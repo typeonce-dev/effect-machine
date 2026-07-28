@@ -1,0 +1,33 @@
+{
+  "name": "@typeonce/effect-machine-example-pokemon",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pokémon statechart example using the published @typeonce/effect-machine package",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "pnpm build"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.0-beta.102",
+    "@tanstack/react-router": "1.170.18",
+    "@typeonce/effect-machine": "0.1.0",
+    "effect": "4.0.0-beta.102",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "scheduler": "0.27.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "6.0.4",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}

@@ -103,6 +103,12 @@ The current source reference is branch `sandro/state-charts` in the Effect
 repository. Exact dependency pins and the sync check are the proof boundary;
 vendoring the rest of Effect is intentionally unnecessary.
 
+## Examples
+
+The [Pokémon statechart example](./examples/pokemon) is a standalone React and
+Vite project that installs the published package from npm. Its dependency graph,
+lockfile, build, and CI job are isolated from this library package.
+
 ## Releases
 
 Add a changeset with `pnpm changeset`. CI validates frozen installation and the
