@@ -1,0 +1,5 @@
+This package incubates the Machine work proposed in Effect PR #6429.
+
+Portions are adapted from the Effect project, which is distributed under the
+MIT License. See https://github.com/Effect-TS/effect and the source history for
+authorship and provenance.

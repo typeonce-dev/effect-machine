@@ -1,0 +1,87 @@
+import type * as Cause from "effect/Cause"
+import * as Data from "effect/Data"
+import type * as Schema from "effect/Schema"
+
+/**
+ * Error returned when a decoded machine snapshot cannot be encoded through its
+ * declared state or output schemas.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEncodeError")<{
+  readonly machineId: string | undefined
+  readonly boundary: "state" | "output" | "configuration"
+  readonly state?: string
+  readonly cause: Schema.SchemaError | Cause.Cause<unknown>
+}> {}
+
+/**
+ * Error returned when a machine contract value does not match the schema or
+ * structural configuration declared for a machine boundary.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class MachineSchemaDecodeError extends Data.TaggedError("MachineSchemaDecodeError")<{
+  readonly machineId: string | undefined
+  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "configuration"
+  readonly state?: string
+  readonly event?: string
+  readonly cause: Schema.SchemaError | Cause.Cause<unknown>
+}> {}
+
+/**
+ * Error returned when a machine does not stabilize within the maximum
+ * number of macrostep iterations.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class InfiniteTransitionError extends Data.TaggedError("InfiniteTransitionError")<{
+  readonly machineId: string | undefined
+  readonly state: string
+  readonly maxIterations: number
+}> {}
+
+/**
+ * Error returned when a machine fails while running startup lifecycle
+ * logic after the initial state has been computed.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class StartupError extends Data.TaggedError("StartupError")<{
+  readonly cause: Cause.Cause<unknown>
+}> {}
+
+/**
+ * Error returned by `spawn` when a child process with the same id already
+ * exists for the current machine.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class ChildAlreadyExistsError extends Data.TaggedError("ChildAlreadyExistsError")<{
+  readonly id: string
+}> {}
+
+/**
+ * Error returned when standalone action execution attempts an operation that
+ * requires a managed machine process.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class ProcessLocalError extends Data.TaggedError("ProcessLocalError")<{
+  readonly operation: string
+}> {}
+
+/**
+ * Error returned by `join` when a running machine is stopped before
+ * producing an output.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class StoppedError extends Data.TaggedError("StoppedError") {}

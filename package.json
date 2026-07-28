@@ -1,0 +1,76 @@
+{
+  "name": "@typeonce/effect-machine",
+  "version": "0.1.0",
+  "description": "Schema-first state machines and statecharts for Effect",
+  "author": "Sandro Maglione",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/typeonce-dev/effect-machine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/typeonce-dev/effect-machine/issues"
+  },
+  "homepage": "https://github.com/typeonce-dev/effect-machine#readme",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./reactivity": {
+      "types": "./dist/reactivity.d.ts",
+      "import": "./dist/reactivity.js"
+    },
+    "./cluster": {
+      "types": "./dist/cluster.d.ts",
+      "import": "./dist/cluster.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:types": "tstyche",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "sync:effect": "node scripts/sync-effect.mjs",
+    "sync:check": "node scripts/sync-effect.mjs --check",
+    "test:sync": "node scripts/test-sync.mjs",
+    "test:consumer": "node scripts/test-consumer.mjs",
+    "pack:check": "node scripts/pack-check.mjs",
+    "check": "pnpm format:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm test:sync && pnpm pack:check",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && pnpm publish --access public --provenance"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "@changesets/cli": "2.31.0",
+    "@effect/vitest": "4.0.0-beta.102",
+    "@types/node": "25.7.0",
+    "effect": "4.0.0-beta.102",
+    "prettier": "3.8.1",
+    "tstyche": "7.2.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": ">=20"
+  }
+}
