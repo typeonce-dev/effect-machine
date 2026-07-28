@@ -54,7 +54,7 @@
     "check": "pnpm format:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm test:sync && pnpm pack:check",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "pnpm build && pnpm publish --access public --provenance"
+    "release": "pnpm build && changeset publish"
   },
   "peerDependencies": {
     "effect": "4.0.0-beta.102"
