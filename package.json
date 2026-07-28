@@ -5,7 +5,7 @@
   "author": "Sandro Maglione",
   "repository": {
     "type": "git",
-    "url": "https://github.com/typeonce-dev/effect-machine.git"
+    "url": "git+https://github.com/typeonce-dev/effect-machine.git"
   },
   "bugs": {
     "url": "https://github.com/typeonce-dev/effect-machine/issues"
