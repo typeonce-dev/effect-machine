@@ -761,27 +761,12 @@ export const matchesChild = <
 
 const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
 
-type MachineRequirementsOf<M extends Machine.Machine.Any> = M extends Machine.Machine<
-    any,
-    infer Events,
-    any,
-    any,
-    any,
-    infer R,
-    any,
-    infer InitialR,
-    any,
-    any,
-    infer Emits,
-    any,
-    any
-  > ? MachineRequirements<
-      InitialR,
-      R,
-      Machine.Machine.EventOf<Events>,
-      Machine.Machine.EmitOf<Emits>
-    >
-  : never
+type MachineRequirementsOf<M extends Machine.Machine.Any> = MachineRequirements<
+  Machine.Machine.InitialServices<M>,
+  Machine.Machine.Services<M>,
+  Machine.Machine.Event<M>,
+  Machine.Machine.Emit<M>
+>
 
 type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
   ExternalRequirements<MachineRequirementsOf<M>>,
@@ -797,65 +782,29 @@ type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> =
       readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
     }
 
-type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> = M extends Machine.Machine<
-  infer States,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  infer OutputStates,
-  any
-> ? IsAny<States> extends true ? {
+type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> =
+  IsAny<Machine.Machine.States<M>> extends true ? {
       readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
     }
-  : Machine.Machine.EnsureOutputImplementations<States, OutputStates>
-  : never
+  : Machine.Machine.EnsureOutputImplementations<Machine.Machine.States<M>, Machine.Machine.OutputStates<M>>
 
-type MachineInputArgsOf<M extends Machine.Machine.Any> = M extends Machine.Machine<
-  any,
-  any,
-  infer Input,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any
-> ? [...Machine.Machine.InputArgs<Input>]
-  : never
+type MachineInputArgsOf<M extends Machine.Machine.Any> = [
+  ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
+]
 
-type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = M extends Machine.Machine<
-  infer States,
-  any,
-  any,
-  any,
-  infer E,
-  infer R,
-  infer InitialE,
-  infer InitialR,
-  any,
-  infer Output,
-  any,
-  any,
-  any
-> ? MachineAtom<
-    Machine.Machine.Snapshot<States>,
+type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
     Machine.Machine.InputEvent<M>,
-    MachineRuntimeError<E, R>,
-    Output,
-    MachineStartError<InitialE, E, InitialR, R, RuntimeError>
+    MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+    Machine.Machine.Output<M>,
+    MachineStartError<
+      Machine.Machine.InitialError<M>,
+      Machine.Machine.Error<M>,
+      Machine.Machine.InitialServices<M>,
+      Machine.Machine.Services<M>,
+      RuntimeError
+    >
   >
-  : never
 
 /**
  * An `AtomMachine` factory with one owned Effect runtime.
@@ -873,7 +822,10 @@ export interface Bound<Services, RuntimeError = never> {
    * @since 4.0.0
    */
   readonly make: <M extends Machine.Machine.Any>(
-    machine: M & EnsureBoundRequirements<Services, M> & EnsureMachineOutputImplementations<M>,
+    machine:
+      & M
+      & EnsureBoundRequirements<Services, NoInfer<M>>
+      & EnsureMachineOutputImplementations<NoInfer<M>>,
     ...args: MachineInputArgsOf<M>
   ) => MachineAtomOf<M, RuntimeError>
 }

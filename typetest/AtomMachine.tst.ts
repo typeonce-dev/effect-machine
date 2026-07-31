@@ -32,6 +32,28 @@ class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 
 class Multiplier extends Context.Service<Multiplier, number>()("test/AtomMachine/Multiplier") {}
 
+class DeepService extends Context.Service<DeepService, string>()("test/AtomMachine/DeepService") {}
+
+class DeepInitialService extends Context.Service<DeepInitialService, string>()(
+  "test/AtomMachine/DeepInitialService"
+) {}
+
+class DeepInitialFailure {
+  readonly _tag = "DeepInitialFailure"
+}
+
+class DeepTransitionFailure {
+  readonly _tag = "DeepTransitionFailure"
+}
+
+class DeepActionFailure {
+  readonly _tag = "DeepActionFailure"
+}
+
+class DeepRuntimeFailure {
+  readonly _tag = "DeepRuntimeFailure"
+}
+
 interface StartFailure {
   readonly _tag: "StartFailure"
 }
@@ -214,6 +236,201 @@ describe("AtomMachine", () => {
     const unprovided = AtomMachine.bind(Atom.runtime(Layer.empty))
     expect(bound.make).type.toBeCallableWith(machine)
     expect(unprovided.make).type.not.toBeCallableWith(machine)
+  })
+
+  it("preserves every channel for deeply composed bound machines", () => {
+    const DeepState = Schema.TaggedUnion({
+      Idle: {},
+      Ready: {},
+      Editor: {},
+      Editing: { value: Schema.String },
+      Saving: { value: Schema.String },
+      Done: { value: Schema.String }
+    })
+    const DeepEvent = Schema.TaggedUnion({
+      Begin: {},
+      Save: { value: Schema.String }
+    })
+    const DeepInternalEvent = Schema.TaggedUnion({
+      Loaded: { value: Schema.String },
+      ChildCompleted: { value: Schema.String },
+      ChildNotice: { value: Schema.String }
+    })
+    const DeepEmit = Schema.TaggedUnion({
+      ParentNotice: { value: Schema.String }
+    })
+    const ChildState = Schema.TaggedUnion({
+      Done: { value: Schema.String }
+    })
+    const ChildEvent = Schema.TaggedUnion({
+      Refresh: {}
+    })
+    const ChildStates = Machine.defineStates({
+      Done: {
+        schema: ChildState.cases.Done,
+        type: "final",
+        output: Schema.String
+      }
+    })
+    const childMachine = Machine.make({
+      states: ChildStates.states,
+      events: [ChildEvent.cases.Refresh],
+      emits: [DeepInternalEvent.cases.ChildNotice],
+      input: Schema.Struct({ value: Schema.String }),
+      initial: ({ value }) => ChildStates.initial.Done(ChildState.cases.Done.make({ value }))
+    }).handle({
+      Done: {
+        entry: ({ state }) =>
+          Machine.action(
+            Effect.gen(function*() {
+              const runtime = yield* Machine.runtime<{
+                readonly emits: typeof DeepInternalEvent.cases.ChildNotice.Type
+              }>()
+              yield* runtime.sendParent(DeepInternalEvent.cases.ChildNotice.make({ value: state.value }))
+            })
+          ),
+        output: ({ state }) => state.value
+      }
+    })
+    const Child = Machine.child("deep-child", childMachine)
+    const DeepStates = Machine.defineStates({
+      Idle: DeepState.cases.Idle,
+      Ready: {
+        schema: DeepState.cases.Ready,
+        initial: "Editor",
+        states: {
+          Editor: {
+            schema: DeepState.cases.Editor,
+            initial: "Editing",
+            states: {
+              Editing: DeepState.cases.Editing,
+              Saving: DeepState.cases.Saving
+            }
+          }
+        }
+      },
+      Done: {
+        schema: DeepState.cases.Done,
+        type: "final",
+        output: Schema.String
+      }
+    })
+    const deepMachine = Machine.make({
+      states: DeepStates.states,
+      events: [DeepEvent.cases.Begin, DeepEvent.cases.Save],
+      internalEvents: [
+        DeepInternalEvent.cases.Loaded,
+        DeepInternalEvent.cases.ChildCompleted,
+        ...childMachine.emits
+      ],
+      emits: [DeepEmit.cases.ParentNotice],
+      input: Schema.Struct({ seed: Schema.String }),
+      initial: ({ seed }) =>
+        Effect.gen(function*() {
+          yield* DeepInitialService
+          if (seed.length < 0) {
+            return yield* Effect.fail(new DeepInitialFailure())
+          }
+          return DeepStates.initial.Idle(DeepState.cases.Idle.make({}))
+        })
+    }).handle({
+      Idle: {
+        invoke: Machine.invoke({
+          id: "deep-inline-invoke",
+          src: () =>
+            Machine.effect(
+              Effect.as(
+                DeepService,
+                DeepInternalEvent.cases.Loaded.make({ value: "loaded" })
+              )
+            )
+        }),
+        on: {
+          Begin: ({ target }) =>
+            target.full.Ready(DeepState.cases.Ready.make({}), (ready) =>
+              ready.Editor(DeepState.cases.Editor.make({}), (editor) =>
+                editor.Editing(DeepState.cases.Editing.make({ value: "ready" }))
+              )
+            )
+        }
+      },
+      Ready: {
+        states: {
+          Editor: {
+            states: {
+              Editing: {
+                on: {
+                  Save: ({ event, target }) =>
+                    Machine.action(
+                      Effect.gen(function*() {
+                        yield* DeepService
+                        return yield* Effect.fail(new DeepActionFailure())
+                      }),
+                      target.local.Saving(DeepState.cases.Saving.make({ value: event.value }))
+                    ),
+                  Loaded: () => Effect.fail(new DeepTransitionFailure())
+                }
+              },
+              Saving: {
+                invoke: ({ state }) =>
+                  Machine.invokeMachine({
+                    child: Child,
+                    input: { value: state.value },
+                    onDone: ({ output }) => DeepInternalEvent.cases.ChildCompleted.make({ value: output })
+                  }),
+                on: {
+                  ChildNotice: ({ event, target }) =>
+                    Machine.action(
+                      Effect.gen(function*() {
+                        const runtime = yield* Machine.runtime<{
+                          readonly emits: typeof DeepEmit.cases.ParentNotice.Type
+                        }>()
+                        yield* runtime.sendParent(DeepEmit.cases.ParentNotice.make({ value: event.value }))
+                      }),
+                      target.local.Saving(DeepState.cases.Saving.make({ value: event.value }))
+                    ),
+                  ChildCompleted: ({ event, target }) =>
+                    target.full.Done(DeepState.cases.Done.make({ value: event.value }))
+                }
+              }
+            }
+          }
+        }
+      },
+      Done: {
+        output: ({ state }) => state.value
+      }
+    })
+    const runtime = Atom.runtime(
+      Layer.mergeAll(
+        Layer.succeed(DeepService, "provided"),
+        Layer.succeed(DeepInitialService, "provided"),
+        Layer.effectDiscard(Effect.fail(new DeepRuntimeFailure()))
+      )
+    )
+    const bound = AtomMachine.bind(runtime)
+    const bridge = bound.make(deepMachine, { seed: "initial" })
+    const unprovided = AtomMachine.bind(Atom.runtime(Layer.empty))
+    const erased: Machine.Machine.Any = deepMachine
+    type ResultFailure = Atom.Failure<typeof bridge.result>
+    type BridgeOutput = typeof bridge extends AtomMachine.MachineAtom<any, any, any, infer Output, any> ? Output
+      : never
+    type SendEvent = typeof bridge.send extends Atom.Writable<any, infer Event> ? Event : never
+
+    expect<Atom.Success<typeof bridge.state>>().type.toBe<Machine.Machine.Snapshot<typeof DeepStates.states>>()
+    expect<SendEvent>().type.toBe<typeof DeepEvent.Type>()
+    expect<BridgeOutput>().type.toBe<string>()
+    expect<Extract<ResultFailure, DeepInitialFailure>>().type.toBe<DeepInitialFailure>()
+    expect<Extract<ResultFailure, DeepTransitionFailure>>().type.toBe<DeepTransitionFailure>()
+    expect<Extract<ResultFailure, DeepActionFailure>>().type.toBe<DeepActionFailure>()
+    expect<Extract<ResultFailure, DeepRuntimeFailure>>().type.toBe<DeepRuntimeFailure>()
+    expect<unknown extends ResultFailure ? true : false>().type.toBe<false>()
+    expect<0 extends 1 & Machine.Machine.Services<typeof deepMachine> ? true : false>().type.toBe<false>()
+    expect(bound.make).type.toBeCallableWith(deepMachine, { seed: "initial" })
+    expect(bound.make).type.not.toBeCallableWith(deepMachine)
+    expect(bound.make).type.not.toBeCallableWith(deepMachine, { seed: 1 })
+    expect(unprovided.make).type.not.toBeCallableWith(deepMachine, { seed: "initial" })
+    expect(bound.make).type.not.toBeCallableWith(erased, { seed: "initial" })
   })
 
   it("preserves bound runtime errors in the result failure channel", () => {

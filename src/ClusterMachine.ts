@@ -214,39 +214,9 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
   typeof SendResult
 >
 
-type MachineEvents<M extends Machine.Machine.Any> = M extends Machine.Machine<
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  infer InputEvents
-> ? InputEvents & ReadonlyArray<Machine.Machine.TaggedSchema> :
-  never
+type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
-type MachineEmits<M extends Machine.Machine.Any> = M extends Machine.Machine<
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  infer Emits,
-  any,
-  any
-> ? Emits & ReadonlyArray<Machine.Machine.TaggedSchema> :
-  never
+type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
 
 /**
  * Cluster adapter for one machine definition and entity type.
@@ -291,29 +261,14 @@ export interface ClusterMachine<
   }) => Layer.Layer<never, never, Storage | MessageStorage.MessageStorage | Sharding.Sharding | R | Services>
 }
 
-type MachineServices<M extends Machine.Machine.Any> = M extends Machine.Machine<
-  infer States,
-  infer Events,
-  any,
-  any,
-  any,
-  infer R,
-  any,
-  infer InitialR,
-  any,
-  any,
-  infer Emits,
-  any,
-  any
-> ?
+type MachineServices<M extends Machine.Machine.Any> =
     | ExcludeCompatibleRuntime<
-      Machine.ExecutionServices<R | InitialR>,
-      Machine.Machine.EventOf<Events & ReadonlyArray<Machine.Machine.TaggedSchema>>,
-      Machine.Machine.EmitOf<Emits & ReadonlyArray<Machine.Machine.TaggedSchema>>
+      Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
+      Machine.Machine.Event<M>,
+      Machine.Machine.Emit<M>
     >
-    | Machine.Machine.SnapshotDecodingServices<States & Machine.Machine.StateSchemas>
-    | Machine.Machine.SnapshotEncodingServices<States & Machine.Machine.StateSchemas>
-  : never
+    | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
+    | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
