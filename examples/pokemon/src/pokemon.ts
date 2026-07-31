@@ -17,6 +17,11 @@ export const Pokemon = Schema.Struct({
   })
 })
 
+export class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInTeam")("ReplaceInTeam", {
+  id: Pokemon.fields.id,
+  pokemon: Pokemon
+}) {}
+
 export class PokemonService extends Context.Service<PokemonService>()("app/PokemonService", {
   make: Effect.gen(function* () {
     const baseClient = yield* HttpClient.HttpClient

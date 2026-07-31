@@ -3,8 +3,9 @@
 A standalone React and Vite application demonstrating parent, child, parallel,
 and invoked Effect machines with a live PokéAPI integration.
 
-This project intentionally installs `@typeonce/effect-machine@0.1.0` from npm.
-It does not use the repository's local source or a workspace dependency.
+This project installs `@typeonce/effect-machine` from the repository root
+through a local `file:` dependency. It keeps an independent lockfile and
+dependency graph while validating the current library build.
 
 ```sh
 pnpm install --frozen-lockfile

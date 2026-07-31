@@ -2,12 +2,6 @@
 
 Schema-first state machines and statecharts for Effect.
 
-This package is the external home for the Machine API proposed in
-[Effect PR #6429](https://github.com/Effect-TS/effect/pull/6429). During
-incubation this repository is the canonical implementation; the synchronization
-tool keeps the Effect PR mechanically aligned without maintaining a second
-implementation.
-
 > Early-release software: APIs may change, and releases are coupled to an exact
 > Effect beta.
 
@@ -395,49 +389,18 @@ pnpm check
 ```
 
 Individual commands are available for `build`, `test`, `test:types`,
-`typecheck`, `format:check`, `test:consumer`, `test:sync`, `sync:check`, and
-`pack:check`. Runtime tests use `@effect/vitest`; type tests use TSTyche and
-TypeScript 6.0.3. The consumer check packs the package, imports all public
-entrypoints, and compiles a strict TypeScript consumer with
-`skipLibCheck: false`.
-
-## Synchronizing Effect PR #6429
-
-Make logic changes here first and run `pnpm check`. Then generate the mapped
-production files, runtime tests, and type tests into a writable Effect checkout:
-
-```sh
-pnpm sync:effect -- /path/to/effect
-```
-
-The explicit mapping covers only the eight production files and six test files.
-It rewrites package imports to Effect repository-relative `.ts` imports and
-restores Effect's private `PipeInspectableProto` boundary. It never copies
-package metadata, documentation, release files, or changesets.
-
-Check an existing checkout without writing:
-
-```sh
-pnpm sync:effect -- --check /path/to/effect
-```
-
-Check mode exits non-zero on any drift. `pnpm test:sync` exercises generation,
-a clean check, and drift detection in a disposable temporary directory. Never
-generate into a checkout with work you have not reviewed. After generation,
-inspect the Effect diff and run its targeted machine, reactivity, cluster, and
-type-test validations followed by `pnpm check`.
-
-The current source reference is branch `sandro/state-charts` in the Effect
-repository. Exact dependency pins and the sync check are the proof boundary;
-vendoring the rest of Effect is intentionally unnecessary.
+`typecheck`, `format:check`, `test:consumer`, and `pack:check`. Runtime tests use
+`@effect/vitest`; type tests use TSTyche and TypeScript 6.0.3. The consumer check
+packs the package, imports all public entrypoints, and compiles a strict
+TypeScript consumer with `skipLibCheck: false`.
 
 ## Examples
 
 The [Pokémon statechart example](./examples/pokemon) is a standalone React and
 Vite project demonstrating compound and parallel states, state-scoped invokes,
-invoked child statecharts, typed emissions, and Atom reactivity. It installs the
-published package from npm, so its dependency graph, lockfile, build, and CI job
-are isolated from this library package.
+invoked child statecharts, typed emissions, and Atom reactivity. It uses a local
+`file:` dependency on this package while retaining an isolated dependency graph,
+lockfile, build, and CI job.
 
 ## Releases
 

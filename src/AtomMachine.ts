@@ -232,11 +232,20 @@ type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output
  * @since 4.0.0
  */
 export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartError = unknown> {
-  /** Atom containing the current child reference when the child is active. */
+  /**
+   * Atom containing the current child reference when the child is active.
+   *
+   * @since 4.0.0
+   */
   readonly ref: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>
   >
-  /** Atom containing the current child lifecycle snapshot when active. */
+
+  /**
+   * Atom containing the current child lifecycle snapshot when active.
+   *
+   * @since 4.0.0
+   */
   readonly snapshot: Atom.Atom<
     AsyncResult.AsyncResult<
       Option.Option<
@@ -249,13 +258,22 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
       StartError
     >
   >
-  /** Atom containing the current child state when active. */
+  /**
+   * Atom containing the current child state when active.
+   *
+   * Runtime failures retain the last successful state. Use `result` when they
+   * must be represented in the atom failure channel.
+   *
+   * @since 4.0.0
+   */
   readonly state: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<RefState<Machine.ChildMachine.Ref<Child>>>, StartError>
   >
   /**
    * Atom containing the current child state when active, with startup and
    * runtime failures in one typed failure channel.
+   *
+   * @since 4.0.0
    */
   readonly result: Atom.Atom<
     AsyncResult.AsyncResult<
@@ -263,12 +281,24 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
       StartError | RefError<Machine.ChildMachine.Ref<Child>>
     >
   >
-  /** Writable atom that sends events to the active child. */
+  /**
+   * Writable atom that sends events to the active child.
+   *
+   * Writes fail with `ChildNotActiveError` while the child is inactive.
+   *
+   * @since 4.0.0
+   */
   readonly send: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
     Machine.ChildMachine.Event<Child>
   >
-  /** Writable atom that stops the active child. */
+  /**
+   * Writable atom that stops the active child.
+   *
+   * Writes fail with `ChildNotActiveError` while the child is inactive.
+   *
+   * @since 4.0.0
+   */
   readonly stop: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
     void
@@ -276,6 +306,8 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   /**
    * Creates a reactive bridge for a directly owned nested child. Reusing the
    * same descriptor returns the same live bridge while it remains referenced.
+   *
+   * @since 4.0.0
    */
   readonly child: <Nested extends Machine.ChildMachine.Any>(
     child: Nested
@@ -615,6 +647,13 @@ const selectSnapshot = <
  * The derived atom suppresses structurally equal updates. Keep the returned
  * atom stable when constructing it inside a component.
  *
+ * **Example**
+ *
+ * ```ts
+ * const readyAtom = AtomMachine.select(machineAtom, "Ready")
+ * // Atom<AsyncResult<Option<Ready>, StartError | RuntimeError>>
+ * ```
+ *
  * @category combinators
  * @since 4.0.0
  */
@@ -641,6 +680,13 @@ export const select = <
  * Valid paths and their selected value types are inferred from the child
  * bridge. An inactive child produces `Option.none()`. Keep the returned atom
  * stable when constructing it inside a component.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const editingAtom = AtomMachine.selectChild(editorAtom, "Editing")
+ * // Atom<AsyncResult<Option<Editing>, StartError | ChildRuntimeError>>
+ * ```
  *
  * @category combinators
  * @since 4.0.0
@@ -818,6 +864,14 @@ type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = M extends Mach
  * @since 4.0.0
  */
 export interface Bound<Services, RuntimeError = never> {
+  /**
+   * Creates an independent machine bridge using the bound runtime.
+   *
+   * The machine's external service requirements must be provided by the
+   * runtime. Machine-native runtime requirements are supplied automatically.
+   *
+   * @since 4.0.0
+   */
   readonly make: <M extends Machine.Machine.Any>(
     machine: M & EnsureBoundRequirements<Services, M> & EnsureMachineOutputImplementations<M>,
     ...args: MachineInputArgsOf<M>

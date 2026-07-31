@@ -47,12 +47,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "sync:effect": "node scripts/sync-effect.mjs",
-    "sync:check": "node scripts/sync-effect.mjs --check",
-    "test:sync": "node scripts/test-sync.mjs",
     "test:consumer": "node scripts/test-consumer.mjs",
     "pack:check": "node scripts/pack-check.mjs",
-    "check": "pnpm format:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm test:sync && pnpm pack:check",
+    "check": "pnpm format:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "pnpm build && changeset publish"

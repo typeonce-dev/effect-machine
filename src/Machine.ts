@@ -126,13 +126,47 @@ export interface Machine<
   readonly [TypeId]: TypeId
   /** @internal Prevents output implementation evidence from being widened. */
   readonly [MachineOutputStatesTypeId]: Readonly<Record<OutputStates, true>>
+
+  /**
+   * State tree that defines the machine topology and state value schemas.
+   *
+   * @since 4.0.0
+   */
   readonly states: States
-  /** Events accepted through public machine input boundaries. */
+
+  /**
+   * Events accepted through public machine input boundaries.
+   *
+   * @since 4.0.0
+   */
   readonly events: InputEvents
-  /** Events reserved for invokes, child emissions, and other machine-local work. */
+
+  /**
+   * Events reserved for invokes, child emissions, and other machine-local work.
+   *
+   * @since 4.0.0
+   */
   readonly internalEvents: ReadonlyArray<Machine.TaggedSchema>
+
+  /**
+   * Events that the machine may emit to its parent or external adapter.
+   *
+   * @since 4.0.0
+   */
   readonly emits: Emits
+
+  /**
+   * Optional schema used to decode the machine input before initialization.
+   *
+   * @since 4.0.0
+   */
   readonly input: Input | undefined
+
+  /**
+   * Optional stable identity used by runtime and persistence integrations.
+   *
+   * @since 4.0.0
+   */
   readonly id: string | undefined
 
   /** @internal */
@@ -145,6 +179,14 @@ export interface Machine<
 
   /** @internal */
   readonly handlers: Machine.StateConfigs<States, Events, Emits, UnhandledStates, Machine.TagOf<Events[number]>, E, R>
+
+  /**
+   * Adds typed state handlers and returns the refined machine definition.
+   * Successive calls implement the remaining unhandled states while retaining
+   * accumulated errors, services, final states, and output evidence.
+   *
+   * @since 4.0.0
+   */
   readonly handle: Machine.Handler<
     States,
     Events,
@@ -284,7 +326,18 @@ export type ExecutionServices<Requirements> =
  * @since 4.0.0
  */
 export interface Runtime<in Events, in Emits> {
+  /**
+   * Queues an event for the current machine macrostep.
+   *
+   * @since 4.0.0
+   */
   readonly raise: (event: Events) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+
+  /**
+   * Emits an event through the running machine's parent boundary.
+   *
+   * @since 4.0.0
+   */
   readonly sendParent: (event: Emits) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 }
 
@@ -863,19 +916,44 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
  * @since 4.0.0
  */
 export interface MachineRef<out State, in Event, out Error = never, out Output = never> {
+  /** Stable machine definition id, or a generated fallback when none was declared. */
   readonly id: string
+
+  /** Unique identity for this running machine instance. */
   readonly sessionId: string
+
+  /** Reads the latest logical state. */
   readonly state: Effect.Effect<State>
+
+  /** Reads the latest lifecycle snapshot. */
   readonly snapshot: Effect.Effect<RuntimeSnapshot<State, Error, Output>>
+
+  /** Streams lifecycle snapshots published after subscription. */
   readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>>
+
+  /** Waits for machine output or fails when execution fails or is stopped. */
   readonly join: Effect.Effect<Output, Error | StoppedError>
+
+  /** Stops this machine instance and its owned child processes. */
   readonly stop: Effect.Effect<void>
+
+  /** Accepts an event for asynchronous processing by the running machine. */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
-  /** Returns the current directly owned child for a typed descriptor. */
+
+  /**
+   * Returns the current directly owned child for a typed descriptor.
+   *
+   * @since 4.0.0
+   */
   readonly child: <Child extends ChildMachine.Any>(
     child: Child
   ) => Effect.Effect<Option.Option<ChildMachine.Ref<Child>>>
-  /** Streams activation, replacement, and removal of a directly owned child. */
+
+  /**
+   * Streams activation, replacement, and removal of a directly owned child.
+   *
+   * @since 4.0.0
+   */
   readonly childChanges: <Child extends ChildMachine.Any>(
     child: Child
   ) => Stream.Stream<Option.Option<ChildMachine.Ref<Child>>>
@@ -895,7 +973,10 @@ export interface Logic<
   out Output = never,
   out InitialError = never
 > {
+  /** Creates the initial process state and may spawn scoped child processes. */
   initial(scope: Logic.Scope<Event>): Effect.Effect<State, InitialError, Requirements>
+
+  /** Runs the stateful process loop until it produces output or fails. */
   run(context: Logic.Context<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
 
@@ -912,9 +993,16 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Address<in Event> {
+    /** Parent-local address id. */
     readonly id: string
+
+    /** Unique identity for this running child instance. */
     readonly sessionId: string
+
+    /** Stops the addressed child process. */
     readonly stop: Effect.Effect<void>
+
+    /** Sends an event to the addressed child process. */
     readonly send: (event: Event) => Effect.Effect<void, StoppedError>
   }
 
@@ -963,14 +1051,25 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Scope<Event> {
+    /** Address of the process being initialized. */
     readonly self: Address<Event>
+
+    /** Address of the owning process, when one exists. */
     readonly parent: Address<unknown> | undefined
+
+    /** Starts a child process owned by this scope. */
     readonly spawn: Spawn
+
+    /** Sends an untyped event to the owning process. */
     readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
+
+    /** Sends an event through a typed parent-local child address. */
     readonly sendTo: <Address extends ChildAddress<never>>(
       id: Address,
       event: ChildAddress.Event<Address>
     ) => Effect.Effect<void, StoppedError>
+
+    /** Stops a child process selected by its parent-local address. */
     readonly stopChild: <Event>(id: ChildAddress<Event>) => Effect.Effect<void>
   }
 
@@ -981,9 +1080,16 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Context<State, Event> extends Scope<Event> {
+    /** Waits for the next event delivered to this process. */
     readonly receive: Effect.Effect<Event>
+
+    /** Reads the current process state. */
     readonly state: Effect.Effect<State>
+
+    /** Replaces the current process state. */
     readonly setState: (state: State) => Effect.Effect<void>
+
+    /** Updates the current process state effectfully and atomically. */
     readonly updateState: <E, R>(
       update: (state: State) => Effect.Effect<State, E, R>
     ) => Effect.Effect<void, E, R>
@@ -1009,7 +1115,11 @@ type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
  */
 export interface ChildMachine<Id extends string, M extends Machine.Any> {
   readonly [ChildMachineTypeId]: typeof ChildMachineTypeId
+
+  /** Parent-local id used to address the invoked child. */
   readonly id: Id
+
+  /** Complete machine definition carried by this descriptor. */
   readonly machine: M
 }
 
@@ -1334,7 +1444,10 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export interface DefinedStates<States extends StateSchemas> {
+    /** Original state tree supplied to {@link defineStates}. */
     readonly states: States
+
+    /** Type-safe builders for constructing valid initial snapshots. */
     readonly initial: InitialBuilder<States>
 
     /**

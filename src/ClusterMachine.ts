@@ -38,9 +38,16 @@ type Snowflake = Snowflake.Snowflake
  * @since 4.0.0
  */
 export interface Checkpoint {
+  /** Stable identity of the machine definition that produced the snapshot. */
   readonly machineId: string
+
+  /** Application-controlled deployment or migration version. */
   readonly version: string
+
+  /** Cluster request whose accepted transition produced this checkpoint. */
   readonly requestId: Snowflake
+
+  /** Encoded logical machine state and completed outputs. */
   readonly snapshot: Machine.Machine.EncodedSnapshot
 }
 
@@ -57,7 +64,10 @@ export interface Checkpoint {
  * @since 4.0.0
  */
 export interface LoadResult {
+  /** Latest checkpoint for the entity, when one has been committed. */
   readonly checkpoint: Option.Option<Checkpoint>
+
+  /** Whether the requested id has already been committed. */
   readonly processed: boolean
 }
 
@@ -255,7 +265,10 @@ export interface ClusterMachine<
   in out M extends Machine.Machine.Any,
   out Services = MachineServices<M>
 > {
+  /** Machine definition executed by each entity instance. */
   readonly machine: M
+
+  /** Cluster entity exposing the persisted, schema-validated `send` RPC. */
   readonly entity: Entity.Entity<Type, SendRpc<MachineEvents<M>>>
 
   /**
@@ -268,6 +281,8 @@ export interface ClusterMachine<
    * arbitrary external effects are not atomic with the checkpoint. The reply
    * is persisted after commit and recovered through request-id deduplication if
    * delivery is interrupted. Machines that never emit may omit `enqueue`.
+   *
+   * @since 4.0.0
    */
   readonly toLayer: <R = never>(options?: {
     readonly enqueue?: (
