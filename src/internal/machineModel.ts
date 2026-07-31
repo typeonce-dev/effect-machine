@@ -144,6 +144,36 @@ export const isTarget = (u: unknown): u is Machine.Target<any, any> => hasProper
 export const isSnapshot = (u: unknown): u is Machine.AtomicSnapshot<string, unknown> =>
   hasProperty(u, "path") && hasProperty(u, "value")
 
+export const getSnapshotByPath = (
+  snapshot: Machine.AtomicSnapshot<string, unknown>,
+  path: string,
+  parents?: Record<string, unknown>
+): Option.Option<Machine.AtomicSnapshot<string, unknown>> => {
+  if (snapshot.path === path) {
+    return Option.some(snapshot)
+  }
+  if (!path.startsWith(`${snapshot.path}.`)) {
+    return Option.none()
+  }
+  if (parents !== undefined) {
+    parents[snapshot.path] = snapshot.value
+  }
+  if (hasProperty(snapshot, "state") && isSnapshot(snapshot.state)) {
+    return getSnapshotByPath(snapshot.state, path, parents)
+  }
+  if (hasProperty(snapshot, "states") && typeof snapshot.states === "object" && snapshot.states !== null) {
+    for (const child of Object.values(snapshot.states)) {
+      if (isSnapshot(child)) {
+        const result = getSnapshotByPath(child, path, parents)
+        if (Option.isSome(result)) {
+          return result
+        }
+      }
+    }
+  }
+  return Option.none()
+}
+
 export interface ActiveConfiguration {
   readonly active: ReadonlySet<string>
   readonly values: ReadonlyMap<string, unknown>
@@ -165,16 +195,48 @@ interface CompletionResult extends FinalCompletion {
   readonly isNew: boolean
 }
 
+interface MachineProtocolSchemas {
+  readonly event: Schema.Top
+  readonly emit: Schema.Top
+}
+
+const MachineProtocolTypeId = Symbol.for("effect/Machine/protocol")
+
+const getProtocolSchemas = (machine: Machine.Any): MachineProtocolSchemas => {
+  const protocol = (machine as any)[MachineProtocolTypeId] as MachineProtocolSchemas | undefined
+  if (protocol === undefined) {
+    throw new Error("Machine protocol is unavailable")
+  }
+  return protocol
+}
+
+const setProtocolSchemas = (machine: Machine.Any, protocol: MachineProtocolSchemas): void => {
+  Object.defineProperty(machine, MachineProtocolTypeId, {
+    value: protocol,
+    enumerable: false
+  })
+}
+
+export const setProtocol = (machine: Machine.Any): void => {
+  setProtocolSchemas(machine, {
+    event: Schema.Union([...machine.events, ...machine.internalEvents]),
+    emit: Schema.Union(machine.emits)
+  })
+}
+
+export const copyProtocol = (source: Machine.Any, target: Machine.Any): void =>
+  setProtocolSchemas(target, getProtocolSchemas(source))
+
 export const getEventName = (event: unknown): string | undefined =>
   hasProperty(event, "_tag") ? String(event._tag) : undefined
 
-export const decodeBoundary = Effect.fnUntraced(function*<A>(
+export const decodeBoundary = <A>(
   machine: Machine.Any,
   schema: Schema.Top,
   value: unknown,
   options: DecodeBoundaryOptions
-) {
-  return yield* Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
+): Effect.Effect<A, MachineSchemaDecodeError> =>
+  Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.mapError((cause) =>
       new MachineSchemaDecodeError({
         machineId: machine.id,
@@ -185,7 +247,6 @@ export const decodeBoundary = Effect.fnUntraced(function*<A>(
       })
     )
   ) as Effect.Effect<A, MachineSchemaDecodeError>
-})
 
 export const decodeInput = <Input extends Schema.Top>(
   machine: Machine.Any,
@@ -201,7 +262,7 @@ export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSch
   const eventName = getEventName(event)
   return decodeBoundary<Machine.EventOf<Events>>(
     machine,
-    Schema.Union(machine.events as ReadonlyArray<Schema.Top>),
+    getProtocolSchemas(machine).event,
     event,
     eventName === undefined ? { boundary: "event" } : { boundary: "event", event: eventName }
   )
@@ -214,7 +275,7 @@ export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchem
   const eventName = getEventName(event)
   return decodeBoundary<Machine.EmitOf<Emits>>(
     machine,
-    Schema.Union(machine.emits as ReadonlyArray<Schema.Top>),
+    getProtocolSchemas(machine).emit,
     event,
     eventName === undefined ? { boundary: "emit" } : { boundary: "emit", event: eventName }
   )
@@ -328,6 +389,15 @@ export const getParentValues = (
   return parents
 }
 
+export const getParentValue = (
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  path: string
+): unknown => {
+  const parent = getNode(machine, path).parent
+  return parent === undefined ? undefined : getActiveValue(configuration, parent)
+}
+
 export const getInitialEntryPaths = (
   machine: Machine.Any,
   configuration: ActiveConfiguration
@@ -385,10 +455,7 @@ export const snapshotFromConfiguration = <const States extends Machine.StateSche
     configuration,
     getRootPath(machine, configuration)
   ) as Machine.Snapshot<States>
-  const root = getRootPath(machine, configuration)
-  const retainPartialOutputs = !isActiveFinalNode(machine, configuration, root)
   const completed = Array.from(configuration.outputs)
-    .filter(([path]) => retainPartialOutputs || hasCompletionHandler(machine, path))
     .map(([path, output]) => ({ path, output }))
   if (completed.length > 0) {
     ;(snapshot as Machine.AtomicSnapshot<string, unknown> & {
@@ -648,7 +715,7 @@ export const getActiveChildPath = (
 export const isDirectFinalPath = (
   machine: Machine.Any,
   path: string
-): boolean => getNode(machine, path).type === "final" || getStateConfigByPath(machine, path)?.type === "final"
+): boolean => getNode(machine, path).type === "final"
 
 export const hasCompletionHandler = (
   machine: Machine.Any,
@@ -727,6 +794,7 @@ export const resolveFinalOutputEffect: <
   const node = getNode(machine, path)
   const output = getStateConfigByPath(machine, path)?.output?.({
     state: getActiveValue(configuration, path),
+    parent: getParentValue(machine, configuration, path),
     parents: getParentValues(machine, configuration, path),
     event,
     outputs
@@ -755,6 +823,13 @@ export const completeActiveFinalNodeEffect: <
 ) {
   if (!configuration.active.has(path)) {
     return undefined
+  }
+  if (outputs.has(path)) {
+    return {
+      path,
+      output: outputs.get(path),
+      isNew: false
+    }
   }
   const node = getNode(machine, path)
   if (node.type === "compound") {

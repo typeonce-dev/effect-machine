@@ -4,7 +4,7 @@ import { Atom } from "effect/unstable/reactivity"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { ReplaceMachine } from "./machines/replace.ts"
 import { SelectionMachine } from "./machines/selection.ts"
-import { Pokemon, PokemonService } from "./pokemon.ts"
+import { Pokemon, PokemonService, ReplaceInTeam } from "./pokemon.ts"
 
 class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTeam", {
   team: Schema.Array(Pokemon)
@@ -17,7 +17,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
 const machine = Machine.make({
   states: States.states,
-  events: [...SelectionMachine.emits, ...ReplaceMachine.emits],
+  events: [ReplaceInTeam],
   initial: Effect.fn(function* () {
     const pk = yield* PokemonService
     const team = yield* pk.getRandomTeam()
@@ -36,7 +36,7 @@ const machine = Machine.make({
 })
 
 const atomRuntime = Atom.runtime(PokemonService.layer)
-export const machineAtom = AtomMachine.make(atomRuntime, machine)
+export const machineAtom = AtomMachine.bind(atomRuntime).make(machine)
 
 export const selectionMachineAtom = machineAtom.child(SelectionChild)
 export const replaceMachineAtom = machineAtom.child(ReplaceChild)

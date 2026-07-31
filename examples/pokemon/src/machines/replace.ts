@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
-import { Pokemon, PokemonService } from "../pokemon.ts"
+import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 
@@ -15,13 +15,6 @@ class ReplacePokemon extends Schema.TaggedClass<ReplacePokemon>("ReplacePokemon"
 }) {}
 
 class Replaced extends Schema.TaggedClass<Replaced>("Replaced")("Replaced", {
-  pokemon: Pokemon
-}) {}
-
-/** Emits */
-
-class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInTeam")("ReplaceInTeam", {
-  id: Pokemon.fields.id,
   pokemon: Pokemon
 }) {}
 

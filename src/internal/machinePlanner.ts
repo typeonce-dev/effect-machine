@@ -24,6 +24,7 @@ import {
   getInitialEntryPaths,
   getLeafPath,
   getNode,
+  getParentValue,
   getParentValues,
   getPathToRoot,
   getRootPath,
@@ -199,8 +200,16 @@ export type MacrostepPlan<State, Event, E, R, Output> = {
   readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
   readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event, E, R>>
   readonly emittedEvents: ReadonlyArray<unknown>
-  readonly output: Output | undefined
-}
+} & (
+  | {
+    readonly done: true
+    readonly output: Output
+  }
+  | {
+    readonly done: false
+    readonly output: undefined
+  }
+)
 
 type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = (
   context: Context
@@ -372,7 +381,6 @@ const makePlanningCapabilities = <Events, Emits>(): Machine.PlanningCapabilities
 } => {
   const runtimeEffect = runtimeFor<Events, Emits>()
   return {
-    action,
     runtime: runtimeEffect,
     raise: (event) => Effect.flatMap(runtimeEffect, (runtime) => runtime.raise(event)),
     emit: (event) => Effect.flatMap(runtimeEffect, (runtime) => runtime.sendParent(event))
@@ -391,6 +399,7 @@ const makeStateActionContext = <
   event: Machine.LifecycleEvent<Events>
 ): Machine.StateActionContext<States, Events, Emits, StateId> => ({
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>()
@@ -409,6 +418,7 @@ const makeTransitionContext = <
   event: Machine.EventByTag<Events, EventTag>
 ): Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any> => ({
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
@@ -428,6 +438,7 @@ const makeDoneContext = <
   output: unknown
 ): Machine.DoneContext<States, Events, Emits, StateId> => ({
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   output: output as Machine.CompletionOutputByIdentifier<States, StateId>,
@@ -518,6 +529,10 @@ const selectAlwaysTransitions = <
             >,
             context: {
               state: getActiveValue(configuration, path) as Machine.StateByIdentifier<
+                States,
+                Machine.StateIdentifier<States>
+              >,
+              parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<
                 States,
                 Machine.StateIdentifier<States>
               >,
@@ -656,7 +671,7 @@ const selectEventTransitions = <
               Emits,
               Machine.StateIdentifier<States>,
               Machine.TagOf<Events[number]>
-            >(machine, configuration, path, event)
+            >(machine as any, configuration, path, event)
           })
         }
         break
@@ -814,12 +829,12 @@ export const InitialEvent: MachineInitialEvent = { _tag: InitialEventTypeId }
 
 const catchStartup = <A, E, R>(
   effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, MachineSchemaDecodeError | StartupError, R> =>
-  Effect.catchCause(effect, (cause): Effect.Effect<never, MachineSchemaDecodeError | StartupError> => {
-    const error = Cause.findErrorOption(cause)
-    return Option.isSome(error) && error.value instanceof MachineSchemaDecodeError
-      ? Effect.fail(error.value as MachineSchemaDecodeError)
-      : Effect.fail(new StartupError({ cause }))
+): Effect.Effect<A, E | StartupError, R> =>
+  Effect.catchCause(effect, (cause): Effect.Effect<never, E | StartupError> => {
+    if (Cause.hasDies(cause)) {
+      return Effect.fail(new StartupError({ cause }))
+    }
+    return Effect.failCause(cause)
   })
 
 export const isFinalState = (
@@ -835,14 +850,20 @@ export const getFinalOutputEffect = <
   machine: Machine.Any,
   state: Machine.Snapshot<States>,
   event: Machine.LifecycleEvent<Events>
-): Effect.Effect<Output | undefined, MachineSchemaDecodeError> =>
+): Effect.Effect<Output, MachineSchemaDecodeError> =>
   normalizeConfigurationEffect(machine, state).pipe(
     Effect.flatMap((configuration) => completeConfigurationEffect(machine, configuration, event)),
-    Effect.map((completed): Output | undefined => {
+    Effect.flatMap((completed): Effect.Effect<Output> => {
       const root = getRootPath(machine, completed.configuration)
-      return isActiveFinalConfiguration(machine, completed.configuration)
-        ? completed.configuration.outputs.get(root) as Output | undefined
-        : undefined
+      if (
+        !isActiveFinalConfiguration(machine, completed.configuration)
+        || !completed.configuration.outputs.has(root)
+      ) {
+        return Effect.die(
+          new Error("Machine attempted to read terminal output from a non-terminal configuration")
+        )
+      }
+      return Effect.succeed(completed.configuration.outputs.get(root) as Output)
     })
   )
 
@@ -899,9 +920,17 @@ export const planInitial: <
       Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>
     >
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
-    readonly output: Output | undefined
-  },
-  InitialE | MachineSchemaDecodeError | StartupError,
+  } & (
+    | {
+      readonly done: true
+      readonly output: Output
+    }
+    | {
+      readonly done: false
+      readonly output: undefined
+    }
+  ),
+  InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   ExcludeCompatibleRuntime<InitialR | R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
 > = Effect.fnUntraced(function*<
   const States extends Machine.StateSchemas,
@@ -919,63 +948,67 @@ export const planInitial: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
 ) {
-  const deferredActions = yield* makeDeferredActions
-  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  const inputArgs = machine.input === undefined
-    ? args
-    : args.length === 0
-    ? (yield* decodeInput(machine, machine.input, undefined), args)
-    : [yield* decodeInput(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
-  const result = machine.initial(...inputArgs)
-  const state = Effect.isEffect(result)
-    ? yield* (provideDeferredServices(
-      result as Effect.Effect<Machine.Snapshot<States>, InitialE, InitialR>,
-      machine,
-      deferredActions,
-      deferredRaisedEvents
-    ) as Effect.Effect<
-      Machine.Snapshot<States>,
-      InitialE | MachineSchemaDecodeError,
-      ExcludeCompatibleRuntime<InitialR, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
+  return yield* catchStartup(Effect.gen(function*() {
+    const deferredActions = yield* makeDeferredActions
+    const deferredRaisedEvents = yield* makeDeferredRaisedEvents
+    const inputArgs = machine.input === undefined
+      ? args
+      : args.length === 0
+      ? (yield* decodeInput(machine, machine.input, undefined), args)
+      : [yield* decodeInput(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
+    const result = machine.initial(...inputArgs)
+    const state = Effect.isEffect(result)
+      ? yield* (provideDeferredServices(
+        result as Effect.Effect<Machine.Snapshot<States>, InitialE, InitialR>,
+        machine,
+        deferredActions,
+        deferredRaisedEvents
+      ) as Effect.Effect<
+        Machine.Snapshot<States>,
+        InitialE | MachineSchemaDecodeError,
+        ExcludeCompatibleRuntime<InitialR, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
+      >)
+      : result
+    const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
+    validateInitialConfiguration(machine, configuration)
+    const actions = yield* deferredActions.read
+    const raisedEvents = yield* deferredRaisedEvents.read
+    const emittedEvents = yield* deferredRaisedEvents.readEmitted
+    const settled = yield* (Effect.gen(function*() {
+      const entry = yield* collectStateActions<States, Events, Emits, E, R>(
+        machine,
+        configuration,
+        getInitialEntryPaths(machine, configuration),
+        InitialEvent,
+        "entry"
+      )
+      return yield* (settle(
+        machine,
+        configuration,
+        InitialEvent,
+        [...entry.actions] as Array<Effect.Effect<void, E, R>>,
+        [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
+        [...emittedEvents, ...entry.emittedEvents],
+        []
+      ) as Effect.Effect<MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>>)
+    }) as Effect.Effect<
+      MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
+      E | InfiniteTransitionError | MachineSchemaDecodeError,
+      ExcludeCompatibleRuntime<R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
     >)
-    : result
-  const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
-  validateInitialConfiguration(machine, configuration)
-  const actions = yield* deferredActions.read
-  const raisedEvents = yield* deferredRaisedEvents.read
-  const emittedEvents = yield* deferredRaisedEvents.readEmitted
-  const settled = yield* (catchStartup(Effect.gen(function*() {
-    const entry = yield* collectStateActions<States, Events, Emits, E, R>(
-      machine,
-      configuration,
-      getInitialEntryPaths(machine, configuration),
-      InitialEvent,
-      "entry"
-    )
-    return yield* (settle(
-      machine,
-      configuration,
-      InitialEvent,
-      [...entry.actions] as Array<Effect.Effect<void, E, R>>,
-      [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
-      [...emittedEvents, ...entry.emittedEvents],
-      []
-    ) as Effect.Effect<MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>>)
-  })) as Effect.Effect<
-    MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
-    MachineSchemaDecodeError | StartupError,
-    ExcludeCompatibleRuntime<R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
-  >)
 
-  return {
-    state: snapshotFromConfiguration<States>(machine, settled.next),
-    actions: [
-      ...actions,
-      ...settled.actions
-    ] as ReadonlyArray<Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>>,
-    emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-    output: settled.output
-  }
+    const planned = {
+      state: snapshotFromConfiguration<States>(machine, settled.next),
+      actions: [
+        ...actions,
+        ...settled.actions
+      ] as ReadonlyArray<Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>>,
+      emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>
+    }
+    return settled.done
+      ? { ...planned, done: true as const, output: settled.output }
+      : { ...planned, done: false as const, output: undefined }
+  }))
 })
 
 export const enabled = <
@@ -1208,6 +1241,7 @@ const settle: <
   let shouldRunAlways = true
   let iterations = 0
   let raisedEventIndex = 0
+  let completedTerminal = false
   let finalOutput: Output | undefined = undefined
   const pendingCompletions: Array<{ readonly path: string; readonly output: unknown }> = []
 
@@ -1252,7 +1286,13 @@ const settle: <
     }
     if (isActiveFinalConfiguration(machine, currentState)) {
       const root = getRootPath(machine, currentState)
-      finalOutput = currentState.outputs.get(root) as Output | undefined
+      if (!currentState.outputs.has(root)) {
+        return yield* Effect.die(
+          new Error("Machine reached a terminal configuration without a completed root output")
+        )
+      }
+      completedTerminal = true
+      finalOutput = currentState.outputs.get(root) as Output
       break
     }
 
@@ -1281,7 +1321,9 @@ const settle: <
     }
     raisedEventIndex += 1
 
-    const raisedEvent = yield* decodeEvent<Events>(machine, raisedEventValue)
+    // Planning runtime validates and normalizes every event before it enters this
+    // internal queue, so decoding it again here only repeats schema work.
+    const raisedEvent = raisedEventValue
     currentEvent = raisedEvent
     const raisedSelections = selectEventTransitions<States, Events, Emits, E, R>(
       machine,
@@ -1306,13 +1348,15 @@ const settle: <
     shouldRunAlways = true
   }
 
-  return {
+  const result = {
     next: currentState,
     actions,
     emittedEvents,
-    microsteps,
-    output: finalOutput
+    microsteps
   }
+  return completedTerminal
+    ? { ...result, done: true, output: finalOutput as Output }
+    : { ...result, done: false, output: undefined }
 })
 
 const macrostep: <
@@ -1354,17 +1398,25 @@ const macrostep: <
 ) {
   const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
   const snapshot = snapshotFromConfiguration<States>(machine, configuration)
+  const decodedEvent = yield* decodeEvent<Events>(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
+    const completed = yield* completeConfigurationEffect(machine, configuration, decodedEvent)
+    const root = getRootPath(machine, completed.configuration)
+    if (!completed.configuration.outputs.has(root)) {
+      return yield* Effect.die(
+        new Error("Machine reached a terminal configuration without a completed root output")
+      )
+    }
     return {
-      next: snapshot,
+      next: snapshotFromConfiguration<States>(machine, completed.configuration),
       actions: [],
       emittedEvents: [],
       microsteps: [],
-      output: undefined
+      done: true,
+      output: completed.configuration.outputs.get(root) as Output
     }
   }
 
-  const decodedEvent = yield* decodeEvent<Events>(machine, event)
   const selections = selectEventTransitions<States, Events, Emits, E, R>(
     machine,
     configuration,
@@ -1376,6 +1428,7 @@ const macrostep: <
       actions: [],
       emittedEvents: [],
       microsteps: [],
+      done: false,
       output: undefined
     }
   }
@@ -1390,7 +1443,7 @@ const macrostep: <
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
   const settled = yield* settle(machine, step.next, decodedEvent, actions, raisedEvents, emittedEvents, microsteps)
-  return {
+  const planned = {
     next: snapshotFromConfiguration<States>(machine, settled.next),
     actions: settled.actions,
     emittedEvents: settled.emittedEvents,
@@ -1403,9 +1456,11 @@ const macrostep: <
       exitPaths: step.exitPaths,
       entryPaths: step.entryPaths,
       changed: step.changed
-    })),
-    output: settled.output
+    }))
   }
+  return settled.done
+    ? { ...planned, done: true, output: settled.output }
+    : { ...planned, done: false, output: undefined }
 })
 
 export const plan = macrostep

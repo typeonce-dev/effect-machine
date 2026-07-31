@@ -13,6 +13,7 @@ import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
+import { ChildAlreadyExistsError } from "./machineErrors.js"
 import type { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./machineErrors.js"
 import * as Model from "./machineModel.js"
 import * as internalPlanner from "./machinePlanner.js"
@@ -73,8 +74,14 @@ export const toProcessLogic: <
     Machine.EventOf<Events>,
     Machine.EmitOf<Emits>
   >,
-  Output | undefined,
-  InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError
+  Output,
+  | InitialE
+  | E
+  | ActionError<InitialR | R>
+  | InfiniteTransitionError
+  | MachineSchemaDecodeError
+  | StartupError
+  | StoppedError
 > = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -113,8 +120,7 @@ export const toProcessLogic: <
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
           const { receive, state, setState } = context
-          let done = false
-          let output: Output | undefined = undefined
+          let terminal: { readonly output: Output } | undefined
 
           const initialState = yield* state
           if (internalPlanner.isFinalState(machine, initialState)) {
@@ -234,9 +240,17 @@ export const toProcessLogic: <
             const token = Symbol()
             const invokeId = String(config.id)
             const key = makeInvokeSessionKey(path, invokeId)
-            const childId = config.addressable === true ? invokeId : makeInvokeChildId(path, invokeId)
+            const childId = config.address === undefined ? makeInvokeChildId(path, invokeId) : String(config.address)
             const scope = yield* Scope.make("parallel")
-            yield* Ref.update(invokeSessions, (sessions) => HashMap.set(sessions, key, { token, scope, childId, path }))
+            const reserved = yield* Ref.modify(invokeSessions, (sessions) =>
+              HashMap.has(sessions, key)
+                ? [false, sessions] as const
+                : [true, HashMap.set(sessions, key, { token, scope, childId, path })] as const
+            )
+            if (!reserved) {
+              yield* Scope.close(scope, Exit.void)
+              return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
+            }
             const logic = config.src()
             const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
               isCurrentInvoke(key, token).pipe(
@@ -249,7 +263,9 @@ export const toProcessLogic: <
                 initial: (childScope) => logic.initial({ ...childScope, sendParent }),
                 run: (childContext) => logic.run({ ...childContext, sendParent })
               },
-              { id: childId }
+              config.descriptor === undefined
+                ? { id: childId }
+                : { id: childId, descriptor: config.descriptor }
             ).pipe(
               Effect.onExit((exit) =>
                 Exit.isFailure(exit)
@@ -282,6 +298,7 @@ export const toProcessLogic: <
                 .flatMap((path) =>
                   getInvokes(Model.getStateConfigByPath(machine, path), {
                     state: Model.getActiveValue(configuration, path),
+                    parent: Model.getParentValue(machine, configuration, path),
                     parents: Model.getParentValues(machine, configuration, path),
                     event,
                     runtime: internalPlanner.runtimeFor<Machine.EventOf<Events>, Machine.EmitOf<Emits>>()
@@ -317,7 +334,7 @@ export const toProcessLogic: <
             )
 
             yield* Effect.whileLoop({
-              while: () => !done,
+              while: () => terminal === undefined,
               body: () =>
                 Effect.gen(function*() {
                   const event = yield* receive
@@ -351,10 +368,9 @@ export const toProcessLogic: <
                     runtime
                   )
 
-                  if (internalPlanner.isFinalState(machine, planned.next)) {
-                    done = true
-                    output = planned.output
-                    yield* stopAllInvokes(Exit.succeed(output))
+                  if (planned.done) {
+                    terminal = { output: planned.output }
+                    yield* stopAllInvokes(Exit.succeed(planned.output))
                   } else {
                     if (changed) {
                       for (const [path, entryEvent] of entryEvents) {
@@ -367,7 +383,12 @@ export const toProcessLogic: <
               step: () => undefined
             })
 
-            return output
+            if (terminal === undefined) {
+              return yield* Effect.die(
+                new Error("Machine process stopped receiving events before reaching a terminal configuration")
+              )
+            }
+            return terminal.output
           }).pipe(
             Effect.onExit((exit) => stopAllInvokes(exit))
           )
@@ -383,8 +404,14 @@ export const toProcessLogic: <
       Machine.EventOf<Events>,
       Machine.EmitOf<Emits>
     >,
-    Output | undefined,
-    InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError
+    Output,
+    | InitialE
+    | E
+    | ActionError<InitialR | R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StartupError
+    | StoppedError
   >
 
 export const start: <
@@ -407,15 +434,19 @@ export const start: <
     Machine.Snapshot<States>,
     Machine.EventOf<Events>,
     | E
-    | InitialE
-    | ActionError<R | InitialR>
+    | ActionError<R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
-    | StartupError
     | StoppedError,
-    Output | undefined
+    Output
   >,
-  InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError,
+  | InitialE
+  | E
+  | ActionError<InitialR | R>
+  | InfiniteTransitionError
+  | MachineSchemaDecodeError
+  | StartupError
+  | StoppedError,
   ExcludeCompatibleRuntime<
     Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
     Machine.EventOf<Events>,

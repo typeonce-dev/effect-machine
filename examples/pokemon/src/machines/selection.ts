@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
-import { Pokemon, PokemonService } from "../pokemon.ts"
+import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
 class Form extends Schema.TaggedClass<Form>("Form")("Form", {}) {}
 
@@ -40,13 +40,6 @@ class SearchResult extends Schema.TaggedClass<SearchResult>("SearchResult")("Sea
 
 class ReplacePokemon extends Schema.TaggedClass<ReplacePokemon>("ReplacePokemon")("ReplacePokemon", {
   id: Pokemon.fields.id
-}) {}
-
-/** Emits */
-
-class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInTeam")("ReplaceInTeam", {
-  id: Pokemon.fields.id,
-  pokemon: Pokemon
 }) {}
 
 const SearchMachine = ({ searchText }: { searchText: string }) =>

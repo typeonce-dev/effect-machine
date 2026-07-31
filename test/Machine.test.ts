@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Context, Data, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import { Machine } from "../src/index.js"
 
 class DeferredLog extends Context.Service<DeferredLog, {
@@ -306,6 +307,13 @@ describe("Machine", () => {
       assert.strictEqual(Machine.isMachine(machine), true)
       assert.deepStrictEqual(planned.state.value, new Idle({ userId: "user-1" }))
     }))
+
+  it("retag constructs the target case without copying the source discriminator", () => {
+    const result = Machine.retag(RequestSucceeded, new Submit({ value: "loaded" }))
+
+    assert.instanceOf(result, RequestSucceeded)
+    assert.deepStrictEqual(result, new RequestSucceeded({ value: "loaded" }))
+  })
 
   it("make stores the machine id", () => {
     const states = Machine.defineStates({ Idle, Loading })
@@ -676,7 +684,6 @@ describe("Machine", () => {
             }
           },
           done: {
-            type: "final",
             output: () => "" as any
           }
         })
@@ -944,7 +951,6 @@ describe("Machine", () => {
           all: {
             states: {
               left: {
-                type: "final",
                 output: () => 1
               }
             }
@@ -966,7 +972,10 @@ describe("Machine", () => {
             schema: ParallelRoot,
             type: "parallel",
             states: {
-              left: ParallelLeftDone,
+              left: {
+                schema: ParallelLeftDone,
+                type: "final"
+              },
               right: ParallelRightDone
             }
           }
@@ -986,7 +995,6 @@ describe("Machine", () => {
           all: {
             states: {
               left: {
-                type: "final"
               }
             }
           }
@@ -1265,6 +1273,9 @@ describe("Machine", () => {
                 const deferredLog = yield* DeferredLog
                 yield* Machine.action(deferredLog.push("entry:entering"))
               })
+            },
+            authorized: {
+              output: ({ state }) => state.code
             }
           }
         }
@@ -1312,7 +1323,8 @@ describe("Machine", () => {
           states: {
             entering: {
               on: {
-                Authorize: ({ event, parents, target }) => {
+                Authorize: ({ event, parent, parents, target }) => {
+                  assert.deepStrictEqual(parent, payment)
                   assert.deepStrictEqual(parents, { payment })
                   return target.local.authorized(new AuthorizedPayment({ code: event.code }))
                 }
@@ -1372,7 +1384,6 @@ describe("Machine", () => {
               }
             },
             authorized: {
-              type: "final",
               output: ({ parents, state }) => {
                 assert.deepStrictEqual(parents, { payment })
                 return state.code
@@ -2223,7 +2234,6 @@ describe("Machine", () => {
               }
             },
             authorized: {
-              type: "final",
               output: ({ state }) => state.code
             }
           }
@@ -2273,7 +2283,6 @@ describe("Machine", () => {
         payment: {
           states: {
             authorized: {
-              type: "final",
               output: ({ state }) => state.code
             }
           }
@@ -2331,7 +2340,6 @@ describe("Machine", () => {
               }
             },
             authorized: {
-              type: "final",
               output: ({ state }) => state.code
             }
           }
@@ -2352,7 +2360,11 @@ describe("Machine", () => {
           state: {
             path: "payment.authorized",
             value: new AuthorizedPayment({ code: "auth-1" })
-          }
+          },
+          completed: [
+            { path: "payment.authorized", output: "auth-1" },
+            { path: "payment", output: "auth-1" }
+          ]
         },
         output: "auth-1"
       })
@@ -2397,7 +2409,6 @@ describe("Machine", () => {
               }
             },
             authorized: {
-              type: "final",
               entry: ({ runtime }) => Effect.flatMap(runtime, (machine) => machine.raise(new Reset({})))
             }
           }
@@ -2471,7 +2482,6 @@ describe("Machine", () => {
                   }
                 },
                 reserved: {
-                  type: "final",
                   output: ({ state }) => state.reservationId
                 }
               }
@@ -2550,7 +2560,6 @@ describe("Machine", () => {
                   }
                 },
                 reserved: {
-                  type: "final",
                   entry: ({ runtime }) => Effect.flatMap(runtime, (machine) => machine.raise(new Reset({})))
                 }
               }
@@ -2770,6 +2779,13 @@ describe("Machine", () => {
                   }
                 }
               }
+            },
+            shipping: {
+              states: {
+                quoted: {
+                  output: ({ state }) => state.quoteId
+                }
+              }
             }
           }
         }
@@ -2882,7 +2898,6 @@ describe("Machine", () => {
                   }
                 },
                 reserved: {
-                  type: "final",
                   output: ({ state }) => state.reservationId
                 }
               }
@@ -2896,7 +2911,6 @@ describe("Machine", () => {
                   }
                 },
                 quoted: {
-                  type: "final",
                   output: ({ state }) => state.quoteId
                 }
               }
@@ -3021,7 +3035,6 @@ describe("Machine", () => {
                   }
                 },
                 reserved: {
-                  type: "final",
                   output: ({ event, state }) => `${state.reservationId}:${String(event._tag)}`
                 }
               }
@@ -3034,7 +3047,6 @@ describe("Machine", () => {
                   }
                 },
                 quoted: {
-                  type: "final",
                   output: ({ event, state }) => `${state.quoteId}:${String(event._tag)}`
                 }
               }
@@ -3165,7 +3177,6 @@ describe("Machine", () => {
                   }
                 },
                 quoted: {
-                  type: "final",
                   entry: ({ runtime }) => Effect.flatMap(runtime, (machine) => machine.raise(new Reset({})))
                 }
               }
@@ -4084,7 +4095,10 @@ describe("Machine", () => {
 
   it("enabled returns no event tags for final states", () => {
     const machine = Machine.make({
-      states: { Idle, Success },
+      states: {
+        Idle,
+        Success: { schema: Success, type: "final" }
+      },
       events: [Submit],
       input: Input,
       initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -4095,7 +4109,6 @@ describe("Machine", () => {
         }
       },
       Success: {
-        type: "final"
       }
     })
 
@@ -4109,7 +4122,10 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const deferredLog = yield* makeDeferredLog
       const machine = Machine.make({
-        states: { Idle, Success },
+        states: {
+          Idle,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -4120,7 +4136,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           entry: Effect.fn(function*() {
             const deferredLog = yield* DeferredLog
             yield* Machine.action(deferredLog.push("success"))
@@ -4137,7 +4152,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, undefined)
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: undefined }]
+        },
         output: undefined
       })
       assert.deepStrictEqual(yield* deferredLog.read, ["success"])
@@ -4157,7 +4176,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ event, state }) => `${state.requestId}:${String(event._tag)}`
         }
       })
@@ -4188,7 +4206,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4204,33 +4221,72 @@ describe("Machine", () => {
 
   it.effect("exposes output when the initial state is final", () =>
     Effect.gen(function*() {
+      let outputCalls = 0
       const machine = Machine.make({
         states: { Success: SuccessOutput },
         events: [Submit],
         initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
       }).handle({
         Success: {
-          type: "final",
-          output: ({ state }) => state.requestId
+          output: ({ state }) => {
+            outputCalls += 1
+            return state.requestId
+          }
         }
       })
 
       const planned = yield* Machine.planInitial(machine)
       const actor = yield* Machine.start(machine)
 
+      assert.strictEqual(planned.done, true)
       assert.strictEqual(planned.output, "request-1")
       assert.strictEqual(yield* actor.join, "request-1")
+      assert.strictEqual(outputCalls, 2)
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: "request-1" }]
+        },
         output: "request-1"
       })
+    }))
+
+  it.effect("preserves completed output when a terminal snapshot is spread and planned again", () =>
+    Effect.gen(function*() {
+      let outputCalls = 0
+      const machine = Machine.make({
+        states: { Success: SuccessOutput },
+        events: [Submit],
+        initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+      }).handle({
+        Success: {
+          output: ({ state }) => {
+            outputCalls += 1
+            return state.requestId
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const cloned = { ...initial.state }
+      const planned = yield* Machine.plan(machine, cloned, new Submit({ value: "ignored" }))
+
+      assert.strictEqual(initial.done, true)
+      assert.deepStrictEqual(cloned.completed, [{ path: "Success", output: "request-1" }])
+      assert.strictEqual(planned.done, true)
+      assert.strictEqual(planned.output, "request-1")
+      assert.strictEqual(outputCalls, 1)
     }))
 
   it.effect("defaults final state output to undefined", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { Idle, Success },
+        states: {
+          Idle,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -4241,7 +4297,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final"
         }
       })
 
@@ -4251,7 +4306,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, undefined)
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: undefined }]
+        },
         output: undefined
       })
     }))
@@ -4259,7 +4318,10 @@ describe("Machine", () => {
   it.effect("rejects events after reaching a final state", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { Idle, Success },
+        states: {
+          Idle,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit, Reset],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -4271,7 +4333,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final"
         }
       })
 
@@ -4282,7 +4343,11 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: undefined }]
+        },
         output: undefined
       })
     }))
@@ -4345,13 +4410,15 @@ describe("Machine", () => {
   it.effect("plans no-op transitions from final states", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { Idle, Success },
+        states: {
+          Idle,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
         Success: {
-          type: "final"
         }
       })
 
@@ -4366,7 +4433,10 @@ describe("Machine", () => {
   it.effect("does not process raised events from final state entry actions", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { Idle, Success },
+        states: {
+          Idle,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit, Reset],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -4378,7 +4448,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           entry: ({ runtime }) => Effect.flatMap(runtime, (machine) => machine.raise(new Reset({})))
         }
       })
@@ -4389,7 +4458,11 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: undefined }]
+        },
         output: undefined
       })
     }))
@@ -4639,7 +4712,6 @@ describe("Machine", () => {
             }
           },
           Success: {
-            type: "final",
             output: ({ state }) => state.requestId
           }
         }),
@@ -4751,7 +4823,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4763,7 +4834,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: "request-1" }]
+        },
         output: "request-1"
       })
     }))
@@ -4820,7 +4895,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4832,7 +4906,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "done:request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "done:request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "done:request-1" }),
+          completed: [{ path: "Success", output: "done:request-1" }]
+        },
         output: "done:request-1"
       })
     }))
@@ -4861,7 +4939,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4873,7 +4950,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "request:42")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request:42" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request:42" }),
+          completed: [{ path: "Success", output: "request:42" }]
+        },
         output: "request:42"
       })
     }))
@@ -4900,7 +4981,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4936,7 +5016,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4946,7 +5025,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "user-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "user-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "user-1" }),
+          completed: [{ path: "Success", output: "user-1" }]
+        },
         output: "user-1"
       })
     }))
@@ -4979,7 +5062,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -4991,74 +5073,20 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "request:42")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request:42" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request:42" }),
+          completed: [{ path: "Success", output: "request:42" }]
+        },
         output: "request:42"
       })
     }))
 
   it.effect("start spawns children from machine actions and sends to them by id", () =>
     Effect.gen(function*() {
+      const Child = Machine.childAddress<ChildPing>("child")
       const childRef = yield* Deferred.make<Machine.MachineRef<number, ChildPing, never, void>>()
-      const childLogic = Machine.logic({
-        initial: 0,
-        run: ({ receive }) =>
-          receive.pipe(
-            Effect.flatMap((event) => Deferred.succeed(event.reply, void 0)),
-            Effect.forever
-          )
-      })
-      const machine = Machine.make({
-        states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, Resolve],
-        input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
-      }).handle({
-        Idle: {
-          on: {
-            Submit: Effect.fn(function*() {
-              yield* Machine.action(
-                Effect.gen(function*() {
-                  const child = yield* Machine.spawn(childLogic, { id: "child" })
-                  const reply = yield* Deferred.make<void>()
-                  yield* Deferred.succeed(childRef, child)
-                  yield* Machine.sendTo("child", new ChildPing({ reply }))
-                  yield* Deferred.await(reply)
-                })
-              )
-              return FlatInitial.Loading(new Loading({ requestId: "request-1" }))
-            })
-          }
-        },
-        Loading: {
-          on: {
-            Resolve: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
-          }
-        },
-        Success: {
-          type: "final",
-          entry: () => Machine.action(Machine.stopChild("child")),
-          output: ({ state }) => state.requestId
-        }
-      })
-
-      const actor = yield* Machine.start(machine, { userId: "user-1" })
-      yield* actor.send(new Submit({ value: "hello" }))
-      const child = yield* Deferred.await(childRef)
-
-      yield* actor.send(new Resolve({}))
-
-      assert.strictEqual(yield* actor.join, "request-1")
-      assert.deepStrictEqual(yield* child.snapshot, {
-        status: "stopped",
-        state: 0
-      })
-    }))
-
-  it.effect("start sends to spawned child processes by typed child address", () =>
-    Effect.gen(function*() {
-      const Child = Machine.child<ChildPing>("child")
-      const childRef = yield* Deferred.make<Machine.MachineRef<number, ChildPing, never, void>>()
-      const childLogic = Machine.logic({
+      const childLogic = Machine.logic<number, ChildPing>({
         initial: 0,
         run: ({ receive }) =>
           receive.pipe(
@@ -5094,7 +5122,64 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
+          entry: () => Machine.action(Machine.stopChild(Child)),
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine, { userId: "user-1" })
+      yield* actor.send(new Submit({ value: "hello" }))
+      const child = yield* Deferred.await(childRef)
+
+      yield* actor.send(new Resolve({}))
+
+      assert.strictEqual(yield* actor.join, "request-1")
+      assert.deepStrictEqual(yield* child.snapshot, {
+        status: "stopped",
+        state: 0
+      })
+    }))
+
+  it.effect("start sends to spawned child processes by typed child address", () =>
+    Effect.gen(function*() {
+      const Child = Machine.childAddress<ChildPing>("child")
+      const childRef = yield* Deferred.make<Machine.MachineRef<number, ChildPing, never, void>>()
+      const childLogic = Machine.logic<number, ChildPing>({
+        initial: 0,
+        run: ({ receive }) =>
+          receive.pipe(
+            Effect.flatMap((event) => Deferred.succeed(event.reply, void 0)),
+            Effect.forever
+          )
+      })
+      const machine = Machine.make({
+        states: { Idle, Loading, Success: SuccessOutput },
+        events: [Submit, Resolve],
+        input: Input,
+        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+      }).handle({
+        Idle: {
+          on: {
+            Submit: Effect.fn(function*() {
+              yield* Machine.action(
+                Effect.gen(function*() {
+                  const child = yield* Machine.spawn(childLogic, { id: Child })
+                  const reply = yield* Deferred.make<void>()
+                  yield* Deferred.succeed(childRef, child)
+                  yield* Machine.sendTo(Child, new ChildPing({ reply }))
+                  yield* Deferred.await(reply)
+                })
+              )
+              return FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            })
+          }
+        },
+        Loading: {
+          on: {
+            Resolve: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+          }
+        },
+        Success: {
           entry: () => Machine.action(Machine.stopChild(Child)),
           output: ({ state }) => state.requestId
         }
@@ -5115,8 +5200,9 @@ describe("Machine", () => {
 
   it.effect("start returns spawned child refs to machine actions", () =>
     Effect.gen(function*() {
+      const Child = Machine.childAddress<ChildPing>("child")
       const childRef = yield* Deferred.make<Machine.MachineRef<number, ChildPing, never, void>>()
-      const childLogic = Machine.logic({
+      const childLogic = Machine.logic<number, ChildPing>({
         initial: 0,
         run: ({ receive }) =>
           receive.pipe(
@@ -5135,7 +5221,7 @@ describe("Machine", () => {
             Submit: Effect.fn(function*() {
               yield* Machine.action(
                 Effect.gen(function*() {
-                  const child = yield* Machine.spawn(childLogic, { id: "child" })
+                  const child = yield* Machine.spawn(childLogic, { id: Child })
                   const reply = yield* Deferred.make<void>()
                   yield* Deferred.succeed(childRef, child)
                   yield* child.send(new ChildPing({ reply }))
@@ -5152,8 +5238,7 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
-          entry: () => Machine.action(Machine.stopChild("child")),
+          entry: () => Machine.action(Machine.stopChild(Child)),
           output: ({ state }) => state.requestId
         }
       })
@@ -5267,7 +5352,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5279,20 +5363,30 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "done:request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "done:request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "done:request-1" }),
+          completed: [{ path: "Success", output: "done:request-1" }]
+        },
         output: "done:request-1"
       })
     }))
 
   it.effect("start invokes a child process by typed child address", () =>
     Effect.gen(function*() {
-      const Request = Machine.child<never>("request")
-      const childLogic = Machine.effect(
-        Effect.succeed(new RequestSucceeded({ value: "done:request-1" }))
-      )
+      const Request = Machine.childAddress<Resolve>("request")
+      const childLogic = Machine.logic<void, Resolve, RequestSucceeded>({
+        initial: undefined,
+        run: ({ receive }) =>
+          Effect.as(
+            receive,
+            new RequestSucceeded({ value: "done:request-1" })
+          )
+      })
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, RequestSucceeded],
+        events: [Submit, Resolve],
+        internalEvents: [RequestSucceeded],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -5303,15 +5397,19 @@ describe("Machine", () => {
         },
         Loading: {
           invoke: Machine.invoke({
-            id: Request,
+            id: "request-lifecycle",
+            address: Request,
             src: () => childLogic
           }),
           on: {
+            Resolve: () =>
+              Machine.action(
+                Machine.sendTo(Request, new Resolve({}))
+              ),
             RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5319,11 +5417,16 @@ describe("Machine", () => {
       const actor = yield* Machine.start(machine, { userId: "user-1" })
 
       yield* actor.send(new Submit({ value: "hello" }))
+      yield* actor.send(new Resolve({}))
 
       assert.strictEqual(yield* actor.join, "done:request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "done:request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "done:request-1" }),
+          completed: [{ path: "Success", output: "done:request-1" }]
+        },
         output: "done:request-1"
       })
     }))
@@ -5348,7 +5451,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5386,7 +5488,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5440,6 +5541,128 @@ describe("Machine", () => {
       assert.instanceOf(error, Machine.ChildAlreadyExistsError)
     }))
 
+  it.effect("invokes reject duplicate lifecycle ids even when addresses differ", () =>
+    Effect.gen(function*() {
+      const First = Machine.childAddress("first")
+      const Second = Machine.childAddress("second")
+      const parentStates = Machine.defineStates({ Loading })
+      const parent = Machine.make({
+        states: parentStates.states,
+        events: [],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: [
+            Machine.invoke({
+              id: "worker",
+              address: First,
+              src: () => Machine.effect(Effect.never)
+            }),
+            Machine.invoke({
+              id: "worker",
+              address: Second,
+              src: () => Machine.effect(Effect.never)
+            })
+          ]
+        }
+      })
+
+      const actor = yield* Machine.start(parent)
+      const error = yield* Effect.flip(actor.join)
+
+      assert.instanceOf(error, Machine.ChildAlreadyExistsError)
+      assert.strictEqual(error.id, "worker")
+    }))
+
+  it.effect("does not let a same-id descriptor address another descriptor's child", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<ReadonlyArray<string>>([])
+      const sendCompleted = yield* Deferred.make<void>()
+      const stopCompleted = yield* Deferred.make<void>()
+      const childStates = Machine.defineStates({ Idle })
+      const makeChild = () =>
+        Machine.make({
+          states: childStates.states,
+          events: [Submit],
+          initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+        }).handle({
+          Idle: {
+            on: {
+              Submit: ({ event, target }) =>
+                Machine.action(
+                  Ref.update(received, (values) => [...values, event.value]),
+                  target.full.Idle(new Idle({ userId: event.value }))
+                )
+            }
+          }
+        })
+      const child = makeChild()
+      const Actual = Machine.child("child-machine", child)
+      const Alias = Machine.child("child-machine", child)
+      const Impostor = Machine.child("child-machine", makeChild())
+      const parentStates = Machine.defineStates({ Loading })
+      const parent = Machine.make({
+        states: parentStates.states,
+        events: [Resolve, Reset],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeMachine({ child: Actual }),
+          on: {
+            Resolve: () =>
+              Machine.action(
+                Machine.sendTo(Impostor, new Submit({ value: "impostor" })).pipe(
+                  Effect.andThen(Deferred.succeed(sendCompleted, void 0)),
+                  Effect.asVoid
+                )
+              ),
+            Reset: () =>
+              Machine.action(
+                Machine.stopChild(Impostor).pipe(
+                  Effect.andThen(Deferred.succeed(stopCompleted, void 0)),
+                  Effect.asVoid
+                )
+              )
+          }
+        }
+      })
+
+      const actor = yield* Machine.start(parent)
+      const actual = yield* actor.childChanges(Actual).pipe(
+        Stream.filter(Option.isSome),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.map((refs) => refs[0].value)
+      )
+
+      assert(Option.isSome(yield* actor.child(Alias)))
+      assert(Option.isNone(yield* actor.child(Impostor)))
+      yield* actor.send(new Resolve({}))
+      yield* Deferred.await(sendCompleted)
+
+      const firstUpdate = yield* waitForSnapshot(
+        actual,
+        (snapshot) => snapshot.state.value.userId === "real"
+      ).pipe(Effect.forkChild)
+      yield* actual.send(new Submit({ value: "real" }))
+      yield* Fiber.join(firstUpdate)
+      assert.deepStrictEqual(yield* Ref.get(received), ["real"])
+
+      yield* actor.send(new Reset({}))
+      yield* Deferred.await(stopCompleted)
+      assert(Option.isSome(yield* actor.child(Actual)))
+
+      const secondUpdate = yield* waitForSnapshot(
+        actual,
+        (snapshot) => snapshot.state.value.userId === "after-stop"
+      ).pipe(Effect.forkChild)
+      yield* actual.send(new Submit({ value: "after-stop" }))
+      yield* Fiber.join(secondUpdate)
+      assert.deepStrictEqual(yield* Ref.get(received), ["real", "after-stop"])
+
+      yield* actor.stop
+    }))
+
   it.effect("start maps invoked child failures to machine events", () =>
     Effect.gen(function*() {
       const error = new InvokeError({ message: "boom" })
@@ -5469,7 +5692,6 @@ describe("Machine", () => {
           }
         },
         Failed: {
-          type: "final",
           output: ({ state }) => state.message
         }
       })
@@ -5481,9 +5703,107 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "boom")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Failed", value: new Failed({ message: "boom" }) },
+        state: {
+          path: "Failed",
+          value: new Failed({ message: "boom" }),
+          completed: [{ path: "Failed", output: "boom" }]
+        },
         output: "boom"
       })
+    }))
+
+  it.effect("start delivers internal invoke events without exposing them through send", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        states: { Idle, Loading, Success: SuccessOutput },
+        events: [Submit],
+        internalEvents: [RequestSucceeded],
+        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+      }).handle({
+        Idle: {
+          on: {
+            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+          }
+        },
+        Loading: {
+          invoke: Machine.invoke({
+            id: "request",
+            src: () => Machine.effect(Effect.succeed(new RequestSucceeded({ value: "loaded" })))
+          }),
+          on: {
+            RequestSucceeded: ({ event }) =>
+              FlatInitial.Success(new Success({ requestId: event.value }))
+          }
+        },
+        Success: {
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine)
+      yield* actor.send(new Submit({ value: "start" }))
+
+      assert.strictEqual(yield* actor.join, "loaded")
+    }))
+
+  it.effect("invokeEffect maps typed failures without manual Effect recovery", () =>
+    Effect.gen(function*() {
+      const failure = new InvokeError({ message: "unavailable" })
+      const machine = Machine.make({
+        states: { Loading, Failed: FailedOutput },
+        events: [],
+        internalEvents: [RequestSucceeded, RequestFailed],
+        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeEffect({
+            id: "request",
+            effect: Effect.fail(failure),
+            onSuccess: (value: string) => new RequestSucceeded({ value }),
+            onFailure: (error) => new RequestFailed({ error, cause: Cause.fail(error) })
+          }),
+          on: {
+            RequestSucceeded: ({ event }) =>
+              FlatInitial.Failed(new Failed({ message: event.value })),
+            RequestFailed: ({ event }) =>
+              FlatInitial.Failed(new Failed({ message: event.error.message }))
+          }
+        },
+        Failed: {
+          output: ({ state }) => state.message
+        }
+      })
+
+      const actor = yield* Machine.start(machine)
+
+      assert.strictEqual(yield* actor.join, "unavailable")
+    }))
+
+  it.effect("after emits a state-scoped internal event", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        states: { Loading, Success: SuccessOutput },
+        events: [],
+        internalEvents: [RequestSucceeded],
+        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.after("1 hour", new RequestSucceeded({ value: "timeout" })),
+          on: {
+            RequestSucceeded: ({ event }) =>
+              FlatInitial.Success(new Success({ requestId: event.value }))
+          }
+        },
+        Success: {
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine)
+      const joined = yield* actor.join.pipe(Effect.forkChild)
+      yield* TestClock.adjust("1 hour")
+
+      assert.strictEqual(yield* Fiber.join(joined), "timeout")
     }))
 
   it.effect("start maps invoked child active snapshots to machine events", () =>
@@ -5511,7 +5831,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5523,7 +5842,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "request:pending")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request:pending" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request:pending" }),
+          completed: [{ path: "Success", output: "request:pending" }]
+        },
         output: "request:pending"
       })
     }))
@@ -5598,7 +5921,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5619,7 +5941,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "ready")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "ready" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "ready" }),
+          completed: [{ path: "Success", output: "ready" }]
+        },
         output: "ready"
       })
     }))
@@ -5668,7 +5994,11 @@ describe("Machine", () => {
       const release = yield* Deferred.make<void>()
       const resetHandled = yield* Deferred.make<void>()
       const machine = Machine.make({
-        states: { Idle, Loading, Success },
+        states: {
+          Idle,
+          Loading,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit, Reset, RequestProgress],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -5703,7 +6033,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final"
         }
       })
 
@@ -5730,7 +6059,11 @@ describe("Machine", () => {
       const release = yield* Deferred.make<void>()
       const resetHandled = yield* Deferred.make<void>()
       const machine = Machine.make({
-        states: { Idle, Loading, Success },
+        states: {
+          Idle,
+          Loading,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit, Reset, RequestSucceeded],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -5762,7 +6095,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final"
         }
       })
 
@@ -5802,7 +6134,11 @@ describe("Machine", () => {
           )
       })
       const machine = Machine.make({
-        states: { Idle, Loading, Success },
+        states: {
+          Idle,
+          Loading,
+          Success: { schema: Success, type: "final" }
+        },
         events: [Submit, Reset, RequestSucceeded],
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
@@ -5826,7 +6162,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final"
         }
       })
 
@@ -5894,7 +6229,6 @@ describe("Machine", () => {
           }
         },
         Success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -5921,7 +6255,11 @@ describe("Machine", () => {
       assert.strictEqual(yield* Fiber.join(joinFiber), "request-1")
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
-        state: { path: "Success", value: new Success({ requestId: "request-1" }) },
+        state: {
+          path: "Success",
+          value: new Success({ requestId: "request-1" }),
+          completed: [{ path: "Success", output: "request-1" }]
+        },
         output: "request-1"
       })
     }))
@@ -6262,7 +6600,6 @@ describe("Machine", () => {
           }
         },
         success: {
-          type: "final",
           output: ({ state }) => state.requestId
         }
       })
@@ -6313,6 +6650,7 @@ describe("Machine", () => {
             Effect.onInterrupt(() => Ref.update(invokeStops, (count) => count + 1))
           )
       })
+      const Worker = Machine.childAddress<never>("worker")
       const machine = Machine.make({
         states: { Idle },
         events: [Resolve],
@@ -6322,7 +6660,7 @@ describe("Machine", () => {
         Idle: {
           entry: () =>
             Machine.action(
-              Machine.spawn(spawnedLogic, { id: "worker" }).pipe(
+              Machine.spawn(spawnedLogic, { id: Worker }).pipe(
                 Effect.asVoid
               )
             ),
@@ -6331,7 +6669,7 @@ describe("Machine", () => {
             src: () => invokeLogic
           }),
           on: {
-            Resolve: () => Machine.action(Machine.stopChild("worker"))
+            Resolve: () => Machine.action(Machine.stopChild(Worker))
           }
         }
       })
@@ -6368,6 +6706,175 @@ describe("Machine", () => {
       assert.instanceOf(error, InitialError)
       assert.strictEqual(error._tag, "InitialError")
       assert.strictEqual(error.state, "Idle")
+    }))
+
+  it.effect("start preserves typed entry failures raised during startup", () =>
+    Effect.gen(function*() {
+      const expected = new EntryError({ state: "Idle" })
+      const machine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+      }).handle({
+        Idle: {
+          entry: () => Effect.fail(expected)
+        }
+      })
+
+      const error = yield* Effect.flip(Machine.start(machine))
+
+      assert.strictEqual(error, expected)
+    }))
+
+  it.effect("preserves complete typed entry causes without wrapping them", () =>
+    Effect.gen(function*() {
+      const cause = Cause.fromReasons<EntryError>([
+        Cause.makeFailReason(new EntryError({ state: "Idle:first" })),
+        Cause.makeFailReason(new EntryError({ state: "Idle:second" }))
+      ])
+      const machine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+      }).handle({
+        Idle: {
+          entry: () => Effect.failCause(cause)
+        }
+      })
+
+      const planningExit = yield* Effect.exit(Machine.planInitial(machine))
+      const startupExit = yield* Effect.exit(Machine.start(machine))
+
+      assert.strictEqual(planningExit._tag, "Failure")
+      if (planningExit._tag === "Failure") {
+        assert.strictEqual(planningExit.cause, cause)
+      }
+      assert.strictEqual(startupExit._tag, "Failure")
+      if (startupExit._tag === "Failure") {
+        assert.strictEqual(startupExit.cause, cause)
+      }
+    }))
+
+  it.effect("wraps initializer defects without losing their cause", () =>
+    Effect.gen(function*() {
+      const defect = new Error("initializer defect")
+      const machine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => {
+          throw defect
+        }
+      })
+
+      const planningError = yield* Effect.flip(Machine.planInitial(machine))
+      const startupError = yield* Effect.flip(Machine.start(machine))
+
+      assert.instanceOf(planningError, Machine.StartupError)
+      assert(Cause.hasDies(planningError.cause))
+      assert.instanceOf(startupError, Machine.StartupError)
+      assert(Cause.hasDies(startupError.cause))
+    }))
+
+  it.effect("preserves initializer interruptions as interruption causes", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => Effect.interrupt
+      })
+      const mixedCause = Cause.fromReasons<EntryError>([
+        Cause.makeFailReason(new EntryError({ state: "Idle" })),
+        Cause.makeInterruptReason(42)
+      ])
+      const mixedMachine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => Effect.failCause(mixedCause)
+      })
+
+      const planningExit = yield* Effect.exit(Machine.planInitial(machine))
+      const startupExit = yield* Effect.exit(Machine.start(machine))
+      const mixedPlanningExit = yield* Effect.exit(Machine.planInitial(mixedMachine))
+      const mixedStartupExit = yield* Effect.exit(Machine.start(mixedMachine))
+
+      assert.strictEqual(planningExit._tag, "Failure")
+      if (planningExit._tag === "Failure") {
+        assert(Cause.hasInterruptsOnly(planningExit.cause))
+      }
+      assert.strictEqual(startupExit._tag, "Failure")
+      if (startupExit._tag === "Failure") {
+        assert(Cause.hasInterruptsOnly(startupExit.cause))
+      }
+      assert.strictEqual(mixedPlanningExit._tag, "Failure")
+      if (mixedPlanningExit._tag === "Failure") {
+        assert.strictEqual(mixedPlanningExit.cause, mixedCause)
+      }
+      assert.strictEqual(mixedStartupExit._tag, "Failure")
+      if (mixedStartupExit._tag === "Failure") {
+        assert.strictEqual(mixedStartupExit.cause, mixedCause)
+      }
+    }))
+
+  it.effect("wraps initial configuration validation defects consistently", () =>
+    Effect.gen(function*() {
+      const states = Machine.defineStates({
+        payment: {
+          schema: Payment,
+          initial: "entering",
+          states: {
+            entering: EnteringPayment,
+            authorized: AuthorizedPayment
+          }
+        }
+      })
+      const invalidInitialState = {
+        path: "payment",
+        value: new Payment({ id: "payment-1" }),
+        state: {
+          path: "payment.authorized",
+          value: new AuthorizedPayment({ code: "authorization-1" })
+        }
+      }
+      const machine = Machine.make({
+        states: states.states,
+        events: [],
+        initial: () => invalidInitialState as any
+      })
+
+      const planningError = yield* Effect.flip(Machine.planInitial(machine))
+      const startupError = yield* Effect.flip(Machine.start(machine))
+
+      assert.instanceOf(planningError, Machine.StartupError)
+      assert(Cause.hasDies(planningError.cause))
+      assert.instanceOf(startupError, Machine.StartupError)
+      assert(Cause.hasDies(startupError.cause))
+    }))
+
+  it.effect("preserves composite startup causes", () =>
+    Effect.gen(function*() {
+      const failure = new EntryError({ state: "Idle" })
+      const cause = Cause.fromReasons<EntryError>([
+        Cause.makeFailReason(failure),
+        Cause.makeDieReason(new Error("entry defect")),
+        Cause.makeInterruptReason(42)
+      ])
+      const machine = Machine.make({
+        states: { Idle },
+        events: [],
+        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+      }).handle({
+        Idle: {
+          entry: () => Effect.failCause(cause)
+        }
+      })
+
+      const error = yield* Effect.flip(Machine.start(machine))
+
+      assert.instanceOf(error, Machine.StartupError)
+      assert.strictEqual(error.cause, cause)
+      assert(Cause.hasFails(error.cause))
+      assert(Cause.hasDies(error.cause))
+      assert(Cause.hasInterrupts(error.cause))
     }))
 
   it.effect("ignores an event that is not handled by the current state", () =>
@@ -6966,13 +7473,46 @@ describe("Machine", () => {
       assert.strictEqual(error.maxIterations, 1000)
     }))
 
+  it.effect("fails initial planning and startup when always transitions do not stabilize", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        id: "InitialLoopMachine",
+        states: { Idle, Loading },
+        events: [],
+        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+      }).handle({
+        Idle: {
+          always: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        },
+        Loading: {
+          always: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+        }
+      })
+
+      const planningError = yield* Effect.flip(Machine.planInitial(machine))
+      const startupError = yield* Effect.flip(Machine.start(machine))
+
+      assert.instanceOf(planningError, Machine.InfiniteTransitionError)
+      assert.strictEqual(planningError.machineId, "InitialLoopMachine")
+      assert.strictEqual(planningError.maxIterations, 1000)
+      assert.instanceOf(startupError, Machine.InfiniteTransitionError)
+      assert.strictEqual(startupError.machineId, "InitialLoopMachine")
+      assert.strictEqual(startupError.maxIterations, 1000)
+    }))
+
   it.effect("fails when completion transitions do not stabilize", () =>
     Effect.gen(function*() {
       const states = Machine.defineStates({
         idle: Idle,
-        done: {
-          schema: Success,
-          type: "final"
+        flow: {
+          schema: Loading,
+          initial: "done",
+          states: {
+            done: {
+              schema: Success,
+              type: "final"
+            }
+          }
         }
       })
       const machine = Machine.make({
@@ -6983,11 +7523,19 @@ describe("Machine", () => {
       }).handle({
         idle: {
           on: {
-            Submit: () => states.initial.done(new Success({ requestId: "request-1" }))
+            Submit: () =>
+              states.initial.flow(
+                new Loading({ requestId: "request-1" }),
+                (flow) => flow.done(new Success({ requestId: "request-1" }))
+              )
           }
         },
-        done: {
-          onDone: ({ state, target }) => target.full.done(state)
+        flow: {
+          onDone: ({ state, target }) =>
+            target.full.flow(
+              state,
+              (flow) => flow.done(new Success({ requestId: state.requestId }))
+            )
         }
       })
 

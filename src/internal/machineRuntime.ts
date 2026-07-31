@@ -23,6 +23,11 @@ import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
 import { ChildAlreadyExistsError, StoppedError } from "./machineErrors.js"
 
+type ChildDescriptor = {
+  readonly id: string
+  readonly machine: object
+}
+
 type ChildEntry =
   | {
     readonly _tag: "Starting"
@@ -31,8 +36,11 @@ type ChildEntry =
   | {
     readonly _tag: "Started"
     readonly token: symbol
+    readonly descriptor: ChildDescriptor | undefined
     readonly ref: MachineRef<any, any, any, any>
   }
+
+type ChildSelector = string | ChildDescriptor
 
 interface ChildRegistry {
   readonly revision: number
@@ -122,8 +130,8 @@ export interface ProcessScope<Event> {
   readonly parent: ProcessAddress<unknown> | undefined
   readonly spawn: ProcessSpawn
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
-  readonly sendTo: <Address extends string>(id: Address, event: unknown) => Effect.Effect<void, StoppedError>
-  readonly stopChild: (id: string) => Effect.Effect<void>
+  readonly sendTo: (child: ChildSelector, event: unknown) => Effect.Effect<void, StoppedError>
+  readonly stopChild: (child: ChildSelector) => Effect.Effect<void>
   /** @internal */
   readonly failCause: (cause: Cause.Cause<unknown>) => Effect.Effect<void>
 }
@@ -153,7 +161,7 @@ export interface ProcessSpawn {
   <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
   ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
     ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   >
@@ -161,9 +169,10 @@ export interface ProcessSpawn {
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
     options: {
       readonly id: string
+      readonly descriptor?: ChildDescriptor
     }
   ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
     ChildAlreadyExistsError | ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   >
@@ -282,7 +291,7 @@ const startInternal: <
   logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
   options: StartInternalOptions
 ) => Effect.Effect<
-  MachineRef<State, Event, Error | InitialError, Output>,
+  MachineRef<State, Event, Error, Output>,
   InitialError,
   Requirements
 > = Effect.fnUntraced(function*<State, Event, Error, Requirements, Output, InitialError>(
@@ -293,10 +302,10 @@ const startInternal: <
   const id = options.id ?? sessionId
   const queue = yield* Queue.unbounded<Event>()
   const stopSelfDeferred = yield* Deferred.make<Effect.Effect<void>>()
-  const externalFailure = yield* Deferred.make<never, Error | InitialError>()
-  const done = yield* Deferred.make<Output, Error | InitialError | StoppedError>()
+  const externalFailure = yield* Deferred.make<never, Error>()
+  const done = yield* Deferred.make<Output, Error | StoppedError>()
   const fiberRef = yield* Deferred.make<Fiber.Fiber<void>>()
-  const changes = yield* PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error | InitialError, Output>>>({
+  const changes = yield* PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({
     replay: 1
   })
   const childrenScope = yield* Scope.make("parallel")
@@ -320,7 +329,10 @@ const startInternal: <
 
   const cleanup = options.onStop ?? Effect.void
 
-  const reserveChildId = (id: string, token: symbol): Effect.Effect<void, ChildAlreadyExistsError> =>
+  const reserveChildId = (
+    id: string,
+    token: symbol
+  ): Effect.Effect<void, ChildAlreadyExistsError> =>
     SubscriptionRef.modifyEffect(childRegistry, (registry) =>
       HashMap.has(registry.children, id)
         ? Effect.fail(new ChildAlreadyExistsError({ id }))
@@ -347,7 +359,8 @@ const startInternal: <
   const registerStartedChild = (
     id: string,
     token: symbol,
-    ref: MachineRef<any, any, any, any>
+    ref: MachineRef<any, any, any, any>,
+    descriptor: ChildDescriptor | undefined
   ): Effect.Effect<boolean> =>
     SubscriptionRef.modify<ChildRegistry, boolean>(
       childRegistry,
@@ -358,21 +371,35 @@ const startInternal: <
         }
         const next = {
           revision: registry.revision + 1,
-          children: HashMap.set(HashMap.remove(registry.children, id), id, { _tag: "Started", token, ref })
+          children: HashMap.set(
+            HashMap.remove(registry.children, id),
+            id,
+            { _tag: "Started", token, descriptor, ref }
+          )
         }
         return [true, next] as const
       }
     )
 
+  const matchesChildSelector = (
+    entry: ChildEntry,
+    child: ChildSelector
+  ): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
+    entry._tag === "Started" && (typeof child === "string" || (
+      entry.descriptor !== undefined &&
+      entry.descriptor.id === child.id &&
+      entry.descriptor.machine === child.machine
+    ))
+
   const getChild = <ChildState, ChildEvent, ChildError, ChildOutput>(
-    child: string | { readonly id: string }
+    child: ChildSelector
   ): Effect.Effect<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>> => {
     const id = typeof child === "string" ? child : child.id
     return (
       SubscriptionRef.get(childRegistry).pipe(
         Effect.map((registry) => {
           const entry = HashMap.get(registry.children, id)
-          return Option.isSome(entry) && entry.value._tag === "Started"
+          return Option.isSome(entry) && matchesChildSelector(entry.value, child)
             ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
             : Option.none()
         })
@@ -381,34 +408,44 @@ const startInternal: <
   }
 
   const childChanges = <ChildState, ChildEvent, ChildError, ChildOutput>(
-    child: string | { readonly id: string }
+    child: ChildSelector
   ): Stream.Stream<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>> => {
     const id = typeof child === "string" ? child : child.id
     return SubscriptionRef.changes(childRegistry).pipe(
       Stream.map((registry) => {
         const entry = HashMap.get(registry.children, id)
-        return Option.isSome(entry) && entry.value._tag === "Started"
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
           ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
           : Option.none()
       })
     )
   }
 
-  const sendTo = (id: string, event: unknown): Effect.Effect<void, StoppedError> =>
+  const sendTo = (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError> => {
+    const id = typeof child === "string" ? child : child.id
+    return (
     SubscriptionRef.get(childRegistry).pipe(
       Effect.flatMap((registry) => {
         const entry = HashMap.get(registry.children, id)
-        return Option.isSome(entry) && entry.value._tag === "Started" ? entry.value.ref.send(event) : Effect.void
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+          ? entry.value.ref.send(event)
+          : Effect.void
       })
     )
+    )
+  }
 
-  const stopChild = (id: string): Effect.Effect<void> =>
+  const stopChild = (child: ChildSelector): Effect.Effect<void> => {
+    const id = typeof child === "string" ? child : child.id
+    return (
     SubscriptionRef.get(childRegistry).pipe(
       Effect.flatMap((registry) => {
         const entry = HashMap.get(registry.children, id)
-        return Option.isSome(entry) && entry.value._tag === "Started" ? entry.value.ref.stop : Effect.void
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child) ? entry.value.ref.stop : Effect.void
       })
     )
+    )
+  }
 
   const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
     options.parent === undefined ? Effect.void : options.parent.send(event)
@@ -416,7 +453,7 @@ const startInternal: <
   function spawn<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
   ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
     ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   >
@@ -424,9 +461,10 @@ const startInternal: <
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
     spawnOptions: {
       readonly id: string
+      readonly descriptor?: ChildDescriptor
     }
   ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
     ChildAlreadyExistsError | ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   >
@@ -434,9 +472,10 @@ const startInternal: <
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
     spawnOptions?: {
       readonly id: string
+      readonly descriptor?: ChildDescriptor
     }
   ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
     ChildAlreadyExistsError | ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   > {
@@ -453,7 +492,7 @@ const startInternal: <
           ).pipe(Scope.provide(childrenScope))
         )
       ) as Effect.Effect<
-        MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+        MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
         ChildInitialError,
         Exclude<ChildRequirements, Scope.Scope>
       >
@@ -473,7 +512,8 @@ const startInternal: <
                 registerStartedChild(
                   childId,
                   token,
-                  child
+                  child,
+                  spawnOptions.descriptor
                 ).pipe(Effect.asVoid),
               onStop: unregisterChild(childId, token),
               parent: self as ProcessAddress<unknown>,
@@ -491,7 +531,7 @@ const startInternal: <
         ).pipe(Scope.provide(childrenScope))
       )
     ) as Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
       ChildAlreadyExistsError | ChildInitialError,
       Exclude<ChildRequirements, Scope.Scope>
     >
@@ -514,11 +554,11 @@ const startInternal: <
     sendParent,
     sendTo,
     stopChild,
-    failCause: (cause) => Deferred.failCause(externalFailure, cause as Cause.Cause<Error | InitialError>)
+    failCause: (cause) => Deferred.failCause(externalFailure, cause as Cause.Cause<Error>)
   }
 
   const initial = yield* logic.initial(scope).pipe(Effect.onExit(cleanupStartupFailure))
-  const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error | InitialError, Output>>({
+  const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
     revision: 0,
     snapshot: {
       status: "active",
@@ -529,8 +569,8 @@ const startInternal: <
   const terminalized = yield* Deferred.make<void>()
 
   const publishSnapshot = (
-    snapshot: VersionedSnapshot<State, Error | InitialError, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error | InitialError, Output>> =>
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<VersionedSnapshot<State, Error, Output>> =>
     PubSub.publish(changes, [snapshot] as const).pipe(Effect.as(snapshot))
 
   const completeChanges: Effect.Effect<void> = PubSub.publish(changes, Exit.succeed<void>(undefined)).pipe(
@@ -538,8 +578,8 @@ const startInternal: <
   )
 
   const completeIfTerminal = (
-    snapshot: VersionedSnapshot<State, Error | InitialError, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error | InitialError, Output>> => {
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<VersionedSnapshot<State, Error, Output>> => {
     if (snapshot.snapshot.status === "active") {
       return Effect.succeed(snapshot)
     }
@@ -547,12 +587,12 @@ const startInternal: <
   }
 
   const publishIfCurrent = (
-    snapshot: VersionedSnapshot<State, Error | InitialError, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error | InitialError, Output> | undefined> =>
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
     SynchronizedRef.get(current).pipe(
       Effect.flatMap((
         currentSnapshot
-      ): Effect.Effect<VersionedSnapshot<State, Error | InitialError, Output> | undefined> =>
+      ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
         currentSnapshot.revision === snapshot.revision
           ? publishSnapshot(snapshot).pipe(Effect.flatMap(completeIfTerminal))
           : Effect.succeed(undefined)
@@ -560,15 +600,15 @@ const startInternal: <
     )
 
   type SnapshotModification = readonly [
-    VersionedSnapshot<State, Error | InitialError, Output> | undefined,
-    VersionedSnapshot<State, Error | InitialError, Output>
+    VersionedSnapshot<State, Error, Output> | undefined,
+    VersionedSnapshot<State, Error, Output>
   ]
 
   const updateSnapshot = <E2, R2>(
     f: (
-      snapshot: RuntimeSnapshot<State, Error | InitialError, Output>
-    ) => Effect.Effect<RuntimeSnapshot<State, Error | InitialError, Output> | undefined, E2, R2>
-  ): Effect.Effect<RuntimeSnapshot<State, Error | InitialError, Output> | undefined, E2, R2> =>
+      snapshot: RuntimeSnapshot<State, Error, Output>
+    ) => Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2>
+  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2> =>
     SynchronizedRef.modifyEffect(
       current,
       (current) =>
@@ -598,9 +638,9 @@ const startInternal: <
 
   const reserveTerminalSnapshot = (
     f: (
-      snapshot: Extract<RuntimeSnapshot<State, Error | InitialError, Output>, { readonly status: "active" }>
-    ) => RuntimeSnapshot<State, Error | InitialError, Output>
-  ): Effect.Effect<RuntimeSnapshot<State, Error | InitialError, Output> | undefined> =>
+      snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
+    ) => RuntimeSnapshot<State, Error, Output>
+  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined> =>
     SynchronizedRef.modifyEffect(
       current,
       (current) =>
@@ -623,7 +663,7 @@ const startInternal: <
     ).pipe(Effect.map((versioned) => versioned?.snapshot))
 
   const setAndPublishSnapshot = (
-    snapshot: RuntimeSnapshot<State, Error | InitialError, Output>
+    snapshot: RuntimeSnapshot<State, Error, Output>
   ): Effect.Effect<void> =>
     SynchronizedRef.updateAndGet(current, (current) => ({
       revision: current.revision + 1,
@@ -647,7 +687,7 @@ const startInternal: <
     ).pipe(Effect.asVoid)
 
   const terminalizeWith = (
-    snapshot: RuntimeSnapshot<State, Error | InitialError, Output>,
+    snapshot: RuntimeSnapshot<State, Error, Output>,
     exit: Exit.Exit<unknown, unknown>,
     completeDone: Effect.Effect<void>
   ): Effect.Effect<void> =>
@@ -708,7 +748,7 @@ const startInternal: <
   yield* publishSnapshot(yield* SynchronizedRef.get(current))
   yield* Deferred.succeed(stopSelfDeferred, stopSelf)
 
-  const changesStream: Stream.Stream<RuntimeSnapshot<State, Error | InitialError, Output>> = Stream.unwrap(
+  const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
     Effect.gen(function*() {
       const subscription = yield* PubSub.subscribe(changes)
       const captured = yield* SynchronizedRef.get(current)
@@ -726,7 +766,7 @@ const startInternal: <
     })
   )
 
-  const terminalizeFailure = (cause: Cause.Cause<Error | InitialError>): Effect.Effect<void> =>
+  const terminalizeFailure = (cause: Cause.Cause<Error>): Effect.Effect<void> =>
     reserveTerminalSnapshot((snapshot) => ({
       status: "error",
       state: snapshot.state,
@@ -758,7 +798,7 @@ const startInternal: <
       )
     )
 
-  const ref: MachineRef<State, Event, Error | InitialError, Output> = {
+  const ref: MachineRef<State, Event, Error, Output> = {
     id,
     sessionId,
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
@@ -812,7 +852,7 @@ export const startProcess: <
     readonly id?: string
   }
 ) => Effect.Effect<
-  MachineRef<State, Event, Error | InitialError, Output>,
+  MachineRef<State, Event, Error, Output>,
   InitialError,
   Requirements
 > = Effect.fnUntraced(function*<State, Event, Error, Requirements, Output, InitialError>(

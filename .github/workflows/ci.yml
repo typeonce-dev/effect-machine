@@ -35,6 +35,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: examples/pokemon/pnpm-lock.yaml
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            examples/pokemon/pnpm-lock.yaml
+      - run: pnpm --dir ../.. install --frozen-lockfile
+      - run: pnpm --dir ../.. build
       - run: pnpm install --frozen-lockfile
       - run: pnpm check

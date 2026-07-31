@@ -5,6 +5,7 @@
  */
 
 import type * as Cause from "effect/Cause"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -45,6 +46,8 @@ export type TypeId = "~effect/Machine"
  * @since 4.0.0
  */
 export const TypeId: TypeId = "~effect/Machine"
+
+declare const MachineOutputStatesTypeId: unique symbol
 
 /**
  * Type identifier used for the synthetic event passed to startup lifecycle
@@ -97,9 +100,10 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Gotchas**
  *
- * History states, delayed transitions, and declarative first-class guards are
- * not part of the current API. Conditional behavior can be expressed in typed
- * handlers with ordinary TypeScript control flow.
+ * History states and declarative first-class guards are not part of the
+ * current API. Conditional behavior can be expressed in typed handlers with
+ * ordinary TypeScript control flow. Use `after` for cancellable state-scoped
+ * delayed events.
  *
  * @category models
  * @since 4.0.0
@@ -116,13 +120,53 @@ export interface Machine<
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  OutputStates extends Machine.StateIdentifier<States> = never
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 > extends Pipeable {
   readonly [TypeId]: TypeId
+  /** @internal Prevents output implementation evidence from being widened. */
+  readonly [MachineOutputStatesTypeId]: Readonly<Record<OutputStates, true>>
+
+  /**
+   * State tree that defines the machine topology and state value schemas.
+   *
+   * @since 4.0.0
+   */
   readonly states: States
-  readonly events: Events
+
+  /**
+   * Events accepted through public machine input boundaries.
+   *
+   * @since 4.0.0
+   */
+  readonly events: InputEvents
+
+  /**
+   * Events reserved for invokes, child emissions, and other machine-local work.
+   *
+   * @since 4.0.0
+   */
+  readonly internalEvents: ReadonlyArray<Machine.TaggedSchema>
+
+  /**
+   * Events that the machine may emit to its parent or external adapter.
+   *
+   * @since 4.0.0
+   */
   readonly emits: Emits
+
+  /**
+   * Optional schema used to decode the machine input before initialization.
+   *
+   * @since 4.0.0
+   */
   readonly input: Input | undefined
+
+  /**
+   * Optional stable identity used by runtime and persistence integrations.
+   *
+   * @since 4.0.0
+   */
   readonly id: string | undefined
 
   /** @internal */
@@ -133,7 +177,16 @@ export interface Machine<
     source: Source
   ) => Machine.TargetBuilder<States, Source>
 
+  /** @internal */
   readonly handlers: Machine.StateConfigs<States, Events, Emits, UnhandledStates, Machine.TagOf<Events[number]>, E, R>
+
+  /**
+   * Adds typed state handlers and returns the refined machine definition.
+   * Successive calls implement the remaining unhandled states while retaining
+   * accumulated errors, services, final states, and output evidence.
+   *
+   * @since 4.0.0
+   */
   readonly handle: Machine.Handler<
     States,
     Events,
@@ -146,7 +199,8 @@ export interface Machine<
     InitialR,
     FinalStates,
     Output,
-    OutputStates
+    OutputStates,
+    InputEvents
   >
 
   /** @internal */
@@ -272,7 +326,18 @@ export type ExecutionServices<Requirements> =
  * @since 4.0.0
  */
 export interface Runtime<in Events, in Emits> {
+  /**
+   * Queues an event for the current machine macrostep.
+   *
+   * @since 4.0.0
+   */
   readonly raise: (event: Events) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+
+  /**
+   * Emits an event through the running machine's parent boundary.
+   *
+   * @since 4.0.0
+   */
   readonly sendParent: (event: Emits) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 }
 
@@ -414,6 +479,37 @@ type DefineStateNodeInput<Node> = Node extends Machine.TaggedSchema ? Node
 type ValidateDefinedStates<States extends Machine.StateSchemas> = [States] extends
   [Machine.ValidateStateSchemas<States>] ? []
   : [validation: Machine.ValidateStateSchemas<States>]
+
+type EventProtocolError<Message extends string, Tag extends PropertyKey = never> = {
+  readonly "~effect/Machine/EventProtocolError": Message
+  readonly tag: Tag
+}
+
+type DuplicateEventTag<
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Seen extends PropertyKey = never
+> = number extends Events["length"] ? never
+  : Events extends readonly [
+    infer Head extends Machine.TaggedSchema,
+    ...infer Tail extends ReadonlyArray<Machine.TaggedSchema>
+  ] ? Machine.TagOf<Head> extends infer Tag extends PropertyKey ? Tag extends Seen ? Tag | DuplicateEventTag<Tail, Seen>
+    : DuplicateEventTag<Tail, Seen | Tag>
+  : never
+  : never
+
+type ValidateEventProtocol<
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  DuplicateInput extends PropertyKey = DuplicateEventTag<InputEvents>,
+  DuplicateInternal extends PropertyKey = DuplicateEventTag<InternalEvents>,
+  Overlap extends PropertyKey = Extract<
+    Machine.TagOf<InputEvents[number]>,
+    Machine.TagOf<InternalEvents[number]>
+  >
+> = [DuplicateInput] extends [never] ? [DuplicateInternal] extends [never] ? [Overlap] extends [never] ? []
+    : [validation: EventProtocolError<"Public and internal event tags must be disjoint", Overlap>]
+  : [validation: EventProtocolError<"Internal event tags must be unique", DuplicateInternal>]
+  : [validation: EventProtocolError<"Public event tags must be unique", DuplicateInput>]
 
 const SnapshotBuilderStateTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderState")
 
@@ -729,7 +825,7 @@ type SpawnIdError<Options extends SpawnOptions> = "id" extends keyof Options ? O
 type SpawnError<Options extends SpawnOptions> = SpawnIdError<Options>
 
 type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialError = never> = Effect.Effect<
-  MachineRef<State, Event, Error | InitialError, Output>,
+  MachineRef<State, Event, Error, Output>,
   SpawnError | InitialError,
   MachineRuntimeRequirement | SpawnRequirements<Requirements>
 >
@@ -820,19 +916,44 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
  * @since 4.0.0
  */
 export interface MachineRef<out State, in Event, out Error = never, out Output = never> {
+  /** Stable machine definition id, or a generated fallback when none was declared. */
   readonly id: string
+
+  /** Unique identity for this running machine instance. */
   readonly sessionId: string
+
+  /** Reads the latest logical state. */
   readonly state: Effect.Effect<State>
+
+  /** Reads the latest lifecycle snapshot. */
   readonly snapshot: Effect.Effect<RuntimeSnapshot<State, Error, Output>>
+
+  /** Streams lifecycle snapshots published after subscription. */
   readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>>
+
+  /** Waits for machine output or fails when execution fails or is stopped. */
   readonly join: Effect.Effect<Output, Error | StoppedError>
+
+  /** Stops this machine instance and its owned child processes. */
   readonly stop: Effect.Effect<void>
+
+  /** Accepts an event for asynchronous processing by the running machine. */
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
-  /** Returns the current directly owned child for a typed descriptor. */
+
+  /**
+   * Returns the current directly owned child for a typed descriptor.
+   *
+   * @since 4.0.0
+   */
   readonly child: <Child extends ChildMachine.Any>(
     child: Child
   ) => Effect.Effect<Option.Option<ChildMachine.Ref<Child>>>
-  /** Streams activation, replacement, and removal of a directly owned child. */
+
+  /**
+   * Streams activation, replacement, and removal of a directly owned child.
+   *
+   * @since 4.0.0
+   */
   readonly childChanges: <Child extends ChildMachine.Any>(
     child: Child
   ) => Stream.Stream<Option.Option<ChildMachine.Ref<Child>>>
@@ -852,7 +973,10 @@ export interface Logic<
   out Output = never,
   out InitialError = never
 > {
+  /** Creates the initial process state and may spawn scoped child processes. */
   initial(scope: Logic.Scope<Event>): Effect.Effect<State, InitialError, Requirements>
+
+  /** Runs the stateful process loop until it produces output or fails. */
   run(context: Logic.Context<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
 
@@ -869,9 +993,16 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Address<in Event> {
+    /** Parent-local address id. */
     readonly id: string
+
+    /** Unique identity for this running child instance. */
     readonly sessionId: string
+
+    /** Stops the addressed child process. */
     readonly stop: Effect.Effect<void>
+
+    /** Sends an event to the addressed child process. */
     readonly send: (event: Event) => Effect.Effect<void, StoppedError>
   }
 
@@ -885,16 +1016,24 @@ export declare namespace Logic {
     <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
       logic: Logic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
     ): Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
+      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
       ChildInitialError,
       Exclude<ChildRequirements, Scope.Scope>
     >
-    <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
+    <
+      ChildState,
+      ChildEvent,
+      ChildError,
+      ChildRequirements,
+      ChildOutput,
+      Options extends SpawnOptions,
+      ChildInitialError = never
+    >(
       logic: Logic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
-      options: { readonly id: string }
+      options: Options & ChildAddress.OptionsCompatibility<Options, ChildEvent>
     ): Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError | ChildInitialError, ChildOutput>,
-      ChildAlreadyExistsError | ChildInitialError,
+      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
+      SpawnIdError<Options> | ChildInitialError,
       Exclude<ChildRequirements, Scope.Scope>
     >
   }
@@ -912,15 +1051,26 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Scope<Event> {
+    /** Address of the process being initialized. */
     readonly self: Address<Event>
+
+    /** Address of the owning process, when one exists. */
     readonly parent: Address<unknown> | undefined
+
+    /** Starts a child process owned by this scope. */
     readonly spawn: Spawn
+
+    /** Sends an untyped event to the owning process. */
     readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
-    readonly sendTo: <Address extends string>(
+
+    /** Sends an event through a typed parent-local child address. */
+    readonly sendTo: <Address extends ChildAddress<never>>(
       id: Address,
       event: ChildAddress.Event<Address>
     ) => Effect.Effect<void, StoppedError>
-    readonly stopChild: (id: string) => Effect.Effect<void>
+
+    /** Stops a child process selected by its parent-local address. */
+    readonly stopChild: <Event>(id: ChildAddress<Event>) => Effect.Effect<void>
   }
 
   /**
@@ -930,9 +1080,16 @@ export declare namespace Logic {
    * @since 4.0.0
    */
   export interface Context<State, Event> extends Scope<Event> {
+    /** Waits for the next event delivered to this process. */
     readonly receive: Effect.Effect<Event>
+
+    /** Reads the current process state. */
     readonly state: Effect.Effect<State>
+
+    /** Replaces the current process state. */
     readonly setState: (state: State) => Effect.Effect<void>
+
+    /** Updates the current process state effectfully and atomically. */
     readonly updateState: <E, R>(
       update: (state: State) => Effect.Effect<State, E, R>
     ) => Effect.Effect<void, E, R>
@@ -942,6 +1099,7 @@ export declare namespace Logic {
 const ChildAddressTypeId = "~effect/Machine/ChildAddress"
 const ChildAddressCompatibilityErrorTypeId = "~effect/Machine/ChildAddressCompatibilityError"
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
+type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
 
 /**
  * Typed descriptor for a complete machine invoked as a child.
@@ -957,7 +1115,11 @@ const ChildMachineTypeId = "~effect/Machine/ChildMachine"
  */
 export interface ChildMachine<Id extends string, M extends Machine.Any> {
   readonly [ChildMachineTypeId]: typeof ChildMachineTypeId
+
+  /** Parent-local id used to address the invoked child. */
   readonly id: Id
+
+  /** Complete machine definition carried by this descriptor. */
   readonly machine: M
 }
 
@@ -993,18 +1155,17 @@ export declare namespace ChildMachine {
       any,
       infer Output,
       any,
-      any
+      any,
+      infer InputEvents
     > ? MachineRef<
         Machine.Snapshot<States>,
-        Machine.EventOf<Events>,
+        Machine.EventOf<InputEvents>,
         | E
-        | InitialE
-        | ActionError<R | InitialR>
+        | ActionError<R>
         | InfiniteTransitionError
         | MachineSchemaDecodeError
-        | StartupError
         | StoppedError,
-        Output | undefined
+        Output
       >
     : never
     : never
@@ -1111,10 +1272,66 @@ export declare namespace Machine {
   /**
    * Any schema-first machine.
    *
+   * This is an erased structural view for APIs that store machines without
+   * knowing their protocols. Generic APIs should capture `M extends Any` to
+   * preserve the concrete machine type. The private output-implementation
+   * proof is intentionally omitted so erasing a machine cannot manufacture
+   * that proof on another concrete `Machine` type.
+   *
    * @category models
    * @since 4.0.0
    */
-  export type Any = Machine<any, any, any, any, any, any, any, any, any, any, any, any>
+  export interface Any extends Pipeable {
+    readonly [TypeId]: TypeId
+    readonly states: StateSchemas
+    readonly events: ReadonlyArray<TaggedSchema>
+    readonly internalEvents: ReadonlyArray<TaggedSchema>
+    readonly emits: ReadonlyArray<TaggedSchema>
+    readonly input: Schema.Top | undefined
+    readonly id: string | undefined
+    readonly stateNodes: StateNodes
+    /** @internal */
+    readonly makeTargetBuilder: any
+    /** @internal */
+    readonly handlers: any
+    /** @internal */
+    readonly handle: any
+    /** @internal */
+    readonly initial: any
+  }
+
+  /**
+   * Extracts the complete event protocol handled inside a machine.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Event<M extends Any> = M extends Machine<any, infer Events, any, any, any, any, any, any, any, any, any, any, any>
+    ? EventOf<Events>
+    : never
+
+  /**
+   * Extracts the event protocol accepted by public machine input boundaries.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type InputEvent<M extends Any> = M extends Machine<
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    any,
+    infer InputEvents
+  > ? EventOf<InputEvents>
+    : never
 
   /**
    * A schema whose decoded value contains a `_tag` discriminator.
@@ -1227,7 +1444,10 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export interface DefinedStates<States extends StateSchemas> {
+    /** Original state tree supplied to {@link defineStates}. */
     readonly states: States
+
+    /** Type-safe builders for constructing valid initial snapshots. */
     readonly initial: InitialBuilder<States>
 
     /**
@@ -1476,6 +1696,17 @@ export declare namespace Machine {
     : never
 
   /**
+   * Extracts the nearest parent state path from a state identifier.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type ImmediateParentStateIdentifier<StateId extends string> = StateId extends
+    `${infer Head}.${infer Tail}` ? Tail extends `${string}.${string}` ? `${Head}.${ImmediateParentStateIdentifier<Tail>}`
+    : Head
+    : never
+
+  /**
    * Maps every parent state path of a state identifier to its decoded value.
    *
    * @category utility types
@@ -1490,6 +1721,23 @@ export declare namespace Machine {
         Parent
       >
     }
+    : never
+
+  /**
+   * Extracts the nearest parent value, or `undefined` for a root state.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type ParentStateValue<
+    States extends StateSchemas,
+    StateId extends StateIdentifier<States>
+  > = StateId extends StateIdentifier<States> ?
+      Extract<ImmediateParentStateIdentifier<StateId>, StateIdentifier<States>> extends infer Parent
+        ? [Parent] extends [never] ? undefined
+        : Parent extends StateIdentifier<States> ? StateByIdentifier<States, Parent>
+        : undefined
+      : undefined
     : never
 
   /**
@@ -1533,14 +1781,18 @@ export declare namespace Machine {
     States extends StateSchemas,
     Children extends StateSchemas,
     Prefix extends StateIdentifier<States>
-  > = UndefinedIfNever<
-    {
-      readonly [Key in Extract<keyof Children, string>]: DirectFinalCompletionOutput<
-        States,
-        Extract<JoinPath<Prefix, Key>, StateIdentifier<States>>
-      >
-    }[Extract<keyof Children, string>]
-  >
+  > = UndefinedIfNever<CompoundCompletionOutputRaw<States, Children, Prefix>>
+
+  type CompoundCompletionOutputRaw<
+    States extends StateSchemas,
+    Children extends StateSchemas,
+    Prefix extends StateIdentifier<States>
+  > = {
+    readonly [Key in Extract<keyof Children, string>]: DirectFinalCompletionOutput<
+      States,
+      Extract<JoinPath<Prefix, Key>, StateIdentifier<States>>
+    >
+  }[Extract<keyof Children, string>]
 
   /**
    * Extracts the output passed when a state node completes.
@@ -1561,6 +1813,69 @@ export declare namespace Machine {
     : Node extends { readonly type: "final" } ? OutputByIdentifier<States, StateId>
     : undefined
     : undefined
+
+  /**
+   * Extracts the schema-derived union produced by structurally terminal root
+   * states.
+   *
+   * **Details**
+   *
+   * Unlike a planned step's optional `output`, active atomic roots do not add
+   * `undefined` to the union. Output-less final and parallel roots
+   * intentionally contribute `undefined`, because that is their completed
+   * value. Handler-driven reachability can make this structural union
+   * conservative; for example, a root `onDone` handler can transition away
+   * before that root becomes the machine's terminal result.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type TerminalOutput<States extends StateSchemas> = {
+    readonly [Key in Extract<keyof States, string>]: Extract<Key, StateIdentifier<States>> extends infer StateId
+      extends StateIdentifier<States> ? NodeByIdentifier<States, StateId> extends infer Node
+        ? Node extends { readonly type: "parallel" | "final" } ? OutputByIdentifier<States, StateId>
+        : Node extends { readonly states: infer Children extends StateSchemas } ? CompoundCompletionOutputRaw<
+            States,
+            Children,
+            StateId
+          >
+        : never
+        : never
+      : never
+  }[Extract<keyof States, string>]
+
+  /**
+   * Extracts every state path whose definition declares an output schema.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type DeclaredOutputState<States extends StateSchemas> =
+    & {
+      readonly [StateId in StateIdentifier<States>]: NodeByIdentifier<States, StateId> extends
+        { readonly output: Schema.Top } ? StateId
+        : never
+    }[StateIdentifier<States>]
+    & StateIdentifier<States>
+
+  /**
+   * Validates that every declared output schema has a matching handler
+   * implementation before a machine is planned or started.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type EnsureOutputImplementations<
+    States extends StateSchemas,
+    OutputStates extends StateIdentifier<States>
+  > = [
+    Exclude<DeclaredOutputState<States>, OutputStates>
+  ] extends [never] ? unknown : {
+    readonly "~effect/Machine/MissingOutputImplementation": Exclude<
+      DeclaredOutputState<States>,
+      OutputStates
+    >
+  }
 
   type OutputSchema<Node> = Node extends { readonly output: infer Output extends Schema.Top } ? Output : never
 
@@ -1923,6 +2238,13 @@ export declare namespace Machine {
    * targets descendants of the source root, and `full` builds complete
    * snapshots for any root.
    *
+   * These builders control how the next active configuration is assembled; they
+   * do not directly control state re-entry. Exit and entry paths are derived
+   * from the previous and next active paths. Shared active ancestors remain
+   * entered even when a `full` target supplies their values again. Use an event
+   * transition with `reenter: true` when the source should explicitly exit and
+   * enter again.
+   *
    * @category models
    * @since 4.0.0
    */
@@ -1965,11 +2287,19 @@ export declare namespace Machine {
   /**
    * Stages an Effect to run after the current machine step is planned.
    *
+   * The two-argument overload returns `next` after staging the Effect, which is
+   * useful when a handler should stage one action and return a target without
+   * introducing an Effect generator.
+   *
    * @category models
    * @since 4.0.0
    */
   export interface Action {
     <E, R>(effect: Effect.Effect<void, E, R>): Effect.Effect<void, never, ActionRequirement<E, R>>
+    <E, R, Next>(
+      effect: Effect.Effect<void, E, R>,
+      next: Next
+    ): Effect.Effect<Next, never, ActionRequirement<E, R>>
   }
 
   /**
@@ -1979,7 +2309,6 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export interface PlanningCapabilities<Events, Emits> {
-    readonly action: Action
     readonly raise: (
       event: Events
     ) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError, Runtime.Requirement<Events, Emits>>
@@ -2004,6 +2333,7 @@ export declare namespace Machine {
     R
   > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: EventByTag<Events, EventTag>
     readonly runtime: RuntimeEffect<Events, Emits>
@@ -2030,6 +2360,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly runtime: RuntimeEffect<Events, Emits>
@@ -2048,6 +2379,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly runtime: RuntimeEffect<Events, Emits>
@@ -2088,6 +2420,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly runtime: RuntimeEffect<Events, Emits>
@@ -2115,6 +2448,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly output: CompletionOutputByIdentifier<States, StateId>
@@ -2142,6 +2476,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
   }
@@ -2176,6 +2511,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly state: StateByIdentifier<States, StateId>
+    readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly outputs: ParallelOutputRegions<States, StateId>
@@ -2418,16 +2754,6 @@ export declare namespace Machine {
     | InvokeRequirements<Config>
 
   /**
-   * Resolves the tag of a state config when it is final.
-   *
-   * @category utility types
-   * @since 4.0.0
-   */
-  export type FinalStateFromConfig<Config, StateTag extends PropertyKey> = Config extends { readonly type: "final" }
-    ? StateTag
-    : never
-
-  /**
    * Configuration for invoking a child process while a state is active.
    *
    * @category models
@@ -2457,8 +2783,15 @@ export declare namespace Machine {
       readonly initialError: Types.Covariant<ChildInitialError>
     }
     readonly id: string
+    /**
+     * Optional parent-local address for sending events to this invocation.
+     *
+     * The invocation `id` is only its state-local lifecycle key. Use an
+     * explicit typed address when the parent must communicate with it.
+     */
+    readonly address?: string
     /** @internal */
-    readonly addressable?: boolean
+    readonly descriptor?: ChildMachine.Any
     src(): Logic<
       ChildState,
       ChildEvent,
@@ -2468,7 +2801,7 @@ export declare namespace Machine {
       ChildInitialError
     >
     snapshot?(
-      context: InvokeSnapshotContext<ChildState, ChildError | ChildInitialError, ChildOutput>
+      context: InvokeSnapshotContext<ChildState, ChildError, ChildOutput>
     ): Event | undefined
     onDone?(context: InvokeDoneContext<ChildOutput>): DeliveredOutput | undefined
   }
@@ -2555,7 +2888,6 @@ export declare namespace Machine {
     E,
     R
   > = {
-    readonly type?: "active"
     readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
     readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
@@ -2587,7 +2919,6 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
   > = {
-    readonly type: "final"
     readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
     readonly exit?: never
     readonly always?: never
@@ -2608,9 +2939,9 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     E,
     R
-  > =
-    | ActiveStateConfig<States, Events, Emits, StateId, E, R>
-    | FinalStateConfig<States, Events, Emits, StateId>
+  > = NodeByIdentifier<States, StateId> extends { readonly type: "final" } ?
+    FinalStateConfig<States, Events, Emits, StateId>
+    : ActiveStateConfig<States, Events, Emits, StateId, E, R>
 
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
 
@@ -2663,7 +2994,7 @@ export declare namespace Machine {
     >
   }
 
-  type HandlerNodeConfigKey = "always" | "entry" | "exit" | "invoke" | "on" | "onDone" | "output" | "states" | "type"
+  type HandlerNodeConfigKey = "always" | "entry" | "exit" | "invoke" | "on" | "onDone" | "output" | "states"
 
   type HandlerValidationError<Message extends string> = {
     readonly "~effect/Machine/HandlerError": Message
@@ -3020,71 +3351,6 @@ export declare namespace Machine {
       >
     : never
 
-  type HandlerTreeFinalStates<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | Extract<
-        FinalStateFromConfig<HandlerConfigPart<Config[Key]>, HandlerStateId<AllStates, JoinPath<Prefix, Key>>>,
-        StateIdentifier<AllStates>
-      >
-      | HandlerNodeChildFinalStates<
-        AllStates,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
-      >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
-
-  type HandlerNodeChildFinalStates<
-    AllStates extends StateSchemas,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeFinalStates<AllStates, Children, Prefix, HandlerNodeChildrenConfig<Config>, HandlerNextDepth<Depth>>
-    : never
-
-  type HandlerTreeOutput<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | ("output" extends keyof HandlerConfigPart<Config[Key]> ? OutputByIdentifier<
-          AllStates,
-          HandlerStateId<AllStates, JoinPath<Prefix, Key>>
-        >
-        : never)
-      | HandlerNodeChildOutput<
-        AllStates,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
-      >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
-
-  type HandlerNodeChildOutput<
-    AllStates extends StateSchemas,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeOutput<AllStates, Children, Prefix, HandlerNodeChildrenConfig<Config>, HandlerNextDepth<Depth>>
-    : never
-
   type HandlerTreeOutputStates<
     AllStates extends StateSchemas,
     States extends StateSchemas,
@@ -3131,6 +3397,7 @@ export declare namespace Machine {
     FinalStates extends StateIdentifier<AllStates>,
     Output,
     OutputStates extends StateIdentifier<AllStates>,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
     Config
   > = Machine<
     AllStates,
@@ -3145,10 +3412,11 @@ export declare namespace Machine {
     >,
     InitialE,
     InitialR,
-    FinalStates | Extract<HandlerTreeFinalStates<AllStates, AllStates, "", Config>, StateIdentifier<AllStates>>,
-    Output | HandlerTreeOutput<AllStates, AllStates, "", Config>,
+    FinalStates,
+    Output,
     Emits,
-    OutputStates | Extract<HandlerTreeOutputStates<AllStates, AllStates, "", Config>, StateIdentifier<AllStates>>
+    OutputStates | Extract<HandlerTreeOutputStates<AllStates, AllStates, "", Config>, StateIdentifier<AllStates>>,
+    InputEvents
   >
 
   /**
@@ -3175,7 +3443,8 @@ export declare namespace Machine {
     InitialR,
     FinalStates extends StateIdentifier<States>,
     Output,
-    OutputStates extends StateIdentifier<States>
+    OutputStates extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema>
   > {
     <const Config extends HandlerTree<States, States, Events, Emits, E, R, "">>(
       config:
@@ -3206,6 +3475,7 @@ export declare namespace Machine {
       FinalStates,
       Output,
       OutputStates,
+      InputEvents,
       Config
     >
   }
@@ -3260,15 +3530,14 @@ export declare namespace Machine {
     E,
     R
   > {
-    readonly type?: "final" | "active"
     readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
     readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
     readonly always?: (context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>
     readonly onDone?: (context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>
     readonly output?:
-      | ((context: FinalOutputContext<States, Events, StateId>) => any)
-      | ((context: ParallelOutputContext<States, Events, StateId>) => any)
+      | ((context: FinalOutputContext<States, Events, StateId>) => unknown)
+      | ((context: ParallelOutputContext<States, Events, StateId>) => unknown)
     readonly on?: EventHandlerMap<States, Events, Emits, StateId, EventTag, E, R>
   }
 
@@ -3307,6 +3576,7 @@ const cloneWithHandlers = (
   const machine = Object.create(Proto)
   machine.states = self.states
   machine.events = self.events
+  machine.internalEvents = self.internalEvents
   machine.emits = self.emits
   machine.input = self.input
   machine.id = self.id
@@ -3315,6 +3585,7 @@ const cloneWithHandlers = (
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
   machine.handle = makeHandle(machine)
+  Model.copyProtocol(self, machine)
   return machine
 }
 
@@ -3386,7 +3657,8 @@ export const isFinal = <
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
   machine: Machine<
     States,
@@ -3400,10 +3672,11 @@ export const isFinal = <
     FinalStates,
     Output,
     Emits,
-    OutputStates
+    OutputStates,
+    InputEvents
   >,
   state: Machine.Snapshot<States>
-): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine, state)
+): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine as any, state)
 
 type SnapshotBuilderOptions = {
   readonly mode: "initial" | "full"
@@ -3657,36 +3930,6 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
     }) as Machine.TargetBuilder<States, Source>
 }
 
-const getSnapshotByPath = (
-  snapshot: Machine.AtomicSnapshot<string, unknown>,
-  path: string,
-  parents?: Record<string, unknown>
-): Option.Option<Machine.AtomicSnapshot<string, unknown>> => {
-  if (snapshot.path === path) {
-    return Option.some(snapshot)
-  }
-  if (!path.startsWith(`${snapshot.path}.`)) {
-    return Option.none()
-  }
-  if (parents !== undefined) {
-    parents[snapshot.path] = snapshot.value
-  }
-  if (hasProperty(snapshot, "state") && Model.isSnapshot(snapshot.state)) {
-    return getSnapshotByPath(snapshot.state, path, parents)
-  }
-  if (hasProperty(snapshot, "states") && typeof snapshot.states === "object" && snapshot.states !== null) {
-    for (const child of Object.values(snapshot.states)) {
-      if (Model.isSnapshot(child)) {
-        const result = getSnapshotByPath(child, path, parents)
-        if (Option.isSome(result)) {
-          return result
-        }
-      }
-    }
-  }
-  return Option.none()
-}
-
 /**
  * Defines a state tree while preserving literal state paths.
  *
@@ -3705,7 +3948,7 @@ const getSnapshotByPath = (
  *
  * ```ts
  * import { Schema } from "effect"
- * import { Machine } from "effect/unstable/machine"
+ * import { Machine } from "@typeonce/effect-machine"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
  *
@@ -3730,17 +3973,17 @@ export const defineStates = <
   states: states as States,
   initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
   get: ((snapshot, path) =>
-    getSnapshotByPath(snapshot, path).pipe(
+    Model.getSnapshotByPath(snapshot, path).pipe(
       Option.map((snapshot) => snapshot.value)
     )) as Machine.DefinedStates<States>["get"],
   getWithParents: ((snapshot, path) => {
     const parents: Record<string, unknown> = {}
-    return getSnapshotByPath(snapshot, path, parents).pipe(
+    return Model.getSnapshotByPath(snapshot, path, parents).pipe(
       Option.map((snapshot) => ({ value: snapshot.value, parents }))
     )
   }) as Machine.DefinedStates<States>["getWithParents"],
-  getSnapshot: getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
-  matches: (snapshot, path) => Option.isSome(getSnapshotByPath(snapshot, path))
+  getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
+  matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
 })
 
 /**
@@ -3754,11 +3997,16 @@ export const defineStates = <
  * `defineStates` or is passed inline. Call `handle` on the returned definition
  * to implement state behavior with ordinary TypeScript control flow.
  *
+ * Schemas in `events` define the public input protocol. Schemas in
+ * `internalEvents` are added to the complete handler protocol for invoke
+ * results, child emissions, and other machine-local deliveries. Their tags
+ * must be disjoint.
+ *
  * **Example** (Typed counter machine)
  *
  * ```ts
  * import { Schema } from "effect"
- * import { Machine } from "effect/unstable/machine"
+ * import { Machine } from "@typeonce/effect-machine"
  *
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
@@ -3790,24 +4038,31 @@ export const defineStates = <
  */
 export const make = <
   const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
   const Input extends Schema.Top = typeof Schema.Void,
   InitialE = never,
-  InitialR = never
+  InitialR = never,
+  const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   config: {
     readonly id?: string
     readonly states: States & DefineStateTreeInput<NoInfer<States>>
-    readonly events: Events
+    /** Events accepted through public machine input boundaries. */
+    readonly events: InputEvents
+    /** Events delivered only by machine-local logic. */
+    readonly internalEvents?: InternalEvents
     readonly emits?: Emits
     readonly input?: Input
     readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
   },
-  ..._validation: ValidateDefinedStates<NoInfer<States>>
+  ..._validation: [
+    ...ValidateDefinedStates<NoInfer<States>>,
+    ...ValidateEventProtocol<NoInfer<InputEvents>, NoInfer<InternalEvents>>
+  ]
 ): Machine<
   States,
-  Events,
+  readonly [...InputEvents, ...InternalEvents],
   Input,
   Machine.StateIdentifier<States>,
   never,
@@ -3815,12 +4070,15 @@ export const make = <
   InitialE,
   InitialR,
   Machine.FinalStateFromDefinition<States>,
+  Machine.TerminalOutput<States>,
+  Emits,
   never,
-  Emits
+  InputEvents
 > => {
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
+  self.internalEvents = config.internalEvents ?? []
   self.emits = config.emits ?? []
   self.input = config.input
   self.id = config.id
@@ -3829,6 +4087,7 @@ export const make = <
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)
+  Model.setProtocol(self)
   return self
 }
 
@@ -3870,9 +4129,25 @@ export const encodeSnapshot: <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  machine: Machine<
+    States,
+    Events,
+    Input,
+    UnhandledStates,
+    E,
+    R,
+    InitialE,
+    InitialR,
+    FinalStates,
+    Output,
+    Emits,
+    OutputStates,
+    InputEvents
+  >,
   snapshot: Machine.Snapshot<States>
 ) => Effect.Effect<
   Machine.EncodedSnapshot,
@@ -3914,9 +4189,25 @@ export const decodeSnapshot: <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  machine: Machine<
+    States,
+    Events,
+    Input,
+    UnhandledStates,
+    E,
+    R,
+    InitialE,
+    InitialR,
+    FinalStates,
+    Output,
+    Emits,
+    OutputStates,
+    InputEvents
+  >,
   encoded: unknown
 ) => Effect.Effect<
   Machine.Snapshot<States>,
@@ -3939,6 +4230,8 @@ export const decodeSnapshot: <
  * Invoked child processes run while their owning state is active and are
  * stopped before the state exits. An unrecovered child failure fails the owning
  * machine; recover inside the child Effect when failure should become an event.
+ * The `id` is a state-local lifecycle key, not a communication address. To
+ * send events to the invocation, pass a typed `childAddress` as `address`.
  * The `src` callback is intentionally independent from its parent state. When
  * construction depends on the typed state, lifecycle event, or runtime, use
  * the state config factory form `invoke: (context) => Machine.invoke(...)` and
@@ -3948,7 +4241,7 @@ export const decodeSnapshot: <
  *
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Machine } from "effect/unstable/machine"
+ * import { Machine } from "@typeonce/effect-machine"
  *
  * class Loaded extends Schema.TaggedClass<Loaded>("Loaded")("Loaded", {
  *   value: Schema.String
@@ -3973,22 +4266,29 @@ export const invoke = <
   ChildOutput = never,
   ChildInitialError = never,
   Event = never,
-  Id extends string = string
+  Address extends ChildAddress<never> | undefined = undefined
 >(
-  config: {
-    readonly id: Id
-    readonly src: () => Logic<
-      ChildState,
-      ChildEvent,
-      ChildError,
-      ChildRequirements,
-      ChildOutput,
-      ChildInitialError
-    >
-    readonly snapshot?: (
-      context: Machine.InvokeSnapshotContext<ChildState, ChildError | ChildInitialError, ChildOutput>
-    ) => Event | undefined
-  } & ChildAddress.Compatibility<Id, ChildEvent>
+  config:
+    & {
+      readonly id: InvokeLifecycleId
+      readonly src: () => Logic<
+        ChildState,
+        ChildEvent,
+        ChildError,
+        ChildRequirements,
+        ChildOutput,
+        ChildInitialError
+      >
+      readonly snapshot?: (
+        context: Machine.InvokeSnapshotContext<ChildState, ChildError, ChildOutput>
+      ) => Event | undefined
+    }
+    & ([Address] extends [undefined] ? {
+        readonly address?: never
+      }
+      : {
+        readonly address: Exclude<Address, undefined>
+      } & ChildAddress.Compatibility<Exclude<Address, undefined>, NoInfer<ChildEvent>>)
 ): Machine.InvokeConfig<
   any,
   any,
@@ -4002,6 +4302,164 @@ export const invoke = <
   ChildOutput,
   ChildInitialError
 > => ({ ...config, [InvokeTypeId]: undefined as any })
+
+type InvokeEffectResult<Requirements, Event> = Machine.InvokeConfig<
+  any,
+  any,
+  any,
+  any,
+  never,
+  void,
+  never,
+  never,
+  Requirements,
+  Event | void,
+  never
+>
+
+type InvokeEffectIsInfallible<Fx extends Effect.Effect<any, any, any>> =
+  IsAny<Effect.Error<Fx>> extends true ? false : [Effect.Error<Fx>] extends [never] ? true : false
+
+type InvokeEffectConfig<
+  Fx extends Effect.Effect<any, any, any>,
+  SuccessEvent,
+  FailureEvent
+> = {
+  readonly id: InvokeLifecycleId
+  readonly effect: Fx
+  readonly onSuccess: (value: NoInfer<Effect.Success<Fx>>) => SuccessEvent | void
+} & (
+  InvokeEffectIsInfallible<Fx> extends true ? {
+      readonly onFailure?: never
+    }
+  : {
+    readonly onFailure: (error: NoInfer<Effect.Error<Fx>>) => FailureEvent | void
+  }
+)
+
+/**
+ * Invokes one Effect and maps its typed outcome into machine-local events.
+ *
+ * **Details**
+ *
+ * This is the high-level one-shot counterpart to `invoke`. Success and typed
+ * failure values are mapped independently, so callers do not need to recover
+ * an Effect into a common event union by hand. Defects and interruption remain
+ * failures of the owning machine.
+ *
+ * Declare mapped outcomes in `internalEvents` unless they are also legitimate
+ * public commands.
+ *
+ * @see {@link invoke} for arbitrary child process logic.
+ * @see {@link after} for a state-scoped delayed event.
+ * @category constructors
+ * @since 4.0.0
+ */
+export const invokeEffect = <
+  const Fx extends Effect.Effect<any, any, any>,
+  SuccessEvent,
+  FailureEvent = never
+>(
+  config: InvokeEffectConfig<Fx, SuccessEvent, FailureEvent>
+): InvokeEffectResult<
+  Effect.Services<Fx>,
+  SuccessEvent | (InvokeEffectIsInfallible<Fx> extends true ? never : FailureEvent)
+> => ((config: {
+  readonly id: string
+  readonly effect: Effect.Effect<unknown, unknown, unknown>
+  readonly onSuccess: (value: unknown) => unknown
+  readonly onFailure?: (error: unknown) => unknown
+}) =>
+  invoke({
+    id: config.id,
+    src: () =>
+      effect(
+        config.onFailure === undefined
+          ? Effect.map(config.effect, config.onSuccess)
+          : Effect.matchEffect(config.effect, {
+            onFailure: (error) => Effect.succeed(config.onFailure!(error)),
+            onSuccess: (value) => Effect.succeed(config.onSuccess(value))
+          })
+      )
+  }))(config as any) as any
+
+/**
+ * Creates a cancellable state-scoped delayed event.
+ *
+ * The timer starts when its owning state is entered and is interrupted when
+ * that state exits. The delayed value should normally be declared in
+ * `internalEvents`.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const after = <Event extends { readonly _tag: PropertyKey }>(
+  duration: Duration.Input,
+  event: Event,
+  options?: { readonly id?: InvokeLifecycleId }
+): InvokeEffectResult<never, Event> =>
+  invoke({
+    id: options?.id ?? `Machine.after:${String(event._tag)}`,
+    src: () => effect(Effect.as(Effect.sleep(duration), event))
+  })
+
+type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
+
+type RetagTargetCompatibility<Target extends Machine.TaggedSchema> = Target extends {
+  readonly fields: Schema.Struct.Fields
+} ? "_tag" extends keyof Target["~type.make.in"] ?
+    {} extends Pick<Target["~type.make.in"], "_tag"> ? unknown : {
+      readonly "~effect/Machine/RetagTargetError": "Target schema must supply its discriminator when make is called"
+    }
+  : unknown
+  : {
+    readonly "~effect/Machine/RetagTargetError": "Target schema must be one tagged struct or tagged class"
+  }
+
+type RequiredKeys<A> = {
+  readonly [Key in keyof A]-?: {} extends Pick<A, Key> ? never : Key
+}[keyof A]
+
+type CompatibleSourceKeys<Fields, Source> = {
+  readonly [Key in Extract<keyof Fields, keyof Source>]: Source[Key] extends Fields[Key] ? Key : never
+}[Extract<keyof Fields, keyof Source>]
+
+type RetagPatch<Target extends Machine.TaggedSchema, Source> =
+  & Partial<RetagFields<Target>>
+  & Pick<
+    RetagFields<Target>,
+    Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
+  >
+
+type RetagArgs<Target extends Machine.TaggedSchema, Source> = [
+  Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
+] extends [never] ? [patch?: RetagPatch<Target, Source>]
+  : [patch: RetagPatch<Target, Source>]
+
+/**
+ * Constructs another tagged case from compatible source fields.
+ *
+ * The target must be one tagged struct or tagged class whose discriminator is
+ * supplied by its constructor. Union wrappers are rejected because their
+ * `make` operation cannot select a member after the source discriminator has
+ * been discarded. Missing or incompatible required target fields must be
+ * supplied by the patch, and the target schema's normal `make` validation
+ * remains authoritative at runtime.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const retag = <
+  const Target extends Machine.TaggedSchema,
+  const Source extends { readonly _tag: PropertyKey }
+>(
+  target: Target & RetagTargetCompatibility<Target>,
+  source: Source,
+  ...args: RetagArgs<Target, Source>
+): Target["Type"] => {
+  const { _tag: _, ...fields } = source
+  return target.make({ ...fields, ...(args[0] ?? {}) } as Target["~type.make.in"])
+}
 
 type InvokeMachineInput<Input extends Schema.Top> = Input extends typeof Schema.Void ? {
     readonly input?: never
@@ -4050,7 +4508,9 @@ export const invokeMachine: {
     Output = never,
     SnapshotEvent = never,
     DoneEvent = never,
-    Id extends string = string
+    Id extends string = string,
+    OutputStates extends Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
   >(
     config:
       & {
@@ -4067,23 +4527,23 @@ export const invokeMachine: {
             InitialR,
             FinalStates,
             Output,
-            Emits
-          >
+            Emits,
+            OutputStates,
+            InputEvents
+          > & Machine.EnsureOutputImplementations<States, OutputStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
             Machine.Snapshot<States>,
             | E
-            | InitialE
-            | ActionError<R | InitialR>
+            | ActionError<R>
             | InfiniteTransitionError
             | MachineSchemaDecodeError
-            | StartupError
             | StoppedError,
-            Output | undefined
+            Output
           >
         ) => SnapshotEvent | undefined
-        readonly onDone: (context: Machine.InvokeDoneContext<Output | undefined>) => DoneEvent | undefined
+        readonly onDone: (context: Machine.InvokeDoneContext<Output>) => DoneEvent | undefined
       }
       & InvokeMachineInput<Input>
   ): Machine.InvokeConfig<
@@ -4093,15 +4553,21 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
+    Machine.EventOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
       Machine.EventOf<Events>,
       Machine.EmitOf<Emits>
     >,
-    Output | undefined,
-    InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError,
+    Output,
+    | InitialE
+    | E
+    | ActionError<InitialR | R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StartupError
+    | StoppedError,
     Machine.EmitOf<Emits>,
     DoneEvent
   >
@@ -4118,7 +4584,9 @@ export const invokeMachine: {
     FinalStates extends Machine.StateIdentifier<States> = never,
     Output = never,
     SnapshotEvent = never,
-    Id extends string = string
+    Id extends string = string,
+    OutputStates extends Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
   >(
     config:
       & {
@@ -4135,20 +4603,20 @@ export const invokeMachine: {
             InitialR,
             FinalStates,
             Output,
-            Emits
-          >
+            Emits,
+            OutputStates,
+            InputEvents
+          > & Machine.EnsureOutputImplementations<States, OutputStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
             Machine.Snapshot<States>,
             | E
-            | InitialE
-            | ActionError<R | InitialR>
+            | ActionError<R>
             | InfiniteTransitionError
             | MachineSchemaDecodeError
-            | StartupError
             | StoppedError,
-            Output | undefined
+            Output
           >
         ) => SnapshotEvent | undefined
         readonly onDone?: never
@@ -4161,15 +4629,21 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
+    Machine.EventOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
       Machine.EventOf<Events>,
       Machine.EmitOf<Emits>
     >,
-    Output | undefined,
-    InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError,
+    Output,
+    | InitialE
+    | E
+    | ActionError<InitialR | R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StartupError
+    | StoppedError,
     Machine.EmitOf<Emits>
   >
 } = ((config: {
@@ -4181,11 +4655,12 @@ export const invokeMachine: {
   const machine = config.child.machine
   return {
     id: config.child.id,
-    addressable: true,
+    address: config.child.id,
+    descriptor: config.child,
     src: () =>
       machine.input === undefined
-        ? internalProcess.toProcessLogic(machine)
-        : internalProcess.toProcessLogic(machine, config.input),
+        ? (internalProcess.toProcessLogic as any)(machine)
+        : (internalProcess.toProcessLogic as any)(machine, config.input),
     snapshot: config.snapshot,
     onDone: config.onDone,
     [InvokeTypeId]: undefined as any
@@ -4224,9 +4699,27 @@ export const planInitial: <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  machine:
+    & Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.EnsureOutputImplementations<States, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   {
@@ -4235,9 +4728,17 @@ export const planInitial: <
       Effect.Effect<void, ActionError<InitialR | R>, ActionServices<InitialR | R>>
     >
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
-    readonly output: Output | undefined
-  },
-  InitialE | MachineSchemaDecodeError | StartupError,
+  } & (
+    | {
+      readonly done: true
+      readonly output: Output
+    }
+    | {
+      readonly done: false
+      readonly output: undefined
+    }
+  ),
+  InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   ExcludeCompatibleRuntime<PlanningServices<InitialR | R>, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
 > = internalPlanner.planInitial as any
 
@@ -4259,7 +4760,8 @@ export const enabled = <
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
   machine: Machine<
     States,
@@ -4273,10 +4775,11 @@ export const enabled = <
     FinalStates,
     Output,
     Emits,
-    OutputStates
+    OutputStates,
+    InputEvents
   >,
   state: Machine.Snapshot<States>
-): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine, state)
+): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine as any, state)
 
 /**
  * Plans the next state snapshot without running deferred actions.
@@ -4312,11 +4815,29 @@ export const plan: <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  machine:
+    & Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.EnsureOutputImplementations<States, OutputStates>,
   state: Machine.Snapshot<States>,
-  event: Machine.EventOf<Events>
+  event: Machine.EventOf<InputEvents>
 ) => Effect.Effect<
   {
     readonly next: Machine.Snapshot<States>
@@ -4332,8 +4853,16 @@ export const plan: <
       readonly entryPaths: ReadonlyArray<string>
       readonly changed: boolean
     }>
-    readonly output: Output | undefined
-  },
+  } & (
+    | {
+      readonly done: true
+      readonly output: Output
+    }
+    | {
+      readonly done: false
+      readonly output: undefined
+    }
+  ),
   E | InfiniteTransitionError | MachineSchemaDecodeError,
   ExcludeCompatibleRuntime<PlanningServices<R>, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
 > = internalPlanner.plan as any
@@ -4346,13 +4875,14 @@ export const plan: <
  * The action's error and service requirements are retained in the machine
  * type without becoming requirements of `plan` or `planInitial`. The managed
  * runtime executes staged actions sequentially before publishing the planned
- * state.
+ * state. Pass a second argument when the planning Effect should return that
+ * value after staging.
  *
  * **Example** (Typed staged action)
  *
  * ```ts
  * import { Context, Effect } from "effect"
- * import { Machine } from "effect/unstable/machine"
+ * import { Machine } from "@typeonce/effect-machine"
  *
  * class Audit extends Context.Service<Audit, {
  *   readonly write: Effect.Effect<void, "AuditError">
@@ -4367,9 +4897,13 @@ export const plan: <
  * @category combinators
  * @since 4.0.0
  */
-export const action = <E, R>(
-  effect: Effect.Effect<void, E, R>
-): Effect.Effect<void, never, ActionRequirement<E, R>> => internalPlanner.action(effect)
+export const action: Machine.Action = (<E, R, Next>(
+  effect: Effect.Effect<void, E, R>,
+  ...next: readonly [Next] | readonly []
+): Effect.Effect<void | Next, never, ActionRequirement<E, R>> => {
+  const staged = internalPlanner.action(effect)
+  return next.length === 0 ? staged : Effect.as(staged, next[0])
+}) as Machine.Action
 
 const processLocal = (operation: string): Effect.Effect<never> => Effect.die(new ProcessLocalErrorValue({ operation }))
 
@@ -4464,7 +4998,7 @@ export const runtime = <const Protocol extends Runtime.Protocol = {}>(): Effect.
  *
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Machine } from "effect/unstable/machine"
+ * import { Machine } from "@typeonce/effect-machine"
  *
  * class LoadFailed extends Schema.TaggedClass<LoadFailed>("LoadFailed")("LoadFailed", {
  *   reason: Schema.String
@@ -4519,7 +5053,7 @@ export const effect = <Output, Error = never, Requirements = never>(
  */
 export const logic = <
   State,
-  Event = any,
+  Event = never,
   Output = void,
   Error = never,
   Requirements = never,
@@ -4578,24 +5112,35 @@ export const transition = <State, Event, Error = never, Requirements = never>(
   })
 
 /**
- * Creates a typed parent-local child address or complete machine descriptor.
+ * Creates a typed descriptor for a complete child machine.
  *
- * **When to use**
- *
- * Use with a complete machine to create the descriptor shared by
- * `invokeMachine`, `sendTo`, and child lookup APIs. The one-argument form
- * creates an event-only address for lower-level process logic.
+ * Descriptors identify a child by id and machine identity, so independently
+ * constructed descriptors for the same pair address the same invoked child.
  *
  * @category constructors
  * @since 4.0.0
  */
-export const child: {
-  <const Id extends string, M extends Machine.Any>(id: Id, machine: M): ChildMachine<Id, M>
-  <Event>(id: string): ChildAddress<Event>
-} = ((id: string, machine?: Machine.Any) =>
-  machine === undefined
-    ? id
-    : { [ChildMachineTypeId]: ChildMachineTypeId, id, machine }) as any
+export const child = <const Id extends string, M extends Machine.Any>(
+  id: Id,
+  machine: M
+): ChildMachine<Id, M> =>
+  ({
+    [ChildMachineTypeId]: ChildMachineTypeId,
+    id,
+    machine
+  })
+
+/**
+ * Creates a typed parent-local address for lower-level child process logic.
+ *
+ * The default event protocol is `never`; provide an event type before using
+ * the address with `spawn`, `invoke`, or `sendTo`.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const childAddress = <Event = never>(id: string): ChildAddress<Event> =>
+  id as ChildAddress<Event>
 
 /**
  * Spawns a child process owned by the currently running machine.
@@ -4675,14 +5220,14 @@ export const sendTo: {
     child: Child,
     event: ChildMachine.Event<Child>
   ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
-  <Address extends string>(
+  <Address extends ChildAddress<never>>(
     id: Address,
     event: ChildAddress.Event<Address>
   ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
 } = ((child: string | ChildMachine.Any, event: unknown) =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
-    (runtime) => runtime.sendTo(typeof child === "string" ? child : child.id, event)
+    (runtime) => runtime.sendTo(child, event)
   )) as any
 
 /**
@@ -4691,12 +5236,13 @@ export const sendTo: {
  * @category runtime
  * @since 4.0.0
  */
-export const stopChild: (
-  child: string | ChildMachine.Any
-) => Effect.Effect<void, never, MachineRuntimeRequirement> = ((child: string | ChildMachine.Any) =>
+export const stopChild: {
+  <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntimeRequirement>
+  <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntimeRequirement>
+} = ((child: string | ChildMachine.Any) =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
-    (runtime) => runtime.stopChild(typeof child === "string" ? child : child.id)
+    (runtime) => runtime.stopChild(child)
   )) as any
 
 /**
@@ -4748,24 +5294,46 @@ export const start: <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 >(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  machine:
+    & Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.EnsureOutputImplementations<States, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   MachineRef<
     Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
+    Machine.EventOf<InputEvents>,
     | E
-    | InitialE
-    | ActionError<R | InitialR>
+    | ActionError<R>
     | InfiniteTransitionError
     | MachineSchemaDecodeError
-    | StartupError
     | StoppedError,
-    Output | undefined
+    Output
   >,
-  InitialE | ActionError<InitialR | R> | MachineSchemaDecodeError | StartupError | StoppedError,
+  | InitialE
+  | E
+  | ActionError<InitialR | R>
+  | InfiniteTransitionError
+  | MachineSchemaDecodeError
+  | StartupError
+  | StoppedError,
   ExcludeCompatibleRuntime<
     ExecutionServices<InitialR | R>,
     Machine.EventOf<Events>,

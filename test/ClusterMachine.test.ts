@@ -36,7 +36,10 @@ class Changed extends Schema.TaggedClass<Changed>("Changed")("Changed", {
   value: Schema.Number
 }) {}
 
-const CounterStates = Machine.defineStates({ Count, Done })
+const CounterStates = Machine.defineStates({
+  Count,
+  Done: { schema: Done, type: "final" }
+})
 
 const makeCounter = (state: {
   readonly gate: Latch.Latch
@@ -96,7 +99,6 @@ const makeCounter = (state: {
       }
     },
     Done: {
-      type: "final"
     }
   })
 
