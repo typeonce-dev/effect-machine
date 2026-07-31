@@ -206,7 +206,6 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 
 type MachineEvents<M extends Machine.Machine.Any> = M extends Machine.Machine<
   any,
-  infer Events,
   any,
   any,
   any,
@@ -216,8 +215,10 @@ type MachineEvents<M extends Machine.Machine.Any> = M extends Machine.Machine<
   any,
   any,
   any,
-  any
-> ? Events & ReadonlyArray<Machine.Machine.TaggedSchema> :
+  any,
+  any,
+  infer InputEvents
+> ? InputEvents & ReadonlyArray<Machine.Machine.TaggedSchema> :
   never
 
 type MachineEmits<M extends Machine.Machine.Any> = M extends Machine.Machine<
@@ -232,6 +233,7 @@ type MachineEmits<M extends Machine.Machine.Any> = M extends Machine.Machine<
   any,
   any,
   infer Emits,
+  any,
   any
 > ? Emits & ReadonlyArray<Machine.Machine.TaggedSchema> :
   never
@@ -286,6 +288,7 @@ type MachineServices<M extends Machine.Machine.Any> = M extends Machine.Machine<
   any,
   any,
   infer Emits,
+  any,
   any
 > ?
     | ExcludeCompatibleRuntime<
@@ -432,23 +435,27 @@ export const make = <
   FinalStates extends Machine.Machine.StateIdentifier<States>,
   Output,
   Emits extends ReadonlyArray<Machine.Machine.TaggedSchema>,
-  OutputStates extends Machine.Machine.StateIdentifier<States>
+  OutputStates extends Machine.Machine.StateIdentifier<States>,
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
 >(
   type: Type,
-  machine: Machine.Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates
-  >,
+  machine:
+    & Machine.Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
   options: {
     readonly version: string
   },
@@ -467,7 +474,8 @@ export const make = <
     FinalStates,
     Output,
     Emits,
-    OutputStates
+    OutputStates,
+    InputEvents
   >,
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<R | InitialR>,
@@ -489,7 +497,8 @@ export const make = <
     FinalStates,
     Output,
     Emits,
-    OutputStates
+    OutputStates,
+    InputEvents
   >
   const eventSchema = Schema.Union(machine.events as MachineEvents<M>)
   const rpc = Rpc.make("send", {

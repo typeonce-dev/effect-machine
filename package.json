@@ -16,6 +16,7 @@
   "sideEffects": false,
   "files": [
     "dist",
+    "docs",
     "README.md",
     "LICENSE",
     "NOTICE"

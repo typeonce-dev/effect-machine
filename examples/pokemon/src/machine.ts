@@ -36,7 +36,7 @@ const machine = Machine.make({
 })
 
 const atomRuntime = Atom.runtime(PokemonService.layer)
-export const machineAtom = AtomMachine.make(atomRuntime, machine)
+export const machineAtom = AtomMachine.bind(atomRuntime).make(machine)
 
 export const selectionMachineAtom = machineAtom.child(SelectionChild)
 export const replaceMachineAtom = machineAtom.child(ReplaceChild)

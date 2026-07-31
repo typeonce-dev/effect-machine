@@ -16,6 +16,10 @@ describe("ClusterMachine", () => {
 
   class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
 
+  class Done extends Schema.TaggedClass<Done>("Done")("Done", {
+    value: Schema.String
+  }) {}
+
   class Input extends Schema.Class<Input>("Input")({
     value: Schema.Number
   }) {}
@@ -62,6 +66,18 @@ describe("ClusterMachine", () => {
     type Rpcs = RpcGroup.Rpcs<typeof bridge.entity.protocol>
     expect<Rpc.Payload<Rpcs>>().type.toBe<Increment | Reset>()
     expect<Rpc.Success<Rpcs>>().type.toBe<ClusterMachine.Accepted | ClusterMachine.Rejected>()
+
+    const internalMachine = Machine.make({
+      states: states.states,
+      events: [Increment],
+      internalEvents: [Reset],
+      initial: () => states.initial.Count(new Count({ value: 0 }))
+    })
+    const internalBridge = ClusterMachine.make("InternalCounterEntity", internalMachine, {
+      version: "1"
+    })
+    type InternalRpcs = RpcGroup.Rpcs<typeof internalBridge.entity.protocol>
+    expect<Rpc.Payload<InternalRpcs>>().type.toBe<Increment>()
   })
 
   it("retains machine and Cluster service requirements", () => {
@@ -95,6 +111,38 @@ describe("ClusterMachine", () => {
 
   it("uses encoded Machine snapshots in checkpoints", () => {
     expect<ClusterMachine.Checkpoint["snapshot"]>().type.toBe<Machine.Machine.EncodedSnapshot>()
+  })
+
+  it("requires declared output implementations", () => {
+    const outputStates = Machine.defineStates({
+      Done: {
+        schema: Done,
+        type: "final",
+        output: Schema.String
+      }
+    })
+    const incomplete = Machine.make({
+      states: outputStates.states,
+      events: [Reset],
+      initial: () => outputStates.initial.Done(new Done({ value: "done" }))
+    })
+
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "Incomplete",
+      incomplete,
+      { version: "1" }
+    )
+
+    const complete = incomplete.handle({
+      Done: {
+        output: ({ state }) => state.value
+      }
+    })
+    expect(ClusterMachine.make).type.toBeCallableWith(
+      "Complete",
+      complete,
+      { version: "1" }
+    )
   })
 
   it("retains snapshot codec service requirements", () => {

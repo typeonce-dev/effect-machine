@@ -27,6 +27,7 @@ try {
     "package/dist/cluster.d.ts",
     "package/package.json",
     "package/README.md",
+    "package/docs/agent-guide.md",
     "package/LICENSE",
     "package/NOTICE"
   ]

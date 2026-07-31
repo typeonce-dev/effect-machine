@@ -6,12 +6,14 @@
 
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import * as Machine from "./Machine.js"
 import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
+import * as Machine from "./Machine.js"
+import * as Model from "./internal/machineModel.js"
 
 /**
  * Error returned when a machine command is issued before startup completes.
@@ -56,6 +58,23 @@ type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineR
   Emits
 >
 
+type MachineRuntimeError<E, R> =
+  | E
+  | Machine.ActionError<R>
+  | Machine.InfiniteTransitionError
+  | Machine.MachineSchemaDecodeError
+  | Machine.StoppedError
+
+type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
+  | InitialE
+  | E
+  | Machine.ActionError<InitialR | R>
+  | Machine.InfiniteTransitionError
+  | Machine.MachineSchemaDecodeError
+  | Machine.StartupError
+  | Machine.StoppedError
+  | RuntimeError
+
 const startMachineAtomEffect = <
   const States extends Machine.Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
@@ -67,41 +86,37 @@ const startMachineAtomEffect = <
   InitialE = never,
   InitialR = never,
   FinalStates extends Machine.Machine.StateIdentifier<States> = never,
-  Output = never
+  Output = never,
+  OutputStates extends Machine.Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
 >(
   get: Atom.AtomContext,
-  machine: Machine.Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits
-  >,
+  machine:
+    & Machine.Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
   args: [...Machine.Machine.InputArgs<Input>]
 ): Effect.Effect<
-  Machine.MachineRef<
-    Machine.Machine.Snapshot<States>,
-    Machine.Machine.EventOf<Events>,
-    | E
-    | Machine.ActionError<InitialR | R>
-    | Machine.InfiniteTransitionError
-    | Machine.MachineSchemaDecodeError
-    | Machine.StartupError
-    | Machine.StoppedError
-    | InitialE,
-    Output | undefined
+    Machine.MachineRef<
+      Machine.Machine.Snapshot<States>,
+      Machine.Machine.EventOf<InputEvents>,
+      MachineRuntimeError<E, R>,
+    Output
   >,
-  | InitialE
-  | Machine.ActionError<InitialR | R>
-  | Machine.MachineSchemaDecodeError
-  | Machine.StartupError
-  | Machine.StoppedError,
+  MachineStartError<InitialE, E, InitialR, R>,
   MachineRequirements<InitialR, R, Machine.Machine.EventOf<Events>, Machine.Machine.EmitOf<Emits>>
 > =>
   Effect.scoped(
@@ -148,9 +163,21 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   /**
    * Atom containing the state value from the latest runtime snapshot.
    *
+   * This preserves the historical behavior of exposing a state even when the
+   * runtime snapshot reports a terminal error. Use `result` when runtime
+   * failures must be represented in the atom failure channel.
+   *
    * @since 4.0.0
    */
   readonly state: Atom.Atom<AsyncResult.AsyncResult<State, StartError>>
+
+  /**
+   * Atom containing the current state, with startup and runtime failures in
+   * one typed failure channel.
+   *
+   * @since 4.0.0
+   */
+  readonly result: Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>>
 
   /**
    * Writable atom that sends events to the machine. Writes before startup
@@ -173,6 +200,8 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
 
   /**
    * Creates a reactive bridge for a directly invoked child machine.
+   * Reusing the same descriptor returns the same live bridge while it remains
+   * referenced.
    *
    * @since 4.0.0
    */
@@ -202,7 +231,7 @@ type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output
  * @category models
  * @since 4.0.0
  */
-export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartError = never> {
+export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartError = unknown> {
   /** Atom containing the current child reference when the child is active. */
   readonly ref: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>
@@ -224,6 +253,16 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   readonly state: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<RefState<Machine.ChildMachine.Ref<Child>>>, StartError>
   >
+  /**
+   * Atom containing the current child state when active, with startup and
+   * runtime failures in one typed failure channel.
+   */
+  readonly result: Atom.Atom<
+    AsyncResult.AsyncResult<
+      Option.Option<RefState<Machine.ChildMachine.Ref<Child>>>,
+      StartError | RefError<Machine.ChildMachine.Ref<Child>>
+    >
+  >
   /** Writable atom that sends events to the active child. */
   readonly send: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
@@ -234,11 +273,86 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
     void
   >
-  /** Creates a reactive bridge for a directly owned nested child. */
+  /**
+   * Creates a reactive bridge for a directly owned nested child. Reusing the
+   * same descriptor returns the same live bridge while it remains referenced.
+   */
   readonly child: <Nested extends Machine.ChildMachine.Any>(
     child: Nested
   ) => ChildMachineAtom<Nested, StartError>
 }
+
+type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, infer StartError> ? StartError
+  : Bridge extends ChildMachineAtom<any, infer StartError> ? StartError
+  : never
+
+/**
+ * Derives the exact child bridge type from a parent bridge and child
+ * descriptor.
+ *
+ * @category utility types
+ * @since 4.0.0
+ */
+export type ChildOf<
+  Parent extends MachineAtom<any, any, any, any, any> | ChildMachineAtom<any, any>,
+  Child extends Machine.ChildMachine.Any
+> = ChildMachineAtom<Child, BridgeStartError<Parent>>
+
+const makeRuntimeResultAtom = <State, Error, Output, StartError>(
+  snapshot: Atom.Atom<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>
+): Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>> =>
+  Atom.readable((get): AsyncResult.AsyncResult<State, StartError | Error> => {
+    const current = get(snapshot)
+    if (AsyncResult.isInitial(current)) {
+      return AsyncResult.initial(current.waiting)
+    } else if (AsyncResult.isFailure(current)) {
+      return AsyncResult.failureWithPrevious(current.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    } else if (current.value.status === "error") {
+      return AsyncResult.failureWithPrevious(current.value.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    }
+    return AsyncResult.success(current.value.state, {
+      waiting: current.waiting
+    })
+  }).pipe(Atom.withEquality(Equal.equals))
+
+const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
+  snapshot: Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<Machine.RuntimeSnapshot<State, Error, Output>>, StartError>
+  >
+): Atom.Atom<AsyncResult.AsyncResult<Option.Option<State>, StartError | Error>> =>
+  Atom.readable((get): AsyncResult.AsyncResult<Option.Option<State>, StartError | Error> => {
+    const current = get(snapshot)
+    if (AsyncResult.isInitial(current)) {
+      return AsyncResult.initial(current.waiting)
+    } else if (AsyncResult.isFailure(current)) {
+      return AsyncResult.failureWithPrevious(current.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    } else if (Option.isNone(current.value)) {
+      const previous = get.self<AsyncResult.AsyncResult<Option.Option<State>, StartError | Error>>()
+      if (Option.isSome(previous) && AsyncResult.isFailure(previous.value)) {
+        return previous.value
+      }
+      return AsyncResult.success(Option.none(), {
+        waiting: current.waiting
+      })
+    } else if (current.value.value.status === "error") {
+      return AsyncResult.failureWithPrevious(current.value.value.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    }
+    return AsyncResult.success(Option.some(current.value.value.state), {
+      waiting: current.waiting
+    })
+  }).pipe(Atom.withEquality(Equal.equals))
 
 const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   parentRef: Atom.Atom<
@@ -323,7 +437,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
       } else if (Option.isNone(result.value)) {
         ctx.setSelf(AsyncResult.fail(new ChildNotActiveError({ id: descriptor.id })))
       } else {
-        Effect.runCallback(result.value.value.send(event), {
+        Effect.runCallback(result.value.value.send(event as never), {
           onExit: (exit) => ctx.setSelf(AsyncResult.fromExit(exit))
         })
       }
@@ -349,13 +463,24 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     }
   )
 
+  const childFamily = Atom.family((nested: Machine.ChildMachine.Any) =>
+    makeChildFromRefAtom(
+      makeChildRefAtom(ref as any, nested),
+      nested
+    ))
+  const child = <Nested extends Machine.ChildMachine.Any>(
+    nested: Nested
+  ): ChildMachineAtom<Nested, StartError> =>
+    childFamily(nested) as ChildMachineAtom<Nested, StartError>
+
   return {
     ref,
     snapshot,
     state: Atom.mapResult(snapshot, Option.map((snapshot) => snapshot.state)),
+    result: makeChildRuntimeResultAtom(snapshot),
     send,
     stop,
-    child: (nested) => makeChildFromRefAtom(makeChildRefAtom(ref as any, nested), nested)
+    child
   }
 }
 
@@ -433,21 +558,277 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError>(
     }
   )
 
+  const optionalRef = Atom.mapResult(ref, Option.some)
+  const childFamily = Atom.family((descriptor: Machine.ChildMachine.Any) =>
+    makeChildFromRefAtom(
+      makeChildRefAtom(optionalRef as any, descriptor),
+      descriptor
+    ))
+  const child = <Child extends Machine.ChildMachine.Any>(
+    descriptor: Child
+  ): ChildMachineAtom<Child, StartError> =>
+    childFamily(descriptor) as ChildMachineAtom<Child, StartError>
+
   return {
     ref,
     snapshot,
     state: Atom.mapResult(snapshot, (snapshot) => snapshot.state),
+    result: makeRuntimeResultAtom(snapshot),
     send,
     stop,
-    child: (child) => {
-      const optionalRef = Atom.mapResult(ref, Option.some)
-      return makeChildFromRefAtom(makeChildRefAtom(optionalRef as any, child), child)
-    }
+    child
   }
+}
+
+type SnapshotNode<State> = State extends Machine.Machine.AtomicSnapshot<string, unknown> ?
+  | State
+  | (State extends { readonly state: infer Child } ? SnapshotNode<Child>
+    : State extends { readonly states: infer Regions } ? SnapshotNode<Regions[keyof Regions]>
+    : never)
+  : never
+
+type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: infer Path extends string } ? Path : never
+  : never
+
+type SnapshotValueByIdentifier<State, Path extends SnapshotIdentifier<State>> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: Path; readonly value: infer Value } ? Value : never
+  : never
+
+type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.ChildMachine.Ref<Child>>
+
+const selectSnapshot = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Path extends SnapshotIdentifier<State>
+>(
+  snapshot: State,
+  path: Path
+): Option.Option<SnapshotValueByIdentifier<State, Path>> =>
+  Model.getSnapshotByPath(snapshot, path).pipe(
+    Option.map((snapshot) => snapshot.value)
+  ) as Option.Option<SnapshotValueByIdentifier<State, Path>>
+
+/**
+ * Selects the typed value for an active state path.
+ *
+ * Valid paths and their selected value types are inferred from the bridge.
+ * The derived atom suppresses structurally equal updates. Keep the returned
+ * atom stable when constructing it inside a component.
+ *
+ * @category combinators
+ * @since 4.0.0
+ */
+export const select = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Event,
+  Error,
+  Output,
+  StartError,
+  const Path extends SnapshotIdentifier<State>
+>(
+  self: MachineAtom<State, Event, Error, Output, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
+> =>
+  Atom.mapResult(self.result, (snapshot) => selectSnapshot(snapshot, path)).pipe(
+    Atom.withEquality(Equal.equals)
+  )
+
+/**
+ * Selects the typed value for an active state path in an invoked child.
+ *
+ * Valid paths and their selected value types are inferred from the child
+ * bridge. An inactive child produces `Option.none()`. Keep the returned atom
+ * stable when constructing it inside a component.
+ *
+ * @category combinators
+ * @since 4.0.0
+ */
+export const selectChild = <
+  Child extends Machine.ChildMachine.Any,
+  StartError,
+  const Path extends SnapshotIdentifier<ChildState<Child>>
+>(
+  self: ChildMachineAtom<Child, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<
+    Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
+    StartError | RefError<Machine.ChildMachine.Ref<Child>>
+  >
+> =>
+  Atom.mapResult(
+    self.result,
+    Option.flatMap((snapshot) => selectSnapshot(snapshot, path))
+  ).pipe(Atom.withEquality(Equal.equals))
+
+/**
+ * Returns whether a state path is active.
+ *
+ * Valid paths are inferred from the bridge snapshot.
+ * The derived atom suppresses equal updates. Runtime failures remain in the
+ * typed failure channel.
+ *
+ * @category combinators
+ * @since 4.0.0
+ */
+export const matches = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Event,
+  Error,
+  Output,
+  StartError,
+  const Path extends SnapshotIdentifier<State>
+>(
+  self: MachineAtom<State, Event, Error, Output, StartError>,
+  path: Path
+): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> =>
+  Atom.mapResult(self.result, (snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path))).pipe(
+    Atom.withEquality(Equal.equals)
+  )
+
+/**
+ * Returns whether a state path is active in an invoked child.
+ *
+ * Valid paths are inferred from the child bridge snapshot.
+ * An inactive child produces `false`. Keep the returned atom stable when
+ * constructing it inside a component.
+ *
+ * @category combinators
+ * @since 4.0.0
+ */
+export const matchesChild = <
+  Child extends Machine.ChildMachine.Any,
+  StartError,
+  const Path extends SnapshotIdentifier<ChildState<Child>>
+>(
+  self: ChildMachineAtom<Child, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+> =>
+  Atom.mapResult(
+    self.result,
+    Option.exists((snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path)))
+  ).pipe(Atom.withEquality(Equal.equals))
+
+const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
+
+type MachineRequirementsOf<M extends Machine.Machine.Any> = M extends Machine.Machine<
+    any,
+    infer Events,
+    any,
+    any,
+    any,
+    infer R,
+    any,
+    infer InitialR,
+    any,
+    any,
+    infer Emits,
+    any,
+    any
+  > ? MachineRequirements<
+      InitialR,
+      R,
+      Machine.Machine.EventOf<Events>,
+      Machine.Machine.EmitOf<Emits>
+    >
+  : never
+
+type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
+  ExternalRequirements<MachineRequirementsOf<M>>,
+  Services
+>
+
+type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> =
+  IsAny<MachineRequirementsOf<M>> extends true ? {
+      readonly [BoundRequirementsTypeId]: MachineRequirementsOf<M>
+    }
+    : [MissingBoundRequirements<Services, M>] extends [never] ? unknown
+    : {
+      readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
+    }
+
+type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> = M extends Machine.Machine<
+  infer States,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  infer OutputStates,
+  any
+> ? IsAny<States> extends true ? {
+      readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
+    }
+  : Machine.Machine.EnsureOutputImplementations<States, OutputStates>
+  : never
+
+type MachineInputArgsOf<M extends Machine.Machine.Any> = M extends Machine.Machine<
+  any,
+  any,
+  infer Input,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any,
+  any
+> ? [...Machine.Machine.InputArgs<Input>]
+  : never
+
+type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = M extends Machine.Machine<
+  infer States,
+  any,
+  any,
+  any,
+  infer E,
+  infer R,
+  infer InitialE,
+  infer InitialR,
+  any,
+  infer Output,
+  any,
+  any,
+  any
+> ? MachineAtom<
+    Machine.Machine.Snapshot<States>,
+    Machine.Machine.InputEvent<M>,
+    MachineRuntimeError<E, R>,
+    Output,
+    MachineStartError<InitialE, E, InitialR, R, RuntimeError>
+  >
+  : never
+
+/**
+ * An `AtomMachine` factory with one owned Effect runtime.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Bound<Services, RuntimeError = never> {
+  readonly make: <M extends Machine.Machine.Any>(
+    machine: M & EnsureBoundRequirements<Services, M> & EnsureMachineOutputImplementations<M>,
+    ...args: MachineInputArgsOf<M>
+  ) => MachineAtomOf<M, RuntimeError>
 }
 
 /**
  * Creates atoms backed by a running machine.
+ *
+ * Use `bind(runtime).make(machine)` when the machine requires external
+ * services.
  *
  * @category constructors
  * @since 4.0.0
@@ -464,7 +845,9 @@ export const make: {
     InitialE = never,
     InitialR = never,
     FinalStates extends Machine.Machine.StateIdentifier<States> = never,
-    Output = never
+    Output = never,
+    OutputStates extends Machine.Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
   >(
     machine:
       & Machine.Machine<
@@ -478,7 +861,9 @@ export const make: {
         InitialR,
         FinalStates,
         Output,
-        Emits
+        Emits,
+        OutputStates,
+        InputEvents
       >
       & EnsureNoExternalRequirements<
         MachineRequirements<
@@ -487,94 +872,46 @@ export const make: {
           Machine.Machine.EventOf<Events>,
           Machine.Machine.EmitOf<Emits>
         >
-      >,
+      >
+      & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
-    Machine.Machine.EventOf<Events>,
-    | E
-    | Machine.ActionError<InitialR | R>
-    | Machine.InfiniteTransitionError
-    | Machine.MachineSchemaDecodeError
-    | Machine.StartupError
-    | Machine.StoppedError
-    | InitialE,
-    Output | undefined,
-    | InitialE
-    | Machine.ActionError<InitialR | R>
-    | Machine.MachineSchemaDecodeError
-    | Machine.StartupError
-    | Machine.StoppedError
+    Machine.Machine.EventOf<InputEvents>,
+    MachineRuntimeError<E, R>,
+    Output,
+    MachineStartError<InitialE, E, InitialR, R>
   >
-  <
-    RuntimeError,
-    const States extends Machine.Machine.StateSchemas,
-    const Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.Machine.TaggedSchema> = any,
-    const Input extends Schema.Top = typeof Schema.Void,
-    UnhandledStates extends Machine.Machine.StateIdentifier<States> = Machine.Machine.StateIdentifier<States>,
-    E = never,
-    R = never,
-    InitialE = never,
-    InitialR = never,
-    FinalStates extends Machine.Machine.StateIdentifier<States> = never,
-    Output = never
-  >(
-    runtime: Atom.AtomRuntime<
-      ExternalRequirements<
-        MachineRequirements<
-          InitialR,
-          R,
-          Machine.Machine.EventOf<Events>,
-          Machine.Machine.EmitOf<Emits>
-        >
-      >,
-      RuntimeError
-    >,
-    machine: Machine.Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits
-    >,
-    ...args: [...Machine.Machine.InputArgs<Input>]
-  ): MachineAtom<
-    Machine.Machine.Snapshot<States>,
-    Machine.Machine.EventOf<Events>,
-    | E
-    | Machine.ActionError<InitialR | R>
-    | Machine.InfiniteTransitionError
-    | Machine.MachineSchemaDecodeError
-    | Machine.StartupError
-    | Machine.StoppedError
-    | InitialE,
-    Output | undefined,
-    | InitialE
-    | Machine.ActionError<InitialR | R>
-    | Machine.MachineSchemaDecodeError
-    | Machine.StartupError
-    | Machine.StoppedError
-    | RuntimeError
-  >
-} = ((...args: ReadonlyArray<any>) => {
-  const runtimeOrMachine = args[0] as Atom.AtomRuntime<any, any> | Machine.Machine.Any
-  if (Machine.isMachine(runtimeOrMachine)) {
-    const machine = runtimeOrMachine
-    const input = args.slice(1) as []
-    const ref = Atom.make((get) => startMachineAtomEffect(get, machine, input))
-    return makeFromRefAtom(ref as any)
-  }
-
-  const runtime = runtimeOrMachine
-  const machine = args[1] as Machine.Machine.Any
-  const input = args.slice(2) as []
-  const ref = runtime.atom((get) => startMachineAtomEffect(get, machine, input))
+} = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
+  const ref = Atom.make((get) => startMachineAtomEffect(get, machine as any, args as []))
   return makeFromRefAtom(ref as any)
 }) as any
+
+const makeWithRuntime = (
+  runtime: Atom.AtomRuntime<any, any>,
+  machine: Machine.Machine.Any,
+  args: ReadonlyArray<unknown>
+): MachineAtom<any, any, any, any, any> => {
+  const ref = runtime.atom((get) => startMachineAtomEffect(get, machine as any, args as []))
+  return makeFromRefAtom(ref as any)
+}
+
+/**
+ * Creates an `AtomMachine` factory that owns a shared Effect runtime.
+ *
+ * Use this when an application runs many machines from the same service layer.
+ * The returned factory keeps runtime provisioning at the composition boundary,
+ * while every call to `make` still creates an independent machine bridge.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const bind = <Services, RuntimeError>(
+  runtime: Atom.AtomRuntime<Services, RuntimeError>
+): Bound<Services, RuntimeError> => ({
+  make: ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) =>
+    makeWithRuntime(runtime, machine, args)) as Bound<
+      Services,
+      RuntimeError
+    >["make"]
+})
