@@ -46,6 +46,9 @@ try {
     [join(root, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
     { cwd: consumer }
   )
+  if (process.env.TSGO_BIN !== undefined) {
+    run(process.env.TSGO_BIN, ["-p", join(consumer, "tsconfig.json")], { cwd: consumer })
+  }
   run(process.execPath, [join(consumer, "runtime.mjs")], { cwd: consumer })
 
   console.log("packed root, reactivity, and cluster entrypoints passed strict consumer validation")

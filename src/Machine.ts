@@ -48,6 +48,7 @@ export type TypeId = "~effect/Machine"
 export const TypeId: TypeId = "~effect/Machine"
 
 declare const MachineOutputStatesTypeId: unique symbol
+declare const MachineTypeId: unique symbol
 
 /**
  * Type identifier used for the synthetic event passed to startup lifecycle
@@ -124,6 +125,22 @@ export interface Machine<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
 > extends Pipeable {
   readonly [TypeId]: TypeId
+  /** @internal Stable type-level carrier for machine protocol extraction. */
+  readonly [MachineTypeId]: Machine.TypeCarrier<
+    States,
+    Events,
+    Input,
+    UnhandledStates,
+    E,
+    R,
+    InitialE,
+    InitialR,
+    FinalStates,
+    Output,
+    Emits,
+    OutputStates,
+    InputEvents
+  >
   /** @internal Prevents output implementation evidence from being widened. */
   readonly [MachineOutputStatesTypeId]: Readonly<Record<OutputStates, true>>
 
@@ -1143,31 +1160,16 @@ export declare namespace ChildMachine {
    * @category utility types
    * @since 4.0.0
    */
-  export type Ref<Child> = Child extends ChildMachine<string, infer M> ? M extends Machine<
-      infer States,
-      infer Events,
-      any,
-      any,
-      infer E,
-      infer R,
-      infer InitialE,
-      infer InitialR,
-      any,
-      infer Output,
-      any,
-      any,
-      infer InputEvents
-    > ? MachineRef<
-        Machine.Snapshot<States>,
-        Machine.EventOf<InputEvents>,
-        | E
-        | ActionError<R>
+  export type Ref<Child> = Child extends ChildMachine<string, infer M> ? MachineRef<
+        Machine.Snapshot<Machine.States<M>>,
+        Machine.InputEvent<M>,
+        | Machine.Error<M>
+        | ActionError<Machine.Services<M>>
         | InfiniteTransitionError
         | MachineSchemaDecodeError
         | StoppedError,
-        Output
+        Machine.Output<M>
       >
-    : never
     : never
 
   /**
@@ -1270,6 +1272,41 @@ export interface SpawnIdOptions extends SpawnOptions {
  */
 export declare namespace Machine {
   /**
+   * Stable type-level representation carried by every machine definition.
+   *
+   * @internal
+   */
+  export interface TypeCarrier<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Input extends Schema.Top,
+    UnhandledStates extends StateIdentifier<States>,
+    E,
+    R,
+    InitialE,
+    InitialR,
+    FinalStates extends StateIdentifier<States>,
+    Output,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    OutputStates extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema>
+  > {
+    readonly states: States
+    readonly events: Events
+    readonly input: Input
+    readonly unhandledStates: UnhandledStates
+    readonly error: E
+    readonly services: R
+    readonly initialError: InitialE
+    readonly initialServices: InitialR
+    readonly finalStates: FinalStates
+    readonly output: Output
+    readonly emits: Emits
+    readonly outputStates: OutputStates
+    readonly inputEvents: InputEvents
+  }
+
+  /**
    * Any schema-first machine.
    *
    * This is an erased structural view for APIs that store machines without
@@ -1283,6 +1320,8 @@ export declare namespace Machine {
    */
   export interface Any extends Pipeable {
     readonly [TypeId]: TypeId
+    /** @internal */
+    readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any, any>
     readonly states: StateSchemas
     readonly events: ReadonlyArray<TaggedSchema>
     readonly internalEvents: ReadonlyArray<TaggedSchema>
@@ -1301,14 +1340,116 @@ export declare namespace Machine {
   }
 
   /**
+   * Extracts the state schema tree carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type States<M extends Any> = M[typeof MachineTypeId]["states"]
+
+  /**
+   * Extracts the complete event schema tuple carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Events<M extends Any> = M[typeof MachineTypeId]["events"]
+
+  /**
+   * Extracts the input schema carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Input<M extends Any> = M[typeof MachineTypeId]["input"]
+
+  /**
+   * Extracts state paths that do not yet have handlers.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type UnhandledStates<M extends Any> = M[typeof MachineTypeId]["unhandledStates"]
+
+  /**
+   * Extracts the runtime error channel carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Error<M extends Any> = M[typeof MachineTypeId]["error"]
+
+  /**
+   * Extracts runtime service requirements carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Services<M extends Any> = M[typeof MachineTypeId]["services"]
+
+  /**
+   * Extracts the startup error channel carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type InitialError<M extends Any> = M[typeof MachineTypeId]["initialError"]
+
+  /**
+   * Extracts startup service requirements carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type InitialServices<M extends Any> = M[typeof MachineTypeId]["initialServices"]
+
+  /**
+   * Extracts final state paths carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type FinalStates<M extends Any> = M[typeof MachineTypeId]["finalStates"]
+
+  /**
+   * Extracts the terminal output channel carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Output<M extends Any> = M[typeof MachineTypeId]["output"]
+
+  /**
+   * Extracts the emitted event schema tuple carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Emits<M extends Any> = M[typeof MachineTypeId]["emits"]
+
+  /**
+   * Extracts state paths with implemented output handlers.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type OutputStates<M extends Any> = M[typeof MachineTypeId]["outputStates"]
+
+  /**
+   * Extracts the public input event schema tuple carried by a machine definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
+
+  /**
    * Extracts the complete event protocol handled inside a machine.
    *
    * @category utility types
    * @since 4.0.0
    */
-  export type Event<M extends Any> = M extends Machine<any, infer Events, any, any, any, any, any, any, any, any, any, any, any>
-    ? EventOf<Events>
-    : never
+  export type Event<M extends Any> = EventOf<Events<M>>
 
   /**
    * Extracts the event protocol accepted by public machine input boundaries.
@@ -1316,22 +1457,15 @@ export declare namespace Machine {
    * @category utility types
    * @since 4.0.0
    */
-  export type InputEvent<M extends Any> = M extends Machine<
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    any,
-    infer InputEvents
-  > ? EventOf<InputEvents>
-    : never
+  export type InputEvent<M extends Any> = EventOf<InputEvents<M>>
+
+  /**
+   * Extracts the event protocol emitted by a machine.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type Emit<M extends Any> = EmitOf<Emits<M>>
 
   /**
    * A schema whose decoded value contains a `_tag` discriminator.
@@ -2825,6 +2959,10 @@ export declare namespace Machine {
     }
   }
 
+  interface InvokeDefinitionValue {
+    readonly [InvokeTypeId]: unknown
+  }
+
   /**
    * State-bound configuration for invoked child processes.
    *
@@ -2842,11 +2980,11 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
   > =
-    | AnyInvokeConfig<any, any, any, any, any, any>
-    | ReadonlyArray<AnyInvokeConfig<any, any, any, any, any, any>>
+    | InvokeDefinitionValue
+    | ReadonlyArray<InvokeDefinitionValue>
     | ((context: InvokeContext<States, Events, Emits, StateId>) =>
-      | AnyInvokeConfig<any, any, any, any, any, any>
-      | ReadonlyArray<AnyInvokeConfig<any, any, any, any, any, any>>)
+      | InvokeDefinitionValue
+      | ReadonlyArray<InvokeDefinitionValue>)
 
   type OutputHandlerConfig<
     States extends StateSchemas,
