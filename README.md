@@ -197,6 +197,11 @@ Transition contexts expose three typed target builders:
 | `target.branch` | Anywhere under the source's active top-level root | Replaces the selected branch while keeping omitted active ancestor values and parallel regions |
 | `target.full`   | Any top-level root                                | Builds a complete active snapshot for the selected root                                        |
 
+When `target.local` or `target.branch` enters an inactive nested parallel
+state, its callback must select every region, just like `initial` and
+`target.full`. When that parallel state is already active, `target.branch`
+can still update one region directly and preserves the other active regions.
+
 The builder controls how the next configuration is assembled; it does not by
 itself decide which invokes restart. The runtime derives exit and entry paths
 from the previous and next active paths. Shared active ancestors remain entered,
