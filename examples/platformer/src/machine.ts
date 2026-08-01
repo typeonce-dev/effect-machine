@@ -151,18 +151,29 @@ export const CharacterMachine = Machine.make({
           Grounded: {
             on: {
               JumpPressed: ({ event, target }) =>
-                target.branch.Character.locomotion.Airborne(
-                  State.cases.Airborne.make({ originY: event.y }),
-                  (airborne) =>
-                    airborne
-                      .motion(State.cases.Motion.make({}), (motion) =>
-                        motion.Jumping(
-                          State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
-                        )
+                target.full.Character(State.cases.Character.make({}), (character) =>
+                  character
+                    .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
+                      locomotion.Airborne(State.cases.Airborne.make({ originY: event.y }), (airborne) =>
+                        airborne
+                          .motion(State.cases.Motion.make({}), (motion) =>
+                            motion.Jumping(
+                              State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
+                            )
+                          )
+                          .airJump(State.cases.AirJump.make({}), (airJump) =>
+                            airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))
+                          )
                       )
-                      .airJump(State.cases.AirJump.make({}), (airJump) =>
-                        airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))
-                      )
+                    )
+                    .facing(State.cases.Facing.make({}), (facing) => facing.Right(State.cases.Right.make({})))
+                    .contact(State.cases.WallContact.make({}), (contact) =>
+                      event.wall === -1
+                        ? contact.LeftWall(State.cases.LeftWall.make({}))
+                        : event.wall === 1
+                          ? contact.RightWall(State.cases.RightWall.make({}))
+                          : contact.NoWall(State.cases.NoWall.make({}))
+                    )
                 )
             },
             states: {
