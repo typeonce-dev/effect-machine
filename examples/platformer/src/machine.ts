@@ -1,0 +1,386 @@
+import { Effect, Schema } from "effect"
+import { Machine } from "@typeonce/effect-machine"
+
+// Domain schemas are shared by state payloads and the public physics protocol.
+export const Axis = Schema.Literals([-1, 0, 1])
+export type Axis = typeof Axis.Type
+const JumpKind = Schema.Literals(["Ground", "Double", "Wall"])
+
+const State = Schema.TaggedUnion({
+  Character: {},
+  Locomotion: {},
+  Grounded: {},
+  Standing: {},
+  Running: { startedAt: Schema.Number },
+  Ducking: { startedAt: Schema.Number },
+  Landing: { impact: Schema.Number, resumeAxis: Axis, landedAt: Schema.Number },
+  Airborne: { originY: Schema.Number },
+  Motion: {},
+  Jumping: { startedAt: Schema.Number, push: Axis, kind: JumpKind },
+  Falling: { apexY: Schema.Number },
+  Diving: { startedAt: Schema.Number },
+  AirJump: {},
+  AirJumpGroundLock: {},
+  AirJumpWallLock: {},
+  AirJumpReady: {},
+  AirJumpSpent: {},
+  WallContact: {},
+  NoWall: {},
+  LeftWall: {},
+  RightWall: {},
+  Facing: {},
+  Left: {},
+  Right: {}
+})
+
+// Inputs and physics facts are one runtime-decoded, statically typed protocol.
+export const Event = Schema.TaggedUnion({
+  Move: { axis: Axis, at: Schema.Number },
+  JumpPressed: { at: Schema.Number, y: Schema.Number, wall: Axis },
+  WallContact: { wall: Axis },
+  DownPressed: { at: Schema.Number },
+  DownReleased: { axis: Axis, at: Schema.Number },
+  ApexReached: { y: Schema.Number },
+  Landed: { impact: Schema.Number, axis: Axis, at: Schema.Number },
+  Reset: {}
+})
+
+const InternalEvent = Schema.TaggedUnion({
+  LandingSettled: {},
+  AirJumpUnlocked: {},
+  TryAirJump: { at: Schema.Number },
+  DoubleJump: { at: Schema.Number },
+  WallJump: { at: Schema.Number, push: Axis }
+})
+
+const awayFrom = (wall: Axis): Axis => (wall === -1 ? 1 : wall === 1 ? -1 : 0)
+
+export const CharacterStates = Machine.defineStates({
+  Character: {
+    schema: State.cases.Character,
+    type: "parallel",
+    states: {
+      locomotion: {
+        schema: State.cases.Locomotion,
+        initial: "Grounded",
+        states: {
+          Grounded: {
+            schema: State.cases.Grounded,
+            initial: "Standing",
+            states: {
+              Standing: State.cases.Standing,
+              Running: State.cases.Running,
+              Ducking: State.cases.Ducking,
+              Landing: State.cases.Landing
+            }
+          },
+          Airborne: {
+            schema: State.cases.Airborne,
+            type: "parallel",
+            states: {
+              motion: {
+                schema: State.cases.Motion,
+                initial: "Jumping",
+                states: {
+                  Jumping: State.cases.Jumping,
+                  Falling: State.cases.Falling,
+                  Diving: State.cases.Diving
+                }
+              },
+              airJump: {
+                schema: State.cases.AirJump,
+                initial: "AirJumpGroundLock",
+                states: {
+                  AirJumpGroundLock: State.cases.AirJumpGroundLock,
+                  AirJumpWallLock: State.cases.AirJumpWallLock,
+                  AirJumpReady: State.cases.AirJumpReady,
+                  AirJumpSpent: State.cases.AirJumpSpent
+                }
+              }
+            }
+          }
+        }
+      },
+      facing: {
+        schema: State.cases.Facing,
+        initial: "Right",
+        states: {
+          Left: State.cases.Left,
+          Right: State.cases.Right
+        }
+      },
+      contact: {
+        schema: State.cases.WallContact,
+        initial: "NoWall",
+        states: {
+          NoWall: State.cases.NoWall,
+          LeftWall: State.cases.LeftWall,
+          RightWall: State.cases.RightWall
+        }
+      }
+    }
+  }
+})
+
+const initialCharacter = () =>
+  CharacterStates.initial.Character(State.cases.Character.make({}), (character) =>
+    character
+      .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
+        locomotion.Grounded(State.cases.Grounded.make({}), (grounded) =>
+          grounded.Standing(State.cases.Standing.make({}))
+        )
+      )
+      .facing(State.cases.Facing.make({}), (facing) => facing.Right(State.cases.Right.make({})))
+      .contact(State.cases.WallContact.make({}), (contact) => contact.NoWall(State.cases.NoWall.make({})))
+  )
+
+export const CharacterMachine = Machine.make({
+  id: "PlatformerCharacter",
+  states: CharacterStates.states,
+  events: Object.values(Event.cases),
+  internalEvents: Object.values(InternalEvent.cases),
+  initial: initialCharacter
+}).handle({
+  Character: {
+    on: {
+      Reset: initialCharacter
+    },
+    states: {
+      locomotion: {
+        states: {
+          Grounded: {
+            on: {
+              JumpPressed: ({ event, target }) =>
+                target.branch.Character.locomotion.Airborne(
+                  State.cases.Airborne.make({ originY: event.y }),
+                  (airborne) =>
+                    airborne
+                      .motion(State.cases.Motion.make({}), (motion) =>
+                        motion.Jumping(
+                          State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
+                        )
+                      )
+                      .airJump(State.cases.AirJump.make({}), (airJump) =>
+                        airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))
+                      )
+                )
+            },
+            states: {
+              Standing: {
+                on: {
+                  Move: ({ event, target }) =>
+                    event.axis === 0
+                      ? undefined
+                      : target.local.Running(State.cases.Running.make({ startedAt: event.at })),
+                  DownPressed: ({ event, target }) =>
+                    target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                }
+              },
+              Running: {
+                on: {
+                  Move: ({ event, target }) =>
+                    event.axis === 0 ? target.local.Standing(State.cases.Standing.make({})) : undefined,
+                  DownPressed: ({ event, target }) =>
+                    target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                }
+              },
+              Ducking: {
+                on: {
+                  DownReleased: ({ event, target }) =>
+                    event.axis === 0
+                      ? target.local.Standing(State.cases.Standing.make({}))
+                      : target.local.Running(State.cases.Running.make({ startedAt: event.at }))
+                }
+              },
+              Landing: {
+                invoke: Machine.after("140 millis", InternalEvent.cases.LandingSettled.make({}), {
+                  id: "landing-settle"
+                }),
+                on: {
+                  Move: ({ event, state, target }) =>
+                    target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis })),
+                  LandingSettled: ({ state, target }) =>
+                    state.resumeAxis === 0
+                      ? target.local.Standing(State.cases.Standing.make({}))
+                      : target.local.Running(State.cases.Running.make({ startedAt: state.landedAt + 140 }))
+                }
+              }
+            }
+          },
+          Airborne: {
+            on: {
+              JumpPressed: Effect.fn(function* ({ event, runtime }) {
+                const machine = yield* runtime
+                const push = awayFrom(event.wall)
+                yield* machine.raise(
+                  push === 0
+                    ? InternalEvent.cases.TryAirJump.make({ at: event.at })
+                    : InternalEvent.cases.WallJump.make({ at: event.at, push })
+                )
+              }),
+              Landed: ({ event, target }) =>
+                target.branch.Character.locomotion.Grounded(State.cases.Grounded.make({}), (grounded) =>
+                  grounded.Landing(
+                    State.cases.Landing.make({
+                      impact: event.impact,
+                      resumeAxis: event.axis,
+                      landedAt: event.at
+                    })
+                  )
+                )
+            },
+            states: {
+              motion: {
+                on: {
+                  DoubleJump: ({ event, target }) =>
+                    target.local.Jumping(
+                      State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Double" })
+                    ),
+                  WallJump: ({ event, target }) =>
+                    target.local.Jumping(
+                      State.cases.Jumping.make({ startedAt: event.at, push: event.push, kind: "Wall" })
+                    )
+                },
+                states: {
+                  Jumping: {
+                    on: {
+                      ApexReached: ({ event, target }) =>
+                        target.local.Falling(State.cases.Falling.make({ apexY: event.y })),
+                      DownPressed: ({ event, target }) =>
+                        target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                    }
+                  },
+                  Falling: {
+                    on: {
+                      DownPressed: ({ event, target }) =>
+                        target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                    }
+                  },
+                  Diving: {}
+                }
+              },
+              airJump: {
+                on: {
+                  WallJump: {
+                    reenter: true,
+                    transition: ({ target }) =>
+                      target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
+                  }
+                },
+                states: {
+                  AirJumpGroundLock: {
+                    invoke: Machine.after("120 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                      id: "ground-air-jump-unlock"
+                    }),
+                    on: {
+                      AirJumpUnlocked: ({ target }) =>
+                        target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                    }
+                  },
+                  AirJumpWallLock: {
+                    invoke: Machine.after("240 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                      id: "wall-air-jump-unlock"
+                    }),
+                    on: {
+                      AirJumpUnlocked: ({ target }) =>
+                        target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                    }
+                  },
+                  AirJumpReady: {
+                    on: {
+                      TryAirJump: Effect.fn(function* ({ event, runtime, target }) {
+                        const machine = yield* runtime
+                        yield* machine.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
+                        return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
+                      })
+                    }
+                  },
+                  AirJumpSpent: {}
+                }
+              }
+            }
+          }
+        }
+      },
+      facing: {
+        states: {
+          Left: {
+            on: {
+              Move: ({ event, target }) =>
+                event.axis === 1 ? target.local.Right(State.cases.Right.make({})) : undefined,
+              WallJump: ({ event, target }) =>
+                event.push === 1 ? target.local.Right(State.cases.Right.make({})) : undefined
+            }
+          },
+          Right: {
+            on: {
+              Move: ({ event, target }) =>
+                event.axis === -1 ? target.local.Left(State.cases.Left.make({})) : undefined,
+              WallJump: ({ event, target }) =>
+                event.push === -1 ? target.local.Left(State.cases.Left.make({})) : undefined
+            }
+          }
+        }
+      },
+      contact: {
+        on: {
+          WallContact: ({ event, target }) =>
+            event.wall === -1
+              ? target.local.LeftWall(State.cases.LeftWall.make({}))
+              : event.wall === 1
+                ? target.local.RightWall(State.cases.RightWall.make({}))
+                : target.local.NoWall(State.cases.NoWall.make({}))
+        },
+        states: {
+          NoWall: {},
+          LeftWall: {},
+          RightWall: {}
+        }
+      }
+    }
+  }
+})
+
+export type CharacterSnapshot = Machine.Machine.Snapshot<typeof CharacterStates.states>
+export type CharacterEvent = Machine.Machine.InputEvent<typeof CharacterMachine>
+
+export const locomotionState = (snapshot: CharacterSnapshot) => {
+  const locomotion = snapshot.states.locomotion.state
+  return locomotion.path === "Character.locomotion.Grounded"
+    ? locomotion.state.value
+    : locomotion.states.motion.state.value
+}
+
+export type LocomotionMode = ReturnType<typeof locomotionState>["_tag"]
+
+export const locomotionMode = (snapshot: CharacterSnapshot): LocomotionMode => locomotionState(snapshot)._tag
+
+export const locomotionBranch = (snapshot: CharacterSnapshot) => snapshot.states.locomotion.state.value._tag
+
+export const airJumpMode = (snapshot: CharacterSnapshot) => {
+  const locomotion = snapshot.states.locomotion.state
+  return locomotion.path === "Character.locomotion.Airborne"
+    ? locomotion.states.airJump.state.value._tag
+    : undefined
+}
+
+export const wallContact = (snapshot: CharacterSnapshot) => {
+  return snapshot.states.contact.state.value._tag
+}
+
+export const facingDirection = (snapshot: CharacterSnapshot) => snapshot.states.facing.state.value._tag
+
+export const activeStateData = (snapshot: CharacterSnapshot) => {
+  const locomotion = snapshot.states.locomotion.state
+  const { _tag: _branch, ...branchData } = locomotion.value
+  if (locomotion.path === "Character.locomotion.Grounded") {
+    const { _tag: _leaf, ...leafData } = locomotion.state.value
+    return { ...branchData, ...leafData }
+  }
+  const { _tag: _motion, ...motionData } = locomotion.states.motion.state.value
+  return {
+    ...branchData,
+    ...motionData,
+    airJump: locomotion.states.airJump.state.value._tag
+  }
+}

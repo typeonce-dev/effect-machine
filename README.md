@@ -401,6 +401,12 @@ TypeScript consumer with `skipLibCheck: false`.
 
 ## Examples
 
+The [platformer statechart example](./examples/platformer) is a playable SVG
+demo centered on a schema-first character machine. It demonstrates nested
+compound locomotion, parallel airborne motion and air-jump regions, independent
+facing and wall-contact regions, typed protocol events, state-scoped timers,
+and state-driven SVG transforms.
+
 The [Pokémon statechart example](./examples/pokemon) is a standalone React and
 Vite project demonstrating compound and parallel states, state-scoped invokes,
 invoked child statecharts, typed emissions, and Atom reactivity. It uses a local

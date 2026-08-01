@@ -1,0 +1,84 @@
+import "./styles.css"
+import { Effect, Fiber, Stream } from "effect"
+import { Machine } from "@typeonce/effect-machine"
+import { GameAdapter } from "./game.ts"
+import {
+  activeStateData,
+  airJumpMode,
+  CharacterMachine,
+  facingDirection,
+  locomotionBranch,
+  locomotionMode,
+  wallContact,
+  type CharacterEvent,
+  type CharacterSnapshot
+} from "./machine.ts"
+
+const requiredElement = <ElementType extends Element>(selector: string) => {
+  const element = document.querySelector<ElementType>(selector)
+  if (element === null) throw new Error(`Missing element: ${selector}`)
+  return element
+}
+
+const modeLabel = requiredElement<HTMLElement>("#active-mode")
+const stateData = requiredElement<HTMLElement>("#state-data")
+const lastEvent = requiredElement<HTMLElement>("#last-event")
+
+const showEvent = (event: CharacterEvent) => {
+  const { _tag, ...payload } = event
+  const detail = Object.keys(payload).length === 0 ? "" : ` ${JSON.stringify(payload)}`
+  lastEvent.textContent = `${_tag}${detail}`
+}
+
+let deliver: ((event: CharacterEvent) => void) | undefined
+const pending: Array<CharacterEvent> = []
+const send = (event: CharacterEvent) => {
+  showEvent(event)
+  deliver === undefined ? pending.push(event) : deliver(event)
+}
+
+const game = new GameAdapter(
+  send,
+  requiredElement<SVGGElement>("#player"),
+  requiredElement<SVGGElement>("#player-pose")
+)
+
+const publish = (next: CharacterSnapshot) => {
+  game.setSnapshot(next)
+  const mode = locomotionMode(next)
+  const facing = facingDirection(next)
+  const contact = wallContact(next)
+  const airJump = airJumpMode(next)
+  modeLabel.textContent = [mode, airJump, contact, facing].filter(Boolean).join(" · ")
+  stateData.textContent = JSON.stringify(activeStateData(next))
+
+  const active = new Set<string>([mode, facing, contact, locomotionBranch(next)])
+  if (airJump !== undefined) active.add(airJump)
+  document.querySelectorAll<HTMLElement>("[data-node]").forEach((node) => {
+    node.classList.toggle("is-active", active.has(node.dataset.node ?? ""))
+  })
+}
+
+const program = Effect.gen(function* () {
+  const actor = yield* Machine.start(CharacterMachine)
+  deliver = (event) => Effect.runFork(actor.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void)))
+  publish(yield* actor.state)
+  for (const event of pending.splice(0)) yield* actor.send(event)
+  yield* Stream.runForEach(actor.changes, ({ state }) => Effect.sync(() => publish(state)))
+})
+
+const fiber = Effect.runFork(program)
+
+let previous = performance.now()
+
+const frame = (now: number) => {
+  game.step((now - previous) / 1_000)
+  previous = now
+  requestAnimationFrame(frame)
+}
+
+requestAnimationFrame(frame)
+window.addEventListener("beforeunload", () => {
+  game.destroy()
+  Effect.runFork(Fiber.interrupt(fiber))
+})
