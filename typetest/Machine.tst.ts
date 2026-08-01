@@ -1730,6 +1730,165 @@ describe("Machine", () => {
     )
   })
 
+  it("state builders omit empty constructor inputs across every target surface", () => {
+    const State = Schema.TaggedUnion({
+      Flow: {},
+      Idle: {},
+      Running: {},
+      Nested: {},
+      NestedIdle: {},
+      Done: {},
+      Required: { value: Schema.String },
+      Parallel: {},
+      Left: {},
+      LeftIdle: {},
+      Right: {},
+      RightIdle: {}
+    })
+    class DefaultOnly extends Schema.TaggedClass<DefaultOnly>("DefaultOnly")("DefaultOnly", {
+      label: Schema.String.pipe(
+        Schema.optionalKey,
+        Schema.withConstructorDefault(Effect.succeed("default"))
+      )
+    }) {}
+    const States = Machine.defineStates({
+      Flow: {
+        schema: State.cases.Flow,
+        initial: "Idle",
+        states: {
+          Idle: State.cases.Idle,
+          Running: State.cases.Running,
+          Nested: {
+            schema: State.cases.Nested,
+            initial: "NestedIdle",
+            states: {
+              NestedIdle: State.cases.NestedIdle
+            }
+          },
+          Done: {
+            schema: State.cases.Done,
+            type: "final"
+          }
+        }
+      },
+      Required: State.cases.Required,
+      DefaultOnly
+    })
+    const ParallelStates = Machine.defineStates({
+      Parallel: {
+        schema: State.cases.Parallel,
+        type: "parallel",
+        states: {
+          left: {
+            schema: State.cases.Left,
+            initial: "LeftIdle",
+            states: {
+              LeftIdle: State.cases.LeftIdle
+            }
+          },
+          right: {
+            schema: State.cases.Right,
+            initial: "RightIdle",
+            states: {
+              RightIdle: State.cases.RightIdle
+            }
+          }
+        }
+      }
+    })
+    type Context = Machine.Machine.HandlerContext<
+      typeof States.states,
+      readonly [typeof SignIn],
+      [],
+      "Flow.Idle",
+      "SignIn",
+      never,
+      never
+    >
+    type ParallelContext = Machine.Machine.HandlerContext<
+      typeof ParallelStates.states,
+      readonly [typeof SignIn],
+      [],
+      "Parallel.left.LeftIdle",
+      "SignIn",
+      never,
+      never
+    >
+    const context = null as unknown as Context
+    const parallelContext = null as unknown as ParallelContext
+
+    const initial = States.initial.Flow.from((flow) => flow.Idle.from())
+    const defaulted = States.initial.DefaultOnly.from()
+    const local = context.target.local.Running.from()
+    const localWith = context.target.local.with.from((flow) => flow.Running.from())
+    const branch = context.target.branch.Flow.Nested.from((nested) => nested.NestedIdle.from())
+    const full = context.target.full.Flow.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from()))
+    const final = context.target.local.Done.from()
+    const parallel = ParallelStates.initial.Parallel.from((root) =>
+      root
+        .left.from((left) => left.LeftIdle.from())
+        .right.from((right) => right.RightIdle.from())
+    )
+    const fullParallel = parallelContext.target.full.Parallel.from((root) =>
+      root
+        .left.from((left) => left.LeftIdle.from())
+        .right.from((right) => right.RightIdle.from())
+    )
+
+    expect(initial).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Snapshot<typeof States.states>>
+    >()
+    expect(defaulted).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Snapshot<typeof States.states>>
+    >()
+    expect(local).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Target<typeof States.states, "Flow.Running">>
+    >()
+    expect(localWith).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Target<typeof States.states, "Flow.Running">>
+    >()
+    expect(branch).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Target<typeof States.states, "Flow.Nested.NestedIdle">>
+    >()
+    expect(full).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Flow">>
+    >()
+    expect(final).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.Target<typeof States.states, "Flow.Done">>
+    >()
+    expect(parallel).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.SnapshotByIdentifier<typeof ParallelStates.states, "Parallel">>
+    >()
+    expect(fullParallel).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<Machine.Machine.SnapshotByIdentifier<typeof ParallelStates.states, "Parallel">>
+    >()
+
+    expect(States.initial.Required.from).type.not.toBeCallableWith()
+    expect(context.target.full.Required.from).type.not.toBeCallableWith()
+    expect(States.initial.Flow.from).type.not.toBeCallableWith()
+    expect(ParallelStates.initial.Parallel.from).type.not.toBeCallableWith()
+
+    const requiredContext = null as unknown as SignedOutContext
+    expect(UpStates.initial.up.from).type.not.toBeCallableWith(
+      (up: ChildBuilder<typeof UpStates.initial.up>) =>
+        up
+          .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
+          .sync.from({ enabled: true }, (sync) => sync.idle.from())
+    )
+    expect(requiredContext.target.full.up.from).type.not.toBeCallableWith(
+      (up: ChildBuilder<typeof requiredContext.target.full.up>) =>
+        up
+          .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
+          .sync.from({ enabled: true }, (sync) => sync.idle.from())
+    )
+    expect(requiredContext.target.local.with.from).type.not.toBeCallableWith(
+      (auth: ChildBuilder<typeof requiredContext.target.local.with>) => auth.signedOut.from()
+    )
+    expect(requiredContext.target.branch.up.from).type.not.toBeCallableWith(
+      (up: ChildBuilder<typeof requiredContext.target.branch.up>) => up.auth.signedOut.from()
+    )
+  })
+
   it("from preserves parallel-region exhaustiveness", () => {
     const context = null as unknown as NestedIdleContext
     const activeContext = null as unknown as NestedActiveContext
@@ -1738,12 +1897,15 @@ describe("Machine", () => {
       { userId: "guest" },
       (auth) => auth.signedOut.from({})
     )
-    const target = context.target.local.work.from(
-      {},
-      (work) =>
-        work
-          .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
-          .sync.from({ enabled: true }, (sync) => sync.idle.from({}))
+    const target = context.target.local.work.from((work) =>
+      work
+        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
+        .sync.from({ enabled: true }, (sync) => sync.idle.from({}))
+    )
+    const branch = context.target.branch.root.work.from((work) =>
+      work
+        .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from())
+        .sync.from({ enabled: true }, (sync) => sync.idle.from())
     )
     const partial = activeContext.target.branch.root.work.sync.from(
       { enabled: true },
@@ -1758,6 +1920,11 @@ describe("Machine", () => {
       >
     >()
     expect(target).type.not.toHaveProperty("path")
+    expect(branch).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.Target<typeof NestedParallelStates.states, "root.work">
+      >
+    >()
     expect(partial).type.toBeAssignableTo<
       Machine.Machine.StateConstruction<
         Machine.Machine.Target<typeof NestedParallelStates.states, "root.work.sync.syncing">

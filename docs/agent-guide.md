@@ -246,6 +246,19 @@ boundary rather than throwing synchronously. This applies recursively to
 initial, full, local, branch, compound, parallel, final, and `local.with`
 builders.
 
+If `{}` satisfies the schema's constructor input, omit it:
+
+```ts
+target.local.Idle.from()
+target.local.Flow.from((flow) => flow.Idle.from())
+```
+
+This shorthand also applies to schemas whose constructor fields are all
+optional or defaulted. It does not make required fields optional. Compound and
+parallel builders still require a callback selecting their active child or
+every active region. Omitted input is normalized to `{}` and still passes
+through `schema.makeEffect`, including refinements.
+
 ## Reading state and parents
 
 `Machine.defineStates` returns typed helpers:

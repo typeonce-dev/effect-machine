@@ -55,11 +55,11 @@ const Counter = Machine.make({
   id: "Counter",
   states: States.states,
   events: [Event.cases.Start],
-  initial: () => States.initial.Idle.from({})
+  initial: () => States.initial.Idle.from()
 }).handle({
   Idle: {
     on: {
-      Start: ({ target }) => target.full.Running.from({})
+      Start: ({ target }) => target.full.Running.from()
     }
   },
   Running: {}
@@ -85,6 +85,16 @@ defaults and tagged-class identity are preserved and failed refinements become
 form is available on initial, local, branch, full, compound, parallel, and
 final builders. A `.from` builder result is therefore a machine construction
 instruction; it becomes a validated public snapshot when planning succeeds.
+
+When `{}` is valid constructor input, omit it. Required state fields remain
+required, while compound and parallel states still require their active-child
+callback:
+
+```ts
+States.initial.Idle.from()
+States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
+States.initial.Flow.from((flow) => flow.Idle.from())
+```
 
 Tagged classes are equally valid when cases need class methods or nominal
 identity:
@@ -112,7 +122,7 @@ const machine = Machine.make({
   states: States.states,
   events: [Command.cases.Save],
   internalEvents: [InternalEvent.cases.Saved, InternalEvent.cases.SaveFailed],
-  initial: () => States.initial.Idle(State.cases.Idle.make({}))
+  initial: () => States.initial.Idle.from()
 })
 ```
 
@@ -174,7 +184,7 @@ Handlers implement behavior and output computation without repeating it:
 const machine = Machine.make({
   states: States.states,
   events: [],
-  initial: () => States.initial.Form.from({ draft: "" }, (form) => form.Editing.from({}))
+  initial: () => States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
 }).handle({
   Form: {
     states: {
@@ -246,7 +256,7 @@ effects in `Machine.action`; actions are staged during planning and run by the
 managed runtime before it publishes the next state.
 
 ```ts
-Save: ({ target }) => Machine.action(writeAuditLog, target.local.Saving(State.cases.Saving.make({})))
+Save: ({ target }) => Machine.action(writeAuditLog, target.local.Saving.from())
 ```
 
 The one-argument form returns `void` after staging. The two-argument form
