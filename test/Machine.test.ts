@@ -156,6 +156,14 @@ describe("Machine", () => {
     requestId: Schema.NonEmptyString
   }) {}
 
+  class DefaultedIdle extends Schema.TaggedClass<DefaultedIdle>("DefaultedIdle")("DefaultedIdle", {
+    id: Schema.String,
+    label: Schema.String.pipe(
+      Schema.optionalKey,
+      Schema.withConstructorDefault(Effect.succeed("default-label"))
+    )
+  }) {}
+
   class Success extends Schema.TaggedClass<Success>("Success")("Success", {
     requestId: Schema.String
   }) {}
@@ -544,6 +552,290 @@ describe("Machine", () => {
         }
       })
     }))
+
+  describe("state builder from", () => {
+    it.effect("constructs TaggedClass initial state and applies constructor defaults", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({ idle: DefaultedIdle })
+        const machine = Machine.make({
+          id: "from-default",
+          states: states.states,
+          events: [],
+          initial: () => states.initial.idle.from({ id: "idle-1" })
+        })
+
+        const planned = yield* Machine.planInitial(machine)
+
+        assert.instanceOf(planned.state.value, DefaultedIdle)
+        assert.deepStrictEqual(planned.state.value, new DefaultedIdle({ id: "idle-1", label: "default-label" }))
+      }))
+
+    it.effect("constructs TaggedUnion states without requiring discriminator fields", () =>
+      Effect.gen(function*() {
+        const State = Schema.TaggedUnion({
+          Idle: {},
+          Done: { requestId: Schema.String }
+        })
+        const Event = Schema.TaggedUnion({
+          Submit: { requestId: Schema.String }
+        })
+        const states = Machine.defineStates({
+          Idle: State.cases.Idle,
+          Done: {
+            schema: State.cases.Done,
+            type: "final"
+          }
+        })
+        const machine = Machine.make({
+          states: states.states,
+          events: [Event],
+          initial: () => states.initial.Idle.from({})
+        }).handle({
+          Idle: {
+            on: {
+              Submit: ({ event, target }) => target.full.Done.from({ requestId: event.requestId })
+            }
+          },
+          Done: {}
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const planned = yield* Machine.plan(
+          machine,
+          initial.state,
+          Event.cases.Submit.make({ requestId: "request-1" })
+        )
+
+        assert.deepStrictEqual(initial.state.value, State.cases.Idle.make({}))
+        assert.deepStrictEqual(planned.next.value, State.cases.Done.make({ requestId: "request-1" }))
+        assert.isTrue(planned.done)
+      }))
+
+    it.effect("fails invalid refinement input through MachineSchemaDecodeError without throwing in the builder", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({ NonEmptyIdle })
+        const invalid = states.initial.NonEmptyIdle.from({ userId: "" })
+        const machine = Machine.make({
+          id: "from-refinement",
+          states: states.states,
+          events: [],
+          initial: () => invalid
+        })
+
+        const error = yield* Effect.flip(Machine.planInitial(machine))
+
+        assertMachineSchemaDecodeError(error, "state", { state: "NonEmptyIdle" })
+        assert.strictEqual((error as Machine.MachineSchemaDecodeError).machineId, "from-refinement")
+      }))
+
+    it.effect("fails invalid transition construction in the typed machine error channel", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({ NonEmptyIdle, NonEmptyLoading })
+        const machine = Machine.make({
+          id: "from-transition-refinement",
+          states: states.states,
+          events: [NonEmptySubmit],
+          initial: () => states.initial.NonEmptyIdle.from({ userId: "user-1" })
+        }).handle({
+          NonEmptyIdle: {
+            on: {
+              NonEmptySubmit: ({ target }) => target.full.NonEmptyLoading.from({ requestId: "" })
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const error = yield* Effect.flip(
+          Machine.plan(
+            machine,
+            initial.state,
+            new NonEmptySubmit({ value: "request-1" })
+          )
+        )
+
+        assertMachineSchemaDecodeError(error, "state", { state: "NonEmptyLoading" })
+        assert.strictEqual((error as Machine.MachineSchemaDecodeError).machineId, "from-transition-refinement")
+      }))
+
+    it.effect("constructs complete compound and parallel targets from schema input", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({
+          idle: Idle,
+          fulfillment: {
+            schema: Fulfillment,
+            type: "parallel",
+            states: {
+              inventory: {
+                schema: Inventory,
+                initial: "checking",
+                states: {
+                  checking: CheckingInventory,
+                  reserved: InventoryReserved
+                }
+              },
+              shipping: {
+                schema: Shipping,
+                initial: "quoting",
+                states: {
+                  quoting: QuotingShipping,
+                  quoted: ShippingQuoted
+                }
+              }
+            }
+          }
+        })
+        const machine = Machine.make({
+          states: states.states,
+          events: [Submit],
+          initial: () => states.initial.idle.from({ userId: "user-1" })
+        }).handle({
+          idle: {
+            on: {
+              Submit: ({ event, target }) =>
+                target.full.fulfillment.from(
+                  { id: event.value },
+                  (fulfillment) =>
+                    fulfillment
+                      .inventory.from(
+                        { warehouse: "warehouse-1" },
+                        (inventory) => inventory.reserved.from({ reservationId: event.value })
+                      )
+                      .shipping.from(
+                        { address: "Main Street" },
+                        (shipping) => shipping.quoted.from({ quoteId: event.value })
+                      )
+                )
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const planned = yield* Machine.plan(machine, initial.state, new Submit({ value: "order-1" }))
+
+        assertParallelStateSnapshot(planned.next as any, "fulfillment", new Fulfillment({ id: "order-1" }), {
+          inventory: {
+            path: "fulfillment.inventory",
+            value: new Inventory({ warehouse: "warehouse-1" }),
+            state: {
+              path: "fulfillment.inventory.reserved",
+              value: new InventoryReserved({ reservationId: "order-1" })
+            }
+          },
+          shipping: {
+            path: "fulfillment.shipping",
+            value: new Shipping({ address: "Main Street" }),
+            state: {
+              path: "fulfillment.shipping.quoted",
+              value: new ShippingQuoted({ quoteId: "order-1" })
+            }
+          }
+        })
+      }))
+
+    it.effect("constructs local parent replacement and leaf targets from schema input", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({
+          payment: {
+            schema: Payment,
+            initial: "entering",
+            states: {
+              entering: EnteringPayment,
+              authorized: AuthorizedPayment
+            }
+          }
+        })
+        const machine = Machine.make({
+          states: states.states,
+          events: [Submit],
+          initial: () =>
+            states.initial.payment.from(
+              { id: "payment-1" },
+              (payment) => payment.entering.from({ amount: 1 })
+            )
+        }).handle({
+          payment: {
+            states: {
+              entering: {
+                on: {
+                  Submit: ({ event, target }) =>
+                    target.local.with.from(
+                      { id: "payment-2" },
+                      (payment) => payment.authorized.from({ code: event.value })
+                    )
+                }
+              }
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const planned = yield* Machine.plan(machine, initial.state, new Submit({ value: "auth-1" }))
+
+        assertCompoundStateSnapshot(planned.next as any, "payment", new Payment({ id: "payment-2" }), {
+          path: "payment.authorized",
+          value: new AuthorizedPayment({ code: "auth-1" })
+        })
+      }))
+
+    it.effect("constructs cross-branch ancestor and leaf values from schema input", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({
+          workflow: {
+            schema: Payment,
+            initial: "idle",
+            states: {
+              idle: Idle,
+              checkout: {
+                schema: Fulfillment,
+                initial: "quoted",
+                states: {
+                  quoted: ShippingQuoted
+                }
+              }
+            }
+          }
+        })
+        const machine = Machine.make({
+          states: states.states,
+          events: [Submit],
+          initial: () =>
+            states.initial.workflow.from(
+              { id: "workflow-1" },
+              (workflow) => workflow.idle.from({ userId: "user-1" })
+            )
+        }).handle({
+          workflow: {
+            states: {
+              idle: {
+                on: {
+                  Submit: ({ event, target }) =>
+                    target.branch.workflow.from(
+                      { id: "workflow-2" },
+                      (workflow) =>
+                        workflow.checkout.from(
+                          { id: "checkout-1" },
+                          (checkout) => checkout.quoted.from({ quoteId: event.value })
+                        )
+                    )
+                }
+              }
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const planned = yield* Machine.plan(machine, initial.state, new Submit({ value: "quote-1" }))
+
+        assertCompoundStateSnapshot(planned.next as any, "workflow", new Payment({ id: "workflow-2" }), {
+          path: "workflow.checkout",
+          value: new Fulfillment({ id: "checkout-1" }),
+          state: {
+            path: "workflow.checkout.quoted",
+            value: new ShippingQuoted({ quoteId: "quote-1" })
+          }
+        })
+      }))
+  })
 
   describe("runtime schema contracts", () => {
     it.effect("decodes input before initial state construction", () =>

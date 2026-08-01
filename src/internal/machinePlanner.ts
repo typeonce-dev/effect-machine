@@ -969,7 +969,7 @@ export const planInitial: <
         ExcludeCompatibleRuntime<InitialR, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
       >)
       : result
-    const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
+    const configuration = yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
     validateInitialConfiguration(machine, configuration)
     const actions = yield* deferredActions.read
     const raisedEvents = yield* deferredRaisedEvents.read

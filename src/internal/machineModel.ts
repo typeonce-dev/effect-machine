@@ -14,6 +14,13 @@ import { MachineSchemaDecodeError, MachineSchemaEncodeError } from "./machineErr
 
 export const TargetTypeId = "~effect/Machine/Target"
 export const TargetSnapshotTypeId: unique symbol = Symbol("effect/Machine/TargetSnapshot")
+export const StateInputTypeId: unique symbol = Symbol("effect/Machine/StateInput")
+export const StateConstructionTypeId: unique symbol = Symbol("effect/Machine/StateConstruction")
+
+interface StateInput {
+  readonly [StateInputTypeId]: typeof StateInputTypeId
+  readonly input: unknown
+}
 
 export const getStateNodeDefinition = (
   path: string,
@@ -143,6 +150,25 @@ export const makeTarget = <
   }) as Machine.Target<States, StateId>
 
 export const isTarget = (u: unknown): u is Machine.Target<any, any> => hasProperty(u, TargetTypeId)
+
+export const makeStateInput = (input: unknown): StateInput => ({
+  [StateInputTypeId]: StateInputTypeId,
+  input
+})
+
+const isStateInput = (u: unknown): u is StateInput => hasProperty(u, StateInputTypeId)
+
+export const markStateConstruction = <A>(value: A): A => {
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    Object.defineProperty(value, StateConstructionTypeId, {
+      value: StateConstructionTypeId,
+      enumerable: false
+    })
+  }
+  return value
+}
+
+export const isStateConstruction = (u: unknown): boolean => hasProperty(u, StateConstructionTypeId)
 
 export const isSnapshot = (u: unknown): u is Machine.AtomicSnapshot<string, unknown> =>
   hasProperty(u, "path") && hasProperty(u, "value")
@@ -289,7 +315,18 @@ export const decodeStateValue = (
   node: Machine.StateNode,
   value: unknown
 ): Effect.Effect<unknown, MachineSchemaDecodeError> =>
-  decodeBoundary(machine, node.schema, value, { boundary: "state", state: node.path })
+  isStateInput(value)
+    ? node.schema.makeEffect(value.input).pipe(
+      Effect.mapError((cause) =>
+        new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "state",
+          state: node.path,
+          cause
+        })
+      )
+    )
+    : decodeBoundary(machine, node.schema, value, { boundary: "state", state: node.path })
 
 export const decodeOutputValue = (
   machine: Machine.Any,

@@ -55,11 +55,11 @@ const Counter = Machine.make({
   id: "Counter",
   states: States.states,
   events: [Event.cases.Start],
-  initial: () => States.initial.Idle(State.cases.Idle.make({}))
+  initial: () => States.initial.Idle.from({})
 }).handle({
   Idle: {
     on: {
-      Start: ({ target }) => target.full.Running(State.cases.Running.make({}))
+      Start: ({ target }) => target.full.Running.from({})
     }
   },
   Running: {}
@@ -68,6 +68,23 @@ const Counter = Machine.make({
 
 `initial` is always a function. For a machine with an input schema, the
 initializer receives the decoded input.
+
+Builder methods accept an already constructed state value directly, or expose
+`.from` for constructing one safely from the state schema's make input:
+
+```ts
+target.local.Running(decodedRunning)
+target.local.Running.from({ startedAt: event.at })
+```
+
+Use the direct call when a decoded value already exists. Use `.from` when
+entering a state from fields. Construction runs through the schema's
+`makeEffect` while the machine plans the configuration, so constructor
+defaults and tagged-class identity are preserved and failed refinements become
+`MachineSchemaDecodeError` failures instead of synchronous throws. The same
+form is available on initial, local, branch, full, compound, parallel, and
+final builders. A `.from` builder result is therefore a machine construction
+instruction; it becomes a validated public snapshot when planning succeeds.
 
 Tagged classes are equally valid when cases need class methods or nominal
 identity:
@@ -157,8 +174,7 @@ Handlers implement behavior and output computation without repeating it:
 const machine = Machine.make({
   states: States.states,
   events: [],
-  initial: () =>
-    States.initial.Form(State.cases.Form.make({ draft: "" }), (form) => form.Editing(State.cases.Editing.make({})))
+  initial: () => States.initial.Form.from({ draft: "" }, (form) => form.Editing.from({}))
 }).handle({
   Form: {
     states: {
