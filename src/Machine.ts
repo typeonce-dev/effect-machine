@@ -536,19 +536,42 @@ type SnapshotBuilderComplete<Regions, Constructed extends boolean = false> = {
   readonly [SnapshotBuilderConstructionTypeId]: Constructed
 }
 
+type FromCallable<Arguments extends ReadonlyArray<unknown>, Result> = Arguments extends
+  readonly [infer Input, ...infer Rest extends ReadonlyArray<unknown>] ? {} extends Input ? {
+      (...args: Rest): Result
+      (...args: Arguments): Result
+    }
+  : (...args: Arguments) => Result
+  : (...args: Arguments) => Result
+
 type FromMethod<Arguments extends ReadonlyArray<unknown>, Result> = {
   /**
    * Constructs the selected state from its schema make input while the
-   * machine plans the resulting configuration.
+   * machine plans the resulting configuration. The input may be omitted when
+   * the schema accepts an empty constructor object.
    *
    * @since 4.0.0
    */
-  readonly from: (...args: Arguments) => Machine.StateConstruction<Result>
+  readonly from: FromCallable<Arguments, Machine.StateConstruction<Result>>
 }
 
 type ConstructionResult<Result> = Result | Machine.StateConstruction<Result>
 
 type UnwrapConstruction<Result> = Result extends Machine.StateConstruction<infer Value> ? Value : Result
+
+type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input ? {
+    <Selected extends ConstructionResult<Result>>(
+      state: (builder: Builder) => Selected
+    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
+    <Selected extends ConstructionResult<Result>>(
+      input: Input,
+      state: (builder: Builder) => Selected
+    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
+  }
+  : <Selected extends ConstructionResult<Result>>(
+    input: Input,
+    state: (builder: Builder) => Selected
+  ) => Machine.StateConstruction<UnwrapConstruction<Selected>>
 
 type InitialSnapshotBuilderWithPrefix<
   States extends Machine.StateSchemas,
@@ -665,14 +688,15 @@ type InitialParallelBuilder<
         Constructed
       >)
       & {
-        readonly from: (
-          ...args: InitialSnapshotFromArguments<States, Key, Prefix>
-        ) => InitialParallelBuilder<
-          States,
-          Prefix,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: InitialSnapshotResult<States, Key, Prefix> },
-          true
+        readonly from: FromCallable<
+          InitialSnapshotFromArguments<States, Key, Prefix>,
+          InitialParallelBuilder<
+            States,
+            Prefix,
+            Exclude<Remaining, Key>,
+            Regions & { readonly [Region in Key]: InitialSnapshotResult<States, Key, Prefix> },
+            true
+          >
         >
       }
   }
@@ -766,14 +790,15 @@ type FullParallelBuilder<
         Constructed
       >)
       & {
-        readonly from: (
-          ...args: FullSnapshotFromArguments<States, Key, Prefix>
-        ) => FullParallelBuilder<
-          States,
-          Prefix,
-          Exclude<Remaining, Key>,
-          Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-          true
+        readonly from: FromCallable<
+          FullSnapshotFromArguments<States, Key, Prefix>,
+          FullParallelBuilder<
+            States,
+            Prefix,
+            Exclude<Remaining, Key>,
+            Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
+            true
+          >
         >
       }
   }
@@ -852,12 +877,11 @@ type LocalTargetMethod<
           ) => Result
         ) => Result)
         & {
-          readonly from: <Result extends ConstructionResult<LocalTargetResultWithPrefix<AllStates, Children, Path>>>(
-            input: Machine.NodeSchema<Node>["~type.make.in"],
-            state: (
-              builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-            ) => Result
-          ) => Machine.StateConstruction<UnwrapConstruction<Result>>
+          readonly from: ConstructionSelectorFromCallable<
+            Machine.NodeSchema<Node>["~type.make.in"],
+            LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+            LocalTargetResultWithPrefix<AllStates, Children, Path>
+          >
         }
     :
       & ((
@@ -883,12 +907,11 @@ type LocalTargetMethod<
         ) => Result
       ) => Result)
       & {
-        readonly from: <Result extends ConstructionResult<LocalTargetResultWithPrefix<AllStates, Children, Path>>>(
-          input: Machine.NodeSchema<Node>["~type.make.in"],
-          state: (
-            builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-          ) => Result
-        ) => Machine.StateConstruction<UnwrapConstruction<Result>>
+        readonly from: ConstructionSelectorFromCallable<
+          Machine.NodeSchema<Node>["~type.make.in"],
+          LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+          LocalTargetResultWithPrefix<AllStates, Children, Path>
+        >
       }
   :
     & ((value: Machine.NodeSchema<Node>["Type"]) => Machine.Target<
@@ -922,12 +945,11 @@ type LocalTargetBuilderForScope<
           ) => Result
         ) => Result)
         & {
-          readonly from: <Result extends ConstructionResult<LocalTargetResultWithPrefix<States, Children, Scope>>>(
-            input: Machine.SchemaByIdentifier<States, Scope>["~type.make.in"],
-            state: (
-              builder: LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
-            ) => Result
-          ) => Machine.StateConstruction<UnwrapConstruction<Result>>
+          readonly from: ConstructionSelectorFromCallable<
+            Machine.SchemaByIdentifier<States, Scope>["~type.make.in"],
+            LocalTargetBuilderWithPrefix<States, Children, Scope, Source>,
+            LocalTargetResultWithPrefix<States, Children, Scope>
+          >
         }
     }
   : {}
@@ -978,12 +1000,11 @@ type BranchTargetMethod<
           ) => Result
         ) => Result)
         & {
-          readonly from: <Result extends ConstructionResult<BranchTargetResultWithPrefix<AllStates, Children, Path>>>(
-            input: Machine.NodeSchema<Node>["~type.make.in"],
-            state: (
-              builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-            ) => Result
-          ) => Machine.StateConstruction<UnwrapConstruction<Result>>
+          readonly from: ConstructionSelectorFromCallable<
+            Machine.NodeSchema<Node>["~type.make.in"],
+            BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+            BranchTargetResultWithPrefix<AllStates, Children, Path>
+          >
         }
         & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
     :
@@ -1010,12 +1031,11 @@ type BranchTargetMethod<
         ) => Result
       ) => Result)
       & {
-        readonly from: <Result extends ConstructionResult<BranchTargetResultWithPrefix<AllStates, Children, Path>>>(
-          input: Machine.NodeSchema<Node>["~type.make.in"],
-          state: (
-            builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-          ) => Result
-        ) => Machine.StateConstruction<UnwrapConstruction<Result>>
+        readonly from: ConstructionSelectorFromCallable<
+          Machine.NodeSchema<Node>["~type.make.in"],
+          BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+          BranchTargetResultWithPrefix<AllStates, Children, Path>
+        >
       }
       & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
   :
@@ -4058,15 +4078,22 @@ type SnapshotBuilderOptions = {
   readonly prefix: string
 }
 
+type FromMethodKind = "leaf" | "nested"
+
 const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) => unknown>(
-  method: Method
-): Method & { readonly from: (input: unknown, ...args: ReadonlyArray<any>) => unknown } => {
+  method: Method,
+  kind: FromMethodKind
+): Method & { readonly from: (...args: ReadonlyArray<any>) => unknown } => {
   Object.defineProperty(method, "from", {
-    value: (input: unknown, ...args: ReadonlyArray<any>) =>
-      Model.markStateConstruction(method(Model.makeStateInput(input), ...args)),
+    value: (...args: ReadonlyArray<any>) => {
+      const omitted = args.length === 0 || (kind === "nested" && args.length === 1 && typeof args[0] === "function")
+      const input = omitted ? {} : args[0]
+      const rest = omitted ? args : args.slice(1)
+      return Model.markStateConstruction(method(Model.makeStateInput(input), ...rest))
+    },
     enumerable: false
   })
-  return method as Method & { readonly from: (input: unknown, ...args: ReadonlyArray<any>) => unknown }
+  return method as Method & { readonly from: (...args: ReadonlyArray<any>) => unknown }
 }
 
 const makeSnapshotBuilder = (
@@ -4075,8 +4102,12 @@ const makeSnapshotBuilder = (
 ): unknown => {
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
-    builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) =>
-      makeSnapshotForNode(states[key], key, value, selector, options)
+    const path = options.prefix === "" ? key : `${options.prefix}.${key}`
+    const node = Model.getStateNodeDefinition(path, states[key])
+    builder[key] = withFrom(
+      (value: unknown, selector?: (builder: unknown) => unknown) =>
+        makeSnapshotForNode(states[key], key, value, selector, options),
+      node.states === undefined ? "leaf" : "nested"
     )
   }
   return builder
@@ -4100,6 +4131,8 @@ const makeParallelSnapshotBuilder = (
     if (hasProperty(regions, key)) {
       continue
     }
+    const path = options.prefix === "" ? key : `${options.prefix}.${key}`
+    const node = Model.getStateNodeDefinition(path, states[key])
     builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
       const nextRegions: Record<string, unknown> = {}
       for (const regionKey of Object.keys(regions)) {
@@ -4108,7 +4141,7 @@ const makeParallelSnapshotBuilder = (
       nextRegions[key] = makeSnapshotForNode(states[key], key, value, selector, options)
       const next = makeParallelSnapshotBuilder(states, options, nextRegions)
       return Model.isStateConstruction(builder) ? Model.markStateConstruction(next) : next
-    })
+    }, node.states === undefined ? "leaf" : "nested")
   }
   return builder
 }
@@ -4304,7 +4337,7 @@ const makeLocalTargetChildBuilder = (
         extendTargetValues(values, child.path, value),
         source
       ))
-    })
+    }, child.type === "atomic" || child.type === "final" ? "leaf" : "nested")
   }
   return builder
 }
@@ -4324,7 +4357,7 @@ const makeLocalTargetBuilder = (
       throw new Error(`Machine expected target "${scope}" builder to provide an active child state`)
     }
     return selector(makeLocalTargetChildBuilder(states, stateNodes, scope, { [scope]: value }, source))
-  })
+  }, "nested")
   return builder
 }
 
@@ -4352,7 +4385,7 @@ const makeBranchTargetNodeBuilder = (
 ): unknown => {
   const node = getTargetBuilderNode(stateNodes, path)
   if (node.type === "atomic" || node.type === "final") {
-    return withFrom((value: unknown) => makeTargetWithValues(node.path, value, values))
+    return withFrom((value: unknown) => makeTargetWithValues(node.path, value, values), "leaf")
   }
   const builder = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
     if (node.type === "parallel") {
@@ -4386,7 +4419,7 @@ const makeBranchTargetNodeBuilder = (
       source
     )
     return selector(nextBuilder)
-  }) as unknown as Record<string, unknown>
+  }, "nested") as unknown as Record<string, unknown>
   if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
     addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
   }
@@ -4445,7 +4478,7 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
  * Machine.make({
  *   states: States.states,
  *   events: [],
- *   initial: () => States.initial.idle(new Idle({}))
+ *   initial: () => States.initial.idle.from()
  * })
  * ```
  *

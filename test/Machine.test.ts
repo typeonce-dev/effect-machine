@@ -589,7 +589,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: [Event],
-          initial: () => states.initial.Idle.from({})
+          initial: () => states.initial.Idle.from()
         }).handle({
           Idle: {
             on: {
@@ -609,6 +609,192 @@ describe("Machine", () => {
         assert.deepStrictEqual(initial.state.value, State.cases.Idle.make({}))
         assert.deepStrictEqual(planned.next.value, State.cases.Done.make({ requestId: "request-1" }))
         assert.isTrue(planned.done)
+      }))
+
+    it.effect("constructs default-only TaggedClass state without an input argument", () =>
+      Effect.gen(function*() {
+        class DefaultOnly extends Schema.TaggedClass<DefaultOnly>("DefaultOnly")("DefaultOnly", {
+          label: Schema.String.pipe(
+            Schema.optionalKey,
+            Schema.withConstructorDefault(Effect.succeed("default-label"))
+          )
+        }) {}
+        const states = Machine.defineStates({ DefaultOnly })
+        const machine = Machine.make({
+          id: "from-default-only",
+          states: states.states,
+          events: [],
+          initial: () => states.initial.DefaultOnly.from()
+        })
+
+        const planned = yield* Machine.planInitial(machine)
+
+        assert.instanceOf(planned.state.value, DefaultOnly)
+        assert.strictEqual(planned.state.value.label, "default-label")
+      }))
+
+    it.effect("constructs nested empty compound targets across local, branch, and full builders", () =>
+      Effect.gen(function*() {
+        const State = Schema.TaggedUnion({
+          Flow: {},
+          Idle: {},
+          Running: {},
+          Nested: {},
+          NestedIdle: {},
+          Done: {}
+        })
+        const Event = Schema.TaggedUnion({
+          Local: {},
+          LocalWith: {},
+          Branch: {},
+          Full: {},
+          Finish: {}
+        })
+        const states = Machine.defineStates({
+          Flow: {
+            schema: State.cases.Flow,
+            initial: "Idle",
+            states: {
+              Idle: State.cases.Idle,
+              Running: State.cases.Running,
+              Nested: {
+                schema: State.cases.Nested,
+                initial: "NestedIdle",
+                states: {
+                  NestedIdle: State.cases.NestedIdle
+                }
+              },
+              Done: {
+                schema: State.cases.Done,
+                type: "final"
+              }
+            }
+          }
+        })
+        const machine = Machine.make({
+          id: "from-empty-targets",
+          states: states.states,
+          events: [
+            Event.cases.Local,
+            Event.cases.LocalWith,
+            Event.cases.Branch,
+            Event.cases.Full,
+            Event.cases.Finish
+          ],
+          initial: () => states.initial.Flow.from((flow) => flow.Idle.from())
+        }).handle({
+          Flow: {
+            states: {
+              Idle: {
+                on: {
+                  Local: ({ target }) => target.local.Running.from(),
+                  LocalWith: ({ target }) => target.local.with.from((flow) => flow.Running.from()),
+                  Branch: ({ target }) => target.branch.Flow.Nested.from((nested) => nested.NestedIdle.from()),
+                  Full: ({ target }) =>
+                    target.full.Flow.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from())),
+                  Finish: ({ target }) => target.local.Done.from()
+                }
+              },
+              Running: {},
+              Nested: {
+                states: {
+                  NestedIdle: {}
+                }
+              },
+              Done: {}
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+
+        const local = yield* Machine.plan(machine, initial.state, Event.cases.Local.make({}))
+        const localWith = yield* Machine.plan(machine, initial.state, Event.cases.LocalWith.make({}))
+        const branch = yield* Machine.plan(machine, initial.state, Event.cases.Branch.make({}))
+        const full = yield* Machine.plan(machine, initial.state, Event.cases.Full.make({}))
+        const final = yield* Machine.plan(machine, initial.state, Event.cases.Finish.make({}))
+
+        assert.strictEqual((local.next as any).state.path, "Flow.Running")
+        assert.strictEqual((localWith.next as any).state.path, "Flow.Running")
+        assert.strictEqual((branch.next as any).state.state.path, "Flow.Nested.NestedIdle")
+        assert.strictEqual((full.next as any).state.state.path, "Flow.Nested.NestedIdle")
+        assert.strictEqual((final.next as any).state.path, "Flow.Done")
+        assert.deepStrictEqual((initial.state as any).value, State.cases.Flow.make({}))
+        assert.deepStrictEqual((local.next as any).state.value, State.cases.Running.make({}))
+        assert.deepStrictEqual((branch.next as any).state.value, State.cases.Nested.make({}))
+        assert.deepStrictEqual((final.next as any).state.value, State.cases.Done.make({}))
+      }))
+
+    it.effect("constructs every empty region of an initial parallel state", () =>
+      Effect.gen(function*() {
+        const State = Schema.TaggedUnion({
+          Parallel: {},
+          Left: {},
+          LeftIdle: {},
+          Right: {},
+          RightIdle: {}
+        })
+        const states = Machine.defineStates({
+          Parallel: {
+            schema: State.cases.Parallel,
+            type: "parallel",
+            states: {
+              left: {
+                schema: State.cases.Left,
+                initial: "LeftIdle",
+                states: {
+                  LeftIdle: State.cases.LeftIdle
+                }
+              },
+              right: {
+                schema: State.cases.Right,
+                initial: "RightIdle",
+                states: {
+                  RightIdle: State.cases.RightIdle
+                }
+              }
+            }
+          }
+        })
+        const machine = Machine.make({
+          id: "from-empty-parallel",
+          states: states.states,
+          events: [],
+          initial: () =>
+            states.initial.Parallel.from((parallel) =>
+              parallel
+                .left.from((left) => left.LeftIdle.from())
+                .right.from((right) => right.RightIdle.from())
+            )
+        })
+
+        const planned = yield* Machine.planInitial(machine)
+
+        assert.strictEqual((planned.state as any).states.left.state.path, "Parallel.left.LeftIdle")
+        assert.strictEqual((planned.state as any).states.right.state.path, "Parallel.right.RightIdle")
+        assert.deepStrictEqual((planned.state as any).value, State.cases.Parallel.make({}))
+        assert.deepStrictEqual((planned.state as any).states.left.value, State.cases.Left.make({}))
+        assert.deepStrictEqual((planned.state as any).states.right.value, State.cases.Right.make({}))
+      }))
+
+    it.effect("fails an omitted empty input refinement through MachineSchemaDecodeError", () =>
+      Effect.gen(function*() {
+        const State = Schema.TaggedUnion({ Blocked: {} })
+        const Blocked = State.cases.Blocked.check(
+          Schema.makeFilter(() => "blocked state cannot be entered")
+        )
+        const states = Machine.defineStates({ Blocked })
+        const invalid = states.initial.Blocked.from()
+        const machine = Machine.make({
+          id: "from-empty-refinement",
+          states: states.states,
+          events: [],
+          initial: () => invalid
+        })
+
+        const error = yield* Effect.flip(Machine.planInitial(machine))
+
+        assertMachineSchemaDecodeError(error, "state", { state: "Blocked" })
+        assert.strictEqual((error as Machine.MachineSchemaDecodeError).machineId, "from-empty-refinement")
       }))
 
     it.effect("fails invalid refinement input through MachineSchemaDecodeError without throwing in the builder", () =>
