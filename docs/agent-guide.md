@@ -230,6 +230,22 @@ Refresh: {
 Do not use `target.full` merely because it is easiest to discover. Prefer the
 narrowest builder that expresses the intended configuration change.
 
+Every state builder method has two construction forms:
+
+```ts
+target.local.Ready(decodedReady)
+target.local.Ready.from({ value: event.value })
+```
+
+The direct call accepts the schema's decoded `Type`. `.from` accepts its
+`~type.make.in`, so callers do not need to invoke a TaggedUnion case's `make`
+or instantiate a TaggedClass. The machine resolves `.from` with
+`schema.makeEffect` during planning. Constructor defaults and class identity
+are retained; refinement failures use `MachineSchemaDecodeError` at the state
+boundary rather than throwing synchronously. This applies recursively to
+initial, full, local, branch, compound, parallel, final, and `local.with`
+builders.
+
 ## Reading state and parents
 
 `Machine.defineStates` returns typed helpers:

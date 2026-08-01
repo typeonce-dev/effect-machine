@@ -1664,6 +1664,134 @@ describe("Machine", () => {
     expect(snapshot.states.sync.state.path).type.toBe<"up.sync.idle" | "up.sync.syncing">()
   })
 
+  it("state builders construct from exact schema make input", () => {
+    const initial = UpStates.initial.up.from(
+      { id: "up-1" },
+      (up) =>
+        up
+          .auth.from(
+            { userId: "guest" },
+            (auth) => auth.signedOut.from({})
+          )
+          .sync.from(
+            { enabled: true },
+            (sync) => sync.idle.from({})
+          )
+    )
+    const context = null as unknown as SignedOutContext
+    const local = context.target.local.signedIn.from({ userId: "user-1" })
+    const full = context.target.full.down.from({})
+    const localWith = context.target.local.with.from(
+      { userId: "user-1" },
+      (auth) => auth.signedIn.from({ userId: "user-1" })
+    )
+    const branch = context.target.branch.up.from(
+      { id: "up-2" },
+      (up) =>
+        up.auth.from(
+          { userId: "user-1" },
+          (auth) => auth.signedIn.from({ userId: "user-1" })
+        )
+    )
+
+    expect(initial).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.SnapshotByIdentifier<typeof UpStates.states, "up">
+      >
+    >()
+    expect(local).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.Target<typeof UpStates.states, "up.auth.signedIn">
+      >
+    >()
+    expect(local).type.not.toHaveProperty("path")
+    expect(local).type.not.toHaveProperty("value")
+    expect(localWith).type.not.toHaveProperty("path")
+    expect(branch).type.not.toHaveProperty("path")
+    expect(full).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.SnapshotByIdentifier<typeof UpStates.states, "down">
+      >
+    >()
+    expect(full).type.not.toHaveProperty("value")
+
+    expect(UpStates.initial.up.from).type.not.toBeCallableWith(
+      { id: 1 },
+      (up: ChildBuilder<typeof UpStates.initial.up>) =>
+        up
+          .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
+          .sync.from({ enabled: true }, (sync) => sync.idle.from({}))
+    )
+    expect(context.target.local.signedIn.from).type.not.toBeCallableWith({})
+    expect(context.target.local.signedIn.from).type.not.toBeCallableWith({ userId: 1 })
+    expect(context.target.local.with.from).type.not.toBeCallableWith(
+      { id: "wrong-parent" },
+      (auth: ChildBuilder<typeof context.target.local.with>) => auth.signedOut.from({})
+    )
+  })
+
+  it("from preserves parallel-region exhaustiveness", () => {
+    const context = null as unknown as NestedIdleContext
+    const activeContext = null as unknown as NestedActiveContext
+    const work = null as unknown as ChildBuilder<typeof context.target.local.work>
+    const afterAuth = work.auth.from(
+      { userId: "guest" },
+      (auth) => auth.signedOut.from({})
+    )
+    const target = context.target.local.work.from(
+      {},
+      (work) =>
+        work
+          .auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
+          .sync.from({ enabled: true }, (sync) => sync.idle.from({}))
+    )
+    const partial = activeContext.target.branch.root.work.sync.from(
+      { enabled: true },
+      (sync) => sync.syncing.from({ requestId: "sync-1" })
+    )
+
+    expect(afterAuth).type.not.toHaveProperty("auth")
+    expect(afterAuth).type.toHaveProperty("sync")
+    expect(target).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.Target<typeof NestedParallelStates.states, "root.work">
+      >
+    >()
+    expect(target).type.not.toHaveProperty("path")
+    expect(partial).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.Target<typeof NestedParallelStates.states, "root.work.sync.syncing">
+      >
+    >()
+    expect(context.target.local.work.from).type.not.toBeCallableWith(
+      {},
+      (work: ChildBuilder<typeof context.target.local.work>) =>
+        work.auth.from({ userId: "guest" }, (auth) => auth.signedOut.from({}))
+    )
+  })
+
+  it("from supports TaggedUnion constructor inputs without a tag", () => {
+    const State = Schema.TaggedUnion({
+      Idle: {},
+      Active: { requestId: Schema.String }
+    })
+    const States = Machine.defineStates({
+      Idle: State.cases.Idle,
+      Active: State.cases.Active
+    })
+    const initial = States.initial.Idle.from({})
+
+    expect(initial).type.toBeAssignableTo<
+      Machine.Machine.StateConstruction<
+        Machine.Machine.AtomicSnapshot<"Idle", typeof State.cases.Idle.Type>
+      >
+    >()
+    expect(initial).type.not.toHaveProperty("value")
+    expect(States.initial.Active.from).type.toBeCallableWith({ requestId: "request-1" })
+    expect(States.initial.Active.from).type.not.toBeCallableWith({})
+    expect(States.initial.Active.from).type.not.toBeCallableWith({ requestId: 1 })
+  })
+
   it("target.full requires every parallel region", () => {
     const context = null as unknown as SignInContext
 
