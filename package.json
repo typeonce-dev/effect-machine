@@ -45,6 +45,7 @@
     "test": "vitest run",
     "test:types": "tstyche",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "perf:types": "pnpm build && node scripts/type-performance.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:consumer": "node scripts/test-consumer.mjs",
