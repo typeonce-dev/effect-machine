@@ -715,7 +715,9 @@ type LocalTargetResult<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-  LocalTargetResultWithPrefix<AllStates, Children, Path>
+  States[StateId] extends { readonly type: "parallel" } ?
+    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+  : LocalTargetResultWithPrefix<AllStates, Children, Path>
   : Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
 
 type LocalTargetResultWithPrefix<
@@ -729,9 +731,10 @@ type LocalTargetResultWithPrefix<
 type LocalTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  Prefix extends string
+  Prefix extends string,
+  Source extends Machine.StateIdentifier<AllStates>
 > = {
-  readonly [Key in Extract<keyof States, string>]: LocalTargetMethod<AllStates, States, Key, Prefix>
+  readonly [Key in Extract<keyof States, string>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
 }
 
 type LocalTargetMethod<
@@ -739,9 +742,27 @@ type LocalTargetMethod<
   States extends Machine.StateSchemas,
   StateId extends Extract<keyof States, string>,
   Prefix extends string,
+  Source extends Machine.StateIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly states: infer Children extends Machine.StateSchemas } ? <
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    Source extends Path | `${Path}.${string}` ? <Result extends LocalTargetResultWithPrefix<
+        AllStates,
+        Children,
+        Path
+      >>(
+        value: Machine.NodeSchema<Node>["Type"],
+        state: (
+          builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+        ) => Result
+      ) => Result
+    : (
+        value: Machine.NodeSchema<Node>["Type"],
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
+      ) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? <
       Result extends LocalTargetResultWithPrefix<
         AllStates,
         Children,
@@ -750,7 +771,7 @@ type LocalTargetMethod<
     >(
       value: Machine.NodeSchema<Node>["Type"],
       state: (
-        builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path>
+        builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
       ) => Result
     ) => Result
   : (value: Machine.NodeSchema<Node>["Type"]) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
@@ -758,9 +779,10 @@ type LocalTargetMethod<
 
 type LocalTargetBuilderForScope<
   States extends Machine.StateSchemas,
-  Scope extends Machine.StateIdentifier<States>
+  Scope extends Machine.StateIdentifier<States>,
+  Source extends Machine.StateIdentifier<States>
 > = ChildrenOf<States, Scope> extends infer Children extends Machine.StateSchemas ?
-    & LocalTargetBuilderWithPrefix<States, Children, Scope>
+    & LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
     & {
       /**
        * Updates the value of the state containing the local group and moves to
@@ -771,7 +793,7 @@ type LocalTargetBuilderForScope<
       readonly with: <Result extends LocalTargetResultWithPrefix<States, Children, Scope>>(
         value: Machine.StateByIdentifier<States, Scope>,
         state: (
-          builder: LocalTargetBuilderWithPrefix<States, Children, Scope>
+          builder: LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
         ) => Result
       ) => Result
     }
@@ -784,7 +806,9 @@ type BranchTargetResult<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
-  BranchTargetResultWithPrefix<AllStates, Children, Path>
+  States[StateId] extends { readonly type: "parallel" } ?
+    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+  : BranchTargetResultWithPrefix<AllStates, Children, Path>
   : Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
 
 type BranchTargetResultWithPrefix<
@@ -798,9 +822,10 @@ type BranchTargetResultWithPrefix<
 type BranchTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  Prefix extends string
+  Prefix extends string,
+  Source extends Machine.StateIdentifier<AllStates>
 > = {
-  readonly [Key in Extract<keyof States, string>]: BranchTargetMethod<AllStates, States, Key, Prefix>
+  readonly [Key in Extract<keyof States, string>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
 }
 
 type BranchTargetMethod<
@@ -808,24 +833,41 @@ type BranchTargetMethod<
   States extends Machine.StateSchemas,
   StateId extends Extract<keyof States, string>,
   Prefix extends string,
+  Source extends Machine.StateIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    Source extends Path | `${Path}.${string}` ?
+        & (<Result extends BranchTargetResultWithPrefix<AllStates, Children, Path>>(
+          value: Machine.NodeSchema<Node>["Type"],
+          state: (
+            builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+          ) => Result
+        ) => Result)
+        & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+    : (
+        value: Machine.NodeSchema<Node>["Type"],
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
+      ) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
       & (<Result extends BranchTargetResultWithPrefix<AllStates, Children, Path>>(
         value: Machine.NodeSchema<Node>["Type"],
         state: (
-          builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path>
+          builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
         ) => Result
       ) => Result)
-      & BranchTargetBuilderWithPrefix<AllStates, Children, Path>
+      & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
   : (value: Machine.NodeSchema<Node>["Type"]) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
   : never
 
 type BranchTargetBuilderForRoot<
   States extends Machine.StateSchemas,
-  Root extends Extract<keyof States, string>
+  Root extends Extract<keyof States, string>,
+  Source extends Machine.StateIdentifier<States>
 > = {
-  readonly [Key in Root]: BranchTargetMethod<States, States, Key, "">
+  readonly [Key in Root]: BranchTargetMethod<States, States, Key, "", Source>
 }
 
 type SpawnRequirements<Requirements> = Exclude<
@@ -2306,6 +2348,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly [Model.TargetTypeId]: typeof Model.TargetTypeId
+    readonly [Model.TargetSnapshotTypeId]?: SnapshotByIdentifier<States, StateId>
     readonly path: StateId
     readonly value: StateByIdentifier<States, StateId>
     readonly values?: Partial<
@@ -2343,7 +2386,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     Source extends StateIdentifier<States>
   > = NearestCompoundScope<States, Source> extends infer Scope ? [Scope] extends [never] ? {}
-    : Scope extends StateIdentifier<States> ? LocalTargetBuilderForScope<States, Scope>
+    : Scope extends StateIdentifier<States> ? LocalTargetBuilderForScope<States, Scope, Source>
     : {}
     : {}
 
@@ -2361,7 +2404,11 @@ export declare namespace Machine {
   export type BranchTargetBuilder<
     States extends StateSchemas,
     Source extends StateIdentifier<States>
-  > = BranchTargetBuilderForRoot<States, Extract<RootStateIdentifier<Source>, Extract<keyof States, string>>>
+  > = BranchTargetBuilderForRoot<
+    States,
+    Extract<RootStateIdentifier<Source>, Extract<keyof States, string>>,
+    Source
+  >
 
   /**
    * Machine-bound target builders available in transition contexts.
@@ -3951,6 +3998,48 @@ const makeTargetWithValues = (
     ? Model.makeTarget(path as any, value as any, { values: values as any })
     : Model.makeTarget(path as any, value as any)
 
+const getTargetBuilderDefinition = (
+  states: Machine.StateTree,
+  targetPath: string
+): Machine.TaggedSchema | Machine.StateNodeConfig => {
+  let children = states
+  let path = ""
+  let definition: Machine.TaggedSchema | Machine.StateNodeConfig | undefined
+  for (const key of targetPath.split(".")) {
+    if (!hasProperty(children, key)) {
+      throw new Error(`Machine expected state path "${targetPath}" to exist`)
+    }
+    definition = children[key]
+    path = path === "" ? key : `${path}.${key}`
+    const node = Model.getStateNodeDefinition(path, definition)
+    children = node.states ?? {}
+  }
+  return definition!
+}
+
+const makeParallelTarget = (
+  states: Machine.StateTree,
+  node: Machine.StateNode,
+  value: unknown,
+  selector: ((builder: unknown) => unknown) | undefined,
+  values: Readonly<Record<string, unknown>> | undefined
+): Machine.Target<any, any> => {
+  if (selector === undefined) {
+    throw new Error(`Machine expected parallel target "${node.path}" builder to provide every active region`)
+  }
+  const snapshot = makeSnapshotForNode(
+    getTargetBuilderDefinition(states, node.path),
+    node.key,
+    value,
+    selector,
+    { mode: "full", prefix: node.parent ?? "" }
+  )
+  return Model.makeTarget(node.path as any, value as any, {
+    snapshot: snapshot as any,
+    values: values as any
+  })
+}
+
 const extendTargetValues = (
   values: Readonly<Record<string, unknown>> | undefined,
   path: string,
@@ -3967,9 +4056,11 @@ const extendTargetValues = (
 }
 
 const makeLocalTargetChildBuilder = (
+  states: Machine.StateTree,
   stateNodes: Machine.StateNodes,
   parentPath: string,
-  values: Readonly<Record<string, unknown>> | undefined
+  values: Readonly<Record<string, unknown>> | undefined,
+  source: string
 ): unknown => {
   const parent = getTargetBuilderNode(stateNodes, parentPath)
   const builder: Record<string, unknown> = {}
@@ -3979,13 +4070,30 @@ const makeLocalTargetChildBuilder = (
       if (child.type === "atomic" || child.type === "final") {
         return makeTargetWithValues(child.path, value, values)
       }
+      if (child.type === "parallel") {
+        if (source !== child.path && !source.startsWith(`${child.path}.`)) {
+          return makeParallelTarget(states, child, value, selector, values)
+        }
+        if (selector === undefined) {
+          throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
+        }
+        return selector(makeLocalTargetChildBuilder(
+          states,
+          stateNodes,
+          child.path,
+          extendTargetValues(values, child.path, value),
+          source
+        ))
+      }
       if (selector === undefined) {
         throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
       }
       return selector(makeLocalTargetChildBuilder(
+        states,
         stateNodes,
         child.path,
-        extendTargetValues(values, child.path, value)
+        extendTargetValues(values, child.path, value),
+        source
       ))
     }
   }
@@ -3993,6 +4101,7 @@ const makeLocalTargetChildBuilder = (
 }
 
 const makeLocalTargetBuilder = (
+  states: Machine.StateTree,
   stateNodes: Machine.StateNodes,
   source: string
 ): unknown => {
@@ -4000,58 +4109,90 @@ const makeLocalTargetBuilder = (
   if (scope === undefined) {
     return {}
   }
-  const builder = makeLocalTargetChildBuilder(stateNodes, scope, undefined) as Record<string, unknown>
+  const builder = makeLocalTargetChildBuilder(states, stateNodes, scope, undefined, source) as Record<string, unknown>
   builder.with = (value: unknown, selector?: (builder: unknown) => unknown) => {
     if (selector === undefined) {
       throw new Error(`Machine expected target "${scope}" builder to provide an active child state`)
     }
-    return selector(makeLocalTargetChildBuilder(stateNodes, scope, { [scope]: value }))
+    return selector(makeLocalTargetChildBuilder(states, stateNodes, scope, { [scope]: value }, source))
   }
   return builder
 }
 
 const addBranchTargetChildren = (
   builder: Record<string, unknown>,
+  states: Machine.StateTree,
   stateNodes: Machine.StateNodes,
   parentPath: string,
-  values: Readonly<Record<string, unknown>> | undefined
+  values: Readonly<Record<string, unknown>> | undefined,
+  source: string
 ): void => {
   const parent = getTargetBuilderNode(stateNodes, parentPath)
   for (const childPath of parent.children) {
     const child = getTargetBuilderNode(stateNodes, childPath)
-    builder[child.key] = makeBranchTargetNodeBuilder(stateNodes, child.path, values)
+    builder[child.key] = makeBranchTargetNodeBuilder(states, stateNodes, child.path, values, source)
   }
 }
 
 const makeBranchTargetNodeBuilder = (
+  states: Machine.StateTree,
   stateNodes: Machine.StateNodes,
   path: string,
-  values: Readonly<Record<string, unknown>> | undefined
+  values: Readonly<Record<string, unknown>> | undefined,
+  source: string
 ): unknown => {
   const node = getTargetBuilderNode(stateNodes, path)
   if (node.type === "atomic" || node.type === "final") {
     return (value: unknown) => makeTargetWithValues(node.path, value, values)
   }
   const builder = ((value: unknown, selector?: (builder: unknown) => unknown) => {
+    if (node.type === "parallel") {
+      if (source !== node.path && !source.startsWith(`${node.path}.`)) {
+        return makeParallelTarget(states, node, value, selector, values)
+      }
+      if (selector === undefined) {
+        throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
+      }
+      const nextBuilder: Record<string, unknown> = {}
+      addBranchTargetChildren(
+        nextBuilder,
+        states,
+        stateNodes,
+        node.path,
+        extendTargetValues(values, node.path, value),
+        source
+      )
+      return selector(nextBuilder)
+    }
     if (selector === undefined) {
       throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
     }
     const nextBuilder: Record<string, unknown> = {}
-    addBranchTargetChildren(nextBuilder, stateNodes, node.path, extendTargetValues(values, node.path, value))
+    addBranchTargetChildren(
+      nextBuilder,
+      states,
+      stateNodes,
+      node.path,
+      extendTargetValues(values, node.path, value),
+      source
+    )
     return selector(nextBuilder)
   }) as unknown as Record<string, unknown>
-  addBranchTargetChildren(builder, stateNodes, node.path, values)
+  if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
+    addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
+  }
   return builder
 }
 
 const makeBranchTargetBuilder = (
+  states: Machine.StateTree,
   stateNodes: Machine.StateNodes,
   source: string
 ): unknown => {
   const rootPath = source.split(".")[0]!
   const root = getTargetBuilderNode(stateNodes, rootPath)
   return {
-    [root.key]: makeBranchTargetNodeBuilder(stateNodes, root.path, undefined)
+    [root.key]: makeBranchTargetNodeBuilder(states, stateNodes, root.path, undefined, source)
   }
 }
 
@@ -4062,8 +4203,8 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
   const full = makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Machine.FullTargetBuilder<States>
   return <Source extends Machine.StateIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
     ({
-      local: makeLocalTargetBuilder(stateNodes, source),
-      branch: makeBranchTargetBuilder(stateNodes, source),
+      local: makeLocalTargetBuilder(states, stateNodes, source),
+      branch: makeBranchTargetBuilder(states, stateNodes, source),
       full
     }) as Machine.TargetBuilder<States, Source>
 }

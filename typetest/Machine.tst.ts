@@ -96,6 +96,38 @@ describe("Machine", () => {
     down: Down
   })
 
+  const NestedParallelStates = Machine.defineStates({
+    root: {
+      schema: Up,
+      initial: "idle",
+      states: {
+        idle: Down,
+        work: {
+          schema: Payment,
+          type: "parallel",
+          states: {
+            auth: {
+              schema: Auth,
+              initial: "signedOut",
+              states: {
+                signedOut: SignedOut,
+                signedIn: SignedIn
+              }
+            },
+            sync: {
+              schema: Sync,
+              initial: "idle",
+              states: {
+                idle: SyncIdle,
+                syncing: Syncing
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+
   type ChildBuilder<Method> = Method extends (value: any, build: (builder: infer Builder) => any) => any ? Builder
     : never
   type IsCallable<A> = A extends (...args: ReadonlyArray<any>) => any ? true : false
@@ -125,6 +157,26 @@ describe("Machine", () => {
     readonly [typeof SignIn],
     [],
     "up.auth",
+    "SignIn",
+    never,
+    never
+  >
+
+  type NestedIdleContext = Machine.Machine.HandlerContext<
+    typeof NestedParallelStates.states,
+    readonly [typeof SignIn],
+    [],
+    "root.idle",
+    "SignIn",
+    never,
+    never
+  >
+
+  type NestedActiveContext = Machine.Machine.HandlerContext<
+    typeof NestedParallelStates.states,
+    readonly [typeof SignIn],
+    [],
+    "root.work.auth.signedOut",
     "SignIn",
     never,
     never
@@ -1632,6 +1684,92 @@ describe("Machine", () => {
 
     expect(auth.signedOut).type.toBeCallableWith(new SignedOut({}))
     expect(auth.signedIn).type.toBeCallableWith(new SignedIn({ userId: "user-1" }))
+  })
+
+  it("target.local requires every region when entering an inactive nested parallel state", () => {
+    const context = null as unknown as NestedIdleContext
+    const target = context.target.local.work(
+      new Payment({}),
+      (work) =>
+        work
+          .auth(
+            new Auth({ userId: "guest" }),
+            (auth) => auth.signedIn(new SignedIn({ userId: "user-1" }))
+          )
+          .sync(
+            new Sync({ enabled: true }),
+            (sync) => sync.syncing(new Syncing({ requestId: "sync-1" }))
+          )
+    )
+
+    expect(target).type.toBeAssignableTo<
+      Machine.Machine.Target<typeof NestedParallelStates.states, "root.work">
+    >()
+    expect(target.path).type.toBe<"root.work">()
+    expect(context.target.local.work).type.not.toBeCallableWith(
+      new Payment({}),
+      (work: ChildBuilder<typeof context.target.local.work>) =>
+        work.auth(
+          new Auth({ userId: "guest" }),
+          (auth) => auth.signedOut(new SignedOut({}))
+        )
+    )
+  })
+
+  it("target.branch requires every region when entering an inactive nested parallel state", () => {
+    const context = null as unknown as NestedIdleContext
+    const target = context.target.branch.root.work(
+      new Payment({}),
+      (work) =>
+        work
+          .auth(
+            new Auth({ userId: "guest" }),
+            (auth) => auth.signedOut(new SignedOut({}))
+          )
+          .sync(
+            new Sync({ enabled: true }),
+            (sync) => sync.idle(new SyncIdle({}))
+          )
+    )
+
+    expect(target.path).type.toBe<"root.work">()
+    expect(context.target.branch.root.work).type.not.toHaveProperty("auth")
+    expect(context.target.branch.root.work).type.not.toBeCallableWith(
+      new Payment({}),
+      (work: ChildBuilder<typeof context.target.branch.root.work>) =>
+        work.auth(
+          new Auth({ userId: "guest" }),
+          (auth) => auth.signedOut(new SignedOut({}))
+        )
+    )
+  })
+
+  it("nested parallel target builders remove regions and validate payloads", () => {
+    const context = null as unknown as NestedIdleContext
+    const work = null as unknown as ChildBuilder<typeof context.target.local.work>
+    const afterAuth = work.auth(
+      new Auth({ userId: "guest" }),
+      (auth) => auth.signedOut(new SignedOut({}))
+    )
+
+    expect(afterAuth).type.not.toHaveProperty("auth")
+    expect(afterAuth).type.toHaveProperty("sync")
+    expect(work.auth).type.not.toBeCallableWith(
+      new Sync({ enabled: true }),
+      (auth: ChildBuilder<typeof work.auth>) => auth.signedOut(new SignedOut({}))
+    )
+  })
+
+  it("target.branch keeps partial navigation for an already-active parallel state", () => {
+    const context = null as unknown as NestedActiveContext
+    const target = context.target.branch.root.work.sync(
+      new Sync({ enabled: true }),
+      (sync) => sync.syncing(new Syncing({ requestId: "sync-1" }))
+    )
+
+    expect(context.target.branch.root.work).type.toHaveProperty("auth")
+    expect(context.target.branch.root.work).type.toHaveProperty("sync")
+    expect(target.path).type.toBe<"root.work.sync.syncing">()
   })
 
   it("target.local constructs typed local leaf targets", () => {

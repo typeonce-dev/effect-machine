@@ -1752,6 +1752,208 @@ describe("Machine", () => {
       ])
     }))
 
+  it.effect("uses target.local to enter an inactive nested parallel state", () =>
+    Effect.gen(function*() {
+      const workflow = new Payment({ id: "workflow-1" })
+      const states = Machine.defineStates({
+        workflow: {
+          schema: Payment,
+          initial: "idle",
+          states: {
+            idle: Idle,
+            fulfillment: {
+              schema: Fulfillment,
+              type: "parallel",
+              states: {
+                inventory: {
+                  schema: Inventory,
+                  initial: "checking",
+                  states: {
+                    checking: CheckingInventory,
+                    reserved: InventoryReserved
+                  }
+                },
+                shipping: {
+                  schema: Shipping,
+                  initial: "quoting",
+                  states: {
+                    quoting: QuotingShipping,
+                    quoted: ShippingQuoted
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: [Submit],
+        initial: () =>
+          states.initial.workflow(
+            workflow,
+            (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
+          )
+      }).handle({
+        workflow: {
+          states: {
+            idle: {
+              on: {
+                Submit: ({ event, target }) =>
+                  target.local.fulfillment(
+                    new Fulfillment({ id: event.value }),
+                    (fulfillment) =>
+                      fulfillment
+                        .inventory(
+                          new Inventory({ warehouse: "warehouse-1" }),
+                          (inventory) =>
+                            inventory.reserved(new InventoryReserved({ reservationId: event.value }))
+                        )
+                        .shipping(
+                          new Shipping({ address: "Main Street" }),
+                          (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
+                        )
+                  )
+              }
+            }
+          }
+        }
+      })
+
+      const planned = yield* Machine.plan(
+        machine,
+        states.initial.workflow(
+          workflow,
+          (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
+        ),
+        new Submit({ value: "order-1" })
+      )
+
+      assertCompoundStateSnapshot(planned.next as any, "workflow", workflow, {
+        path: "workflow.fulfillment",
+        value: new Fulfillment({ id: "order-1" }),
+        states: {
+          inventory: {
+            path: "workflow.fulfillment.inventory",
+            value: new Inventory({ warehouse: "warehouse-1" }),
+            state: {
+              path: "workflow.fulfillment.inventory.reserved",
+              value: new InventoryReserved({ reservationId: "order-1" })
+            }
+          },
+          shipping: {
+            path: "workflow.fulfillment.shipping",
+            value: new Shipping({ address: "Main Street" }),
+            state: {
+              path: "workflow.fulfillment.shipping.quoted",
+              value: new ShippingQuoted({ quoteId: "order-1" })
+            }
+          }
+        }
+      } as any)
+      assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, [
+        "workflow.fulfillment",
+        "workflow.fulfillment.inventory",
+        "workflow.fulfillment.shipping",
+        "workflow.fulfillment.inventory.reserved",
+        "workflow.fulfillment.shipping.quoted"
+      ])
+    }))
+
+  it.effect("uses target.branch to enter a nested parallel state and preserve outer regions", () =>
+    Effect.gen(function*() {
+      const app = new Fulfillment({ id: "app-1" })
+      const flow = new Payment({ id: "flow-1" })
+      const monitor = new QuotingShipping({ postalCode: "12345" })
+      const states = Machine.defineStates({
+        app: {
+          schema: Fulfillment,
+          type: "parallel",
+          states: {
+            flow: {
+              schema: Payment,
+              initial: "idle",
+              states: {
+                idle: Idle,
+                fulfillment: {
+                  schema: Fulfillment,
+                  type: "parallel",
+                  states: {
+                    inventory: Inventory,
+                    shipping: Shipping
+                  }
+                }
+              }
+            },
+            monitor: QuotingShipping
+          }
+        }
+      })
+      const initial = states.initial.app(
+        app,
+        (app) =>
+          app
+            .flow(
+              flow,
+              (flow) => flow.idle(new Idle({ userId: "user-1" }))
+            )
+            .monitor(monitor)
+      )
+      const machine = Machine.make({
+        states: states.states,
+        events: [Submit],
+        initial: () => initial
+      }).handle({
+        app: {
+          states: {
+            flow: {
+              states: {
+                idle: {
+                  on: {
+                    Submit: ({ event, target }) =>
+                      target.branch.app.flow.fulfillment(
+                        new Fulfillment({ id: event.value }),
+                        (fulfillment) =>
+                          fulfillment
+                            .inventory(new Inventory({ warehouse: "warehouse-1" }))
+                            .shipping(new Shipping({ address: "Main Street" }))
+                      )
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const planned = yield* Machine.plan(machine, initial, new Submit({ value: "order-1" }))
+
+      assertParallelStateSnapshot(planned.next as any, "app", app, {
+        flow: {
+          path: "app.flow",
+          value: flow,
+          state: {
+            path: "app.flow.fulfillment",
+            value: new Fulfillment({ id: "order-1" }),
+            states: {
+              inventory: {
+                path: "app.flow.fulfillment.inventory",
+                value: new Inventory({ warehouse: "warehouse-1" })
+              },
+              shipping: {
+                path: "app.flow.fulfillment.shipping",
+                value: new Shipping({ address: "Main Street" })
+              }
+            }
+          }
+        },
+        monitor: {
+          path: "app.monitor",
+          value: monitor
+        }
+      })
+    }))
+
   it.effect("uses target.local to preserve parent and sibling parallel region values", () =>
     Effect.gen(function*() {
       const states = Machine.defineStates({

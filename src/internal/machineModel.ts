@@ -13,6 +13,7 @@ import type { Machine } from "../Machine.js"
 import { MachineSchemaDecodeError, MachineSchemaEncodeError } from "./machineErrors.js"
 
 export const TargetTypeId = "~effect/Machine/Target"
+export const TargetSnapshotTypeId: unique symbol = Symbol("effect/Machine/TargetSnapshot")
 
 export const getStateNodeDefinition = (
   path: string,
@@ -122,6 +123,7 @@ export const makeTarget = <
   path: StateId,
   value: Machine.StateByIdentifier<States, StateId>,
   options?: {
+    readonly snapshot?: Machine.SnapshotByIdentifier<States, StateId>
     readonly values?: Partial<
       {
         readonly [AncestorStateId in Machine.StateIdentifier<States>]: Machine.StateByIdentifier<
@@ -134,6 +136,7 @@ export const makeTarget = <
 ): Machine.Target<States, StateId> =>
   ({
     [TargetTypeId]: TargetTypeId,
+    [TargetSnapshotTypeId]: options?.snapshot,
     path,
     value,
     values: options?.values
@@ -681,12 +684,74 @@ export const configurationFromTargetPathEffect = Effect.fnUntraced(function*(
   return { active, values, outputs } as ActiveConfiguration
 })
 
+export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  snapshot: Machine.AtomicSnapshot<string, unknown>,
+  providedValues: Readonly<Record<string, unknown>> | undefined
+) {
+  const subtree = yield* configurationFromSnapshotEffect(machine, snapshot)
+  const active = new Set(subtree.active)
+  const values = new Map(subtree.values)
+  const outputs = new Map(subtree.outputs)
+  const paths = getPathToRoot(machine, String(snapshot.path))
+  const pathSet = new Set(paths)
+
+  for (const ancestor of paths.slice(0, -1)) {
+    const node = getNode(machine, ancestor)
+    active.add(ancestor)
+    if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
+      values.set(ancestor, yield* decodeStateValue(machine, node, providedValues[ancestor]))
+    } else if (current.values.has(ancestor)) {
+      values.set(ancestor, current.values.get(ancestor))
+    } else {
+      throw new Error(`Machine target "${snapshot.path}" requires a value for ancestor state "${ancestor}"`)
+    }
+  }
+
+  for (const ancestor of paths.slice(0, -1)) {
+    const ancestorNode = getNode(machine, ancestor)
+    if (ancestorNode.type === "parallel") {
+      for (const child of ancestorNode.children) {
+        if (pathSet.has(child) || !current.active.has(child)) {
+          continue
+        }
+        for (const activePath of current.active) {
+          if (isPathInSubtree(activePath, child)) {
+            active.add(activePath)
+            if (current.values.has(activePath)) {
+              values.set(activePath, current.values.get(activePath))
+            }
+            if (current.outputs.has(activePath)) {
+              outputs.set(activePath, current.outputs.get(activePath))
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return { active, values, outputs } as ActiveConfiguration
+})
+
 export const normalizeTargetConfigurationEffect = <const States extends Machine.StateSchemas>(
   machine: Machine.Any,
   current: ActiveConfiguration,
   target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
 ): Effect.Effect<ActiveConfiguration, MachineSchemaDecodeError> => {
   if (isTarget(target)) {
+    const snapshot = target[TargetSnapshotTypeId]
+    if (snapshot !== undefined) {
+      if (String(snapshot.path) !== String(target.path)) {
+        throw new Error(`Machine expected target snapshot path to be "${target.path}"`)
+      }
+      return configurationFromTargetSnapshotEffect(
+        machine,
+        current,
+        snapshot,
+        target.values as Readonly<Record<string, unknown>> | undefined
+      )
+    }
     return configurationFromTargetPathEffect(
       machine,
       current,

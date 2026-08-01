@@ -170,7 +170,8 @@ const ParallelStates = Machine.defineStates({
 ```
 
 Every parallel region needs an active state in initial and full snapshot
-builders.
+builders. The same rule applies when a local or branch target enters an
+inactive nested parallel state.
 
 Use `type: "final"` for a terminal leaf in `Machine.defineStates`. A final
 child completes its compound parent. Put `onDone` on that completed parent,
@@ -207,6 +208,11 @@ until every declared output schema has an implementation.
 | `target.local`  | The destination is inside the nearest compound scope containing the source | The compound value, active ancestors, and unrelated parallel regions              |
 | `target.branch` | The destination is elsewhere under the active top-level root               | Omitted current ancestor values and parallel regions                              |
 | `target.full`   | The destination may be under any top-level root                            | Nothing is inferred for a newly selected root; build its complete active snapshot |
+
+Entering an inactive parallel state through `target.local` or `target.branch`
+requires a complete callback with one selection per region. A parallel state
+that is already active remains partially addressable through `target.branch`;
+unmentioned active regions are preserved.
 
 These describe configuration construction, not automatic process restart.
 Machine planning compares active paths and derives the actual exit and entry
