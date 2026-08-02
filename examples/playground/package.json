@@ -1,8 +1,8 @@
 {
-  "name": "@typeonce/effect-machine-example-pokemon",
+  "name": "@typeonce/effect-machine-example-playground",
   "version": "0.0.0",
   "private": true,
-  "description": "Pokémon statechart example using the local @typeonce/effect-machine package",
+  "description": "React playground for building @typeonce/effect-machine examples",
   "type": "module",
   "scripts": {
     "dev": "vite",
