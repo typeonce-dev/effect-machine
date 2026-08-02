@@ -9,6 +9,8 @@ const JumpKind = Schema.Literals(["Ground", "Double", "Wall"])
 const State = Schema.TaggedUnion({
   Character: {},
   Locomotion: {},
+  Playing: {},
+  Paused: { pausedAt: Schema.Number },
   Grounded: {},
   Standing: {},
   Running: { startedAt: Schema.Number },
@@ -42,6 +44,8 @@ export const Event = Schema.TaggedUnion({
   DownReleased: { axis: Axis, at: Schema.Number },
   ApexReached: { y: Schema.Number },
   Landed: { impact: Schema.Number, axis: Axis, at: Schema.Number },
+  Pause: { at: Schema.Number },
+  Resume: {},
   Reset: {}
 })
 
@@ -62,43 +66,54 @@ export const CharacterStates = Machine.defineStates({
     states: {
       locomotion: {
         schema: State.cases.Locomotion,
-        initial: "Grounded",
+        initial: "Playing",
         states: {
-          Grounded: {
-            schema: State.cases.Grounded,
-            initial: "Standing",
+          Playing: {
+            schema: State.cases.Playing,
+            initial: "Grounded",
             states: {
-              Standing: State.cases.Standing,
-              Running: State.cases.Running,
-              Ducking: State.cases.Ducking,
-              Landing: State.cases.Landing
-            }
-          },
-          Airborne: {
-            schema: State.cases.Airborne,
-            type: "parallel",
-            states: {
-              motion: {
-                schema: State.cases.Motion,
-                initial: "Jumping",
+              Grounded: {
+                schema: State.cases.Grounded,
+                initial: "Standing",
                 states: {
-                  Jumping: State.cases.Jumping,
-                  Falling: State.cases.Falling,
-                  Diving: State.cases.Diving
+                  Standing: State.cases.Standing,
+                  Running: State.cases.Running,
+                  Ducking: State.cases.Ducking,
+                  Landing: State.cases.Landing
                 }
               },
-              airJump: {
-                schema: State.cases.AirJump,
-                initial: "AirJumpGroundLock",
+              Airborne: {
+                schema: State.cases.Airborne,
+                type: "parallel",
                 states: {
-                  AirJumpGroundLock: State.cases.AirJumpGroundLock,
-                  AirJumpWallLock: State.cases.AirJumpWallLock,
-                  AirJumpReady: State.cases.AirJumpReady,
-                  AirJumpSpent: State.cases.AirJumpSpent
+                  motion: {
+                    schema: State.cases.Motion,
+                    initial: "Jumping",
+                    states: {
+                      Jumping: State.cases.Jumping,
+                      Falling: State.cases.Falling,
+                      Diving: State.cases.Diving
+                    }
+                  },
+                  airJump: {
+                    schema: State.cases.AirJump,
+                    initial: "AirJumpGroundLock",
+                    states: {
+                      AirJumpGroundLock: State.cases.AirJumpGroundLock,
+                      AirJumpWallLock: State.cases.AirJumpWallLock,
+                      AirJumpReady: State.cases.AirJumpReady,
+                      AirJumpSpent: State.cases.AirJumpSpent
+                    }
+                  }
                 }
+              },
+              resume: {
+                type: "history",
+                history: "deep"
               }
             }
-          }
+          },
+          Paused: State.cases.Paused
         }
       },
       facing: {
@@ -122,12 +137,29 @@ export const CharacterStates = Machine.defineStates({
   }
 })
 
+const initialPlaying = (): Machine.Machine.SnapshotByIdentifier<
+  typeof CharacterStates.states,
+  "Character.locomotion.Playing"
+> => ({
+  path: "Character.locomotion.Playing",
+  value: State.cases.Playing.make({}),
+  state: {
+    path: "Character.locomotion.Playing.Grounded",
+    value: State.cases.Grounded.make({}),
+    state: {
+      path: "Character.locomotion.Playing.Grounded.Standing",
+      value: State.cases.Standing.make({})
+    }
+  }
+})
+
 const initialCharacter = () =>
   CharacterStates.initial.Character(State.cases.Character.make({}), (character) =>
     character
       .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
-        locomotion.Grounded(State.cases.Grounded.make({}), (grounded) =>
-          grounded.Standing(State.cases.Standing.make({}))))
+        locomotion.Playing(State.cases.Playing.make({}), (playing) =>
+          playing.Grounded(State.cases.Grounded.make({}), (grounded) =>
+            grounded.Standing(State.cases.Standing.make({})))))
       .facing(State.cases.Facing.make({}), (facing) =>
         facing.Right(State.cases.Right.make({})))
       .contact(State.cases.WallContact.make({}), (contact) =>
@@ -147,161 +179,180 @@ export const CharacterMachine = Machine.make({
     states: {
       locomotion: {
         states: {
-          Grounded: {
+          Playing: {
+            history: {
+              resume: {
+                default: initialPlaying
+              }
+            },
             on: {
-              JumpPressed: ({ event, target }) =>
-                target.full.Character(State.cases.Character.make({}), (character) =>
-                  character
-                    .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
-                      locomotion.Airborne(State.cases.Airborne.make({ originY: event.y }), (airborne) =>
-                        airborne
-                          .motion(State.cases.Motion.make({}), (motion) =>
-                            motion.Jumping(
-                              State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
-                            ))
-                          .airJump(State.cases.AirJump.make({}), (airJump) =>
-                            airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({})))))
-                    .facing(State.cases.Facing.make({}), (facing) =>
-                      facing.Right(State.cases.Right.make({})))
-                    .contact(State.cases.WallContact.make({}), (contact) =>
-                      event.wall === -1
-                        ? contact.LeftWall(State.cases.LeftWall.make({}))
-                        : event.wall === 1
-                        ? contact.RightWall(State.cases.RightWall.make({}))
-                        : contact.NoWall(State.cases.NoWall.make({}))))
+              Pause: ({ event, target }) =>
+                target.branch.Character.locomotion.Paused(State.cases.Paused.make({ pausedAt: event.at }))
             },
             states: {
-              Standing: {
+              Grounded: {
                 on: {
-                  Move: ({ event, target }) =>
-                    event.axis === 0
-                      ? undefined
-                      : target.local.Running(State.cases.Running.make({ startedAt: event.at })),
-                  DownPressed: ({ event, target }) =>
-                    target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                  JumpPressed: ({ event, target }) =>
+                    target.full.Character(State.cases.Character.make({}), (character) =>
+                      character
+                        .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
+                          locomotion.Playing(State.cases.Playing.make({}), (playing) =>
+                            playing.Airborne(State.cases.Airborne.make({ originY: event.y }), (airborne) =>
+                              airborne
+                                .motion(State.cases.Motion.make({}), (motion) =>
+                                  motion.Jumping(
+                                    State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
+                                  ))
+                                .airJump(State.cases.AirJump.make({}), (airJump) =>
+                                  airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))))))
+                        .facing(State.cases.Facing.make({}), (facing) =>
+                          facing.Right(State.cases.Right.make({})))
+                        .contact(State.cases.WallContact.make({}), (contact) =>
+                          event.wall === -1
+                            ? contact.LeftWall(State.cases.LeftWall.make({}))
+                            : event.wall === 1
+                            ? contact.RightWall(State.cases.RightWall.make({}))
+                            : contact.NoWall(State.cases.NoWall.make({}))))
+                },
+                states: {
+                  Standing: {
+                    on: {
+                      Move: ({ event, target }) =>
+                        event.axis === 0
+                          ? undefined
+                          : target.local.Running(State.cases.Running.make({ startedAt: event.at })),
+                      DownPressed: ({ event, target }) =>
+                        target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                    }
+                  },
+                  Running: {
+                    on: {
+                      Move: ({ event, target }) =>
+                        event.axis === 0 ? target.local.Standing(State.cases.Standing.make({})) : undefined,
+                      DownPressed: ({ event, target }) =>
+                        target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                    }
+                  },
+                  Ducking: {
+                    on: {
+                      DownReleased: ({ event, target }) =>
+                        event.axis === 0
+                          ? target.local.Standing(State.cases.Standing.make({}))
+                          : target.local.Running(State.cases.Running.make({ startedAt: event.at }))
+                    }
+                  },
+                  Landing: {
+                    invoke: Machine.after("140 millis", InternalEvent.cases.LandingSettled.make({}), {
+                      id: "landing-settle"
+                    }),
+                    on: {
+                      Move: ({ event, state, target }) =>
+                        target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis })),
+                      LandingSettled: ({ state, target }) =>
+                        state.resumeAxis === 0
+                          ? target.local.Standing(State.cases.Standing.make({}))
+                          : target.local.Running(State.cases.Running.make({ startedAt: state.landedAt + 140 }))
+                    }
+                  }
                 }
               },
-              Running: {
+              Airborne: {
                 on: {
-                  Move: ({ event, target }) =>
-                    event.axis === 0 ? target.local.Standing(State.cases.Standing.make({})) : undefined,
-                  DownPressed: ({ event, target }) =>
-                    target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
-                }
-              },
-              Ducking: {
-                on: {
-                  DownReleased: ({ event, target }) =>
-                    event.axis === 0
-                      ? target.local.Standing(State.cases.Standing.make({}))
-                      : target.local.Running(State.cases.Running.make({ startedAt: event.at }))
-                }
-              },
-              Landing: {
-                invoke: Machine.after("140 millis", InternalEvent.cases.LandingSettled.make({}), {
-                  id: "landing-settle"
-                }),
-                on: {
-                  Move: ({ event, state, target }) =>
-                    target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis })),
-                  LandingSettled: ({ state, target }) =>
-                    state.resumeAxis === 0
-                      ? target.local.Standing(State.cases.Standing.make({}))
-                      : target.local.Running(State.cases.Running.make({ startedAt: state.landedAt + 140 }))
+                  JumpPressed: Effect.fn(function*({ event, runtime }) {
+                    const machine = yield* runtime
+                    const push = awayFrom(event.wall)
+                    yield* machine.raise(
+                      push === 0
+                        ? InternalEvent.cases.TryAirJump.make({ at: event.at })
+                        : InternalEvent.cases.WallJump.make({ at: event.at, push })
+                    )
+                  }),
+                  Landed: ({ event, target }) =>
+                    target.branch.Character.locomotion.Playing.Grounded(
+                      State.cases.Grounded.make({}),
+                      (grounded) =>
+                        grounded.Landing(
+                          State.cases.Landing.make({
+                            impact: event.impact,
+                            resumeAxis: event.axis,
+                            landedAt: event.at
+                          })
+                        )
+                    )
+                },
+                states: {
+                  motion: {
+                    on: {
+                      DoubleJump: ({ event, target }) =>
+                        target.local.Jumping(
+                          State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Double" })
+                        ),
+                      WallJump: ({ event, target }) =>
+                        target.local.Jumping(
+                          State.cases.Jumping.make({ startedAt: event.at, push: event.push, kind: "Wall" })
+                        )
+                    },
+                    states: {
+                      Jumping: {
+                        on: {
+                          ApexReached: ({ event, target }) =>
+                            target.local.Falling(State.cases.Falling.make({ apexY: event.y })),
+                          DownPressed: ({ event, target }) =>
+                            target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                        }
+                      },
+                      Falling: {
+                        on: {
+                          DownPressed: ({ event, target }) =>
+                            target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                        }
+                      },
+                      Diving: {}
+                    }
+                  },
+                  airJump: {
+                    on: {
+                      WallJump: {
+                        reenter: true,
+                        transition: ({ target }) => target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
+                      }
+                    },
+                    states: {
+                      AirJumpGroundLock: {
+                        invoke: Machine.after("120 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                          id: "ground-air-jump-unlock"
+                        }),
+                        on: {
+                          AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                        }
+                      },
+                      AirJumpWallLock: {
+                        invoke: Machine.after("240 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                          id: "wall-air-jump-unlock"
+                        }),
+                        on: {
+                          AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                        }
+                      },
+                      AirJumpReady: {
+                        on: {
+                          TryAirJump: Effect.fn(function*({ event, runtime, target }) {
+                            const machine = yield* runtime
+                            yield* machine.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
+                            return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
+                          })
+                        }
+                      },
+                      AirJumpSpent: {}
+                    }
+                  }
                 }
               }
             }
           },
-          Airborne: {
+          Paused: {
             on: {
-              JumpPressed: Effect.fn(function*({ event, runtime }) {
-                const machine = yield* runtime
-                const push = awayFrom(event.wall)
-                yield* machine.raise(
-                  push === 0
-                    ? InternalEvent.cases.TryAirJump.make({ at: event.at })
-                    : InternalEvent.cases.WallJump.make({ at: event.at, push })
-                )
-              }),
-              Landed: ({ event, target }) =>
-                target.branch.Character.locomotion.Grounded(
-                  State.cases.Grounded.make({}),
-                  (grounded) =>
-                    grounded.Landing(
-                      State.cases.Landing.make({
-                        impact: event.impact,
-                        resumeAxis: event.axis,
-                        landedAt: event.at
-                      })
-                    )
-                )
-            },
-            states: {
-              motion: {
-                on: {
-                  DoubleJump: ({ event, target }) =>
-                    target.local.Jumping(
-                      State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Double" })
-                    ),
-                  WallJump: ({ event, target }) =>
-                    target.local.Jumping(
-                      State.cases.Jumping.make({ startedAt: event.at, push: event.push, kind: "Wall" })
-                    )
-                },
-                states: {
-                  Jumping: {
-                    on: {
-                      ApexReached: ({ event, target }) =>
-                        target.local.Falling(State.cases.Falling.make({ apexY: event.y })),
-                      DownPressed: ({ event, target }) =>
-                        target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
-                    }
-                  },
-                  Falling: {
-                    on: {
-                      DownPressed: ({ event, target }) =>
-                        target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
-                    }
-                  },
-                  Diving: {}
-                }
-              },
-              airJump: {
-                on: {
-                  WallJump: {
-                    reenter: true,
-                    transition: ({ target }) => target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
-                  }
-                },
-                states: {
-                  AirJumpGroundLock: {
-                    invoke: Machine.after("120 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
-                      id: "ground-air-jump-unlock"
-                    }),
-                    on: {
-                      AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
-                    }
-                  },
-                  AirJumpWallLock: {
-                    invoke: Machine.after("240 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
-                      id: "wall-air-jump-unlock"
-                    }),
-                    on: {
-                      AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
-                    }
-                  },
-                  AirJumpReady: {
-                    on: {
-                      TryAirJump: Effect.fn(function*({ event, runtime, target }) {
-                        const machine = yield* runtime
-                        yield* machine.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
-                        return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
-                      })
-                    }
-                  },
-                  AirJumpSpent: {}
-                }
-              }
+              Resume: ({ target }) => target.history.Character.locomotion.Playing.resume()
             }
           }
         }
@@ -347,23 +398,35 @@ export const CharacterMachine = Machine.make({
 export type CharacterSnapshot = Machine.Machine.Snapshot<typeof CharacterStates.states>
 export type CharacterEvent = Machine.Machine.InputEvent<typeof CharacterMachine>
 
+export const isPaused = (snapshot: CharacterSnapshot) =>
+  snapshot.states.locomotion.state.path === "Character.locomotion.Paused"
+
 export const locomotionState = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
-  return locomotion.path === "Character.locomotion.Grounded"
-    ? locomotion.state.value
-    : locomotion.states.motion.state.value
+  if (locomotion.path === "Character.locomotion.Paused") {
+    return locomotion.value
+  }
+
+  const playing = locomotion.state
+  return playing.path === "Character.locomotion.Playing.Grounded"
+    ? playing.state.value
+    : playing.states.motion.state.value
 }
 
 export type LocomotionMode = ReturnType<typeof locomotionState>["_tag"]
 
 export const locomotionMode = (snapshot: CharacterSnapshot): LocomotionMode => locomotionState(snapshot)._tag
 
-export const locomotionBranch = (snapshot: CharacterSnapshot) => snapshot.states.locomotion.state.value._tag
+export const locomotionBranch = (snapshot: CharacterSnapshot) => {
+  const locomotion = snapshot.states.locomotion.state
+  return locomotion.path === "Character.locomotion.Paused" ? locomotion.value._tag : locomotion.state.value._tag
+}
 
 export const airJumpMode = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
-  return locomotion.path === "Character.locomotion.Airborne"
-    ? locomotion.states.airJump.state.value._tag
+  return locomotion.path === "Character.locomotion.Playing" &&
+      locomotion.state.path === "Character.locomotion.Playing.Airborne"
+    ? locomotion.state.states.airJump.state.value._tag
     : undefined
 }
 
@@ -375,15 +438,21 @@ export const facingDirection = (snapshot: CharacterSnapshot) => snapshot.states.
 
 export const activeStateData = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
-  const { _tag: _branch, ...branchData } = locomotion.value
-  if (locomotion.path === "Character.locomotion.Grounded") {
-    const { _tag: _leaf, ...leafData } = locomotion.state.value
+  if (locomotion.path === "Character.locomotion.Paused") {
+    const { _tag: _paused, ...pausedData } = locomotion.value
+    return pausedData
+  }
+
+  const playing = locomotion.state
+  const { _tag: _branch, ...branchData } = playing.value
+  if (playing.path === "Character.locomotion.Playing.Grounded") {
+    const { _tag: _leaf, ...leafData } = playing.state.value
     return { ...branchData, ...leafData }
   }
-  const { _tag: _motion, ...motionData } = locomotion.states.motion.state.value
+  const { _tag: _motion, ...motionData } = playing.states.motion.state.value
   return {
     ...branchData,
     ...motionData,
-    airJump: locomotion.states.airJump.state.value._tag
+    airJump: playing.states.airJump.state.value._tag
   }
 }

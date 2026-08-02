@@ -21,24 +21,43 @@ pnpm check
 - **W**, **up**, or **Space** — jump; press again once in the air for a double jump
 - Touch either wall and jump — turn and kick away; repeat after returning to a wall
 - **S** or **down** — duck while grounded; dive while airborne
+- **P** — pause and resume the exact playable configuration through deep history
 - **R** — reset
 
 ## Statechart
 
 `Character` is parallel: `locomotion`, `facing`, and `contact` update
-independently. The locomotion region is compound and makes `Grounded` and
-`Airborne` mutually exclusive. Each branch is compound again:
+independently. The locomotion region switches between `Playing` and `Paused`.
+Inside `Playing`, `Grounded` and `Airborne` are mutually exclusive. Each branch
+is compound again:
 
 ```text
 Character (parallel)
 ├─ locomotion
-│  ├─ Grounded: Standing | Running | Ducking | Landing
-│  └─ Airborne (parallel)
-│     ├─ motion: Jumping | Falling | Diving
-│     └─ airJump: GroundLock | WallLock | Ready | Spent
+│  ├─ Playing
+│  │  ├─ Grounded: Standing | Running | Ducking | Landing
+│  │  ├─ Airborne (parallel)
+│  │  │  ├─ motion: Jumping | Falling | Diving
+│  │  │  └─ airJump: GroundLock | WallLock | Ready | Spent
+│  │  └─ resume (deep history)
+│  └─ Paused
 ├─ facing: Left | Right
 └─ contact: NoWall | LeftWall | RightWall
 ```
+
+`Pause` exits `Playing`, which records its current deep configuration. Physics
+stops while `Paused`. `Resume` targets `Playing.resume`, restoring both the
+active descendants and their typed values: for example, an airborne wall jump
+returns with its `originY`, `startedAt`, `push`, jump kind, and air-jump lock.
+This is one saved configuration, not an undo stack; pausing again replaces the
+previous history. The history implementation also supplies a typed default
+`Playing` snapshot for the case where the history node is targeted before the
+region has ever been exited.
+
+State-scoped invocations follow normal statechart entry/exit semantics. Pausing
+cancels an active landing or air-jump timer, and restoring that state starts its
+invocation again. History restores state configuration and values, not elapsed
+wall-clock time or the adapter's past events.
 
 State payloads live only where they are valid: `Landing` owns impact and resume
 direction, while `Airborne` owns only the jump origin. Air-jump availability is

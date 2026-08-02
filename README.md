@@ -147,7 +147,7 @@ masquerade as an internal result.
 
 ## Statechart structure
 
-`Machine.defineStates` accepts atomic, compound, parallel, and final state
+`Machine.defineStates` accepts atomic, compound, parallel, final, and history
 nodes:
 
 ```ts
@@ -205,6 +205,71 @@ Put data on the narrowest state where it is valid. If several sibling phases
 share data, prefer storing it on their compound parent instead of copying it
 into every child state.
 
+### History states
+
+A history pseudo-state remembers the last active configuration of its parent.
+It has no value schema and never appears in an active snapshot. History is
+shallow by default; use `history: "deep"` to retain the complete descendant
+configuration and its validated values:
+
+```ts
+const States = Machine.defineStates({
+  checkout: {
+    schema: Checkout,
+    initial: "shipping",
+    states: {
+      shipping: Shipping,
+      payment: {
+        schema: Payment,
+        initial: "cardEntry",
+        states: {
+          cardEntry: CardEntry,
+          verifying: Verifying
+        }
+      },
+      resume: { type: "history", history: "deep" }
+    }
+  },
+  support: Support
+})
+```
+
+Implement a typed default for the first transition before any configuration
+has been remembered, then target history without supplying a state value:
+
+```ts
+machine.handle({
+  checkout: {
+    history: {
+      resume: {
+        default: () => initialCheckoutSnapshot
+      }
+    }
+  },
+  support: {
+    on: {
+      Resume: ({ target }) => target.history.checkout.resume()
+    }
+  }
+})
+```
+
+Deep history restores every remembered descendant value. Shallow history
+restores the parent and direct-child values, then follows normal initial paths.
+Only compound or parallel states that shallow restoration can enter implicitly
+need an `initial` handler to construct those new child values:
+
+```ts
+payment: {
+  initial: ;
+  ;(({ state }) => new CardEntry({ attempt: state.attempt, cardNumber: "" }))
+}
+```
+
+Execution APIs remain unavailable until required history defaults and shallow
+initializers have been implemented. History records are part of logical
+snapshots and are schema-validated by `encodeSnapshot` and `decodeSnapshot`.
+
 Transition between structurally related tagged states with `Machine.retag`.
 The source `_tag` is discarded, compatible fields are reused, and missing or
 incompatible required fields must be supplied:
@@ -215,13 +280,14 @@ const saving = Machine.retag(State.cases.Saving, editing)
 
 ## Choosing a target builder
 
-Transition contexts expose three typed target builders:
+Transition contexts expose four typed target builders:
 
-| Builder         | Destination                                       | Configuration behavior                                                                         |
-| --------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `target.local`  | Inside the source's nearest compound scope        | Keeps the compound value, active ancestors, and unrelated parallel regions                     |
-| `target.branch` | Anywhere under the source's active top-level root | Replaces the selected branch while keeping omitted active ancestor values and parallel regions |
-| `target.full`   | Any top-level root                                | Builds a complete active snapshot for the selected root                                        |
+| Builder          | Destination                                       | Configuration behavior                                                                         |
+| ---------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `target.local`   | Inside the source's nearest compound scope        | Keeps the compound value, active ancestors, and unrelated parallel regions                     |
+| `target.branch`  | Anywhere under the source's active top-level root | Replaces the selected branch while keeping omitted active ancestor values and parallel regions |
+| `target.full`    | Any top-level root                                | Builds a complete active snapshot for the selected root                                        |
+| `target.history` | A declared history pseudo-state                   | Restores its parent's remembered configuration or runs its typed default                       |
 
 When `target.local` or `target.branch` enters an inactive nested parallel
 state, its callback must select every region, just like `initial` and
@@ -404,9 +470,9 @@ restrictions and delivery guarantees are documented on that API.
 
 ## Current limits
 
-History states and declarative first-class guards are not part of the current
-API. Ordinary TypeScript conditions implement guards. Use `Machine.after` for a
-cancellable state-scoped delayed event.
+Declarative first-class guards are not part of the current API. Ordinary
+TypeScript conditions implement guards. Use `Machine.after` for a cancellable
+state-scoped delayed event.
 
 ## Guidance for agents and contributors
 
@@ -434,8 +500,9 @@ TypeScript consumer with `skipLibCheck: false`.
 The [platformer statechart example](./examples/platformer) is a playable SVG
 demo centered on a schema-first character machine. It demonstrates nested
 compound locomotion, parallel airborne motion and air-jump regions, independent
-facing and wall-contact regions, typed protocol events, state-scoped timers,
-and state-driven SVG transforms.
+facing and wall-contact regions, a pause/resume flow backed by typed deep
+history, typed protocol events, state-scoped timers, and state-driven SVG
+transforms.
 
 The [Pokémon statechart example](./examples/pokemon) is a standalone React and
 Vite project demonstrating compound and parallel states, state-scoped invokes,

@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && vite build",
     "preview": "vite preview",
-    "check": "pnpm build"
+    "check": "pnpm test && pnpm build"
   },
   "dependencies": {
     "@typeonce/effect-machine": "file:../..",
@@ -17,7 +18,8 @@
   },
   "devDependencies": {
     "typescript": "6.0.3",
-    "vite": "8.1.5"
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
   },
   "packageManager": "pnpm@10.17.1",
   "engines": {

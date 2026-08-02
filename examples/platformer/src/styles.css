@@ -146,6 +146,34 @@ h1 {
   fill: #c77dff;
   filter: drop-shadow(0 0 3px #c77dff);
 }
+#player[data-paused="true"] {
+  opacity: 0.55;
+}
+.pause-overlay {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.pause-overlay rect {
+  fill: rgb(10 16 33 / 72%);
+}
+.pause-overlay text {
+  text-anchor: middle;
+  font-family: ui-monospace, monospace;
+}
+.pause-title {
+  fill: #e9fff9;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.pause-copy {
+  fill: #55d6be;
+  font-size: 11px;
+}
+#game.is-paused .pause-overlay {
+  opacity: 1;
+}
 .controls {
   display: flex;
   flex-wrap: wrap;
@@ -234,6 +262,13 @@ kbd {
 .branch + .branch {
   margin-top: 7px;
 }
+.play-state-row {
+  margin-bottom: 7px;
+}
+.playing-region {
+  padding-left: 7px;
+  border-left: 1px solid #304766;
+}
 .branch h3 {
   display: inline-block;
   margin: 0 0 5px;
@@ -248,7 +283,9 @@ kbd {
   display: inline-block;
   margin-left: 4px;
   color: #55d6be;
-  font: 700 8px ui-monospace, monospace;
+  font:
+    700 8px ui-monospace,
+    monospace;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -264,7 +301,9 @@ kbd {
   display: block;
   margin-bottom: 4px;
   color: #637c98;
-  font: 700 8px ui-monospace, monospace;
+  font:
+    700 8px ui-monospace,
+    monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -283,6 +322,12 @@ kbd {
     650 9px ui-monospace,
     monospace;
   transition: 120ms ease;
+}
+.state-row .history-node {
+  border-style: dashed;
+  border-color: #8a6bc4;
+  color: #b89de8;
+  background: rgb(138 107 196 / 8%);
 }
 [data-node].is-active {
   border-color: #55d6be !important;

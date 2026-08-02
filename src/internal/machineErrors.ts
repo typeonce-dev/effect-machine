@@ -11,7 +11,7 @@ import type * as Schema from "effect/Schema"
  */
 export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEncodeError")<{
   readonly machineId: string | undefined
-  readonly boundary: "state" | "output" | "configuration"
+  readonly boundary: "state" | "output" | "history" | "configuration"
   readonly state?: string
   readonly cause: Schema.SchemaError | Cause.Cause<unknown>
 }> {}
@@ -25,7 +25,7 @@ export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEnc
  */
 export class MachineSchemaDecodeError extends Data.TaggedError("MachineSchemaDecodeError")<{
   readonly machineId: string | undefined
-  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "configuration"
+  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "history" | "configuration"
   readonly state?: string
   readonly event?: string
   readonly cause: Schema.SchemaError | Cause.Cause<unknown>

@@ -1,0 +1,725 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Context, Data, Effect, Fiber, Schema, Stream } from "effect"
+import { Machine } from "../src/index.js"
+
+class Checkout extends Schema.TaggedClass<Checkout>("Checkout")("Checkout", {
+  orderId: Schema.String
+}) {}
+class Shipping extends Schema.TaggedClass<Shipping>("Shipping")("Shipping", {
+  address: Schema.String
+}) {}
+class Payment extends Schema.TaggedClass<Payment>("Payment")("Payment", {
+  attempt: Schema.Number
+}) {}
+class CardEntry extends Schema.TaggedClass<CardEntry>("CardEntry")("CardEntry", {
+  cardNumber: Schema.String
+}) {}
+class Verifying extends Schema.TaggedClass<Verifying>("Verifying")("Verifying", {
+  challengeId: Schema.String
+}) {}
+class Support extends Schema.TaggedClass<Support>("Support")("Support", {
+  ticket: Schema.String
+}) {}
+
+class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
+class ResumeShallow extends Schema.TaggedClass<ResumeShallow>("ResumeShallow")("ResumeShallow", {}) {}
+class ResumeDeep extends Schema.TaggedClass<ResumeDeep>("ResumeDeep")("ResumeDeep", {}) {}
+class GoShipping extends Schema.TaggedClass<GoShipping>("GoShipping")("GoShipping", {
+  address: Schema.String
+}) {}
+class EnterVerifying extends Schema.TaggedClass<EnterVerifying>("EnterVerifying")("EnterVerifying", {}) {}
+class ReenterHistory extends Schema.TaggedClass<ReenterHistory>("ReenterHistory")("ReenterHistory", {}) {}
+
+class CardDefaults extends Context.Service<CardDefaults, {
+  readonly cardNumber: string
+}>()("test/MachineHistory/CardDefaults") {}
+
+class InitializerFailure extends Data.TaggedError("InitializerFailure")<{
+  readonly attempt: number
+}> {}
+
+class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {
+  id: Schema.String
+}) {}
+class Editor extends Schema.TaggedClass<Editor>("Editor")("Editor", {
+  documentId: Schema.String
+}) {}
+class Writing extends Schema.TaggedClass<Writing>("Writing")("Writing", {
+  draft: Schema.String
+}) {}
+class Preview extends Schema.TaggedClass<Preview>("Preview")("Preview", {
+  page: Schema.Number
+}) {}
+class Sidebar extends Schema.TaggedClass<Sidebar>("Sidebar")("Sidebar", {
+  width: Schema.Number
+}) {}
+class Files extends Schema.TaggedClass<Files>("Files")("Files", {
+  directory: Schema.String
+}) {}
+class Search extends Schema.TaggedClass<Search>("Search")("Search", {
+  query: Schema.String
+}) {}
+class Away extends Schema.TaggedClass<Away>("Away")("Away", {}) {}
+
+class LeaveWorkspace extends Schema.TaggedClass<LeaveWorkspace>("LeaveWorkspace")("LeaveWorkspace", {}) {}
+class ResumeWorkspaceShallow extends Schema.TaggedClass<ResumeWorkspaceShallow>("ResumeWorkspaceShallow")(
+  "ResumeWorkspaceShallow",
+  {}
+) {}
+class ResumeWorkspaceDeep extends Schema.TaggedClass<ResumeWorkspaceDeep>("ResumeWorkspaceDeep")(
+  "ResumeWorkspaceDeep",
+  {}
+) {}
+class RestoreEditor extends Schema.TaggedClass<RestoreEditor>("RestoreEditor")("RestoreEditor", {}) {}
+
+const CheckoutStates = Machine.defineStates({
+  checkout: {
+    schema: Checkout,
+    initial: "shipping",
+    states: {
+      shipping: Shipping,
+      payment: {
+        schema: Payment,
+        initial: "cardEntry",
+        states: {
+          cardEntry: CardEntry,
+          verifying: Verifying
+        }
+      },
+      recent: {
+        type: "history"
+      },
+      exact: {
+        type: "history",
+        history: "deep"
+      }
+    }
+  },
+  support: Support
+})
+
+const checkoutPaymentVerifying = (
+  orderId: string,
+  attempt: number,
+  challengeId: string
+): Machine.Machine.Snapshot<typeof CheckoutStates.states> => ({
+  path: "checkout",
+  value: new Checkout({ orderId }),
+  state: {
+    path: "checkout.payment",
+    value: new Payment({ attempt }),
+    state: {
+      path: "checkout.payment.verifying",
+      value: new Verifying({ challengeId })
+    }
+  }
+})
+
+const checkoutShipping = (orderId: string, address: string) =>
+  CheckoutStates.initial.checkout(
+    new Checkout({ orderId }),
+    (checkout) => checkout.shipping(new Shipping({ address }))
+  )
+
+const makeCheckoutMachine = (
+  initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>,
+  onInitialize?: () => void,
+  lifecycle?: Array<string>,
+  onDefault?: () => void
+) =>
+  Machine.make({
+    states: CheckoutStates.states,
+    events: [Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory],
+    initial: () => initial
+  }).handle({
+    checkout: {
+      entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:checkout"))),
+      exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:checkout"))),
+      history: {
+        recent: {
+          default: () => {
+            onDefault?.()
+            return checkoutShipping("fallback-order", "fallback-address")
+          }
+        },
+        exact: {
+          default: () => {
+            onDefault?.()
+            return checkoutShipping("fallback-order", "fallback-address")
+          }
+        }
+      },
+      on: {
+        Leave: ({ target }) => target.full.support(new Support({ ticket: "ticket-1" })),
+        GoShipping: ({ event, target }) => target.local.shipping(new Shipping({ address: event.address })),
+        ReenterHistory: {
+          reenter: true,
+          transition: ({ target }) => target.history.checkout.exact()
+        }
+      },
+      states: {
+        shipping: {
+          on: {
+            EnterVerifying: ({ target }) =>
+              target.local.payment(
+                new Payment({ attempt: 2 }),
+                (payment) => payment.verifying(new Verifying({ challengeId: "challenge-7" }))
+              )
+          }
+        },
+        payment: {
+          entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:payment"))),
+          exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:payment"))),
+          initial: ({ state }) => {
+            onInitialize?.()
+            return new CardEntry({ cardNumber: `fresh-${state.attempt}` })
+          },
+          states: {
+            verifying: {
+              entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:verifying"))),
+              exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:verifying")))
+            }
+          }
+        }
+      }
+    },
+    support: {
+      entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:support"))),
+      exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:support"))),
+      on: {
+        ResumeShallow: ({ target }) => target.history.checkout.recent(),
+        ResumeDeep: ({ target }) => target.history.checkout.exact()
+      }
+    }
+  })
+
+const waitForPath = <State, Event, Error, Output>(
+  actor: Machine.MachineRef<State, Event, Error, Output>,
+  path: string
+) =>
+  actor.changes.pipe(
+    Stream.filter((snapshot) => snapshot.status === "active" && hasPath(snapshot.state, path)),
+    Stream.take(1),
+    Stream.runCollect,
+    Effect.map((snapshots) => Array.from(snapshots)[0]!)
+  )
+
+const hasPath = (snapshot: unknown, path: string): boolean => {
+  if (typeof snapshot !== "object" || snapshot === null) return false
+  const value = snapshot as any
+  if (value.path === path) return true
+  if (value.state !== undefined && hasPath(value.state, path)) return true
+  return value.states !== undefined && Object.values(value.states).some((child) => hasPath(child, path))
+}
+
+const sendAndWaitForPath = <State, Event, Error, Output>(
+  actor: Machine.MachineRef<State, Event, Error, Output>,
+  event: Event,
+  path: string
+) =>
+  Effect.gen(function*() {
+    const observer = yield* waitForPath(actor, path).pipe(Effect.forkChild)
+    yield* actor.send(event)
+    return yield* Fiber.join(observer)
+  })
+
+const WorkspaceStates = Machine.defineStates({
+  workspace: {
+    schema: Workspace,
+    type: "parallel",
+    states: {
+      editor: {
+        schema: Editor,
+        initial: "writing",
+        states: {
+          writing: Writing,
+          preview: Preview
+        }
+      },
+      sidebar: {
+        schema: Sidebar,
+        initial: "files",
+        states: {
+          files: Files,
+          search: Search
+        }
+      },
+      recent: {
+        type: "history"
+      },
+      exact: {
+        type: "history",
+        history: "deep"
+      }
+    }
+  },
+  away: Away
+})
+
+const activeWorkspace: Machine.Machine.Snapshot<typeof WorkspaceStates.states> = {
+  path: "workspace",
+  value: new Workspace({ id: "workspace-1" }),
+  states: {
+    editor: {
+      path: "workspace.editor",
+      value: new Editor({ documentId: "document-1" }),
+      state: {
+        path: "workspace.editor.preview",
+        value: new Preview({ page: 4 })
+      }
+    },
+    sidebar: {
+      path: "workspace.sidebar",
+      value: new Sidebar({ width: 320 }),
+      state: {
+        path: "workspace.sidebar.search",
+        value: new Search({ query: "history" })
+      }
+    }
+  }
+}
+
+const makeWorkspaceMachine = (initialized: Array<string>) =>
+  Machine.make({
+    states: WorkspaceStates.states,
+    events: [LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep],
+    initial: () => activeWorkspace
+  }).handle({
+    workspace: {
+      history: {
+        recent: {
+          default: () =>
+            WorkspaceStates.initial.workspace(
+              new Workspace({ id: "fallback" }),
+              (workspace) =>
+                workspace
+                  .editor(
+                    new Editor({ documentId: "fallback" }),
+                    (editor) => editor.writing(new Writing({ draft: "" }))
+                  )
+                  .sidebar(
+                    new Sidebar({ width: 200 }),
+                    (sidebar) => sidebar.files(new Files({ directory: "/" }))
+                  )
+            )
+        },
+        exact: {
+          default: () =>
+            WorkspaceStates.initial.workspace(
+              new Workspace({ id: "fallback" }),
+              (workspace) =>
+                workspace
+                  .editor(
+                    new Editor({ documentId: "fallback" }),
+                    (editor) => editor.writing(new Writing({ draft: "" }))
+                  )
+                  .sidebar(
+                    new Sidebar({ width: 200 }),
+                    (sidebar) => sidebar.files(new Files({ directory: "/" }))
+                  )
+            )
+        }
+      },
+      on: {
+        LeaveWorkspace: ({ target }) => target.full.away(new Away({}))
+      },
+      states: {
+        editor: {
+          initial: ({ state }) => {
+            initialized.push("editor")
+            return new Writing({ draft: `fresh:${state.documentId}` })
+          }
+        },
+        sidebar: {
+          initial: ({ state }) => {
+            initialized.push("sidebar")
+            return new Files({ directory: `/fresh/${state.width}` })
+          }
+        }
+      }
+    },
+    away: {
+      on: {
+        ResumeWorkspaceShallow: ({ target }) => target.history.workspace.recent(),
+        ResumeWorkspaceDeep: ({ target }) => target.history.workspace.exact()
+      }
+    }
+  })
+
+const NestedHistoryStates = Machine.defineStates({
+  workspace: {
+    schema: Workspace,
+    type: "parallel",
+    states: {
+      editor: {
+        schema: Editor,
+        initial: "writing",
+        states: {
+          writing: Writing,
+          preview: Preview,
+          exact: {
+            type: "history",
+            history: "deep"
+          }
+        }
+      },
+      sidebar: Search
+    }
+  }
+})
+
+const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryStates.states> = {
+  path: "workspace",
+  value: new Workspace({ id: "workspace-1" }),
+  states: {
+    editor: {
+      path: "workspace.editor",
+      value: new Editor({ documentId: "document-1" }),
+      state: {
+        path: "workspace.editor.preview",
+        value: new Preview({ page: 4 })
+      }
+    },
+    sidebar: {
+      path: "workspace.sidebar",
+      value: new Search({ query: "untouched" })
+    }
+  }
+}
+
+const nestedHistoryMachine = Machine.make({
+  states: NestedHistoryStates.states,
+  events: [RestoreEditor],
+  initial: () =>
+    NestedHistoryStates.initial.workspace(
+      new Workspace({ id: "workspace-1" }),
+      (workspace) =>
+        workspace
+          .editor(
+            new Editor({ documentId: "document-1" }),
+            (editor) => editor.writing(new Writing({ draft: "" }))
+          )
+          .sidebar(new Search({ query: "untouched" }))
+    )
+}).handle({
+  workspace: {
+    states: {
+      editor: {
+        history: {
+          exact: {
+            default: () => ({
+              path: "workspace.editor",
+              value: new Editor({ documentId: "fallback" }),
+              state: {
+                path: "workspace.editor.writing",
+                value: new Writing({ draft: "" })
+              }
+            })
+          }
+        },
+        states: {
+          preview: {
+            on: {
+              RestoreEditor: {
+                reenter: true,
+                transition: ({ target }) => target.history.workspace.editor.exact()
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+
+const makeEffectfulInitializerMachine = (initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>) =>
+  Machine.make({
+    states: CheckoutStates.states,
+    events: [Leave, ResumeShallow],
+    initial: () => initial
+  }).handle({
+    checkout: {
+      history: {
+        recent: {
+          default: () => checkoutShipping("fallback", "fallback")
+        },
+        exact: {
+          default: () => checkoutShipping("fallback", "fallback")
+        }
+      },
+      on: {
+        Leave: ({ target }) => target.full.support(new Support({ ticket: "ticket-1" }))
+      },
+      states: {
+        payment: {
+          initial: ({ state }) =>
+            Effect.gen(function*() {
+              const defaults = yield* CardDefaults
+              if (state.attempt < 0) {
+                return yield* new InitializerFailure({ attempt: state.attempt })
+              }
+              return new CardEntry({ cardNumber: defaults.cardNumber })
+            })
+        }
+      }
+    },
+    support: {
+      on: {
+        ResumeShallow: ({ target }) => target.history.checkout.recent()
+      }
+    }
+  })
+
+describe("Machine history states", () => {
+  it.effect("uses the typed default before a history record exists", () =>
+    Effect.gen(function*() {
+      let initialized = 0
+      const machine = makeCheckoutMachine(
+        CheckoutStates.initial.support(new Support({ ticket: "new" })),
+        () => initialized++
+      )
+
+      const initial = yield* Machine.planInitial(machine)
+      const resumed = yield* Machine.plan(machine, initial.state, new ResumeDeep({}))
+
+      assert.deepStrictEqual(resumed.next, checkoutShipping("fallback-order", "fallback-address"))
+      assert.strictEqual(initialized, 0)
+    }))
+
+  it.effect("deep history restores exact values and is overwritten rather than consumed or stacked", () =>
+    Effect.gen(function*() {
+      const original = checkoutPaymentVerifying("order-1", 2, "challenge-7")
+      const machine = makeCheckoutMachine(original)
+
+      const firstLeave = yield* Machine.plan(machine, original, new Leave({}))
+      assert.deepStrictEqual(Object.keys(firstLeave.next.history ?? {}).sort(), [
+        "checkout.exact",
+        "checkout.recent"
+      ])
+
+      const exact = yield* Machine.plan(machine, firstLeave.next, new ResumeDeep({}))
+      assert.strictEqual(exact.next.path, original.path)
+      assert.deepStrictEqual(exact.next.value, original.value)
+      assert.deepStrictEqual((exact.next as any).state, (original as any).state)
+      assert.deepStrictEqual(exact.next.history, firstLeave.next.history)
+
+      const shipping = yield* Machine.plan(machine, exact.next, new GoShipping({ address: "Second Street" }))
+      const secondLeave = yield* Machine.plan(machine, shipping.next, new Leave({}))
+      const resumedOnce = yield* Machine.plan(machine, secondLeave.next, new ResumeDeep({}))
+      assert.strictEqual(resumedOnce.next.path, "checkout")
+      assert.deepStrictEqual((resumedOnce.next as any).state, {
+        path: "checkout.shipping",
+        value: new Shipping({ address: "Second Street" })
+      })
+
+      const thirdLeave = yield* Machine.plan(machine, resumedOnce.next, new Leave({}))
+      const resumedTwice = yield* Machine.plan(machine, thirdLeave.next, new ResumeDeep({}))
+      assert.deepStrictEqual((resumedTwice.next as any).state, (resumedOnce.next as any).state)
+    }))
+
+  it.effect("shallow history retains parent and direct-child values and freshly initializes descendants", () =>
+    Effect.gen(function*() {
+      let initialized = 0
+      const original = checkoutPaymentVerifying("order-1", 3, "challenge-7")
+      const machine = makeCheckoutMachine(original, () => initialized++)
+
+      const left = yield* Machine.plan(machine, original, new Leave({}))
+      const resumed = yield* Machine.plan(machine, left.next, new ResumeShallow({}))
+
+      assert.strictEqual(initialized, 1)
+      assert.deepStrictEqual(resumed.next.value, new Checkout({ orderId: "order-1" }))
+      assert.deepStrictEqual((resumed.next as any).state.value, new Payment({ attempt: 3 }))
+      assert.deepStrictEqual((resumed.next as any).state.state, {
+        path: "checkout.payment.cardEntry",
+        value: new CardEntry({ cardNumber: "fresh-3" })
+      })
+
+      const leftAgain = yield* Machine.plan(machine, resumed.next, new Leave({}))
+      const resumedAgain = yield* Machine.plan(machine, leftAgain.next, new ResumeShallow({}))
+      assert.strictEqual(initialized, 2)
+      assert.deepStrictEqual((resumedAgain.next as any).state.state.value, new CardEntry({ cardNumber: "fresh-3" }))
+    }))
+
+  it.effect("round-trips history and rejects corrupted remembered paths and values", () =>
+    Effect.gen(function*() {
+      const original = checkoutPaymentVerifying("order-1", 2, "challenge-7")
+      const machine = makeCheckoutMachine(original)
+      const left = yield* Machine.plan(machine, original, new Leave({}))
+
+      const encoded = yield* Machine.encodeSnapshot(machine, left.next)
+      const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
+      assert.deepStrictEqual(decoded, left.next)
+      assert.instanceOf(decoded.history?.["checkout.exact"]?.values["checkout"], Checkout)
+      assert.instanceOf(decoded.history?.["checkout.exact"]?.values["checkout.payment.verifying"], Verifying)
+
+      const invalidPath = structuredClone(encoded) as any
+      invalidPath.history["checkout.exact"].active.push("checkout.missing")
+      invalidPath.history["checkout.exact"].values["checkout.missing"] = { _tag: "Verifying", challengeId: "x" }
+      const pathError = yield* Machine.decodeSnapshot(machine, invalidPath).pipe(Effect.flip)
+      assert.instanceOf(pathError, Machine.MachineSchemaDecodeError)
+      assert.strictEqual(pathError.boundary, "history")
+
+      const invalidValue = structuredClone(encoded) as any
+      invalidValue.history["checkout.exact"].values["checkout.payment.verifying"].challengeId = 123
+      const valueError = yield* Machine.decodeSnapshot(machine, invalidValue).pipe(Effect.flip)
+      assert.instanceOf(valueError, Machine.MachineSchemaDecodeError)
+      assert.strictEqual(valueError.boundary, "history")
+      assert.strictEqual(valueError.state, "checkout.payment.verifying")
+    }))
+
+  it.effect("captures the current subtree before resolving a reentering transition to its own history", () =>
+    Effect.gen(function*() {
+      let defaults = 0
+      const original = checkoutPaymentVerifying("order-1", 2, "challenge-7")
+      const machine = makeCheckoutMachine(original, undefined, undefined, () => defaults++)
+
+      const reentered = yield* Machine.plan(machine, original, new ReenterHistory({}))
+
+      assert.strictEqual(defaults, 0)
+      assert.strictEqual(reentered.next.path, "checkout")
+      assert.deepStrictEqual(reentered.next.value, original.value)
+      assert.deepStrictEqual((reentered.next as any).state, (original as any).state)
+      assert.deepStrictEqual(reentered.next.history?.["checkout.exact"]?.active, [
+        "checkout",
+        "checkout.payment",
+        "checkout.payment.verifying"
+      ])
+    }))
+
+  it.effect("restores every parallel region deeply and initializes each region for shallow history", () =>
+    Effect.gen(function*() {
+      const initialized: Array<string> = []
+      const machine = makeWorkspaceMachine(initialized)
+      const left = yield* Machine.plan(machine, activeWorkspace, new LeaveWorkspace({}))
+
+      assert.deepStrictEqual(left.next.history?.["workspace.recent"]?.active, [
+        "workspace",
+        "workspace.editor",
+        "workspace.sidebar"
+      ])
+      assert.deepStrictEqual(left.next.history?.["workspace.exact"]?.active, [
+        "workspace",
+        "workspace.editor",
+        "workspace.editor.preview",
+        "workspace.sidebar",
+        "workspace.sidebar.search"
+      ])
+
+      const deep = yield* Machine.plan(machine, left.next, new ResumeWorkspaceDeep({}))
+      assert.deepStrictEqual((deep.next as any).states, (activeWorkspace as any).states)
+      assert.deepStrictEqual(initialized, [])
+
+      const leftAgain = yield* Machine.plan(machine, deep.next, new LeaveWorkspace({}))
+      const shallow = yield* Machine.plan(machine, leftAgain.next, new ResumeWorkspaceShallow({}))
+      assert.deepStrictEqual(initialized, ["editor", "sidebar"])
+      assert.deepStrictEqual((shallow.next as any).states.editor, {
+        path: "workspace.editor",
+        value: new Editor({ documentId: "document-1" }),
+        state: {
+          path: "workspace.editor.writing",
+          value: new Writing({ draft: "fresh:document-1" })
+        }
+      })
+      assert.deepStrictEqual((shallow.next as any).states.sidebar, {
+        path: "workspace.sidebar",
+        value: new Sidebar({ width: 320 }),
+        state: {
+          path: "workspace.sidebar.files",
+          value: new Files({ directory: "/fresh/320" })
+        }
+      })
+    }))
+
+  it.effect("restores nested history without replacing an unaffected parallel sibling", () =>
+    Effect.gen(function*() {
+      const restored = yield* Machine.plan(
+        nestedHistoryMachine,
+        nestedParallelSnapshot,
+        new RestoreEditor({})
+      )
+
+      assert.deepStrictEqual((restored.next as any).states.editor, (nestedParallelSnapshot as any).states.editor)
+      assert.deepStrictEqual((restored.next as any).states.sidebar, {
+        path: "workspace.sidebar",
+        value: new Search({ query: "untouched" })
+      })
+      assert.deepStrictEqual(restored.next.history?.["workspace.editor.exact"]?.active, [
+        "workspace",
+        "workspace.editor",
+        "workspace.editor.preview"
+      ])
+    }))
+
+  it.effect("runs effectful shallow initializers with their service and error channels", () =>
+    Effect.gen(function*() {
+      const defaults = CardDefaults.of({ cardNumber: "4242" })
+      const original = checkoutPaymentVerifying("order-1", 4, "challenge-7")
+      const machine = makeEffectfulInitializerMachine(original)
+      const left = yield* Machine.plan(machine, original, new Leave({})).pipe(
+        Effect.provideService(CardDefaults, defaults)
+      )
+      const resumed = yield* Machine.plan(machine, left.next, new ResumeShallow({})).pipe(
+        Effect.provideService(CardDefaults, defaults)
+      )
+      assert.deepStrictEqual((resumed.next as any).state.state.value, new CardEntry({ cardNumber: "4242" }))
+
+      const invalid = checkoutPaymentVerifying("order-2", -1, "challenge-8")
+      const invalidLeft = yield* Machine.plan(machine, invalid, new Leave({})).pipe(
+        Effect.provideService(CardDefaults, defaults)
+      )
+      const error = yield* Machine.plan(machine, invalidLeft.next, new ResumeShallow({})).pipe(
+        Effect.provideService(CardDefaults, defaults),
+        Effect.flip
+      )
+      assert.deepStrictEqual(error, new InitializerFailure({ attempt: -1 }))
+    }))
+
+  it.effect("exits leaf-to-root and re-enters root-to-leaf on every history restoration", () =>
+    Effect.gen(function*() {
+      const lifecycle: Array<string> = []
+      const machine = makeCheckoutMachine(
+        checkoutShipping("order-1", "Main Street"),
+        undefined,
+        lifecycle
+      )
+      const actor = yield* Machine.start(machine)
+      yield* Effect.yieldNow
+      yield* sendAndWaitForPath(actor, new EnterVerifying({}), "checkout.payment.verifying")
+      yield* Effect.yieldNow
+      lifecycle.length = 0
+
+      yield* sendAndWaitForPath(actor, new Leave({}), "support")
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(lifecycle, [
+        "exit:verifying",
+        "exit:payment",
+        "exit:checkout",
+        "entry:support"
+      ])
+
+      lifecycle.length = 0
+      yield* sendAndWaitForPath(actor, new ResumeDeep({}), "checkout")
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(lifecycle, [
+        "exit:support",
+        "entry:checkout",
+        "entry:payment",
+        "entry:verifying"
+      ])
+
+      lifecycle.length = 0
+      yield* sendAndWaitForPath(actor, new Leave({}), "support")
+      yield* sendAndWaitForPath(actor, new ResumeDeep({}), "checkout")
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(lifecycle, [
+        "exit:verifying",
+        "exit:payment",
+        "exit:checkout",
+        "entry:support",
+        "exit:support",
+        "entry:checkout",
+        "entry:payment",
+        "entry:verifying"
+      ])
+    }))
+})
