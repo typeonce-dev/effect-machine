@@ -1,5 +1,5 @@
-import { Effect, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
+import { Effect, Schema } from "effect"
 
 // Domain schemas are shared by state payloads and the public physics protocol.
 export const Axis = Schema.Literals([-1, 0, 1])
@@ -127,12 +127,11 @@ const initialCharacter = () =>
     character
       .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
         locomotion.Grounded(State.cases.Grounded.make({}), (grounded) =>
-          grounded.Standing(State.cases.Standing.make({}))
-        )
-      )
-      .facing(State.cases.Facing.make({}), (facing) => facing.Right(State.cases.Right.make({})))
-      .contact(State.cases.WallContact.make({}), (contact) => contact.NoWall(State.cases.NoWall.make({})))
-  )
+          grounded.Standing(State.cases.Standing.make({}))))
+      .facing(State.cases.Facing.make({}), (facing) =>
+        facing.Right(State.cases.Right.make({})))
+      .contact(State.cases.WallContact.make({}), (contact) =>
+        contact.NoWall(State.cases.NoWall.make({}))))
 
 export const CharacterMachine = Machine.make({
   id: "PlatformerCharacter",
@@ -159,22 +158,17 @@ export const CharacterMachine = Machine.make({
                           .motion(State.cases.Motion.make({}), (motion) =>
                             motion.Jumping(
                               State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
-                            )
-                          )
+                            ))
                           .airJump(State.cases.AirJump.make({}), (airJump) =>
-                            airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))
-                          )
-                      )
-                    )
-                    .facing(State.cases.Facing.make({}), (facing) => facing.Right(State.cases.Right.make({})))
+                            airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({})))))
+                    .facing(State.cases.Facing.make({}), (facing) =>
+                      facing.Right(State.cases.Right.make({})))
                     .contact(State.cases.WallContact.make({}), (contact) =>
                       event.wall === -1
                         ? contact.LeftWall(State.cases.LeftWall.make({}))
                         : event.wall === 1
-                          ? contact.RightWall(State.cases.RightWall.make({}))
-                          : contact.NoWall(State.cases.NoWall.make({}))
-                    )
-                )
+                        ? contact.RightWall(State.cases.RightWall.make({}))
+                        : contact.NoWall(State.cases.NoWall.make({}))))
             },
             states: {
               Standing: {
@@ -220,7 +214,7 @@ export const CharacterMachine = Machine.make({
           },
           Airborne: {
             on: {
-              JumpPressed: Effect.fn(function* ({ event, runtime }) {
+              JumpPressed: Effect.fn(function*({ event, runtime }) {
                 const machine = yield* runtime
                 const push = awayFrom(event.wall)
                 yield* machine.raise(
@@ -230,14 +224,16 @@ export const CharacterMachine = Machine.make({
                 )
               }),
               Landed: ({ event, target }) =>
-                target.branch.Character.locomotion.Grounded(State.cases.Grounded.make({}), (grounded) =>
-                  grounded.Landing(
-                    State.cases.Landing.make({
-                      impact: event.impact,
-                      resumeAxis: event.axis,
-                      landedAt: event.at
-                    })
-                  )
+                target.branch.Character.locomotion.Grounded(
+                  State.cases.Grounded.make({}),
+                  (grounded) =>
+                    grounded.Landing(
+                      State.cases.Landing.make({
+                        impact: event.impact,
+                        resumeAxis: event.axis,
+                        landedAt: event.at
+                      })
+                    )
                 )
             },
             states: {
@@ -274,8 +270,7 @@ export const CharacterMachine = Machine.make({
                 on: {
                   WallJump: {
                     reenter: true,
-                    transition: ({ target }) =>
-                      target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
+                    transition: ({ target }) => target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
                   }
                 },
                 states: {
@@ -284,8 +279,7 @@ export const CharacterMachine = Machine.make({
                       id: "ground-air-jump-unlock"
                     }),
                     on: {
-                      AirJumpUnlocked: ({ target }) =>
-                        target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                      AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
                     }
                   },
                   AirJumpWallLock: {
@@ -293,13 +287,12 @@ export const CharacterMachine = Machine.make({
                       id: "wall-air-jump-unlock"
                     }),
                     on: {
-                      AirJumpUnlocked: ({ target }) =>
-                        target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                      AirJumpUnlocked: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
                     }
                   },
                   AirJumpReady: {
                     on: {
-                      TryAirJump: Effect.fn(function* ({ event, runtime, target }) {
+                      TryAirJump: Effect.fn(function*({ event, runtime, target }) {
                         const machine = yield* runtime
                         yield* machine.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
                         return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
@@ -325,8 +318,7 @@ export const CharacterMachine = Machine.make({
           },
           Right: {
             on: {
-              Move: ({ event, target }) =>
-                event.axis === -1 ? target.local.Left(State.cases.Left.make({})) : undefined,
+              Move: ({ event, target }) => event.axis === -1 ? target.local.Left(State.cases.Left.make({})) : undefined,
               WallJump: ({ event, target }) =>
                 event.push === -1 ? target.local.Left(State.cases.Left.make({})) : undefined
             }
@@ -339,8 +331,8 @@ export const CharacterMachine = Machine.make({
             event.wall === -1
               ? target.local.LeftWall(State.cases.LeftWall.make({}))
               : event.wall === 1
-                ? target.local.RightWall(State.cases.RightWall.make({}))
-                : target.local.NoWall(State.cases.NoWall.make({}))
+              ? target.local.RightWall(State.cases.RightWall.make({}))
+              : target.local.NoWall(State.cases.NoWall.make({}))
         },
         states: {
           NoWall: {},

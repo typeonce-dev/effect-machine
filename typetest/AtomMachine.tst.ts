@@ -1,8 +1,8 @@
 import { Context, Effect, Layer, type Option, Schema } from "effect"
-import { Machine } from "../src/index.js"
 import { AsyncResult, Atom } from "effect/unstable/reactivity"
-import { AtomMachine } from "../src/reactivity.js"
 import { describe, expect, it } from "tstyche"
+import { Machine } from "../src/index.js"
+import { AtomMachine } from "../src/reactivity.js"
 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 
@@ -347,10 +347,11 @@ describe("AtomMachine", () => {
         }),
         on: {
           Begin: ({ target }) =>
-            target.full.Ready(DeepState.cases.Ready.make({}), (ready) =>
-              ready.Editor(DeepState.cases.Editor.make({}), (editor) =>
-                editor.Editing(DeepState.cases.Editing.make({ value: "ready" }))
-              )
+            target.full.Ready(
+              DeepState.cases.Ready.make({}),
+              (ready) =>
+                ready.Editor(DeepState.cases.Editor.make({}), (editor) =>
+                  editor.Editing(DeepState.cases.Editing.make({ value: "ready" })))
             )
         }
       },

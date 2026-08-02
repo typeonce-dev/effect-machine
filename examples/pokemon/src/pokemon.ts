@@ -23,7 +23,7 @@ export class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInT
 }) {}
 
 export class PokemonService extends Context.Service<PokemonService>()("app/PokemonService", {
-  make: Effect.gen(function* () {
+  make: Effect.gen(function*() {
     const baseClient = yield* HttpClient.HttpClient
     const client = baseClient.pipe(
       HttpClient.mapRequest(
@@ -32,7 +32,7 @@ export class PokemonService extends Context.Service<PokemonService>()("app/Pokem
     )
 
     return {
-      getRandomTeam: Effect.fn("PokemonService.getTeam")(function* () {
+      getRandomTeam: Effect.fn("PokemonService.getTeam")(function*() {
         const teamIndexes = yield* Random.shuffle(Array.range(1, 1025)).pipe(Effect.map(Array.take(6)))
 
         return yield* Effect.all(
@@ -43,13 +43,13 @@ export class PokemonService extends Context.Service<PokemonService>()("app/Pokem
         )
       }),
 
-      getRandomPokemon: Effect.fn("PokemonService.getRandomPokemon")(function* () {
+      getRandomPokemon: Effect.fn("PokemonService.getRandomPokemon")(function*() {
         const index = yield* Random.nextIntBetween(1, 1025)
         const response = yield* client.get(`/pokemon/${index}`)
         return yield* HttpClientResponse.schemaBodyJson(Pokemon)(response)
       }),
 
-      getByName: Effect.fn("PokemonService.getByName")(function* (name: string) {
+      getByName: Effect.fn("PokemonService.getByName")(function*(name: string) {
         const response = yield* client.get(`/pokemon/${encodeURIComponent(name.trim().toLowerCase())}`)
         return yield* HttpClientResponse.matchStatus(response, {
           404: () => Effect.succeed(Option.none()),

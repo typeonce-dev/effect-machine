@@ -1,10 +1,10 @@
-import { Context, Effect, Layer, Schema } from "effect"
-import { Atom } from "effect/unstable/reactivity"
 import { Machine } from "@typeonce/effect-machine"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Context, Effect, Layer, Schema } from "effect"
+import { Atom } from "effect/unstable/reactivity"
 
-type Equal<Left, Right> =
-  (<Type>() => Type extends Left ? 1 : 2) extends <Type>() => Type extends Right ? 1 : 2 ? true : false
+type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends <Type>() => Type extends Right ? 1 : 2 ? true
+  : false
 type Expect<Type extends true> = Type
 
 class ExternalService extends Context.Service<ExternalService, string>()("consumer/ExternalService") {}
@@ -64,7 +64,7 @@ const childMachine = Machine.make({
   Done: {
     entry: ({ state }) =>
       Machine.action(
-        Effect.gen(function* () {
+        Effect.gen(function*() {
           const runtime = yield* Machine.runtime<{ readonly emits: typeof Internal.cases.ChildNotice.Type }>()
           yield* runtime.sendParent(Internal.cases.ChildNotice.make({ value: state.value }))
         })
@@ -104,7 +104,7 @@ const machine = Machine.make({
   emits: [Emitted.cases.Notice],
   input: Schema.Struct({ seed: Schema.String }),
   initial: ({ seed }) =>
-    Effect.gen(function* () {
+    Effect.gen(function*() {
       yield* InitialService
       if (seed.length < 0) return yield* Effect.fail(new InitialFailure())
       return States.initial.Idle(State.cases.Idle.make({}))
@@ -117,10 +117,11 @@ const machine = Machine.make({
     }),
     on: {
       Begin: ({ target }) =>
-        target.full.Ready(State.cases.Ready.make({}), (ready) =>
-          ready.Editor(State.cases.Editor.make({}), (editor) =>
-            editor.Editing(State.cases.Editing.make({ value: "ready" }))
-          )
+        target.full.Ready(
+          State.cases.Ready.make({}),
+          (ready) =>
+            ready.Editor(State.cases.Editor.make({}), (editor) =>
+              editor.Editing(State.cases.Editing.make({ value: "ready" })))
         )
     }
   },
@@ -132,7 +133,7 @@ const machine = Machine.make({
             on: {
               Save: ({ event, target }) =>
                 Machine.action(
-                  Effect.gen(function* () {
+                  Effect.gen(function*() {
                     yield* ExternalService
                     return yield* Effect.fail(new ActionFailure())
                   }),
@@ -151,7 +152,7 @@ const machine = Machine.make({
             on: {
               ChildNotice: ({ event, target }) =>
                 Machine.action(
-                  Effect.gen(function* () {
+                  Effect.gen(function*() {
                     const runtime = yield* Machine.runtime<{ readonly emits: typeof Emitted.cases.Notice.Type }>()
                     yield* runtime.sendParent(Emitted.cases.Notice.make({ value: event.value }))
                   }),

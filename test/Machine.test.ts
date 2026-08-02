@@ -1472,8 +1472,7 @@ describe("Machine", () => {
         }).handle({
           all: {
             states: {
-              left: {
-              }
+              left: {}
             }
           }
         })
@@ -2284,8 +2283,7 @@ describe("Machine", () => {
                       fulfillment
                         .inventory(
                           new Inventory({ warehouse: "warehouse-1" }),
-                          (inventory) =>
-                            inventory.reserved(new InventoryReserved({ reservationId: event.value }))
+                          (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.value }))
                         )
                         .shipping(
                           new Shipping({ address: "Main Street" }),
@@ -4788,8 +4786,7 @@ describe("Machine", () => {
           Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
         }
       },
-      Success: {
-      }
+      Success: {}
     })
 
     assert.deepStrictEqual(
@@ -4976,8 +4973,7 @@ describe("Machine", () => {
             Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
           }
         },
-        Success: {
-        }
+        Success: {}
       })
 
       const actor = yield* Machine.start(machine, { userId: "user-1" })
@@ -5012,8 +5008,7 @@ describe("Machine", () => {
             Reset: () => FlatInitial.Idle(new Idle({ userId: "user-2" }))
           }
         },
-        Success: {
-        }
+        Success: {}
       })
 
       const actor = yield* Machine.start(machine, { userId: "user-1" })
@@ -5098,8 +5093,7 @@ describe("Machine", () => {
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
-        Success: {
-        }
+        Success: {}
       })
 
       const state = FlatInitial.Success(new Success({ requestId: "request-1" }))
@@ -6411,8 +6405,7 @@ describe("Machine", () => {
             src: () => Machine.effect(Effect.succeed(new RequestSucceeded({ value: "loaded" })))
           }),
           on: {
-            RequestSucceeded: ({ event }) =>
-              FlatInitial.Success(new Success({ requestId: event.value }))
+            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
           }
         },
         Success: {
@@ -6443,10 +6436,8 @@ describe("Machine", () => {
             onFailure: (error) => new RequestFailed({ error, cause: Cause.fail(error) })
           }),
           on: {
-            RequestSucceeded: ({ event }) =>
-              FlatInitial.Failed(new Failed({ message: event.value })),
-            RequestFailed: ({ event }) =>
-              FlatInitial.Failed(new Failed({ message: event.error.message }))
+            RequestSucceeded: ({ event }) => FlatInitial.Failed(new Failed({ message: event.value })),
+            RequestFailed: ({ event }) => FlatInitial.Failed(new Failed({ message: event.error.message }))
           }
         },
         Failed: {
@@ -6470,8 +6461,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.after("1 hour", new RequestSucceeded({ value: "timeout" })),
           on: {
-            RequestSucceeded: ({ event }) =>
-              FlatInitial.Success(new Success({ requestId: event.value }))
+            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
           }
         },
         Success: {
@@ -6712,8 +6702,7 @@ describe("Machine", () => {
             RequestProgress: ({ event }) => FlatInitial.Success(new Success({ requestId: event.childState }))
           }
         },
-        Success: {
-        }
+        Success: {}
       })
 
       const actor = yield* Machine.start(machine, { userId: "user-1" })
@@ -6774,8 +6763,7 @@ describe("Machine", () => {
             RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
           }
         },
-        Success: {
-        }
+        Success: {}
       })
 
       const actor = yield* Machine.start(machine, { userId: "user-1" })
@@ -6841,8 +6829,7 @@ describe("Machine", () => {
             RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
           }
         },
-        Success: {
-        }
+        Success: {}
       })
 
       const actor = yield* Machine.start(machine, { userId: "user-1" })

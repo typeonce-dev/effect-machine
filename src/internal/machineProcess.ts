@@ -245,8 +245,7 @@ export const toProcessLogic: <
             const reserved = yield* Ref.modify(invokeSessions, (sessions) =>
               HashMap.has(sessions, key)
                 ? [false, sessions] as const
-                : [true, HashMap.set(sessions, key, { token, scope, childId, path })] as const
-            )
+                : [true, HashMap.set(sessions, key, { token, scope, childId, path })] as const)
             if (!reserved) {
               yield* Scope.close(scope, Exit.void)
               return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))

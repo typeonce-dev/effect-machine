@@ -98,8 +98,7 @@ const makeCounter = (state: {
         })
       }
     },
-    Done: {
-    }
+    Done: {}
   })
 
 const storageKey = (entityType: string, entityId: string): string => `${entityType}\u0000${entityId}`

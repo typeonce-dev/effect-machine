@@ -1,17 +1,17 @@
 import "./styles.css"
-import { Effect, Fiber, Stream } from "effect"
 import { Machine } from "@typeonce/effect-machine"
+import { Effect, Fiber, Stream } from "effect"
 import { GameAdapter } from "./game.ts"
 import {
   activeStateData,
   airJumpMode,
+  type CharacterEvent,
   CharacterMachine,
+  type CharacterSnapshot,
   facingDirection,
   locomotionBranch,
   locomotionMode,
-  wallContact,
-  type CharacterEvent,
-  type CharacterSnapshot
+  wallContact
 } from "./machine.ts"
 
 const requiredElement = <ElementType extends Element>(selector: string) => {
@@ -59,7 +59,7 @@ const publish = (next: CharacterSnapshot) => {
   })
 }
 
-const program = Effect.gen(function* () {
+const program = Effect.gen(function*() {
   const actor = yield* Machine.start(CharacterMachine)
   deliver = (event) => Effect.runFork(actor.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void)))
   publish(yield* actor.state)

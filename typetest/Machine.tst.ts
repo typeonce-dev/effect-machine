@@ -1,6 +1,6 @@
 import { Context, Effect, Option, Schema } from "effect"
-import { Machine } from "../src/index.js"
 import { describe, expect, it } from "tstyche"
+import { Machine } from "../src/index.js"
 
 describe("Machine", () => {
   class Up extends Schema.TaggedClass<Up>("Up")("Up", {
@@ -1096,8 +1096,7 @@ describe("Machine", () => {
               return Effect.as(DoneRequirement, target.full.down(new Down({})))
             },
             states: {
-              signedIn: {
-              }
+              signedIn: {}
             }
           }
         }

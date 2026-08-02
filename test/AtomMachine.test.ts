@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Context, Data, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
-import { Machine } from "../src/index.js"
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
+import { Machine } from "../src/index.js"
 import { AtomMachine } from "../src/reactivity.js"
 
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {
@@ -92,8 +92,7 @@ const makeCounterMachine = () =>
         Finish: ({ state, event }) => MachineInitial.Count(new Count({ value: state.value + event.by }))
       }
     },
-    Done: {
-    }
+    Done: {}
   })
 
 const makeFailingCounterMachine = () =>
@@ -107,8 +106,7 @@ const makeFailingCounterMachine = () =>
         Finish: () => Effect.fail(new RuntimeError({ reason: "transition" }))
       }
     },
-    Done: {
-    }
+    Done: {}
   })
 
 const makeDelayedCounterMachine = (release: Deferred.Deferred<void>) =>
@@ -125,8 +123,7 @@ const makeDelayedCounterMachine = (release: Deferred.Deferred<void>) =>
         Finish: ({ state, event }) => MachineInitial.Count(new Count({ value: state.value + event.by }))
       }
     },
-    Done: {
-    }
+    Done: {}
   })
 
 describe("AtomMachine", () => {
@@ -650,8 +647,7 @@ describe("AtomMachine", () => {
             })
           }
         },
-        ValueRead: {
-        }
+        ValueRead: {}
       })
       const bridge = AtomMachine.make(machine)
       yield* mount(registry, bridge.snapshot)

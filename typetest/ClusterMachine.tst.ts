@@ -1,9 +1,9 @@
 import { Context, Effect, type Layer, Option, Schema, SchemaGetter } from "effect"
 import { type MessageStorage, type Sharding } from "effect/unstable/cluster"
-import { ClusterMachine } from "../src/cluster.js"
-import { Machine } from "../src/index.js"
 import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { describe, expect, it } from "tstyche"
+import { ClusterMachine } from "../src/cluster.js"
+import { Machine } from "../src/index.js"
 
 describe("ClusterMachine", () => {
   class Count extends Schema.TaggedClass<Count>("Count")("Count", {

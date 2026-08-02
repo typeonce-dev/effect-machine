@@ -1,7 +1,7 @@
-import { Effect, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
-import { Atom } from "effect/unstable/reactivity"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Effect, Schema } from "effect"
+import { Atom } from "effect/unstable/reactivity"
 import { ReplaceMachine } from "./machines/replace.ts"
 import { SelectionMachine } from "./machines/selection.ts"
 import { Pokemon, PokemonService, ReplaceInTeam } from "./pokemon.ts"
@@ -18,7 +18,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 const machine = Machine.make({
   states: States.states,
   events: [ReplaceInTeam],
-  initial: Effect.fn(function* () {
+  initial: Effect.fn(function*() {
     const pk = yield* PokemonService
     const team = yield* pk.getRandomTeam()
     return States.initial.ActiveTeam(new ActiveTeam({ team }))
