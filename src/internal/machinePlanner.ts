@@ -13,15 +13,19 @@ import type { ActionRequirement, InitialEvent as MachineInitialEvent, Machine, R
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./machineErrors.js"
 import {
   type ActiveConfiguration,
+  captureHistory,
   compareDocumentOrder,
   completeConfigurationEffect,
   decodeEmit,
   decodeEvent,
   decodeInput,
+  decodeStateValue,
+  configurationFromHistoryRecord,
   getActiveLeafPathFrom,
   getActiveLeafPaths,
   getActiveValue,
   getInitialEntryPaths,
+  getHistoryRecord,
   getLeafPath,
   getNode,
   getParentValue,
@@ -32,11 +36,15 @@ import {
   isDescendantOf,
   isSnapshot,
   isTarget,
+  isHistoryTarget,
+  isPathInSubtree,
+  makeTarget,
   normalizeConfiguration,
   normalizeConfigurationEffect,
   normalizeTargetConfigurationEffect,
   pathDepth,
   snapshotFromConfiguration,
+  snapshotFromConfigurationAtPath,
   validateInitialConfiguration
 } from "./machineModel.js"
 import type { ProcessScope } from "./machineRuntime.js"
@@ -288,6 +296,179 @@ const collectTransition = Effect.fnUntraced(function*<
     actions: actions as ReadonlyArray<DeferredAction<E, R>>,
     raisedEvents: raisedEvents as ReadonlyArray<Event>,
     emittedEvents
+  }
+})
+
+const collectStateInitializer = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  handler: (context: any) => unknown,
+  context: any
+) {
+  const deferredActions = yield* makeDeferredActions
+  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
+  const result = handler(context)
+  const value = Effect.isEffect(result)
+    ? yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
+    : result
+  return {
+    value,
+    actions: yield* deferredActions.read,
+    raisedEvents: yield* deferredRaisedEvents.read,
+    emittedEvents: yield* deferredRaisedEvents.readEmitted
+  }
+})
+
+/** Completes the intentionally partial configuration held by shallow history.
+ * Only a compound node with no remembered child invokes an initializer; deep
+ * history never reaches this path. */
+const completeHistoryConfiguration = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  event: unknown
+) {
+  const active = new Set(configuration.active)
+  const values = new Map(configuration.values)
+  const actions: Array<DeferredAction> = []
+  const raisedEvents: Array<unknown> = []
+  const emittedEvents: Array<unknown> = []
+
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const path of Array.from(active).sort((left, right) => compareDocumentOrder(machine, left, right))) {
+      const node = getNode(machine, path)
+      if (node.type === "compound" && !node.children.some((child) => active.has(child))) {
+        if (node.initial === undefined) {
+          throw new Error(`Machine shallow history expected compound state "${path}" to have an initial child`)
+        }
+        const initializer = machine.handlers[path]?.initial
+        if (initializer === undefined) {
+          throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
+        }
+        const current = {
+          active,
+          values,
+          outputs: configuration.outputs,
+          history: configuration.history
+        } as ActiveConfiguration
+        const initialized = yield* collectStateInitializer(machine, initializer, {
+          state: getActiveValue(current, path),
+          parent: getParentValue(machine, current, path),
+          parents: getParentValues(machine, current, path),
+          event,
+          ...makePlanningCapabilities()
+        })
+        const child = getNode(machine, node.initial)
+        active.add(child.path)
+        values.set(child.path, yield* decodeStateValue(machine, child, initialized.value))
+        actions.push(...initialized.actions)
+        raisedEvents.push(...initialized.raisedEvents)
+        emittedEvents.push(...initialized.emittedEvents)
+        changed = true
+      }
+      if (node.type === "parallel") {
+        const missing = node.children.filter((childPath) => !active.has(childPath))
+        if (missing.length > 0) {
+          const initializer = machine.handlers[path]?.initial
+          if (initializer === undefined) {
+            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
+          }
+          const current = {
+            active,
+            values,
+            outputs: configuration.outputs,
+            history: configuration.history
+          } as ActiveConfiguration
+          const initialized = yield* collectStateInitializer(machine, initializer, {
+            state: getActiveValue(current, path),
+            parent: getParentValue(machine, current, path),
+            parents: getParentValues(machine, current, path),
+            event,
+            ...makePlanningCapabilities()
+          })
+          if (typeof initialized.value !== "object" || initialized.value === null) {
+            throw new Error(`Machine parallel state initializer for "${path}" must return its region values`)
+          }
+          for (const childPath of missing) {
+            const child = getNode(machine, childPath)
+            if (!Object.prototype.hasOwnProperty.call(initialized.value, child.key)) {
+              throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
+            }
+            active.add(child.path)
+            values.set(
+              child.path,
+              yield* decodeStateValue(machine, child, (initialized.value as Record<string, unknown>)[child.key])
+            )
+          }
+          actions.push(...initialized.actions)
+          raisedEvents.push(...initialized.raisedEvents)
+          emittedEvents.push(...initialized.emittedEvents)
+          changed = true
+        }
+      }
+    }
+  }
+  return {
+    configuration: {
+      active,
+      values,
+      outputs: new Map<string, unknown>(),
+      history: configuration.history
+    } as ActiveConfiguration,
+    actions,
+    raisedEvents,
+    emittedEvents
+  }
+})
+
+const resolveHistoryTarget = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  target: { readonly path: string; readonly parent: string },
+  event: unknown
+) {
+  const node = getNode(machine, target.path)
+  if (node.type !== "history" || node.parent !== target.parent) {
+    throw new Error(`Machine expected history target "${target.path}" to resolve to its declared parent`)
+  }
+  const record = getHistoryRecord(configuration, target.path)
+  if (record !== undefined) {
+    const restored = configurationFromHistoryRecord(machine, configuration, record)
+    // Deep records are already complete below the history parent. This pass is
+    // still required for parallel ancestors outside that parent whose other
+    // regions must be initialized when the ancestor is re-entered.
+    const completed = yield* completeHistoryConfiguration(machine, restored, event)
+    const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.parent)
+    return {
+      target: makeTarget(target.parent as any, snapshot.value as any, { snapshot: snapshot as any }),
+      actions: completed.actions,
+      raisedEvents: completed.raisedEvents,
+      emittedEvents: completed.emittedEvents
+    }
+  }
+
+  const key = node.key
+  const fallback = machine.handlers[target.parent]?.history?.[key]?.default
+  if (fallback === undefined) {
+    throw new Error(`Machine history state "${target.path}" requires a default implementation`)
+  }
+  const collected = yield* collectTransition(machine, fallback, {
+    event,
+    ...makePlanningCapabilities(),
+    target: machine.makeTargetBuilder(target.parent).full,
+    parent: target.parent
+  })
+  if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
+    throw new Error(`Machine history default for "${target.path}" must return a concrete parent snapshot`)
+  }
+  if (String(collected.state.path) !== target.parent) {
+    throw new Error(`Machine history default for "${target.path}" must return state "${target.parent}"`)
+  }
+  return {
+    target: makeTarget(target.parent as any, collected.state.value as any, { snapshot: collected.state as any }),
+    actions: collected.actions,
+    raisedEvents: collected.raisedEvents,
+    emittedEvents: collected.emittedEvents
   }
 })
 
@@ -785,11 +966,45 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     selection.transition.transition,
     selection.context
   )
-  const target = transitionResult.state === undefined
+  const unresolvedTarget = transitionResult.state === undefined
     ? undefined
     : transitionResult.state as
       | Machine.Snapshot<States>
       | Machine.Target<States, Machine.StateIdentifier<States>>
+  let historyResolution: {
+    readonly target: unknown
+    readonly actions: ReadonlyArray<DeferredAction>
+    readonly raisedEvents: ReadonlyArray<unknown>
+    readonly emittedEvents: ReadonlyArray<unknown>
+  } | undefined
+  const reenteredHistoryParent = unresolvedTarget !== undefined && isHistoryTarget(unresolvedTarget) &&
+    selection.transition.reenter && state.active.has(unresolvedTarget.parent)
+  if (unresolvedTarget !== undefined && isHistoryTarget(unresolvedTarget)) {
+    // A reentering transition may exit the history node's own parent. SCXML
+    // history observes that same exit, so resolve against a provisional
+    // capture rather than an older record (or the default).
+    const provisionalBoundary = selection.transition.reenter
+      ? getNode(machine, selection.sourcePath).parent
+      : getLeastCommonAncestor(machine, stateIdentifier, unresolvedTarget.parent)
+    const provisionalExitPaths = reenteredHistoryParent
+      ? sortExitPaths(
+        machine,
+        Array.from(state.active).filter((path) => isPathInSubtree(path, unresolvedTarget.parent))
+      )
+      : getExitPaths(machine, state, provisionalBoundary)
+    const stateAtHistoryResolution = provisionalExitPaths.includes(unresolvedTarget.parent)
+      ? captureHistory(machine, state, state, provisionalExitPaths)
+      : state
+    historyResolution = yield* resolveHistoryTarget(
+      machine,
+      stateAtHistoryResolution,
+      unresolvedTarget,
+      (selection.context as any).event
+    )
+  }
+  const target = historyResolution === undefined ? unresolvedTarget : historyResolution.target as
+    | Machine.Snapshot<States>
+    | Machine.Target<States, Machine.StateIdentifier<States>>
   const targetPath = target === undefined ? undefined : getTargetNodePath(target)
   const stateAfterTransition = target === undefined
     ? state
@@ -800,9 +1015,9 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     return {
       selection,
       target,
-      actions: transitionResult.actions,
-      raisedEvents: transitionResult.raisedEvents,
-      emittedEvents: transitionResult.emittedEvents,
+      actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
+      raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
+      emittedEvents: [...transitionResult.emittedEvents, ...(historyResolution?.emittedEvents ?? [])],
       changed,
       exitPaths: [],
       entryPaths: []
@@ -816,12 +1031,22 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
   return {
     selection,
     target,
-    actions: transitionResult.actions,
-    raisedEvents: transitionResult.raisedEvents,
-    emittedEvents: transitionResult.emittedEvents,
+    actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
+    raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
+    emittedEvents: [...transitionResult.emittedEvents, ...(historyResolution?.emittedEvents ?? [])],
     changed,
-    exitPaths: getExitPaths(machine, state, boundary),
-    entryPaths: getEntryPaths(machine, stateAfterTransition, boundary)
+    exitPaths: reenteredHistoryParent
+      ? sortExitPaths(
+        machine,
+        Array.from(state.active).filter((path) => isPathInSubtree(path, unresolvedTarget!.parent))
+      )
+      : getExitPaths(machine, state, boundary),
+    entryPaths: reenteredHistoryParent
+      ? sortEntryPaths(
+        machine,
+        Array.from(stateAfterTransition.active).filter((path) => isPathInSubtree(path, unresolvedTarget!.parent))
+      )
+      : getEntryPaths(machine, stateAfterTransition, boundary)
   } as EvaluatedTransition<States, Event, E, R, Context>
 })
 
@@ -1163,6 +1388,7 @@ const microstep: <
 
   const exitPaths = sortExitPaths(machine, sortedTransitions.flatMap((transition) => transition.exitPaths))
   const entryPaths = sortEntryPaths(machine, sortedTransitions.flatMap((transition) => transition.entryPaths))
+  stateAfterTransition = captureHistory(machine, state, stateAfterTransition, exitPaths)
   const exit = yield* collectStateActions<States, Events, Emits, E, R>(
     machine,
     state,

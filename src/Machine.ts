@@ -101,10 +101,9 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Gotchas**
  *
- * History states and declarative first-class guards are not part of the
- * current API. Conditional behavior can be expressed in typed handlers with
- * ordinary TypeScript control flow. Use `after` for cancellable state-scoped
- * delayed events.
+ * Declarative first-class guards are not part of the current API. Conditional
+ * behavior can be expressed in typed handlers with ordinary TypeScript control
+ * flow. Use `after` for cancellable state-scoped delayed events.
  *
  * @category models
  * @since 4.0.0
@@ -433,13 +432,25 @@ type StateDefinitionError<Message extends string> = {
   readonly "~effect/Machine/DefinitionError": Message
 }
 
-type ValidateStateTree<States extends Machine.StateSchemas> = {
-  readonly [Key in keyof States]: ValidateStateNode<States[Key]>
+type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKey<States>
+
+type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryStateKey<States>
+
+type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends boolean = false> = {
+  readonly [Key in keyof States]: ValidateStateNode<States[Key], AllowHistory>
 }
 
-type ValidateStateNode<Node> = Node extends Machine.TaggedSchema ? unknown
+type ValidateStateNode<Node, AllowHistory extends boolean> = Node extends Machine.HistoryStateNodeConfig ?
+  AllowHistory extends true ? ValidateHistoryStateNode<Node>
+  : StateDefinitionError<"History states must be declared below an active parent state">
+  : Node extends Machine.TaggedSchema ? unknown
   : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node>
   : StateDefinitionError<"State nodes must be tagged schemas or state node configs">
+
+type ValidateHistoryStateNode<Node extends Machine.HistoryStateNodeConfig> = [
+  Extract<keyof Node, "schema" | "states" | "initial" | "output">
+] extends [never] ? unknown
+  : StateDefinitionError<"History states cannot declare schemas, children, initial states, or output">
 
 type ValidateStateNodeConfig<Node extends { readonly schema: Machine.TaggedSchema }> = Node extends
   { readonly states: infer Children } ? ValidateStateNodeWithChildren<Node, Children>
@@ -456,7 +467,7 @@ type ValidateStateNodeWithChildren<
   Node extends { readonly type: "final" } ? StateDefinitionError<"Final states cannot declare child states">
   : Node extends { readonly type: "parallel" } ?
     "initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
-    : { readonly states: ValidateStateTree<Children> } & ValidateOutputSchema<Node>
+    : { readonly states: ValidateStateTree<Children, true> } & ValidateOutputSchema<Node>
   : "output" extends keyof Node ? StateDefinitionError<"Only final and parallel states can declare output">
   : ValidateCompoundStateNode<Node, Children>
   : StateDefinitionError<"Child states must be a state tree">
@@ -464,8 +475,8 @@ type ValidateStateNodeWithChildren<
 type ValidateCompoundStateNode<
   Node extends { readonly schema: Machine.TaggedSchema },
   Children extends Machine.StateSchemas
-> = Node extends { readonly initial: infer Initial } ? Initial extends Extract<keyof Children, string> ? {
-      readonly states: ValidateStateTree<Children>
+> = Node extends { readonly initial: infer Initial } ? Initial extends ActiveStateKey<Children> ? {
+      readonly states: ValidateStateTree<Children, true>
     }
   : StateDefinitionError<"Compound initial must be one of its direct child keys">
   : StateDefinitionError<"Compound states must declare an initial child">
@@ -485,10 +496,11 @@ type DefineStateTreeInput<States extends Machine.StateSchemas> = {
 }
 
 type DefineStateNodeInput<Node> = Node extends Machine.TaggedSchema ? Node
+  : Node extends Machine.HistoryStateNodeConfig ? Machine.HistoryStateNodeConfig
   : Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
     Omit<Node, "states"> & { readonly states: DefineStateTreeInput<Children> }
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? Omit<Node, "initial" | "states"> & {
-      readonly initial: Extract<keyof Children, string>
+      readonly initial: ActiveStateKey<Children>
       readonly states: DefineStateTreeInput<Children>
     }
   : Node
@@ -577,12 +589,12 @@ type InitialSnapshotBuilderWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string = ""
 > = {
-  readonly [Key in Extract<keyof States, string>]: InitialSnapshotMethod<States, Key, Prefix>
+  readonly [Key in ActiveStateKey<States>]: InitialSnapshotMethod<States, Key, Prefix>
 }
 
 type InitialSnapshotMethod<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string
 > =
   & ((
@@ -595,7 +607,7 @@ type InitialSnapshotMethod<
 
 type InitialSnapshotArguments<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
@@ -606,7 +618,7 @@ type InitialSnapshotArguments<
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>>
     ]
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends Extract<keyof Children, string> } ? [
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? [
         value: Machine.NodeSchema<Node>["Type"],
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
@@ -618,7 +630,7 @@ type InitialSnapshotArguments<
 
 type InitialSnapshotFromArguments<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
@@ -629,7 +641,7 @@ type InitialSnapshotFromArguments<
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>, boolean>
     ]
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends Extract<keyof Children, string> } ? [
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? [
         input: Machine.NodeSchema<Node>["~type.make.in"],
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
@@ -641,7 +653,7 @@ type InitialSnapshotFromArguments<
 
 type InitialSnapshotResult<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
@@ -652,7 +664,7 @@ type InitialSnapshotResult<
       InitialSnapshotRegionsWithPrefix<Children, Path>
     >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends Extract<keyof Children, string> } ? Machine.CompoundSnapshot<
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? Machine.CompoundSnapshot<
         Path,
         Machine.NodeSchema<Node>["Type"],
         InitialSnapshotResult<Children, Initial, Path>
@@ -665,13 +677,13 @@ type InitialSnapshotRegionsWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string
 > = {
-  readonly [Key in Extract<keyof States, string>]: InitialSnapshotResult<States, Key, Prefix>
+  readonly [Key in ActiveStateKey<States>]: InitialSnapshotResult<States, Key, Prefix>
 }
 
 type InitialParallelBuilder<
   States extends Machine.StateSchemas,
   Prefix extends string,
-  Remaining extends Extract<keyof States, string> = Extract<keyof States, string>,
+  Remaining extends ActiveStateKey<States> = ActiveStateKey<States>,
   Regions = {},
   Constructed extends boolean = false
 > =
@@ -705,12 +717,12 @@ type FullSnapshotBuilderWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string = ""
 > = {
-  readonly [Key in Extract<keyof States, string>]: FullSnapshotMethod<States, Key, Prefix>
+  readonly [Key in ActiveStateKey<States>]: FullSnapshotMethod<States, Key, Prefix>
 }
 
 type FullSnapshotMethod<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string
 > =
   & ((
@@ -723,7 +735,7 @@ type FullSnapshotMethod<
 
 type FullSnapshotArguments<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
@@ -744,7 +756,7 @@ type FullSnapshotArguments<
 
 type FullSnapshotFromArguments<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
@@ -765,7 +777,7 @@ type FullSnapshotFromArguments<
 
 type FullSnapshotResult<
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = Machine.SnapshotByIdentifierWithPath<States, StateId, Path>
@@ -773,7 +785,7 @@ type FullSnapshotResult<
 type FullParallelBuilder<
   States extends Machine.StateSchemas,
   Prefix extends string,
-  Remaining extends Extract<keyof States, string> = Extract<keyof States, string>,
+  Remaining extends ActiveStateKey<States> = ActiveStateKey<States>,
   Regions = {},
   Constructed extends boolean = false
 > =
@@ -834,7 +846,7 @@ type StateIdentifierFromPath<
 type LocalTargetResult<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
@@ -848,8 +860,8 @@ type LocalTargetResultWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string
 > = {
-  readonly [Key in Extract<keyof States, string>]: LocalTargetResult<AllStates, States, Key, Prefix>
-}[Extract<keyof States, string>]
+  readonly [Key in ActiveStateKey<States>]: LocalTargetResult<AllStates, States, Key, Prefix>
+}[ActiveStateKey<States>]
 
 type LocalTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
@@ -857,13 +869,13 @@ type LocalTargetBuilderWithPrefix<
   Prefix extends string,
   Source extends Machine.StateIdentifier<AllStates>
 > = {
-  readonly [Key in Extract<keyof States, string>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
+  readonly [Key in ActiveStateKey<States>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
 }
 
 type LocalTargetMethod<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Source extends Machine.StateIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
@@ -957,7 +969,7 @@ type LocalTargetBuilderForScope<
 type BranchTargetResult<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends { readonly states: infer Children extends Machine.StateSchemas } ?
@@ -971,8 +983,8 @@ type BranchTargetResultWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string
 > = {
-  readonly [Key in Extract<keyof States, string>]: BranchTargetResult<AllStates, States, Key, Prefix>
-}[Extract<keyof States, string>]
+  readonly [Key in ActiveStateKey<States>]: BranchTargetResult<AllStates, States, Key, Prefix>
+}[ActiveStateKey<States>]
 
 type BranchTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
@@ -980,13 +992,13 @@ type BranchTargetBuilderWithPrefix<
   Prefix extends string,
   Source extends Machine.StateIdentifier<AllStates>
 > = {
-  readonly [Key in Extract<keyof States, string>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
+  readonly [Key in ActiveStateKey<States>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
 }
 
 type BranchTargetMethod<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
-  StateId extends Extract<keyof States, string>,
+  StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Source extends Machine.StateIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
@@ -1051,11 +1063,81 @@ type BranchTargetMethod<
 
 type BranchTargetBuilderForRoot<
   States extends Machine.StateSchemas,
-  Root extends Extract<keyof States, string>,
+  Root extends ActiveStateKey<States>,
   Source extends Machine.StateIdentifier<States>
 > = {
   readonly [Key in Root]: BranchTargetMethod<States, States, Key, "", Source>
 }
+
+type HistoryContainingKey<States extends Machine.StateSchemas> = {
+  readonly [Key in Extract<keyof States, string>]: States[Key] extends Machine.HistoryStateNodeConfig ? Key
+    : States[Key] extends { readonly states: infer Children extends Machine.StateSchemas } ?
+      [Machine.HistoryIdentifier<Children>] extends [never] ? never : Key
+    : never
+}[Extract<keyof States, string>]
+
+type HistoryTargetBuilderWithPrefix<
+  AllStates extends Machine.StateSchemas,
+  States extends Machine.StateSchemas,
+  Prefix extends string
+> = {
+  readonly [Key in HistoryContainingKey<States>]: States[Key] extends Machine.HistoryStateNodeConfig ?
+    () => Machine.HistoryTarget<
+      AllStates,
+      Extract<Machine.JoinPath<Prefix, Key>, Machine.HistoryIdentifier<AllStates>>
+    >
+    : States[Key] extends { readonly states: infer Children extends Machine.StateSchemas } ?
+      HistoryTargetBuilderWithPrefix<AllStates, Children, Machine.JoinPath<Prefix, Key>>
+    : never
+}
+
+type HasDirectShallowHistory<States extends Machine.StateSchemas> = {
+  readonly [Key in HistoryStateKey<States>]: States[Key] extends { readonly history: "deep" } ? never : Key
+}[HistoryStateKey<States>] extends never ? false : true
+
+type InitializerClosureForNode<
+  AllStates extends Machine.StateSchemas,
+  Node,
+  Path extends string
+> = Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+  | Extract<Path, Machine.StateIdentifier<AllStates>>
+  | InitializerClosuresForChildren<AllStates, Children, Path>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas; readonly initial: infer Initial } ?
+    | Extract<Path, Machine.StateIdentifier<AllStates>>
+    | (Initial extends ActiveStateKey<Children> ? InitializerClosureForNode<
+        AllStates,
+        Children[Initial],
+        Machine.JoinPath<Path, Initial>
+      >
+      : never)
+  : never
+
+type InitializerClosuresForChildren<
+  AllStates extends Machine.StateSchemas,
+  States extends Machine.StateSchemas,
+  Prefix extends string
+> = {
+  readonly [Key in ActiveStateKey<States>]: InitializerClosureForNode<
+    AllStates,
+    States[Key],
+    Machine.JoinPath<Prefix, Key>
+  >
+}[ActiveStateKey<States>]
+
+type RequiredHistoryInitializersWithPrefix<
+  AllStates extends Machine.StateSchemas,
+  States extends Machine.StateSchemas,
+  Prefix extends string
+> = {
+  readonly [Key in ActiveStateKey<States>]: States[Key] extends {
+    readonly states: infer Children extends Machine.StateSchemas
+  } ?
+    | (HasDirectShallowHistory<Children> extends true ?
+      InitializerClosuresForChildren<AllStates, Children, Machine.JoinPath<Prefix, Key>>
+      : never)
+    | RequiredHistoryInitializersWithPrefix<AllStates, Children, Machine.JoinPath<Prefix, Key>>
+    : never
+}[ActiveStateKey<States>]
 
 type SpawnRequirements<Requirements> = Exclude<
   Requirements,
@@ -1753,12 +1835,31 @@ export declare namespace Machine {
   }
 
   /**
+   * Pseudo-state that restores the last active configuration of its parent.
+   *
+   * History nodes are transition targets only. They never become active and
+   * therefore do not declare a state value schema or lifecycle handlers.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface HistoryStateNodeConfig {
+    readonly type: "history"
+    /** Defaults to shallow history. */
+    readonly history?: "shallow" | "deep"
+  }
+
+  /**
    * Configuration accepted for an object state node.
    *
    * @category models
    * @since 4.0.0
    */
-  export type StateNodeConfig = AtomicStateNodeConfig | CompoundStateNodeConfig | ParallelStateNodeConfig
+  export type StateNodeConfig =
+    | AtomicStateNodeConfig
+    | CompoundStateNodeConfig
+    | ParallelStateNodeConfig
+    | HistoryStateNodeConfig
 
   /**
    * Object state tree keyed by state path.
@@ -1876,9 +1977,10 @@ export declare namespace Machine {
   export interface StateNode {
     readonly path: string
     readonly key: string
-    readonly schema: TaggedSchema
+    readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
-    readonly type: "atomic" | "compound" | "parallel" | "final"
+    readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+    readonly history: "shallow" | "deep" | undefined
     readonly parent: string | undefined
     readonly children: ReadonlyArray<string>
     readonly initial: string | undefined
@@ -1950,12 +2052,73 @@ export declare namespace Machine {
     States extends StateSchemas,
     Prefix extends string = ""
   > = {
-    readonly [Key in Extract<keyof States, string>]: States[Key] extends { readonly states: infer Children }
-      ? Children extends StateSchemas ?
-        JoinPath<Prefix, Key> | StateIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
-      : JoinPath<Prefix, Key>
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never
+      : States[Key] extends { readonly states: infer Children }
+        ? Children extends StateSchemas ?
+          JoinPath<Prefix, Key> | StateIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
+        : JoinPath<Prefix, Key>
       : JoinPath<Prefix, Key>
   }[Extract<keyof States, string>]
+
+  /**
+   * Extracts the transition-only history pseudo-state paths in a definition.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type HistoryIdentifier<States extends StateSchemas> = HistoryIdentifierWithPrefix<States>
+
+  /** @internal */
+  export type HistoryIdentifierWithPrefix<
+    States extends StateSchemas,
+    Prefix extends string = ""
+  > = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? JoinPath<Prefix, Key>
+      : States[Key] extends { readonly states: infer Children extends StateSchemas } ?
+        HistoryIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
+      : never
+  }[Extract<keyof States, string>]
+
+  /** Active keys directly declared in a state tree. */
+  export type ActiveStateKey<States extends StateSchemas> = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never : Key
+  }[Extract<keyof States, string>]
+
+  /** History pseudo-state keys directly declared in a state tree. */
+  export type HistoryStateKey<States extends StateSchemas> = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? Key : never
+  }[Extract<keyof States, string>]
+
+  /**
+   * Active states that must implement implicit initial-value construction for
+   * shallow history restoration.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type RequiredHistoryInitializers<States extends StateSchemas> = [HistoryIdentifier<States>] extends [never]
+    ? never
+    : Extract<RequiredHistoryInitializersWithPrefix<States, States, "">, StateIdentifier<States>>
+
+  /** Active parent states that own one or more history pseudo-states. */
+  export type HistoryParentIdentifier<States extends StateSchemas> = HistoryIdentifier<States> extends infer HistoryId
+    ? HistoryId extends string ? Extract<ImmediateParentStateIdentifier<HistoryId>, StateIdentifier<States>> : never
+    : never
+
+  /** History defaults and implicit initializers that remain unimplemented. */
+  export type MissingHistoryImplementations<
+    States extends StateSchemas,
+    UnhandledStates extends StateIdentifier<States>
+  > = Extract<UnhandledStates, HistoryParentIdentifier<States> | RequiredHistoryInitializers<States>>
+
+  /** @internal Readiness proof required by planning and managed execution. */
+  export type EnsureHistoryImplementations<
+    States extends StateSchemas,
+    UnhandledStates extends StateIdentifier<States>
+  > = [HistoryIdentifier<States>] extends [never] ? unknown
+    : [MissingHistoryImplementations<States, UnhandledStates>] extends [never] ? unknown : {
+      readonly "~effect/Machine/MissingHistoryImplementation": MissingHistoryImplementations<States, UnhandledStates>
+    }
 
   /**
    * Extracts a state-tree node by state path.
@@ -2151,11 +2314,11 @@ export declare namespace Machine {
     Children extends StateSchemas,
     Prefix extends StateIdentifier<States>
   > = {
-    readonly [Key in Extract<keyof Children, string>]: DirectFinalCompletionOutput<
+    readonly [Key in ActiveStateKey<Children>]: DirectFinalCompletionOutput<
       States,
       Extract<JoinPath<Prefix, Key>, StateIdentifier<States>>
     >
-  }[Extract<keyof Children, string>]
+  }[ActiveStateKey<Children>]
 
   /**
    * Extracts the output passed when a state node completes.
@@ -2298,6 +2461,13 @@ export declare namespace Machine {
     readonly output?: unknown
   }
 
+  /** Encoded values and paths retained by one history pseudo-state. */
+  export interface EncodedSnapshotHistoryEntry {
+    readonly mode: "shallow" | "deep"
+    readonly active: ReadonlyArray<string>
+    readonly values: Readonly<Record<string, unknown>>
+  }
+
   /**
    * Normalized data representation of a machine snapshot.
    *
@@ -2314,6 +2484,7 @@ export declare namespace Machine {
     readonly _tag: "MachineSnapshot"
     readonly active: ReadonlyArray<EncodedSnapshotState>
     readonly completed?: ReadonlyArray<EncodedSnapshotCompletion>
+    readonly history?: Readonly<Record<string, EncodedSnapshotHistoryEntry>>
   }
 
   /**
@@ -2325,6 +2496,13 @@ export declare namespace Machine {
   export interface SnapshotCompletion {
     readonly path: string
     readonly output: unknown
+  }
+
+  /** Decoded values and paths retained by one history pseudo-state. */
+  export interface SnapshotHistoryEntry {
+    readonly mode: "shallow" | "deep"
+    readonly active: ReadonlyArray<string>
+    readonly values: Readonly<Record<string, unknown>>
   }
 
   /**
@@ -2345,6 +2523,7 @@ export declare namespace Machine {
    */
   export interface SnapshotMetadata {
     readonly completed?: ReadonlyArray<SnapshotCompletion>
+    readonly history?: Readonly<Record<string, SnapshotHistoryEntry>>
   }
 
   /**
@@ -2422,8 +2601,8 @@ export declare namespace Machine {
     States extends StateSchemas,
     Prefix extends string
   > = {
-    readonly [Key in Extract<keyof States, string>]: SnapshotByIdentifierWithPath<States, Key, JoinPath<Prefix, Key>>
-  }[Extract<keyof States, string>]
+    readonly [Key in ActiveStateKey<States>]: SnapshotByIdentifierWithPath<States, Key, JoinPath<Prefix, Key>>
+  }[ActiveStateKey<States>]
 
   /**
    * Extracts child snapshots under a parallel parent path prefix, keyed by
@@ -2436,7 +2615,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     Prefix extends string
   > = {
-    readonly [Key in Extract<keyof States, string>]: SnapshotByIdentifierWithPath<States, Key, JoinPath<Prefix, Key>>
+    readonly [Key in ActiveStateKey<States>]: SnapshotByIdentifierWithPath<States, Key, JoinPath<Prefix, Key>>
   }
 
   /**
@@ -2447,7 +2626,7 @@ export declare namespace Machine {
    */
   export type SnapshotByIdentifierWithPath<
     States extends StateSchemas,
-    StateId extends Extract<keyof States, string>,
+    StateId extends ActiveStateKey<States>,
     Path extends string
   > = States[StateId] extends { readonly type: "parallel"; readonly states: infer Children }
     ? Children extends StateSchemas ? ParallelSnapshot<
@@ -2472,8 +2651,8 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export type Snapshot<States extends StateSchemas> = {
-    readonly [StateId in Extract<keyof States, string>]: SnapshotByIdentifier<States, StateId & StateIdentifier<States>>
-  }[Extract<keyof States, string>]
+    readonly [StateId in ActiveStateKey<States>]: SnapshotByIdentifier<States, StateId & StateIdentifier<States>>
+  }[ActiveStateKey<States>]
 
   /**
    * Extracts the root state identifier from a state path.
@@ -2561,6 +2740,28 @@ export declare namespace Machine {
   }
 
   /**
+   * Transition instruction that restores a history pseudo-state's parent.
+   *
+   * Unlike ordinary targets, history targets carry no state value. The
+   * planner resolves the remembered concrete configuration, or evaluates the
+   * history node's typed default when no record exists.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface HistoryTarget<
+    States extends StateSchemas,
+    HistoryId extends HistoryIdentifier<States>
+  > {
+    readonly [Model.HistoryTargetTypeId]: typeof Model.HistoryTargetTypeId
+    readonly path: HistoryId
+    readonly parent: Extract<ParentPath<HistoryId>, StateIdentifier<States>>
+  }
+
+  /** Builder containing only history pseudo-state paths. */
+  export type HistoryTargetBuilder<States extends StateSchemas> = HistoryTargetBuilderWithPrefix<States, States, "">
+
+  /**
    * Builder for complete transition snapshots.
    *
    * **When to use**
@@ -2608,7 +2809,7 @@ export declare namespace Machine {
     Source extends StateIdentifier<States>
   > = BranchTargetBuilderForRoot<
     States,
-    Extract<RootStateIdentifier<Source>, Extract<keyof States, string>>,
+    Extract<RootStateIdentifier<Source>, ActiveStateKey<States>>,
     Source
   >
 
@@ -2665,6 +2866,9 @@ export declare namespace Machine {
      * @since 4.0.0
      */
     readonly full: FullTargetBuilder<States>
+
+    /** Restores a declared shallow or deep history pseudo-state. */
+    readonly history: HistoryTargetBuilder<States>
   }
 
   /**
@@ -2875,7 +3079,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > = NodeByIdentifier<States, StateId> extends
     { readonly type: "parallel"; readonly states: infer Children extends StateSchemas } ? {
-      readonly [Key in Extract<keyof Children, string>]: CompletionOutputByIdentifier<
+      readonly [Key in ActiveStateKey<Children>]: CompletionOutputByIdentifier<
         States,
         Extract<JoinPath<StateId, Key>, StateIdentifier<States>>
       >
@@ -2934,12 +3138,18 @@ export declare namespace Machine {
   export type HandlerResult<States extends StateSchemas, E, R> =
     | Snapshot<States>
     | Target<States, StateIdentifier<States>>
-    | StateConstruction<Snapshot<States> | Target<States, StateIdentifier<States>>>
+    | HistoryTarget<States, HistoryIdentifier<States>>
+    | StateConstruction<
+      Snapshot<States> | Target<States, StateIdentifier<States>> | HistoryTarget<States, HistoryIdentifier<States>>
+    >
     | void
     | Effect.Effect<
       | Snapshot<States>
       | Target<States, StateIdentifier<States>>
-      | StateConstruction<Snapshot<States> | Target<States, StateIdentifier<States>>>
+      | HistoryTarget<States, HistoryIdentifier<States>>
+      | StateConstruction<
+        Snapshot<States> | Target<States, StateIdentifier<States>> | HistoryTarget<States, HistoryIdentifier<States>>
+      >
       | void,
       E,
       R
@@ -2981,6 +3191,18 @@ export declare namespace Machine {
    */
   export type StateActionReturn<Config, Key extends "entry" | "exit"> = Key extends keyof Config
     ? NonNullable<Config[Key]> extends (...args: any) => infer Ret ? Ret : never
+    : never
+  /** Extracts the return value from an implicit initial child implementation. */
+  export type StateInitialReturn<Config> = Config extends { readonly initial?: infer Initial }
+    ? NonNullable<Initial> extends (...args: any) => infer Ret ? Ret : never
+    : never
+  /** Extracts the return values from a state's history defaults. */
+  export type HistoryDefaultReturn<Config> = Config extends { readonly history?: infer History }
+    ? {
+      readonly [Key in keyof NonNullable<History>]: NonNullable<History>[Key] extends {
+        readonly default: (...args: any) => infer Ret
+      } ? Ret : never
+    }[keyof NonNullable<History>]
     : never
   /**
    * Extracts the return value from an event transition config.
@@ -3143,6 +3365,8 @@ export declare namespace Machine {
     | Effect.Services<DoneReturn<Config>>
     | Effect.Services<StateActionReturn<Config, "entry">>
     | Effect.Services<StateActionReturn<Config, "exit">>
+    | Effect.Services<StateInitialReturn<Config>>
+    | Effect.Services<HistoryDefaultReturn<Config>>
     | InvokeRequirements<Config>
 
   /**
@@ -3301,7 +3525,80 @@ export declare namespace Machine {
           ) => HandlerResult<States, any, any>
         }
     }
+    readonly initial?: StateInitialHandler<States, Events, Emits, StateId>
   } & ActiveOutputHandlerConfig<States, Events, StateId>
+
+  /** Values supplied when a statechart implicitly enters a state's initial children. */
+  export type StateInitialValue<
+    States extends StateSchemas,
+    StateId extends StateIdentifier<States>
+  > = NodeByIdentifier<States, StateId> extends infer Node ?
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends StateSchemas } ? {
+        readonly [Key in ActiveStateKey<Children>]: NodeSchema<Children[Key]>["Type"]
+      }
+    : Node extends { readonly states: infer Children extends StateSchemas; readonly initial: infer Initial } ?
+      Initial extends ActiveStateKey<Children> ? NodeSchema<Children[Initial]>["Type"] : never
+    : never
+    : never
+
+  /** Context passed to an implicit child-state initializer. */
+  export type StateInitialContext<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateIdentifier<States>
+  > = StateActionContext<States, Events, Emits, StateId>
+
+  /** Initial child value implementation for a compound or parallel state. */
+  export type StateInitialHandler<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateIdentifier<States>
+  > = (context: StateInitialContext<States, Events, Emits, StateId>) =>
+    | StateInitialValue<States, StateId>
+    | Effect.Effect<StateInitialValue<States, StateId>, any, any>
+
+  /** Context used only when a history node has no previously captured record. */
+  export interface HistoryDefaultContext<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ParentId extends StateIdentifier<States>
+  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+    readonly event: LifecycleEvent<Events>
+    readonly runtime: RuntimeEffect<Events, Emits>
+    readonly target: FullTargetBuilder<States>
+    readonly parent: ParentId
+  }
+
+  /** Typed fallback evaluated when a history node has no record yet. */
+  export type HistoryDefaultHandler<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ParentId extends StateIdentifier<States>
+  > = (context: HistoryDefaultContext<States, Events, Emits, ParentId>) =>
+    | SnapshotByIdentifier<States, ParentId>
+    | StateConstruction<SnapshotByIdentifier<States, ParentId>>
+    | Effect.Effect<
+      SnapshotByIdentifier<States, ParentId> | StateConstruction<SnapshotByIdentifier<States, ParentId>>,
+      any,
+      any
+    >
+
+  /** Default implementations keyed by direct history child. */
+  export type HistoryDefaultConfig<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ParentId extends StateIdentifier<States>,
+    Children extends StateSchemas
+  > = {
+    readonly [Key in HistoryStateKey<Children>]?: {
+      readonly default: HistoryDefaultHandler<States, Events, Emits, ParentId>
+    }
+  }
 
   /**
    * Configuration accepted for a final state.
@@ -3362,12 +3659,15 @@ export declare namespace Machine {
     & HandlerConfig<AllStates, Events, Emits, StateId, E, R>
     & (HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
           readonly states?: never
+          readonly history?: never
         }
       : {
         readonly states?: HandlerTree<AllStates, Children, Events, Emits, E, R, StateId>
+        readonly history?: HistoryDefaultConfig<AllStates, Events, Emits, StateId, Children>
       }
       : {
         readonly states?: never
+        readonly history?: never
       })
 
   type HandlerTree<
@@ -3379,7 +3679,7 @@ export declare namespace Machine {
     R,
     Prefix extends string
   > = {
-    readonly [Key in Extract<keyof States, string>]?: HandlerNode<
+    readonly [Key in ActiveStateKey<States>]?: HandlerNode<
       AllStates,
       States[Key],
       Events,
@@ -3390,7 +3690,17 @@ export declare namespace Machine {
     >
   }
 
-  type HandlerNodeConfigKey = "always" | "entry" | "exit" | "invoke" | "on" | "onDone" | "output" | "states"
+  type HandlerNodeConfigKey =
+    | "always"
+    | "entry"
+    | "exit"
+    | "history"
+    | "initial"
+    | "invoke"
+    | "on"
+    | "onDone"
+    | "output"
+    | "states"
 
   type HandlerValidationError<Message extends string> = {
     readonly "~effect/Machine/HandlerError": Message
@@ -3632,7 +3942,12 @@ export declare namespace Machine {
     Depth extends ReadonlyArray<unknown> = HandlerDepth
   > = {
     readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | HandlerStateId<AllStates, JoinPath<Prefix, Key>>
+      | HandlerImplementedStateId<
+        AllStates,
+        States[Key],
+        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
+        Config[Key]
+      >
       | HandlerNodeChildStateIds<
         AllStates,
         States[Key],
@@ -3641,6 +3956,32 @@ export declare namespace Machine {
         Depth
       >
   }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
+
+  type HandlerHasRequiredInitial<
+    AllStates extends StateSchemas,
+    StateId extends StateIdentifier<AllStates>,
+    Config
+  > = StateId extends RequiredHistoryInitializers<AllStates> ? "initial" extends keyof Config ? true : false : true
+
+  type HandlerHasRequiredHistoryDefaults<Node, Config> = Node extends {
+    readonly states: infer Children extends StateSchemas
+  } ? [HistoryStateKey<Children>] extends [never] ? true
+    : Config extends { readonly history?: infer HistoryConfig } ? [
+        Exclude<HistoryStateKey<Children>, Extract<keyof NonNullable<HistoryConfig>, string>>
+      ] extends [never] ? true
+      : false
+    : false
+  : true
+
+  type HandlerImplementedStateId<
+    AllStates extends StateSchemas,
+    Node,
+    StateId extends StateIdentifier<AllStates>,
+    Config
+  > = [HistoryIdentifier<AllStates>] extends [never] ? StateId
+    : HandlerHasRequiredInitial<AllStates, StateId, Config> extends true ?
+      HandlerHasRequiredHistoryDefaults<Node, Config> extends true ? StateId : never
+    : never
 
   type HandlerNodeChildStateIds<
     AllStates extends StateSchemas,
@@ -3659,6 +4000,8 @@ export declare namespace Machine {
     | Effect.Error<DoneReturn<Config>>
     | Effect.Error<StateActionReturn<Config, "entry">>
     | Effect.Error<StateActionReturn<Config, "exit">>
+    | Effect.Error<StateInitialReturn<Config>>
+    | Effect.Error<HistoryDefaultReturn<Config>>
     | InvokeError<Config>
 
   type HandlerTreeError<
@@ -4103,6 +4446,9 @@ const makeSnapshotBuilder = (
 ): unknown => {
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
+    if ((states[key] as { readonly type?: unknown }).type === "history") {
+      continue
+    }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
     const node = Model.getStateNodeDefinition(path, states[key])
     builder[key] = withFrom(
@@ -4129,6 +4475,9 @@ const makeParallelSnapshotBuilder = (
     enumerable: false
   })
   for (const key of Object.keys(states)) {
+    if ((states[key] as { readonly type?: unknown }).type === "history") {
+      continue
+    }
     if (hasProperty(regions, key)) {
       continue
     }
@@ -4159,6 +4508,9 @@ const getParallelSnapshotBuilderRegions = (
     SnapshotBuilderStateTypeId
   ]
   for (const key of Object.keys(states)) {
+    if ((states[key] as { readonly type?: unknown }).type === "history") {
+      continue
+    }
     if (!hasProperty(regions, key)) {
       throw new Error(`Machine expected parallel state "${path}" builder callback to provide region "${key}"`)
     }
@@ -4439,16 +4791,46 @@ const makeBranchTargetBuilder = (
   }
 }
 
+const makeHistoryTargetBuilder = (
+  states: Machine.StateTree,
+  prefix: string
+): unknown => {
+  const builder: Record<string, unknown> = {}
+  for (const key of Object.keys(states)) {
+    const path = prefix === "" ? key : `${prefix}.${key}`
+    const definition = states[key]
+    if ((definition as { readonly type?: unknown }).type === "history") {
+      const parent = getParentPathRuntime(path)
+      builder[key] = () => Model.makeHistoryTarget(path, parent)
+      continue
+    }
+    if (typeof definition === "object" && definition !== null && hasProperty(definition, "states")) {
+      builder[key] = makeHistoryTargetBuilder(definition.states as Machine.StateTree, path)
+    }
+  }
+  return builder
+}
+
+const getParentPathRuntime = (path: string): string => {
+  const separator = path.lastIndexOf(".")
+  if (separator < 0) {
+    throw new Error(`Machine expected history state "${path}" to have an active parent`)
+  }
+  return path.slice(0, separator)
+}
+
 const makeTargetBuilder = <const States extends Machine.StateSchemas>(
   states: States,
   stateNodes: Machine.StateNodes
 ) => {
   const full = makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Machine.FullTargetBuilder<States>
+  const history = makeHistoryTargetBuilder(states, "") as Machine.HistoryTargetBuilder<States>
   return <Source extends Machine.StateIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
     ({
       local: makeLocalTargetBuilder(states, stateNodes, source),
       branch: makeBranchTargetBuilder(states, stateNodes, source),
-      full
+      full,
+      history
     }) as Machine.TargetBuilder<States, Source>
 }
 
@@ -5056,6 +5438,7 @@ export const invokeMachine: {
             OutputStates,
             InputEvents
           > & Machine.EnsureOutputImplementations<States, OutputStates>
+            & Machine.EnsureHistoryImplementations<States, UnhandledStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
@@ -5132,6 +5515,7 @@ export const invokeMachine: {
             OutputStates,
             InputEvents
           > & Machine.EnsureOutputImplementations<States, OutputStates>
+            & Machine.EnsureHistoryImplementations<States, UnhandledStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
@@ -5244,7 +5628,8 @@ export const planInitial: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>,
+    & Machine.EnsureOutputImplementations<States, OutputStates>
+    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   & {
@@ -5361,7 +5746,8 @@ export const plan: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>,
+    & Machine.EnsureOutputImplementations<States, OutputStates>
+    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
   state: Machine.Snapshot<States>,
   event: Machine.EventOf<InputEvents>
 ) => Effect.Effect<
@@ -5839,7 +6225,8 @@ export const start: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>,
+    & Machine.EnsureOutputImplementations<States, OutputStates>
+    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   MachineRef<

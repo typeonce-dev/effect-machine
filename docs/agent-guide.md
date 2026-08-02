@@ -104,7 +104,7 @@ its extra control is required:
   the same operation with a returned transition value, not a separate action
   API.
 
-## Atomic, compound, and parallel states
+## Atomic, compound, parallel, and history states
 
 Use an atomic state when no child phase can be active beneath it.
 
@@ -201,13 +201,74 @@ const machine = Machine.make({
 Do not repeat `type: "final"` in `handle`. Execution APIs reject a machine
 until every declared output schema has an implementation.
 
+Declare a history pseudo-state below the active parent whose configuration it
+should remember. It has no schema, is excluded from active state identifiers,
+and is addressed only through `target.history`:
+
+```ts
+const States = Machine.defineStates({
+  checkout: {
+    schema: Checkout,
+    initial: "shipping",
+    states: {
+      shipping: Shipping,
+      payment: {
+        schema: Payment,
+        initial: "cardEntry",
+        states: {
+          cardEntry: CardEntry,
+          verifying: Verifying
+        }
+      },
+      recent: { type: "history" },
+      exact: { type: "history", history: "deep" }
+    }
+  },
+  support: Support
+})
+```
+
+Every history node needs a default parent snapshot for the first use:
+
+```ts
+checkout: {
+  history: {
+    recent: { default: () => initialCheckoutSnapshot },
+    exact: { default: () => initialCheckoutSnapshot }
+  }
+}
+```
+
+Target it without a value:
+
+```ts
+Resume: ({ target }) => target.history.checkout.exact()
+```
+
+Deep history restores the complete remembered subtree and its decoded values.
+Shallow history restores only parent and direct-child values. If the remembered
+child is compound, its configured initial child needs a freshly constructed
+value, so implement `initial` only on paths required by shallow history:
+
+```ts
+payment: {
+  initial: ({ state }) => new CardEntry({ attempt: state.attempt, cardNumber: "" })
+}
+```
+
+The machine's readiness type tracks missing defaults and shallow initializers.
+History is an overwriteable register, not a stack: restoration does not consume
+it, and the next parent exit replaces it. Entry actions and invokes run again;
+prior effects, actors, and timers are not rewound.
+
 ## Choosing a target
 
-| Builder         | Use it when                                                                | What it preserves                                                                 |
-| --------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `target.local`  | The destination is inside the nearest compound scope containing the source | The compound value, active ancestors, and unrelated parallel regions              |
-| `target.branch` | The destination is elsewhere under the active top-level root               | Omitted current ancestor values and parallel regions                              |
-| `target.full`   | The destination may be under any top-level root                            | Nothing is inferred for a newly selected root; build its complete active snapshot |
+| Builder          | Use it when                                                                | What it preserves                                                                 |
+| ---------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `target.local`   | The destination is inside the nearest compound scope containing the source | The compound value, active ancestors, and unrelated parallel regions              |
+| `target.branch`  | The destination is elsewhere under the active top-level root               | Omitted current ancestor values and parallel regions                              |
+| `target.full`    | The destination may be under any top-level root                            | Nothing is inferred for a newly selected root; build its complete active snapshot |
+| `target.history` | The destination is a declared history pseudo-state                         | Its parent's remembered configuration, or its default before the first capture    |
 
 Entering an inactive parallel state through `target.local` or `target.branch`
 requires a complete callback with one selection per region. A parallel state
@@ -611,10 +672,9 @@ a deeper statechart instead of casting away the diagnostic.
 
 The current API does not include:
 
-- history states;
 - declarative first-class guards;
 - a complete inspectable graph for arbitrary transition Effects.
 
 Use ordinary TypeScript conditions for guards and `Machine.after` for
 state-scoped timers. Do not invent undocumented state-node properties such as
-`guard` or `history`.
+`guard`.

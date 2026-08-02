@@ -16,22 +16,232 @@ export const TargetTypeId = "~effect/Machine/Target"
 export const TargetSnapshotTypeId: unique symbol = Symbol("effect/Machine/TargetSnapshot")
 export const StateInputTypeId: unique symbol = Symbol("effect/Machine/StateInput")
 export const StateConstructionTypeId: unique symbol = Symbol("effect/Machine/StateConstruction")
+export const HistoryTargetTypeId: unique symbol = Symbol("effect/Machine/HistoryTarget")
 
 interface StateInput {
   readonly [StateInputTypeId]: typeof StateInputTypeId
   readonly input: unknown
 }
 
+/** Internal target produced by the history target builder. History nodes are
+ * routing instructions and are never part of an active configuration. */
+export interface HistoryTarget {
+  readonly [HistoryTargetTypeId]: typeof HistoryTargetTypeId
+  readonly path: string
+  readonly parent: string
+}
+
+export interface HistoryRecord {
+  readonly mode: "shallow" | "deep"
+  readonly parent: string
+  readonly active: ReadonlySet<string>
+  readonly values: ReadonlyMap<string, unknown>
+}
+
+const validateHistoryRecordControl = (machine: Machine.Any, record: HistoryRecord): void => {
+  const ancestry = new Set(getPathToRoot(machine, record.parent))
+  const visit = (path: string): void => {
+    const node = getNode(machine, path)
+    if (node.type === "compound") {
+      const children = node.children.filter((child) => record.active.has(child))
+      if (children.length !== 1) {
+        throw new Error(`Machine history expected compound state "${path}" to retain one active child`)
+      }
+      if (record.mode === "deep") visit(children[0])
+      return
+    }
+    if (node.type === "parallel") {
+      for (const child of node.children) {
+        if (!record.active.has(child)) {
+          throw new Error(`Machine history expected parallel state "${path}" to retain region "${child}"`)
+        }
+        if (record.mode === "deep") visit(child)
+      }
+    }
+  }
+  visit(record.parent)
+  for (const path of record.active) {
+    if (!ancestry.has(path) && !isPathInSubtree(path, record.parent)) {
+      throw new Error(`Machine history contains state "${path}" outside parent "${record.parent}"`)
+    }
+    if (
+      record.mode === "shallow" && isDescendantOf(path, record.parent) &&
+      getNode(machine, path).parent !== record.parent
+    ) {
+      throw new Error(`Machine shallow history contains deep descendant "${path}"`)
+    }
+  }
+}
+
+type SnapshotWithHistory = Machine.AtomicSnapshot<string, unknown> & {
+  readonly history?: Readonly<Record<string, {
+    readonly mode: "shallow" | "deep"
+    readonly active: ReadonlyArray<string>
+    readonly values: Readonly<Record<string, unknown>>
+  }>>
+}
+
+const historyFromSnapshot = (
+  machine: Machine.Any,
+  snapshot: SnapshotWithHistory
+): ReadonlyMap<string, HistoryRecord> => {
+  const history = new Map<string, HistoryRecord>()
+  for (const [path, entry] of Object.entries(snapshot.history ?? {})) {
+    const historyNode = getNode(machine, path)
+    if (historyNode.type !== "history" || historyNode.parent === undefined || historyNode.history !== entry.mode) {
+      throw new Error(`Machine snapshot contains invalid history record "${path}"`)
+    }
+    const active = new Set<string>()
+    const values = new Map<string, unknown>()
+    for (const activePath of entry.active) {
+      if (active.has(activePath) || !Object.prototype.hasOwnProperty.call(entry.values, activePath)) {
+        throw new Error(`Machine snapshot contains invalid remembered state "${activePath}"`)
+      }
+      const node = getNode(machine, activePath)
+      if (
+        node.type === "history" ||
+        !(isPathInSubtree(activePath, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(activePath)) ||
+        !Schema.is(getStateNodeSchema(node))(entry.values[activePath])
+      ) {
+        throw new Error(`Machine snapshot contains invalid remembered value for "${activePath}"`)
+      }
+      active.add(activePath)
+      values.set(activePath, entry.values[activePath])
+    }
+    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
+      throw new Error(`Machine snapshot contains incomplete history record "${path}"`)
+    }
+    history.set(path, {
+      mode: entry.mode,
+      parent: historyNode.parent,
+      active,
+      values
+    })
+    validateHistoryRecordControl(machine, history.get(path)!)
+  }
+  return history
+}
+
+const historyFromSnapshotEffect = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  snapshot: SnapshotWithHistory
+) {
+  const history = new Map<string, HistoryRecord>()
+  for (const [path, entry] of Object.entries(snapshot.history ?? {})) {
+    const historyNode = machine.stateNodes.byPath.get(path)
+    if (
+      historyNode === undefined || historyNode.type !== "history" || historyNode.parent === undefined ||
+      historyNode.history !== entry.mode
+    ) {
+      return yield* Effect.fail(new MachineSchemaDecodeError({
+        machineId: machine.id,
+        boundary: "history",
+        state: path,
+        cause: Cause.die(new Error(`Machine snapshot contains invalid history record "${path}"`))
+      }))
+    }
+    const active = new Set<string>()
+    const values = new Map<string, unknown>()
+    for (const activePath of entry.active) {
+      const node = machine.stateNodes.byPath.get(activePath)
+      if (
+        active.has(activePath) || node === undefined || node.type === "history" ||
+        !Object.prototype.hasOwnProperty.call(entry.values, activePath) ||
+        !(isPathInSubtree(activePath, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(activePath))
+      ) {
+        return yield* Effect.fail(new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "history",
+          state: activePath,
+          cause: Cause.die(new Error(`Machine snapshot contains invalid remembered state "${activePath}"`))
+        }))
+      }
+      active.add(activePath)
+      values.set(
+        activePath,
+        yield* decodeBoundary(machine, getStateNodeSchema(node), entry.values[activePath], {
+          boundary: "history",
+          state: activePath
+        })
+      )
+    }
+    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
+      return yield* Effect.fail(new MachineSchemaDecodeError({
+        machineId: machine.id,
+        boundary: "history",
+        state: path,
+        cause: Cause.die(new Error(`Machine snapshot contains incomplete history record "${path}"`))
+      }))
+    }
+    history.set(path, {
+      mode: entry.mode,
+      parent: historyNode.parent,
+      active,
+      values
+    })
+    try {
+      validateHistoryRecordControl(machine, history.get(path)!)
+    } catch (cause) {
+      return yield* Effect.fail(new MachineSchemaDecodeError({
+        machineId: machine.id,
+        boundary: "history",
+        state: path,
+        cause: Cause.die(cause)
+      }))
+    }
+  }
+  return history
+})
+
+const historyToSnapshot = (
+  history: ReadonlyMap<string, HistoryRecord>
+): Readonly<Record<string, {
+  readonly mode: "shallow" | "deep"
+  readonly active: ReadonlyArray<string>
+  readonly values: Readonly<Record<string, unknown>>
+}>> => {
+  const entries: Record<string, {
+    readonly mode: "shallow" | "deep"
+    readonly active: ReadonlyArray<string>
+    readonly values: Readonly<Record<string, unknown>>
+  }> = {}
+  for (const [path, record] of history) {
+    entries[path] = {
+      mode: record.mode,
+      active: Array.from(record.active),
+      values: Object.fromEntries(record.values)
+    }
+  }
+  return entries
+}
+
+export const makeHistoryTarget = (path: string, parent: string): HistoryTarget => ({
+  [HistoryTargetTypeId]: HistoryTargetTypeId,
+  path,
+  parent
+})
+
+export const isHistoryTarget = (u: unknown): u is HistoryTarget => hasProperty(u, HistoryTargetTypeId)
+
 export const getStateNodeDefinition = (
   path: string,
   definition: Machine.TaggedSchema | Machine.StateNodeConfig
 ): {
-  readonly schema: Machine.TaggedSchema
+  readonly schema: Machine.TaggedSchema | undefined
   readonly output: Schema.Top | undefined
-  readonly type: "atomic" | "compound" | "parallel" | "final"
+  readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
   readonly initial: string | undefined
   readonly states: Machine.StateTree | undefined
 } => {
+  if (!Schema.isSchema(definition) && (definition as any).type === "history") {
+    return {
+      schema: undefined,
+      output: undefined,
+      type: "history",
+      initial: undefined,
+      states: undefined
+    }
+  }
   if (Schema.isSchema(definition)) {
     return {
       schema: definition as Machine.TaggedSchema,
@@ -92,7 +302,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
       }
       const path = parent === undefined ? key : `${parent}.${key}`
       const definition = getStateNodeDefinition(path, tree[key])
-      const node = {
+      const node: Machine.StateNode = {
         path,
         key,
         schema: definition.schema,
@@ -101,11 +311,20 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
         parent,
         children: [] as ReadonlyArray<string>,
         initial: definition.initial === undefined ? undefined : `${path}.${definition.initial}`,
+        history: definition.type === "history"
+          ? ((tree[key] as any).history === "deep" ? "deep" : "shallow")
+          : undefined,
         order
       }
       byPath.set(path, node)
-      paths.push(path)
       order += 1
+      if (definition.type === "history") {
+        if (parent === undefined) {
+          throw new Error(`Machine history state "${path}" must belong to a parent state`)
+        }
+        continue
+      }
+      paths.push(path)
       if (definition.states !== undefined) {
         const children = compile(definition.states, path)
         if (node.type === "compound" && (node.initial === undefined || !children.includes(node.initial))) {
@@ -120,7 +339,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
   return {
     byPath,
     roots: compile(states, undefined)
-  }
+  } as Machine.StateNodes
 }
 
 export const makeTarget = <
@@ -207,6 +426,7 @@ export interface ActiveConfiguration {
   readonly active: ReadonlySet<string>
   readonly values: ReadonlyMap<string, unknown>
   readonly outputs: ReadonlyMap<string, unknown>
+  readonly history: ReadonlyMap<string, HistoryRecord>
 }
 
 export interface FinalCompletion {
@@ -215,7 +435,7 @@ export interface FinalCompletion {
 }
 
 export interface DecodeBoundaryOptions {
-  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "configuration"
+  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "history" | "configuration"
   readonly state?: string
   readonly event?: string
 }
@@ -316,7 +536,7 @@ export const decodeStateValue = (
   value: unknown
 ): Effect.Effect<unknown, MachineSchemaDecodeError> =>
   isStateInput(value)
-    ? node.schema.makeEffect(value.input).pipe(
+    ? getStateNodeSchema(node).makeEffect(value.input).pipe(
       Effect.mapError((cause) =>
         new MachineSchemaDecodeError({
           machineId: machine.id,
@@ -326,7 +546,7 @@ export const decodeStateValue = (
         })
       )
     )
-    : decodeBoundary(machine, node.schema, value, { boundary: "state", state: node.path })
+    : decodeBoundary(machine, getStateNodeSchema(node), value, { boundary: "state", state: node.path })
 
 export const decodeOutputValue = (
   machine: Machine.Any,
@@ -343,6 +563,13 @@ export const getNode = (machine: Machine.Any, path: string): Machine.StateNode =
     throw new Error(`Machine expected state path "${path}" to exist`)
   }
   return node
+}
+
+export const getStateNodeSchema = (node: Machine.StateNode): Machine.TaggedSchema => {
+  if (node.schema === undefined || node.type === "history") {
+    throw new Error(`Machine history state "${node.path}" has no active value schema`)
+  }
+  return node.schema
 }
 
 export const hasOwn = (u: object, key: string): boolean => Object.prototype.hasOwnProperty.call(u, key)
@@ -410,7 +637,9 @@ export const getRootPath = (machine: Machine.Any, configuration: ActiveConfigura
 
 export const getActiveValue = (configuration: ActiveConfiguration, path: string): unknown => {
   if (!configuration.values.has(path)) {
-    throw new Error(`Machine expected active state "${path}" to have a value`)
+    throw new Error(
+      `Machine expected active state "${path}" to have a value (available: ${Array.from(configuration.values.keys()).join(", ")})`
+    )
   }
   return configuration.values.get(path)
 }
@@ -502,6 +731,24 @@ export const snapshotFromConfiguration = <const States extends Machine.StateSche
       completed: ReadonlyArray<Machine.SnapshotCompletion>
     }).completed = completed
   }
+  if (configuration.history.size > 0) {
+    Object.assign(snapshot, { history: historyToSnapshot(configuration.history) })
+  }
+  return snapshot
+}
+
+/** Creates a targetable subtree snapshot while carrying machine-level history
+ * metadata on that subtree root. This is used when a nested history target
+ * must preserve active ancestors and unaffected parallel regions. */
+export const snapshotFromConfigurationAtPath = <const States extends Machine.StateSchemas>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  path: string
+): Machine.SnapshotByIdentifier<States, Machine.StateIdentifier<States>> => {
+  const snapshot = snapshotFromPath<States>(machine, configuration, path)
+  if (configuration.history.size > 0) {
+    Object.assign(snapshot, { history: historyToSnapshot(configuration.history) })
+  }
   return snapshot
 }
 
@@ -515,7 +762,7 @@ export const configurationFromSnapshot = (
 
   const visit = (current: Machine.AtomicSnapshot<string, unknown>): void => {
     const node = getNode(machine, String(current.path))
-    if (!Schema.is(node.schema)(current.value)) {
+    if (!Schema.is(getStateNodeSchema(node))(current.value)) {
       throw new Error(`Machine expected snapshot for "${node.path}" to match its schema`)
     }
     active.add(node.path)
@@ -559,7 +806,7 @@ export const configurationFromSnapshot = (
       }
     }
   }
-  return { active, values, outputs }
+  return { active, values, outputs, history: historyFromSnapshot(machine, snapshot) }
 }
 
 export const normalizeConfiguration = <const States extends Machine.StateSchemas>(
@@ -623,7 +870,12 @@ export const configurationFromSnapshotEffect = Effect.fnUntraced(function*(
       }
     }
   }
-  return { active, values, outputs } as ActiveConfiguration
+  return {
+    active,
+    values,
+    outputs,
+    history: yield* historyFromSnapshotEffect(machine, snapshot)
+  } as ActiveConfiguration
 })
 
 export const normalizeConfigurationEffect = <const States extends Machine.StateSchemas>(
@@ -662,6 +914,102 @@ export const validateInitialConfiguration = (machine: Machine.Any, configuration
       }
     }
   }
+}
+
+/** Capture every history register whose owning parent exits in this microstep.
+ * The control record is deliberately independent from effects/actions: it is
+ * part of the logical snapshot and is therefore preserved by pure planning. */
+export const captureHistory = (
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  next: ActiveConfiguration,
+  exitPaths: ReadonlyArray<string>
+): ActiveConfiguration => {
+  if (exitPaths.length === 0) {
+    return next
+  }
+  const exited = new Set(exitPaths)
+  const history = new Map(next.history)
+  for (const node of machine.stateNodes.byPath.values() as Iterable<Machine.StateNode>) {
+    if (node.type !== "history" || node.parent === undefined || !exited.has(node.parent)) {
+      continue
+    }
+    const mode = node.history === "deep" ? "deep" : "shallow"
+    const active = new Set<string>()
+    for (const ancestor of getPathToRoot(machine, node.parent)) {
+      if (current.active.has(ancestor)) {
+        active.add(ancestor)
+      }
+    }
+    for (const path of current.active) {
+      if (
+        path === node.parent ||
+        (mode === "deep" && isDescendantOf(path, node.parent)) ||
+        (mode === "shallow" && getNode(machine, path).parent === node.parent)
+      ) {
+        active.add(path)
+      }
+    }
+    const values = new Map<string, unknown>()
+    for (const path of active) {
+      values.set(path, getActiveValue(current, path))
+    }
+    history.set(node.path, {
+      mode,
+      parent: node.parent,
+      active,
+      values
+    })
+  }
+  return {
+    active: next.active,
+    values: next.values,
+    outputs: next.outputs,
+    history
+  }
+}
+
+export const getHistoryRecord = (
+  configuration: ActiveConfiguration,
+  path: string
+): HistoryRecord | undefined => configuration.history.get(path)
+
+/** Builds the remembered portion of a configuration. Shallow records are
+ * intentionally incomplete below their direct child; the planner completes
+ * them by invoking only the required typed initializers. */
+export const configurationFromHistoryRecord = (
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  record: HistoryRecord
+): ActiveConfiguration => {
+  const active = new Set(record.active)
+  const values = new Map(record.values)
+  const outputs = new Map<string, unknown>()
+  const ancestors = getPathToRoot(machine, record.parent)
+  const ancestorSet = new Set(ancestors)
+
+  // A history transition can occur while an ancestor parallel state remains
+  // active. Its unaffected regions retain their current configuration.
+  for (const ancestor of ancestors) {
+    const node = getNode(machine, ancestor)
+    if (node.type !== "parallel") {
+      continue
+    }
+    for (const child of node.children) {
+      if (ancestorSet.has(child) || record.active.has(child) || !current.active.has(child)) {
+        continue
+      }
+      for (const path of current.active) {
+        if (isPathInSubtree(path, child)) {
+          active.add(path)
+          if (current.values.has(path)) values.set(path, current.values.get(path))
+          if (current.outputs.has(path)) outputs.set(path, current.outputs.get(path))
+        }
+      }
+    }
+  }
+
+  return { active, values, outputs, history: current.history }
 }
 
 export const configurationFromTargetPathEffect = Effect.fnUntraced(function*(
@@ -718,7 +1066,12 @@ export const configurationFromTargetPathEffect = Effect.fnUntraced(function*(
     throw new Error(`Machine target "${node.path}" must include an active child state`)
   }
 
-  return { active, values, outputs } as ActiveConfiguration
+  return {
+    active,
+    values,
+    outputs,
+    history: current.history
+  } as ActiveConfiguration
 })
 
 export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*(
@@ -768,7 +1121,12 @@ export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*
     }
   }
 
-  return { active, values, outputs } as ActiveConfiguration
+  return {
+    active,
+    values,
+    outputs,
+    history: new Map([...current.history, ...subtree.history])
+  } as ActiveConfiguration
 })
 
 export const normalizeTargetConfigurationEffect = <const States extends Machine.StateSchemas>(
@@ -798,7 +1156,12 @@ export const normalizeTargetConfigurationEffect = <const States extends Machine.
     )
   }
   if (isSnapshot(target)) {
-    return normalizeConfigurationEffect(machine, target)
+    return normalizeConfigurationEffect(machine, target).pipe(
+      Effect.map((configuration) => ({
+        ...configuration,
+        history: new Map([...current.history, ...configuration.history])
+      }))
+    )
   }
   throw new Error("Machine expected transition target to be a snapshot or target builder result")
 }
@@ -1022,7 +1385,8 @@ export const completeConfigurationEffect: <
   const completed = {
     active: configuration.active,
     values: configuration.values,
-    outputs
+    outputs,
+    history: configuration.history
   }
   for (
     const path of Array.from(completed.active).sort((left, right) => {
@@ -1047,6 +1411,11 @@ const EncodedSnapshotSchema = Schema.Struct({
   completed: Schema.optional(Schema.Array(Schema.Struct({
     path: Schema.String,
     output: Schema.optional(Schema.Unknown)
+  }))),
+  history: Schema.optional(Schema.Record(Schema.String, Schema.Struct({
+    mode: Schema.Literals(["shallow", "deep"]),
+    active: Schema.Array(Schema.String),
+    values: Schema.Record(Schema.String, Schema.Unknown)
   })))
 })
 
@@ -1055,7 +1424,7 @@ const encodeBoundary = (
   schema: Schema.Top,
   value: unknown,
   options: {
-    readonly boundary: "state" | "output"
+    readonly boundary: "state" | "output" | "history"
     readonly state: string
   }
 ): Effect.Effect<unknown, MachineSchemaEncodeError, unknown> =>
@@ -1075,7 +1444,7 @@ const decodeEncodedBoundary = (
   schema: Schema.Top,
   value: unknown,
   options: {
-    readonly boundary: "state" | "output"
+    readonly boundary: "state" | "output" | "history"
     readonly state: string
   }
 ): Effect.Effect<unknown, MachineSchemaDecodeError, unknown> =>
@@ -1162,7 +1531,7 @@ export const encodeSnapshot = (
       Effect.mapError((error) =>
         new MachineSchemaEncodeError({
           machineId: machine.id,
-          boundary: error.boundary === "state" ? "state" : "configuration",
+          boundary: error.boundary === "state" || error.boundary === "history" ? error.boundary : "configuration",
           ...(error.state === undefined ? {} : { state: error.state }),
           cause: error.cause
         })
@@ -1185,7 +1554,7 @@ export const encodeSnapshot = (
       const node = getNode(machine, path)
       active.push({
         path,
-        value: yield* encodeBoundary(machine, node.schema, getActiveValue(configuration, path), {
+        value: yield* encodeBoundary(machine, getStateNodeSchema(node), getActiveValue(configuration, path), {
           boundary: "state",
           state: path
         })
@@ -1216,10 +1585,81 @@ export const encodeSnapshot = (
       })
     }
 
+    const history: Record<string, Machine.EncodedSnapshotHistoryEntry> = {}
+    for (const [historyPath, record] of Array.from(configuration.history).sort(([left], [right]) =>
+      left.localeCompare(right)
+    )) {
+      const historyNode = machine.stateNodes.byPath.get(historyPath)
+      if (
+        historyNode === undefined || historyNode.type !== "history" || historyNode.parent !== record.parent ||
+        historyNode.history !== record.mode
+      ) {
+        return yield* Effect.fail(
+          new MachineSchemaEncodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(new Error(`Machine snapshot contains invalid history record "${historyPath}"`))
+          })
+        )
+      }
+      try {
+        validateHistoryRecordControl(machine, record)
+      } catch (cause) {
+        return yield* Effect.fail(
+          new MachineSchemaEncodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(cause)
+          })
+        )
+      }
+      const encodedValues: Record<string, unknown> = {}
+      for (const path of record.active) {
+        const stateNode = machine.stateNodes.byPath.get(path)
+        if (
+          stateNode === undefined || stateNode.type === "history" || !record.values.has(path) ||
+          !(isPathInSubtree(path, record.parent) || getPathToRoot(machine, record.parent).includes(path))
+        ) {
+          return yield* Effect.fail(
+            new MachineSchemaEncodeError({
+              machineId: machine.id,
+              boundary: "history",
+              state: path,
+              cause: Cause.die(new Error(`Machine snapshot contains invalid remembered state "${path}"`))
+            })
+          )
+        }
+        encodedValues[path] = yield* encodeBoundary(
+          machine,
+          getStateNodeSchema(stateNode),
+          record.values.get(path),
+          { boundary: "history", state: path }
+        )
+      }
+      if (record.values.size !== record.active.size) {
+        return yield* Effect.fail(
+          new MachineSchemaEncodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(new Error(`Machine history record "${historyPath}" contains values outside its paths`))
+          })
+        )
+      }
+      history[historyPath] = {
+        mode: record.mode,
+        active: Array.from(record.active).sort((left, right) => compareDocumentOrder(machine, left, right)),
+        values: encodedValues
+      }
+    }
+
     return {
       _tag: "MachineSnapshot" as const,
       active,
-      ...(completed.length === 0 ? {} : { completed })
+      ...(completed.length === 0 ? {} : { completed }),
+      ...(Object.keys(history).length === 0 ? {} : { history })
     }
   }).pipe(Effect.catchCause((cause) => failEncodeCause(machine, cause)))
 
@@ -1247,17 +1687,112 @@ export const decodeSnapshot = (
       active.add(entry.path)
       values.set(
         entry.path,
-        yield* decodeEncodedBoundary(machine, node.schema, entry.value, {
+        yield* decodeEncodedBoundary(machine, getStateNodeSchema(node), entry.value, {
           boundary: "state",
           state: entry.path
         })
       )
     }
 
+    const history = new Map<string, HistoryRecord>()
+    for (const [historyPath, encodedRecord] of Object.entries(decoded.history ?? {})) {
+      const historyNode = machine.stateNodes.byPath.get(historyPath)
+      if (
+        historyNode === undefined || historyNode.type !== "history" || historyNode.parent === undefined ||
+        historyNode.history !== encodedRecord.mode
+      ) {
+        return yield* Effect.fail(
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(new Error(`Machine encoded snapshot contains invalid history record "${historyPath}"`))
+          })
+        )
+      }
+      const rememberedActive = new Set<string>()
+      const rememberedValues = new Map<string, unknown>()
+      for (const path of encodedRecord.active) {
+        if (rememberedActive.has(path)) {
+          return yield* Effect.fail(
+            new MachineSchemaDecodeError({
+              machineId: machine.id,
+              boundary: "history",
+              state: path,
+              cause: Cause.die(new Error(`Machine encoded history contains duplicate state "${path}"`))
+            })
+          )
+        }
+        const stateNode = machine.stateNodes.byPath.get(path)
+        if (
+          stateNode === undefined || stateNode.type === "history" ||
+          !Object.prototype.hasOwnProperty.call(encodedRecord.values, path) ||
+          !(isPathInSubtree(path, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(path))
+        ) {
+          return yield* Effect.fail(
+            new MachineSchemaDecodeError({
+              machineId: machine.id,
+              boundary: "history",
+              state: path,
+              cause: Cause.die(new Error(`Machine encoded snapshot contains invalid remembered state "${path}"`))
+            })
+          )
+        }
+        rememberedActive.add(path)
+        rememberedValues.set(
+          path,
+          yield* decodeEncodedBoundary(machine, getStateNodeSchema(stateNode), encodedRecord.values[path], {
+            boundary: "history",
+            state: path
+          })
+        )
+      }
+      if (Object.keys(encodedRecord.values).length !== rememberedActive.size) {
+        return yield* Effect.fail(
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(new Error(`Machine encoded history "${historyPath}" contains values outside its paths`))
+          })
+        )
+      }
+      if (!rememberedActive.has(historyNode.parent)) {
+        return yield* Effect.fail(
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(new Error(`Machine encoded history "${historyPath}" does not contain its parent state`))
+          })
+        )
+      }
+      const record: HistoryRecord = {
+        mode: encodedRecord.mode,
+        parent: historyNode.parent,
+        active: rememberedActive,
+        values: rememberedValues
+      }
+      try {
+        validateHistoryRecordControl(machine, record)
+      } catch (cause) {
+        return yield* Effect.fail(
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: historyPath,
+            cause: Cause.die(cause)
+          })
+        )
+      }
+      history.set(historyPath, record)
+    }
+
     const configuration: ActiveConfiguration = {
       active,
       values,
-      outputs: new Map()
+      outputs: new Map(),
+      history
     }
     const snapshot = validateEncodedConfiguration(machine, configuration)
     const completions: Array<Machine.SnapshotCompletion> = []
