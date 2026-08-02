@@ -509,6 +509,18 @@ type ValidateDefinedStates<States extends Machine.StateSchemas> = [States] exten
   [Machine.ValidateStateSchemas<States>] ? []
   : [validation: Machine.ValidateStateSchemas<States>]
 
+type InvalidDefinedStateTreeInput<States extends Machine.StateSchemas> = [States] extends
+  [Machine.ValidateStateSchemas<States>] ? never
+  : States & Machine.ValidateStateSchemas<States>
+
+interface DefineStates {
+  <const States extends Machine.StateSchemas>(
+    states: States & DefineStateTreeInput<NoInfer<States>>,
+    ..._validation: ValidateDefinedStates<NoInfer<States>>
+  ): Machine.DefinedStates<States>
+  <const States extends Machine.StateSchemas>(states: InvalidDefinedStateTreeInput<States>): never
+}
+
 type EventProtocolError<Message extends string, Tag extends PropertyKey = never> = {
   readonly "~effect/Machine/EventProtocolError": Message
   readonly tag: Tag
@@ -526,19 +538,23 @@ type DuplicateEventTag<
     : never
   : never
 
-type ValidateEventProtocol<
+type ValidateInputEventProtocol<
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  DuplicateInput extends PropertyKey = DuplicateEventTag<InputEvents>
+> = [DuplicateInput] extends [never] ? unknown
+  : EventProtocolError<"Public event tags must be unique", DuplicateInput>
+
+type ValidateInternalEventProtocol<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  DuplicateInput extends PropertyKey = DuplicateEventTag<InputEvents>,
   DuplicateInternal extends PropertyKey = DuplicateEventTag<InternalEvents>,
   Overlap extends PropertyKey = Extract<
     Machine.TagOf<InputEvents[number]>,
     Machine.TagOf<InternalEvents[number]>
   >
-> = [DuplicateInput] extends [never] ? [DuplicateInternal] extends [never] ? [Overlap] extends [never] ? []
-    : [validation: EventProtocolError<"Public and internal event tags must be disjoint", Overlap>]
-  : [validation: EventProtocolError<"Internal event tags must be unique", DuplicateInternal>]
-  : [validation: EventProtocolError<"Public event tags must be unique", DuplicateInput>]
+> = [DuplicateInternal] extends [never] ? [Overlap] extends [never] ? unknown
+  : EventProtocolError<"Public and internal event tags must be disjoint", Overlap>
+  : EventProtocolError<"Internal event tags must be unique", DuplicateInternal>
 
 const SnapshotBuilderStateTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderState")
 const SnapshotBuilderConstructionTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderConstruction")
@@ -3703,11 +3719,9 @@ export declare namespace Machine {
     | "output"
     | "states"
 
-  type HandlerValidationError<Message extends string> = {
-    readonly "~effect/Machine/HandlerError": Message
+  type HandlerValidationError<Message extends string, Path extends string, Detail = unknown> = {
+    readonly "~effect/Machine/HandlerError": readonly [message: Message, path: Path, detail: Detail]
   }
-
-  type HandlerValidationErrors<Validation> = Validation extends HandlerValidationError<any> ? Validation : never
 
   type NodeHasDeclaredOutput<
     States extends StateSchemas,
@@ -3762,29 +3776,47 @@ export declare namespace Machine {
     Config
   > = "output" extends keyof Config ? StateId : never
 
-  type UnionToIntersection<Union> = (
-    Union extends unknown ? (argument: Union) => void : never
-  ) extends (argument: infer Intersection) => void ? Intersection
-    : never
-
   type HandlerUnknownStateKeyValidation<
     States extends StateSchemas,
-    Config
-  > = [Exclude<Extract<keyof Config, string>, Extract<keyof States, string>>] extends [never] ? unknown
-    : HandlerValidationError<"Handler tree contains a state key that does not exist">
+    Prefix extends string,
+    Config,
+    UnknownKeys extends string = Exclude<Extract<keyof Config, string>, Extract<keyof States, string>>
+  > = [UnknownKeys] extends [never] ? unknown : {
+    readonly [Key in UnknownKeys]: HandlerValidationError<
+      "Handler tree contains a state key that does not exist",
+      JoinPath<Prefix, Key>,
+      Key
+    >
+  }
 
-  type HandlerUnknownConfigKeyValidation<Config> = [
-    Exclude<Extract<keyof Config, string>, HandlerNodeConfigKey>
-  ] extends [never] ? unknown
-    : HandlerValidationError<"Handler config contains an unknown key">
+  type HandlerUnknownConfigKeyValidation<
+    StateId extends string,
+    Config,
+    UnknownKeys extends string = Exclude<Extract<keyof Config, string>, HandlerNodeConfigKey>
+  > = [UnknownKeys] extends [never] ? unknown : {
+    readonly [Key in UnknownKeys]: HandlerValidationError<
+      "Handler config contains an unknown key",
+      StateId,
+      Key
+    >
+  }
 
   type HandlerOnKeyValidation<
     Events extends ReadonlyArray<TaggedSchema>,
-    Config
-  > = Config extends { readonly on?: infer On } ? [
-      Exclude<Extract<keyof NonNullable<On>, string>, TagOf<Events[number]>>
-    ] extends [never] ? unknown
-    : HandlerValidationError<"Handler config contains an event key that does not exist">
+    StateId extends string,
+    Config,
+    On = Config extends { readonly on?: infer Current } ? NonNullable<Current> : never,
+    UnknownKeys extends string = Exclude<Extract<keyof On, string>, TagOf<Events[number]>>
+  > = "on" extends keyof Config ? [UnknownKeys] extends [never] ? unknown
+    : {
+      readonly on: {
+        readonly [Key in UnknownKeys]: HandlerValidationError<
+          "Handler config contains an event key that does not exist",
+          StateId,
+          Key
+        >
+      }
+    }
     : unknown
 
   type HandlerDepth = readonly [unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown]
@@ -3797,26 +3829,39 @@ export declare namespace Machine {
     AllStates extends StateSchemas,
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
     Prefix extends string,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown>
-  > = "states" extends keyof Config ?
-    Depth extends readonly [] ? HandlerValidationError<"Handler nesting exceeds the supported depth">
+  > = "states" extends keyof Config ? Depth extends readonly [] ? {
+        readonly states: HandlerValidationError<"Handler nesting exceeds the supported depth", Prefix>
+      }
     : Config extends { readonly states?: infer ChildrenConfig } ?
-      HandlerChildren<Node> extends infer Children extends StateSchemas ?
-        [Children] extends [never] ?
-          HandlerValidationError<"Handler config contains child states for a state that has no children">
+      HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
+            readonly states: HandlerValidationError<
+              "Handler config contains child states for a state that has no children",
+              Prefix
+            >
+          }
         : HandlerTreeValidation<
           AllStates,
           Children,
           Events,
+          Emits,
           Prefix,
           NonNullable<ChildrenConfig>,
           AvailableOutputStates,
           HandlerNextDepth<Depth>
+        > extends infer Validation ? unknown extends Validation ? unknown
+          : { readonly states: Validation }
+        : never
+      : {
+        readonly states: HandlerValidationError<
+          "Handler config contains child states for a state that has no children",
+          Prefix
         >
-      : HandlerValidationError<"Handler config contains child states for a state that has no children">
+      }
     : unknown
     : unknown
 
@@ -3829,12 +3874,24 @@ export declare namespace Machine {
     & ("onDone" extends keyof Config ? [
         Exclude<RequiredCompletionOutputStates<AllStates, StateId>, AvailableOutputStates>
       ] extends [never] ? unknown
-      : HandlerValidationError<"Handler config is missing an output implementation required by onDone">
+      : {
+        readonly onDone: HandlerValidationError<
+          "Handler config is missing an output implementation required by onDone",
+          StateId,
+          Exclude<RequiredCompletionOutputStates<AllStates, StateId>, AvailableOutputStates>
+        >
+      }
       : unknown)
     & ("output" extends keyof Config ? NodeByIdentifier<AllStates, StateId> extends { readonly type: "parallel" } ? [
           Exclude<RequiredParallelOutputStates<AllStates, StateId>, AvailableOutputStates>
         ] extends [never] ? unknown
-        : HandlerValidationError<"Handler config is missing a region output implementation required by parallel output">
+        : {
+          readonly output: HandlerValidationError<
+            "Handler config is missing a region output implementation required by parallel output",
+            StateId,
+            Exclude<RequiredParallelOutputStates<AllStates, StateId>, AvailableOutputStates>
+          >
+        }
       : unknown
       : unknown)
 
@@ -3842,93 +3899,138 @@ export declare namespace Machine {
     AllStates extends StateSchemas,
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<AllStates>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown>
   > =
-    & HandlerUnknownConfigKeyValidation<Config>
-    & HandlerOnKeyValidation<Events, Config>
-    & HandlerInvokeOutputValidation<Events, Config>
-    & HandlerInvokeEmitsValidation<Events, Config>
-    & HandlerInvokeSnapshotValidation<Events, Config>
-    & HandlerChildrenValidation<AllStates, Node, Events, StateId, Config, AvailableOutputStates, Depth>
+    & HandlerUnknownConfigKeyValidation<StateId, Config>
+    & HandlerOnKeyValidation<Events, StateId, Config>
+    & HandlerInvokeOutputValidation<Events, StateId, Config>
+    & HandlerInvokeEmitsValidation<Events, StateId, Config>
+    & HandlerInvokeSnapshotValidation<Events, StateId, Config>
+    & HandlerChildrenValidation<AllStates, Node, Events, Emits, StateId, Config, AvailableOutputStates, Depth>
     & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
+    & HandlerRuntimeValidation<Events, Emits, StateId, Config>
 
   type HandlerInvokeOutputValidation<
     Events extends ReadonlyArray<TaggedSchema>,
+    StateId extends string,
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
     : [Exclude<InvokeOutput<InvokeReturn<Config>>, EventOf<Events> | void>] extends [never] ? unknown
-    : HandlerValidationError<"Invoked child output must be a machine event or void">
+    : {
+      readonly invoke: HandlerValidationError<
+        "Invoked child output must be a machine event or void",
+        StateId,
+        Exclude<InvokeOutput<InvokeReturn<Config>>, EventOf<Events> | void>
+      >
+    }
 
   type HandlerInvokeEmitsValidation<
     Events extends ReadonlyArray<TaggedSchema>,
+    StateId extends string,
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
     : [Exclude<InvokeEmits<InvokeReturn<Config>>, EventOf<Events>>] extends [never] ? unknown
-    : HandlerValidationError<"Invoked child emits events not accepted by the parent machine">
+    : {
+      readonly invoke: HandlerValidationError<
+        "Invoked child emits events not accepted by the parent machine",
+        StateId,
+        Exclude<InvokeEmits<InvokeReturn<Config>>, EventOf<Events>>
+      >
+    }
 
   type HandlerInvokeSnapshotValidation<
     Events extends ReadonlyArray<TaggedSchema>,
+    StateId extends string,
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
     : IsAny<InvokeSnapshotEvent<InvokeReturn<Config>>> extends true ? unknown
     : [Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventOf<Events> | undefined>] extends [never] ? unknown
-    : HandlerValidationError<"Invoked child snapshot mapper must return a machine event or undefined">
+    : {
+      readonly invoke: HandlerValidationError<
+        "Invoked child snapshot mapper must return a machine event or undefined",
+        StateId,
+        Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventOf<Events> | undefined>
+      >
+    }
 
-  type HandlerTreeNodeValidationErrors<
+  type HandlerRuntimeValidation<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends string,
+    Config,
+    Incompatible = IncompatibleRuntime<
+      ConfigServices<HandlerConfigPart<Config>>,
+      EventOf<Events>,
+      EmitOf<Emits>
+    >
+  > = [Incompatible] extends [never] ? unknown
+    : HandlerValidationError<"Handler config requires an incompatible machine runtime", StateId, Incompatible>
+
+  type HandlerTreeNodeValidationMap<
     AllStates extends StateSchemas,
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
     Prefix extends string,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown>
   > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]: HandlerValidationErrors<
-      HandlerNodeValidation<
-        AllStates,
-        States[Key],
-        Events,
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        AvailableOutputStates,
-        Depth
-      >
+    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]?: HandlerNodeValidation<
+      AllStates,
+      States[Key],
+      Events,
+      Emits,
+      HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
+      Config[Key],
+      AvailableOutputStates,
+      Depth
     >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
+  }
+
+  type HandlerTreeNodeValidationErrors<Validations> = {
+    readonly [Key in keyof Validations as unknown extends Validations[Key] ? never : Key]?: Validations[Key]
+  }
 
   type HandlerTreeNodeValidations<
     AllStates extends StateSchemas,
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
     Prefix extends string,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown>
-  > = HandlerTreeNodeValidationErrors<
+  > = HandlerTreeNodeValidationMap<
     AllStates,
     States,
     Events,
+    Emits,
     Prefix,
     Config,
     AvailableOutputStates,
     Depth
-  > extends infer Errors ? [Errors] extends [never] ? unknown : UnionToIntersection<Errors>
+  > extends infer Validations ?
+    HandlerTreeNodeValidationErrors<Validations> extends infer Errors ? keyof Errors extends never ? unknown : Errors
+    : never
     : never
 
   type HandlerTreeValidation<
     AllStates extends StateSchemas,
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
     Prefix extends string,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown> = HandlerDepth
   > =
-    & HandlerUnknownStateKeyValidation<States, Config>
-    & HandlerTreeNodeValidations<AllStates, States, Events, Prefix, Config, AvailableOutputStates, Depth>
+    & HandlerUnknownStateKeyValidation<States, Prefix, Config>
+    & HandlerTreeNodeValidations<AllStates, States, Events, Emits, Prefix, Config, AvailableOutputStates, Depth>
 
   type HandlerNodeChildrenConfig<Config> = "states" extends keyof Config ?
     Config extends { readonly states?: infer Children } ? NonNullable<Children>
@@ -4193,14 +4295,14 @@ export declare namespace Machine {
           States,
           States,
           Events,
+          Emits,
           "",
-          Config,
-          OutputStates | Extract<HandlerTreeOutputStates<States, States, "", Config>, StateIdentifier<States>>
-        >
-        & EnsureCompatibleRuntime<
-          HandlerTreeServices<States, Events, Emits, States, "", Config>,
-          EventOf<Events>,
-          EmitOf<Emits>
+          NoInfer<Config>,
+          | OutputStates
+          | Extract<
+            HandlerTreeOutputStates<States, States, "", NoInfer<Config>>,
+            StateIdentifier<States>
+          >
         >
     ): HandleTreeResult<
       States,
@@ -4869,11 +4971,8 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
  * @category constructors
  * @since 4.0.0
  */
-export const defineStates = <
-  const States extends Machine.StateSchemas
->(
-  states: States & DefineStateTreeInput<NoInfer<States>>,
-  ..._validation: ValidateDefinedStates<NoInfer<States>>
+export const defineStates: DefineStates = (<const States extends Machine.StateSchemas>(
+  states: States
 ): Machine.DefinedStates<States> => ({
   states: states as States,
   initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
@@ -4889,7 +4988,82 @@ export const defineStates = <
   }) as Machine.DefinedStates<States>["getWithParents"],
   getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
   matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
-})
+})) as DefineStates
+
+type MakeConfig<
+  States extends Machine.StateSchemas,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  Input extends Schema.Top,
+  InitialE,
+  InitialR,
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+> = {
+  readonly id?: string
+  readonly states: States & DefineStateTreeInput<NoInfer<States>>
+  readonly events: InputEvents & ValidateInputEventProtocol<NoInfer<InputEvents>>
+  readonly internalEvents?:
+    & InternalEvents
+    & ValidateInternalEventProtocol<
+      NoInfer<InputEvents>,
+      NoInfer<InternalEvents>
+    >
+  readonly emits?: Emits
+  readonly input?: Input
+  readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
+}
+
+type MakeResult<
+  States extends Machine.StateSchemas,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  Input extends Schema.Top,
+  InitialE,
+  InitialR,
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+> = Machine<
+  States,
+  readonly [...InputEvents, ...InternalEvents],
+  Input,
+  Machine.StateIdentifier<States>,
+  never,
+  never,
+  InitialE,
+  InitialR,
+  Machine.FinalStateFromDefinition<States>,
+  Machine.TerminalOutput<States>,
+  Emits,
+  never,
+  InputEvents
+>
+
+interface Make {
+  <
+    const States extends Machine.StateSchemas,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const Input extends Schema.Top = typeof Schema.Void,
+    InitialE = never,
+    InitialR = never,
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  >(
+    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>,
+    ..._validation: ValidateDefinedStates<NoInfer<States>>
+  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>
+  <
+    const States extends Machine.StateSchemas,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const Input extends Schema.Top = typeof Schema.Void,
+    InitialE = never,
+    InitialR = never,
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  >(
+    config:
+      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>, "states">
+      & { readonly states: InvalidDefinedStateTreeInput<States> }
+  ): never
+}
 
 /**
  * Creates a schema-first machine definition.
@@ -4941,7 +5115,7 @@ export const defineStates = <
  * @category constructors
  * @since 4.0.0
  */
-export const make = <
+export const make: Make = (<
   const States extends Machine.StateSchemas,
   const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -4952,34 +5126,14 @@ export const make = <
 >(
   config: {
     readonly id?: string
-    readonly states: States & DefineStateTreeInput<NoInfer<States>>
-    /** Events accepted through public machine input boundaries. */
+    readonly states: States
     readonly events: InputEvents
-    /** Events delivered only by machine-local logic. */
     readonly internalEvents?: InternalEvents
     readonly emits?: Emits
     readonly input?: Input
     readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
-  },
-  ..._validation: [
-    ...ValidateDefinedStates<NoInfer<States>>,
-    ...ValidateEventProtocol<NoInfer<InputEvents>, NoInfer<InternalEvents>>
-  ]
-): Machine<
-  States,
-  readonly [...InputEvents, ...InternalEvents],
-  Input,
-  Machine.StateIdentifier<States>,
-  never,
-  never,
-  InitialE,
-  InitialR,
-  Machine.FinalStateFromDefinition<States>,
-  Machine.TerminalOutput<States>,
-  Emits,
-  never,
-  InputEvents
-> => {
+  }
+): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents> => {
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
@@ -4994,7 +5148,7 @@ export const make = <
   self.handle = makeHandle(self)
   Model.setProtocol(self)
   return self
-}
+}) as Make
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.

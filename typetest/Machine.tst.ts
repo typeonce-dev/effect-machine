@@ -426,6 +426,25 @@ describe("Machine", () => {
     expect<Effect.Services<typeof planned>>().type.toBe<never>()
   })
 
+  it("handle rejects incompatible machine runtime requirements", () => {
+    const machine = Machine.make({
+      states: UpStates.states,
+      events: [SignIn],
+      initial: () => UpStates.initial.down(new Down({}))
+    })
+
+    expect(machine.handle).type.toBeCallableWith({
+      down: {
+        entry: () => Machine.runtime<{ readonly events: SignIn }>()
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      down: {
+        entry: () => Machine.runtime<{ readonly events: Down }>()
+      }
+    })
+  })
+
   it("keeps staged action errors and services out of planning", () => {
     const machine = Machine.make({
       states: UpStates.states,
