@@ -424,26 +424,26 @@ const startInternal: <
   const sendTo = (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError> => {
     const id = typeof child === "string" ? child : child.id
     return (
-    SubscriptionRef.get(childRegistry).pipe(
-      Effect.flatMap((registry) => {
-        const entry = HashMap.get(registry.children, id)
-        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
-          ? entry.value.ref.send(event)
-          : Effect.void
-      })
-    )
+      SubscriptionRef.get(childRegistry).pipe(
+        Effect.flatMap((registry) => {
+          const entry = HashMap.get(registry.children, id)
+          return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+            ? entry.value.ref.send(event)
+            : Effect.void
+        })
+      )
     )
   }
 
   const stopChild = (child: ChildSelector): Effect.Effect<void> => {
     const id = typeof child === "string" ? child : child.id
     return (
-    SubscriptionRef.get(childRegistry).pipe(
-      Effect.flatMap((registry) => {
-        const entry = HashMap.get(registry.children, id)
-        return Option.isSome(entry) && matchesChildSelector(entry.value, child) ? entry.value.ref.stop : Effect.void
-      })
-    )
+      SubscriptionRef.get(childRegistry).pipe(
+        Effect.flatMap((registry) => {
+          const entry = HashMap.get(registry.children, id)
+          return Option.isSome(entry) && matchesChildSelector(entry.value, child) ? entry.value.ref.stop : Effect.void
+        })
+      )
     )
   }
 

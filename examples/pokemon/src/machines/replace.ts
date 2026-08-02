@@ -1,5 +1,5 @@
-import { Effect, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
+import { Effect, Schema } from "effect"
 import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
@@ -24,7 +24,7 @@ const ReplaceWithRandomMachine = Machine.invoke({
     Machine.effect(
       Effect.sleep("500 millis").pipe(
         Effect.andThen(
-          Effect.gen(function* () {
+          Effect.gen(function*() {
             const pk = yield* PokemonService
             const pokemon = yield* pk.getRandomPokemon()
             return new Replaced({ pokemon })

@@ -9,8 +9,6 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import * as Machine from "./Machine.js"
-import { Rpc } from "effect/unstable/rpc"
 import {
   ClusterError,
   ClusterSchema,
@@ -20,6 +18,8 @@ import {
   type Sharding,
   Snowflake
 } from "effect/unstable/cluster"
+import { Rpc } from "effect/unstable/rpc"
+import * as Machine from "./Machine.js"
 
 type EntityAddress = EntityAddress.EntityAddress
 type PersistenceError = ClusterError.PersistenceError
@@ -262,13 +262,13 @@ export interface ClusterMachine<
 }
 
 type MachineServices<M extends Machine.Machine.Any> =
-    | ExcludeCompatibleRuntime<
-      Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
-      Machine.Machine.Event<M>,
-      Machine.Machine.Emit<M>
-    >
-    | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
-    | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
+  | ExcludeCompatibleRuntime<
+    Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
+    Machine.Machine.Event<M>,
+    Machine.Machine.Emit<M>
+  >
+  | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
+  | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 

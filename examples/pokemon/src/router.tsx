@@ -177,8 +177,7 @@ function PokemonGrid({ team }: { team: readonly (typeof Pokemon.Type)[] }) {
                   new SelectPokemon({
                     id: pokemon.id
                   })
-                )
-              }
+                )}
             >
               Select
             </button>

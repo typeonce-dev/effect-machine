@@ -1,5 +1,5 @@
-import { Effect, Option, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
+import { Effect, Option, Schema } from "effect"
 import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
 class Form extends Schema.TaggedClass<Form>("Form")("Form", {}) {}
@@ -49,7 +49,7 @@ const SearchMachine = ({ searchText }: { searchText: string }) =>
       Machine.effect(
         Effect.sleep("500 millis").pipe(
           Effect.andThen(
-            Effect.gen(function* () {
+            Effect.gen(function*() {
               const pk = yield* PokemonService
               const pokemon = yield* pk.getByName(searchText)
               return new SearchResult({ result: pokemon })
@@ -95,8 +95,7 @@ export const SelectionMachine = Machine.make({
     SelectionStates.initial.form(new Form(), (form) =>
       form
         .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
-        .selection(new Selection(), (selection) => selection.Unselected(new Unselected()))
-    )
+        .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
 }).handle({
   form: {
     states: {
@@ -117,8 +116,7 @@ export const SelectionMachine = Machine.make({
                     target.full.form(new Form(), (form) =>
                       form
                         .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
-                        .selection(new Selection(), (selection) => selection.Unselected(new Unselected()))
-                    )
+                        .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
                   )
                 )
             }

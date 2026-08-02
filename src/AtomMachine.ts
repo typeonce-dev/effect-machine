@@ -12,8 +12,8 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
-import * as Machine from "./Machine.js"
 import * as Model from "./internal/machineModel.js"
+import * as Machine from "./Machine.js"
 
 /**
  * Error returned when a machine command is issued before startup completes.
@@ -110,10 +110,10 @@ const startMachineAtomEffect = <
     & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
   args: [...Machine.Machine.InputArgs<Input>]
 ): Effect.Effect<
-    Machine.MachineRef<
-      Machine.Machine.Snapshot<States>,
-      Machine.Machine.EventOf<InputEvents>,
-      MachineRuntimeError<E, R>,
+  Machine.MachineRef<
+    Machine.Machine.Snapshot<States>,
+    Machine.Machine.EventOf<InputEvents>,
+    MachineRuntimeError<E, R>,
     Output
   >,
   MachineStartError<InitialE, E, InitialR, R>,
@@ -499,11 +499,11 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     makeChildFromRefAtom(
       makeChildRefAtom(ref as any, nested),
       nested
-    ))
+    )
+  )
   const child = <Nested extends Machine.ChildMachine.Any>(
     nested: Nested
-  ): ChildMachineAtom<Nested, StartError> =>
-    childFamily(nested) as ChildMachineAtom<Nested, StartError>
+  ): ChildMachineAtom<Nested, StartError> => childFamily(nested) as ChildMachineAtom<Nested, StartError>
 
   return {
     ref,
@@ -595,11 +595,11 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError>(
     makeChildFromRefAtom(
       makeChildRefAtom(optionalRef as any, descriptor),
       descriptor
-    ))
+    )
+  )
   const child = <Child extends Machine.ChildMachine.Any>(
     descriptor: Child
-  ): ChildMachineAtom<Child, StartError> =>
-    childFamily(descriptor) as ChildMachineAtom<Child, StartError>
+  ): ChildMachineAtom<Child, StartError> => childFamily(descriptor) as ChildMachineAtom<Child, StartError>
 
   return {
     ref,
@@ -613,10 +613,10 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError>(
 }
 
 type SnapshotNode<State> = State extends Machine.Machine.AtomicSnapshot<string, unknown> ?
-  | State
-  | (State extends { readonly state: infer Child } ? SnapshotNode<Child>
-    : State extends { readonly states: infer Regions } ? SnapshotNode<Regions[keyof Regions]>
-    : never)
+    | State
+    | (State extends { readonly state: infer Child } ? SnapshotNode<Child>
+      : State extends { readonly states: infer Regions } ? SnapshotNode<Regions[keyof Regions]>
+      : never)
   : never
 
 type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
@@ -773,19 +773,18 @@ type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude
   Services
 >
 
-type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> =
-  IsAny<MachineRequirementsOf<M>> extends true ? {
-      readonly [BoundRequirementsTypeId]: MachineRequirementsOf<M>
-    }
-    : [MissingBoundRequirements<Services, M>] extends [never] ? unknown
-    : {
-      readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
-    }
+type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> = IsAny<MachineRequirementsOf<M>> extends true ? {
+    readonly [BoundRequirementsTypeId]: MachineRequirementsOf<M>
+  }
+  : [MissingBoundRequirements<Services, M>] extends [never] ? unknown
+  : {
+    readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
+  }
 
-type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> =
-  IsAny<Machine.Machine.States<M>> extends true ? {
-      readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
-    }
+type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ?
+  {
+    readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
+  }
   : Machine.Machine.EnsureOutputImplementations<Machine.Machine.States<M>, Machine.Machine.OutputStates<M>>
 
 type MachineInputArgsOf<M extends Machine.Machine.Any> = [
@@ -793,18 +792,18 @@ type MachineInputArgsOf<M extends Machine.Machine.Any> = [
 ]
 
 type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
-    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-    Machine.Machine.InputEvent<M>,
-    MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
-    Machine.Machine.Output<M>,
-    MachineStartError<
-      Machine.Machine.InitialError<M>,
-      Machine.Machine.Error<M>,
-      Machine.Machine.InitialServices<M>,
-      Machine.Machine.Services<M>,
-      RuntimeError
-    >
+  Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+  Machine.Machine.InputEvent<M>,
+  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+  Machine.Machine.Output<M>,
+  MachineStartError<
+    Machine.Machine.InitialError<M>,
+    Machine.Machine.Error<M>,
+    Machine.Machine.InitialServices<M>,
+    Machine.Machine.Services<M>,
+    RuntimeError
   >
+>
 
 /**
  * An `AtomMachine` factory with one owned Effect runtime.
@@ -915,9 +914,10 @@ const makeWithRuntime = (
 export const bind = <Services, RuntimeError>(
   runtime: Atom.AtomRuntime<Services, RuntimeError>
 ): Bound<Services, RuntimeError> => ({
-  make: ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) =>
-    makeWithRuntime(runtime, machine, args)) as Bound<
-      Services,
-      RuntimeError
-    >["make"]
+  make:
+    ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) =>
+      makeWithRuntime(runtime, machine, args)) as Bound<
+        Services,
+        RuntimeError
+      >["make"]
 })

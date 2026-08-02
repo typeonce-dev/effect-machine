@@ -1,7 +1,7 @@
-import { Effect, Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Effect, Schema } from "effect"
 
 const State = Schema.TaggedUnion({
   Idle: {},

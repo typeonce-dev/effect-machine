@@ -19,8 +19,8 @@ require upgrading Effect in lockstep; do not override the peer to another beta.
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 ```
 
 Each ESM entrypoint is independent and tree-shakeable. Importing the root does
@@ -37,8 +37,8 @@ property contains the individual tagged schemas, and each case has a typed
 `make` constructor.
 
 ```ts
-import { Schema } from "effect"
 import { Machine } from "@typeonce/effect-machine"
+import { Schema } from "effect"
 
 const State = Schema.TaggedUnion({
   Idle: {},
@@ -256,7 +256,9 @@ effects in `Machine.action`; actions are staged during planning and run by the
 managed runtime before it publishes the next state.
 
 ```ts
-Save: ({ target }) => Machine.action(writeAuditLog, target.local.Saving.from())
+const handlers = {
+  Save: ({ target }) => Machine.action(writeAuditLog, target.local.Saving.from())
+}
 ```
 
 The one-argument form returns `void` after staging. The two-argument form
@@ -283,16 +285,18 @@ state interrupts the child. For a one-shot Effect, `Machine.invokeEffect` maps
 typed success and failure values directly to internal events:
 
 ```ts
-invoke: ({ state }) =>
-  Machine.invokeEffect({
-    id: "save",
-    effect: save(state),
-    onSuccess: (entry) => InternalEvent.cases.Saved.make({ id: entry.id }),
-    onFailure: (error) =>
-      InternalEvent.cases.SaveFailed.make({
-        message: String(error)
-      })
-  })
+const loading = {
+  invoke: ({ state }) =>
+    Machine.invokeEffect({
+      id: "save",
+      effect: save(state),
+      onSuccess: (entry) => InternalEvent.cases.Saved.make({ id: entry.id }),
+      onFailure: (error) =>
+        InternalEvent.cases.SaveFailed.make({
+          message: String(error)
+        })
+    })
+}
 ```
 
 Omit `onFailure` when the Effect cannot fail. Defects and interruption remain
@@ -344,8 +348,8 @@ Exporting one descriptor remains the clearest module boundary.
 disposing the registry-owned reference stops it.
 
 ```ts
-import { Atom } from "effect/unstable/reactivity"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Atom } from "effect/unstable/reactivity"
 
 const runtime = Atom.runtime(AppLayer)
 const machines = AtomMachine.bind(runtime)

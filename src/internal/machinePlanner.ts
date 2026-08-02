@@ -195,21 +195,23 @@ export type MicrostepPlan<State, Event, E, R> = {
   readonly changed: boolean
 }
 
-export type MacrostepPlan<State, Event, E, R, Output> = {
-  readonly next: State
-  readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
-  readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event, E, R>>
-  readonly emittedEvents: ReadonlyArray<unknown>
-} & (
-  | {
-    readonly done: true
-    readonly output: Output
+export type MacrostepPlan<State, Event, E, R, Output> =
+  & {
+    readonly next: State
+    readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
+    readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event, E, R>>
+    readonly emittedEvents: ReadonlyArray<unknown>
   }
-  | {
-    readonly done: false
-    readonly output: undefined
-  }
-)
+  & (
+    | {
+      readonly done: true
+      readonly output: Output
+    }
+    | {
+      readonly done: false
+      readonly output: undefined
+    }
+  )
 
 type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = (
   context: Context
@@ -914,13 +916,14 @@ export const planInitial: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
-  {
+  & {
     readonly state: Machine.Snapshot<States>
     readonly actions: ReadonlyArray<
       Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>
     >
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
-  } & (
+  }
+  & (
     | {
       readonly done: true
       readonly output: Output

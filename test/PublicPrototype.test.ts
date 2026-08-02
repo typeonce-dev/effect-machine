@@ -19,7 +19,7 @@ it("uses the public pipeable and inspectable prototypes", () => {
     [key: symbol]: () => unknown
   }
   assert.deepStrictEqual(inspectable.toJSON(), { _id: "Machine" })
-  assert.strictEqual(JSON.stringify(machine), '{"_id":"Machine"}')
-  assert.strictEqual(String(machine), '{"_id":"Machine"}')
+  assert.strictEqual(JSON.stringify(machine), "{\"_id\":\"Machine\"}")
+  assert.strictEqual(String(machine), "{\"_id\":\"Machine\"}")
   assert.deepStrictEqual(inspectable[Symbol.for("nodejs.util.inspect.custom")](), { _id: "Machine" })
 })
