@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -21,46 +25,65 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
-  pokemon-example:
+  changeset-policy:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - run: >-
+          node scripts/check-changeset.mjs
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
+
+  discover-examples:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.examples.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: examples
+        run: echo "matrix=$(node scripts/list-examples.mjs)" >> "$GITHUB_OUTPUT"
+
+  example:
+    needs: discover-examples
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover-examples.outputs.matrix) }}
+    name: example (${{ matrix.example }})
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: examples/pokemon
+        working-directory: ${{ matrix.directory }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          package_json_file: examples/pokemon/package.json
+          package_json_file: ${{ matrix.directory }}/package.json
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
-            examples/pokemon/pnpm-lock.yaml
+            ${{ matrix.directory }}/pnpm-lock.yaml
       - run: pnpm --dir ../.. install --frozen-lockfile
       - run: pnpm --dir ../.. build
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
 
-  platformer-example:
+  examples:
+    if: always()
+    needs: [discover-examples, example]
+    name: examples
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: examples/platformer
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-        with:
-          package_json_file: examples/platformer/package.json
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            examples/platformer/pnpm-lock.yaml
-      - run: pnpm --dir ../.. install --frozen-lockfile
-      - run: pnpm --dir ../.. build
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - name: Require every example check to pass
+        env:
+          DISCOVERY_RESULT: ${{ needs.discover-examples.result }}
+          EXAMPLE_RESULT: ${{ needs.example.result }}
+        run: |
+          test "$DISCOVERY_RESULT" = "success"
+          test "$EXAMPLE_RESULT" = "success"

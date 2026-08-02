@@ -1,7 +1,33 @@
 import { spawnSync } from "node:child_process"
+import { existsSync } from "node:fs"
 import { resolve } from "node:path"
 
-const root = resolve(import.meta.dirname, "..")
+const options = {
+  allowMissing: false,
+  json: false,
+  root: resolve(import.meta.dirname, "..")
+}
+
+for (let index = 2; index < process.argv.length; index += 1) {
+  const argument = process.argv[index]
+
+  if (argument === "--allow-missing") {
+    options.allowMissing = true
+  } else if (argument === "--json") {
+    options.json = true
+  } else if (argument === "--root") {
+    const root = process.argv[index + 1]
+    if (root === undefined) {
+      throw new Error("--root requires a directory")
+    }
+    options.root = resolve(root)
+    index += 1
+  } else {
+    throw new Error(`Unknown argument: ${argument}`)
+  }
+}
+
+const root = options.root
 const tsc = resolve(root, "node_modules", "typescript", "bin", "tsc")
 
 const scenarios = [
@@ -94,7 +120,15 @@ const version = run(["--version"])
 const results = new Map()
 
 for (const scenario of scenarios) {
-  const output = run([...compilerArguments, resolve(root, "perf", "types", scenario.file)])
+  const file = resolve(root, "perf", "types", scenario.file)
+  if (!existsSync(file)) {
+    if (options.allowMissing) {
+      continue
+    }
+    throw new Error(`Type-performance scenario does not exist: ${file}`)
+  }
+
+  const output = run([...compilerArguments, file])
 
   results.set(scenario.id, {
     instantiations: readMetric(output, "Instantiations"),
@@ -102,7 +136,9 @@ for (const scenario of scenarios) {
   })
 }
 
-const visibleScenarios = scenarios.filter((scenario) => scenario.hidden !== true)
+const visibleScenarios = scenarios.filter(
+  (scenario) => scenario.hidden !== true && results.has(scenario.id)
+)
 const rows = visibleScenarios.map((scenario) => {
   const result = results.get(scenario.id)
   const control = scenario.control === undefined ? undefined : results.get(scenario.control)
@@ -115,6 +151,34 @@ const rows = visibleScenarios.map((scenario) => {
     checkTime: `${result.checkTime.toFixed(2)}s`
   }
 })
+
+if (options.json) {
+  console.log(
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        typescriptVersion: version,
+        skipLibCheck: true,
+        scenarios: visibleScenarios.map((scenario) => {
+          const result = results.get(scenario.id)
+          const control = scenario.control === undefined ? undefined : results.get(scenario.control)
+
+          return {
+            id: scenario.id,
+            label: scenario.label,
+            instantiations: result.instantiations,
+            marginalInstantiations:
+              control === undefined ? null : result.instantiations - control.instantiations,
+            checkTimeSeconds: result.checkTime
+          }
+        })
+      },
+      null,
+      2
+    )
+  )
+  process.exit(0)
+}
 
 const widths = {
   scenario: Math.max("Scenario".length, ...rows.map((row) => row.scenario.length)),

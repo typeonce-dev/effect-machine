@@ -1,0 +1,68 @@
+name: Type performance
+
+on:
+  pull_request:
+
+concurrency:
+  group: type-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  type-performance:
+    name: type-performance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out base
+        uses: actions/checkout@v7
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Check out pull request
+        uses: actions/checkout@v7
+        with:
+          path: head
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: head/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            base/pnpm-lock.yaml
+            head/pnpm-lock.yaml
+
+      - name: Install and build base
+        run: |
+          pnpm --dir base install --frozen-lockfile
+          pnpm --dir base build
+
+      - name: Install and build pull request
+        run: |
+          pnpm --dir head install --frozen-lockfile
+          pnpm --dir head build
+
+      - name: Measure base and pull request
+        run: |
+          node head/scripts/type-performance.mjs --root base --json --allow-missing > "$RUNNER_TEMP/before.json"
+          node head/scripts/type-performance.mjs --root head --json > "$RUNNER_TEMP/after.json"
+          node head/scripts/compare-type-performance.mjs "$RUNNER_TEMP/before.json" "$RUNNER_TEMP/after.json" > "$RUNNER_TEMP/report.md"
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report for the comment workflow
+        uses: actions/upload-artifact@v7
+        with:
+          name: type-performance-report
+          path: |
+            ${{ runner.temp }}/before.json
+            ${{ runner.temp }}/after.json
+          if-no-files-found: error
+          retention-days: 7

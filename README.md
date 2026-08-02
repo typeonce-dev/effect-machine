@@ -495,6 +495,9 @@ Individual commands are available for `build`, `test`, `test:types`,
 packs the package, imports all public entrypoints, and compiles a strict
 TypeScript consumer with `skipLibCheck: false`.
 
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before proposing a change. Pull
+requests receive an automated base-versus-head type-instantiation report.
+
 ## Examples
 
 The [platformer statechart example](./examples/platformer) is a playable SVG
@@ -509,6 +512,11 @@ Vite project demonstrating compound and parallel states, state-scoped invokes,
 invoked child statecharts, typed emissions, and Atom reactivity. It uses a local
 `file:` dependency on this package while retaining an isolated dependency graph,
 lockfile, build, and CI job.
+
+The [playground](./examples/playground) collects focused interactive examples
+for traffic lights, turnstiles, media players, microwaves, and worker-backed
+machines. CI discovers every direct package under `examples/` and runs its
+`check` script automatically.
 
 ## Releases
 
