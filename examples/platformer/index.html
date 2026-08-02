@@ -53,11 +53,17 @@
                 <path class="scarf" d="M2 20h27v5H17l-7 5 2-5H2z" />
               </g>
             </g>
+            <g class="pause-overlay" aria-hidden="true">
+              <rect width="640" height="360" />
+              <text class="pause-title" x="320" y="170">PAUSED</text>
+              <text class="pause-copy" x="320" y="197">P resumes from deep history</text>
+            </g>
           </svg>
           <div class="controls" aria-label="Controls">
             <span><kbd>A</kbd><kbd>D</kbd> move</span>
             <span><kbd>W</kbd>/<kbd>Space</kbd> jump ×2</span>
             <span><kbd>S</kbd> duck / dive</span>
+            <span><kbd>P</kbd> pause / resume</span>
             <span><kbd>R</kbd> reset</span>
           </div>
         </div>
@@ -72,33 +78,40 @@
             <div class="regions">
               <section>
                 <h2>locomotion</h2>
-                <div class="branch">
-                  <h3 data-node="Grounded">Grounded</h3>
-                  <div class="state-row">
-                    <span data-node="Standing">Standing</span>
-                    <span data-node="Running">Running</span>
-                    <span data-node="Ducking">Ducking</span>
-                    <span data-node="Landing">Landing</span>
-                  </div>
+                <div class="state-row play-state-row">
+                  <span data-node="Playing">Playing</span>
+                  <span data-node="Paused">Paused</span>
+                  <span class="history-node">resume · H*</span>
                 </div>
-                <div class="branch">
-                  <h3 data-node="Airborne">Airborne</h3>
-                  <div class="parallel-label">parallel regions</div>
-                  <div class="nested-region">
-                    <small>motion</small>
+                <div class="playing-region">
+                  <div class="branch">
+                    <h3 data-node="Grounded">Grounded</h3>
                     <div class="state-row">
-                      <span data-node="Jumping">Jumping</span>
-                      <span data-node="Falling">Falling</span>
-                      <span data-node="Diving">Diving</span>
+                      <span data-node="Standing">Standing</span>
+                      <span data-node="Running">Running</span>
+                      <span data-node="Ducking">Ducking</span>
+                      <span data-node="Landing">Landing</span>
                     </div>
                   </div>
-                  <div class="nested-region">
-                    <small>air jump</small>
-                    <div class="state-row">
-                      <span data-node="AirJumpGroundLock">ground lock</span>
-                      <span data-node="AirJumpWallLock">wall lock</span>
-                      <span data-node="AirJumpReady">ready</span>
-                      <span data-node="AirJumpSpent">spent</span>
+                  <div class="branch">
+                    <h3 data-node="Airborne">Airborne</h3>
+                    <div class="parallel-label">parallel regions</div>
+                    <div class="nested-region">
+                      <small>motion</small>
+                      <div class="state-row">
+                        <span data-node="Jumping">Jumping</span>
+                        <span data-node="Falling">Falling</span>
+                        <span data-node="Diving">Diving</span>
+                      </div>
+                    </div>
+                    <div class="nested-region">
+                      <small>air jump</small>
+                      <div class="state-row">
+                        <span data-node="AirJumpGroundLock">ground lock</span>
+                        <span data-node="AirJumpWallLock">wall lock</span>
+                        <span data-node="AirJumpReady">ready</span>
+                        <span data-node="AirJumpSpent">spent</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -140,7 +153,8 @@
 
       <p class="note">
         A small adapter owns coordinates and gravity. The machine owns legal behavior, and the box simply transforms to
-        show its active state. Wall contact is tracked explicitly, so floor-corner jumps stay ordinary.
+        show its active state. Pause exits <code>Playing</code>; resume targets its deep-history node and restores the
+        exact grounded or airborne configuration, including state-local values.
       </p>
     </main>
     <script type="module" src="/src/main.ts"></script>

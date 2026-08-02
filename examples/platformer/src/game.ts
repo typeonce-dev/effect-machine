@@ -1,5 +1,5 @@
 import type { Axis, CharacterEvent, CharacterSnapshot, LocomotionMode } from "./machine.ts"
-import { airJumpMode, facingDirection, locomotionState } from "./machine.ts"
+import { airJumpMode, facingDirection, isPaused, locomotionState } from "./machine.ts"
 
 const FLOOR = 324
 const SIZE = 30
@@ -11,7 +11,8 @@ const pose = {
   Falling: "rotate(12 15 15)",
   Ducking: "translate(0 15) scale(1 .5)",
   Diving: "rotate(90 15 15) scale(.8 1.15)",
-  Landing: "translate(-3 12) scale(1.2 .6)"
+  Landing: "translate(-3 12) scale(1.2 .6)",
+  Paused: "translate(0 0)"
 } as const satisfies Record<LocomotionMode, string>
 
 export class GameAdapter {
@@ -43,6 +44,13 @@ export class GameAdapter {
     if (this.snapshot === undefined) return
     const dt = Math.min(seconds, 1 / 30)
     const state = locomotionState(this.snapshot)
+
+    if (state._tag === "Paused") {
+      this.player.dataset.paused = "true"
+      return
+    }
+
+    delete this.player.dataset.paused
     const mode = state._tag
     const p = this.position
 
@@ -121,6 +129,15 @@ export class GameAdapter {
   private readonly onKeyDown = (event: KeyboardEvent) => {
     if (!this.isGameKey(event.code)) return
     event.preventDefault()
+
+    if (event.code === "KeyP") {
+      if (event.repeat || this.snapshot === undefined) return
+      this.send(isPaused(this.snapshot) ? { _tag: "Resume" } : { _tag: "Pause", at: performance.now() })
+      return
+    }
+
+    if (this.snapshot !== undefined && isPaused(this.snapshot) && event.code !== "KeyR") return
+
     const previousAxis = this.axis
     this.held.add(event.code)
     if (previousAxis !== this.axis) this.send({ _tag: "Move", axis: this.axis, at: performance.now() })
@@ -139,6 +156,7 @@ export class GameAdapter {
   private readonly onKeyUp = (event: KeyboardEvent) => {
     const previousAxis = this.axis
     this.held.delete(event.code)
+    if (this.snapshot !== undefined && isPaused(this.snapshot)) return
     if (previousAxis !== this.axis) this.send({ _tag: "Move", axis: this.axis, at: performance.now() })
     if (event.code === "KeyS" || event.code === "ArrowDown") {
       this.send({ _tag: "DownReleased", axis: this.axis, at: performance.now() })
@@ -151,6 +169,7 @@ export class GameAdapter {
       "KeyD",
       "KeyW",
       "KeyS",
+      "KeyP",
       "KeyR",
       "Space",
       "ArrowLeft",

@@ -1100,16 +1100,16 @@ type InitializerClosureForNode<
   Node,
   Path extends string
 > = Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-  | Extract<Path, Machine.StateIdentifier<AllStates>>
-  | InitializerClosuresForChildren<AllStates, Children, Path>
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas; readonly initial: infer Initial } ?
     | Extract<Path, Machine.StateIdentifier<AllStates>>
-    | (Initial extends ActiveStateKey<Children> ? InitializerClosureForNode<
-        AllStates,
-        Children[Initial],
-        Machine.JoinPath<Path, Initial>
-      >
-      : never)
+    | InitializerClosuresForChildren<AllStates, Children, Path>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas; readonly initial: infer Initial } ?
+      | Extract<Path, Machine.StateIdentifier<AllStates>>
+      | (Initial extends ActiveStateKey<Children> ? InitializerClosureForNode<
+          AllStates,
+          Children[Initial],
+          Machine.JoinPath<Path, Initial>
+        >
+        : never)
   : never
 
 type InitializerClosuresForChildren<
@@ -1132,10 +1132,10 @@ type RequiredHistoryInitializersWithPrefix<
   readonly [Key in ActiveStateKey<States>]: States[Key] extends {
     readonly states: infer Children extends Machine.StateSchemas
   } ?
-    | (HasDirectShallowHistory<Children> extends true ?
-      InitializerClosuresForChildren<AllStates, Children, Machine.JoinPath<Prefix, Key>>
-      : never)
-    | RequiredHistoryInitializersWithPrefix<AllStates, Children, Machine.JoinPath<Prefix, Key>>
+      | (HasDirectShallowHistory<Children> extends true ?
+        InitializerClosuresForChildren<AllStates, Children, Machine.JoinPath<Prefix, Key>>
+        : never)
+      | RequiredHistoryInitializersWithPrefix<AllStates, Children, Machine.JoinPath<Prefix, Key>>
     : never
 }[ActiveStateKey<States>]
 
@@ -2116,7 +2116,8 @@ export declare namespace Machine {
     States extends StateSchemas,
     UnhandledStates extends StateIdentifier<States>
   > = [HistoryIdentifier<States>] extends [never] ? unknown
-    : [MissingHistoryImplementations<States, UnhandledStates>] extends [never] ? unknown : {
+    : [MissingHistoryImplementations<States, UnhandledStates>] extends [never] ? unknown :
+    {
       readonly "~effect/Machine/MissingHistoryImplementation": MissingHistoryImplementations<States, UnhandledStates>
     }
 
@@ -3197,11 +3198,11 @@ export declare namespace Machine {
     ? NonNullable<Initial> extends (...args: any) => infer Ret ? Ret : never
     : never
   /** Extracts the return values from a state's history defaults. */
-  export type HistoryDefaultReturn<Config> = Config extends { readonly history?: infer History }
-    ? {
+  export type HistoryDefaultReturn<Config> = Config extends { readonly history?: infer History } ? {
       readonly [Key in keyof NonNullable<History>]: NonNullable<History>[Key] extends {
         readonly default: (...args: any) => infer Ret
-      } ? Ret : never
+      } ? Ret :
+        never
     }[keyof NonNullable<History>]
     : never
   /**
@@ -3971,7 +3972,7 @@ export declare namespace Machine {
       ] extends [never] ? true
       : false
     : false
-  : true
+    : true
 
   type HandlerImplementedStateId<
     AllStates extends StateSchemas,
@@ -5423,7 +5424,7 @@ export const invokeMachine: {
       & {
         readonly child: ChildMachine<
           Id,
-          Machine<
+          & Machine<
             States,
             Events,
             Input,
@@ -5437,8 +5438,9 @@ export const invokeMachine: {
             Emits,
             OutputStates,
             InputEvents
-          > & Machine.EnsureOutputImplementations<States, OutputStates>
-            & Machine.EnsureHistoryImplementations<States, UnhandledStates>
+          >
+          & Machine.EnsureOutputImplementations<States, OutputStates>
+          & Machine.EnsureHistoryImplementations<States, UnhandledStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
@@ -5500,7 +5502,7 @@ export const invokeMachine: {
       & {
         readonly child: ChildMachine<
           Id,
-          Machine<
+          & Machine<
             States,
             Events,
             Input,
@@ -5514,8 +5516,9 @@ export const invokeMachine: {
             Emits,
             OutputStates,
             InputEvents
-          > & Machine.EnsureOutputImplementations<States, OutputStates>
-            & Machine.EnsureHistoryImplementations<States, UnhandledStates>
+          >
+          & Machine.EnsureOutputImplementations<States, OutputStates>
+          & Machine.EnsureHistoryImplementations<States, UnhandledStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<

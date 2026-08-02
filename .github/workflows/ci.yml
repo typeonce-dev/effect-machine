@@ -42,3 +42,25 @@ jobs:
       - run: pnpm --dir ../.. build
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+
+  platformer-example:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/platformer
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: examples/platformer/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            examples/platformer/pnpm-lock.yaml
+      - run: pnpm --dir ../.. install --frozen-lockfile
+      - run: pnpm --dir ../.. build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check

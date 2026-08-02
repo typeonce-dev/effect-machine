@@ -1,6 +1,6 @@
 import { Context, Effect, Schema } from "effect"
-import { Machine } from "../src/index.js"
 import { describe, expect, it } from "tstyche"
+import { Machine } from "../src/index.js"
 
 class Checkout extends Schema.TaggedClass<Checkout>("Checkout")("Checkout", {
   orderId: Schema.String

@@ -74,11 +74,13 @@ const validateHistoryRecordControl = (machine: Machine.Any, record: HistoryRecor
 }
 
 type SnapshotWithHistory = Machine.AtomicSnapshot<string, unknown> & {
-  readonly history?: Readonly<Record<string, {
-    readonly mode: "shallow" | "deep"
-    readonly active: ReadonlyArray<string>
-    readonly values: Readonly<Record<string, unknown>>
-  }>>
+  readonly history?: Readonly<
+    Record<string, {
+      readonly mode: "shallow" | "deep"
+      readonly active: ReadonlyArray<string>
+      readonly values: Readonly<Record<string, unknown>>
+    }>
+  >
 }
 
 const historyFromSnapshot = (
@@ -100,7 +102,8 @@ const historyFromSnapshot = (
       const node = getNode(machine, activePath)
       if (
         node.type === "history" ||
-        !(isPathInSubtree(activePath, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(activePath)) ||
+        !(isPathInSubtree(activePath, historyNode.parent) ||
+          getPathToRoot(machine, historyNode.parent).includes(activePath)) ||
         !Schema.is(getStateNodeSchema(node))(entry.values[activePath])
       ) {
         throw new Error(`Machine snapshot contains invalid remembered value for "${activePath}"`)
@@ -133,12 +136,14 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
       historyNode === undefined || historyNode.type !== "history" || historyNode.parent === undefined ||
       historyNode.history !== entry.mode
     ) {
-      return yield* Effect.fail(new MachineSchemaDecodeError({
-        machineId: machine.id,
-        boundary: "history",
-        state: path,
-        cause: Cause.die(new Error(`Machine snapshot contains invalid history record "${path}"`))
-      }))
+      return yield* Effect.fail(
+        new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "history",
+          state: path,
+          cause: Cause.die(new Error(`Machine snapshot contains invalid history record "${path}"`))
+        })
+      )
     }
     const active = new Set<string>()
     const values = new Map<string, unknown>()
@@ -147,14 +152,17 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
       if (
         active.has(activePath) || node === undefined || node.type === "history" ||
         !Object.prototype.hasOwnProperty.call(entry.values, activePath) ||
-        !(isPathInSubtree(activePath, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(activePath))
+        !(isPathInSubtree(activePath, historyNode.parent) ||
+          getPathToRoot(machine, historyNode.parent).includes(activePath))
       ) {
-        return yield* Effect.fail(new MachineSchemaDecodeError({
-          machineId: machine.id,
-          boundary: "history",
-          state: activePath,
-          cause: Cause.die(new Error(`Machine snapshot contains invalid remembered state "${activePath}"`))
-        }))
+        return yield* Effect.fail(
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "history",
+            state: activePath,
+            cause: Cause.die(new Error(`Machine snapshot contains invalid remembered state "${activePath}"`))
+          })
+        )
       }
       active.add(activePath)
       values.set(
@@ -166,12 +174,14 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
       )
     }
     if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
-      return yield* Effect.fail(new MachineSchemaDecodeError({
-        machineId: machine.id,
-        boundary: "history",
-        state: path,
-        cause: Cause.die(new Error(`Machine snapshot contains incomplete history record "${path}"`))
-      }))
+      return yield* Effect.fail(
+        new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "history",
+          state: path,
+          cause: Cause.die(new Error(`Machine snapshot contains incomplete history record "${path}"`))
+        })
+      )
     }
     history.set(path, {
       mode: entry.mode,
@@ -182,12 +192,14 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
     try {
       validateHistoryRecordControl(machine, history.get(path)!)
     } catch (cause) {
-      return yield* Effect.fail(new MachineSchemaDecodeError({
-        machineId: machine.id,
-        boundary: "history",
-        state: path,
-        cause: Cause.die(cause)
-      }))
+      return yield* Effect.fail(
+        new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "history",
+          state: path,
+          cause: Cause.die(cause)
+        })
+      )
     }
   }
   return history
@@ -195,11 +207,13 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
 
 const historyToSnapshot = (
   history: ReadonlyMap<string, HistoryRecord>
-): Readonly<Record<string, {
-  readonly mode: "shallow" | "deep"
-  readonly active: ReadonlyArray<string>
-  readonly values: Readonly<Record<string, unknown>>
-}>> => {
+): Readonly<
+  Record<string, {
+    readonly mode: "shallow" | "deep"
+    readonly active: ReadonlyArray<string>
+    readonly values: Readonly<Record<string, unknown>>
+  }>
+> => {
   const entries: Record<string, {
     readonly mode: "shallow" | "deep"
     readonly active: ReadonlyArray<string>
@@ -638,7 +652,9 @@ export const getRootPath = (machine: Machine.Any, configuration: ActiveConfigura
 export const getActiveValue = (configuration: ActiveConfiguration, path: string): unknown => {
   if (!configuration.values.has(path)) {
     throw new Error(
-      `Machine expected active state "${path}" to have a value (available: ${Array.from(configuration.values.keys()).join(", ")})`
+      `Machine expected active state "${path}" to have a value (available: ${
+        Array.from(configuration.values.keys()).join(", ")
+      })`
     )
   }
   return configuration.values.get(path)
@@ -1412,11 +1428,14 @@ const EncodedSnapshotSchema = Schema.Struct({
     path: Schema.String,
     output: Schema.optional(Schema.Unknown)
   }))),
-  history: Schema.optional(Schema.Record(Schema.String, Schema.Struct({
-    mode: Schema.Literals(["shallow", "deep"]),
-    active: Schema.Array(Schema.String),
-    values: Schema.Record(Schema.String, Schema.Unknown)
-  })))
+  history: Schema.optional(Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      mode: Schema.Literals(["shallow", "deep"]),
+      active: Schema.Array(Schema.String),
+      values: Schema.Record(Schema.String, Schema.Unknown)
+    })
+  ))
 })
 
 const encodeBoundary = (
@@ -1586,9 +1605,11 @@ export const encodeSnapshot = (
     }
 
     const history: Record<string, Machine.EncodedSnapshotHistoryEntry> = {}
-    for (const [historyPath, record] of Array.from(configuration.history).sort(([left], [right]) =>
-      left.localeCompare(right)
-    )) {
+    for (
+      const [historyPath, record] of Array.from(configuration.history).sort(([left], [right]) =>
+        left.localeCompare(right)
+      )
+    ) {
       const historyNode = machine.stateNodes.byPath.get(historyPath)
       if (
         historyNode === undefined || historyNode.type !== "history" || historyNode.parent !== record.parent ||
