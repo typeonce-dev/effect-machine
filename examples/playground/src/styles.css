@@ -1,0 +1,430 @@
+:root {
+  color: #e8ecf4;
+  background: #0c0f15;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 0%, rgb(93 117 255 / 18%), transparent 28rem),
+    radial-gradient(circle at 95% 18%, rgb(56 214 162 / 10%), transparent 22rem), #0c0f15;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  padding: 0.65rem 0.9rem;
+  border: 1px solid #354057;
+  border-radius: 0.6rem;
+  color: #f4f6fa;
+  background: #20283a;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #7085ff;
+  background: #2a3550;
+}
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.app-shell {
+  width: min(76rem, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.site-header {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 4.75rem;
+  border-bottom: 1px solid #252b38;
+}
+
+.brand {
+  display: inline-flex;
+  gap: 0.65rem;
+  align-items: center;
+  color: #f7f8fb;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid #9aaaFF;
+  border-radius: 0.2rem;
+  box-shadow: 0.28rem 0.28rem 0 #42d6a3;
+  transform: rotate(45deg);
+}
+
+nav {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+}
+
+nav a {
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  color: #8f98aa;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+nav a:hover,
+nav a.is-active {
+  color: #eef1ff;
+  background: #202638;
+}
+
+main {
+  padding: clamp(3rem, 8vw, 6.5rem) 0 6rem;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  max-width: 13ch;
+  margin-bottom: 1.25rem;
+  font-size: clamp(3rem, 8vw, 6.6rem);
+  line-height: 0.92;
+  letter-spacing: -0.07em;
+}
+
+.eyebrow,
+.starter-label {
+  margin-bottom: 1rem;
+  color: #7e91ff;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.lede {
+  max-width: 42rem;
+  color: #a8b0c0;
+  font-size: clamp(1.05rem, 2vw, 1.3rem);
+  line-height: 1.65;
+}
+
+.hero {
+  margin-bottom: 4rem;
+}
+
+.example-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.example-card {
+  position: relative;
+  min-height: 19rem;
+  padding: 1.5rem;
+  overflow: hidden;
+  border: 1px solid #293040;
+  border-radius: 1rem;
+  color: inherit;
+  background: linear-gradient(145deg, rgb(29 35 48 / 92%), rgb(17 21 29 / 92%));
+  text-decoration: none;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+
+.example-card:hover {
+  border-color: #5264ad;
+  transform: translateY(-3px);
+}
+
+.example-card h2 {
+  margin: 3.2rem 0 0.7rem;
+  font-size: 1.7rem;
+  letter-spacing: -0.035em;
+}
+
+.example-card p {
+  max-width: 30rem;
+  color: #9ca5b6;
+  line-height: 1.55;
+}
+
+.example-card ul {
+  display: flex;
+  gap: 0.4rem;
+  margin: 1.25rem 0 3rem;
+  padding: 0;
+  list-style: none;
+}
+
+.example-card li,
+.file-pill {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid #343d50;
+  border-radius: 999px;
+  color: #aeb7c9;
+  background: #151a24;
+  font-size: 0.72rem;
+}
+
+.card-index {
+  color: #6e7d99;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.75rem;
+}
+
+.card-action {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  color: #94a4ff;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.example-header {
+  margin-bottom: 3rem;
+}
+
+.example-header h1 {
+  font-size: clamp(2.8rem, 7vw, 5.5rem);
+}
+
+.file-pill {
+  display: inline-block;
+  margin-top: 0.5rem;
+  border-radius: 0.4rem;
+  color: #79dcb9;
+}
+
+.workbench {
+  min-height: 25rem;
+  border: 1px solid #2a3242;
+  border-radius: 1.25rem;
+  background:
+    linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px), #111620;
+  background-size: 1.5rem 1.5rem;
+  box-shadow: 0 2rem 5rem rgb(0 0 0 / 25%);
+}
+
+.starter-panel {
+  display: grid;
+  place-items: center;
+  min-height: 25rem;
+  padding: clamp(2rem, 7vw, 5rem);
+  text-align: center;
+}
+
+.starter-panel h2 {
+  margin: 1.5rem 0 0.65rem;
+  font-size: 1.45rem;
+}
+
+.starter-panel > p {
+  max-width: 42rem;
+  margin-bottom: 0;
+  color: #99a3b5;
+  line-height: 1.65;
+}
+
+.placeholder-object {
+  position: relative;
+  width: 8rem;
+  height: 8rem;
+}
+
+.turnstile-post {
+  position: absolute;
+  bottom: 0;
+  left: 3rem;
+  width: 2rem;
+  height: 6.5rem;
+  border: 1px solid #8390a9;
+  border-radius: 0.5rem 0.5rem 0.2rem 0.2rem;
+  background: #343e51;
+}
+
+.turnstile-arm {
+  position: absolute;
+  z-index: 1;
+  top: 2.25rem;
+  left: 0.25rem;
+  width: 7.5rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  background: #8092ff;
+  transform: rotate(-15deg);
+}
+
+.traffic-light {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.8rem;
+  border: 1px solid #475064;
+  border-radius: 1rem;
+  background: #202733;
+}
+
+.traffic-light span {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: #303746;
+  box-shadow: inset 0 0.2rem 0.5rem rgb(0 0 0 / 45%);
+}
+
+.traffic-light .red {
+  background: #d8555f;
+  box-shadow: 0 0 2rem rgb(216 85 95 / 35%);
+}
+
+.microwave {
+  display: grid;
+  grid-template-columns: 10rem 3rem;
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border: 1px solid #4a5366;
+  border-radius: 0.8rem;
+  background: #343c49;
+}
+
+.microwave-window {
+  height: 7rem;
+  border: 0.4rem solid #202630;
+  border-radius: 0.35rem;
+  background: radial-gradient(circle, #34485d, #151d27);
+}
+
+.microwave-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: center;
+  padding-top: 0.4rem;
+}
+
+.microwave-controls span {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: #8793a8;
+}
+
+.file-picker {
+  display: inline-flex;
+  gap: 0.8rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px dashed #4d5c7b;
+  border-radius: 0.65rem;
+  color: #b8c1d2;
+  cursor: pointer;
+}
+
+.file-picker input {
+  max-width: 13rem;
+  color: #7f899b;
+  font-size: 0.75rem;
+}
+
+.audio-player {
+  width: min(100%, 32rem);
+  margin-bottom: 0.5rem;
+}
+
+.transport-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  width: 100%;
+  margin-bottom: 2rem;
+  text-align: left;
+}
+
+.transport-grid article {
+  min-height: 12rem;
+  padding: 1.25rem;
+  border: 1px solid #303a4d;
+  border-radius: 0.8rem;
+  background: rgb(20 26 37 / 90%);
+}
+
+.transport-grid h2 {
+  margin-top: 1.25rem;
+}
+
+.transport-grid p {
+  min-height: 2.8rem;
+  color: #98a2b5;
+  font-size: 0.85rem;
+}
+
+.status-dot {
+  display: block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: #5fddae;
+  box-shadow: 0 0 1rem rgb(95 221 174 / 60%);
+}
+
+.status-dot.channel {
+  background: #8092ff;
+  box-shadow: 0 0 1rem rgb(128 146 255 / 60%);
+}
+
+.implementation-note {
+  padding-top: 1.5rem;
+  border-top: 1px solid #2d3546;
+}
+
+@media (max-width: 48rem) {
+  .site-header {
+    display: block;
+    padding-top: 1.25rem;
+  }
+
+  nav {
+    margin-top: 0.75rem;
+  }
+
+  .example-grid,
+  .transport-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .example-card {
+    min-height: 17rem;
+  }
+}
+

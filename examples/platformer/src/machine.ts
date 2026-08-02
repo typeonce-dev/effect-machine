@@ -137,8 +137,8 @@ const initialCharacter = () =>
 export const CharacterMachine = Machine.make({
   id: "PlatformerCharacter",
   states: CharacterStates.states,
-  events: Object.values(Event.cases),
-  internalEvents: Object.values(InternalEvent.cases),
+  events: [Event],
+  internalEvents: [InternalEvent],
   initial: initialCharacter
 }).handle({
   Character: {

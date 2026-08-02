@@ -1,0 +1,34 @@
+{
+  "name": "@typeonce/effect-machine-example-playground",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React playground for building @typeonce/effect-machine examples",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm typecheck && vite build",
+    "preview": "vite preview",
+    "check": "pnpm build"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.0-beta.102",
+    "@tanstack/react-router": "1.170.18",
+    "@typeonce/effect-machine": "file:../..",
+    "effect": "4.0.0-beta.102",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "scheduler": "0.27.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "6.0.4",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
