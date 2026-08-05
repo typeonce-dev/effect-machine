@@ -32,10 +32,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - run: >-
+      - name: Require a changeset
+        if: >-
+          github.head_ref != 'changeset-release/main' ||
+          github.event.pull_request.user.login != 'github-actions[bot]'
+        run: >-
           node scripts/check-changeset.mjs
           --base ${{ github.event.pull_request.base.sha }}
           --head ${{ github.event.pull_request.head.sha }}
+      - name: Accept the Changesets release pull request
+        if: >-
+          github.head_ref == 'changeset-release/main' &&
+          github.event.pull_request.user.login == 'github-actions[bot]'
+        run: echo "Changesets release pull requests consume their changeset files."
 
   discover-examples:
     runs-on: ubuntu-latest
