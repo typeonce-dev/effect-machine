@@ -2035,27 +2035,43 @@ export declare namespace Machine {
     }
 
   /**
+   * Statically inspectable destination paths for a transition handler.
+   * A declared parent path covers every descendant below that state.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export type TransitionTargets<Path extends string = string> =
+    | {
+      readonly type: "dynamic"
+    }
+    | {
+      readonly type: "declared"
+      readonly paths: ReadonlyArray<Path>
+    }
+
+  /**
    * Inspectable registration for a transition handler.
    *
    * **Details**
    *
-   * Current transition handlers resolve their target at runtime and may return
-   * no target, so `target` is explicitly reported as dynamic. The source,
-   * trigger, and reentry behavior are available without executing the handler.
+   * Event handlers may declare an upper bound of possible target paths. A
+   * handler without that declaration is explicitly reported as dynamic. The
+   * source, trigger, and reentry behavior are available without executing the
+   * handler.
    *
    * @category models
    * @since 4.0.0
    */
   export interface TransitionDefinition<
-    Path extends string = string,
-    EventTag extends PropertyKey = PropertyKey
+    SourcePath extends string = string,
+    EventTag extends PropertyKey = PropertyKey,
+    TargetPath extends string = SourcePath
   > {
-    readonly source: Path
+    readonly source: SourcePath
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
-    readonly target: {
-      readonly type: "dynamic"
-    }
+    readonly targets: TransitionTargets<TargetPath>
   }
 
   /**
@@ -3589,6 +3605,12 @@ export declare namespace Machine {
         ) => HandlerResult<States, any, any>)
         | {
           readonly reenter?: boolean
+          /**
+           * Upper bound of state or history paths this handler may target.
+           * Returning `void` is always permitted. Declaring a parent state also
+           * permits concrete descendant targets below it.
+           */
+          readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
           readonly transition: (
             context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
           ) => HandlerResult<States, any, any>
@@ -3871,6 +3893,48 @@ export declare namespace Machine {
     }
     : unknown
 
+  type TransitionResultTargetPath<Result> = IsAny<Result> extends true ? never
+    : Result extends Effect.Effect<infer Success, any, any> ? TransitionResultTargetPath<Success>
+    : Result extends StateConstruction<infer Constructed> ? TransitionResultTargetPath<Constructed>
+    : Result extends { readonly path: infer Path extends string } ? Path
+    : never
+
+  type DeclaredTransitionTarget<Transition> = Transition extends {
+    readonly targets: infer Targets extends ReadonlyArray<string>
+  } ? Targets[number]
+    : never
+
+  type ExcludeDeclaredTransitionTarget<Returned, Declared extends string> = Returned extends string ?
+    Returned extends Declared | `${Declared}.${string}` ? never : Returned
+    : never
+
+  type UndeclaredTransitionTarget<Transition> = "targets" extends keyof Transition ? ExcludeDeclaredTransitionTarget<
+      TransitionResultTargetPath<EventTransitionReturn<Transition>>,
+      DeclaredTransitionTarget<Transition>
+    >
+    : never
+
+  type HandlerOnTargetValidationErrors<StateId extends string, On> = {
+    readonly [
+      EventTag in keyof On as [UndeclaredTransitionTarget<On[EventTag]>] extends [never] ? never
+        : EventTag
+    ]: HandlerValidationError<
+      "Transition returns a target not listed in targets",
+      StateId,
+      readonly [event: EventTag, target: UndeclaredTransitionTarget<On[EventTag]>]
+    >
+  }
+
+  type HandlerOnTargetValidation<StateId extends string, Config> = "on" extends keyof Config ?
+    Config extends { readonly on?: infer On } ? HandlerOnTargetValidationErrors<
+        StateId,
+        NonNullable<On>
+      > extends infer Errors ? keyof Errors extends never ? unknown
+        : { readonly on: Errors }
+      : never
+    : unknown
+    : unknown
+
   type HandlerDepth = readonly [unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown]
 
   type HandlerNextDepth<Depth extends ReadonlyArray<unknown>> = Depth extends
@@ -3959,6 +4023,7 @@ export declare namespace Machine {
   > =
     & HandlerUnknownConfigKeyValidation<StateId, Config>
     & HandlerOnKeyValidation<Events, StateId, Config>
+    & HandlerOnTargetValidation<StateId, Config>
     & HandlerInvokeOutputValidation<Events, StateId, Config>
     & HandlerInvokeEmitsValidation<Events, StateId, Config>
     & HandlerInvokeSnapshotValidation<Events, StateId, Config>
@@ -4402,6 +4467,8 @@ export declare namespace Machine {
       | ((context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>) => HandlerResult<States, E, R>)
       | {
         readonly reenter?: boolean
+        /** Statically declared upper bound of possible target paths. */
+        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
           context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
         ) => HandlerResult<States, E, R>
@@ -4485,6 +4552,7 @@ const cloneWithHandlers = (
 
 const flattenHandlers = (
   handlers: Record<PropertyKey, Machine.AnyStateConfig>,
+  stateNodes: Machine.StateNodes,
   states: Machine.StateTree,
   prefix: string,
   config: Record<string, unknown>
@@ -4499,6 +4567,27 @@ const flattenHandlers = (
       throw new Error(`Machine expected state "${path}" handler to be an object`)
     }
     const { states: childConfig, ...stateConfig } = nodeConfig as Record<string, unknown>
+    const on = stateConfig.on
+    if (typeof on === "object" && on !== null) {
+      for (const event of Reflect.ownKeys(on)) {
+        const transition = (on as Record<PropertyKey, unknown>)[event]
+        if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
+          continue
+        }
+        if (!Array.isArray(transition.targets)) {
+          throw new Error(
+            `Machine expected transition targets for state "${path}" on "${String(event)}" to be an array`
+          )
+        }
+        for (const target of transition.targets) {
+          if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
+            throw new Error(
+              `Machine transition for state "${path}" on "${String(event)}" declares unknown target "${String(target)}"`
+            )
+          }
+        }
+      }
+    }
     handlers[path] = stateConfig as Machine.AnyStateConfig
     if (childConfig !== undefined) {
       const node = Model.getStateNodeDefinition(path, states[key])
@@ -4508,7 +4597,7 @@ const flattenHandlers = (
       if (typeof childConfig !== "object" || childConfig === null) {
         throw new Error(`Machine expected state "${path}" child handlers to be an object`)
       }
-      flattenHandlers(handlers, node.states, path, childConfig as Record<string, unknown>)
+      flattenHandlers(handlers, stateNodes, node.states, path, childConfig as Record<string, unknown>)
     }
   }
 }
@@ -4519,7 +4608,7 @@ const makeHandle = (self: Machine.Any): Machine.Any["handle"] =>
       Object.create(null),
       self.handlers
     )
-    flattenHandlers(handlers, self.states, "", config)
+    flattenHandlers(handlers, self.stateNodes, self.states, "", config)
     return cloneWithHandlers(self, handlers)
   }) as Machine.Any["handle"]
 
@@ -5889,9 +5978,8 @@ export const stateNodes = <M extends Machine.Any>(
  *
  * Event handlers retain their handler-key order within each source state and
  * are followed by eventless and completion handlers. This function does not
- * execute handlers. Targets are reported as dynamic because the current
- * function-based transition model resolves them from a concrete snapshot and
- * event at runtime.
+ * execute handlers. Event handlers with a `targets` declaration expose those
+ * possible paths; handlers without one remain dynamic.
  *
  * @category getters
  * @since 4.0.0
@@ -5901,13 +5989,15 @@ export const transitionDefinitions = <M extends Machine.Any>(
 ): ReadonlyArray<
   Machine.TransitionDefinition<
     Machine.StateIdentifier<Machine.States<M>>,
-    Machine.TagOf<Machine.Events<M>[number]>
+    Machine.TagOf<Machine.Events<M>[number]>,
+    Machine.StateNodeIdentifier<Machine.States<M>>
   >
 > =>
   Model.transitionDefinitions(machine) as ReadonlyArray<
     Machine.TransitionDefinition<
       Machine.StateIdentifier<Machine.States<M>>,
-      Machine.TagOf<Machine.Events<M>[number]>
+      Machine.TagOf<Machine.Events<M>[number]>,
+      Machine.StateNodeIdentifier<Machine.States<M>>
     >
   >
 

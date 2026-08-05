@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Schema } from "effect"
+import { Cause, Effect, Schema } from "effect"
 import { Machine } from "../src/index.js"
 import { makeTextRenderer } from "./visualization/text.js"
 
@@ -90,9 +90,15 @@ const machine = Machine.make({
         states: {
           idle: {
             on: {
-              Start: ({ target }) =>
-                target.local.running(new Running({}), (running) => running.editing(new Editing({}))),
-              Refresh: () => undefined
+              Start: {
+                targets: ["application.workflow.running"],
+                transition: ({ target }) =>
+                  target.local.running(new Running({}), (running) => running.editing(new Editing({})))
+              },
+              Refresh: {
+                targets: [],
+                transition: () => undefined
+              }
             }
           },
           running: {
@@ -148,19 +154,19 @@ describe("Machine structural visualization", () => {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Start" },
         reenter: false,
-        target: { type: "dynamic" }
+        targets: { type: "declared", paths: ["application.workflow.running"] }
       },
       {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: false,
-        target: { type: "dynamic" }
+        targets: { type: "declared", paths: [] }
       },
       {
         source: "application.connection.online",
         trigger: { type: "event", event: "Disconnect" },
         reenter: false,
-        target: { type: "dynamic" }
+        targets: { type: "dynamic" }
       }
     ])
   })
@@ -188,19 +194,19 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: true,
-        target: { type: "dynamic" }
+        targets: { type: "dynamic" }
       },
       {
         source: "idle",
         trigger: { type: "always" },
         reenter: false,
-        target: { type: "dynamic" }
+        targets: { type: "dynamic" }
       },
       {
         source: "idle",
         trigger: { type: "done" },
         reenter: false,
-        target: { type: "dynamic" }
+        targets: { type: "dynamic" }
       }
     ])
   })
@@ -210,12 +216,12 @@ describe("Machine structural visualization", () => {
       renderMachine(machine, initial),
       [
         "inspection-example",
-        "● active  ○ inactive  ◇ registered triggers (targets resolve at runtime)",
+        "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
         "",
         "├─ ● application [parallel]",
         "│  ├─ ● workflow [compound, initial: idle]",
         "│  │  ├─ ● idle",
-        "│  │  │  └─ ◇ on: Start, Refresh",
+        "│  │  │  └─ ◇ on: Start → running, Refresh → ∅",
         "│  │  ├─ ○ running [compound, initial: editing]",
         "│  │  │  ├─ ○ editing",
         "│  │  │  └─ ○ complete [final]",
@@ -228,6 +234,78 @@ describe("Machine structural visualization", () => {
         "",
         "Candidate events: Start, Refresh, Disconnect"
       ].join("\n")
+    )
+  })
+
+  it.effect("accepts a concrete leaf beneath a declared compound target", () =>
+    Effect.gen(function*() {
+      const planned = yield* Machine.plan(machine, initial, new Start({}))
+
+      assert.deepStrictEqual(Machine.configuration(machine, planned.next).map((node) => node.path), [
+        "application",
+        "application.workflow",
+        "application.workflow.running",
+        "application.workflow.running.editing",
+        "application.connection",
+        "application.connection.online"
+      ])
+    }))
+
+  it.effect("rejects a runtime target outside its declaration", () =>
+    Effect.gen(function*() {
+      const unsafe = machine.handle({
+        application: {
+          states: {
+            workflow: {
+              states: {
+                idle: {
+                  on: {
+                    Start: {
+                      targets: ["application.workflow.idle"],
+                      transition: ({ target }) =>
+                        target.full.disabled(new Disabled({})) as unknown as Machine.Machine.Target<
+                          typeof States.states,
+                          "application.workflow.idle"
+                        >
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+      const exit = yield* Effect.exit(Machine.plan(unsafe, initial, new Start({})))
+
+      assert.strictEqual(exit._tag, "Failure")
+      if (exit._tag === "Failure") {
+        assert(Cause.hasDies(exit.cause))
+        assert.include(Cause.pretty(exit.cause), "returned target \"disabled\" outside declared targets")
+      }
+    }))
+
+  it("rejects a declared path that is not a machine state", () => {
+    assert.throws(
+      () =>
+        machine.handle({
+          application: {
+            states: {
+              workflow: {
+                states: {
+                  idle: {
+                    on: {
+                      Start: {
+                        targets: ["missing"] as any,
+                        transition: () => undefined
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }),
+      /declares unknown target "missing"/
     )
   })
 })

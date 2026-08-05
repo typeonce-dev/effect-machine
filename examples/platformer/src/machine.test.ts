@@ -1,7 +1,10 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
+import { makeTextRenderer } from "../../../test/visualization/text.ts"
 import { CharacterMachine, type CharacterSnapshot, Event } from "./machine.ts"
+
+const renderMachine = makeTextRenderer<typeof CharacterMachine, CharacterSnapshot>(Machine)
 
 const playingSnapshot = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
@@ -15,6 +18,31 @@ const runPlan = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.runPromise(effect as unknown as Effect.Effect<A, E, never>)
 
 describe("platformer history integration", () => {
+  it("renders registered and candidate events separately from states", async () => {
+    await runPlan(Effect.gen(function*() {
+      const initial = yield* Machine.planInitial(CharacterMachine)
+      const definitions = Machine.transitionDefinitions(CharacterMachine)
+      const rendered = renderMachine(CharacterMachine, initial.state)
+
+      expect(definitions).toHaveLength(27)
+      expect(definitions).toContainEqual({
+        source: "Character.locomotion.Playing.Airborne.airJump",
+        trigger: { type: "event", event: "WallJump" },
+        reenter: true,
+        targets: {
+          type: "declared",
+          paths: ["Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"]
+        }
+      })
+      expect(definitions.every(({ targets }) => targets.type === "declared")).toBe(true)
+      expect(rendered).toContain("◇ on: WallJump [reenter] → AirJumpWallLock")
+      expect(rendered).toContain(
+        "Candidate events: Move, DownPressed, JumpPressed, Pause, WallJump, WallContact, Reset"
+      )
+      expect(rendered).not.toContain("Observed event samples")
+    }))
+  })
+
   it("resumes the exact grounded leaf and its state-local value", async () => {
     await runPlan(Effect.gen(function*() {
       const initial = yield* Machine.planInitial(CharacterMachine)

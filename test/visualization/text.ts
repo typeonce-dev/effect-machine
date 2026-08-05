@@ -26,9 +26,14 @@ interface TransitionDefinition {
       readonly type: "done"
     }
   readonly reenter: boolean
-  readonly target: {
-    readonly type: "dynamic"
-  }
+  readonly targets:
+    | {
+      readonly type: "dynamic"
+    }
+    | {
+      readonly type: "declared"
+      readonly paths: ReadonlyArray<string>
+    }
 }
 
 interface InspectionApi<Machine, Snapshot> {
@@ -54,7 +59,15 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   const labels: Array<string> = []
   const events = definitions.flatMap((definition) =>
     definition.trigger.type === "event" ?
-      [`${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}`]
+      [
+        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${
+          definition.targets.type === "declared"
+            ? definition.targets.paths.length === 0
+              ? " → ∅"
+              : ` → ${definition.targets.paths.map((path) => path.slice(path.lastIndexOf(".") + 1)).join(" | ")}`
+            : ""
+        }`
+      ]
       : []
   )
 
@@ -104,7 +117,7 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
 
   const lines = [
     machine.id ?? "Machine",
-    "● active  ○ inactive  ◇ registered triggers (targets resolve at runtime)",
+    "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
     ""
   ]
   const visit = (node: StateNode, prefix: string, isLast: boolean): void => {

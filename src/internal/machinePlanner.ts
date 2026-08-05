@@ -229,11 +229,13 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
   | TransitionHandler<States, E, R, Context>
   | {
     readonly reenter?: boolean
+    readonly targets?: ReadonlyArray<string>
     readonly transition: TransitionHandler<States, E, R, Context>
   }
 
 type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
+  readonly targets: ReadonlyArray<string> | undefined
   readonly transition: TransitionHandler<States, E, R, Context>
 }
 
@@ -244,8 +246,12 @@ const normalizeEventTransition = <States extends Machine.StateSchemas, E, R, Con
     return undefined
   }
   return typeof transition === "function"
-    ? { reenter: false, transition }
-    : { reenter: transition.reenter === true, transition: transition.transition }
+    ? { reenter: false, targets: undefined, transition }
+    : {
+      reenter: transition.reenter === true,
+      targets: transition.targets,
+      transition: transition.transition
+    }
 }
 
 const collectStateAction = Effect.fnUntraced(function*<Context, Event, E, R>(
@@ -704,7 +710,7 @@ const selectAlwaysTransitions = <
           selected.push({
             sourcePath: path,
             leafPath: leaf,
-            transition: { reenter: false, transition: always } as MicrostepTransition<
+            transition: { reenter: false, targets: undefined, transition: always } as MicrostepTransition<
               States,
               E,
               R,
@@ -771,7 +777,7 @@ const selectDoneTransitions = <
       selected.push({
         sourcePath: completion.path,
         leafPath: getActiveLeafPathFrom(machine, configuration, completion.path),
-        transition: { reenter: false, transition: onDone } as MicrostepTransition<
+        transition: { reenter: false, targets: undefined, transition: onDone } as MicrostepTransition<
           States,
           E,
           R,
@@ -876,6 +882,29 @@ const getTargetNodePath = <const States extends Machine.StateSchemas>(
   throw new Error("Machine expected transition target to be a snapshot or target builder result")
 }
 
+const validateDeclaredTransitionTarget = (
+  sourcePath: string,
+  event: unknown,
+  declaredTargets: ReadonlyArray<string> | undefined,
+  target: unknown
+): void => {
+  if (declaredTargets === undefined || target === undefined) {
+    return
+  }
+  const actual = typeof target === "object" && target !== null && "path" in target
+    ? String(target.path)
+    : "<unknown>"
+  if (!declaredTargets.some((path) => actual === path || actual.startsWith(`${path}.`))) {
+    throw new Error(
+      `Machine transition from "${sourcePath}" on "${
+        String(event)
+      }" returned target "${actual}" outside declared targets: ${
+        declaredTargets.length === 0 ? "none" : declaredTargets.map((path) => `"${path}"`).join(", ")
+      }`
+    )
+  }
+}
+
 const hasPathIntersection = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean => {
   for (const path of left) {
     if (right.includes(path)) {
@@ -971,6 +1000,12 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     : transitionResult.state as
       | Machine.Snapshot<States>
       | Machine.Target<States, Machine.StateIdentifier<States>>
+  validateDeclaredTransitionTarget(
+    selection.sourcePath,
+    (selection.context as { readonly event: { readonly _tag: unknown } }).event._tag,
+    selection.transition.targets,
+    unresolvedTarget
+  )
   let historyResolution: {
     readonly target: unknown
     readonly actions: ReadonlyArray<DeferredAction>
