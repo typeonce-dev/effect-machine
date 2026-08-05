@@ -1655,6 +1655,7 @@ export declare namespace Machine {
     readonly emits: ReadonlyArray<TaggedSchema>
     readonly input: Schema.Top | undefined
     readonly id: string | undefined
+    /** @internal */
     readonly stateNodes: StateNodes
     /** @internal */
     readonly makeTargetBuilder: any
@@ -1990,16 +1991,17 @@ export declare namespace Machine {
    * @category models
    * @since 4.0.0
    */
-  export interface StateNode {
-    readonly path: string
+  export interface StateNode<Path extends string = string> {
+    readonly path: Path
     readonly key: string
     readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
     readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
     readonly history: "shallow" | "deep" | undefined
-    readonly parent: string | undefined
-    readonly children: ReadonlyArray<string>
-    readonly initial: string | undefined
+    readonly parent: Path | undefined
+    /** Active child paths. History pseudo-states are available through their `parent` relationship. */
+    readonly children: ReadonlyArray<Path>
+    readonly initial: Path | undefined
     readonly order: number
   }
 
@@ -2009,9 +2011,51 @@ export declare namespace Machine {
    * @category models
    * @since 4.0.0
    */
-  export interface StateNodes {
-    readonly byPath: ReadonlyMap<string, StateNode>
-    readonly roots: ReadonlyArray<string>
+  export interface StateNodes<Path extends string = string> {
+    readonly byPath: ReadonlyMap<Path, StateNode<Path>>
+    readonly roots: ReadonlyArray<Path>
+  }
+
+  /**
+   * Trigger that selects a registered transition handler.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export type TransitionTrigger<EventTag extends PropertyKey = PropertyKey> =
+    | {
+      readonly type: "event"
+      readonly event: EventTag
+    }
+    | {
+      readonly type: "always"
+    }
+    | {
+      readonly type: "done"
+    }
+
+  /**
+   * Inspectable registration for a transition handler.
+   *
+   * **Details**
+   *
+   * Current transition handlers resolve their target at runtime and may return
+   * no target, so `target` is explicitly reported as dynamic. The source,
+   * trigger, and reentry behavior are available without executing the handler.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface TransitionDefinition<
+    Path extends string = string,
+    EventTag extends PropertyKey = PropertyKey
+  > {
+    readonly source: Path
+    readonly trigger: TransitionTrigger<EventTag>
+    readonly reenter: boolean
+    readonly target: {
+      readonly type: "dynamic"
+    }
   }
 
   /**
@@ -2083,6 +2127,14 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export type HistoryIdentifier<States extends StateSchemas> = HistoryIdentifierWithPrefix<States>
+
+  /**
+   * Extracts every compiled state-node path, including history pseudo-states.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type StateNodeIdentifier<States extends StateSchemas> = StateIdentifier<States> | HistoryIdentifier<States>
 
   /** @internal */
   export type HistoryIdentifierWithPrefix<
@@ -5809,6 +5861,77 @@ export const planInitial: <
   InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   ExcludeCompatibleRuntime<PlanningServices<InitialR | R>, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
 > = internalPlanner.planInitial as any
+
+/**
+ * Returns every compiled state node in definition order.
+ *
+ * **Details**
+ *
+ * The result includes atomic, compound, parallel, final, and history nodes.
+ * Use each node's `parent` property to reconstruct the complete hierarchy.
+ * History pseudo-states are intentionally omitted from `children` because they
+ * can never appear in an active configuration.
+ *
+ * @category getters
+ * @since 4.0.0
+ */
+export const stateNodes = <M extends Machine.Any>(
+  machine: M
+): ReadonlyArray<Machine.StateNode<Machine.StateNodeIdentifier<Machine.States<M>>>> =>
+  Array.from(machine.stateNodes.byPath.values()) as unknown as ReadonlyArray<
+    Machine.StateNode<Machine.StateNodeIdentifier<Machine.States<M>>>
+  >
+
+/**
+ * Returns every registered transition handler in state definition order.
+ *
+ * **Details**
+ *
+ * Event handlers retain their handler-key order within each source state and
+ * are followed by eventless and completion handlers. This function does not
+ * execute handlers. Targets are reported as dynamic because the current
+ * function-based transition model resolves them from a concrete snapshot and
+ * event at runtime.
+ *
+ * @category getters
+ * @since 4.0.0
+ */
+export const transitionDefinitions = <M extends Machine.Any>(
+  machine: M
+): ReadonlyArray<
+  Machine.TransitionDefinition<
+    Machine.StateIdentifier<Machine.States<M>>,
+    Machine.TagOf<Machine.Events<M>[number]>
+  >
+> =>
+  Model.transitionDefinitions(machine) as ReadonlyArray<
+    Machine.TransitionDefinition<
+      Machine.StateIdentifier<Machine.States<M>>,
+      Machine.TagOf<Machine.Events<M>[number]>
+    >
+  >
+
+/**
+ * Returns every state node active in a decoded snapshot, in definition order.
+ *
+ * **Details**
+ *
+ * Active compound ancestors and parallel regions are included together with
+ * their active descendants. History pseudo-states are never active and are not
+ * returned.
+ *
+ * @category getters
+ * @since 4.0.0
+ */
+export const configuration = <M extends Machine.Any>(
+  machine: M,
+  state: Machine.Snapshot<Machine.States<M>>
+): ReadonlyArray<Machine.StateNode<Machine.StateIdentifier<Machine.States<M>>>> => {
+  const active = Model.normalizeConfiguration(machine, state).active
+  return stateNodes(machine).filter((node) => active.has(node.path)) as ReadonlyArray<
+    Machine.StateNode<Machine.StateIdentifier<Machine.States<M>>>
+  >
+}
 
 /**
  * Returns the event tags handled by the current state snapshot.
