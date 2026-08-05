@@ -358,6 +358,11 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
 
 const dynamicTransitionTargets = { type: "dynamic" } as const
 
+const transitionTargets = (handler: unknown): Machine.TransitionTargets =>
+  typeof handler === "object" && handler !== null && "targets" in handler && handler.targets !== undefined
+    ? { type: "declared", paths: Array.from(handler.targets as ReadonlyArray<string>) }
+    : dynamicTransitionTargets
+
 export const transitionDefinitions = (
   machine: Machine.Any
 ): ReadonlyArray<Machine.TransitionDefinition> => {
@@ -373,9 +378,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "event", event },
         reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
-        targets: typeof handler === "object" && handler !== null && handler.targets !== undefined
-          ? { type: "declared", paths: Array.from(handler.targets) }
-          : dynamicTransitionTargets
+        targets: transitionTargets(handler)
       })
     }
     if (config.always !== undefined) {
@@ -383,7 +386,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "always" },
         reenter: false,
-        targets: dynamicTransitionTargets
+        targets: transitionTargets(config.always)
       })
     }
     if (config.onDone !== undefined) {
@@ -391,7 +394,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "done" },
         reenter: false,
-        targets: dynamicTransitionTargets
+        targets: transitionTargets(config.onDone)
       })
     }
   }

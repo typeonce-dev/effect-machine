@@ -239,7 +239,7 @@ type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly transition: TransitionHandler<States, E, R, Context>
 }
 
-const normalizeEventTransition = <States extends Machine.StateSchemas, E, R, Context>(
+const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>(
   transition: EventTransition<States, E, R, Context> | undefined
 ): MicrostepTransition<States, E, R, Context> | undefined => {
   if (transition === undefined) {
@@ -481,6 +481,7 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
 type SelectedTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly sourcePath: string
   readonly leafPath: string
+  readonly trigger: Machine.TransitionTrigger
   readonly transition: MicrostepTransition<States, E, R, Context>
   readonly context: Context
 }
@@ -703,14 +704,15 @@ const selectAlwaysTransitions = <
   const selectedSources = new Set<string>()
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
-      const always = machine.handlers[path]?.always
+      const always = normalizeTransition(machine.handlers[path]?.always)
       if (always !== undefined) {
         if (!selectedSources.has(path)) {
           selectedSources.add(path)
           selected.push({
             sourcePath: path,
             leafPath: leaf,
-            transition: { reenter: false, targets: undefined, transition: always } as MicrostepTransition<
+            trigger: { type: "always" },
+            transition: always as unknown as MicrostepTransition<
               States,
               E,
               R,
@@ -771,13 +773,14 @@ const selectDoneTransitions = <
   > = []
   const selectedSources = new Set<string>()
   for (const completion of completions) {
-    const onDone = machine.handlers[completion.path]?.onDone
+    const onDone = normalizeTransition(machine.handlers[completion.path]?.onDone)
     if (onDone !== undefined && !selectedSources.has(completion.path)) {
       selectedSources.add(completion.path)
       selected.push({
         sourcePath: completion.path,
         leafPath: getActiveLeafPathFrom(machine, configuration, completion.path),
-        transition: { reenter: false, targets: undefined, transition: onDone } as MicrostepTransition<
+        trigger: { type: "done" },
+        transition: onDone as unknown as MicrostepTransition<
           States,
           E,
           R,
@@ -833,13 +836,14 @@ const selectEventTransitions = <
   const selectedSources = new Set<string>()
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
-      const transition = normalizeEventTransition(machine.handlers[path]?.on?.[event._tag])
+      const transition = normalizeTransition(machine.handlers[path]?.on?.[event._tag])
       if (transition !== undefined) {
         if (!selectedSources.has(path)) {
           selectedSources.add(path)
           selected.push({
             sourcePath: path,
             leafPath: leaf,
+            trigger: { type: "event", event: event._tag },
             transition: transition as unknown as MicrostepTransition<
               States,
               E,
@@ -884,7 +888,7 @@ const getTargetNodePath = <const States extends Machine.StateSchemas>(
 
 const validateDeclaredTransitionTarget = (
   sourcePath: string,
-  event: unknown,
+  trigger: Machine.TransitionTrigger,
   declaredTargets: ReadonlyArray<string> | undefined,
   target: unknown
 ): void => {
@@ -895,10 +899,9 @@ const validateDeclaredTransitionTarget = (
     ? String(target.path)
     : "<unknown>"
   if (!declaredTargets.some((path) => actual === path || actual.startsWith(`${path}.`))) {
+    const triggerLabel = trigger.type === "event" ? String(trigger.event) : trigger.type
     throw new Error(
-      `Machine transition from "${sourcePath}" on "${
-        String(event)
-      }" returned target "${actual}" outside declared targets: ${
+      `Machine transition from "${sourcePath}" on "${triggerLabel}" returned target "${actual}" outside declared targets: ${
         declaredTargets.length === 0 ? "none" : declaredTargets.map((path) => `"${path}"`).join(", ")
       }`
     )
@@ -1002,7 +1005,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       | Machine.Target<States, Machine.StateIdentifier<States>>
   validateDeclaredTransitionTarget(
     selection.sourcePath,
-    (selection.context as { readonly event: { readonly _tag: unknown } }).event._tag,
+    selection.trigger,
     selection.transition.targets,
     unresolvedTarget
   )

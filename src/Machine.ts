@@ -2055,10 +2055,10 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * Event handlers may declare an upper bound of possible target paths. A
-   * handler without that declaration is explicitly reported as dynamic. The
-   * source, trigger, and reentry behavior are available without executing the
-   * handler.
+   * Event, eventless, and completion handlers may declare an upper bound of
+   * possible target paths. A handler without that declaration is explicitly
+   * reported as dynamic. The source, trigger, and reentry behavior are
+   * available without executing the handler.
    *
    * @category models
    * @since 4.0.0
@@ -3417,7 +3417,7 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export type AlwaysReturn<Config> = Config extends { readonly always?: infer Always }
-    ? NonNullable<Always> extends (...args: any) => infer Ret ? Ret : never
+    ? EventTransitionReturn<NonNullable<Always>>
     : never
   /**
    * Extracts the return value from a state completion transition.
@@ -3426,7 +3426,7 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export type DoneReturn<Config> = Config extends { readonly onDone?: infer OnDone }
-    ? NonNullable<OnDone> extends (...args: any) => infer Ret ? Ret : never
+    ? EventTransitionReturn<NonNullable<OnDone>>
     : never
   /**
    * Extracts the return value from a final state output function.
@@ -3596,8 +3596,24 @@ export declare namespace Machine {
     readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
     readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
-    readonly always?: (context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>
-    readonly onDone?: (context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>
+    readonly always?:
+      | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
+      | {
+        /** Statically declared upper bound of possible target paths. */
+        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly transition: (
+          context: AlwaysContext<States, Events, Emits, StateId>
+        ) => HandlerResult<States, any, any>
+      }
+    readonly onDone?:
+      | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
+      | {
+        /** Statically declared upper bound of possible target paths. */
+        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly transition: (
+          context: DoneContext<States, Events, Emits, StateId>
+        ) => HandlerResult<States, any, any>
+      }
     readonly on?: {
       readonly [EventTag in TagOf<Events[number]>]?:
         | ((
@@ -3935,6 +3951,22 @@ export declare namespace Machine {
     : unknown
     : unknown
 
+  type HandlerDirectTargetValidation<
+    StateId extends string,
+    Config,
+    Trigger extends "always" | "onDone",
+    Transition = Config extends { readonly [Key in Trigger]?: infer Value } ? NonNullable<Value> : never,
+    Undeclared extends string = UndeclaredTransitionTarget<Transition>
+  > = Trigger extends keyof Config ? [Undeclared] extends [never] ? unknown
+    : {
+      readonly [Key in Trigger]: HandlerValidationError<
+        "Transition returns a target not listed in targets",
+        StateId,
+        readonly [trigger: Trigger, target: Undeclared]
+      >
+    }
+    : unknown
+
   type HandlerDepth = readonly [unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown]
 
   type HandlerNextDepth<Depth extends ReadonlyArray<unknown>> = Depth extends
@@ -4024,6 +4056,8 @@ export declare namespace Machine {
     & HandlerUnknownConfigKeyValidation<StateId, Config>
     & HandlerOnKeyValidation<Events, StateId, Config>
     & HandlerOnTargetValidation<StateId, Config>
+    & HandlerDirectTargetValidation<StateId, Config, "always">
+    & HandlerDirectTargetValidation<StateId, Config, "onDone">
     & HandlerInvokeOutputValidation<Events, StateId, Config>
     & HandlerInvokeEmitsValidation<Events, StateId, Config>
     & HandlerInvokeSnapshotValidation<Events, StateId, Config>
@@ -4494,8 +4528,22 @@ export declare namespace Machine {
     readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
     readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
-    readonly always?: (context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>
-    readonly onDone?: (context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>
+    readonly always?:
+      | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
+      | {
+        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly transition: (
+          context: AlwaysContext<States, Events, Emits, StateId>
+        ) => HandlerResult<States, E, R>
+      }
+    readonly onDone?:
+      | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
+      | {
+        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly transition: (
+          context: DoneContext<States, Events, Emits, StateId>
+        ) => HandlerResult<States, E, R>
+      }
     readonly output?:
       | ((context: FinalOutputContext<States, Events, StateId>) => unknown)
       | ((context: ParallelOutputContext<States, Events, StateId>) => unknown)
@@ -4550,6 +4598,29 @@ const cloneWithHandlers = (
   return machine
 }
 
+const validateTransitionTargets = (
+  stateNodes: Machine.StateNodes,
+  path: string,
+  trigger: PropertyKey,
+  transition: unknown
+): void => {
+  if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
+    return
+  }
+  if (!Array.isArray(transition.targets)) {
+    throw new Error(
+      `Machine expected transition targets for state "${path}" on "${String(trigger)}" to be an array`
+    )
+  }
+  for (const target of transition.targets) {
+    if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
+      throw new Error(
+        `Machine transition for state "${path}" on "${String(trigger)}" declares unknown target "${String(target)}"`
+      )
+    }
+  }
+}
+
 const flattenHandlers = (
   handlers: Record<PropertyKey, Machine.AnyStateConfig>,
   stateNodes: Machine.StateNodes,
@@ -4570,24 +4641,11 @@ const flattenHandlers = (
     const on = stateConfig.on
     if (typeof on === "object" && on !== null) {
       for (const event of Reflect.ownKeys(on)) {
-        const transition = (on as Record<PropertyKey, unknown>)[event]
-        if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
-          continue
-        }
-        if (!Array.isArray(transition.targets)) {
-          throw new Error(
-            `Machine expected transition targets for state "${path}" on "${String(event)}" to be an array`
-          )
-        }
-        for (const target of transition.targets) {
-          if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
-            throw new Error(
-              `Machine transition for state "${path}" on "${String(event)}" declares unknown target "${String(target)}"`
-            )
-          }
-        }
+        validateTransitionTargets(stateNodes, path, event, (on as Record<PropertyKey, unknown>)[event])
       }
     }
+    validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
+    validateTransitionTargets(stateNodes, path, "done", stateConfig.onDone)
     handlers[path] = stateConfig as Machine.AnyStateConfig
     if (childConfig !== undefined) {
       const node = Model.getStateNodeDefinition(path, states[key])
@@ -5978,8 +6036,9 @@ export const stateNodes = <M extends Machine.Any>(
  *
  * Event handlers retain their handler-key order within each source state and
  * are followed by eventless and completion handlers. This function does not
- * execute handlers. Event handlers with a `targets` declaration expose those
- * possible paths; handlers without one remain dynamic.
+ * execute handlers. Object-form event, eventless, and completion handlers with
+ * a `targets` declaration expose those possible paths; handlers without one
+ * remain dynamic.
  *
  * @category getters
  * @since 4.0.0

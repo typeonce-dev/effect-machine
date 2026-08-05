@@ -121,6 +121,47 @@ const machine = Machine.make({
 
 const renderMachine = makeTextRenderer<typeof machine, typeof initial>(Machine)
 
+const LifecycleStates = Machine.defineStates({
+  idle: Idle,
+  workflow: {
+    schema: Workflow,
+    initial: "complete",
+    states: {
+      complete: {
+        schema: Complete,
+        type: "final"
+      }
+    }
+  },
+  disabled: Disabled
+})
+
+const lifecycleMachine = Machine.make({
+  id: "lifecycle-inspection",
+  states: LifecycleStates.states,
+  events: [],
+  initial: () => LifecycleStates.initial.idle(new Idle({}))
+}).handle({
+  idle: {
+    always: {
+      targets: ["workflow"],
+      transition: ({ target }) =>
+        target.full.workflow(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
+    }
+  },
+  workflow: {
+    onDone: {
+      targets: ["disabled"],
+      transition: ({ target }) => target.full.disabled(new Disabled({}))
+    }
+  }
+})
+
+const renderLifecycleMachine = makeTextRenderer<
+  typeof lifecycleMachine,
+  Machine.Machine.Snapshot<typeof LifecycleStates.states>
+>(Machine)
+
 describe("Machine structural visualization", () => {
   it("exposes every state node in definition order", () => {
     assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
@@ -184,8 +225,14 @@ describe("Machine structural visualization", () => {
             transition: () => undefined
           }
         },
-        always: () => undefined,
-        onDone: () => undefined
+        always: {
+          targets: ["idle"],
+          transition: () => undefined
+        },
+        onDone: {
+          targets: ["idle"],
+          transition: () => undefined
+        }
       }
     })
 
@@ -200,16 +247,55 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "always" },
         reenter: false,
-        targets: { type: "dynamic" }
+        targets: { type: "declared", paths: ["idle"] }
       },
       {
         source: "idle",
         trigger: { type: "done" },
         reenter: false,
-        targets: { type: "dynamic" }
+        targets: { type: "declared", paths: ["idle"] }
       }
     ])
   })
+
+  it.effect("plans declared eventless and completion transitions", () =>
+    Effect.gen(function*() {
+      const planned = yield* Machine.planInitial(lifecycleMachine)
+
+      assert.deepStrictEqual(Machine.configuration(lifecycleMachine, planned.state).map(({ path }) => path), [
+        "disabled"
+      ])
+      assert.deepStrictEqual(Machine.transitionDefinitions(lifecycleMachine), [
+        {
+          source: "idle",
+          trigger: { type: "always" },
+          reenter: false,
+          targets: { type: "declared", paths: ["workflow"] }
+        },
+        {
+          source: "workflow",
+          trigger: { type: "done" },
+          reenter: false,
+          targets: { type: "declared", paths: ["disabled"] }
+        }
+      ])
+      assert.strictEqual(
+        renderLifecycleMachine(lifecycleMachine, planned.state),
+        [
+          "lifecycle-inspection",
+          "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
+          "",
+          "├─ ○ idle",
+          "│  └─ ◇ always → workflow",
+          "├─ ○ workflow [compound, initial: complete]",
+          "│  ├─ ◇ done → disabled",
+          "│  └─ ○ complete [final]",
+          "└─ ● disabled",
+          "",
+          "Candidate events: none"
+        ].join("\n")
+      )
+    }))
 
   it("renders the structure and active configuration as text", () => {
     assert.strictEqual(
@@ -284,6 +370,47 @@ describe("Machine structural visualization", () => {
       }
     }))
 
+  it.effect("rejects runtime targets outside always and onDone declarations", () =>
+    Effect.gen(function*() {
+      const unsafeAlways = lifecycleMachine.handle({
+        idle: {
+          always: {
+            targets: ["idle"],
+            transition: ({ target }) =>
+              target.full.workflow(
+                new Workflow({}),
+                (workflow) => workflow.complete(new Complete({}))
+              ) as unknown as Machine.Machine.Target<typeof LifecycleStates.states, "idle">
+          }
+        }
+      })
+      const alwaysExit = yield* Effect.exit(Machine.planInitial(unsafeAlways))
+
+      assert.strictEqual(alwaysExit._tag, "Failure")
+      if (alwaysExit._tag === "Failure") {
+        assert.include(Cause.pretty(alwaysExit.cause), "on \"always\" returned target \"workflow\"")
+      }
+
+      const unsafeDone = lifecycleMachine.handle({
+        workflow: {
+          onDone: {
+            targets: ["workflow"],
+            transition: ({ target }) =>
+              target.full.disabled(new Disabled({})) as unknown as Machine.Machine.Target<
+                typeof LifecycleStates.states,
+                "workflow"
+              >
+          }
+        }
+      })
+      const doneExit = yield* Effect.exit(Machine.planInitial(unsafeDone))
+
+      assert.strictEqual(doneExit._tag, "Failure")
+      if (doneExit._tag === "Failure") {
+        assert.include(Cause.pretty(doneExit.cause), "on \"done\" returned target \"disabled\"")
+      }
+    }))
+
   it("rejects a declared path that is not a machine state", () => {
     assert.throws(
       () =>
@@ -306,6 +433,30 @@ describe("Machine structural visualization", () => {
           }
         }),
       /declares unknown target "missing"/
+    )
+    assert.throws(
+      () =>
+        lifecycleMachine.handle({
+          idle: {
+            always: {
+              targets: ["missing"],
+              transition: () => undefined
+            }
+          }
+        } as any),
+      /on "always" declares unknown target "missing"/
+    )
+    assert.throws(
+      () =>
+        lifecycleMachine.handle({
+          workflow: {
+            onDone: {
+              targets: ["missing"],
+              transition: () => undefined
+            }
+          }
+        } as any),
+      /on "done" declares unknown target "missing"/
     )
   })
 })

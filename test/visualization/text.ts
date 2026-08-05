@@ -57,16 +57,16 @@ const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
 
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<string> => {
   const labels: Array<string> = []
+  const targets = (definition: TransitionDefinition): string =>
+    definition.targets.type === "dynamic" ?
+      ""
+      : definition.targets.paths.length === 0 ?
+      " → ∅"
+      : ` → ${definition.targets.paths.map((path) => path.slice(path.lastIndexOf(".") + 1)).join(" | ")}`
   const events = definitions.flatMap((definition) =>
     definition.trigger.type === "event" ?
       [
-        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${
-          definition.targets.type === "declared"
-            ? definition.targets.paths.length === 0
-              ? " → ∅"
-              : ` → ${definition.targets.paths.map((path) => path.slice(path.lastIndexOf(".") + 1)).join(" | ")}`
-            : ""
-        }`
+        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${targets(definition)}`
       ]
       : []
   )
@@ -76,9 +76,9 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   }
   for (const definition of definitions) {
     if (definition.trigger.type === "always") {
-      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}`)
+      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
     } else if (definition.trigger.type === "done") {
-      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}`)
+      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
     }
   }
   return labels

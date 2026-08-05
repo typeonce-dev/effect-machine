@@ -123,12 +123,48 @@ describe("Machine inspection", () => {
         }
       }
     } as const
+    const always = {
+      idle: {
+        always: {
+          targets: ["running"],
+          transition: () => target.full.running(new Running({}))
+        }
+      }
+    } as const
+    const undeclaredAlways = {
+      idle: {
+        always: {
+          targets: ["idle"],
+          transition: () => target.full.running(new Running({}))
+        }
+      }
+    } as const
+    const onDone = {
+      idle: {
+        onDone: {
+          targets: ["running"],
+          transition: () => Effect.succeed(target.full.running(new Running({})))
+        }
+      }
+    } as const
+    const undeclaredOnDone = {
+      idle: {
+        onDone: {
+          targets: ["idle"],
+          transition: () => target.full.running(new Running({}))
+        }
+      }
+    } as const
 
     expect(flat.handle).type.toBeCallableWith(direct)
     expect(flat.handle).type.toBeCallableWith(effectful)
     expect(flat.handle).type.toBeCallableWith(constructed)
     expect(flat.handle).type.toBeCallableWith(multiple)
+    expect(flat.handle).type.toBeCallableWith(always)
+    expect(flat.handle).type.toBeCallableWith(onDone)
     expect(flat.handle).type.not.toBeCallableWith(undeclared)
     expect(flat.handle).type.not.toBeCallableWith(partiallyUndeclared)
+    expect(flat.handle).type.not.toBeCallableWith(undeclaredAlways)
+    expect(flat.handle).type.not.toBeCallableWith(undeclaredOnDone)
   })
 })
