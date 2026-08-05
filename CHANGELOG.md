@@ -1,5 +1,29 @@
 # @typeonce/effect-machine
 
+## 0.3.0
+
+### Minor Changes
+
+- 1d1f35f: Add fully typed shallow and deep history states. History targets restore schema-validated state values, support typed defaults before the first capture, require only the initializers needed by shallow restoration, preserve parallel configurations, and round-trip through snapshot encoding and decoding.
+- e556e63: Add safe `.from` state construction to initial and transition target builders.
+  Constructor inputs are resolved through the selected state schema during
+  planning, preserving defaults and class identity while reporting validation
+  failures as `MachineSchemaDecodeError` values.
+- 3646067: Allow state builder `.from()` calls to omit the constructor input when the
+  selected schema accepts `{}`. Required fields and compound or parallel child
+  selection remain type-safe, and omitted inputs still run through schema
+  construction during planning.
+
+### Patch Changes
+
+- 607a0c4: Allow local and branch targets to enter inactive nested parallel states. These
+  targets now require a complete selection for every parallel region while
+  preserving partial updates for parallel states that are already active.
+- ea8e165: Improve compile-time diagnostics for invalid state definitions, event protocols,
+  and handler configurations. Errors now retain the relevant configuration shape
+  and state path while preserving existing inference and type safety.
+- 955663f: Preserve every machine protocol channel when creating bound AtomMachine bridges from deeply composed handled machines. Inline invoked children also retain their exact error, service, event, and output types instead of inheriting erased contextual `any` channels.
+
 ## 0.2.0
 
 ### Minor Changes
