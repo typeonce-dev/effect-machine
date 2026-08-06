@@ -1164,18 +1164,27 @@ export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*
     const ancestorNode = getNode(machine, ancestor)
     if (ancestorNode.type === "parallel") {
       for (const child of ancestorNode.children) {
-        if (pathSet.has(child) || !current.active.has(child)) {
+        if (pathSet.has(child)) continue
+        if (current.active.has(child)) {
+          for (const activePath of current.active) {
+            if (isPathInSubtree(activePath, child)) {
+              active.add(activePath)
+              if (current.values.has(activePath)) {
+                values.set(activePath, current.values.get(activePath))
+              }
+              if (current.outputs.has(activePath)) {
+                outputs.set(activePath, current.outputs.get(activePath))
+              }
+            }
+          }
           continue
         }
-        for (const activePath of current.active) {
-          if (isPathInSubtree(activePath, child)) {
-            active.add(activePath)
-            if (current.values.has(activePath)) {
-              values.set(activePath, current.values.get(activePath))
-            }
-            if (current.outputs.has(activePath)) {
-              outputs.set(activePath, current.outputs.get(activePath))
-            }
+        if (providedValues !== undefined && hasOwn(providedValues, child)) {
+          for (const [providedPath, providedValue] of Object.entries(providedValues)) {
+            if (!isPathInSubtree(providedPath, child)) continue
+            const providedNode = getNode(machine, providedPath)
+            active.add(providedPath)
+            values.set(providedPath, yield* decodeStateValue(machine, providedNode, providedValue))
           }
         }
       }

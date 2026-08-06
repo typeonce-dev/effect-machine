@@ -1856,6 +1856,9 @@ export declare namespace Machine {
    *
    * History nodes are transition targets only. They never become active and
    * therefore do not declare a state value schema or lifecycle handlers.
+   * A recorded nested history can rebuild inactive ancestors. Before the
+   * first capture, however, a nested history fallback cannot reconstruct
+   * values for inactive ancestors above its direct owner.
    *
    * @category models
    * @since 4.0.0
@@ -2072,6 +2075,27 @@ export declare namespace Machine {
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
     readonly targets: TransitionTargets<TargetPath>
+  }
+
+  /**
+   * Transition retained after hierarchy precedence and conflict resolution for
+   * one planned microstep.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface RetainedTransition<
+    SourcePath extends string = string,
+    EventTag extends PropertyKey = PropertyKey,
+    TargetPath extends string = SourcePath
+  > {
+    readonly source: SourcePath
+    readonly trigger: TransitionTrigger<EventTag>
+    readonly reenter: boolean
+    /** Path returned by the handler, including a history pseudo-state. */
+    readonly target: TargetPath | undefined
+    /** Concrete path used after resolving history, otherwise equal to `target`. */
+    readonly resolvedTarget: TargetPath | undefined
   }
 
   /**
@@ -3679,7 +3703,14 @@ export declare namespace Machine {
     readonly parent: ParentId
   }
 
-  /** Typed fallback evaluated when a history node has no record yet. */
+  /**
+   * Typed fallback evaluated when a history node has no record yet.
+   *
+   * The fallback constructs the history node's direct parent snapshot. It
+   * cannot currently provide values for inactive ancestors above that parent,
+   * so first-use fallback to a nested history requires those ancestors to
+   * already be active. Recorded nested history does not have this limitation.
+   */
   export type HistoryDefaultHandler<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -5938,9 +5969,11 @@ export const invokeMachine: {
  * **Details**
  *
  * The returned plan contains the settled initial snapshot, staged actions,
- * emitted events, and optional final output. Planning may evaluate transition
- * logic and follow completion, eventless, and raised-event steps, but it does
- * not execute effects passed to `action`.
+ * emitted events, optional final output, and every startup microstep. Planning
+ * may evaluate transition logic and follow completion, eventless, and
+ * raised-event steps, but it does not execute effects passed to `action`.
+ * `startingState` and `initialEntryPaths` describe the normalized
+ * configuration before entry callbacks and settlement begin.
  *
  * **Gotchas**
  *
@@ -5989,11 +6022,32 @@ export const planInitial: <
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   & {
+    readonly startingState: Machine.Snapshot<States>
+    readonly initialEntryPaths: ReadonlyArray<Machine.StateIdentifier<States>>
     readonly state: Machine.Snapshot<States>
     readonly actions: ReadonlyArray<
       Effect.Effect<void, ActionError<InitialR | R>, ActionServices<InitialR | R>>
     >
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+    readonly microsteps: ReadonlyArray<{
+      readonly next: Machine.Snapshot<States>
+      readonly event: Machine.EventOf<Events> | InitialEvent
+      readonly transitions: ReadonlyArray<
+        Machine.RetainedTransition<
+          Machine.StateIdentifier<States>,
+          Machine.TagOf<Events[number]>,
+          Machine.StateNodeIdentifier<States>
+        >
+      >
+      readonly actions: ReadonlyArray<
+        Effect.Effect<void, ActionError<InitialR | R>, ActionServices<InitialR | R>>
+      >
+      readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
+      readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+      readonly exitPaths: ReadonlyArray<string>
+      readonly entryPaths: ReadonlyArray<string>
+      readonly changed: boolean
+    }>
   }
   & (
     | {
@@ -6187,6 +6241,13 @@ export const plan: <
     readonly microsteps: ReadonlyArray<{
       readonly next: Machine.Snapshot<States>
       readonly event: Machine.EventOf<Events> | InitialEvent
+      readonly transitions: ReadonlyArray<
+        Machine.RetainedTransition<
+          Machine.StateIdentifier<States>,
+          Machine.TagOf<Events[number]>,
+          Machine.StateNodeIdentifier<States>
+        >
+      >
       readonly actions: ReadonlyArray<Effect.Effect<void, ActionError<R>, ActionServices<R>>>
       readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
       readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>

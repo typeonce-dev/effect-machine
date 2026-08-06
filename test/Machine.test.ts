@@ -3992,6 +3992,335 @@ describe("Machine", () => {
       })
     }))
 
+  it.effect("preserves simultaneous value-only updates in separate parallel regions", () =>
+    Effect.gen(function*() {
+      const deferredLog = yield* makeDeferredLog
+      const fulfillment = new Fulfillment({ id: "fulfillment-1" })
+      const inventory = new Inventory({ warehouse: "warehouse-1" })
+      const shipping = new Shipping({ address: "Main Street" })
+      const states = Machine.defineStates({
+        fulfillment: {
+          schema: Fulfillment,
+          type: "parallel",
+          states: {
+            inventory: {
+              schema: Inventory,
+              initial: "checking",
+              states: { checking: CheckingInventory }
+            },
+            shipping: {
+              schema: Shipping,
+              initial: "quoting",
+              states: { quoting: QuotingShipping }
+            }
+          }
+        }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: [ReserveInventory],
+        initial: () =>
+          states.initial.fulfillment(fulfillment, (regions) =>
+            regions
+              .inventory(inventory, (region) => region.checking(new CheckingInventory({ sku: "sku-1" })))
+              .shipping(shipping, (region) => region.quoting(new QuotingShipping({ postalCode: "10000" }))))
+      }).handle({
+        fulfillment: {
+          states: {
+            inventory: {
+              states: {
+                checking: {
+                  on: {
+                    ReserveInventory: Effect.fn(function*({ event, target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("transition:inventory:value"))
+                      return target.local.checking(
+                        new CheckingInventory({ sku: `${event.reservationId}:inventory` })
+                      )
+                    })
+                  }
+                }
+              }
+            },
+            shipping: {
+              states: {
+                quoting: {
+                  on: {
+                    ReserveInventory: Effect.fn(function*({ event, target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("transition:shipping:value"))
+                      return target.local.quoting(
+                        new QuotingShipping({ postalCode: `${event.reservationId}:shipping` })
+                      )
+                    })
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine).pipe(Effect.provideService(DeferredLog, deferredLog))
+      const planned = yield* Machine.plan(
+        machine,
+        initial.state,
+        new ReserveInventory({ reservationId: "request-42" })
+      ).pipe(Effect.provideService(DeferredLog, deferredLog))
+
+      assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
+        inventory: {
+          path: "fulfillment.inventory",
+          value: inventory,
+          state: {
+            path: "fulfillment.inventory.checking",
+            value: new CheckingInventory({ sku: "request-42:inventory" })
+          }
+        },
+        shipping: {
+          path: "fulfillment.shipping",
+          value: shipping,
+          state: {
+            path: "fulfillment.shipping.quoting",
+            value: new QuotingShipping({ postalCode: "request-42:shipping" })
+          }
+        }
+      })
+      assert.strictEqual(planned.microsteps[0]!.changed, false)
+      assert.deepStrictEqual(
+        planned.microsteps[0]!.transitions.map(({ resolvedTarget, source, target }) => ({
+          source,
+          target,
+          resolvedTarget
+        })),
+        [
+          {
+            source: "fulfillment.inventory.checking",
+            target: "fulfillment.inventory.checking",
+            resolvedTarget: "fulfillment.inventory.checking"
+          },
+          {
+            source: "fulfillment.shipping.quoting",
+            target: "fulfillment.shipping.quoting",
+            resolvedTarget: "fulfillment.shipping.quoting"
+          }
+        ]
+      )
+      assert.strictEqual(planned.microsteps[0]!.actions.length, 2)
+      assert.deepStrictEqual(yield* deferredLog.read, [])
+
+      const actor = yield* Machine.start(machine).pipe(Effect.provideService(DeferredLog, deferredLog))
+      yield* sendAndWaitForSnapshot(
+        actor,
+        new ReserveInventory({ reservationId: "request-42" }),
+        (snapshot) =>
+          snapshot.state.path === "fulfillment" &&
+          (snapshot.state as any).states.inventory.state.value.sku === "request-42:inventory" &&
+          (snapshot.state as any).states.shipping.state.value.postalCode === "request-42:shipping"
+      )
+      yield* Effect.yieldNow
+
+      assert.deepStrictEqual(yield* deferredLog.read, [
+        "transition:inventory:value",
+        "transition:shipping:value"
+      ])
+    }))
+
+  it.effect("keeps transition metadata and staged actions in document order across target application phases", () =>
+    Effect.gen(function*() {
+      const deferredLog = yield* makeDeferredLog
+      const fulfillment = new Fulfillment({ id: "fulfillment-1" })
+      const inventory = new Inventory({ warehouse: "warehouse-1" })
+      const checking = new CheckingInventory({ sku: "sku-1" })
+      const shipping = new Shipping({ address: "Main Street" })
+      const quoting = new QuotingShipping({ postalCode: "10000" })
+      const states = Machine.defineStates({
+        fulfillment: {
+          schema: Fulfillment,
+          type: "parallel",
+          states: {
+            inventory: {
+              schema: Inventory,
+              initial: "checking",
+              states: { checking: CheckingInventory, reserved: InventoryReserved }
+            },
+            shipping: {
+              schema: Shipping,
+              initial: "quoting",
+              states: { quoting: QuotingShipping, quoted: ShippingQuoted }
+            }
+          }
+        }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: [Resolve, Reset],
+        initial: () =>
+          states.initial.fulfillment(fulfillment, (regions) =>
+            regions
+              .inventory(inventory, (region) => region.checking(checking))
+              .shipping(shipping, (region) => region.quoting(quoting)))
+      }).handle({
+        fulfillment: {
+          states: {
+            inventory: {
+              states: {
+                checking: {
+                  on: {
+                    Resolve: Effect.fn(function*({ target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("resolve:inventory:changed"))
+                      return target.local.reserved(new InventoryReserved({ reservationId: "resolved" }))
+                    }),
+                    Reset: Effect.fn(function*({ target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("reset:inventory:value"))
+                      return target.local.checking(new CheckingInventory({ sku: "reset" }))
+                    })
+                  }
+                }
+              }
+            },
+            shipping: {
+              states: {
+                quoting: {
+                  on: {
+                    Resolve: Effect.fn(function*({ target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("resolve:shipping:value"))
+                      return target.local.quoting(new QuotingShipping({ postalCode: "resolved" }))
+                    }),
+                    Reset: Effect.fn(function*({ target }) {
+                      const deferredLog = yield* DeferredLog
+                      yield* Machine.action(deferredLog.push("reset:shipping:changed"))
+                      return target.local.quoted(new ShippingQuoted({ quoteId: "reset" }))
+                    })
+                  }
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine).pipe(Effect.provideService(DeferredLog, deferredLog))
+      const changedThenValue = yield* Machine.plan(machine, initial.state, new Resolve({})).pipe(
+        Effect.provideService(DeferredLog, deferredLog)
+      )
+      assertParallelStateSnapshot(changedThenValue.next as any, "fulfillment", fulfillment, {
+        inventory: {
+          path: "fulfillment.inventory",
+          value: inventory,
+          state: {
+            path: "fulfillment.inventory.reserved",
+            value: new InventoryReserved({ reservationId: "resolved" })
+          }
+        },
+        shipping: {
+          path: "fulfillment.shipping",
+          value: shipping,
+          state: {
+            path: "fulfillment.shipping.quoting",
+            value: new QuotingShipping({ postalCode: "resolved" })
+          }
+        }
+      })
+      assert.deepStrictEqual(
+        changedThenValue.microsteps[0]!.transitions.map(({ resolvedTarget, source, target }) => ({
+          source,
+          target,
+          resolvedTarget
+        })),
+        [
+          {
+            source: "fulfillment.inventory.checking",
+            target: "fulfillment.inventory.reserved",
+            resolvedTarget: "fulfillment.inventory.reserved"
+          },
+          {
+            source: "fulfillment.shipping.quoting",
+            target: "fulfillment.shipping.quoting",
+            resolvedTarget: "fulfillment.shipping.quoting"
+          }
+        ]
+      )
+      assert.strictEqual(changedThenValue.microsteps[0]!.actions.length, 2)
+
+      const valueThenChanged = yield* Machine.plan(machine, initial.state, new Reset({})).pipe(
+        Effect.provideService(DeferredLog, deferredLog)
+      )
+      assertParallelStateSnapshot(valueThenChanged.next as any, "fulfillment", fulfillment, {
+        inventory: {
+          path: "fulfillment.inventory",
+          value: inventory,
+          state: {
+            path: "fulfillment.inventory.checking",
+            value: new CheckingInventory({ sku: "reset" })
+          }
+        },
+        shipping: {
+          path: "fulfillment.shipping",
+          value: shipping,
+          state: {
+            path: "fulfillment.shipping.quoted",
+            value: new ShippingQuoted({ quoteId: "reset" })
+          }
+        }
+      })
+      assert.deepStrictEqual(
+        valueThenChanged.microsteps[0]!.transitions.map(({ resolvedTarget, source, target }) => ({
+          source,
+          target,
+          resolvedTarget
+        })),
+        [
+          {
+            source: "fulfillment.inventory.checking",
+            target: "fulfillment.inventory.checking",
+            resolvedTarget: "fulfillment.inventory.checking"
+          },
+          {
+            source: "fulfillment.shipping.quoting",
+            target: "fulfillment.shipping.quoted",
+            resolvedTarget: "fulfillment.shipping.quoted"
+          }
+        ]
+      )
+      assert.strictEqual(valueThenChanged.microsteps[0]!.actions.length, 2)
+      assert.deepStrictEqual(yield* deferredLog.read, [])
+
+      const changedThenValueActor = yield* Machine.start(machine).pipe(
+        Effect.provideService(DeferredLog, deferredLog)
+      )
+      yield* sendAndWaitForSnapshot(
+        changedThenValueActor,
+        new Resolve({}),
+        (snapshot) =>
+          snapshot.state.path === "fulfillment" &&
+          (snapshot.state as any).states.inventory.state.path === "fulfillment.inventory.reserved" &&
+          (snapshot.state as any).states.shipping.state.value.postalCode === "resolved"
+      )
+      const valueThenChangedActor = yield* Machine.start(machine).pipe(
+        Effect.provideService(DeferredLog, deferredLog)
+      )
+      yield* sendAndWaitForSnapshot(
+        valueThenChangedActor,
+        new Reset({}),
+        (snapshot) =>
+          snapshot.state.path === "fulfillment" &&
+          (snapshot.state as any).states.inventory.state.value.sku === "reset" &&
+          (snapshot.state as any).states.shipping.state.path === "fulfillment.shipping.quoted"
+      )
+      yield* Effect.yieldNow
+
+      assert.deepStrictEqual(yield* deferredLog.read, [
+        "resolve:inventory:changed",
+        "resolve:shipping:value",
+        "reset:inventory:value",
+        "reset:shipping:changed"
+      ])
+    }))
+
   it.effect("prefers child transitions over conflicting ancestor transitions", () =>
     Effect.gen(function*() {
       const deferredLog = yield* makeDeferredLog

@@ -254,6 +254,12 @@ machine.handle({
 })
 ```
 
+A recorded nested history can rebuild inactive ancestors when it is restored.
+There is one current first-use boundary: if no history record exists, a nested
+history fallback constructs only its direct owner's snapshot and cannot
+reconstruct values for inactive ancestors above that owner. Those ancestors
+must already be active when that nested fallback is targeted.
+
 Deep history restores every remembered descendant value. Shallow history
 restores the parent and direct-child values, then follows normal initial paths.
 Only compound or parallel states that shallow restoration can enter implicitly
