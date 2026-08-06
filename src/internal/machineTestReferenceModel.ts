@@ -20,26 +20,46 @@ import type {
   FiniteTransition
 } from "./machineTestFiniteModel.js"
 
-/** The deterministic value assigned to one active finite-model state. */
+/**
+ * The deterministic value assigned to one active finite-model state.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceStateValue {
   readonly _tag: string
   readonly value: number
 }
 
-/** One output retained for an actively completed state. */
+/**
+ * One output retained for an actively completed state.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceCompletion {
   readonly path: string
   readonly output: string
 }
 
-/** One independently captured shallow or deep history register. */
+/**
+ * One independently captured shallow or deep history register.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceHistoryRecord {
   readonly mode: "shallow" | "deep"
   readonly active: ReadonlyArray<string>
   readonly values: Readonly<Record<string, ReferenceStateValue>>
 }
 
-/** An independently interpreted finite-model configuration. */
+/**
+ * An independently interpreted finite-model configuration.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceState {
   /** Active ancestors and leaf in state-definition order. */
   readonly activePaths: ReadonlyArray<string>
@@ -53,7 +73,12 @@ export interface ReferenceState {
   readonly output: string | undefined
 }
 
-/** One transition retained by the independent reference step. */
+/**
+ * One transition retained by the independent reference step.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceTransition {
   readonly source: string
   readonly trigger: {
@@ -65,7 +90,12 @@ export interface ReferenceTransition {
   readonly resolvedTarget: string | undefined
 }
 
-/** The independently calculated planner microstep for one selected event. */
+/**
+ * The independently calculated planner microstep for one selected event.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceMicrostep {
   readonly next: ReferenceState
   readonly event: string
@@ -75,7 +105,12 @@ export interface ReferenceMicrostep {
   readonly changed: boolean
 }
 
-/** Startup semantics calculated without executing the real machine. */
+/**
+ * Startup semantics calculated without executing the real machine.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceInitialStep {
   readonly startingState: ReferenceState
   readonly initialEntryPaths: ReadonlyArray<string>
@@ -85,7 +120,12 @@ export interface ReferenceInitialStep {
   readonly output: string | undefined
 }
 
-/** One public event interpreted against a reference configuration. */
+/**
+ * One public event interpreted against a reference configuration.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceStep {
   readonly index: number
   readonly event: string
@@ -96,7 +136,12 @@ export interface ReferenceStep {
   readonly output: string | undefined
 }
 
-/** A complete, pure interpretation of a finite model and event sequence. */
+/**
+ * A complete, pure interpretation of a finite model and event sequence.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ReferenceTrace {
   readonly events: ReadonlyArray<string>
   readonly initial: ReferenceInitialStep
@@ -104,7 +149,12 @@ export interface ReferenceTrace {
   readonly final: ReferenceState
 }
 
-/** Location of one planner/reference disagreement. */
+/**
+ * Location of one planner/reference disagreement.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ModelVerificationLocation {
   readonly phase: "initial" | "event" | "final"
   readonly eventIndex?: number
@@ -121,7 +171,12 @@ type ModelStateField =
   | "step.after"
   | "trace.final"
 
-/** Stable semantic observation compared by the finite-model oracle. */
+/**
+ * Stable semantic observation compared by the finite-model oracle.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type ModelVerificationField =
   | `${ModelStateField}.${"activePaths" | "values" | "completions" | "history"}`
   | "event.tag"
@@ -147,7 +202,12 @@ export type ModelVerificationField =
   | "step.plan.output"
   | "trace.finalConfiguration"
 
-/** One structured semantic disagreement with the independent interpreter. */
+/**
+ * One structured semantic disagreement with the independent interpreter.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ModelVerificationMismatch {
   readonly location: ModelVerificationLocation
   /** Stable dotted field identifying the compared observation. */
@@ -157,7 +217,12 @@ export interface ModelVerificationMismatch {
   readonly message: string
 }
 
-/** All semantic disagreements found for one finite-model trace. */
+/**
+ * All semantic disagreements found for one finite-model trace.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
 export class ModelVerificationError extends Data.TaggedError("MachineTestModelVerificationError")<{
   readonly mismatches: ReadonlyArray<ModelVerificationMismatch>
 }> {}

@@ -151,21 +151,36 @@ export type ScenarioOptions<M extends AnyMachine> =
       readonly inputArbitrary?: FastCheck.Arbitrary<InputValue<M>>
     })
 
-/** Diagnostics for one schema-derived arbitrary. */
+/**
+ * Diagnostics for one schema-derived arbitrary.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface SchemaArbitraryDiagnostic {
   readonly boundary: "input" | "event"
   readonly index: number | undefined
   readonly report: Schema.Annotations.ToArbitrary.Report
 }
 
-/** Diagnostics describing how a scenario arbitrary was assembled. */
+/**
+ * Diagnostics describing how a scenario arbitrary was assembled.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ScenarioDiagnostics {
   readonly input: "none" | "schema" | "override"
   readonly events: "empty" | "schema" | "override"
   readonly schemas: ReadonlyArray<SchemaArbitraryDiagnostic>
 }
 
-/** A scenario arbitrary together with schema-derivation diagnostics. */
+/**
+ * A scenario arbitrary together with schema-derivation diagnostics.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface Scenarios<M extends AnyMachine> {
   readonly arbitrary: FastCheck.Arbitrary<Scenario<M>>
   readonly diagnostics: ScenarioDiagnostics
@@ -272,7 +287,12 @@ export const scenarios = <M extends AnyMachine>(
   }
 }
 
-/** Completion information retained by an initial or event plan. */
+/**
+ * Completion information retained by an initial or event plan.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type PlanCompletion<M extends AnyMachine> =
   | {
     readonly done: true
@@ -283,7 +303,12 @@ export type PlanCompletion<M extends AnyMachine> =
     readonly output: undefined
   }
 
-/** One public planned microstep, including retained post-conflict transitions. */
+/**
+ * One public planned microstep, including retained post-conflict transitions.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface Microstep<
   M extends AnyMachine,
   Requirements = Machine.Machine.Services<M>
@@ -307,7 +332,12 @@ export interface Microstep<
   readonly changed: boolean
 }
 
-/** The complete data returned while planning machine startup. */
+/**
+ * The complete data returned while planning machine startup.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type InitialPlan<M extends AnyMachine> =
   & {
     readonly startingState: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -327,7 +357,12 @@ export type InitialPlan<M extends AnyMachine> =
   }
   & PlanCompletion<M>
 
-/** The complete data returned while planning one public event. */
+/**
+ * The complete data returned while planning one public event.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type EventPlan<M extends AnyMachine> =
   & {
     readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -343,7 +378,12 @@ export type EventPlan<M extends AnyMachine> =
   }
   & PlanCompletion<M>
 
-/** Startup portion of an executable planner trace. */
+/**
+ * Startup portion of an executable planner trace.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface InitialTrace<M extends AnyMachine> {
   readonly plan: InitialPlan<M>
   readonly startingState: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -352,7 +392,12 @@ export interface InitialTrace<M extends AnyMachine> {
   readonly configuration: ReadonlyArray<StatePath<M>>
 }
 
-/** One event portion of an executable planner trace. */
+/**
+ * One event portion of an executable planner trace.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface TraceStep<M extends AnyMachine> {
   readonly index: number
   readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -363,7 +408,12 @@ export interface TraceStep<M extends AnyMachine> {
   readonly afterConfiguration: ReadonlyArray<StatePath<M>>
 }
 
-/** A scenario and every plan produced by executing it without running actions. */
+/**
+ * A scenario and every plan produced by executing it without running actions.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface Trace<M extends AnyMachine> {
   readonly scenario: Scenario<M>
   readonly initial: InitialTrace<M>
@@ -437,7 +487,12 @@ export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
     readonly cause: Cause
   }
 
-/** Errors that can be produced while planning a complete scenario. */
+/**
+ * Errors that can be produced while planning a complete scenario.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
 export type RunError<M extends AnyMachine> =
   | Machine.Machine.InitialError<M>
   | Machine.Machine.Error<M>
@@ -445,7 +500,12 @@ export type RunError<M extends AnyMachine> =
   | Machine.MachineSchemaDecodeError
   | Machine.StartupError
 
-/** Services required while planning a complete scenario. */
+/**
+ * Services required while planning a complete scenario.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type RunServices<M extends AnyMachine> = ExcludeCompatibleRuntime<
   Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>,
   Machine.Machine.Event<M>,
@@ -738,7 +798,12 @@ const makeStructuralIdentityIndex = () => {
   }
 }
 
-/** A deterministic hit/miss summary for a finite set declared by a machine. */
+/**
+ * A deterministic hit/miss summary for a finite set declared by a machine.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface CoverageSummary<Item> {
   readonly total: number
   readonly hit: number
@@ -747,20 +812,35 @@ export interface CoverageSummary<Item> {
   readonly misses: ReadonlyArray<Item>
 }
 
-/** One active (non-history) state node in a state coverage summary. */
+/**
+ * One active (non-history) state node in a state coverage summary.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface StateCoverageItem<Path extends string = string> {
   readonly path: Path
   readonly type: Exclude<Machine.Machine.StateNode["type"], "history">
 }
 
-/** State activation and lifecycle coverage. */
+/**
+ * State activation and lifecycle coverage.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface StateCoverage<Path extends string = string> {
   readonly activation: CoverageSummary<StateCoverageItem<Path>>
   readonly entry: CoverageSummary<StateCoverageItem<Path>>
   readonly exit: CoverageSummary<StateCoverageItem<Path>>
 }
 
-/** One stable transition-definition identity in definition order. */
+/**
+ * One stable transition-definition identity in definition order.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface TransitionCoverageItem<
   SourcePath extends string = string,
   EventTag extends PropertyKey = PropertyKey,
@@ -774,13 +854,23 @@ export interface TransitionCoverageItem<
   readonly targets: Machine.Machine.TransitionTargets<TargetPath>
 }
 
-/** One public event tag declared by the machine. */
+/**
+ * One public event tag declared by the machine.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface EventCoverageItem<Tag extends PropertyKey = PropertyKey> {
   readonly tag: Tag
   readonly count: number
 }
 
-/** Public event coverage, including events that no transition retained. */
+/**
+ * Public event coverage, including events that no transition retained.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type EventCoverage<Tag extends PropertyKey = PropertyKey> =
   | {
     readonly available: true
@@ -806,21 +896,36 @@ export type EventCoverage<Tag extends PropertyKey = PropertyKey> =
     }>
   }
 
-/** Trace-derived scenario counts. There is no finite declared scenario space. */
+/**
+ * Trace-derived scenario counts. There is no finite declared scenario space.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ScenarioCoverage {
   readonly traces: number
   readonly events: number
   readonly empty: number
 }
 
-/** Trace-derived logical configuration counts. There is no claimed exhaustive total. */
+/**
+ * Trace-derived logical configuration counts. There is no claimed exhaustive total.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface LogicalConfigurationCoverage {
   readonly observations: number
   readonly hit: number
   readonly identities: ReadonlyArray<string>
 }
 
-/** Directly observed startup and microstep evidence. */
+/**
+ * Directly observed startup and microstep evidence.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface MicrostepCoverageEvidence {
   readonly total: number
   readonly changed: number
@@ -832,14 +937,24 @@ export interface MicrostepCoverageEvidence {
   readonly doneTriggered: number
 }
 
-/** Directly observed completion evidence. */
+/**
+ * Directly observed completion evidence.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface CompletionCoverageEvidence<Path extends string = string> {
   readonly donePlans: number
   readonly recordObservations: number
   readonly paths: ReadonlyArray<Path>
 }
 
-/** Directly observed history records and history-target transitions. */
+/**
+ * Directly observed history records and history-target transitions.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface HistoryCoverageEvidence<Path extends string = string> {
   readonly recordObservations: number
   readonly recorded: ReadonlyArray<{
@@ -850,7 +965,12 @@ export interface HistoryCoverageEvidence<Path extends string = string> {
   readonly resolvedTargets: number
 }
 
-/** Coverage computed only from observable machine definitions and planner traces. */
+/**
+ * Coverage computed only from observable machine definitions and planner traces.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface Coverage<M extends AnyMachine> {
   readonly states: StateCoverage<StatePath<M>>
   readonly transitions: CoverageSummary<
@@ -1189,7 +1309,12 @@ export const coverage = <M extends AnyMachine>(
   } as Coverage<M>
 }
 
-/** The observation roles summarized for one logical graph node. */
+/**
+ * The observation roles summarized for one logical graph node.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ObservedGraphNodeObservations {
   readonly total: number
   readonly startup: number
@@ -1197,7 +1322,12 @@ export interface ObservedGraphNodeObservations {
   readonly microstep: number
 }
 
-/** One full encoded logical snapshot stored in the observed Effect graph. */
+/**
+ * One full encoded logical snapshot stored in the observed Effect graph.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ObservedGraphNode<M extends AnyMachine> {
   readonly id: string
   readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
@@ -1206,7 +1336,12 @@ export interface ObservedGraphNode<M extends AnyMachine> {
   readonly observations: ObservedGraphNodeObservations
 }
 
-/** Retained evidence for one microstep inside an observed graph edge. */
+/**
+ * Retained evidence for one microstep inside an observed graph edge.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ObservedGraphMicrostep<M extends AnyMachine> {
   readonly next: string
   readonly event: Machine.Machine.Event<M> | Machine.InitialEvent
@@ -1218,7 +1353,12 @@ export interface ObservedGraphMicrostep<M extends AnyMachine> {
   readonly changed: boolean
 }
 
-/** A startup or public-event macrostep retained by the observed graph. */
+/**
+ * A startup or public-event macrostep retained by the observed graph.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export type ObservedGraphEdge<M extends AnyMachine> =
   | {
     readonly _tag: "Startup"
@@ -1235,7 +1375,12 @@ export type ObservedGraphEdge<M extends AnyMachine> =
     readonly completion: PlanCompletion<M>
   }
 
-/** An Effect directed graph plus stable indexes useful to graph algorithms. */
+/**
+ * An Effect directed graph plus stable indexes useful to graph algorithms.
+ *
+ * @category models
+ * @since 4.0.0
+ */
 export interface ObservedGraph<M extends AnyMachine> {
   readonly graph: Graph.DirectedGraph<ObservedGraphNode<M>, ObservedGraphEdge<M>>
   readonly nodesById: ReadonlyMap<string, Graph.NodeIndex>
