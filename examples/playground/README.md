@@ -28,9 +28,17 @@ Each starter keeps its machine definition next to its route component:
 - `src/examples/media-player`
 - `src/examples/worker-tabs`
 
-The first four route components are intentionally light: their domain schemas,
-events, and state topology are ready, while the React-to-machine adapter is left
-for the exercise.
+The turnstile, traffic light, and microwave route components are intentionally
+light: their domain schemas, events, and state topology are ready, while the
+React-to-machine adapter is left for the exercise.
+
+The media player is a complete browser integration. `schemas.ts` owns its typed
+protocol, `service.ts` exposes the audio element and Web Audio graph as an
+Effect service, `invocations.ts` defines its state-scoped processes, and the
+React page translates DOM events into machine events. Its compound
+`Ready` state models the loaded playback lifecycle inside a parallel `Player`:
+the transport region owns loading, playback, buffering, and failures while the
+settings region independently owns `Audible` and `Muted`.
 
 The workers route additionally contains:
 
