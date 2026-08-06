@@ -93,9 +93,9 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Details**
  *
- * Machines support atomic, compound, parallel, and final states together with
- * completion transitions, eventless transitions, raised events, actions,
- * spawned children, and state-scoped invokes. Schemas validate machine
+ * Machines support atomic, compound, parallel, final, history, and choice
+ * states together with completion transitions, eventless transitions, raised
+ * events, actions, spawned children, and state-scoped invokes. Schemas validate machine
  * boundaries while preserving decoded state, event, output, error, and service
  * types throughout planning and execution.
  *
@@ -436,6 +436,9 @@ type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKe
 
 type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryStateKey<States>
 
+type IsPseudoStateNode<Node> = Node extends Machine.HistoryStateNodeConfig | Machine.ChoiceStateNodeConfig ? true
+  : false
+
 type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends boolean = false> = {
   readonly [Key in keyof States]: ValidateStateNode<States[Key], AllowHistory>
 }
@@ -443,6 +446,7 @@ type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends
 type ValidateStateNode<Node, AllowHistory extends boolean> = Node extends Machine.HistoryStateNodeConfig ?
   AllowHistory extends true ? ValidateHistoryStateNode<Node>
   : StateDefinitionError<"History states must be declared below an active parent state">
+  : Node extends Machine.ChoiceStateNodeConfig ? ValidateChoiceStateNode<Node>
   : Node extends Machine.TaggedSchema ? unknown
   : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node>
   : StateDefinitionError<"State nodes must be tagged schemas or state node configs">
@@ -451,6 +455,11 @@ type ValidateHistoryStateNode<Node extends Machine.HistoryStateNodeConfig> = [
   Extract<keyof Node, "schema" | "states" | "initial" | "output">
 ] extends [never] ? unknown
   : StateDefinitionError<"History states cannot declare schemas, children, initial states, or output">
+
+type ValidateChoiceStateNode<Node extends Machine.ChoiceStateNodeConfig> = [
+  Extract<keyof Node, "schema" | "states" | "initial" | "output" | "history">
+] extends [never] ? unknown
+  : StateDefinitionError<"Choice states cannot declare schemas, children, initial states, output, or history">
 
 type ValidateStateNodeConfig<Node extends { readonly schema: Machine.TaggedSchema }> = Node extends
   { readonly states: infer Children } ? ValidateStateNodeWithChildren<Node, Children>
@@ -497,6 +506,7 @@ type DefineStateTreeInput<States extends Machine.StateSchemas> = {
 
 type DefineStateNodeInput<Node> = Node extends Machine.TaggedSchema ? Node
   : Node extends Machine.HistoryStateNodeConfig ? Machine.HistoryStateNodeConfig
+  : Node extends Machine.ChoiceStateNodeConfig ? Machine.ChoiceStateNodeConfig
   : Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
     Omit<Node, "states"> & { readonly states: DefineStateTreeInput<Children> }
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? Omit<Node, "initial" | "states"> & {
@@ -1867,6 +1877,21 @@ export declare namespace Machine {
   }
 
   /**
+   * Transition-only pseudo-state that records where a transition chooses
+   * between multiple declared destinations.
+   *
+   * Choice nodes never become active and therefore do not declare a state
+   * value schema or lifecycle handlers. The decision remains in the incoming
+   * transition callback so its source state and event stay precisely typed.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface ChoiceStateNodeConfig {
+    readonly type: "choice"
+  }
+
+  /**
    * Configuration accepted for an object state node.
    *
    * @category models
@@ -1877,6 +1902,7 @@ export declare namespace Machine {
     | CompoundStateNodeConfig
     | ParallelStateNodeConfig
     | HistoryStateNodeConfig
+    | ChoiceStateNodeConfig
 
   /**
    * Object state tree keyed by state path.
@@ -1996,10 +2022,10 @@ export declare namespace Machine {
     readonly key: string
     readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
-    readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+    readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
     readonly history: "shallow" | "deep" | undefined
     readonly parent: Path | undefined
-    /** Active child paths. History pseudo-states are available through their `parent` relationship. */
+    /** Active child paths. Pseudo-states are available through their `parent` relationship. */
     readonly children: ReadonlyArray<Path>
     readonly initial: Path | undefined
     readonly order: number
@@ -2066,12 +2092,15 @@ export declare namespace Machine {
   export interface TransitionDefinition<
     SourcePath extends string = string,
     EventTag extends PropertyKey = PropertyKey,
-    TargetPath extends string = SourcePath
+    TargetPath extends string = SourcePath,
+    ChoicePath extends string = never
   > {
     readonly source: SourcePath
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
     readonly targets: TransitionTargets<TargetPath>
+    /** Structural choice pseudo-state traversed by this transition. */
+    readonly choice?: ChoicePath
   }
 
   /**
@@ -2128,7 +2157,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     Prefix extends string = ""
   > = {
-    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never
+    readonly [Key in Extract<keyof States, string>]: IsPseudoStateNode<States[Key]> extends true ? never
       : States[Key] extends { readonly states: infer Children }
         ? Children extends StateSchemas ?
           JoinPath<Prefix, Key> | StateIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
@@ -2150,7 +2179,18 @@ export declare namespace Machine {
    * @category utility types
    * @since 4.0.0
    */
-  export type StateNodeIdentifier<States extends StateSchemas> = StateIdentifier<States> | HistoryIdentifier<States>
+  export type StateNodeIdentifier<States extends StateSchemas> =
+    | StateIdentifier<States>
+    | HistoryIdentifier<States>
+    | ChoiceIdentifier<States>
+
+  /** Extracts transition-only choice pseudo-state paths in a definition. */
+  export type ChoiceIdentifier<States extends StateSchemas> = ChoiceIdentifierWithPrefix<States>
+
+  /** Extracts paths that may be returned as concrete transition targets. */
+  export type TransitionTargetIdentifier<States extends StateSchemas> =
+    | StateIdentifier<States>
+    | HistoryIdentifier<States>
 
   /** @internal */
   export type HistoryIdentifierWithPrefix<
@@ -2163,9 +2203,20 @@ export declare namespace Machine {
       : never
   }[Extract<keyof States, string>]
 
+  /** @internal */
+  export type ChoiceIdentifierWithPrefix<
+    States extends StateSchemas,
+    Prefix extends string = ""
+  > = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends ChoiceStateNodeConfig ? JoinPath<Prefix, Key>
+      : States[Key] extends { readonly states: infer Children extends StateSchemas } ?
+        ChoiceIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
+      : never
+  }[Extract<keyof States, string>]
+
   /** Active keys directly declared in a state tree. */
   export type ActiveStateKey<States extends StateSchemas> = {
-    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never : Key
+    readonly [Key in Extract<keyof States, string>]: IsPseudoStateNode<States[Key]> extends true ? never : Key
   }[Extract<keyof States, string>]
 
   /** History pseudo-state keys directly declared in a state tree. */
@@ -3599,8 +3650,9 @@ export declare namespace Machine {
     readonly always?:
       | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
       | {
+        readonly choice?: ChoiceIdentifier<States>
         /** Statically declared upper bound of possible target paths. */
-        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
         readonly transition: (
           context: AlwaysContext<States, Events, Emits, StateId>
         ) => HandlerResult<States, any, any>
@@ -3608,8 +3660,9 @@ export declare namespace Machine {
     readonly onDone?:
       | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
       | {
+        readonly choice?: ChoiceIdentifier<States>
         /** Statically declared upper bound of possible target paths. */
-        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
         readonly transition: (
           context: DoneContext<States, Events, Emits, StateId>
         ) => HandlerResult<States, any, any>
@@ -3621,12 +3674,13 @@ export declare namespace Machine {
         ) => HandlerResult<States, any, any>)
         | {
           readonly reenter?: boolean
+          readonly choice?: ChoiceIdentifier<States>
           /**
            * Upper bound of state or history paths this handler may target.
            * Returning `void` is always permitted. Declaring a parent state also
            * permits concrete descendant targets below it.
            */
-          readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+          readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
           readonly transition: (
             context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
           ) => HandlerResult<States, any, any>
@@ -3930,6 +3984,51 @@ export declare namespace Machine {
     >
     : never
 
+  type TransitionSuccess<Result> = Result extends Effect.Effect<infer Success, any, any> ? TransitionSuccess<Success>
+    : Result extends StateConstruction<infer Constructed> ? TransitionSuccess<Constructed>
+    : Result
+
+  type ChoiceTransitionValidation<
+    StateId extends string,
+    Trigger extends PropertyKey,
+    Transition
+  > = Transition extends { readonly choice: string } ?
+    Transition extends { readonly targets: readonly [string, ...ReadonlyArray<string>] } ?
+      undefined extends TransitionSuccess<EventTransitionReturn<Transition>> ? HandlerValidationError<
+          "Choice transition must return a target",
+          StateId,
+          Trigger
+        >
+      : unknown
+    : HandlerValidationError<"Choice transition must declare at least one target", StateId, Trigger>
+    : unknown
+
+  type HandlerOnChoiceValidationErrors<StateId extends string, On> = {
+    readonly [
+      EventTag in keyof On as unknown extends ChoiceTransitionValidation<StateId, EventTag, On[EventTag]> ? never
+        : EventTag
+    ]: ChoiceTransitionValidation<StateId, EventTag, On[EventTag]>
+  }
+
+  type HandlerOnChoiceValidation<StateId extends string, Config> = "on" extends keyof Config ?
+    Config extends { readonly on?: infer On } ? HandlerOnChoiceValidationErrors<
+        StateId,
+        NonNullable<On>
+      > extends infer Errors ? keyof Errors extends never ? unknown
+        : { readonly on: Errors }
+      : never
+    : unknown
+    : unknown
+
+  type HandlerDirectChoiceValidation<
+    StateId extends string,
+    Config,
+    Trigger extends "always" | "onDone",
+    Transition = Config extends { readonly [Key in Trigger]?: infer Value } ? NonNullable<Value> : never,
+    Validation = ChoiceTransitionValidation<StateId, Trigger, Transition>
+  > = Trigger extends keyof Config ? unknown extends Validation ? unknown : { readonly [Key in Trigger]: Validation }
+    : unknown
+
   type HandlerOnTargetValidationErrors<StateId extends string, On> = {
     readonly [
       EventTag in keyof On as [UndeclaredTransitionTarget<On[EventTag]>] extends [never] ? never
@@ -4056,8 +4155,11 @@ export declare namespace Machine {
     & HandlerUnknownConfigKeyValidation<StateId, Config>
     & HandlerOnKeyValidation<Events, StateId, Config>
     & HandlerOnTargetValidation<StateId, Config>
+    & HandlerOnChoiceValidation<StateId, Config>
     & HandlerDirectTargetValidation<StateId, Config, "always">
     & HandlerDirectTargetValidation<StateId, Config, "onDone">
+    & HandlerDirectChoiceValidation<StateId, Config, "always">
+    & HandlerDirectChoiceValidation<StateId, Config, "onDone">
     & HandlerInvokeOutputValidation<Events, StateId, Config>
     & HandlerInvokeEmitsValidation<Events, StateId, Config>
     & HandlerInvokeSnapshotValidation<Events, StateId, Config>
@@ -4501,8 +4603,9 @@ export declare namespace Machine {
       | ((context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>) => HandlerResult<States, E, R>)
       | {
         readonly reenter?: boolean
+        readonly choice?: ChoiceIdentifier<States>
         /** Statically declared upper bound of possible target paths. */
-        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
         readonly transition: (
           context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
         ) => HandlerResult<States, E, R>
@@ -4531,7 +4634,8 @@ export declare namespace Machine {
     readonly always?:
       | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
       | {
-        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly choice?: ChoiceIdentifier<States>
+        readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
         readonly transition: (
           context: AlwaysContext<States, Events, Emits, StateId>
         ) => HandlerResult<States, E, R>
@@ -4539,7 +4643,8 @@ export declare namespace Machine {
     readonly onDone?:
       | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
       | {
-        readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
+        readonly choice?: ChoiceIdentifier<States>
+        readonly targets?: ReadonlyArray<TransitionTargetIdentifier<States>>
         readonly transition: (
           context: DoneContext<States, Events, Emits, StateId>
         ) => HandlerResult<States, E, R>
@@ -4604,6 +4709,20 @@ const validateTransitionTargets = (
   trigger: PropertyKey,
   transition: unknown
 ): void => {
+  if (typeof transition === "object" && transition !== null && hasProperty(transition, "choice")) {
+    const choice = transition.choice
+    const choiceNode = typeof choice === "string" ? stateNodes.byPath.get(choice) : undefined
+    if (choiceNode?.type !== "choice") {
+      throw new Error(
+        `Machine transition for state "${path}" on "${String(trigger)}" declares unknown choice "${String(choice)}"`
+      )
+    }
+    if (!hasProperty(transition, "targets") || !Array.isArray(transition.targets) || transition.targets.length === 0) {
+      throw new Error(
+        `Machine choice transition for state "${path}" on "${String(trigger)}" must declare at least one target`
+      )
+    }
+  }
   if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
     return
   }
@@ -4613,7 +4732,8 @@ const validateTransitionTargets = (
     )
   }
   for (const target of transition.targets) {
-    if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
+    const targetNode = typeof target === "string" ? stateNodes.byPath.get(target) : undefined
+    if (targetNode === undefined || targetNode.type === "choice") {
       throw new Error(
         `Machine transition for state "${path}" on "${String(trigger)}" declares unknown target "${String(target)}"`
       )
@@ -4724,6 +4844,10 @@ type SnapshotBuilderOptions = {
   readonly prefix: string
 }
 
+const isPseudoStateDefinition = (definition: Machine.TaggedSchema | Machine.StateNodeConfig): boolean =>
+  (definition as { readonly type?: unknown }).type === "history" ||
+  (definition as { readonly type?: unknown }).type === "choice"
+
 type FromMethodKind = "leaf" | "nested"
 
 const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) => unknown>(
@@ -4748,7 +4872,7 @@ const makeSnapshotBuilder = (
 ): unknown => {
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    if (isPseudoStateDefinition(states[key])) {
       continue
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
@@ -4777,7 +4901,7 @@ const makeParallelSnapshotBuilder = (
     enumerable: false
   })
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    if (isPseudoStateDefinition(states[key])) {
       continue
     }
     if (hasProperty(regions, key)) {
@@ -4810,7 +4934,7 @@ const getParallelSnapshotBuilderRegions = (
     SnapshotBuilderStateTypeId
   ]
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    if (isPseudoStateDefinition(states[key])) {
       continue
     }
     if (!hasProperty(regions, key)) {
@@ -6014,10 +6138,10 @@ export const planInitial: <
  *
  * **Details**
  *
- * The result includes atomic, compound, parallel, final, and history nodes.
+ * The result includes atomic, compound, parallel, final, history, and choice nodes.
  * Use each node's `parent` property to reconstruct the complete hierarchy.
- * History pseudo-states are intentionally omitted from `children` because they
- * can never appear in an active configuration.
+ * History and choice pseudo-states are intentionally omitted from `children`
+ * because they can never appear in an active configuration.
  *
  * @category getters
  * @since 4.0.0
@@ -6049,14 +6173,16 @@ export const transitionDefinitions = <M extends Machine.Any>(
   Machine.TransitionDefinition<
     Machine.StateIdentifier<Machine.States<M>>,
     Machine.TagOf<Machine.Events<M>[number]>,
-    Machine.StateNodeIdentifier<Machine.States<M>>
+    Machine.TransitionTargetIdentifier<Machine.States<M>>,
+    Machine.ChoiceIdentifier<Machine.States<M>>
   >
 > =>
   Model.transitionDefinitions(machine) as ReadonlyArray<
     Machine.TransitionDefinition<
       Machine.StateIdentifier<Machine.States<M>>,
       Machine.TagOf<Machine.Events<M>[number]>,
-      Machine.StateNodeIdentifier<Machine.States<M>>
+      Machine.TransitionTargetIdentifier<Machine.States<M>>,
+      Machine.ChoiceIdentifier<Machine.States<M>>
     >
   >
 

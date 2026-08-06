@@ -229,12 +229,14 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
   | TransitionHandler<States, E, R, Context>
   | {
     readonly reenter?: boolean
+    readonly choice?: string
     readonly targets?: ReadonlyArray<string>
     readonly transition: TransitionHandler<States, E, R, Context>
   }
 
 type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
+  readonly choice: string | undefined
   readonly targets: ReadonlyArray<string> | undefined
   readonly transition: TransitionHandler<States, E, R, Context>
 }
@@ -246,9 +248,10 @@ const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>
     return undefined
   }
   return typeof transition === "function"
-    ? { reenter: false, targets: undefined, transition }
+    ? { reenter: false, choice: undefined, targets: undefined, transition }
     : {
       reenter: transition.reenter === true,
+      choice: transition.choice,
       targets: transition.targets,
       transition: transition.transition
     }
@@ -998,6 +1001,13 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     selection.transition.transition,
     selection.context
   )
+  if (selection.transition.choice !== undefined && transitionResult.state === undefined) {
+    return yield* Effect.die(
+      new Error(
+        `Machine choice transition through "${selection.transition.choice}" from "${selection.sourcePath}" must return a target`
+      )
+    )
+  }
   const unresolvedTarget = transitionResult.state === undefined
     ? undefined
     : transitionResult.state as

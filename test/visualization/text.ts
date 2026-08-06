@@ -1,7 +1,7 @@
 interface StateNode {
   readonly path: string
   readonly key: string
-  readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+  readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly history: "shallow" | "deep" | undefined
   readonly parent: string | undefined
   readonly children: ReadonlyArray<string>
@@ -26,6 +26,7 @@ interface TransitionDefinition {
       readonly type: "done"
     }
   readonly reenter: boolean
+  readonly choice?: string
   readonly targets:
     | {
       readonly type: "dynamic"
@@ -57,6 +58,8 @@ const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
 
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<string> => {
   const labels: Array<string> = []
+  const choice = (definition: TransitionDefinition): string =>
+    definition.choice === undefined ? "" : ` via ${definition.choice.slice(definition.choice.lastIndexOf(".") + 1)}`
   const targets = (definition: TransitionDefinition): string =>
     definition.targets.type === "dynamic" ?
       ""
@@ -66,7 +69,9 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   const events = definitions.flatMap((definition) =>
     definition.trigger.type === "event" ?
       [
-        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${targets(definition)}`
+        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${choice(definition)}${
+          targets(definition)
+        }`
       ]
       : []
   )
@@ -76,9 +81,9 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   }
   for (const definition of definitions) {
     if (definition.trigger.type === "always") {
-      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
+      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${choice(definition)}${targets(definition)}`)
     } else if (definition.trigger.type === "done") {
-      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
+      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${choice(definition)}${targets(definition)}`)
     }
   }
   return labels

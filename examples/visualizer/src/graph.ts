@@ -4,6 +4,7 @@ const leafWidth = 112
 const leafHeight = 58
 const historyWidth = 100
 const historyHeight = 46
+const choiceSize = 46
 const groupMinWidth = 164
 const groupHeader = 36
 const groupPadding = 14
@@ -32,6 +33,7 @@ export interface DiagramTransition {
     | { readonly type: "always" }
     | { readonly type: "done" }
   readonly reenter: boolean
+  readonly choice?: string
   readonly targets:
     | { readonly type: "dynamic" }
     | { readonly type: "declared"; readonly paths: ReadonlyArray<string> }
@@ -69,7 +71,9 @@ export const buildDiagramGraph = <M extends Machine.Machine.Any>(machine: M): Di
     if (node === undefined) throw new Error(`Missing diagram node: ${path}`)
     const childPaths = children.get(path) ?? []
     const result = childPaths.length === 0
-      ? node.type === "history"
+      ? node.type === "choice"
+        ? { width: choiceSize, height: choiceSize }
+        : node.type === "history"
         ? { width: historyWidth, height: historyHeight }
         : { width: leafWidth, height: leafHeight }
       : (() => {
@@ -140,7 +144,8 @@ export const buildDiagramGraph = <M extends Machine.Machine.Any>(machine: M): Di
       source: definition.source,
       trigger: definition.trigger,
       reenter: definition.reenter,
-      targets: definition.targets
+      targets: definition.targets,
+      ...(definition.choice === undefined ? {} : { choice: definition.choice })
     }))
   }
 }

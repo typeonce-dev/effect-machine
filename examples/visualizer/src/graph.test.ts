@@ -1,3 +1,5 @@
+import { Machine } from "@typeonce/effect-machine"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { buildDiagramGraph } from "./graph.ts"
 import { VisualizerMachine } from "./machine.ts"
@@ -31,5 +33,31 @@ describe("diagram graph", () => {
       }
     })
     expect(graph.transitions.every(({ targets }) => targets.type === "declared")).toBe(true)
+  })
+
+  it("routes annotated transitions through choice nodes", () => {
+    class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+    class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
+    class Go extends Schema.TaggedClass<Go>("Go")("Go", {}) {}
+    const states = Machine.defineStates({ idle: Idle, decide: { type: "choice" }, done: Done })
+    const machine = Machine.make({
+      states: states.states,
+      events: [Go],
+      initial: () => states.initial.idle(new Idle({}))
+    }).handle({
+      idle: {
+        on: {
+          Go: {
+            choice: "decide",
+            targets: ["done"],
+            transition: ({ target }) => target.full.done(new Done({}))
+          }
+        }
+      }
+    })
+
+    const graph = buildDiagramGraph(machine)
+    expect(graph.nodes.find(({ path }) => path === "decide")?.type).toBe("choice")
+    expect(graph.transitions[0]).toMatchObject({ choice: "decide" })
   })
 })

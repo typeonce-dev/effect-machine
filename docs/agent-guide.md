@@ -104,7 +104,7 @@ its extra control is required:
   the same operation with a returned transition value, not a separate action
   API.
 
-## Atomic, compound, parallel, and history states
+## Atomic, compound, parallel, history, and choice states
 
 Use an atomic state when no child phase can be active beneath it.
 
@@ -200,6 +200,26 @@ const machine = Machine.make({
 
 Do not repeat `type: "final"` in `handle`. Execution APIs reject a machine
 until every declared output schema has an implementation.
+
+Declare `{ type: "choice" }` for a transition-only routing node. Choice nodes
+have no schema, are excluded from active state identifiers and snapshots, and
+cannot be selected as a compound initial child. Annotate the incoming
+object-form transition with the choice path and every possible destination;
+perform the decision with ordinary TypeScript control flow in that transition:
+
+```ts
+Submit: {
+  choice: "validate",
+  targets: ["accepted", "rejected"],
+  transition: ({ state, target }) =>
+    isValid(state) ? target.full.accepted.from() : target.full.rejected.from()
+}
+```
+
+This form preserves the incoming handler's precise source-state and event
+types. A choice annotation requires a non-empty `targets` tuple and the
+callback must return a target. Choice nodes are structural metadata and never
+create an extra runtime microstep.
 
 Declare a history pseudo-state below the active parent whose configuration it
 should remember. It has no schema, is excluded from active state identifiers,

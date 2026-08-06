@@ -229,6 +229,10 @@ h1 {
   stroke-dasharray: 4 4;
 }
 
+.state-node.is-choice > .state-box {
+  fill: #fff8e7;
+}
+
 .transition-edge {
   fill: none;
   stroke: #87847d;

@@ -127,7 +127,7 @@ const eventPoint = (transition: DiagramTransition): { readonly x: number; readon
   const source = nodesByPath.get(transition.source)
   if (source === undefined) return { x: 0, y: 0 }
   if (transition.targets.type === "declared" && transition.targets.paths.length > 0) {
-    const target = nodesByPath.get(transition.targets.paths[0]!)
+    const target = nodesByPath.get(transition.choice ?? transition.targets.paths[0]!)
     if (target !== undefined) {
       const from = center(source)
       const to = center(target)
@@ -173,12 +173,15 @@ const drawNode = (node: DiagramNode, group: boolean): void => {
   const element = svgElement("g", { class: `state-node ${group ? "state-group" : "state-leaf"}` })
   element.dataset.nodePath = node.path
   const box = svgElement("rect", {
-    x: node.x,
-    y: node.y,
-    width: node.width,
-    height: node.height,
-    rx: group ? 16 : node.type === "history" ? 24 : 10,
-    class: "state-box"
+    x: node.type === "choice" ? node.x + 10 : node.x,
+    y: node.type === "choice" ? node.y + 10 : node.y,
+    width: node.type === "choice" ? node.width - 20 : node.width,
+    height: node.type === "choice" ? node.height - 20 : node.height,
+    rx: group ? 16 : node.type === "history" ? 24 : node.type === "choice" ? 0 : 10,
+    class: "state-box",
+    ...(node.type === "choice"
+      ? { transform: `rotate(45 ${node.x + node.width / 2} ${node.y + node.height / 2})` }
+      : {})
   })
   const label = svgElement("text", {
     x: node.x + (group ? 15 : node.width / 2),
@@ -186,7 +189,7 @@ const drawNode = (node: DiagramNode, group: boolean): void => {
     class: "state-label",
     "text-anchor": group ? "start" : "middle"
   })
-  label.textContent = node.key
+  label.textContent = node.type === "choice" ? "?" : node.key
   element.append(box, label)
   if (group) {
     const kind = svgElement("text", {
@@ -199,6 +202,7 @@ const drawNode = (node: DiagramNode, group: boolean): void => {
     element.append(kind)
   }
   if (node.type === "history") element.classList.add("is-history")
+  if (node.type === "choice") element.classList.add("is-choice")
   svg.append(element)
   nodeElements.set(node.path, element)
 }
@@ -209,11 +213,20 @@ for (const node of grouped.sort((left, right) => left.depth - right.depth)) draw
 for (const transition of graph.transitions) {
   const source = nodesByPath.get(transition.source)
   if (source === undefined || transition.targets.type !== "declared") continue
+  const choice = transition.choice === undefined ? undefined : nodesByPath.get(transition.choice)
+  if (choice !== undefined) {
+    const path = svgElement("path", {
+      d: edgePath(source, choice),
+      class: `transition-edge${transition.reenter ? " is-reenter" : ""}`,
+      "marker-end": "url(#arrow)"
+    })
+    svg.append(path)
+  }
   for (const targetPath of transition.targets.paths) {
     const target = nodesByPath.get(targetPath)
     if (target === undefined) continue
     const path = svgElement("path", {
-      d: edgePath(source, target),
+      d: edgePath(choice ?? source, target),
       class: `transition-edge${transition.reenter ? " is-reenter" : ""}`,
       "marker-end": "url(#arrow)"
     })

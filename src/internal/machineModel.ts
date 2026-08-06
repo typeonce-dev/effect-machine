@@ -243,15 +243,18 @@ export const getStateNodeDefinition = (
 ): {
   readonly schema: Machine.TaggedSchema | undefined
   readonly output: Schema.Top | undefined
-  readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+  readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly initial: string | undefined
   readonly states: Machine.StateTree | undefined
 } => {
-  if (!Schema.isSchema(definition) && (definition as any).type === "history") {
+  if (
+    !Schema.isSchema(definition) && ((definition as any).type === "history" || (definition as any).type === "choice")
+  ) {
+    const type = (definition as any).type as "history" | "choice"
     return {
       schema: undefined,
       output: undefined,
-      type: "history",
+      type,
       initial: undefined,
       states: undefined
     }
@@ -332,9 +335,12 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
       }
       byPath.set(path, node)
       order += 1
-      if (definition.type === "history") {
+      if (definition.type === "history" || definition.type === "choice") {
         if (parent === undefined) {
-          throw new Error(`Machine history state "${path}" must belong to a parent state`)
+          if (definition.type === "history") {
+            throw new Error(`Machine history state "${path}" must belong to a parent state`)
+          }
+          continue
         }
         continue
       }
@@ -363,10 +369,15 @@ const transitionTargets = (handler: unknown): Machine.TransitionTargets =>
     ? { type: "declared", paths: Array.from(handler.targets as ReadonlyArray<string>) }
     : dynamicTransitionTargets
 
+const transitionChoice = (handler: unknown): { readonly choice: string } | {} =>
+  typeof handler === "object" && handler !== null && "choice" in handler && typeof handler.choice === "string"
+    ? { choice: handler.choice }
+    : {}
+
 export const transitionDefinitions = (
   machine: Machine.Any
-): ReadonlyArray<Machine.TransitionDefinition> => {
-  const definitions: Array<Machine.TransitionDefinition> = []
+): ReadonlyArray<Machine.TransitionDefinition<string, PropertyKey, string, string>> => {
+  const definitions: Array<Machine.TransitionDefinition<string, PropertyKey, string, string>> = []
   for (const node of machine.stateNodes.byPath.values()) {
     const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
     if (config === undefined) {
@@ -378,7 +389,8 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "event", event },
         reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
-        targets: transitionTargets(handler)
+        targets: transitionTargets(handler),
+        ...transitionChoice(handler)
       })
     }
     if (config.always !== undefined) {
@@ -386,7 +398,8 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "always" },
         reenter: false,
-        targets: transitionTargets(config.always)
+        targets: transitionTargets(config.always),
+        ...transitionChoice(config.always)
       })
     }
     if (config.onDone !== undefined) {
@@ -394,7 +407,8 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "done" },
         reenter: false,
-        targets: transitionTargets(config.onDone)
+        targets: transitionTargets(config.onDone),
+        ...transitionChoice(config.onDone)
       })
     }
   }
@@ -625,8 +639,8 @@ export const getNode = (machine: Machine.Any, path: string): Machine.StateNode =
 }
 
 export const getStateNodeSchema = (node: Machine.StateNode): Machine.TaggedSchema => {
-  if (node.schema === undefined || node.type === "history") {
-    throw new Error(`Machine history state "${node.path}" has no active value schema`)
+  if (node.schema === undefined) {
+    throw new Error(`Machine pseudo-state "${node.path}" has no active value schema`)
   }
   return node.schema
 }

@@ -147,7 +147,7 @@ masquerade as an internal result.
 
 ## Statechart structure
 
-`Machine.defineStates` accepts atomic, compound, parallel, final, and history
+`Machine.defineStates` accepts atomic, compound, parallel, final, history, and choice
 nodes:
 
 ```ts
@@ -204,6 +204,44 @@ parent, not on the final leaf.
 Put data on the narrowest state where it is valid. If several sibling phases
 share data, prefer storing it on their compound parent instead of copying it
 into every child state.
+
+### Choice states
+
+A choice is a transition-only pseudo-state used to show where one typed
+transition selects between multiple destinations. It has no schema, never
+becomes active, and never appears in a snapshot. Declare the choice in the
+state tree, then annotate an object-form event, eventless, or completion
+transition with its path and the possible targets:
+
+```ts
+const States = Machine.defineStates({
+  Editing,
+  Validate: { type: "choice" },
+  Accepted,
+  Rejected
+})
+
+const machine = Machine.make({
+  states: States.states,
+  events: [Submit],
+  initial: () => States.initial.Editing.from()
+}).handle({
+  Editing: {
+    on: {
+      Submit: {
+        choice: "Validate",
+        targets: ["Accepted", "Rejected"],
+        transition: ({ state, target }) => isValid(state) ? target.full.Accepted.from() : target.full.Rejected.from()
+      }
+    }
+  }
+})
+```
+
+The transition callback performs the check directly, retaining its precise
+source state and event types. A choice transition must declare at least one
+possible target and return one of those targets. Inspection tools expose the
+choice path without executing the callback.
 
 ### History states
 
