@@ -27,8 +27,8 @@ const examples = [
   {
     to: "/media-player" as const,
     title: "Media player",
-    description: "Connect a real audio element lifecycle to a typed statechart.",
-    concepts: ["DOM events", "parallel concerns"]
+    description: "Coordinate parallel transport and sound modes with state-scoped Effects.",
+    concepts: ["parallel states", "compound states", "Effect services"]
   },
   {
     to: "/worker-tabs" as const,
