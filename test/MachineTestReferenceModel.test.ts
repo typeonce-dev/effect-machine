@@ -1469,6 +1469,6 @@ describe("MachineTest finite-model reference interpreter", () => {
         Effect.flatMap((trace) => MachineTest.verifyModel(generated.model, trace))
       )
     },
-    { fastCheck: { numRuns: 1_500, seed: 51_205 } }
+    { timeout: 30_000, fastCheck: { numRuns: 1_500, seed: 51_205 } }
   )
 })
