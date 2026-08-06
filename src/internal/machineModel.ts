@@ -356,6 +356,51 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
   } as Machine.StateNodes
 }
 
+const dynamicTransitionTargets = { type: "dynamic" } as const
+
+const transitionTargets = (handler: unknown): Machine.TransitionTargets =>
+  typeof handler === "object" && handler !== null && "targets" in handler && handler.targets !== undefined
+    ? { type: "declared", paths: Array.from(handler.targets as ReadonlyArray<string>) }
+    : dynamicTransitionTargets
+
+export const transitionDefinitions = (
+  machine: Machine.Any
+): ReadonlyArray<Machine.TransitionDefinition> => {
+  const definitions: Array<Machine.TransitionDefinition> = []
+  for (const node of machine.stateNodes.byPath.values()) {
+    const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
+    if (config === undefined) {
+      continue
+    }
+    for (const event of Reflect.ownKeys(config.on ?? {})) {
+      const handler = config.on?.[event]
+      definitions.push({
+        source: node.path,
+        trigger: { type: "event", event },
+        reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
+        targets: transitionTargets(handler)
+      })
+    }
+    if (config.always !== undefined) {
+      definitions.push({
+        source: node.path,
+        trigger: { type: "always" },
+        reenter: false,
+        targets: transitionTargets(config.always)
+      })
+    }
+    if (config.onDone !== undefined) {
+      definitions.push({
+        source: node.path,
+        trigger: { type: "done" },
+        reenter: false,
+        targets: transitionTargets(config.onDone)
+      })
+    }
+  }
+  return definitions
+}
+
 export const makeTarget = <
   const States extends Machine.StateSchemas,
   const StateId extends Machine.StateIdentifier<States>
