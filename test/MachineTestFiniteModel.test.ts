@@ -66,6 +66,7 @@ const assertValid = (
 
   const states = flatten(model)
   const byPath = new Map(states.map((state) => [state.path, state]))
+  const stateOrder = new Map(states.map((state, index) => [state.path, index]))
   assert.strictEqual(byPath.size, states.length)
   for (const state of states) {
     assert.ok(Object.isFrozen(state.node))
@@ -103,8 +104,15 @@ const assertValid = (
       source !== undefined && source.node._tag !== "Final" && source.node._tag !== "History" &&
         source.node._tag !== "Choice"
     )
-    assert.ok(model.events.includes(transition.event))
-    const registration = `${transition.source}\u0000${transition.event}`
+    if (transition.trigger.type === "event") assert.ok(model.events.includes(transition.trigger.event))
+    else {
+      assert.ok(transition.target !== undefined)
+      assert.strictEqual("reenter" in transition, false)
+      assert.ok(stateOrder.get(transition.target!)! > stateOrder.get(transition.source)!)
+      if (transition.trigger.type === "always") assert.strictEqual(source.node._tag, "Atomic")
+      else assert.ok(source.node._tag === "Compound" || source.node._tag === "Parallel")
+    }
+    const registration = `${transition.source}\u0000${JSON.stringify(transition.trigger)}`
     assert.ok(!registrations.has(registration))
     registrations.add(registration)
     if (transition.target !== undefined) {
@@ -136,7 +144,7 @@ const assertValid = (
 
 const canonicalTransition = (transition: Machine.Machine.TransitionDefinition) => ({
   source: transition.source,
-  event: transition.trigger.type === "event" ? transition.trigger.event : transition.trigger.type,
+  trigger: transition.trigger,
   reenter: transition.reenter,
   targets: transition.targets.type === "declared" ? transition.targets.paths : undefined
 })
@@ -162,7 +170,8 @@ describe("MachineTest finite models", () => {
       choiceInitialWitnesses: true,
       structurallyValid: true,
       shrinkPreservesValidity: true,
-      eventlessTransitions: false
+      eventlessTransitions: true,
+      acyclicAutomaticTransitions: true
     })
     const samples = FastCheck.sample(generated.arbitrary, { numRuns: 250, seed: 10_241 })
     for (const model of samples) {
@@ -178,6 +187,12 @@ describe("MachineTest finite models", () => {
     }
     assert.ok(samples.some((model) => flatten(model).some(({ node }) => node._tag === "Parallel")))
     assert.ok(samples.some((model) => flatten(model).some(({ node }) => node._tag === "History")))
+    assert.ok(samples.some((model) => model.transitions.some(({ trigger }) => trigger.type === "always")))
+    assert.ok(samples.some((model) => model.transitions.some(({ trigger }) => trigger.type === "done")))
+    assert.ok(samples.some((model) =>
+      model.transitions.some(({ trigger }) => trigger.type === "event") &&
+      model.transitions.some(({ trigger }) => trigger.type !== "event")
+    ))
     assert.ok(samples.some((model) => flatten(model).filter(({ node }) => node._tag === "History").length > 1))
     assert.ok(
       samples.some((model) =>
@@ -185,6 +200,44 @@ describe("MachineTest finite models", () => {
       )
     )
   })
+
+  it.effect("generates firing event-to-always and event-to-completion chains", () =>
+    Effect.gen(function*() {
+      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 2_000, seed: 12_773 })
+      const witnesses = new Map<"always" | "done", {
+        readonly event: string
+        readonly model: MachineTest.FiniteModel
+      }>()
+
+      for (const model of samples) {
+        for (const eventTag of model.events) {
+          const reference = MachineTest.interpretModel(model, [eventTag])
+          const triggers = reference.steps[0]?.microsteps.flatMap((microstep) =>
+            microstep.transitions.map(({ trigger }) => trigger.type)
+          ) ?? []
+          if (triggers[0] !== "event") {
+            continue
+          }
+          if (triggers.includes("always") && !witnesses.has("always")) {
+            witnesses.set("always", { event: eventTag, model })
+          }
+          if (triggers.includes("done") && !witnesses.has("done")) {
+            witnesses.set("done", { event: eventTag, model })
+          }
+        }
+        if (witnesses.size === 2) {
+          break
+        }
+      }
+
+      assert.ok(witnesses.has("always"), "generated models must exercise an event -> always chain")
+      assert.ok(witnesses.has("done"), "generated models must exercise an event -> completion chain")
+      for (const witness of witnesses.values()) {
+        const machine = MachineTest.compileModel(witness.model)
+        const trace = yield* MachineTest.run(machine, { events: [{ _tag: witness.event }] })
+        yield* MachineTest.verifyModel(witness.model, trace)
+      }
+    }))
 
   it.effect("replays exact generated root and nested value-mutation/capture/restore scenarios", () =>
     Effect.gen(function*() {
@@ -252,15 +305,15 @@ describe("MachineTest finite models", () => {
       )
 
       const actualTransitions = Machine.transitionDefinitions(machine)
-        .filter(({ trigger }) => trigger.type === "event")
+        .filter(({ trigger }) => trigger.type !== "choice")
         .map(canonicalTransition)
       assert.strictEqual(actualTransitions.length, model.transitions.length)
       for (let index = 0; index < model.transitions.length; index++) {
         const expected = model.transitions[index]!
         const actual = actualTransitions[index]!
         assert.strictEqual(actual.source, expected.source)
-        assert.strictEqual(actual.event, expected.event)
-        assert.strictEqual(actual.reenter, expected.reenter)
+        assert.deepStrictEqual(actual.trigger, expected.trigger)
+        assert.strictEqual(actual.reenter, "reenter" in expected ? expected.reenter : false)
         if (expected.target === undefined) {
           assert.strictEqual(actual.targets, undefined)
         } else {
@@ -315,7 +368,12 @@ describe("MachineTest finite models", () => {
         ],
         initial: "right",
         events: ["Switch"],
-        transitions: [{ source: "right.idle", event: "Switch", target: "left", reenter: true }]
+        transitions: [{
+          source: "right.idle",
+          trigger: { type: "event", event: "Switch" },
+          target: "left",
+          reenter: true
+        }]
       }
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Switch" }] })
@@ -376,7 +434,11 @@ describe("MachineTest finite models", () => {
       transitions: []
     }
     assert.throws(
-      () => MachineTest.compileModel({ ...base, transitions: [{ source: "missing", event: "Go", reenter: false }] }),
+      () =>
+        MachineTest.compileModel({
+          ...base,
+          transitions: [{ source: "missing", trigger: { type: "event", event: "Go" }, reenter: false }]
+        }),
       /invalid transition source/
     )
     assert.throws(
@@ -384,8 +446,8 @@ describe("MachineTest finite models", () => {
         MachineTest.compileModel({
           ...base,
           transitions: [
-            { source: "idle", event: "Go", reenter: false },
-            { source: "idle", event: "Go", target: "idle", reenter: true }
+            { source: "idle", trigger: { type: "event", event: "Go" }, reenter: false },
+            { source: "idle", trigger: { type: "event", event: "Go" }, target: "idle", reenter: true }
           ]
         }),
       /duplicate transition/
@@ -417,6 +479,40 @@ describe("MachineTest finite models", () => {
           transitions: []
         }),
       /unknown initial child/
+    )
+
+    assert.throws(
+      () =>
+        MachineTest.compileModel({
+          ...base,
+          transitions: [{
+            source: "idle",
+            trigger: { type: "always" },
+            reenter: false
+          }]
+        } as unknown as MachineTest.FiniteModel),
+      /event-only reenter option/
+    )
+
+    assert.throws(
+      () =>
+        MachineTest.compileModel({
+          roots: [{
+            _tag: "Compound",
+            key: "root",
+            value: 0,
+            initial: "idle",
+            states: [{ _tag: "Atomic", key: "idle", value: 1 }]
+          }],
+          initial: "root",
+          events: ["Unused"],
+          transitions: [{
+            source: "root",
+            trigger: { type: "done" },
+            reenter: false
+          }]
+        } as unknown as MachineTest.FiniteModel),
+      /event-only reenter option/
     )
   })
 
@@ -467,13 +563,18 @@ describe("MachineTest finite models", () => {
         transitions: [
           {
             source: mutationSource,
-            event: "Mutate",
+            trigger: { type: "event", event: "Mutate" },
             target: mutationSource,
             targetValue: 100,
             reenter: false
           },
-          { source: "root.work.phase.idle", event: "Leave", target: "outside", reenter: false },
-          { source: "outside", event: "Leave", target: history, reenter: false }
+          {
+            source: "root.work.phase.idle",
+            trigger: { type: "event", event: "Leave" },
+            target: "outside",
+            reenter: false
+          },
+          { source: "outside", trigger: { type: "event", event: "Leave" }, target: history, reenter: false }
         ],
         historyScenarios: [scenario]
       }

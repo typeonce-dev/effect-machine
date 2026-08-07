@@ -32,8 +32,107 @@ describe("Machine inspection", () => {
   })
 
   it("preserves state paths for structural inspection", () => {
-    expect(Machine.stateNodes(machine)[0]!.path).type.toBe<"root" | "root.idle" | "root.recent">()
+    const nodes = Machine.stateNodes(machine)
+    expect(nodes[0]!.path).type.toBe<"root" | "root.idle" | "root.recent">()
+    expect(nodes.find((node) => node.type === "history")!.path).type.toBe<"root.recent">()
+    expect(nodes.find((node) => node.type === "history")!.parent).type.toBe<"root" | "root.idle">()
+    expect(nodes.find((node) => node.type === "atomic")!.path).type.toBe<"root" | "root.idle">()
     expect(Machine.configuration(machine, initial)[0]!.path).type.toBe<"root" | "root.idle">()
+  })
+
+  it("narrows every compiled state-node property from its type", () => {
+    const inspect = (node: Machine.Machine.StateNode<"state">) => {
+      switch (node.type) {
+        case "atomic":
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.output).type.toBe<undefined>()
+          expect(node.history).type.toBe<undefined>()
+          expect(node.children).type.toBe<readonly []>()
+          expect(node.initial).type.toBe<undefined>()
+          expect(node.parent).type.toBe<"state" | undefined>()
+          break
+        case "compound":
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.output).type.toBe<undefined>()
+          expect(node.history).type.toBe<undefined>()
+          expect(node.children).type.toBe<ReadonlyArray<"state">>()
+          expect(node.initial).type.toBe<"state">()
+          expect(node.parent).type.toBe<"state" | undefined>()
+          break
+        case "parallel":
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.output).type.toBe<Schema.Top | undefined>()
+          expect(node.history).type.toBe<undefined>()
+          expect(node.children).type.toBe<ReadonlyArray<"state">>()
+          expect(node.initial).type.toBe<undefined>()
+          expect(node.parent).type.toBe<"state" | undefined>()
+          break
+        case "final":
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.output).type.toBe<Schema.Top | undefined>()
+          expect(node.history).type.toBe<undefined>()
+          expect(node.children).type.toBe<readonly []>()
+          expect(node.initial).type.toBe<undefined>()
+          expect(node.parent).type.toBe<"state" | undefined>()
+          break
+        case "history":
+          expect(node.schema).type.toBe<undefined>()
+          expect(node.output).type.toBe<undefined>()
+          expect(node.history).type.toBe<"shallow" | "deep">()
+          expect(node.children).type.toBe<readonly []>()
+          expect(node.initial).type.toBe<undefined>()
+          expect(node.parent).type.toBe<"state">()
+          break
+        case "choice":
+          expect(node.schema).type.toBe<undefined>()
+          expect(node.output).type.toBe<undefined>()
+          expect(node.history).type.toBe<undefined>()
+          expect(node.children).type.toBe<readonly []>()
+          expect(node.initial).type.toBe<undefined>()
+          expect(node.parent).type.toBe<"state">()
+          break
+        default:
+          expect(node).type.toBe<never>()
+      }
+    }
+
+    expect(inspect).type.toBe<(node: Machine.Machine.StateNode<"state">) => void>()
+  })
+
+  it("keeps choice initial paths while configuration remains active-only", () => {
+    const ChoiceStates = Machine.defineStates({
+      Flow: {
+        schema: Root,
+        initial: "Routing",
+        states: {
+          Routing: { type: "choice" },
+          Ready: Idle
+        }
+      }
+    })
+    const choiceMachine = Machine.make({
+      states: ChoiceStates.states,
+      events: [],
+      initial: () => ChoiceStates.initial.Flow(new Root({}), (flow) => flow.Routing())
+    })
+    const flow = Machine.stateNodes(choiceMachine).find((node) => node.type === "compound")!
+    const routing = Machine.stateNodes(choiceMachine).find((node) => node.type === "choice")!
+
+    expect(flow.path).type.toBe<"Flow" | "Flow.Ready">()
+    expect(flow.initial).type.toBe<"Flow" | "Flow.Ready" | "Flow.Routing">()
+    expect<"Flow.Routing">().type.toBeAssignableTo<typeof flow.initial>()
+    expect(routing.path).type.toBe<"Flow.Routing">()
+    expect(routing.parent).type.toBe<"Flow" | "Flow.Ready">()
+
+    const settled: Machine.Machine.Snapshot<typeof ChoiceStates.states> = {
+      path: "Flow",
+      value: new Root({}),
+      state: { path: "Flow.Ready", value: new Idle({}) }
+    }
+    const configuration = Machine.configuration(choiceMachine, settled)
+    expect<(typeof configuration)[number]["path"]>().type.toBe<"Flow" | "Flow.Ready">()
+    expect<(typeof configuration)[number]["type"]>().type.toBe<"atomic" | "compound" | "parallel" | "final">()
+    expect<Extract<(typeof configuration)[number], { readonly type: "history" | "choice" }>>().type.toBe<never>()
   })
 
   it("preserves source paths and event tags for transition inspection", () => {

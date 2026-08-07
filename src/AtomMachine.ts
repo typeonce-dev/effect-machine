@@ -13,6 +13,7 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
 import * as Model from "./internal/machineModel.js"
+import type { EnsureExecutable } from "./internal/machineReadiness.js"
 import * as Machine from "./Machine.js"
 
 /**
@@ -124,7 +125,7 @@ const startMachineAtomEffect = <
       OutputStates,
       InputEvents
     >
-    & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   args: [...Machine.Machine.InputArgs<Input>]
 ): Effect.Effect<
   Machine.MachineRef<
@@ -815,16 +816,14 @@ type EnsureBoundResumeRequirements<Services, M extends Machine.Machine.Any> =
       readonly [BoundRequirementsTypeId]: MissingBoundResumeRequirements<Services, M>
     }
 
-type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ?
-  {
+type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ? {
     readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
   }
-  : Machine.Machine.EnsureOutputImplementations<Machine.Machine.States<M>, Machine.Machine.OutputStates<M>>
-
-type EnsureMachineHistoryImplementations<M extends Machine.Machine.Any> = Machine.Machine.EnsureHistoryImplementations<
-  Machine.Machine.States<M>,
-  Machine.Machine.UnhandledStates<M>
->
+  : EnsureExecutable<
+    Machine.Machine.States<M>,
+    Machine.Machine.UnhandledStates<M>,
+    Machine.Machine.OutputStates<M>
+  >
 
 type MachineInputArgsOf<M extends Machine.Machine.Any> = [
   ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
@@ -871,7 +870,7 @@ export interface Bound<Services, RuntimeError = never> {
     machine:
       & M
       & EnsureBoundRequirements<Services, NoInfer<M>>
-      & EnsureMachineOutputImplementations<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>,
     ...args: MachineInputArgsOf<M>
   ) => MachineAtomOf<M, RuntimeError>
 
@@ -880,8 +879,7 @@ export interface Bound<Services, RuntimeError = never> {
     machine:
       & M
       & EnsureBoundResumeRequirements<Services, NoInfer<M>>
-      & EnsureMachineOutputImplementations<NoInfer<M>>
-      & EnsureMachineHistoryImplementations<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ) => ResumedMachineAtomOf<M, RuntimeError>
 }
@@ -935,7 +933,7 @@ export const make: {
           Machine.Machine.EmitOf<Emits>
         >
       >
-      & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
+      & EnsureExecutable<States, UnhandledStates, OutputStates>,
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
@@ -964,8 +962,7 @@ export const resume: {
     machine:
       & M
       & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
-      & EnsureMachineOutputImplementations<NoInfer<M>>
-      & EnsureMachineHistoryImplementations<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ): ResumedMachineAtomOf<M, never>
 } = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {

@@ -10,7 +10,6 @@ import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
@@ -301,10 +300,10 @@ const startInternal: <
   const sessionId = yield* options.runtime.nextSessionId
   const id = options.id ?? sessionId
   const queue = yield* Queue.unbounded<Event>()
-  const stopSelfDeferred = yield* Deferred.make<Effect.Effect<void>>()
+  const stopRequested = yield* Deferred.make<void>()
+  const terminalized = yield* Deferred.make<void>()
   const externalFailure = yield* Deferred.make<never, Error>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
-  const fiberRef = yield* Deferred.make<Fiber.Fiber<void>>()
   const changes = yield* PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({
     replay: 1
   })
@@ -319,8 +318,8 @@ const startInternal: <
 
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
-      ? Deferred.succeed(stopSelfDeferred, Effect.void).pipe(
-        Effect.andThen(closeChildren(exit))
+      ? closeChildren(exit).pipe(
+        Effect.ensuring(Deferred.succeed(terminalized, void 0))
       )
       : Effect.void
 
@@ -537,10 +536,21 @@ const startInternal: <
     >
   }
 
+  let initializing = true
+  const requestStop = Deferred.succeed(stopRequested, void 0).pipe(Effect.asVoid)
   const self: ProcessAddress<Event> = {
     id,
     sessionId,
-    stop: Deferred.await(stopSelfDeferred).pipe(Effect.flatMap((stopSelf) => stopSelf)),
+    // Initialization must finish constructing a state before a stopped
+    // snapshot can be published. A stop requested there is therefore recorded
+    // and returns so initialization can finish. Once running, the requesting
+    // process waits forever and is interrupted by the supervisor after the
+    // stop request wins, so execution never continues after `self.stop`.
+    stop: Effect.suspend(() =>
+      initializing
+        ? requestStop
+        : requestStop.pipe(Effect.andThen(Effect.never))
+    ),
     send: (event: Event) =>
       Queue.offer(queue, event).pipe(
         Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
@@ -557,7 +567,12 @@ const startInternal: <
     failCause: (cause) => Deferred.failCause(externalFailure, cause as Cause.Cause<Error>)
   }
 
-  const initial = yield* logic.initial(scope).pipe(Effect.onExit(cleanupStartupFailure))
+  const initial = yield* logic.initial(scope).pipe(
+    Effect.onExit(cleanupStartupFailure),
+    Effect.ensuring(Effect.sync(() => {
+      initializing = false
+    }))
+  )
   const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
     revision: 0,
     snapshot: {
@@ -566,8 +581,6 @@ const startInternal: <
     }
   })
   const terminalizing = yield* Ref.make(false)
-  const terminalized = yield* Deferred.make<void>()
-
   const publishSnapshot = (
     snapshot: VersionedSnapshot<State, Error, Output>
   ): Effect.Effect<VersionedSnapshot<State, Error, Output>> =>
@@ -702,29 +715,64 @@ const startInternal: <
       )
     )
 
-  const stopSelf: Effect.Effect<void> = Effect.uninterruptible(
+  const reserveStoppedSnapshot = reserveTerminalSnapshot((snapshot) => ({
+    status: "stopped",
+    state: snapshot.state
+  }))
+
+  const reserveFailureSnapshot = (cause: Cause.Cause<Error>) =>
     reserveTerminalSnapshot((snapshot) => ({
-      status: "stopped",
-      state: snapshot.state
-    })).pipe(
+      status: "error",
+      state: snapshot.state,
+      cause
+    }))
+
+  const reserveSuccessSnapshot = (output: Output) =>
+    reserveTerminalSnapshot((snapshot) => ({
+      status: "done",
+      state: snapshot.state,
+      output
+    }))
+
+  const terminalizeReservedStop = (
+    snapshot: RuntimeSnapshot<State, Error, Output>
+  ): Effect.Effect<void> => {
+    const exit = Exit.void
+    return terminalizeWith(
+      snapshot,
+      exit,
+      Deferred.fail(done, new StoppedError())
+    )
+  }
+
+  const terminalizeReservedFailure = (
+    snapshot: RuntimeSnapshot<State, Error, Output>,
+    cause: Cause.Cause<Error>
+  ): Effect.Effect<void> => {
+    const exit = Exit.failCause(cause)
+    return terminalizeWith(snapshot, exit, Deferred.failCause(done, cause))
+  }
+
+  const terminalizeReservedSuccess = (
+    snapshot: RuntimeSnapshot<State, Error, Output>,
+    output: Output
+  ): Effect.Effect<void> => {
+    const exit = Exit.succeed(output)
+    return terminalizeWith(snapshot, exit, Deferred.succeed(done, output))
+  }
+
+  const terminalizeStop: Effect.Effect<void> = Effect.uninterruptible(
+    reserveStoppedSnapshot.pipe(
       Effect.flatMap((snapshot) =>
         snapshot === undefined
           ? Deferred.await(terminalized)
-          : Effect.suspend(() => {
-            const exit = Exit.void
-            return Deferred.await(fiberRef).pipe(
-              Effect.flatMap(Fiber.interrupt),
-              Effect.andThen(
-                terminalizeWith(
-                  snapshot,
-                  exit,
-                  Deferred.fail(done, new StoppedError())
-                )
-              )
-            )
-          })
+          : terminalizeReservedStop(snapshot)
       )
     )
+  )
+
+  const stop: Effect.Effect<void> = Effect.uninterruptible(
+    requestStop.pipe(Effect.andThen(Deferred.await(terminalized)))
   )
 
   const context: ProcessContext<State, Event> = {
@@ -746,7 +794,6 @@ const startInternal: <
   }
 
   yield* publishSnapshot(yield* SynchronizedRef.get(current))
-  yield* Deferred.succeed(stopSelfDeferred, stopSelf)
 
   const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
     Effect.gen(function*() {
@@ -766,38 +813,6 @@ const startInternal: <
     })
   )
 
-  const terminalizeFailure = (cause: Cause.Cause<Error>): Effect.Effect<void> =>
-    reserveTerminalSnapshot((snapshot) => ({
-      status: "error",
-      state: snapshot.state,
-      cause
-    })).pipe(
-      Effect.flatMap((snapshot) =>
-        snapshot === undefined
-          ? Effect.void
-          : Effect.suspend(() => {
-            const exit = Exit.failCause(cause)
-            return terminalizeWith(snapshot, exit, Deferred.failCause(done, cause))
-          })
-      )
-    )
-
-  const terminalizeSuccess = (output: Output): Effect.Effect<void> =>
-    reserveTerminalSnapshot((snapshot) => ({
-      status: "done",
-      state: snapshot.state,
-      output
-    })).pipe(
-      Effect.flatMap((snapshot) =>
-        snapshot === undefined
-          ? Effect.void
-          : Effect.suspend(() => {
-            const exit = Exit.succeed(output)
-            return terminalizeWith(snapshot, exit, Deferred.succeed(done, output))
-          })
-      )
-    )
-
   const ref: MachineRef<State, Event, Error, Output> = {
     id,
     sessionId,
@@ -805,7 +820,7 @@ const startInternal: <
     snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
     join: Deferred.await(done),
-    stop: stopSelf,
+    stop,
     send: self.send,
     child: getChild,
     childChanges
@@ -815,17 +830,86 @@ const startInternal: <
     yield* options.onReady(ref)
   }
 
-  const runFiber: Effect.Effect<void, never, Requirements> = Effect.raceFirst(
-    logic.run(context),
-    Deferred.await(externalFailure)
-  ).pipe(
-    Effect.matchCauseEffect({
-      onFailure: terminalizeFailure,
-      onSuccess: terminalizeSuccess
-    })
+  type ProcessTermination =
+    | { readonly _tag: "Stopped"; readonly snapshot: RuntimeSnapshot<State, Error, Output> }
+    | {
+      readonly _tag: "Done"
+      readonly snapshot: RuntimeSnapshot<State, Error, Output>
+      readonly output: Output
+    }
+    | {
+      readonly _tag: "Failure"
+      readonly snapshot: RuntimeSnapshot<State, Error, Output>
+      readonly cause: Cause.Cause<Error>
+    }
+
+  const arbitration = yield* Deferred.make<ProcessTermination>()
+  // Only the actual worker and stop waiter are restored to interruptibility.
+  // Reserving a terminal snapshot, publishing the shared arbitration result,
+  // and terminalizing stay masked so scope interruption cannot abandon a
+  // reservation. Both contenders read the same result: a contender that loses
+  // the reservation cannot finish the race with a different outcome.
+  const runFiber: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
+    Deferred.poll(stopRequested).pipe(
+      Effect.flatMap((requested) => {
+        if (Option.isSome(requested)) {
+          return terminalizeStop
+        }
+        const awaitArbitration = Deferred.await(arbitration)
+        const completeArbitration = (termination: ProcessTermination) =>
+          Deferred.succeed(arbitration, termination).pipe(
+            Effect.andThen(awaitArbitration)
+          )
+        const stopContender = restore(Deferred.await(stopRequested)).pipe(
+          Effect.andThen(reserveStoppedSnapshot),
+          Effect.flatMap((snapshot) =>
+            snapshot === undefined
+              ? awaitArbitration
+              : completeArbitration({ _tag: "Stopped", snapshot })
+          )
+        )
+        const workerContender: Effect.Effect<ProcessTermination, never, Requirements> = restore(
+          Effect.raceFirst(
+            Effect.suspend(() => logic.run(context)),
+            Deferred.await(externalFailure)
+          )
+        ).pipe(
+          Effect.exit,
+          Effect.flatMap((exit) =>
+            Exit.isFailure(exit)
+              ? reserveFailureSnapshot(exit.cause).pipe(
+                Effect.flatMap((snapshot) =>
+                  snapshot === undefined
+                    ? awaitArbitration
+                    : completeArbitration({ _tag: "Failure", snapshot, cause: exit.cause })
+                )
+              )
+              : reserveSuccessSnapshot(exit.value).pipe(
+                Effect.flatMap((snapshot) =>
+                  snapshot === undefined
+                    ? awaitArbitration
+                    : completeArbitration({ _tag: "Done", snapshot, output: exit.value })
+                )
+              )
+          )
+        )
+        return Effect.raceFirst(workerContender, stopContender).pipe(
+          Effect.flatMap((termination) => {
+            switch (termination._tag) {
+              case "Stopped":
+                return terminalizeReservedStop(termination.snapshot)
+              case "Done":
+                return terminalizeReservedSuccess(termination.snapshot, termination.output)
+              case "Failure":
+                return terminalizeReservedFailure(termination.snapshot, termination.cause)
+            }
+          })
+        )
+      })
+    )
   )
 
-  const fiber = yield* runFiber.pipe(
+  yield* runFiber.pipe(
     (effect) =>
       options.fiberScope !== undefined ?
         Effect.forkIn(effect, options.fiberScope)
@@ -833,7 +917,6 @@ const startInternal: <
         Effect.forkDetach(effect)
         : Effect.forkChild(effect)
   )
-  yield* Deferred.succeed(fiberRef, fiber)
   yield* Effect.yieldNow
 
   return ref

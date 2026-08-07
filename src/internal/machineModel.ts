@@ -259,23 +259,72 @@ export const makeChoiceTarget = (
 
 export const isChoiceTarget = (u: unknown): u is ChoiceTarget => hasProperty(u, ChoiceTargetTypeId)
 
+interface NormalizedStateNodeDefinitionBase {
+  readonly annotations: Readonly<Machine.StateNodeAnnotations> | undefined
+}
+
+type NormalizedStateNodeDefinition =
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "atomic"
+    readonly schema: Machine.TaggedSchema
+    readonly output: undefined
+    readonly history: undefined
+    readonly initial: undefined
+    readonly states: undefined
+  })
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "compound"
+    readonly schema: Machine.TaggedSchema
+    readonly output: undefined
+    readonly history: undefined
+    readonly initial: string
+    readonly states: Machine.StateTree
+  })
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "parallel"
+    readonly schema: Machine.TaggedSchema
+    readonly output: Schema.Top | undefined
+    readonly history: undefined
+    readonly initial: undefined
+    readonly states: Machine.StateTree
+  })
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "final"
+    readonly schema: Machine.TaggedSchema
+    readonly output: Schema.Top | undefined
+    readonly history: undefined
+    readonly initial: undefined
+    readonly states: undefined
+  })
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "history"
+    readonly schema: undefined
+    readonly output: undefined
+    readonly history: "shallow" | "deep"
+    readonly initial: undefined
+    readonly states: undefined
+  })
+  | (NormalizedStateNodeDefinitionBase & {
+    readonly type: "choice"
+    readonly schema: undefined
+    readonly output: undefined
+    readonly history: undefined
+    readonly initial: undefined
+    readonly states: undefined
+  })
+
 export const getStateNodeDefinition = (
   path: string,
   definition: Machine.TaggedSchema | Machine.StateNodeConfig
-): {
-  readonly schema: Machine.TaggedSchema | undefined
-  readonly output: Schema.Top | undefined
-  readonly annotations: Readonly<Machine.StateNodeAnnotations> | undefined
-  readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
-  readonly initial: string | undefined
-  readonly states: Machine.StateTree | undefined
-} => {
+): NormalizedStateNodeDefinition => {
   if (!Schema.isSchema(definition) && (definition as any).type === "history") {
+    const history = definition as Machine.HistoryStateNodeConfig
     return {
       schema: undefined,
       output: undefined,
-      annotations: (definition as Machine.HistoryStateNodeConfig).annotations,
+      annotations: history.annotations,
       type: "history",
+      history: history.history === "deep" ? "deep" : "shallow",
       initial: undefined,
       states: undefined
     }
@@ -286,6 +335,7 @@ export const getStateNodeDefinition = (
       output: undefined,
       annotations: (definition as Machine.ChoiceStateNodeConfig).annotations,
       type: "choice",
+      history: undefined,
       initial: undefined,
       states: undefined
     }
@@ -296,6 +346,7 @@ export const getStateNodeDefinition = (
       output: undefined,
       annotations: Schema.resolveAnnotations(definition),
       type: "atomic",
+      history: undefined,
       initial: undefined,
       states: undefined
     }
@@ -316,6 +367,7 @@ export const getStateNodeDefinition = (
         output: Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined,
         annotations: Schema.resolveAnnotations(definition.schema),
         type: "parallel",
+        history: undefined,
         initial: undefined,
         states: (definition as any).states as Machine.StateTree
       }
@@ -328,18 +380,31 @@ export const getStateNodeDefinition = (
       output: undefined,
       annotations: Schema.resolveAnnotations(definition.schema),
       type: "compound",
+      history: undefined,
       initial: (definition as any).initial,
       states: (definition as any).states as Machine.StateTree
     }
   }
-  return {
-    schema: definition.schema as Machine.TaggedSchema,
-    output: Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined,
-    annotations: Schema.resolveAnnotations(definition.schema),
-    type: definition.type === "final" ? "final" : "atomic",
-    initial: undefined,
-    states: undefined
-  }
+  const output = Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined
+  return definition.type === "final"
+    ? {
+      schema: definition.schema as Machine.TaggedSchema,
+      output,
+      annotations: Schema.resolveAnnotations(definition.schema),
+      type: "final",
+      history: undefined,
+      initial: undefined,
+      states: undefined
+    }
+    : {
+      schema: definition.schema as Machine.TaggedSchema,
+      output: undefined,
+      annotations: Schema.resolveAnnotations(definition.schema),
+      type: "atomic",
+      history: undefined,
+      initial: undefined,
+      states: undefined
+    }
 }
 
 export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNodes => {
@@ -354,40 +419,110 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
       }
       const path = parent === undefined ? key : `${parent}.${key}`
       const definition = getStateNodeDefinition(path, tree[key])
-      const node: Machine.StateNode = {
-        path,
-        key,
-        schema: definition.schema,
-        output: definition.output,
-        annotations: definition.annotations,
-        type: definition.type,
-        parent,
-        children: [] as ReadonlyArray<string>,
-        initial: definition.initial === undefined ? undefined : `${path}.${definition.initial}`,
-        history: definition.type === "history"
-          ? ((tree[key] as any).history === "deep" ? "deep" : "shallow")
-          : undefined,
-        order
+      let node: Machine.StateNode
+      let childStates: Machine.StateTree | undefined
+      const base = { path, key, annotations: definition.annotations, order }
+      switch (definition.type) {
+        case "atomic":
+          node = {
+            ...base,
+            type: "atomic",
+            schema: definition.schema,
+            output: undefined,
+            history: undefined,
+            parent,
+            children: [],
+            initial: undefined
+          }
+          break
+        case "compound":
+          node = {
+            ...base,
+            type: "compound",
+            schema: definition.schema,
+            output: undefined,
+            history: undefined,
+            parent,
+            children: [],
+            initial: `${path}.${definition.initial}`
+          }
+          childStates = definition.states
+          break
+        case "parallel":
+          node = {
+            ...base,
+            type: "parallel",
+            schema: definition.schema,
+            output: definition.output,
+            history: undefined,
+            parent,
+            children: [],
+            initial: undefined
+          }
+          childStates = definition.states
+          break
+        case "final":
+          node = {
+            ...base,
+            type: "final",
+            schema: definition.schema,
+            output: definition.output,
+            history: undefined,
+            parent,
+            children: [],
+            initial: undefined
+          }
+          break
+        case "history":
+          if (parent === undefined) {
+            throw new Error(`Machine history state "${path}" must belong to a parent state`)
+          }
+          node = {
+            ...base,
+            type: "history",
+            schema: undefined,
+            output: undefined,
+            history: definition.history,
+            parent,
+            children: [],
+            initial: undefined
+          }
+          break
+        case "choice":
+          if (parent === undefined) {
+            throw new Error(`Machine choice state "${path}" must belong to a parent state`)
+          }
+          node = {
+            ...base,
+            type: "choice",
+            schema: undefined,
+            output: undefined,
+            history: undefined,
+            parent,
+            children: [],
+            initial: undefined
+          }
+          break
       }
       byPath.set(path, node)
       order += 1
       if (definition.type === "history" || definition.type === "choice") {
-        if (parent === undefined) {
-          throw new Error(`Machine ${definition.type} state "${path}" must belong to a parent state`)
-        }
         continue
       }
       paths.push(path)
-      if (definition.states !== undefined) {
-        const children = compile(definition.states, path)
-        if (
-          node.type === "compound" &&
-          (node.initial === undefined ||
-            (!children.includes(node.initial) && byPath.get(node.initial)?.type !== "choice"))
-        ) {
-          throw new Error(`Machine.make expected compound state "${path}" initial child to exist`)
+      if (childStates !== undefined) {
+        const children = compile(childStates, path)
+        if (node.type === "compound") {
+          if (!children.includes(node.initial) && byPath.get(node.initial)?.type !== "choice") {
+            throw new Error(`Machine.make expected compound state "${path}" initial child to exist`)
+          }
+          node = { ...node, children }
+        } else if (node.type === "parallel") {
+          node = { ...node, children }
+        } else {
+          throw new Error(`Machine state "${path}" cannot declare child states`)
         }
-        ;(node as { children: ReadonlyArray<string> }).children = children
+        byPath.set(path, node)
       }
     }
     return paths
@@ -680,7 +815,7 @@ export const getNode = (machine: Machine.Any, path: string): Machine.StateNode =
 }
 
 export const getStateNodeSchema = (node: Machine.StateNode): Machine.TaggedSchema => {
-  if (node.schema === undefined || node.type === "history" || node.type === "choice") {
+  if (node.schema === undefined) {
     throw new Error(`Machine pseudo-state "${node.path}" has no active value schema`)
   }
   return node.schema

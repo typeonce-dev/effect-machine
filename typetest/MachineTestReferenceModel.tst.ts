@@ -7,7 +7,7 @@ describe("MachineTest finite-model reference interpreter", () => {
     roots: [{ _tag: "Atomic", key: "idle", value: 0 }],
     initial: "idle",
     events: ["Tick"],
-    transitions: [{ source: "idle", event: "Tick", reenter: false }]
+    transitions: [{ source: "idle", trigger: { type: "event", event: "Tick" }, reenter: false }]
   }
   const reference = MachineTest.interpretModel(model, ["Tick"])
 
