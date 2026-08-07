@@ -8,10 +8,31 @@ if (typeof globalThis.gc !== "function") {
 
 const implementationId = process.argv[2]
 const counts = JSON.parse(process.argv[3] ?? "[]")
+const profileId = process.argv[4] ?? "idle"
 const implementation = implementations.find((candidate) => candidate.implementation === implementationId)
 
 if (implementation === undefined) {
   throw new Error(`Unknown runtime benchmark implementation: ${implementationId}`)
+}
+
+const profile = profileId === "idle"
+  ? {
+    id: "idle",
+    label: "Idle machine",
+    start: implementation.startCounters,
+    stop: implementation.stopCounters
+  }
+  : profileId === "parent-with-child"
+  ? {
+    id: "parent-with-child",
+    label: "Idle parent with one child",
+    start: implementation.startChildCounters,
+    stop: implementation.stopChildCounters
+  }
+  : undefined
+
+if (profile === undefined) {
+  throw new Error(`Unknown runtime memory profile: ${profileId}`)
 }
 
 const collectGarbage = async () => {
@@ -35,8 +56,8 @@ const linearSlope = (points, value) => {
 }
 
 // Trigger implementation-specific lazy initialization before taking the baseline.
-const warmup = await implementation.startCounter()
-await implementation.stopCounter(warmup)
+const warmup = await profile.start(1)
+await profile.stop(warmup)
 await collectGarbage()
 
 const baseline = process.memoryUsage()
@@ -45,7 +66,7 @@ const refs = []
 
 try {
   for (const count of counts) {
-    refs.push(...await implementation.startCounters(count - refs.length))
+    refs.push(...await profile.start(count - refs.length))
     await collectGarbage()
     const usage = process.memoryUsage()
     points.push({
@@ -57,7 +78,7 @@ try {
     })
   }
 } finally {
-  await implementation.stopCounters(refs)
+  await profile.stop(refs)
   await collectGarbage()
 }
 
@@ -65,6 +86,8 @@ process.stdout.write(JSON.stringify({
   implementation: implementation.implementation,
   implementationLabel: implementation.label,
   implementationVersion: implementation.version,
+  id: profile.id,
+  label: profile.label,
   baseline: {
     heapUsedBytes: baseline.heapUsed,
     rssBytes: baseline.rss

@@ -1,14 +1,19 @@
 import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import * as XStateV5 from "xstate-v5"
 import * as XStateV6 from "xstate-v6"
 import { effectMachineAdapter } from "./counter.mjs"
 import { makeXStateAdapter } from "./xstate.mjs"
 
 const readPackageVersion = (path) => JSON.parse(readFileSync(path, "utf8")).version
+const implementationRoot = resolve(
+  process.env.EFFECT_MACHINE_BENCHMARK_ROOT ?? fileURLToPath(new URL("../..", import.meta.url))
+)
 
 export const packageVersions = {
-  effectMachine: readPackageVersion(new URL("../../package.json", import.meta.url)),
-  effect: readPackageVersion(new URL("../../node_modules/effect/package.json", import.meta.url)),
+  effectMachine: readPackageVersion(resolve(implementationRoot, "package.json")),
+  effect: readPackageVersion(resolve(implementationRoot, "node_modules/effect/package.json")),
   tinybench: readPackageVersion(new URL("../../node_modules/tinybench/package.json", import.meta.url)),
   xstateV5: readPackageVersion(new URL("../../node_modules/xstate-v5/package.json", import.meta.url)),
   xstateV6: readPackageVersion(new URL("../../node_modules/xstate-v6/package.json", import.meta.url))

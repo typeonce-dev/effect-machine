@@ -11,8 +11,12 @@ The command reports:
 
 - pure `Machine.plan` counter-transition throughput;
 - end-to-end useful-increment throughput for a burst sent to one running machine;
+- the same running burst while a consumer drains every published snapshot;
+- repeated child lookup and delivery to one running child;
 - machine start-and-stop throughput;
-- idle heap and resident-memory growth at 100, 500, and 1,000 live machines.
+- parent-with-child start-and-stop throughput;
+- heap and resident-memory growth for both idle machines and idle parents with
+  one child, at 100, 500, and 1,000 live units.
 
 The comparison dependencies use package aliases, so XState 5 and 6 can be
 loaded by the same process:
@@ -68,12 +72,15 @@ pnpm perf:runtime -- --output runtime-performance.json
 Prefer `--output` for scripts: pnpm and the preceding build may add their own
 lines to standard output before `--json` is printed.
 
-Pull requests run the suite three times for both the base and pull request
-revisions on the same GitHub-hosted runner. The workflow publishes the median
-of those process-level results to the job summary and a sticky pull request
-comment. The benchmark workflow has read-only repository access; a separate
-trusted `workflow_run` workflow validates the uploaded JSON before receiving
-permission to update the comment.
+Pull requests run the pull request's benchmark harness five times against both
+the base and pull request library revisions on the same GitHub-hosted runner.
+Using one harness revision means a newly added scenario can compare both
+implementations immediately. The runs are interleaved to reduce time-dependent
+machine drift. The workflow publishes the process-level median and its median
+absolute deviation to the job summary and a sticky pull request comment. The
+benchmark workflow has read-only repository access; a separate trusted
+`workflow_run` workflow validates the uploaded JSON before receiving permission
+to update the comment.
 
 The implementation lives in `scripts/runtime-performance.mjs`; the Effect
 Machine fixture is in `perf/runtime/counter.mjs`, and the comparison adapter is
