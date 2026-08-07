@@ -265,6 +265,7 @@ export const getStateNodeDefinition = (
 ): {
   readonly schema: Machine.TaggedSchema | undefined
   readonly output: Schema.Top | undefined
+  readonly annotations: Readonly<Machine.StateNodeAnnotations> | undefined
   readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly initial: string | undefined
   readonly states: Machine.StateTree | undefined
@@ -273,6 +274,7 @@ export const getStateNodeDefinition = (
     return {
       schema: undefined,
       output: undefined,
+      annotations: (definition as Machine.HistoryStateNodeConfig).annotations,
       type: "history",
       initial: undefined,
       states: undefined
@@ -282,6 +284,7 @@ export const getStateNodeDefinition = (
     return {
       schema: undefined,
       output: undefined,
+      annotations: (definition as Machine.ChoiceStateNodeConfig).annotations,
       type: "choice",
       initial: undefined,
       states: undefined
@@ -291,6 +294,7 @@ export const getStateNodeDefinition = (
     return {
       schema: definition as Machine.TaggedSchema,
       output: undefined,
+      annotations: Schema.resolveAnnotations(definition),
       type: "atomic",
       initial: undefined,
       states: undefined
@@ -310,6 +314,7 @@ export const getStateNodeDefinition = (
       return {
         schema: definition.schema as Machine.TaggedSchema,
         output: Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined,
+        annotations: Schema.resolveAnnotations(definition.schema),
         type: "parallel",
         initial: undefined,
         states: (definition as any).states as Machine.StateTree
@@ -321,6 +326,7 @@ export const getStateNodeDefinition = (
     return {
       schema: definition.schema as Machine.TaggedSchema,
       output: undefined,
+      annotations: Schema.resolveAnnotations(definition.schema),
       type: "compound",
       initial: (definition as any).initial,
       states: (definition as any).states as Machine.StateTree
@@ -329,6 +335,7 @@ export const getStateNodeDefinition = (
   return {
     schema: definition.schema as Machine.TaggedSchema,
     output: Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined,
+    annotations: Schema.resolveAnnotations(definition.schema),
     type: definition.type === "final" ? "final" : "atomic",
     initial: undefined,
     states: undefined
@@ -352,6 +359,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
         key,
         schema: definition.schema,
         output: definition.output,
+        annotations: definition.annotations,
         type: definition.type,
         parent,
         children: [] as ReadonlyArray<string>,

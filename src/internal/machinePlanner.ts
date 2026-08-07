@@ -642,12 +642,14 @@ const makeTransitionContext = <
   machine: Machine<States, Events, any, any, any, any, any, any, any, any, Emits>,
   configuration: ActiveConfiguration,
   path: string,
-  event: Machine.EventByTag<Events, EventTag>
+  event: Machine.EventByTag<Events, EventTag>,
+  snapshot: Machine.Snapshot<States>
 ): Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any> => ({
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
+  snapshot,
   ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
   target: machine.makeTargetBuilder(path as StateId)
 })
@@ -662,13 +664,15 @@ const makeDoneContext = <
   configuration: ActiveConfiguration,
   path: string,
   event: Machine.LifecycleEvent<Events>,
-  output: unknown
+  output: unknown,
+  snapshot: Machine.Snapshot<States>
 ): Machine.DoneContext<States, Events, Emits, StateId> => ({
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   output: output as Machine.CompletionOutputByIdentifier<States, StateId>,
+  snapshot,
   ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
   target: machine.makeTargetBuilder(path as StateId)
 })
@@ -739,6 +743,8 @@ const selectAlwaysTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  let snapshot: Machine.Snapshot<States> | undefined
+  const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
       const always = normalizeTransition(machine.handlers[path]?.always)
@@ -769,6 +775,7 @@ const selectAlwaysTransitions = <
                 Machine.StateIdentifier<States>
               >,
               event,
+              snapshot: capturedSnapshot(),
               ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
               target: machine.makeTargetBuilder(path as Machine.StateIdentifier<States>)
             }
@@ -809,6 +816,8 @@ const selectDoneTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  let snapshot: Machine.Snapshot<States> | undefined
+  const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const completion of completions) {
     const onDone = normalizeTransition(machine.handlers[completion.path]?.onDone)
     if (onDone !== undefined && !selectedSources.has(completion.path)) {
@@ -828,7 +837,8 @@ const selectDoneTransitions = <
           configuration,
           completion.path,
           event,
-          completion.output
+          completion.output,
+          capturedSnapshot()
         )
       })
     }
@@ -871,6 +881,8 @@ const selectEventTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  let snapshot: Machine.Snapshot<States> | undefined
+  const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
       const transition = normalizeTransition(machine.handlers[path]?.on?.[event._tag])
@@ -901,7 +913,7 @@ const selectEventTransitions = <
               Emits,
               Machine.StateIdentifier<States>,
               Machine.TagOf<Events[number]>
-            >(machine as any, configuration, path, event)
+            >(machine as any, configuration, path, event, capturedSnapshot())
           })
         }
         break

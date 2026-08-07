@@ -1,6 +1,9 @@
 interface StateNode {
   readonly path: string
   readonly key: string
+  readonly annotations: {
+    readonly title?: string | undefined
+  } | undefined
   readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly history: "shallow" | "deep" | undefined
   readonly parent: string | undefined
@@ -39,15 +42,53 @@ interface TransitionDefinition {
     }
 }
 
+type ActivityDefinition =
+  | {
+    readonly source: string
+    readonly type: "dynamic"
+  }
+  | {
+    readonly source: string
+    readonly id: string
+    readonly type: "process"
+  }
+  | {
+    readonly source: string
+    readonly id: string
+    readonly type: "effect"
+    readonly outcomes: {
+      readonly success: "dynamic"
+      readonly failure: "dynamic" | "none"
+    }
+  }
+  | {
+    readonly source: string
+    readonly id: string
+    readonly type: "timer"
+    readonly duration: string
+    readonly event: string
+  }
+  | {
+    readonly source: string
+    readonly id: string
+    readonly type: "machine"
+    readonly child: {
+      readonly id: string
+      readonly machineId: string | null
+    }
+  }
+
 interface InspectionApi<Machine, Snapshot> {
   readonly stateNodes: (machine: Machine) => ReadonlyArray<StateNode>
   readonly transitionDefinitions: (machine: Machine) => ReadonlyArray<TransitionDefinition>
+  readonly activityDefinitions?: (machine: Machine) => ReadonlyArray<ActivityDefinition>
   readonly configuration: (machine: Machine, snapshot: Snapshot) => ReadonlyArray<StateNode>
   readonly enabled: (machine: Machine, snapshot: Snapshot) => ReadonlyArray<PropertyKey>
 }
 
 const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
   const status = active.has(node.path) ? "●" : "○"
+  const label = node.annotations?.title === undefined ? node.key : `${node.annotations.title} (${node.key})`
   const details: Array<string> = node.type === "atomic" ? [] : [node.type]
   if (node.initial !== undefined) {
     details.push(`initial: ${node.initial.slice(node.path.length + 1)}`)
@@ -55,7 +96,7 @@ const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
   if (node.history !== undefined) {
     details.push(node.history)
   }
-  return details.length === 0 ? `${status} ${node.key}` : `${status} ${node.key} [${details.join(", ")}]`
+  return details.length === 0 ? `${status} ${label}` : `${status} ${label} [${details.join(", ")}]`
 }
 
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<string> => {
@@ -89,6 +130,23 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   return labels
 }
 
+const activityLabel = (definition: ActivityDefinition): string => {
+  switch (definition.type) {
+    case "dynamic":
+      return "◆ activity: dynamic"
+    case "process":
+      return `◆ process: ${definition.id}`
+    case "effect":
+      return `◆ effect: ${definition.id} [success: ${definition.outcomes.success}, failure: ${definition.outcomes.failure}]`
+    case "timer":
+      return `◆ timer: ${definition.id} [${definition.duration}] → ${definition.event}`
+    case "machine": {
+      const identity = definition.child.machineId === null ? definition.child.id : definition.child.machineId
+      return `◆ machine: ${definition.id} → ${identity}`
+    }
+  }
+}
+
 /**
  * Builds an experimental text renderer around a machine module's public
  * inspection functions. Keeping the module injectable lets examples use their
@@ -107,6 +165,7 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
   )
   const children = new Map<string | undefined, Array<StateNode>>()
   const transitions = new Map<string, Array<TransitionDefinition>>()
+  const activities = new Map<string, Array<ActivityDefinition>>()
 
   for (const node of nodes) {
     const siblings = children.get(node.parent) ?? []
@@ -119,18 +178,26 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
     registrations.push(definition)
     transitions.set(definition.source, registrations)
   }
+  for (const definition of inspection.activityDefinitions?.(machine) ?? []) {
+    const registrations = activities.get(definition.source) ?? []
+    registrations.push(definition)
+    activities.set(definition.source, registrations)
+  }
 
   const lines = [
     machine.id ?? "Machine",
-    "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
+    activities.size === 0
+      ? "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)"
+      : "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)  ◆ activity",
     ""
   ]
   const visit = (node: StateNode, prefix: string, isLast: boolean): void => {
     lines.push(`${prefix}${isLast ? "└─" : "├─"} ${nodeLabel(node, active)}`)
     const descendants = children.get(node.path) ?? []
     const registrations = transitions.get(node.path) ?? []
+    const ownedActivities = activities.get(node.path) ?? []
     const childPrefix = `${prefix}${isLast ? "   " : "│  "}`
-    const labels = triggerLabels(registrations)
+    const labels = [...triggerLabels(registrations), ...ownedActivities.map(activityLabel)]
     const itemCount = labels.length + descendants.length
     labels.forEach((label, index) => {
       lines.push(`${childPrefix}${index === itemCount - 1 ? "└─" : "├─"} ${label}`)
