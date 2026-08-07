@@ -69,6 +69,7 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
 interface VersionedSnapshot<State, Error, Output> {
   readonly revision: number
   readonly snapshot: RuntimeSnapshot<State, Error, Output>
+  readonly terminalizing: boolean
 }
 
 export type RuntimeOutcome<State, Error = never, Output = never> =
@@ -253,25 +254,19 @@ export const watch = <State, Event, Error = never, Output = never>(
   )
 
 interface ProcessRuntime {
-  readonly close: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>
   readonly nextSessionId: Effect.Effect<string>
-  readonly rootScope: Scope.Closeable
 }
 
-const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.gen(function*() {
+const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
   let sessionIdCounter = 0
-  const rootScope = yield* Scope.make("parallel")
   return {
-    close: (exit) => Scope.close(rootScope, exit),
-    nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`),
-    rootScope
+    nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`)
   }
 })
 
 interface StartInternalOptions {
   readonly detached?: boolean
   readonly fiberScope?: Scope.Scope
-  readonly finalizer?: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>
   readonly id?: string
   readonly onReady?: (ref: MachineRef<any, any, any, any>) => Effect.Effect<void>
   readonly onStop?: Effect.Effect<void>
@@ -309,12 +304,8 @@ const startInternal: <
   })
   const childrenScope = yield* Scope.make("parallel")
   const childRegistry = yield* SubscriptionRef.make<ChildRegistry>({ revision: 0, children: HashMap.empty() })
-  const currentChildrenScope = yield* SynchronizedRef.make<Scope.Closeable>(childrenScope)
 
-  const closeChildren = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
-    SynchronizedRef.get(currentChildrenScope).pipe(
-      Effect.flatMap((scope) => Scope.close(scope, exit))
-    )
+  const closeChildren = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> => Scope.close(childrenScope, exit)
 
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
@@ -322,9 +313,6 @@ const startInternal: <
         Effect.ensuring(Deferred.succeed(terminalized, void 0))
       )
       : Effect.void
-
-  const finalize = (exit: Exit.Exit<unknown, unknown>): Effect.Effect<void> =>
-    options.finalizer === undefined ? Effect.void : options.finalizer(exit)
 
   const cleanup = options.onStop ?? Effect.void
 
@@ -479,18 +467,14 @@ const startInternal: <
     Exclude<ChildRequirements, Scope.Scope>
   > {
     if (spawnOptions?.id === undefined) {
-      return SynchronizedRef.get(currentChildrenScope).pipe(
-        Effect.flatMap((childrenScope) =>
-          Effect.acquireRelease(
-            startInternal(logic, {
-              fiberScope: childrenScope,
-              parent: self as MachineRef<unknown, unknown, unknown, unknown>,
-              runtime: options.runtime
-            }),
-            (child) => child.stop
-          ).pipe(Scope.provide(childrenScope))
-        )
-      ) as Effect.Effect<
+      return Effect.acquireRelease(
+        startInternal(logic, {
+          fiberScope: childrenScope,
+          parent: self as MachineRef<unknown, unknown, unknown, unknown>,
+          runtime: options.runtime
+        }),
+        (child) => child.stop
+      ).pipe(Scope.provide(childrenScope)) as Effect.Effect<
         MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
         ChildInitialError,
         Exclude<ChildRequirements, Scope.Scope>
@@ -498,38 +482,34 @@ const startInternal: <
     }
 
     const childId = spawnOptions.id
-    return SynchronizedRef.get(currentChildrenScope).pipe(
-      Effect.flatMap((childrenScope) =>
-        Effect.acquireRelease(
-          Effect.gen(function*() {
-            const token = Symbol()
-            yield* reserveChildId(childId, token)
-            const child = yield* startInternal(logic, {
-              fiberScope: childrenScope,
-              id: childId,
-              onReady: (child) =>
-                registerStartedChild(
-                  childId,
-                  token,
-                  child,
-                  spawnOptions.descriptor
-                ).pipe(Effect.asVoid),
-              onStop: unregisterChild(childId, token),
-              parent: self as ProcessAddress<unknown>,
-              runtime: options.runtime
-            }).pipe(
-              Effect.onExit((exit) =>
-                Exit.isFailure(exit)
-                  ? unregisterChild(childId, token)
-                  : Effect.void
-              )
-            )
-            return child
-          }),
-          (child) => child.stop
-        ).pipe(Scope.provide(childrenScope))
-      )
-    ) as Effect.Effect<
+    return Effect.acquireRelease(
+      Effect.gen(function*() {
+        const token = Symbol()
+        yield* reserveChildId(childId, token)
+        const child = yield* startInternal(logic, {
+          fiberScope: childrenScope,
+          id: childId,
+          onReady: (child) =>
+            registerStartedChild(
+              childId,
+              token,
+              child,
+              spawnOptions.descriptor
+            ).pipe(Effect.asVoid),
+          onStop: unregisterChild(childId, token),
+          parent: self as ProcessAddress<unknown>,
+          runtime: options.runtime
+        }).pipe(
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit)
+              ? unregisterChild(childId, token)
+              : Effect.void
+          )
+        )
+        return child
+      }),
+      (child) => child.stop
+    ).pipe(Scope.provide(childrenScope)) as Effect.Effect<
       MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
       ChildAlreadyExistsError | ChildInitialError,
       Exclude<ChildRequirements, Scope.Scope>
@@ -575,12 +555,12 @@ const startInternal: <
   )
   const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
     revision: 0,
+    terminalizing: false,
     snapshot: {
       status: "active",
       state: initial
     }
   })
-  const terminalizing = yield* Ref.make(false)
   const publishSnapshot = (
     snapshot: VersionedSnapshot<State, Error, Output>
   ): Effect.Effect<VersionedSnapshot<State, Error, Output>> =>
@@ -625,25 +605,22 @@ const startInternal: <
     SynchronizedRef.modifyEffect(
       current,
       (current) =>
-        Ref.get(terminalizing).pipe(
-          Effect.flatMap((isTerminalizing) =>
-            isTerminalizing
-              ? Effect.succeed([undefined, current] as const)
-              : Effect.map(
-                f(current.snapshot),
-                (next) => {
-                  if (next === undefined) {
-                    return [undefined, current] as const
-                  }
-                  const versioned = {
-                    revision: current.revision + 1,
-                    snapshot: next
-                  }
-                  return [versioned, versioned] as const
-                }
-              )
+        current.terminalizing
+          ? Effect.succeed([undefined, current] as const)
+          : Effect.map(
+            f(current.snapshot),
+            (next) => {
+              if (next === undefined) {
+                return [undefined, current] as const
+              }
+              const versioned = {
+                revision: current.revision + 1,
+                snapshot: next,
+                terminalizing: false
+              }
+              return [versioned, versioned] as const
+            }
           )
-        )
     ).pipe(
       Effect.flatMap((versioned) => versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)),
       Effect.map((published) => published?.snapshot)
@@ -654,25 +631,21 @@ const startInternal: <
       snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
     ) => RuntimeSnapshot<State, Error, Output>
   ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined> =>
-    SynchronizedRef.modifyEffect(
+    SynchronizedRef.modify(
       current,
-      (current) =>
-        Ref.get(terminalizing).pipe(
-          Effect.flatMap((isTerminalizing): Effect.Effect<SnapshotModification> => {
-            if (isTerminalizing || current.snapshot.status !== "active") {
-              return Effect.succeed([undefined, current] as SnapshotModification)
-            }
-            return Ref.set(terminalizing, true).pipe(
-              Effect.as([
-                {
-                  revision: current.revision + 1,
-                  snapshot: f(current.snapshot)
-                },
-                current
-              ] as SnapshotModification)
-            )
-          })
-        )
+      (current): SnapshotModification => {
+        if (current.terminalizing || current.snapshot.status !== "active") {
+          return [undefined, current]
+        }
+        return [
+          {
+            revision: current.revision + 1,
+            snapshot: f(current.snapshot),
+            terminalizing: true
+          },
+          { ...current, terminalizing: true }
+        ]
+      }
     ).pipe(Effect.map((versioned) => versioned?.snapshot))
 
   const setAndPublishSnapshot = (
@@ -680,7 +653,8 @@ const startInternal: <
   ): Effect.Effect<void> =>
     SynchronizedRef.updateAndGet(current, (current) => ({
       revision: current.revision + 1,
-      snapshot
+      snapshot,
+      terminalizing: true
     })).pipe(
       Effect.flatMap(publishSnapshot),
       Effect.flatMap(completeIfTerminal),
@@ -709,7 +683,6 @@ const startInternal: <
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
         Effect.andThen(cleanup),
-        Effect.andThen(finalize(exit)),
         Effect.andThen(completeDone),
         Effect.ensuring(Deferred.succeed(terminalized, void 0))
       )
@@ -950,14 +923,12 @@ export const startProcess: <
     options === undefined
       ? {
         detached: true,
-        finalizer: runtime.close,
         runtime
       }
       : {
         ...options,
         detached: true,
-        finalizer: runtime.close,
         runtime
       }
-  ).pipe(Effect.onExit((exit) => Exit.isFailure(exit) ? runtime.close(exit) : Effect.void))
+  )
 })
