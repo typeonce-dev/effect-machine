@@ -3,3 +3,4 @@ dist/
 references/
 *.tgz
 .DS_Store
+.pnpm-store

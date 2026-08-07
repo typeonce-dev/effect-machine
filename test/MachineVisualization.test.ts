@@ -64,14 +64,10 @@ const initial = States.initial.application(
       .connection(new Connection({}), (connection) => connection.online(new Online({})))
 )
 
-const initialWorkflow = (): Machine.Machine.SnapshotByIdentifier<typeof States.states, "application.workflow"> => ({
-  path: "application.workflow",
-  value: new Workflow({}),
-  state: {
-    path: "application.workflow.idle",
-    value: new Idle({})
-  }
-})
+const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
+  typeof States.states,
+  "application.workflow"
+> => initial
 
 const machine = Machine.make({
   id: "inspection-example",

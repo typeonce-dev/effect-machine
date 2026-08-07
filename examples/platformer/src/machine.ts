@@ -137,22 +137,6 @@ export const CharacterStates = Machine.defineStates({
   }
 })
 
-const initialPlaying = (): Machine.Machine.SnapshotByIdentifier<
-  typeof CharacterStates.states,
-  "Character.locomotion.Playing"
-> => ({
-  path: "Character.locomotion.Playing",
-  value: State.cases.Playing.make({}),
-  state: {
-    path: "Character.locomotion.Playing.Grounded",
-    value: State.cases.Grounded.make({}),
-    state: {
-      path: "Character.locomotion.Playing.Grounded.Standing",
-      value: State.cases.Standing.make({})
-    }
-  }
-})
-
 const initialCharacter = () =>
   CharacterStates.initial.Character(State.cases.Character.make({}), (character) =>
     character
@@ -185,7 +169,7 @@ export const CharacterMachine = Machine.make({
           Playing: {
             history: {
               resume: {
-                default: initialPlaying
+                default: initialCharacter
               }
             },
             on: {

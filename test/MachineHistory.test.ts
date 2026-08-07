@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Context, Data, Effect, Fiber, Schema, Stream } from "effect"
+import { Cause, Context, Data, Effect, Fiber, Schema, Stream } from "effect"
 import { Machine } from "../src/index.js"
 
 class Checkout extends Schema.TaggedClass<Checkout>("Checkout")("Checkout", {
@@ -71,6 +71,7 @@ class ResumeWorkspaceDeep extends Schema.TaggedClass<ResumeWorkspaceDeep>("Resum
   {}
 ) {}
 class RestoreEditor extends Schema.TaggedClass<RestoreEditor>("RestoreEditor")("RestoreEditor", {}) {}
+class DefaultEditor extends Schema.TaggedClass<DefaultEditor>("DefaultEditor")("DefaultEditor", {}) {}
 
 const CheckoutStates = Machine.defineStates({
   checkout: {
@@ -389,7 +390,7 @@ const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryState
 
 const nestedHistoryMachine = Machine.make({
   states: NestedHistoryStates.states,
-  events: [RestoreEditor],
+  events: [RestoreEditor, DefaultEditor],
   initial: () =>
     NestedHistoryStates.initial.workspace(
       new Workspace({ id: "workspace-1" }),
@@ -407,14 +408,17 @@ const nestedHistoryMachine = Machine.make({
       editor: {
         history: {
           exact: {
-            default: () => ({
-              path: "workspace.editor",
-              value: new Editor({ documentId: "fallback" }),
-              state: {
-                path: "workspace.editor.writing",
-                value: new Writing({ draft: "" })
-              }
-            })
+            default: () =>
+              NestedHistoryStates.initial.workspace(
+                new Workspace({ id: "fallback-workspace" }),
+                (workspace) =>
+                  workspace
+                    .editor(
+                      new Editor({ documentId: "fallback" }),
+                      (editor) => editor.writing(new Writing({ draft: "" }))
+                    )
+                    .sidebar(new Search({ query: "fallback" }))
+              )
           }
         },
         states: {
@@ -423,9 +427,11 @@ const nestedHistoryMachine = Machine.make({
               RestoreEditor: {
                 reenter: true,
                 transition: ({ target }) => target.history.workspace.editor.exact()
-              }
+              },
+              DefaultEditor: ({ target }) => target.history.workspace.editor.exact()
             }
-          }
+          },
+          writing: {}
         }
       }
     }
@@ -656,6 +662,57 @@ describe("Machine history states", () => {
         "workspace.editor",
         "workspace.editor.preview"
       ])
+    }))
+
+  it.effect("uses a nested first-use default while preserving an active parallel sibling", () =>
+    Effect.gen(function*() {
+      const restored = yield* Machine.plan(
+        nestedHistoryMachine,
+        nestedParallelSnapshot,
+        new DefaultEditor({})
+      )
+
+      assert.deepStrictEqual((restored.next as any).states.editor, {
+        path: "workspace.editor",
+        value: new Editor({ documentId: "fallback" }),
+        state: {
+          path: "workspace.editor.writing",
+          value: new Writing({ draft: "" })
+        }
+      })
+      assert.deepStrictEqual((restored.next as any).states.sidebar, {
+        path: "workspace.sidebar",
+        value: new Search({ query: "untouched" })
+      })
+      assert.strictEqual(restored.microsteps[0]?.transitions[0]?.target, "workspace.editor.exact")
+      assert.strictEqual(restored.microsteps[0]?.transitions[0]?.resolvedTarget, "workspace.editor")
+      assert.strictEqual(restored.next.history, undefined)
+    }))
+
+  it.effect("rejects a forged fallback that omits its declared owner with a precise diagnostic", () =>
+    Effect.gen(function*() {
+      const unsafe = makeCheckoutMachine(
+        CheckoutStates.initial.support(new Support({ ticket: "new" }))
+      ).handle({
+        checkout: {
+          history: {
+            exact: {
+              default: (() => CheckoutStates.initial.support(new Support({ ticket: "forged" }))) as any
+            }
+          }
+        }
+      })
+      const initial = yield* Machine.planInitial(unsafe)
+      const exit = yield* Effect.exit(Machine.plan(unsafe, initial.state, new ResumeDeep({})))
+
+      assert.strictEqual(exit._tag, "Failure")
+      if (exit._tag === "Failure") {
+        assert(Cause.hasDies(exit.cause))
+        assert.include(
+          Cause.pretty(exit.cause),
+          "Machine history default for \"checkout.exact\" returned a configuration that does not contain owner state \"checkout\""
+        )
+      }
     }))
 
   it.effect("runs effectful shallow initializers with their service and error channels", () =>

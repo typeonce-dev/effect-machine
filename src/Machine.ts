@@ -865,6 +865,181 @@ type FullParallelBuilder<
       }
   }
 
+type HistorySnapshotArguments<
+  States extends Machine.StateSchemas,
+  StateId extends ActiveStateKey<States>,
+  Prefix extends string,
+  Owner extends string,
+  Path extends string = Machine.JoinPath<Prefix, StateId>
+> = Path extends Owner ? FullSnapshotArguments<States, StateId, Prefix>
+  : States[StateId] extends infer Node ?
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
+        value: Machine.NodeSchema<Node>["Type"],
+        states: (
+          builder: HistoryParallelBuilder<Children, Path, Owner>
+        ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>>
+      ]
+    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
+        value: Machine.NodeSchema<Node>["Type"],
+        state: (
+          builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
+        ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
+      ]
+    : never
+  : never
+
+type HistorySnapshotFromArguments<
+  States extends Machine.StateSchemas,
+  StateId extends ActiveStateKey<States>,
+  Prefix extends string,
+  Owner extends string,
+  Path extends string = Machine.JoinPath<Prefix, StateId>
+> = Path extends Owner ? FullSnapshotFromArguments<States, StateId, Prefix>
+  : States[StateId] extends infer Node ?
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
+        input: Machine.NodeSchema<Node>["~type.make.in"],
+        states: (
+          builder: HistoryParallelBuilder<Children, Path, Owner>
+        ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>, boolean>
+      ]
+    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
+        input: Machine.NodeSchema<Node>["~type.make.in"],
+        state: (
+          builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
+        ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
+      ]
+    : never
+  : never
+
+type HistorySnapshotResult<
+  States extends Machine.StateSchemas,
+  StateId extends ActiveStateKey<States>,
+  Prefix extends string,
+  Owner extends string,
+  Path extends string = Machine.JoinPath<Prefix, StateId>
+> = Path extends Owner ? FullSnapshotResult<States, StateId, Prefix>
+  : States[StateId] extends infer Node ?
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+      Machine.ParallelSnapshot<
+        Path,
+        Machine.NodeSchema<Node>["Type"],
+        HistorySnapshotRegions<Children, Path, Owner>
+      >
+    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? Machine.CompoundSnapshot<
+        Path,
+        Machine.NodeSchema<Node>["Type"],
+        HistorySnapshotWithPrefix<Children, Owner, Path>
+      >
+    : never
+  : never
+
+type HistorySnapshotMethod<
+  States extends Machine.StateSchemas,
+  StateId extends ActiveStateKey<States>,
+  Prefix extends string,
+  Owner extends string
+> =
+  & ((
+    ...args: HistorySnapshotArguments<States, StateId, Prefix, Owner>
+  ) => HistorySnapshotResult<States, StateId, Prefix, Owner>)
+  & FromMethod<
+    HistorySnapshotFromArguments<States, StateId, Prefix, Owner>,
+    HistorySnapshotResult<States, StateId, Prefix, Owner>
+  >
+
+type HistorySnapshotWithPrefix<
+  States extends Machine.StateSchemas,
+  Owner extends string,
+  Prefix extends string
+> = {
+  readonly [Key in ActiveStateKey<States>]: Owner extends
+    | Machine.JoinPath<Prefix, Key>
+    | `${Machine.JoinPath<Prefix, Key>}.${string}` ? HistorySnapshotResult<States, Key, Prefix, Owner>
+    : never
+}[ActiveStateKey<States>]
+
+type HistorySnapshotBuilderWithPrefix<
+  States extends Machine.StateSchemas,
+  Owner extends string,
+  Prefix extends string = ""
+> = {
+  readonly [
+    Key in ActiveStateKey<States> as Owner extends
+      | Machine.JoinPath<Prefix, Key>
+      | `${Machine.JoinPath<Prefix, Key>}.${string}` ? Key
+      : never
+  ]: HistorySnapshotMethod<States, Key, Prefix, Owner>
+}
+
+type HistorySnapshotRegions<
+  States extends Machine.StateSchemas,
+  Prefix extends string,
+  Owner extends string
+> = {
+  readonly [Key in ActiveStateKey<States>]: Owner extends
+    | Machine.JoinPath<Prefix, Key>
+    | `${Machine.JoinPath<Prefix, Key>}.${string}` ? HistorySnapshotResult<States, Key, Prefix, Owner>
+    : FullSnapshotResult<States, Key, Prefix>
+}
+
+type HistoryParallelBuilder<
+  States extends Machine.StateSchemas,
+  Prefix extends string,
+  Owner extends string,
+  Remaining extends ActiveStateKey<States> = ActiveStateKey<States>,
+  Regions = {},
+  Constructed extends boolean = false
+> =
+  & SnapshotBuilderComplete<Regions, Constructed>
+  & {
+    readonly [Key in Remaining]: Owner extends
+      | Machine.JoinPath<Prefix, Key>
+      | `${Machine.JoinPath<Prefix, Key>}.${string}` ?
+        & ((...args: HistorySnapshotArguments<States, Key, Prefix, Owner>) => HistoryParallelBuilder<
+          States,
+          Prefix,
+          Owner,
+          Exclude<Remaining, Key>,
+          Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
+          Constructed
+        >)
+        & {
+          readonly from: FromCallable<
+            HistorySnapshotFromArguments<States, Key, Prefix, Owner>,
+            HistoryParallelBuilder<
+              States,
+              Prefix,
+              Owner,
+              Exclude<Remaining, Key>,
+              Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
+              true
+            >
+          >
+        }
+      :
+        & ((...args: FullSnapshotArguments<States, Key, Prefix>) => HistoryParallelBuilder<
+          States,
+          Prefix,
+          Owner,
+          Exclude<Remaining, Key>,
+          Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
+          Constructed
+        >)
+        & {
+          readonly from: FromCallable<
+            FullSnapshotFromArguments<States, Key, Prefix>,
+            HistoryParallelBuilder<
+              States,
+              Prefix,
+              Owner,
+              Exclude<Remaining, Key>,
+              Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
+              true
+            >
+          >
+        }
+  }
+
 type ParentPath<Path extends string> = Path extends `${infer Parent}.${infer Child}`
   ? Child extends `${string}.${string}` ? `${Parent}.${ParentPath<Child>}` : Parent
   : never
@@ -1940,9 +2115,9 @@ export declare namespace Machine {
    *
    * History nodes are transition targets only. They never become active and
    * therefore do not declare a state value schema or lifecycle handlers.
-   * A recorded nested history can rebuild inactive ancestors. Before the
-   * first capture, however, a nested history fallback cannot reconstruct
-   * values for inactive ancestors above its direct owner.
+   * Both recorded history and a first-use default can rebuild inactive
+   * ancestors. A default is a complete root configuration containing the
+   * history owner, so its validity is independent of the transition source.
    *
    * @category models
    * @since 4.0.0
@@ -2919,6 +3094,21 @@ export declare namespace Machine {
     : AtomicSnapshot<Path, NodeSchema<States[StateId]>["Type"]>
 
   /**
+   * Extracts a complete root snapshot whose selected configuration contains a
+   * particular active state.
+   *
+   * Parallel ancestors still require every region, while compound ancestors
+   * are narrowed to the branch leading to `Owner`.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type CompleteSnapshotContaining<
+    States extends StateSchemas,
+    Owner extends StateIdentifier<States>
+  > = HistorySnapshotWithPrefix<States, Owner, "">
+
+  /**
    * Extracts the union of statechart snapshots represented by a state
    * definition.
    *
@@ -3064,6 +3254,17 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export type FullTargetBuilder<States extends StateSchemas> = FullSnapshotBuilderWithPrefix<States>
+
+  /**
+   * Builder for a complete fallback configuration containing a history owner.
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type HistoryDefaultTargetBuilder<
+    States extends StateSchemas,
+    Owner extends StateIdentifier<States>
+  > = HistorySnapshotBuilderWithPrefix<States, Owner>
 
   /**
    * Builder for source-local transition targets.
@@ -3964,17 +4165,16 @@ export declare namespace Machine {
   > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
     readonly event: LifecycleEvent<Events>
     readonly runtime: RuntimeEffect<Events, Emits>
-    readonly target: FullTargetBuilder<States>
+    readonly target: HistoryDefaultTargetBuilder<States, ParentId>
     readonly parent: ParentId
   }
 
   /**
    * Typed fallback evaluated when a history node has no record yet.
    *
-   * The fallback constructs the history node's direct parent snapshot. It
-   * cannot currently provide values for inactive ancestors above that parent,
-   * so first-use fallback to a nested history requires those ancestors to
-   * already be active. Recorded nested history does not have this limitation.
+   * The fallback constructs a complete root configuration containing the
+   * history owner. This makes the default independent of the transition source
+   * and provides every inactive ancestor and required parallel region.
    */
   export type HistoryDefaultHandler<
     States extends StateSchemas,
@@ -3982,10 +4182,11 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     ParentId extends StateIdentifier<States>
   > = (context: HistoryDefaultContext<States, Events, Emits, ParentId>) =>
-    | SnapshotByIdentifier<States, ParentId>
-    | StateConstruction<SnapshotByIdentifier<States, ParentId>>
+    | CompleteSnapshotContaining<States, ParentId>
+    | StateConstruction<CompleteSnapshotContaining<States, ParentId>>
     | Effect.Effect<
-      SnapshotByIdentifier<States, ParentId> | StateConstruction<SnapshotByIdentifier<States, ParentId>>,
+      | CompleteSnapshotContaining<States, ParentId>
+      | StateConstruction<CompleteSnapshotContaining<States, ParentId>>,
       any,
       any
     >

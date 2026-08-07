@@ -479,13 +479,21 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
     parent: target.parent
   })
   if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
-    throw new Error(`Machine history default for "${target.path}" must return a concrete parent snapshot`)
+    throw new Error(`Machine history default for "${target.path}" must return a complete snapshot containing its owner`)
   }
-  if (String(collected.state.path) !== target.parent) {
-    throw new Error(`Machine history default for "${target.path}" must return state "${target.parent}"`)
+  const fallbackConfiguration = yield* normalizeConfigurationEffect(machine, collected.state as any)
+  if (!fallbackConfiguration.active.has(target.parent)) {
+    throw new Error(
+      `Machine history default for "${target.path}" returned a configuration that does not contain owner state "${target.parent}"`
+    )
   }
+  const snapshot = snapshotFromConfigurationAtPath(machine, fallbackConfiguration, target.parent)
+  const values = Object.fromEntries(fallbackConfiguration.values)
   return {
-    target: makeTarget(target.parent as any, collected.state.value as any, { snapshot: collected.state as any }),
+    target: makeTarget(target.parent as any, snapshot.value as any, {
+      snapshot: snapshot as any,
+      values: values as any
+    }),
     actions: collected.actions,
     raisedEvents: collected.raisedEvents,
     emittedEvents: collected.emittedEvents
