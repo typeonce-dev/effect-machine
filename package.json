@@ -50,6 +50,7 @@
     "test:types": "tstyche",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "perf:types": "pnpm build && node scripts/type-performance.mjs",
+    "perf:runtime": "pnpm build && node --expose-gc scripts/runtime-performance.mjs",
     "format": "dprint fmt",
     "format:check": "dprint check",
     "test:consumer": "node scripts/test-consumer.mjs",
@@ -68,9 +69,12 @@
     "@types/node": "25.7.0",
     "dprint": "0.55.2",
     "effect": "4.0.0-beta.102",
+    "tinybench": "2.9.0",
     "tstyche": "7.2.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "xstate-v5": "npm:xstate@5.32.5",
+    "xstate-v6": "npm:xstate@6.0.0-alpha.27"
   },
   "packageManager": "pnpm@10.17.1",
   "engines": {

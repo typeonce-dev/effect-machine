@@ -27,6 +27,9 @@ importers:
       effect:
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102
+      tinybench:
+        specifier: 2.9.0
+        version: 2.9.0
       tstyche:
         specifier: 7.2.1
         version: 7.2.1(typescript@6.0.3)
@@ -36,6 +39,12 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0))
+      xstate-v5:
+        specifier: npm:xstate@5.32.5
+        version: xstate@5.32.5
+      xstate-v6:
+        specifier: npm:xstate@6.0.0-alpha.27
+        version: xstate@6.0.0-alpha.27
 
 packages:
 
@@ -1021,6 +1030,13 @@ packages:
     engines: {node: '>=8'}
     hasBin: true
 
+  xstate@5.32.5:
+    resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==}
+
+  xstate@6.0.0-alpha.27:
+    resolution: {integrity: sha512-gpJrSoIBWE2jguo8kNGQulNdWNPtzi4nhDvzOKh9VP3M+UHc7ISFqvLRpO2xmGjW5pvpv1sE0beK8rJ2cGFJMQ==}
+    hasBin: true
+
   yaml@2.9.0:
     resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
     engines: {node: '>= 14.6'}
@@ -1908,5 +1924,9 @@ snapshots:
     dependencies:
       siginfo: 2.0.0
       stackback: 0.0.2
+
+  xstate@5.32.5: {}
+
+  xstate@6.0.0-alpha.27: {}
 
   yaml@2.9.0: {}
