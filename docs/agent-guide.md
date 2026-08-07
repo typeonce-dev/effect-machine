@@ -228,7 +228,8 @@ const States = Machine.defineStates({
 })
 ```
 
-Every history node needs a default parent snapshot for the first use:
+Every history node needs a source-independent default for the first use. The
+default is a complete root snapshot containing the history owner:
 
 ```ts
 checkout: {
@@ -256,10 +257,35 @@ payment: {
 }
 ```
 
-A recorded nested history can rebuild inactive ancestors. A first-use fallback
-cannot: it constructs the history node's direct parent snapshot, so it cannot
-currently reconstruct values for inactive ancestors above that owner. Those
-ancestors must already be active when an unrecorded nested history is targeted.
+A nested default must include every ancestor above its owner and every region
+of any parallel ancestor. The containing branch is checked statically, so an
+unrelated root, a sibling compound branch, a direct-owner-only nested snapshot,
+or an incomplete parallel configuration is rejected. A canonical nested
+default looks like:
+
+```ts
+Workspace: {
+  history: {
+    resume: {
+      default: ({ target }) =>
+        target.App(
+          State.cases.App.make({ workspaceId: "default" }),
+          (app) =>
+            app.Workspace(
+              State.cases.Workspace.make({}),
+              (workspace) =>
+                workspace.Editing(State.cases.Editing.make({}))
+            )
+        )
+    }
+  }
+}
+```
+
+On first use from an inactive root, this complete configuration is entered. If
+a parallel ancestor is already active, unaffected active regions are retained.
+Once a history record exists, shallow or deep recorded restoration wins over
+the default.
 
 The machine's readiness type tracks missing defaults and shallow initializers.
 History is an overwriteable register, not a stack: restoration does not consume
@@ -273,7 +299,7 @@ prior effects, actors, and timers are not rewound.
 | `target.local`   | The destination is inside the nearest compound scope containing the source | The compound value, active ancestors, and unrelated parallel regions              |
 | `target.branch`  | The destination is elsewhere under the active top-level root               | Omitted current ancestor values and parallel regions                              |
 | `target.full`    | The destination may be under any top-level root                            | Nothing is inferred for a newly selected root; build its complete active snapshot |
-| `target.history` | The destination is a declared history pseudo-state                         | Its parent's remembered configuration, or its default before the first capture; an unrecorded nested fallback requires ancestors above its owner to be active |
+| `target.history` | The destination is a declared history pseudo-state                         | Its parent's remembered configuration, or a source-independent complete default containing that owner before the first capture |
 
 Entering an inactive parallel state through `target.local` or `target.branch`
 requires a complete callback with one selection per region. A parallel state

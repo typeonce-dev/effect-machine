@@ -313,11 +313,37 @@ machine.handle({
 })
 ```
 
-A recorded nested history can rebuild inactive ancestors when it is restored.
-There is one current first-use boundary: if no history record exists, a nested
-history fallback constructs only its direct owner's snapshot and cannot
-reconstruct values for inactive ancestors above that owner. Those ancestors
-must already be active when that nested fallback is targeted.
+A history default is source-independent. It must construct a complete root
+configuration containing the history owner, including every inactive ancestor
+above a nested owner and every required region of a parallel ancestor. For a
+top-level owner, its owner snapshot is already a complete root snapshot.
+
+For example, a history node owned by `App.Workspace` can be targeted from an
+unrelated `Closed` root and supplies the complete `App` configuration on first
+use:
+
+```ts
+Workspace: {
+  history: {
+    resume: {
+      default: ({ target }) =>
+        target.App(
+          State.cases.App.make({ workspaceId: "default" }),
+          (app) =>
+            app.Workspace(
+              State.cases.Workspace.make({}),
+              (workspace) =>
+                workspace.Editing(State.cases.Editing.make({}))
+            )
+        )
+    }
+  }
+}
+```
+
+The containing branch is enforced statically: unrelated roots, sibling
+compound branches that omit the owner, owner-only nested snapshots, and
+incomplete parallel configurations are rejected.
 
 Deep history restores every remembered descendant value. Shallow history
 restores the parent and direct-child values, then follows normal initial paths.

@@ -1265,13 +1265,12 @@ const makeHandlers = (
             const fallback = byPath.get(child.fallback)!
             const parts = child.fallback.split(".")
             const completeRoot = selectSnapshot(target, fallback.root, byPath, parts, 0)
-            const selected = findSnapshot(completeRoot, path)
-            if (selected === undefined) {
+            if (findSnapshot(completeRoot, path) === undefined) {
               throw new Error(
                 `MachineTest.compileModel could not construct history fallback for "${path}.${child.key}"`
               )
             }
-            return selected
+            return completeRoot
           }
         }]]
       }))

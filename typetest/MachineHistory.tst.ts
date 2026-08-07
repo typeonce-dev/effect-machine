@@ -30,6 +30,20 @@ class InitialRequirement extends Context.Service<InitialRequirement, {
   readonly cardNumber: string
 }>()("test/MachineHistory/InitialRequirement") {}
 
+class FallbackRequirement extends Context.Service<FallbackRequirement, {
+  readonly workspaceId: string
+}>()("test/MachineHistory/FallbackRequirement") {}
+
+class App extends Schema.TaggedClass<App>("App")("App", {
+  session: Schema.String
+}) {}
+class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {}) {}
+class Settings extends Schema.TaggedClass<Settings>("Settings")("Settings", {}) {}
+class Closed extends Schema.TaggedClass<Closed>("Closed")("Closed", {}) {}
+class Editor extends Schema.TaggedClass<Editor>("Editor")("Editor", {}) {}
+class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {}) {}
+class Sidebar extends Schema.TaggedClass<Sidebar>("Sidebar")("Sidebar", {}) {}
+
 const States = Machine.defineStates({
   checkout: {
     schema: Checkout,
@@ -55,6 +69,63 @@ const States = Machine.defineStates({
   },
   support: Support
 })
+
+const NestedStates = Machine.defineStates({
+  App: {
+    schema: App,
+    initial: "Workspace",
+    states: {
+      Workspace: {
+        schema: Workspace,
+        type: "parallel",
+        states: {
+          Editor: {
+            schema: Editor,
+            initial: "Editing",
+            states: {
+              Editing
+            }
+          },
+          Sidebar,
+          resume: {
+            type: "history",
+            history: "deep"
+          }
+        }
+      },
+      Settings
+    }
+  },
+  Closed
+})
+
+const completeNestedFallback = (
+  target: Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
+) =>
+  target.App(
+    new App({ session: "fallback" }),
+    (app) => {
+      expect(app).type.not.toHaveProperty("Settings")
+      return app.Workspace(
+        new Workspace({}),
+        (workspace) =>
+          workspace
+            .Editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
+            .Sidebar(new Sidebar({}))
+      )
+    }
+  )
+
+const constructedNestedFallback = (
+  target: Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">,
+  session: string
+) =>
+  target.App.from({ session }, (app) =>
+    app.Workspace.from((workspace) =>
+      workspace
+        .Editor.from((editor) => editor.Editing.from())
+        .Sidebar.from()
+    ))
 
 describe("Machine history states", () => {
   it("separates active and history identifiers", () => {
@@ -135,7 +206,9 @@ describe("Machine history states", () => {
           recent: {
             default: ({ parent, target }) => {
               expect(parent).type.toBe<"checkout">()
-              expect(target).type.toBe<Machine.Machine.FullTargetBuilder<typeof States.states>>()
+              expect(target).type.toBe<
+                Machine.Machine.HistoryDefaultTargetBuilder<typeof States.states, "checkout">
+              >()
               return States.initial.checkout(
                 new Checkout({ orderId: "fallback" }),
                 (checkout) => checkout.shipping(new Shipping({ address: "" }))
@@ -203,6 +276,166 @@ describe("Machine history states", () => {
         }
       }
     })
+  })
+
+  it("accepts only complete root configurations containing a nested history owner", () => {
+    expect<Machine.Machine.CompleteSnapshotContaining<typeof NestedStates.states, "App.Workspace">>().type.toBe<
+      ReturnType<typeof completeNestedFallback>
+    >()
+
+    const machine = Machine.make({
+      states: NestedStates.states,
+      events: [Resume],
+      initial: () => NestedStates.initial.Closed(new Closed({}))
+    })
+
+    const complete = machine.handle({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: ({ parent, target }) => {
+                  expect(parent).type.toBe<"App.Workspace">()
+                  expect(target).type.toBe<
+                    Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
+                  >()
+                  expect(target).type.not.toHaveProperty("Closed")
+                  return completeNestedFallback(target)
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    expect(Machine.planInitial).type.toBeCallableWith(complete)
+
+    expect(machine.handle).type.not.toBeCallableWith({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: () => ({
+                  path: "Closed" as const,
+                  value: new Closed({})
+                })
+              }
+            }
+          }
+        }
+      }
+    })
+
+    expect(machine.handle).type.not.toBeCallableWith({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: () => ({
+                  path: "App" as const,
+                  value: new App({ session: "sibling" }),
+                  state: {
+                    path: "App.Settings" as const,
+                    value: new Settings({})
+                  }
+                })
+              }
+            }
+          }
+        }
+      }
+    })
+
+    expect(machine.handle).type.not.toBeCallableWith({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: () => ({
+                  path: "App.Workspace" as const,
+                  value: new Workspace({}),
+                  states: {
+                    Editor: {
+                      path: "App.Workspace.Editor" as const,
+                      value: new Editor({}),
+                      state: {
+                        path: "App.Workspace.Editor.Editing" as const,
+                        value: new Editing({})
+                      }
+                    },
+                    Sidebar: {
+                      path: "App.Workspace.Sidebar" as const,
+                      value: new Sidebar({})
+                    }
+                  }
+                })
+              }
+            }
+          }
+        }
+      }
+    })
+
+    expect(machine.handle).type.not.toBeCallableWith({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: () => ({
+                  path: "App" as const,
+                  value: new App({ session: "missing-region" }),
+                  state: {
+                    path: "App.Workspace" as const,
+                    value: new Workspace({}),
+                    states: {
+                      Sidebar: {
+                        path: "App.Workspace.Sidebar" as const,
+                        value: new Sidebar({})
+                      }
+                    }
+                  }
+                })
+              }
+            }
+          }
+        }
+      }
+    })
+  })
+
+  it("preserves exact error and service inference for effectful nested defaults", () => {
+    const machine = Machine.make({
+      states: NestedStates.states,
+      events: [Resume],
+      initial: () => NestedStates.initial.Closed(new Closed({}))
+    }).handle({
+      App: {
+        states: {
+          Workspace: {
+            history: {
+              resume: {
+                default: ({ target }) =>
+                  Effect.gen(function*() {
+                    const requirement = yield* FallbackRequirement
+                    if (requirement.workspaceId === "") {
+                      return yield* Effect.fail("fallback-failed" as const)
+                    }
+                    return constructedNestedFallback(target, requirement.workspaceId)
+                  })
+              }
+            }
+          }
+        }
+      }
+    })
+
+    expect<Machine.Machine.Error<typeof machine>>().type.toBe<"fallback-failed">()
+    expect<Machine.Machine.Services<typeof machine>>().type.toBe<FallbackRequirement>()
   })
 
   it("tracks defaults and shallow initializers across successive handle calls", () => {

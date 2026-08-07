@@ -1,5 +1,4 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { FastCheck } from "effect/testing"
@@ -1337,16 +1336,22 @@ describe("MachineTest finite-model reference interpreter", () => {
       yield* MachineTest.verifyModel(model, trace)
     }))
 
-  it.effect("documents that nested fallback cannot reconstruct an inactive outer ancestor yet", () =>
+  it.effect("restores a first-use nested fallback through inactive compound and parallel ancestors", () =>
     Effect.gen(function*() {
       const model = inactiveOuterHistoryModel("outside")
       const machine = MachineTest.compileModel(model)
-      const exit = yield* Effect.exit(MachineTest.run(machine, { events: [event("Resume")] }))
+      const trace = yield* MachineTest.run(machine, { events: [event("Resume")] })
 
-      assert.strictEqual(exit._tag, "Failure")
-      if (exit._tag === "Failure") {
-        assert.include(Cause.pretty(exit.cause), "requires a value for ancestor state")
-      }
+      assert.deepStrictEqual(trace.finalConfiguration, [
+        "workspace",
+        "workspace.editor",
+        "workspace.editor.writing",
+        "workspace.sidebar",
+        "workspace.sidebar.closed"
+      ])
+      assert.deepStrictEqual((trace.final as any).history, undefined)
+      yield* MachineTest.verify(machine, trace)
+      yield* MachineTest.verifyModel(model, trace)
     }))
 
   it.effect("rejects consumed, shallow-as-deep, missing-region, and fallback-after-record mutations", () =>
@@ -1438,13 +1443,24 @@ describe("MachineTest finite-model reference interpreter", () => {
     // standing in for the mutation that must be captured and restored.
     return FastCheck.oneof(
       ...(historyScenarios.length === 0
-        ? [FastCheck.constant({ events: [] as ReadonlyArray<string>, scenario: undefined })]
-        : historyScenarios.map((scenario) => FastCheck.constant({ events: scenario.events, scenario }))),
+        ? [FastCheck.constant({ events: [] as ReadonlyArray<string>, scenario: undefined, firstUse: false })]
+        : historyScenarios.map((scenario) =>
+          FastCheck.constant({ events: scenario.events, scenario, firstUse: false })
+        )),
       ...(historyScenarios.length === 0
         ? []
-        : historyScenarios.map((scenario) => FastCheck.constant({ events: scenario.events, scenario }))),
-      randomEvents.map((events) => ({ events, scenario: undefined }))
-    ).map(({ events, scenario }) => ({ model, events, scenario }))
+        : historyScenarios.map((scenario) =>
+          FastCheck.constant({ events: [scenario.resume.event], scenario, firstUse: true })
+        )),
+      randomEvents.map((events) => ({ events, scenario: undefined, firstUse: false }))
+    ).map(({ events, firstUse, scenario }) => ({
+      model: firstUse && scenario !== undefined
+        ? { ...model, initial: scenario.resume.source.split(".")[0]!, historyScenarios: [] }
+        : model,
+      events,
+      scenario,
+      firstUse
+    }))
   })
 
   it.effect.prop(
@@ -1456,6 +1472,11 @@ describe("MachineTest finite-model reference interpreter", () => {
         Effect.tap((trace) => {
           if (generated.scenario === undefined) return Effect.void
           const scenario = generated.scenario
+          if (generated.firstUse) {
+            assert.include(trace.finalConfiguration, scenario.owner)
+            assert.ok(snapshotAtPath(trace.final, scenario.history) === undefined)
+            return Effect.void
+          }
           const mutated = snapshotAtPath(trace.steps[0]!.after, scenario.mutation.source) as any
           const restored = snapshotAtPath(trace.final, scenario.mutation.source) as any
           assert.strictEqual(mutated.value.value, scenario.mutation.value)
