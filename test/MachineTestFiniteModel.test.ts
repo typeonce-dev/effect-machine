@@ -70,7 +70,9 @@ const assertValid = (
   for (const state of states) {
     assert.ok(Object.isFrozen(state.node))
     assert.ok(state.depth <= limits.maxDepth)
-    if (state.node._tag !== "History") assert.ok(Number.isSafeInteger(state.node.value))
+    if (state.node._tag !== "History" && state.node._tag !== "Choice") {
+      assert.ok(Number.isSafeInteger(state.node.value))
+    }
     if (state.node._tag === "History") {
       assert.ok(state.parent !== undefined)
       const fallback = byPath.get(state.node.fallback)
@@ -79,12 +81,12 @@ const assertValid = (
     } else if (state.node._tag === "Compound") {
       const compound = state.node
       assert.ok(Object.isFrozen(compound.states))
-      const children = compound.states.filter((child) => child._tag !== "History")
+      const children = compound.states.filter((child) => child._tag !== "History" && child._tag !== "Choice")
       assert.ok(children.length >= 1 && children.length <= limits.maxChildren)
-      assert.ok(children.some(({ key }) => key === compound.initial))
+      assert.ok(compound.states.some(({ key }) => key === compound.initial))
     } else if (state.node._tag === "Parallel") {
       assert.ok(Object.isFrozen(state.node.states))
-      const regions = state.node.states.filter((child) => child._tag !== "History")
+      const regions = state.node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice")
       assert.ok(regions.length >= 2 && regions.length <= limits.maxParallelRegions)
       assert.strictEqual(state.node.output, `output:${state.path}`)
     } else if (state.node._tag === "Final") {
@@ -97,7 +99,10 @@ const assertValid = (
   for (const transition of model.transitions) {
     assert.ok(Object.isFrozen(transition))
     const source = byPath.get(transition.source)
-    assert.ok(source !== undefined && source.node._tag !== "Final" && source.node._tag !== "History")
+    assert.ok(
+      source !== undefined && source.node._tag !== "Final" && source.node._tag !== "History" &&
+        source.node._tag !== "Choice"
+    )
     assert.ok(model.events.includes(transition.event))
     const registration = `${transition.source}\u0000${transition.event}`
     assert.ok(!registrations.has(registration))
@@ -153,6 +158,8 @@ describe("MachineTest finite models", () => {
       historyStates: true,
       historyLeaveResumeSequences: true,
       historyValueScenarios: true,
+      choiceStates: true,
+      choiceInitialWitnesses: true,
       structurallyValid: true,
       shrinkPreservesValidity: true,
       eventlessTransitions: false
@@ -215,7 +222,7 @@ describe("MachineTest finite models", () => {
       const expected = expectedStates.map(({ node, parent, path }): {
         readonly path: string
         readonly parent: string | undefined
-        readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+        readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
         readonly children: ReadonlyArray<string>
         readonly initial: string | undefined
       } => ({
@@ -229,9 +236,13 @@ describe("MachineTest finite models", () => {
           ? "parallel"
           : node._tag === "History"
           ? "history"
+          : node._tag === "Choice"
+          ? "choice"
           : "compound",
         children: node._tag === "Compound" || node._tag === "Parallel"
-          ? node.states.filter((child) => child._tag !== "History").map(({ key }) => `${path}.${key}`)
+          ? node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice").map(({ key }) =>
+            `${path}.${key}`
+          )
           : [],
         initial: node._tag === "Compound" ? `${path}.${node.initial}` : undefined
       }))
@@ -240,7 +251,9 @@ describe("MachineTest finite models", () => {
         expected
       )
 
-      const actualTransitions = Machine.transitionDefinitions(machine).map(canonicalTransition)
+      const actualTransitions = Machine.transitionDefinitions(machine)
+        .filter(({ trigger }) => trigger.type === "event")
+        .map(canonicalTransition)
       assert.strictEqual(actualTransitions.length, model.transitions.length)
       for (let index = 0; index < model.transitions.length; index++) {
         const expected = model.transitions[index]!

@@ -17,6 +17,7 @@ export const TargetSnapshotTypeId: unique symbol = Symbol("effect/Machine/Target
 export const StateInputTypeId: unique symbol = Symbol("effect/Machine/StateInput")
 export const StateConstructionTypeId: unique symbol = Symbol("effect/Machine/StateConstruction")
 export const HistoryTargetTypeId: unique symbol = Symbol("effect/Machine/HistoryTarget")
+export const ChoiceTargetTypeId: unique symbol = Symbol("effect/Machine/ChoiceTarget")
 
 interface StateInput {
   readonly [StateInputTypeId]: typeof StateInputTypeId
@@ -29,6 +30,14 @@ export interface HistoryTarget {
   readonly [HistoryTargetTypeId]: typeof HistoryTargetTypeId
   readonly path: string
   readonly parent: string
+}
+
+/** Internal target produced by a choice target builder. */
+export interface ChoiceTarget {
+  readonly [ChoiceTargetTypeId]: typeof ChoiceTargetTypeId
+  readonly path: string
+  readonly parent: string
+  readonly values?: Readonly<Record<string, unknown>>
 }
 
 export interface HistoryRecord {
@@ -101,7 +110,7 @@ const historyFromSnapshot = (
       }
       const node = getNode(machine, activePath)
       if (
-        node.type === "history" ||
+        node.type === "history" || node.type === "choice" ||
         !(isPathInSubtree(activePath, historyNode.parent) ||
           getPathToRoot(machine, historyNode.parent).includes(activePath)) ||
         !Schema.is(getStateNodeSchema(node))(entry.values[activePath])
@@ -150,7 +159,7 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
     for (const activePath of entry.active) {
       const node = machine.stateNodes.byPath.get(activePath)
       if (
-        active.has(activePath) || node === undefined || node.type === "history" ||
+        active.has(activePath) || node === undefined || node.type === "history" || node.type === "choice" ||
         !Object.prototype.hasOwnProperty.call(entry.values, activePath) ||
         !(isPathInSubtree(activePath, historyNode.parent) ||
           getPathToRoot(machine, historyNode.parent).includes(activePath))
@@ -237,13 +246,26 @@ export const makeHistoryTarget = (path: string, parent: string): HistoryTarget =
 
 export const isHistoryTarget = (u: unknown): u is HistoryTarget => hasProperty(u, HistoryTargetTypeId)
 
+export const makeChoiceTarget = (
+  path: string,
+  parent: string,
+  values?: Readonly<Record<string, unknown>>
+): ChoiceTarget => ({
+  [ChoiceTargetTypeId]: ChoiceTargetTypeId,
+  path,
+  parent,
+  ...(values === undefined ? {} : { values })
+})
+
+export const isChoiceTarget = (u: unknown): u is ChoiceTarget => hasProperty(u, ChoiceTargetTypeId)
+
 export const getStateNodeDefinition = (
   path: string,
   definition: Machine.TaggedSchema | Machine.StateNodeConfig
 ): {
   readonly schema: Machine.TaggedSchema | undefined
   readonly output: Schema.Top | undefined
-  readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+  readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly initial: string | undefined
   readonly states: Machine.StateTree | undefined
 } => {
@@ -252,6 +274,15 @@ export const getStateNodeDefinition = (
       schema: undefined,
       output: undefined,
       type: "history",
+      initial: undefined,
+      states: undefined
+    }
+  }
+  if (!Schema.isSchema(definition) && (definition as any).type === "choice") {
+    return {
+      schema: undefined,
+      output: undefined,
+      type: "choice",
       initial: undefined,
       states: undefined
     }
@@ -332,16 +363,20 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
       }
       byPath.set(path, node)
       order += 1
-      if (definition.type === "history") {
+      if (definition.type === "history" || definition.type === "choice") {
         if (parent === undefined) {
-          throw new Error(`Machine history state "${path}" must belong to a parent state`)
+          throw new Error(`Machine ${definition.type} state "${path}" must belong to a parent state`)
         }
         continue
       }
       paths.push(path)
       if (definition.states !== undefined) {
         const children = compile(definition.states, path)
-        if (node.type === "compound" && (node.initial === undefined || !children.includes(node.initial))) {
+        if (
+          node.type === "compound" &&
+          (node.initial === undefined ||
+            (!children.includes(node.initial) && byPath.get(node.initial)?.type !== "choice"))
+        ) {
           throw new Error(`Machine.make expected compound state "${path}" initial child to exist`)
         }
         ;(node as { children: ReadonlyArray<string> }).children = children
@@ -370,6 +405,18 @@ export const transitionDefinitions = (
   for (const node of machine.stateNodes.byPath.values()) {
     const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
     if (config === undefined) {
+      continue
+    }
+    if (node.type === "choice") {
+      const choice = (config as any).choice
+      if (choice !== undefined) {
+        definitions.push({
+          source: node.path,
+          trigger: { type: "choice" },
+          reenter: false,
+          targets: transitionTargets(choice)
+        })
+      }
       continue
     }
     for (const event of Reflect.ownKeys(config.on ?? {})) {
@@ -625,8 +672,8 @@ export const getNode = (machine: Machine.Any, path: string): Machine.StateNode =
 }
 
 export const getStateNodeSchema = (node: Machine.StateNode): Machine.TaggedSchema => {
-  if (node.schema === undefined || node.type === "history") {
-    throw new Error(`Machine history state "${node.path}" has no active value schema`)
+  if (node.schema === undefined || node.type === "history" || node.type === "choice") {
+    throw new Error(`Machine pseudo-state "${node.path}" has no active value schema`)
   }
   return node.schema
 }
@@ -963,7 +1010,8 @@ export const validateInitialConfiguration = (machine: Machine.Any, configuration
     const node = getNode(machine, path)
     if (node.type === "compound") {
       const child = node.children.find((child) => configuration.active.has(child))
-      if (child !== node.initial) {
+      const initialNode = node.initial === undefined ? undefined : getNode(machine, node.initial)
+      if (initialNode?.type === "choice" ? child === undefined : child !== node.initial) {
         throw new Error(`Machine initial state "${node.path}" must enter initial child "${node.initial}"`)
       }
     }
@@ -1694,7 +1742,8 @@ export const encodeSnapshot = (
       for (const path of record.active) {
         const stateNode = machine.stateNodes.byPath.get(path)
         if (
-          stateNode === undefined || stateNode.type === "history" || !record.values.has(path) ||
+          stateNode === undefined || stateNode.type === "history" || stateNode.type === "choice" ||
+          !record.values.has(path) ||
           !(isPathInSubtree(path, record.parent) || getPathToRoot(machine, record.parent).includes(path))
         ) {
           return yield* Effect.fail(
@@ -1800,7 +1849,7 @@ export const decodeSnapshot = (
         }
         const stateNode = machine.stateNodes.byPath.get(path)
         if (
-          stateNode === undefined || stateNode.type === "history" ||
+          stateNode === undefined || stateNode.type === "history" || stateNode.type === "choice" ||
           !Object.prototype.hasOwnProperty.call(encodedRecord.values, path) ||
           !(isPathInSubtree(path, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(path))
         ) {

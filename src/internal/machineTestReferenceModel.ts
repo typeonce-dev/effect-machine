@@ -81,10 +81,9 @@ export interface ReferenceState {
  */
 export interface ReferenceTransition {
   readonly source: string
-  readonly trigger: {
-    readonly type: "event"
-    readonly event: string
-  }
+  readonly trigger:
+    | { readonly type: "event"; readonly event: string }
+    | { readonly type: "choice" }
   readonly reenter: boolean
   readonly target: string | undefined
   readonly resolvedTarget: string | undefined
@@ -115,7 +114,7 @@ export interface ReferenceInitialStep {
   readonly startingState: ReferenceState
   readonly initialEntryPaths: ReadonlyArray<string>
   readonly state: ReferenceState
-  readonly microsteps: readonly []
+  readonly microsteps: ReadonlyArray<ReferenceMicrostep>
   readonly done: boolean
   readonly output: string | undefined
 }
@@ -286,7 +285,9 @@ const indexModel = (model: FiniteModel): ModelIndex => {
         depth,
         order: ordered.length,
         children: node._tag === "Compound" || node._tag === "Parallel"
-          ? node.states.filter((child) => child._tag !== "History").map((child) => `${path}.${child.key}`)
+          ? node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice").map((child) =>
+            `${path}.${child.key}`
+          )
           : []
       })
       if (node._tag === "Compound" || node._tag === "Parallel") {
@@ -314,8 +315,8 @@ const getState = (index: ModelIndex, path: string): IndexedState => {
 }
 
 const activeValue = (state: IndexedState, value?: number): ReferenceStateValue => {
-  if (state.node._tag === "History") {
-    throw new Error(`MachineTest.interpretModel cannot activate history state "${state.path}"`)
+  if (state.node._tag === "History" || state.node._tag === "Choice") {
+    throw new Error(`MachineTest.interpretModel cannot activate pseudo-state "${state.path}"`)
   }
   return { _tag: stateTag(state.path), value: value ?? state.node.value }
 }
@@ -353,8 +354,22 @@ const initialChildPath = (state: IndexedState): string => {
   return `${state.path}.${child.key}`
 }
 
+const resolveChoicePath = (index: ModelIndex, path: string): string => {
+  let current = getState(index, path)
+  const seen = new Set<string>()
+  while (current.node._tag === "Choice") {
+    if (seen.has(current.path)) {
+      throw new Error(`MachineTest.interpretModel received infinite choice loop at "${current.path}"`)
+    }
+    seen.add(current.path)
+    current = getState(index, current.node.selected)
+  }
+  return current.path
+}
+
 const expandInitial = (index: ModelIndex, path: string): ReadonlyArray<string> => {
   const current = getState(index, path)
+  if (current.node._tag === "Choice") return expandInitial(index, resolveChoicePath(index, current.path))
   if (current.node._tag === "Compound") {
     return [current.path, ...expandInitial(index, initialChildPath(current))]
   }
@@ -543,6 +558,9 @@ const runtimeTargetPath = (index: ModelIndex, transition: FiniteTransition): str
   const source = getState(index, transition.source)
   const target = getState(index, transition.target)
   if (target.node._tag === "History") return target.parent
+  if (target.node._tag === "Choice") {
+    return runtimeTargetPath(index, { ...transition, target: resolveChoicePath(index, target.path) })
+  }
   // A same-root branch builder identifies the concrete initialized leaf. A
   // full builder replaces the root with a complete snapshot and identifies
   // that snapshot's root even when it contains initialized descendants.
@@ -574,6 +592,34 @@ const runtimeTargetPath = (index: ModelIndex, transition: FiniteTransition): str
     return inspect(`${current.path}.${next}`)
   }
   return inspect(source.root)
+}
+
+const entryChoicePath = (index: ModelIndex, path: string): string | undefined => {
+  const state = getState(index, path)
+  if (state.node._tag === "Choice") return state.path
+  if (state.node._tag === "Compound") {
+    return entryChoicePath(index, `${state.path}.${state.node.initial}`)
+  }
+  if (state.node._tag === "Parallel") {
+    for (const child of state.children) {
+      const choice = entryChoicePath(index, child)
+      if (choice !== undefined) return choice
+    }
+  }
+  return undefined
+}
+
+const choiceResolvedTargetPath = (index: ModelIndex, path: string): string => {
+  const choice = getState(index, path)
+  if (choice.node._tag !== "Choice") return choice.path
+  const selected = getState(index, choice.node.selected)
+  if (selected.node._tag === "Choice") return choiceResolvedTargetPath(index, selected.path)
+  return runtimeTargetPath(index, {
+    source: choice.path,
+    event: "__choice__",
+    target: selected.path,
+    reenter: false
+  })!
 }
 
 const isPathInSubtree = (path: string, root: string): boolean => path === root || path.startsWith(`${root}.`)
@@ -626,7 +672,7 @@ const makeHistoryConfiguration = (
   }
 
   const ordered = index.ordered
-    .filter(({ node, path }) => node._tag !== "History" && active.has(path))
+    .filter(({ node, path }) => node._tag !== "History" && node._tag !== "Choice" && active.has(path))
     .map(({ path }) => path)
   const values: Record<string, ReferenceStateValue> = {}
   for (const path of ordered) {
@@ -734,6 +780,9 @@ const targetState = (
   if (transition.target === undefined) return before
   const source = getState(index, transition.source)
   const target = getState(index, transition.target)
+  if (target.node._tag === "Choice") {
+    return targetState(index, before, { ...transition, target: resolveChoicePath(index, target.path) }, leaf)
+  }
   if (target.node._tag === "History") return resolveHistoryState(index, before, transition, leaf)
   if (source.root !== target.root) {
     const unsettled = makeUnsettledState(index, target.path)
@@ -840,9 +889,55 @@ const transitionRecord = (index: ModelIndex, transition: FiniteTransition): Refe
   // the finite AST keeps the broader declared bound separately.
   target: transition.target !== undefined && getState(index, transition.target).node._tag === "History"
     ? transition.target
-    : runtimeTargetPath(index, transition),
-  resolvedTarget: runtimeTargetPath(index, transition)
+    : transition.target === undefined
+    ? runtimeTargetPath(index, transition)
+    : getState(index, transition.source).root !== getState(index, transition.target).root
+    ? transition.target
+    : entryChoicePath(index, transition.target) ?? runtimeTargetPath(index, transition),
+  resolvedTarget: transition.target === undefined
+    ? runtimeTargetPath(index, transition)
+    : entryChoicePath(index, transition.target) === undefined
+    ? runtimeTargetPath(index, transition)
+    : choiceResolvedTargetPath(index, entryChoicePath(index, transition.target)!)
 })
+
+const choiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray<ReferenceTransition> => {
+  const records: Array<ReferenceTransition> = []
+  let current = getState(index, path)
+  const seen = new Set<string>()
+  while (current.node._tag === "Choice") {
+    if (seen.has(current.path)) break
+    seen.add(current.path)
+    const selected = getState(index, current.node.selected)
+    const selectedTarget = selected.node._tag === "Choice"
+      ? selected.path
+      : choiceResolvedTargetPath(index, current.path)
+    records.push({
+      source: current.path,
+      trigger: { type: "choice" },
+      reenter: false,
+      target: selectedTarget,
+      resolvedTarget: choiceResolvedTargetPath(index, current.path)
+    })
+    current = getState(index, resolveChoicePath(index, selected.path))
+  }
+  return records
+}
+
+const initialChoiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray<ReferenceTransition> => {
+  const current = getState(index, path)
+  if (current.node._tag === "Choice") {
+    const records = choiceTransitionRecords(index, current.path)
+    return [...records, ...initialChoiceTransitionRecords(index, resolveChoicePath(index, current.path))]
+  }
+  if (current.node._tag === "Compound") {
+    return initialChoiceTransitionRecords(index, initialChildPath(current))
+  }
+  if (current.node._tag === "Parallel") {
+    return current.children.flatMap((child) => initialChoiceTransitionRecords(index, child))
+  }
+  return []
+}
 
 const evaluateTransition = (
   index: ModelIndex,
@@ -859,8 +954,13 @@ const evaluateTransition = (
   const naturalBoundary = targetPath === undefined
     ? getState(index, transition.source).parent
     : leastCommonAncestor(index, selection.leaf, targetPath)
+  const choiceEntry = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
+  const choiceResolvesToActiveAncestor = choiceEntry !== undefined &&
+    isPathInSubtree(transition.source, resolveChoicePath(index, choiceEntry))
   const boundary = transition.reenter
-    ? broadenBoundary(index, naturalBoundary, getState(index, transition.source).parent)
+    ? !choiceResolvesToActiveAncestor
+      ? broadenBoundary(index, naturalBoundary, getState(index, transition.source).parent)
+      : getState(index, transition.source).parent
     : naturalBoundary
   const historyTarget = transition.target === undefined ? undefined : getState(index, transition.target)
   const reenteredHistoryOwner = historyTarget?.node._tag === "History" && transition.reenter &&
@@ -971,11 +1071,21 @@ const stepModel = (
   const exitPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.exitPaths), undefined, "exit")
   const entryPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.entryPaths), undefined, "entry")
   next = captureHistory(index, before, next, exitPaths)
+  const enteredChoice = sorted.some(({ transition }) =>
+    transition.target !== undefined && entryChoicePath(index, transition.target) !== undefined
+  )
+  if (enteredChoice) next = withControlOrder({ ...next, completions: [] }, controlOrder(next))
 
   const microstep: ReferenceMicrostep = {
     next,
     event,
-    transitions: sorted.map(({ transition }) => transitionRecord(index, transition)),
+    transitions: sorted.flatMap(({ transition }) => {
+      const choice = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
+      return [
+        transitionRecord(index, transition),
+        ...(choice === undefined ? [] : choiceTransitionRecords(index, choice))
+      ]
+    }),
     exitPaths,
     entryPaths,
     changed
@@ -1010,11 +1120,19 @@ export const interpretModel = (
   }
   const startingState = makeUnsettledState(index, model.initial)
   const initialState = settleCompletions(index, startingState)
+  const initialChoiceTransitions = initialChoiceTransitionRecords(index, model.initial)
   const initial: ReferenceInitialStep = {
     startingState,
     initialEntryPaths: startingState.activePaths,
     state: initialState,
-    microsteps: [],
+    microsteps: initialChoiceTransitions.length === 0 ? [] : [{
+      next: startingState,
+      event: "InitialEvent",
+      transitions: initialChoiceTransitions,
+      exitPaths: [],
+      entryPaths: [],
+      changed: false
+    }],
     done: initialState.status === "done",
     output: initialState.output
   }
@@ -1223,7 +1341,12 @@ export const verifyModelTrace = (
     reference.initial.state.activePaths,
     get(actualInitial, "configuration")
   )
-  add(initialLocation, "initial.plan.microsteps", reference.initial.microsteps, get(actualInitialPlan, "microsteps"))
+  add(
+    initialLocation,
+    "initial.plan.microsteps",
+    reference.initial.microsteps.length,
+    array(get(actualInitialPlan, "microsteps")).length
+  )
   add(initialLocation, "initial.plan.done", reference.initial.done, get(actualInitialPlan, "done"))
   add(initialLocation, "initial.plan.output", reference.initial.output, get(actualInitialPlan, "output"))
 
