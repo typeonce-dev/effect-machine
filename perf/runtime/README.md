@@ -68,6 +68,13 @@ pnpm perf:runtime -- --output runtime-performance.json
 Prefer `--output` for scripts: pnpm and the preceding build may add their own
 lines to standard output before `--json` is printed.
 
+Pull requests run the suite three times for both the base and pull request
+revisions on the same GitHub-hosted runner. The workflow publishes the median
+of those process-level results to the job summary and a sticky pull request
+comment. The benchmark workflow has read-only repository access; a separate
+trusted `workflow_run` workflow validates the uploaded JSON before receiving
+permission to update the comment.
+
 The implementation lives in `scripts/runtime-performance.mjs`; the Effect
 Machine fixture is in `perf/runtime/counter.mjs`, and the comparison adapter is
 in `perf/runtime/xstate.mjs`. Add new scenarios only when every implementation
