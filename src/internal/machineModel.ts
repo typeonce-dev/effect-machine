@@ -1604,6 +1604,46 @@ const getCompletionSchema = (
   return node.output ?? Schema.Void
 }
 
+/** Defensively validates and normalizes an in-memory logical snapshot. Unlike
+ * the transport decoder this consumes decoded schema values. */
+export const normalizeSnapshotEffect = <const States extends Machine.StateSchemas>(
+  machine: Machine.Any,
+  snapshot: Machine.Snapshot<States>
+): Effect.Effect<Machine.Snapshot<States>, MachineSchemaDecodeError> =>
+  Effect.gen(function*() {
+    const configuration = yield* normalizeConfigurationEffect(machine, snapshot)
+    const outputs = new Map<string, unknown>()
+    const completionPaths = new Set<string>()
+    const completions = snapshot.completed ?? []
+    if (!Array.isArray(completions)) {
+      throw new Error("Machine snapshot completion metadata must be an array")
+    }
+    for (const completion of completions) {
+      if (
+        typeof completion !== "object" || completion === null ||
+        typeof (completion as { readonly path?: unknown }).path !== "string"
+      ) {
+        throw new Error("Machine snapshot contains malformed completion metadata")
+      }
+      const path = completion.path
+      if (completionPaths.has(path)) {
+        throw new Error(`Machine snapshot contains duplicate completion "${path}"`)
+      }
+      if (!configuration.active.has(path) || !isActiveFinalNode(machine, configuration, path)) {
+        throw new Error(`Machine snapshot contains invalid completion "${path}"`)
+      }
+      completionPaths.add(path)
+      outputs.set(
+        path,
+        yield* decodeBoundary(machine, getCompletionSchema(machine, configuration, path), completion.output, {
+          boundary: "output",
+          state: path
+        })
+      )
+    }
+    return snapshotFromConfiguration<States>(machine, { ...configuration, outputs })
+  }).pipe(Effect.catchCause((cause) => failDecodeCause(machine, cause)))
+
 const validateEncodedConfiguration = (
   machine: Machine.Any,
   configuration: ActiveConfiguration

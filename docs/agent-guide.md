@@ -92,7 +92,8 @@ Choose one helper from the intent, and reach for the lower-level form only when
 its extra control is required:
 
 - Bind a shared Atom runtime once with `AtomMachine.bind(runtime)`, then use the
-  returned `make`. Use `AtomMachine.make(machine)` for a service-free machine.
+  returned `make` or `resume`. Use `AtomMachine.make(machine)` and
+  `AtomMachine.resume(machine, snapshot)` for service-free machines.
 - Use `Machine.invokeEffect` for a typed one-shot Effect and `Machine.after` for
   a timer. Use `Machine.invoke` with `Machine.effect` only for custom child
   process behavior or snapshot mapping.
@@ -668,15 +669,51 @@ Use `Machine.encodeSnapshot` and `Machine.decodeSnapshot` for validated logical
 statechart data. Persist machine identity and an application migration/version
 next to the encoded snapshot.
 
+The canonical resumption boundary is explicit:
+
+```ts
+const encoded = yield* Machine.encodeSnapshot(machine, snapshot)
+const decoded = yield* Machine.decodeSnapshot(machine, encoded)
+const ref = yield* Machine.resume(machine, decoded)
+```
+
+Pass only a decoded `Machine.Snapshot` to `resume`; encoded or arbitrary
+transport data belongs at `decodeSnapshot`. Resumption validates and normalizes
+the logical snapshot again, then publishes it as the fresh runtime's first
+state. It does not call the initial function, require machine input, or include
+initial-only failures and services in its Effect type.
+
 Encoding does not preserve:
 
 - running invokes or spawned children;
-- subscriptions, timers, or services;
+- subscriptions, queued events, fibers, scopes, timers, or services;
 - the machine definition;
 - application migration metadata.
 
-Do not treat decoding as resuming the previous process. It reconstructs logical
-state only.
+`resume` reconstructs runtime ownership from logical state only:
+
+- no historical entry, transition, completion, eventless, raise, or emit work
+  is replayed;
+- completion and history records survive but do not retrigger `onDone`;
+- active-state invokes start once in ordinary ancestor/document order with
+  `Machine.InitialEvent`;
+- `invokeEffect` restarts, `invokeMachine` creates a fresh child from its normal
+  initial state, and `Machine.after` restarts its complete duration;
+- inactive invokes, spawned children, child snapshots, elapsed timer time, and
+  prior `RuntimeSnapshot` status/errors are not restored;
+- a final logical snapshot creates an immediately completed ref;
+- `resume` itself does not evaluate `always` or `onDone`, including transitions
+  newly enabled by a changed machine definition. Later events use ordinary
+  planning semantics.
+
+Use `AtomMachine.resume(machine, decoded)` or
+`AtomMachine.bind(runtime).resume(machine, decoded)` for the same contract in a
+lazy atom bridge. Registry disposal stops the fresh invokes and timers exactly
+as it does for `AtomMachine.make`.
+
+This is not durable runtime restoration. `ClusterMachine` has a separate
+checkpoint/planning contract and process-local restrictions; do not substitute
+`Machine.resume` for cluster recovery.
 
 ## Common compiler errors
 

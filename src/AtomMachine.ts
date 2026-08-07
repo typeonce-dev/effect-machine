@@ -58,6 +58,12 @@ type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineR
   Emits
 >
 
+type MachineResumeRequirements<R, Events, Emits> = ExcludeCompatibleMachineRuntime<
+  Machine.ExecutionServices<R>,
+  Events,
+  Emits
+>
+
 type MachineRuntimeError<E, R> =
   | E
   | Machine.ActionError<R>
@@ -74,6 +80,17 @@ type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
   | Machine.StartupError
   | Machine.StoppedError
   | RuntimeError
+
+const runMachineAtomEffect = <State, Event, Error, Output, StartError, Requirements>(
+  get: Atom.AtomContext,
+  start: Effect.Effect<Machine.MachineRef<State, Event, Error, Output>, StartError, Requirements>
+): Effect.Effect<never, StartError, Requirements> =>
+  Effect.scoped(
+    Effect.acquireRelease(start, (ref) => ref.stop).pipe(
+      Effect.tap((ref) => Effect.sync(() => get.setSelf(AsyncResult.success(ref)))),
+      Effect.flatMap(() => Effect.never)
+    )
+  )
 
 const startMachineAtomEffect = <
   const States extends Machine.Machine.StateSchemas,
@@ -118,16 +135,13 @@ const startMachineAtomEffect = <
   >,
   MachineStartError<InitialE, E, InitialR, R>,
   MachineRequirements<InitialR, R, Machine.Machine.EventOf<Events>, Machine.Machine.EmitOf<Emits>>
-> =>
-  Effect.scoped(
-    Effect.acquireRelease(
-      Machine.start(machine, ...args),
-      (ref) => ref.stop
-    ).pipe(
-      Effect.tap((ref) => Effect.sync(() => get.setSelf(AsyncResult.success(ref)))),
-      Effect.flatMap(() => Effect.never)
-    )
-  )
+> => runMachineAtomEffect(get, Machine.start(machine, ...args))
+
+const resumeMachineAtomEffect = (
+  get: Atom.AtomContext,
+  machine: Machine.Machine.Any,
+  snapshot: Machine.Machine.Snapshot<any>
+) => runMachineAtomEffect(get, Machine.resume(machine as any, snapshot as any))
 
 /**
  * Atoms backed by one running machine instance in an `AtomRegistry`.
@@ -781,11 +795,36 @@ type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> = IsAny<Ma
     readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
   }
 
+type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
+  Machine.Machine.Services<M>,
+  Machine.Machine.Event<M>,
+  Machine.Machine.Emit<M>
+>
+
+type MissingBoundResumeRequirements<Services, M extends Machine.Machine.Any> = Exclude<
+  ExternalRequirements<MachineResumeRequirementsOf<M>>,
+  Services
+>
+
+type EnsureBoundResumeRequirements<Services, M extends Machine.Machine.Any> =
+  IsAny<MachineResumeRequirementsOf<M>> extends true ? {
+      readonly [BoundRequirementsTypeId]: MachineResumeRequirementsOf<M>
+    }
+    : [MissingBoundResumeRequirements<Services, M>] extends [never] ? unknown
+    : {
+      readonly [BoundRequirementsTypeId]: MissingBoundResumeRequirements<Services, M>
+    }
+
 type EnsureMachineOutputImplementations<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ?
   {
     readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
   }
   : Machine.Machine.EnsureOutputImplementations<Machine.Machine.States<M>, Machine.Machine.OutputStates<M>>
+
+type EnsureMachineHistoryImplementations<M extends Machine.Machine.Any> = Machine.Machine.EnsureHistoryImplementations<
+  Machine.Machine.States<M>,
+  Machine.Machine.UnhandledStates<M>
+>
 
 type MachineInputArgsOf<M extends Machine.Machine.Any> = [
   ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
@@ -803,6 +842,14 @@ type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
     Machine.Machine.Services<M>,
     RuntimeError
   >
+>
+
+type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
+  Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+  Machine.Machine.InputEvent<M>,
+  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+  Machine.Machine.Output<M>,
+  Machine.MachineSchemaDecodeError | RuntimeError
 >
 
 /**
@@ -827,6 +874,16 @@ export interface Bound<Services, RuntimeError = never> {
       & EnsureMachineOutputImplementations<NoInfer<M>>,
     ...args: MachineInputArgsOf<M>
   ) => MachineAtomOf<M, RuntimeError>
+
+  /** Creates a lazy bridge from a decoded logical snapshot. */
+  readonly resume: <M extends Machine.Machine.Any>(
+    machine:
+      & M
+      & EnsureBoundResumeRequirements<Services, NoInfer<M>>
+      & EnsureMachineOutputImplementations<NoInfer<M>>
+      & EnsureMachineHistoryImplementations<NoInfer<M>>,
+    snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  ) => ResumedMachineAtomOf<M, RuntimeError>
 }
 
 /**
@@ -892,12 +949,45 @@ export const make: {
   return makeFromRefAtom(ref as any)
 }) as any
 
+/**
+ * Creates a lazy atom bridge from a decoded logical snapshot.
+ *
+ * The bridge owns one freshly resumed runtime per `AtomRegistry`, with the same
+ * lazy start and disposal semantics as {@link make}. The machine initial
+ * function and its input, errors, and services are not involved.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const resume: {
+  <M extends Machine.Machine.Any>(
+    machine:
+      & M
+      & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
+      & EnsureMachineOutputImplementations<NoInfer<M>>
+      & EnsureMachineHistoryImplementations<NoInfer<M>>,
+    snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  ): ResumedMachineAtomOf<M, never>
+} = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {
+  const ref = Atom.make((get) => resumeMachineAtomEffect(get, machine, snapshot))
+  return makeFromRefAtom(ref as any)
+}) as any
+
 const makeWithRuntime = (
   runtime: Atom.AtomRuntime<any, any>,
   machine: Machine.Machine.Any,
   args: ReadonlyArray<unknown>
 ): MachineAtom<any, any, any, any, any> => {
   const ref = runtime.atom((get) => startMachineAtomEffect(get, machine as any, args as []))
+  return makeFromRefAtom(ref as any)
+}
+
+const resumeWithRuntime = (
+  runtime: Atom.AtomRuntime<any, any>,
+  machine: Machine.Machine.Any,
+  snapshot: Machine.Machine.Snapshot<any>
+): MachineAtom<any, any, any, any, any> => {
+  const ref = runtime.atom((get) => resumeMachineAtomEffect(get, machine, snapshot))
   return makeFromRefAtom(ref as any)
 }
 
@@ -919,5 +1009,8 @@ export const bind = <Services, RuntimeError>(
       makeWithRuntime(runtime, machine, args)) as Bound<
         Services,
         RuntimeError
-      >["make"]
+      >["make"],
+  resume:
+    ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) =>
+      resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"]
 })

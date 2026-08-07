@@ -431,7 +431,11 @@ const nestedHistoryMachine = Machine.make({
               DefaultEditor: ({ target }) => target.history.workspace.editor.exact()
             }
           },
-          writing: {}
+          writing: {
+            on: {
+              DefaultEditor: ({ target }) => target.history.workspace.editor.exact()
+            }
+          }
         }
       }
     }
@@ -579,6 +583,22 @@ describe("Machine history states", () => {
       assert.strictEqual(valueError.state, "checkout.payment.verifying")
     }))
 
+  it.effect("preserves recorded history across encode, decode, and runtime resume", () =>
+    Effect.gen(function*() {
+      const original = checkoutPaymentVerifying("order-1", 2, "challenge-7")
+      const machine = makeCheckoutMachine(original)
+      const left = yield* Machine.plan(machine, original, new Leave({}))
+      const expected = yield* Machine.plan(machine, left.next, new ResumeDeep({}))
+      const encoded = yield* Machine.encodeSnapshot(machine, left.next)
+      const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
+      const ref = yield* Machine.resume(machine, decoded)
+
+      assert.deepStrictEqual((yield* ref.state).history, left.next.history)
+      yield* sendAndWaitForPath(ref, new ResumeDeep({}), "checkout")
+      assert.deepStrictEqual(yield* ref.state, expected.next)
+      yield* ref.stop
+    }))
+
   it.effect("captures the current subtree before resolving a reentering transition to its own history", () =>
     Effect.gen(function*() {
       let defaults = 0
@@ -687,6 +707,38 @@ describe("Machine history states", () => {
       assert.strictEqual(restored.microsteps[0]?.transitions[0]?.target, "workspace.editor.exact")
       assert.strictEqual(restored.microsteps[0]?.transitions[0]?.resolvedTarget, "workspace.editor")
       assert.strictEqual(restored.next.history, undefined)
+    }))
+
+  it.effect("resumes nested first-use and recorded history snapshots after codec round-trips", () =>
+    Effect.gen(function*() {
+      const encodedFirstUse = yield* Machine.encodeSnapshot(nestedHistoryMachine, nestedParallelSnapshot)
+      const decodedFirstUse = yield* Machine.decodeSnapshot(
+        nestedHistoryMachine,
+        JSON.parse(JSON.stringify(encodedFirstUse))
+      )
+      const firstUseRef = yield* Machine.resume(nestedHistoryMachine, decodedFirstUse)
+      yield* sendAndWaitForPath(firstUseRef, new DefaultEditor({}), "workspace.editor.writing")
+      const firstUseState = yield* firstUseRef.state
+      assert.deepStrictEqual((firstUseState as any).states.editor.value, new Editor({ documentId: "fallback" }))
+      assert.deepStrictEqual((firstUseState as any).states.sidebar, nestedParallelSnapshot.states.sidebar)
+      yield* firstUseRef.stop
+
+      const recorded = yield* Machine.plan(nestedHistoryMachine, nestedParallelSnapshot, new RestoreEditor({}))
+      const current = {
+        ...(yield* Machine.plan(nestedHistoryMachine, nestedParallelSnapshot, new DefaultEditor({}))).next,
+        history: recorded.next.history
+      } as Machine.Machine.Snapshot<typeof NestedHistoryStates.states>
+      const encodedRecorded = yield* Machine.encodeSnapshot(nestedHistoryMachine, current)
+      const decodedRecorded = yield* Machine.decodeSnapshot(
+        nestedHistoryMachine,
+        JSON.parse(JSON.stringify(encodedRecorded))
+      )
+      const recordedRef = yield* Machine.resume(nestedHistoryMachine, decodedRecorded)
+      yield* sendAndWaitForPath(recordedRef, new DefaultEditor({}), "workspace.editor.preview")
+      const restored = yield* recordedRef.state
+      assert.deepStrictEqual((restored as any).states.editor, nestedParallelSnapshot.states.editor)
+      assert.deepStrictEqual((restored as any).states.sidebar, nestedParallelSnapshot.states.sidebar)
+      yield* recordedRef.stop
     }))
 
   it.effect("rejects a forged fallback that omits its declared owner with a precise diagnostic", () =>
