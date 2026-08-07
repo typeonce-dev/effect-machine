@@ -195,6 +195,13 @@ export const runtimeFor = <Events, Emits>(): Effect.Effect<
 export type MicrostepPlan<State, Event, E, R> = {
   readonly next: State
   readonly event: Event | MachineInitialEvent
+  readonly transitions: ReadonlyArray<{
+    readonly source: string
+    readonly trigger: Machine.TransitionTrigger
+    readonly reenter: boolean
+    readonly target: string | undefined
+    readonly resolvedTarget: string | undefined
+  }>
   readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
   readonly raisedEvents: ReadonlyArray<Event>
   readonly emittedEvents: ReadonlyArray<unknown>
@@ -445,8 +452,12 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
     // regions must be initialized when the ancestor is re-entered.
     const completed = yield* completeHistoryConfiguration(machine, restored, event)
     const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.parent)
+    const values = Object.fromEntries(completed.configuration.values)
     return {
-      target: makeTarget(target.parent as any, snapshot.value as any, { snapshot: snapshot as any }),
+      target: makeTarget(target.parent as any, snapshot.value as any, {
+        snapshot: snapshot as any,
+        values: values as any
+      }),
       actions: completed.actions,
       raisedEvents: completed.raisedEvents,
       emittedEvents: completed.emittedEvents
@@ -488,6 +499,11 @@ type SelectedTransition<States extends Machine.StateSchemas, E, R, Context> = {
 
 type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Context> = {
   readonly selection: SelectedTransition<States, E, R, Context>
+  readonly unresolvedTarget:
+    | Machine.Snapshot<States>
+    | Machine.Target<States, Machine.StateIdentifier<States>>
+    | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
+    | undefined
   readonly target:
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
@@ -526,6 +542,16 @@ const getLeastCommonAncestor = (
     ancestor = leftPath[index]
   }
   return ancestor
+}
+
+const broadenTransitionBoundary = (
+  naturalBoundary: string | undefined,
+  reentryBoundary: string | undefined
+): string | undefined => {
+  if (naturalBoundary === undefined || reentryBoundary === undefined) return undefined
+  return naturalBoundary === reentryBoundary || isDescendantOf(naturalBoundary, reentryBoundary)
+    ? reentryBoundary
+    : naturalBoundary
 }
 
 const getExitPaths = (
@@ -875,8 +901,14 @@ const selectEventTransitions = <
 }
 
 const getTargetNodePath = <const States extends Machine.StateSchemas>(
-  target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+  target:
+    | Machine.Snapshot<States>
+    | Machine.Target<States, Machine.StateIdentifier<States>>
+    | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
 ): string => {
+  if (isHistoryTarget(target)) {
+    return String(target.path)
+  }
   if (isTarget(target)) {
     return String(target.path)
   }
@@ -1003,6 +1035,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     : transitionResult.state as
       | Machine.Snapshot<States>
       | Machine.Target<States, Machine.StateIdentifier<States>>
+      | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
@@ -1040,9 +1073,15 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       (selection.context as any).event
     )
   }
-  const target = historyResolution === undefined ? unresolvedTarget : historyResolution.target as
-    | Machine.Snapshot<States>
-    | Machine.Target<States, Machine.StateIdentifier<States>>
+  const target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>> | undefined =
+    historyResolution === undefined
+      ? unresolvedTarget as
+        | Machine.Snapshot<States>
+        | Machine.Target<States, Machine.StateIdentifier<States>>
+        | undefined
+      : historyResolution.target as
+        | Machine.Snapshot<States>
+        | Machine.Target<States, Machine.StateIdentifier<States>>
   const targetPath = target === undefined ? undefined : getTargetNodePath(target)
   const stateAfterTransition = target === undefined
     ? state
@@ -1052,6 +1091,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
   if (!changed) {
     return {
       selection,
+      unresolvedTarget,
       target,
       actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
       raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
@@ -1062,12 +1102,17 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     } as EvaluatedTransition<States, Event, E, R, Context>
   }
 
-  const boundary = selection.transition.reenter
+  const naturalBoundary = targetPath === undefined
     ? getNode(machine, selection.sourcePath).parent
-    : getLeastCommonAncestor(machine, stateIdentifier, targetPath!)
+    : getLeastCommonAncestor(machine, stateIdentifier, targetPath)
+  const reentryBoundary = getNode(machine, selection.sourcePath).parent
+  const boundary = selection.transition.reenter
+    ? broadenTransitionBoundary(naturalBoundary, reentryBoundary)
+    : naturalBoundary
 
   return {
     selection,
+    unresolvedTarget,
     target,
     actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
     raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
@@ -1237,6 +1282,8 @@ export const planInitial: <
       : result
     const configuration = yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
     validateInitialConfiguration(machine, configuration)
+    const startingState = snapshotFromConfiguration<States>(machine, configuration)
+    const initialEntryPaths = getInitialEntryPaths(machine, configuration)
     const actions = yield* deferredActions.read
     const raisedEvents = yield* deferredRaisedEvents.read
     const emittedEvents = yield* deferredRaisedEvents.readEmitted
@@ -1244,7 +1291,7 @@ export const planInitial: <
       const entry = yield* collectStateActions<States, Events, Emits, E, R>(
         machine,
         configuration,
-        getInitialEntryPaths(machine, configuration),
+        initialEntryPaths,
         InitialEvent,
         "entry"
       )
@@ -1264,12 +1311,25 @@ export const planInitial: <
     >)
 
     const planned = {
+      startingState,
+      initialEntryPaths,
       state: snapshotFromConfiguration<States>(machine, settled.next),
       actions: [
         ...actions,
         ...settled.actions
       ] as ReadonlyArray<Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>>,
-      emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>
+      emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+      microsteps: settled.microsteps.map((step) => ({
+        next: snapshotFromConfiguration<States>(machine, step.next),
+        event: step.event,
+        transitions: step.transitions,
+        actions: step.actions,
+        raisedEvents: step.raisedEvents,
+        emittedEvents: step.emittedEvents,
+        exitPaths: step.exitPaths,
+        entryPaths: step.entryPaths,
+        changed: step.changed
+      }))
     }
     return settled.done
       ? { ...planned, done: true as const, output: settled.output }
@@ -1369,6 +1429,7 @@ const microstep: <
     return {
       next: state,
       event,
+      transitions: [],
       actions: [],
       raisedEvents: [],
       emittedEvents: [],
@@ -1392,8 +1453,24 @@ const microstep: <
 
   const transitions = removeConflictingTransitions(machine, evaluatedTransitions)
   const sortedTransitions = sortEvaluatedTransitions(machine, transitions)
+  const retainedTransitions = sortedTransitions.map((transition) => ({
+    source: transition.selection.sourcePath,
+    trigger: transition.selection.trigger,
+    reenter: transition.selection.transition.reenter,
+    target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
+    resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
+  }))
   let stateAfterTransition = state
-  for (const transition of sortedTransitions) {
+  // Value-only targets are evaluated against the original configuration. If
+  // one is applied after a control-changing transition, it can resurrect a
+  // branch that the changing transition exited. Apply value-only updates
+  // first so later control targets remain authoritative while still
+  // preserving updates made in unaffected parallel regions.
+  const targetApplicationOrder = [
+    ...sortedTransitions.filter((transition) => !transition.changed),
+    ...sortedTransitions.filter((transition) => transition.changed)
+  ]
+  for (const transition of targetApplicationOrder) {
     if (transition.target !== undefined) {
       stateAfterTransition = yield* normalizeTargetConfigurationEffect<States>(
         machine,
@@ -1415,6 +1492,7 @@ const microstep: <
     return {
       next: stateAfterTransition,
       event,
+      transitions: retainedTransitions,
       actions: transitionActions,
       raisedEvents: transitionRaisedEvents,
       emittedEvents: transitionEmittedEvents,
@@ -1445,6 +1523,7 @@ const microstep: <
   return {
     next: stateAfterTransition,
     event,
+    transitions: retainedTransitions,
     actions: [...exit.actions, ...transitionActions, ...entry.actions] as ReadonlyArray<
       Effect.Effect<void, E, R>
     >,
@@ -1717,6 +1796,7 @@ const macrostep: <
     microsteps: settled.microsteps.map((step) => ({
       next: snapshotFromConfiguration<States>(machine, step.next),
       event: step.event,
+      transitions: step.transitions,
       actions: step.actions,
       raisedEvents: step.raisedEvents,
       emittedEvents: step.emittedEvents,

@@ -51,7 +51,7 @@ try {
   }
   run(process.execPath, [join(consumer, "runtime.mjs")], { cwd: consumer })
 
-  console.log("packed root, reactivity, and cluster entrypoints passed strict consumer validation")
+  console.log("packed root, reactivity, cluster, and testing entrypoints passed strict consumer validation")
 } finally {
   await rm(destination, { recursive: true, force: true })
 }

@@ -483,6 +483,8 @@ describe("Machine history states", () => {
       const resumed = yield* Machine.plan(machine, initial.state, new ResumeDeep({}))
 
       assert.deepStrictEqual(resumed.next, checkoutShipping("fallback-order", "fallback-address"))
+      assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.target, "checkout.exact")
+      assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(initialized, 0)
     }))
 
@@ -498,6 +500,8 @@ describe("Machine history states", () => {
       ])
 
       const exact = yield* Machine.plan(machine, firstLeave.next, new ResumeDeep({}))
+      assert.strictEqual(exact.microsteps[0]?.transitions[0]?.target, "checkout.exact")
+      assert.strictEqual(exact.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(exact.next.path, original.path)
       assert.deepStrictEqual(exact.next.value, original.value)
       assert.deepStrictEqual((exact.next as any).state, (original as any).state)
@@ -526,6 +530,8 @@ describe("Machine history states", () => {
       const left = yield* Machine.plan(machine, original, new Leave({}))
       const resumed = yield* Machine.plan(machine, left.next, new ResumeShallow({}))
 
+      assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.target, "checkout.recent")
+      assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(initialized, 1)
       assert.deepStrictEqual(resumed.next.value, new Checkout({ orderId: "order-1" }))
       assert.deepStrictEqual((resumed.next as any).state.value, new Payment({ attempt: 3 }))
@@ -575,6 +581,8 @@ describe("Machine history states", () => {
 
       const reentered = yield* Machine.plan(machine, original, new ReenterHistory({}))
 
+      assert.strictEqual(reentered.microsteps[0]?.transitions[0]?.target, "checkout.exact")
+      assert.strictEqual(reentered.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(defaults, 0)
       assert.strictEqual(reentered.next.path, "checkout")
       assert.deepStrictEqual(reentered.next.value, original.value)

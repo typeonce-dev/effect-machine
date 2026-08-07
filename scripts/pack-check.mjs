@@ -25,6 +25,8 @@ try {
     "package/dist/reactivity.d.ts",
     "package/dist/cluster.js",
     "package/dist/cluster.d.ts",
+    "package/dist/testing.js",
+    "package/dist/testing.d.ts",
     "package/package.json",
     "package/README.md",
     "package/docs/agent-guide.md",

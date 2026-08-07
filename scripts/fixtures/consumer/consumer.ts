@@ -1,6 +1,7 @@
 import { Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect, Schema } from "effect"
 
 const State = Schema.TaggedUnion({
@@ -54,6 +55,7 @@ const invoked = Machine.invokeEffect({
 })
 const delayed = Machine.after("1 second", InternalEvent.cases.Loaded.make({ value: "late" }))
 const staged = Machine.action(Effect.succeed(undefined), "next" as const)
+const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 
 type InputEvent = Machine.Machine.InputEvent<typeof machine>
 type HandledEvent = Machine.Machine.Event<typeof machine>
@@ -64,4 +66,17 @@ const loaded: HandledEvent = InternalEvent.cases.Loaded.make({ value: "ready" })
 // @ts-expect-error Internal events cannot cross the public input boundary.
 const invalidInput: InputEvent = loaded
 
-void [atoms, idleAtom, loadingAtom, invalidSelector, cluster, invoked, delayed, staged, start, loaded, invalidInput]
+void [
+  atoms,
+  idleAtom,
+  loadingAtom,
+  invalidSelector,
+  cluster,
+  invoked,
+  delayed,
+  staged,
+  generated,
+  start,
+  loaded,
+  invalidInput
+]
