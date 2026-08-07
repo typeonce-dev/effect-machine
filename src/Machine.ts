@@ -7394,3 +7394,85 @@ export const start: <
     Machine.EmitOf<Emits>
   >
 > = internalProcess.start as any
+
+/**
+ * Starts a fresh managed runtime from a decoded logical snapshot.
+ *
+ * **Details**
+ *
+ * `resume` validates and normalizes the supplied snapshot before publishing it
+ * as the first state. It does not call the machine's initial function, replay
+ * entry or transition actions, re-deliver raised or emitted events, or
+ * re-evaluate historical completion and eventless transitions. Active-state
+ * invokes start once in ancestor and document order with {@link InitialEvent};
+ * delayed invokes restart their complete duration and invoked machines start
+ * from their own initial state.
+ *
+ * Only logical state, completion, and history metadata are resumed. Queues,
+ * scopes, subscriptions, fibers, spawned children, invoke progress, and prior
+ * runtime status are process-local and are not restored. A final snapshot
+ * immediately produces a completed ref with its current-machine output.
+ *
+ * Decode encoded data explicitly with {@link decodeSnapshot} before calling
+ * this function. Stable snapshots are hosted as supplied; newly enabled
+ * eventless or completion transitions in a changed machine definition are not
+ * evaluated merely because the runtime was resumed; only ordinary subsequent
+ * transition planning can enter and stabilize states.
+ *
+ * @see {@link decodeSnapshot} for the schema and transport boundary.
+ * @see {@link start} for ordinary initial startup.
+ * @category constructors
+ * @since 4.0.0
+ */
+export const resume: <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never,
+  OutputStates extends Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+>(
+  machine:
+    & Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & Machine.EnsureOutputImplementations<States, OutputStates>
+    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
+  snapshot: Machine.Snapshot<States>
+) => Effect.Effect<
+  MachineRef<
+    Machine.Snapshot<States>,
+    Machine.EventOf<InputEvents>,
+    | E
+    | ActionError<R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StoppedError,
+    Output
+  >,
+  MachineSchemaDecodeError,
+  ExcludeCompatibleRuntime<
+    ExecutionServices<R>,
+    Machine.EventOf<Events>,
+    Machine.EmitOf<Emits>
+  >
+> = internalProcess.resume as any

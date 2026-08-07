@@ -597,8 +597,38 @@ contain the machine definition, machine version, services, subscriptions, or
 running child processes. Store machine identity and migration/version metadata
 alongside it.
 
+Resume a decoded logical snapshot explicitly:
+
+```ts
+const encoded = yield * Machine.encodeSnapshot(machine, snapshot)
+const decoded = yield * Machine.decodeSnapshot(machine, encoded)
+const ref = yield * Machine.resume(machine, decoded)
+```
+
+`resume` does not call `initial`, require machine input, or replay entry,
+transition, completion, eventless, raised-event, or emitted-event work that
+produced the snapshot. The decoded snapshot is the first published logical
+state. A final snapshot immediately yields a completed ref with its output.
+
+Resumption creates a fresh runtime. Invokes owned by active states start once in
+normal ancestor/document order and receive `Machine.InitialEvent` as their
+lifecycle event. `invokeEffect` runs again, invoked machines start from their
+own initial state, and `Machine.after` timers restart from their full declared
+duration. Spawned children, queued events, subscriptions, fibers, scopes,
+elapsed timer time, child snapshots, and prior `RuntimeSnapshot` status/errors
+are not restored. Completion and history metadata remain logical state and are
+not replayed. A changed machine definition does not cause `resume` itself to
+evaluate newly enabled `always` or `onDone` transitions.
+
+Reactive applications use `AtomMachine.resume(machine, decoded)` for a
+service-free machine or `AtomMachine.bind(runtime).resume(machine, decoded)`
+for a service-backed machine. These bridges have the same lazy one-runtime-per-
+registry ownership and disposal behavior as `AtomMachine.make`.
+
 `ClusterMachine` provides a separate persisted entity adapter. Its process-local
-restrictions and delivery guarantees are documented on that API.
+restrictions, checkpoint planning, and delivery guarantees are documented on
+that API. `Machine.resume` is logical resumption, not durable process or cluster
+restoration.
 
 ## Current limits
 

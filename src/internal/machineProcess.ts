@@ -38,6 +38,16 @@ interface InvokeSession {
   readonly path: string
 }
 
+type ProcessEntry<States extends Machine.StateSchemas, Input extends Schema.Top> =
+  | {
+    readonly _tag: "Initial"
+    readonly args: [...Machine.InputArgs<Input>]
+  }
+  | {
+    readonly _tag: "Resume"
+    readonly snapshot: Machine.Snapshot<States>
+  }
+
 const getInvokes = (
   config: Machine.AnyStateConfig | undefined,
   context: Machine.InvokeContext<any, any, any, any>
@@ -50,7 +60,7 @@ const getInvokes = (
   return Array.isArray(invokes) ? invokes as ReadonlyArray<AnyInvokeConfig> : [invokes as AnyInvokeConfig]
 }
 
-export const toProcessLogic: <
+const makeProcessLogic: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -64,7 +74,7 @@ export const toProcessLogic: <
   Output = never
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
+  entry: ProcessEntry<States, Input>
 ) => internalRuntime.ProcessLogic<
   Machine.Snapshot<States>,
   Machine.EventOf<Events>,
@@ -96,13 +106,16 @@ export const toProcessLogic: <
   Output = never
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
+  entry: ProcessEntry<States, Input>
 ) =>
   ({
     initial: (scope) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
-          const planned = yield* internalPlanner.planInitial(machine, ...args)
+          if (entry._tag === "Resume") {
+            return yield* Model.normalizeSnapshotEffect(machine, entry.snapshot)
+          }
+          const planned = yield* internalPlanner.planInitial(machine, ...entry.args)
           const runtime = internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(
             machine,
             scope
@@ -413,6 +426,46 @@ export const toProcessLogic: <
     | StoppedError
   >
 
+export const toProcessLogic: <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never
+>(
+  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  ...args: [...Machine.InputArgs<Input>]
+) => internalRuntime.ProcessLogic<
+  Machine.Snapshot<States>,
+  Machine.EventOf<Events>,
+  E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
+  ExcludeCompatibleRuntime<
+    Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+    Machine.EventOf<Events>,
+    Machine.EmitOf<Emits>
+  >,
+  Output,
+  | InitialE
+  | E
+  | ActionError<InitialR | R>
+  | InfiniteTransitionError
+  | MachineSchemaDecodeError
+  | StartupError
+  | StoppedError
+> = (machine, ...args) => makeProcessLogic(machine, { _tag: "Initial", args })
+
+const toResumedProcessLogic = (
+  machine: Machine.Any,
+  snapshot: Machine.Snapshot<any>
+): internalRuntime.ProcessLogic<any, any, any, any, any, any> =>
+  (makeProcessLogic as any)(machine, { _tag: "Resume", snapshot })
+
 export const start: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -454,5 +507,39 @@ export const start: <
 > = (machine, ...args) =>
   internalRuntime.startProcess(
     toProcessLogic(machine, ...args),
+    machine.id === undefined ? undefined : { id: machine.id }
+  ) as any
+
+export const resume: <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never
+>(
+  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  snapshot: Machine.Snapshot<States>
+) => Effect.Effect<
+  internalRuntime.MachineRef<
+    Machine.Snapshot<States>,
+    Machine.EventOf<Events>,
+    E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
+    Output
+  >,
+  MachineSchemaDecodeError,
+  ExcludeCompatibleRuntime<
+    Exclude<ExecutionServices<R>, internalRuntime.MachineRuntime>,
+    Machine.EventOf<Events>,
+    Machine.EmitOf<Emits>
+  >
+> = (machine, snapshot) =>
+  internalRuntime.startProcess(
+    toResumedProcessLogic(machine, snapshot),
     machine.id === undefined ? undefined : { id: machine.id }
   ) as any

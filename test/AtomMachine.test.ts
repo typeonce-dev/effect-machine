@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Context, Data, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Context, Data, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import { Machine } from "../src/index.js"
 import { AtomMachine } from "../src/reactivity.js"
@@ -127,6 +127,64 @@ const makeDelayedCounterMachine = (release: Deferred.Deferred<void>) =>
   })
 
 describe("AtomMachine", () => {
+  it.effect("resumes lazily once per registry and disposes the resumed runtime", () =>
+    Effect.gen(function*() {
+      const initialCalls = yield* Ref.make(0)
+      const invokeStarts = yield* Ref.make(0)
+      const invokeStopped = yield* Deferred.make<void>()
+      const machine = Machine.make({
+        states: CounterStates.states,
+        events: [Finish],
+        initial: () =>
+          Ref.update(initialCalls, (n) => n + 1).pipe(
+            Effect.as(CounterStates.initial.Count(new Count({ value: 0 })))
+          )
+      }).handle({
+        Count: {
+          invoke: Machine.invoke({
+            id: "active",
+            src: () =>
+              Machine.logic({
+                initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
+                run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
+              })
+          }),
+          on: {
+            Finish: ({ event, state, target }) => target.full.Count(new Count({ value: state.value + event.by }))
+          }
+        },
+        Done: {}
+      })
+      const bridge = AtomMachine.resume(machine, CounterStates.initial.Count(new Count({ value: 5 })))
+      const firstRegistry = AtomRegistry.make()
+      const secondRegistry = AtomRegistry.make()
+
+      const first = yield* AtomRegistry.getResult(firstRegistry, bridge.ref)
+      const firstAgain = yield* AtomRegistry.getResult(firstRegistry, bridge.ref)
+      const second = yield* AtomRegistry.getResult(secondRegistry, bridge.ref)
+      assert.strictEqual(first.sessionId, firstAgain.sessionId)
+      assert.strictEqual(first, firstAgain)
+      assert.notStrictEqual(first, second)
+      assert.deepStrictEqual(yield* AtomRegistry.getResult(firstRegistry, bridge.state), {
+        path: "Count",
+        value: new Count({ value: 5 })
+      })
+      assert.strictEqual(yield* Ref.get(initialCalls), 0)
+      assert.strictEqual(yield* Ref.get(invokeStarts), 2)
+
+      const stopped = yield* first.changes.pipe(
+        Stream.filter((snapshot) => snapshot.status === "stopped"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild
+      )
+      firstRegistry.dispose()
+      yield* Deferred.await(invokeStopped)
+      yield* Fiber.join(stopped)
+      assert.strictEqual((yield* first.snapshot).status, "stopped")
+      secondRegistry.dispose()
+    }))
+
   it.effect("reactively exposes an invoked child machine", () =>
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry
