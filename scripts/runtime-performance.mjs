@@ -57,6 +57,7 @@ const configuration = options.quick
     minimumWarmupIterations: 1,
     planningBatchSize: 25,
     burstBatchSize: 25,
+    childBatchSize: 10,
     memoryCounts: [25, 100]
   }
   : {
@@ -66,6 +67,7 @@ const configuration = options.quick
     minimumWarmupIterations: 5,
     planningBatchSize: 100,
     burstBatchSize: 250,
+    childBatchSize: 100,
     memoryCounts: [100, 500, 1_000]
   }
 
@@ -78,6 +80,8 @@ const bench = new Bench({
 })
 const benchmarkDefinitions = new Map()
 const activeBurstRefs = new Map()
+const activeChildRefs = new Map()
+const activeObservedRefs = new Map()
 
 for (const implementation of implementations) {
   const metadata = {
@@ -145,6 +149,79 @@ for (const implementation of implementations) {
     }
   })
 
+  const observedBurstTask = `${implementation.implementation}:observed-runtime-burst`
+  benchmarkDefinitions.set(observedBurstTask, {
+    ...metadata,
+    id: "observed-runtime-burst",
+    label: "Drain burst with a change observer",
+    unit: "increments/s",
+    operationsPerIteration: configuration.burstBatchSize,
+    fenceEventsPerIteration: 1
+  })
+  bench.add(observedBurstTask, async () => {
+    const value = await implementation.runObservedCounterBurst(
+      activeObservedRefs.get(implementation.implementation),
+      configuration.burstBatchSize
+    )
+    if (value !== configuration.burstBatchSize) {
+      throw new Error(
+        `${implementation.label} observed runtime benchmark produced ${value}, expected ${configuration.burstBatchSize}`
+      )
+    }
+  }, {
+    beforeEach: async () => {
+      activeObservedRefs.set(implementation.implementation, await implementation.startObservedCounter())
+    },
+    afterEach: async () => {
+      const ref = activeObservedRefs.get(implementation.implementation)
+      await implementation.stopObservedCounter(ref)
+      activeObservedRefs.delete(implementation.implementation)
+    }
+  })
+
+  const childBurstTask = `${implementation.implementation}:child-runtime-burst`
+  benchmarkDefinitions.set(childBurstTask, {
+    ...metadata,
+    id: "child-runtime-burst",
+    label: "Lookup and send to one child",
+    unit: "increments/s",
+    operationsPerIteration: configuration.childBatchSize,
+    fenceEventsPerIteration: 1
+  })
+  const runChildBurst = implementation.async
+    ? async () => {
+      const value = await implementation.runChildCounterBurst(
+        activeChildRefs.get(implementation.implementation),
+        configuration.childBatchSize
+      )
+      if (value !== configuration.childBatchSize) {
+        throw new Error(
+          `${implementation.label} child runtime benchmark produced ${value}, expected ${configuration.childBatchSize}`
+        )
+      }
+    }
+    : () => {
+      const value = implementation.runChildCounterBurst(
+        activeChildRefs.get(implementation.implementation),
+        configuration.childBatchSize
+      )
+      if (value !== configuration.childBatchSize) {
+        throw new Error(
+          `${implementation.label} child runtime benchmark produced ${value}, expected ${configuration.childBatchSize}`
+        )
+      }
+    }
+  bench.add(childBurstTask, runChildBurst, {
+    beforeEach: async () => {
+      activeChildRefs.set(implementation.implementation, await implementation.startChildCounter())
+    },
+    afterEach: async () => {
+      const ref = activeChildRefs.get(implementation.implementation)
+      await implementation.stopChildCounter(ref)
+      activeChildRefs.delete(implementation.implementation)
+    }
+  })
+
   const lifecycleTask = `${implementation.implementation}:start-stop`
   benchmarkDefinitions.set(lifecycleTask, {
     ...metadata,
@@ -161,6 +238,23 @@ for (const implementation of implementations) {
       }
       : () => implementation.runLifecycle()
   )
+
+  const childLifecycleTask = `${implementation.implementation}:child-start-stop`
+  benchmarkDefinitions.set(childLifecycleTask, {
+    ...metadata,
+    id: "child-start-stop",
+    label: "Start and stop a parent with one child",
+    unit: "families/s",
+    operationsPerIteration: 1
+  })
+  bench.add(
+    childLifecycleTask,
+    implementation.async
+      ? async () => {
+        await implementation.runChildLifecycle()
+      }
+      : () => implementation.runChildLifecycle()
+  )
 }
 
 try {
@@ -172,6 +266,16 @@ try {
     if (ref !== undefined) {
       await implementation.stopCounter(ref)
       activeBurstRefs.delete(implementation.implementation)
+    }
+    const childRef = activeChildRefs.get(implementation.implementation)
+    if (childRef !== undefined) {
+      await implementation.stopChildCounter(childRef)
+      activeChildRefs.delete(implementation.implementation)
+    }
+    const observedRef = activeObservedRefs.get(implementation.implementation)
+    if (observedRef !== undefined) {
+      await implementation.stopObservedCounter(observedRef)
+      activeObservedRefs.delete(implementation.implementation)
     }
   }
 }
@@ -204,15 +308,25 @@ const benchmarks = bench.tasks.map((task) => {
 })
 
 const memoryWorker = fileURLToPath(new URL("../perf/runtime/memory-worker.mjs", import.meta.url))
-const memory = implementations.map((implementation) =>
-  JSON.parse(
-    execFileSync(
-      process.execPath,
-      ["--expose-gc", memoryWorker, implementation.implementation, JSON.stringify(configuration.memoryCounts)],
-      { encoding: "utf8" }
+const memoryProfileIds = ["idle", "parent-with-child"]
+const memory = implementations.map((implementation) => {
+  const profiles = memoryProfileIds.map((profileId) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          "--expose-gc",
+          memoryWorker,
+          implementation.implementation,
+          JSON.stringify(configuration.memoryCounts),
+          profileId
+        ],
+        { encoding: "utf8" }
+      )
     )
   )
-)
+  return { ...profiles[0], profiles }
+})
 
 const cpu = cpus()[0]
 const report = {
@@ -267,28 +381,33 @@ if (options.json) {
     }))
   )
 
-  console.log("\nIdle machine memory after forced GC\n")
+  console.log("\nRuntime memory after forced GC\n")
   console.table(
     memory.flatMap((result) =>
-      result.points.map((point) => ({
-        Implementation: `${result.implementationLabel} ${result.implementationVersion}`,
-        Machines: integer.format(point.machines),
-        "Heap delta": formatBytes(point.heapDeltaBytes),
-        "Heap/machine": formatBytes(point.heapDeltaBytes / point.machines),
-        "RSS delta": formatBytes(point.rssDeltaBytes)
-      }))
+      result.profiles.flatMap((profile) =>
+        profile.points.map((point) => ({
+          Implementation: `${result.implementationLabel} ${result.implementationVersion}`,
+          Profile: profile.label,
+          Units: integer.format(point.machines),
+          "Heap delta": formatBytes(point.heapDeltaBytes),
+          "Heap/unit": formatBytes(point.heapDeltaBytes / point.machines),
+          "RSS delta": formatBytes(point.rssDeltaBytes)
+        }))
+      )
     )
   )
   for (const result of memory) {
-    console.log(
-      `${result.implementationLabel} heap slope: ${formatBytes(result.heapBytesPerIdleMachine)} per idle machine`
-    )
-    if (Number.isFinite(result.heapBytesPerIdleMachine) && result.heapBytesPerIdleMachine > 0) {
+    for (const profile of result.profiles) {
       console.log(
-        `${result.implementationLabel} estimated idle capacity per GiB: ${integer.format(1_073_741_824 / result.heapBytesPerIdleMachine)} machines`
+        `${result.implementationLabel} ${profile.label.toLowerCase()} heap slope: ${formatBytes(profile.heapBytesPerIdleMachine)} per unit`
       )
-    } else {
-      console.log(`${result.implementationLabel} estimated idle capacity per GiB: unavailable`)
+      if (profile.id === "idle" && Number.isFinite(profile.heapBytesPerIdleMachine) && profile.heapBytesPerIdleMachine > 0) {
+        console.log(
+          `${result.implementationLabel} estimated idle capacity per GiB: ${integer.format(1_073_741_824 / profile.heapBytesPerIdleMachine)} machines`
+        )
+      } else if (profile.id === "idle") {
+        console.log(`${result.implementationLabel} estimated idle capacity per GiB: unavailable`)
+      }
     }
   }
   console.log("RSS is an allocator-sensitive diagnostic; heap slope is the primary memory metric.")

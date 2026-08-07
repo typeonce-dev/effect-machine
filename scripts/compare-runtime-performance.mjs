@@ -79,6 +79,37 @@ const validateReport = (report, path) => {
         throw new Error(`Invalid runtime-performance memory point: ${path}`)
       }
     }
+    if (measurement.profiles !== undefined) {
+      if (!Array.isArray(measurement.profiles) || measurement.profiles.length === 0 || measurement.profiles.length > 10) {
+        throw new Error(`Invalid runtime-performance memory profiles: ${path}`)
+      }
+      const profileIds = new Set()
+      for (const profile of measurement.profiles) {
+        if (
+          profile.implementation !== measurement.implementation ||
+          !isShortString(profile.id, 100) ||
+          !isShortString(profile.label, 200) ||
+          !isBoundedNumber(profile.heapBytesPerIdleMachine) ||
+          profile.heapBytesPerIdleMachine < 0 ||
+          !Array.isArray(profile.points) ||
+          profile.points.length > 20 ||
+          profileIds.has(profile.id)
+        ) {
+          throw new Error(`Invalid runtime-performance memory profile: ${path}`)
+        }
+        for (const point of profile.points) {
+          if (
+            !Number.isSafeInteger(point.machines) ||
+            point.machines < 0 ||
+            !isBoundedNumber(point.heapDeltaBytes) ||
+            !isBoundedNumber(point.rssDeltaBytes)
+          ) {
+            throw new Error(`Invalid runtime-performance memory profile point: ${path}`)
+          }
+        }
+        profileIds.add(profile.id)
+      }
+    }
     memoryKeys.add(measurement.implementation)
   }
 }
@@ -123,6 +154,11 @@ const median = (values) => {
     : sorted[middle]
 }
 
+const relativeMedianAbsoluteDeviation = (values) => {
+  const center = median(values)
+  return center === 0 ? 0 : median(values.map((value) => Math.abs(value - center))) / center * 100
+}
+
 const assertConsistentRuns = (reports, label) => {
   const first = reports[0]
   const configuration = JSON.stringify(first.configuration)
@@ -130,6 +166,9 @@ const assertConsistentRuns = (reports, label) => {
     `${benchmark.implementation}\u0000${benchmark.id}\u0000${benchmark.unit}`
   ).sort().join("\u0001")
   const memoryKeys = first.memory.map((measurement) => measurement.implementation).sort().join("\u0001")
+  const memoryProfileKeys = first.memory.flatMap((measurement) =>
+    (measurement.profiles ?? []).map((profile) => `${measurement.implementation}\u0000${profile.id}`)
+  ).sort().join("\u0001")
 
   for (const report of reports.slice(1)) {
     if (
@@ -141,6 +180,9 @@ const assertConsistentRuns = (reports, label) => {
         `${benchmark.implementation}\u0000${benchmark.id}\u0000${benchmark.unit}`
       ).sort().join("\u0001") !== benchmarkKeys ||
       report.memory.map((measurement) => measurement.implementation).sort().join("\u0001") !== memoryKeys
+      || report.memory.flatMap((measurement) =>
+        (measurement.profiles ?? []).map((profile) => `${measurement.implementation}\u0000${profile.id}`)
+      ).sort().join("\u0001") !== memoryProfileKeys
     ) {
       throw new Error(`Inconsistent ${label} runtime-performance reports`)
     }
@@ -160,21 +202,36 @@ const aggregate = (reports, label) => {
           candidate.implementation === benchmark.implementation && candidate.id === benchmark.id
         )
       )
+      const throughputs = matches.map((match) => match.medianThroughput)
       return {
         ...benchmark,
-        medianThroughput: median(matches.map((match) => match.medianThroughput)),
+        medianThroughput: median(throughputs),
+        processRelativeMad: relativeMedianAbsoluteDeviation(throughputs),
         relativeMarginOfError: median(matches.map((match) => match.relativeMarginOfError))
       }
     }),
-    memory: first.memory.map((measurement) => ({
-      ...measurement,
-      heapBytesPerIdleMachine: median(
-        reports.map((report) =>
-          report.memory.find((candidate) => candidate.implementation === measurement.implementation)
-            .heapBytesPerIdleMachine
-        )
+    memory: first.memory.map((measurement) => {
+      const matches = reports.map((report) =>
+        report.memory.find((candidate) => candidate.implementation === measurement.implementation)
       )
-    }))
+      const heapSlopes = matches.map((match) => match.heapBytesPerIdleMachine)
+      return {
+        ...measurement,
+        heapBytesPerIdleMachine: median(heapSlopes),
+        processRelativeMad: relativeMedianAbsoluteDeviation(heapSlopes),
+        profiles: measurement.profiles?.map((profile) => {
+          const profileMatches = matches.map((match) =>
+            match.profiles.find((candidate) => candidate.id === profile.id)
+          )
+          const profileHeapSlopes = profileMatches.map((match) => match.heapBytesPerIdleMachine)
+          return {
+            ...profile,
+            heapBytesPerIdleMachine: median(profileHeapSlopes),
+            processRelativeMad: relativeMedianAbsoluteDeviation(profileHeapSlopes)
+          }
+        })
+      }
+    })
   }
 }
 
@@ -189,6 +246,7 @@ const escapeCell = (value) => String(value).replaceAll("|", "\\|").replaceAll("\
 const code = (value) => `\`${String(value).replaceAll("`", "\\`")}\``
 const formatThroughput = (value, unit) => `${integer.format(value)} ${escapeCell(unit)}`
 const formatHeap = (value) => `${decimal.format(value / 1_024)} KiB`
+const formatVariability = (value) => `${decimal.format(value)}% MAD`
 const formatDifference = (before, after) => {
   const difference = after - before
   const sign = difference > 0 ? "+" : ""
@@ -235,15 +293,19 @@ for (const scenario of scenarios) {
   )
 }
 
+const memoryProfiles = pullRequest.memory[0]?.profiles ?? []
 lines.push(
   "",
-  "| Idle memory | Heap per machine |",
-  "| --- | ---: |"
+  `| Memory profile | ${implementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
+  `| --- | ${implementations.map(() => "---:").join(" | ")} |`
 )
-for (const implementation of implementations) {
-  const measurement = pullRequest.memory.find((candidate) => candidate.implementation === implementation.id)
+for (const profile of memoryProfiles) {
   lines.push(
-    `| ${escapeCell(implementation.label)} | ${measurement === undefined ? "—" : formatHeap(measurement.heapBytesPerIdleMachine)} |`
+    `| ${escapeCell(profile.label)} | ${implementations.map((implementation) => {
+      const measurement = pullRequest.memory.find((candidate) => candidate.implementation === implementation.id)
+      const implementationProfile = measurement?.profiles?.find((candidate) => candidate.id === profile.id)
+      return implementationProfile === undefined ? "—" : formatHeap(implementationProfile.heapBytesPerIdleMachine)
+    }).join(" | ")} |`
   )
 }
 
@@ -272,24 +334,29 @@ if (base === undefined) {
     "",
     "### Effect Machine change from base",
     "",
-    "| Metric | Base | PR | Difference |",
-    "| --- | ---: | ---: | ---: |"
+    "| Metric | Base | Base variability | PR | PR variability | Difference |",
+    "| --- | ---: | ---: | ---: | ---: | ---: |"
   )
   for (const scenario of scenarios) {
     const before = baseEffect.get(scenario.id)
     const after = pullRequestEffect.get(scenario.id)
     if (before !== undefined && after !== undefined && before.unit === after.unit) {
       lines.push(
-        `| ${escapeCell(scenario.label)} | ${formatThroughput(before.medianThroughput, before.unit)} | ${formatThroughput(after.medianThroughput, after.unit)} | ${formatDifference(before.medianThroughput, after.medianThroughput)} |`
+        `| ${escapeCell(scenario.label)} | ${formatThroughput(before.medianThroughput, before.unit)} | ${formatVariability(before.processRelativeMad)} | ${formatThroughput(after.medianThroughput, after.unit)} | ${formatVariability(after.processRelativeMad)} | ${formatDifference(before.medianThroughput, after.medianThroughput)} |`
       )
     }
   }
   const beforeMemory = base.memory.find((measurement) => measurement.implementation === "effect-machine")
   const afterMemory = pullRequest.memory.find((measurement) => measurement.implementation === "effect-machine")
   if (beforeMemory !== undefined && afterMemory !== undefined) {
-    lines.push(
-      `| Idle heap per machine | ${formatHeap(beforeMemory.heapBytesPerIdleMachine)} | ${formatHeap(afterMemory.heapBytesPerIdleMachine)} | ${formatDifference(beforeMemory.heapBytesPerIdleMachine, afterMemory.heapBytesPerIdleMachine)} |`
-    )
+    for (const beforeProfile of beforeMemory.profiles ?? []) {
+      const afterProfile = afterMemory.profiles?.find((candidate) => candidate.id === beforeProfile.id)
+      if (afterProfile !== undefined) {
+        lines.push(
+          `| ${escapeCell(beforeProfile.label)} heap per unit | ${formatHeap(beforeProfile.heapBytesPerIdleMachine)} | ${formatVariability(beforeProfile.processRelativeMad)} | ${formatHeap(afterProfile.heapBytesPerIdleMachine)} | ${formatVariability(afterProfile.processRelativeMad)} | ${formatDifference(beforeProfile.heapBytesPerIdleMachine, afterProfile.heapBytesPerIdleMachine)} |`
+        )
+      }
+    }
   }
 }
 
@@ -302,7 +369,7 @@ lines.push(
     `- ${escapeCell(implementation.label)}: ${code(implementation.version)}`
   ),
   "",
-  "Higher throughput is better; lower idle heap is better. Runtime measurements on shared GitHub-hosted hardware remain informational, so small differences should be confirmed across multiple workflow runs.",
+  "Higher throughput is better; lower heap is better. Variability is the median absolute deviation across independent processes, relative to their median. Runtime measurements on shared GitHub-hosted hardware remain informational, so small differences should be confirmed across multiple workflow runs.",
   "",
   "</details>"
 )

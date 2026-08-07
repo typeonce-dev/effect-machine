@@ -1,5 +1,17 @@
-import { Effect, Schema } from "effect"
-import { Machine } from "../../dist/index.js"
+import { readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
+
+const implementationRoot = resolve(
+  process.env.EFFECT_MACHINE_BENCHMARK_ROOT ?? fileURLToPath(new URL("../..", import.meta.url))
+)
+const implementationRequire = createRequire(pathToFileURL(join(implementationRoot, "package.json")))
+const effectPackagePath = implementationRequire.resolve("effect/package.json")
+const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"))
+const effect = await import(pathToFileURL(resolve(dirname(effectPackagePath), effectPackage.exports["."])).href)
+const { Machine } = await import(pathToFileURL(join(implementationRoot, "dist/index.js")).href)
+const { Effect, Fiber, Option, Schema, Stream } = effect
 
 const CounterState = Schema.TaggedUnion({
   Count: {
@@ -42,6 +54,20 @@ export const counterMachine = Machine.make({
   }
 })
 
+const ParentState = Schema.TaggedUnion({ Active: {} })
+const ParentStates = Machine.defineStates({ Active: ParentState.cases.Active })
+const CounterChild = Machine.child("counter", counterMachine)
+const counterParentMachine = Machine.make({
+  id: "RuntimeBenchmarkCounterParent",
+  states: ParentStates.states,
+  events: [],
+  initial: () => ParentStates.initial.Active(ParentState.cases.Active.make({}))
+}).handle({
+  Active: {
+    invoke: Machine.invokeMachine({ child: CounterChild })
+  }
+})
+
 export const incrementEvent = CounterEvent.cases.Increment.make({})
 const finishEvent = CounterEvent.cases.Finish.make({})
 
@@ -66,6 +92,76 @@ export const planCounterBatch = (size) => {
 export const startCounter = () => Effect.runPromise(Machine.start(counterMachine))
 
 export const stopCounter = (ref) => Effect.runPromise(ref.stop)
+
+export const startObservedCounter = () =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(counterMachine)
+      const observer = yield* ref.changes.pipe(Stream.runDrain, Effect.forkDetach)
+      yield* Effect.yieldNow
+      return { ref, observer }
+    })
+  )
+
+export const stopObservedCounter = ({ ref, observer }) =>
+  Effect.runPromise(
+    ref.stop.pipe(Effect.ensuring(Fiber.interrupt(observer)))
+  )
+
+export const runObservedCounterBurst = ({ ref, observer }, size) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      for (let index = 0; index < size; index += 1) {
+        yield* ref.send(incrementEvent)
+      }
+      yield* ref.send(finishEvent)
+      const value = yield* ref.join
+      yield* Fiber.join(observer)
+      return value
+    })
+  )
+
+const waitForCounterChild = (parent) =>
+  Effect.gen(function*() {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      const child = yield* parent.child(CounterChild)
+      if (Option.isSome(child)) {
+        return child.value
+      }
+      yield* Effect.yieldNow
+    }
+    return yield* Effect.dieMessage("Effect Machine child did not become ready")
+  })
+
+export const startChildCounter = () =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const parent = yield* Machine.start(counterParentMachine)
+      yield* waitForCounterChild(parent)
+      return parent
+    })
+  )
+
+export const stopChildCounter = (parent) => Effect.runPromise(parent.stop)
+
+export const runChildCounterBurst = (parent, size) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      for (let index = 0; index < size; index += 1) {
+        const child = yield* parent.child(CounterChild)
+        if (Option.isNone(child)) {
+          return yield* Effect.dieMessage("Effect Machine child disappeared during the benchmark")
+        }
+        yield* child.value.send(incrementEvent)
+      }
+      const child = yield* parent.child(CounterChild)
+      if (Option.isNone(child)) {
+        return yield* Effect.dieMessage("Effect Machine child disappeared before the terminal fence")
+      }
+      yield* child.value.send(finishEvent)
+      return yield* child.value.join
+    })
+  )
 
 export const runCounterBurst = (ref, size) =>
   Effect.runPromise(
@@ -95,6 +191,22 @@ export const stopCounters = (refs) =>
     })
   )
 
+export const startChildCounters = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () =>
+        Effect.gen(function*() {
+          const parent = yield* Machine.start(counterParentMachine)
+          yield* waitForCounterChild(parent)
+          return parent
+        }),
+      { concurrency: 1 }
+    )
+  )
+
+export const stopChildCounters = stopCounters
+
 export const effectMachineAdapter = {
   implementation: "effect-machine",
   label: "Effect Machine",
@@ -102,6 +214,8 @@ export const effectMachineAdapter = {
   async: true,
   planCounterBatch,
   runCounterBurst,
+  runObservedCounterBurst,
+  runChildCounterBurst,
   runLifecycle: async () => {
     const ref = await startCounter()
     try {
@@ -112,8 +226,24 @@ export const effectMachineAdapter = {
       await stopCounter(ref)
     }
   },
+  runChildLifecycle: async () => {
+    const parent = await startChildCounter()
+    try {
+      if (!parent.sessionId.startsWith("machine:")) {
+        throw new Error(`Child lifecycle benchmark produced invalid session id ${parent.sessionId}`)
+      }
+    } finally {
+      await stopChildCounter(parent)
+    }
+  },
   startCounter,
+  startObservedCounter,
+  startChildCounter,
   startCounters,
+  startChildCounters,
   stopCounter,
+  stopChildCounter,
+  stopChildCounters,
+  stopObservedCounter,
   stopCounters
 }

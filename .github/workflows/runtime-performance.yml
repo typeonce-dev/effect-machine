@@ -14,7 +14,7 @@ jobs:
   runtime-performance:
     name: runtime-performance
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out base
         uses: actions/checkout@v7
@@ -46,8 +46,7 @@ jobs:
           pnpm --dir head install --frozen-lockfile
           pnpm --dir head build
 
-      - name: Install and build base when benchmarkable
-        if: ${{ hashFiles('base/scripts/runtime-performance.mjs') != '' }}
+      - name: Install and build base
         run: |
           pnpm --dir base install --frozen-lockfile
           pnpm --dir base build
@@ -57,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           reports="$RUNNER_TEMP/runtime-performance"
+          harness="$GITHUB_WORKSPACE/head/scripts/runtime-performance.mjs"
           mkdir -p "$reports/base" "$reports/head"
 
           measure() {
@@ -64,22 +64,20 @@ jobs:
             local output="$2"
             (
               cd "$checkout"
-              node --expose-gc scripts/runtime-performance.mjs --json
+              EFFECT_MACHINE_BENCHMARK_ROOT="$PWD" node --expose-gc "$harness" --json
             ) > "$output"
           }
 
-          if [[ -f base/scripts/runtime-performance.mjs ]]; then
-            measure base "$reports/base/1.json"
-            measure head "$reports/head/1.json"
-            measure head "$reports/head/2.json"
-            measure base "$reports/base/2.json"
-            measure base "$reports/base/3.json"
-            measure head "$reports/head/3.json"
-          else
-            measure head "$reports/head/1.json"
-            measure head "$reports/head/2.json"
-            measure head "$reports/head/3.json"
-          fi
+          measure base "$reports/base/1.json"
+          measure head "$reports/head/1.json"
+          measure head "$reports/head/2.json"
+          measure base "$reports/base/2.json"
+          measure base "$reports/base/3.json"
+          measure head "$reports/head/3.json"
+          measure head "$reports/head/4.json"
+          measure base "$reports/base/4.json"
+          measure base "$reports/base/5.json"
+          measure head "$reports/head/5.json"
 
           node head/scripts/compare-runtime-performance.mjs \
             "$reports/base" \

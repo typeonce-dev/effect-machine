@@ -27,6 +27,18 @@ export const makeXStateAdapter = (options) => {
       done: { type: "final" }
     }
   })
+  const parentMachine = xstate.createMachine({
+    id: `RuntimeBenchmarkCounterParent-${implementation}`,
+    initial: "active",
+    states: {
+      active: {
+        invoke: {
+          id: "counter",
+          src: machine
+        }
+      }
+    }
+  })
   const initialSnapshot = xstate.initialTransition(machine)[0]
 
   const planCounterBatch = (size) => {
@@ -40,6 +52,37 @@ export const makeXStateAdapter = (options) => {
   const startCounter = () => xstate.createActor(machine).start()
   const stopCounter = (actor) => actor.stop()
 
+  const startObservedCounter = () => {
+    const actor = xstate.createActor(machine)
+    let observed
+    let complete
+    const completion = new Promise((resolve) => {
+      complete = resolve
+    })
+    const subscription = actor.subscribe({
+      next: (snapshot) => {
+        observed = snapshot
+      },
+      complete
+    })
+    actor.start()
+    return { actor, completion, getObserved: () => observed, subscription }
+  }
+  const stopObservedCounter = ({ actor, subscription }) => {
+    actor.stop()
+    subscription.unsubscribe()
+  }
+
+  const startChildCounter = () => {
+    const parent = xstate.createActor(parentMachine).start()
+    if (parent.getSnapshot().children.counter === undefined) {
+      parent.stop()
+      throw new Error(`${label} child did not become ready`)
+    }
+    return parent
+  }
+  const stopChildCounter = (parent) => parent.stop()
+
   const runCounterBurst = (actor, size) => {
     for (let index = 0; index < size; index += 1) {
       actor.send(incrementEvent)
@@ -48,6 +91,39 @@ export const makeXStateAdapter = (options) => {
     const snapshot = actor.getSnapshot()
     if (snapshot.status !== "done") {
       throw new Error(`${label} terminal fence produced status ${snapshot.status}`)
+    }
+    return snapshot.context.value
+  }
+
+  const runObservedCounterBurst = async ({ actor, completion, getObserved }, size) => {
+    for (let index = 0; index < size; index += 1) {
+      actor.send(incrementEvent)
+    }
+    actor.send(finishEvent)
+    await completion
+    const snapshot = getObserved()
+    if (snapshot?.status !== "done") {
+      throw new Error(`${label} observed terminal fence produced status ${snapshot?.status}`)
+    }
+    return snapshot.context.value
+  }
+
+  const runChildCounterBurst = (parent, size) => {
+    for (let index = 0; index < size; index += 1) {
+      const child = parent.getSnapshot().children.counter
+      if (child === undefined) {
+        throw new Error(`${label} child disappeared during the benchmark`)
+      }
+      child.send(incrementEvent)
+    }
+    const child = parent.getSnapshot().children.counter
+    if (child === undefined) {
+      throw new Error(`${label} child disappeared before the terminal fence`)
+    }
+    child.send(finishEvent)
+    const snapshot = child.getSnapshot()
+    if (snapshot.status !== "done") {
+      throw new Error(`${label} child terminal fence produced status ${snapshot.status}`)
     }
     return snapshot.context.value
   }
@@ -61,6 +137,18 @@ export const makeXStateAdapter = (options) => {
       }
     } finally {
       stopCounter(actor)
+    }
+  }
+
+  const runChildLifecycle = () => {
+    const parent = startChildCounter()
+    try {
+      const child = parent.getSnapshot().children.counter
+      if (child === undefined || child.getSnapshot().status !== "active") {
+        throw new Error(`${label} child lifecycle benchmark produced an invalid initial snapshot`)
+      }
+    } finally {
+      stopChildCounter(parent)
     }
   }
 
@@ -78,6 +166,16 @@ export const makeXStateAdapter = (options) => {
     }
   }
 
+  const startChildCounters = (count) => {
+    const actors = []
+    for (let index = 0; index < count; index += 1) {
+      actors.push(startChildCounter())
+    }
+    return actors
+  }
+
+  const stopChildCounters = stopCounters
+
   return {
     implementation,
     label,
@@ -85,10 +183,19 @@ export const makeXStateAdapter = (options) => {
     async: false,
     planCounterBatch,
     runCounterBurst,
+    runChildCounterBurst,
+    runChildLifecycle,
     runLifecycle,
+    runObservedCounterBurst,
     startCounter,
+    startChildCounter,
     startCounters,
+    startChildCounters,
+    startObservedCounter,
     stopCounter,
-    stopCounters
+    stopChildCounter,
+    stopChildCounters,
+    stopCounters,
+    stopObservedCounter
   }
 }
