@@ -60,6 +60,20 @@ const getInvokes = (
   return Array.isArray(invokes) ? invokes as ReadonlyArray<AnyInvokeConfig> : [invokes as AnyInvokeConfig]
 }
 
+const invokeCapabilityCache = new WeakMap<Machine.Any, boolean>()
+
+const hasInvokeCapability = (machine: Machine.Any): boolean => {
+  const cached = invokeCapabilityCache.get(machine)
+  if (cached !== undefined) {
+    return cached
+  }
+  const hasInvokes = Object.values(
+    machine.handlers as Record<string, Machine.AnyStateConfig>
+  ).some((config) => config.invoke !== undefined)
+  invokeCapabilityCache.set(machine, hasInvokes)
+  return hasInvokes
+}
+
 const makeProcessLogic: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -107,8 +121,9 @@ const makeProcessLogic: <
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   entry: ProcessEntry<States, Input>
-) =>
-  ({
+) => {
+  const hasInvokes = hasInvokeCapability(machine)
+  return ({
     initial: (scope) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
@@ -142,6 +157,47 @@ const makeProcessLogic: <
               initialState,
               internalPlanner.InitialEvent
             )
+          }
+
+          const liveRuntime = internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(
+            machine,
+            context
+          )
+
+          if (!hasInvokes) {
+            yield* Effect.whileLoop({
+              while: () => terminal === undefined,
+              body: () =>
+                Effect.gen(function*() {
+                  const event = yield* receive
+                  const current = yield* state
+                  const planned = yield* internalPlanner.plan(machine, current, event)
+                  if (planned.microsteps.length === 0) {
+                    return yield* Effect.yieldNow
+                  }
+
+                  yield* internalPlanner.runActions(planned.actions, liveRuntime)
+                  yield* setState(planned.next)
+                  yield* internalPlanner.runEmittedEvents(
+                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                    liveRuntime
+                  )
+
+                  if (planned.done) {
+                    terminal = { output: planned.output }
+                  } else {
+                    yield* Effect.yieldNow
+                  }
+                }),
+              step: () => undefined
+            })
+
+            if (terminal === undefined) {
+              return yield* Effect.die(
+                new Error("Machine process stopped receiving events before reaching a terminal configuration")
+              )
+            }
+            return terminal.output
           }
 
           const invokeSessions = yield* Ref.make<HashMap.HashMap<string, InvokeSession>>(
@@ -366,18 +422,14 @@ const makeProcessLogic: <
                     }
                   }
 
-                  const runtime = internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(
-                    machine,
-                    context
-                  )
-                  yield* internalPlanner.runActions(planned.actions, runtime)
+                  yield* internalPlanner.runActions(planned.actions, liveRuntime)
                   if (changed) {
                     yield* stopInvokes(exitPaths)
                   }
                   yield* setState(planned.next)
                   yield* internalPlanner.runEmittedEvents(
                     planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                    runtime
+                    liveRuntime
                   )
 
                   if (planned.done) {
@@ -425,6 +477,7 @@ const makeProcessLogic: <
     | StartupError
     | StoppedError
   >
+}
 
 export const toProcessLogic: <
   const States extends Machine.StateSchemas,
