@@ -170,6 +170,167 @@ const machine = Machine.make({
   }
 })
 
+class PackagedDeepService extends Context.Service<PackagedDeepService, string>()(
+  "consumer/PackagedDeepService"
+) {}
+class PackagedDeepFailure {
+  readonly _tag = "PackagedDeepFailure"
+}
+const PackagedDeepState = Schema.TaggedStruct("PackagedDeepState", {})
+const PackagedDeepStates = Machine.defineStates({
+  n0: {
+    schema: PackagedDeepState,
+    initial: "n1",
+    states: {
+      n1: {
+        schema: PackagedDeepState,
+        initial: "n2",
+        states: {
+          n2: {
+            schema: PackagedDeepState,
+            initial: "n3",
+            states: {
+              n3: {
+                schema: PackagedDeepState,
+                initial: "n4",
+                states: {
+                  n4: {
+                    schema: PackagedDeepState,
+                    initial: "n5",
+                    states: {
+                      n5: {
+                        schema: PackagedDeepState,
+                        initial: "n6",
+                        states: {
+                          n6: {
+                            schema: PackagedDeepState,
+                            initial: "n7",
+                            states: {
+                              n7: {
+                                schema: PackagedDeepState,
+                                initial: "n8",
+                                states: {
+                                  n8: {
+                                    schema: PackagedDeepState,
+                                    initial: "n9",
+                                    states: {
+                                      n9: {
+                                        schema: PackagedDeepState,
+                                        initial: "n10",
+                                        states: {
+                                          n10: {
+                                            schema: PackagedDeepState,
+                                            initial: "n11",
+                                            states: {
+                                              n11: {
+                                                schema: PackagedDeepState,
+                                                initial: "n12",
+                                                states: {
+                                                  n12: {
+                                                    schema: PackagedDeepState,
+                                                    type: "final",
+                                                    output: Schema.String
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+const packagedDeepMachine = Machine.make({
+  states: PackagedDeepStates.states,
+  events: [],
+  initial: (): never => {
+    throw new Error("type-only packaged consumer fixture")
+  }
+}).handle({
+  n0: {
+    states: {
+      n1: {
+        states: {
+          n2: {
+            states: {
+              n3: {
+                states: {
+                  n4: {
+                    states: {
+                      n5: {
+                        states: {
+                          n6: {
+                            states: {
+                              n7: {
+                                states: {
+                                  n8: {
+                                    states: {
+                                      n9: {
+                                        states: {
+                                          n10: {
+                                            states: {
+                                              n11: {
+                                                states: {
+                                                  n12: {
+                                                    entry: () =>
+                                                      Effect.flatMap(
+                                                        PackagedDeepService,
+                                                        () => Effect.fail(new PackagedDeepFailure())
+                                                      ),
+                                                    output: () => "packaged"
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+type PackagedDeepErrorIsExact = Expect<
+  Equal<Machine.Machine.Error<typeof packagedDeepMachine>, PackagedDeepFailure>
+>
+type PackagedDeepServicesAreExact = Expect<
+  Equal<Machine.Machine.Services<typeof packagedDeepMachine>, PackagedDeepService>
+>
+type PackagedDeepUnhandledIsExact = Expect<
+  Equal<Machine.Machine.UnhandledStates<typeof packagedDeepMachine>, never>
+>
+void Machine.planInitial(packagedDeepMachine)
+
 const runtime = Atom.runtime(
   Layer.mergeAll(
     Layer.succeed(ExternalService, "provided"),
@@ -216,6 +377,9 @@ export type {
   InitialErrorIsPreserved,
   MachineServicesAreNotAny,
   OutputIsExact,
+  PackagedDeepErrorIsExact,
+  PackagedDeepServicesAreExact,
+  PackagedDeepUnhandledIsExact,
   RuntimeErrorIsPreserved,
   StateIsExact,
   TransitionErrorIsPreserved
