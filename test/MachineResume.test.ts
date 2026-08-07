@@ -77,6 +77,77 @@ describe("Machine.resume", () => {
       assert.instanceOf(yield* Effect.flip(ref.send(new Add({ value: 1 }))), Machine.StoppedError)
     }))
 
+  it.effect("matches controlled suffix work without replaying pre-boundary actions or raised events", () =>
+    Effect.gen(function*() {
+      class A extends Schema.TaggedClass<A>("ResumeWorkA")("ResumeWorkA", {}) {}
+      class B extends Schema.TaggedClass<B>("ResumeWorkB")("ResumeWorkB", {}) {}
+      class C extends Schema.TaggedClass<C>("ResumeWorkC")("ResumeWorkC", {}) {}
+      class Advance extends Schema.TaggedClass<Advance>("ResumeWorkAdvance")("ResumeWorkAdvance", {}) {}
+      class Raised extends Schema.TaggedClass<Raised>("ResumeWorkRaised")("ResumeWorkRaised", {}) {}
+      const states = Machine.defineStates({ A, B, C })
+      const makeMachine = (log: Array<string>) =>
+        Machine.make({
+          states: states.states,
+          events: [Advance, Raised],
+          initial: () => states.initial.A(new A({}))
+        }).handle({
+          A: {
+            entry: () => Machine.action(Effect.sync(() => log.push("entry:A"))),
+            exit: () => Machine.action(Effect.sync(() => log.push("exit:A"))),
+            on: {
+              ResumeWorkAdvance: Effect.fn(function*({ target }) {
+                const runtime = yield* Machine.runtime<{ readonly events: Raised }>()
+                yield* runtime.raise(new Raised({}))
+                yield* Machine.action(Effect.sync(() => log.push("transition:A-B")))
+                return target.full.B(new B({}))
+              })
+            }
+          },
+          B: {
+            entry: () => Machine.action(Effect.sync(() => log.push("entry:B"))),
+            exit: () => Machine.action(Effect.sync(() => log.push("exit:B"))),
+            on: {
+              ResumeWorkRaised: ({ target }) =>
+                Machine.action(
+                  Effect.sync(() => log.push("raised:B-C")),
+                  target.full.C(new C({}))
+                )
+            }
+          },
+          C: { entry: () => Machine.action(Effect.sync(() => log.push("entry:C"))) }
+        })
+
+      const uninterruptedLog: Array<string> = []
+      const uninterruptedMachine = makeMachine(uninterruptedLog)
+      const uninterrupted = yield* Machine.start(uninterruptedMachine)
+      const boundary = yield* uninterrupted.state
+      const encodedBoundary = yield* Machine.encodeSnapshot(uninterruptedMachine, boundary)
+      uninterruptedLog.length = 0
+      yield* sendAndWait(
+        uninterrupted,
+        new Advance({}),
+        (snapshot) => snapshot.state.path === "C"
+      )
+      const uninterruptedFinal = yield* uninterrupted.state
+      yield* uninterrupted.stop
+
+      const resumedLog: Array<string> = []
+      const resumedMachine = makeMachine(resumedLog)
+      const decodedBoundary = yield* Machine.decodeSnapshot(resumedMachine, encodedBoundary)
+      const resumed = yield* Machine.resume(resumedMachine, decodedBoundary)
+      assert.deepStrictEqual(resumedLog, [])
+      yield* sendAndWait(resumed, new Advance({}), (snapshot) => snapshot.state.path === "C")
+      const resumedFinal = yield* resumed.state
+
+      assert.deepStrictEqual(resumedLog, uninterruptedLog)
+      assert.deepStrictEqual(resumedLog, ["exit:A", "transition:A-B", "entry:B", "exit:B", "raised:B-C", "entry:C"])
+      assert.deepStrictEqual(
+        yield* Machine.encodeSnapshot(resumedMachine, resumedFinal),
+        yield* Machine.encodeSnapshot(uninterruptedMachine, uninterruptedFinal)
+      )
+      yield* resumed.stop
+    }))
+
   it.effect("starts only active compound and parallel invokes in deterministic order", () =>
     Effect.gen(function*() {
       class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
