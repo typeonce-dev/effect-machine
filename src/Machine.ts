@@ -5,7 +5,7 @@
  */
 
 import type * as Cause from "effect/Cause"
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -15,6 +15,7 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
+import * as Activities from "./internal/machineActivities.js"
 import type {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -1869,6 +1870,28 @@ export declare namespace Machine {
   export type TaggedSchema = Schema.Top & { readonly Type: { readonly _tag: PropertyKey } }
 
   /**
+   * Descriptive annotations exposed for compiled state nodes.
+   *
+   * Schema-backed states resolve their complete Effect Schema annotation map.
+   * Pseudo-states accept only the descriptive fields below. Annotations never
+   * affect state identity, targeting, or runtime behavior.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface StateNodeAnnotations extends Schema.Annotations.Annotations {
+    readonly title?: string | undefined
+    readonly description?: string | undefined
+    readonly documentation?: string | undefined
+  }
+
+  /** Descriptive annotations accepted by schema-less pseudo-states. */
+  export type PseudoStateAnnotations = Pick<
+    StateNodeAnnotations,
+    "title" | "description" | "documentation"
+  >
+
+  /**
    * Configuration accepted for an atomic object state node.
    *
    * @category models
@@ -1928,6 +1951,7 @@ export declare namespace Machine {
     readonly type: "history"
     /** Defaults to shallow history. */
     readonly history?: "shallow" | "deep"
+    readonly annotations?: PseudoStateAnnotations
   }
 
   /**
@@ -1942,6 +1966,7 @@ export declare namespace Machine {
    */
   export interface ChoiceStateNodeConfig {
     readonly type: "choice"
+    readonly annotations?: PseudoStateAnnotations
   }
 
   /**
@@ -2075,10 +2100,12 @@ export declare namespace Machine {
     readonly key: string
     readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
+    /** Resolved Effect Schema annotations, or descriptive pseudo-state annotations. */
+    readonly annotations: Readonly<StateNodeAnnotations> | undefined
     readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
     readonly history: "shallow" | "deep" | undefined
     readonly parent: Path | undefined
-    /** Active child paths. History pseudo-states are available through their `parent` relationship. */
+    /** Active child paths. Pseudo-states are available through their `parent` relationship. */
     readonly children: ReadonlyArray<Path>
     readonly initial: Path | undefined
     readonly order: number
@@ -2155,6 +2182,18 @@ export declare namespace Machine {
     readonly reenter: boolean
     readonly targets: TransitionTargets<TargetPath>
   }
+
+  /**
+   * Serializable description of state-owned work.
+   *
+   * Static invoke descriptors expose their lifecycle id and kind without
+   * retaining Effects, closures, services, or child runtimes. A function-valued
+   * invoke factory is reported as dynamic and is never evaluated by inspection.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export type ActivityDefinition<SourcePath extends string = string> = Activities.ActivityDefinition<SourcePath>
 
   /**
    * Transition retained after hierarchy precedence and conflict resolution for
@@ -3174,6 +3213,8 @@ export declare namespace Machine {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
+    /** Complete logical configuration captured at the start of this microstep. */
+    readonly snapshot: Snapshot<States>
     readonly event: EventByTag<Events, EventTag>
     readonly runtime: RuntimeEffect<Events, Emits>
 
@@ -3261,6 +3302,8 @@ export declare namespace Machine {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
+    /** Complete logical configuration captured at the start of this microstep. */
+    readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
     readonly runtime: RuntimeEffect<Events, Emits>
 
@@ -3289,6 +3332,8 @@ export declare namespace Machine {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
+    /** Complete logical configuration captured at the start of this microstep. */
+    readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
     readonly output: CompletionOutputByIdentifier<States, StateId>
     readonly runtime: RuntimeEffect<Events, Emits>
@@ -3725,6 +3770,8 @@ export declare namespace Machine {
       readonly requirements: Types.Covariant<ChildRequirements>
       readonly initialError: Types.Covariant<ChildInitialError>
     }
+    /** @internal Serializable descriptor metadata used by inspection. */
+    readonly [Activities.ActivityMetadataTypeId]?: Activities.StaticActivityMetadata
     readonly id: string
     /**
      * Optional parent-local address for sending events to this invocation.
@@ -5948,7 +5995,11 @@ export const invoke = <
   ChildRequirements,
   ChildOutput,
   ChildInitialError
-> => ({ ...config, [InvokeTypeId]: undefined as any })
+> => ({
+  ...config,
+  [InvokeTypeId]: undefined as any,
+  [Activities.ActivityMetadataTypeId]: { type: "process" }
+})
 
 type InvokeEffectResult<Requirements, Event> = Machine.InvokeConfig<
   any,
@@ -6020,8 +6071,8 @@ export const invokeEffect = <
     readonly effect: Effect.Effect<unknown, unknown, unknown>
     readonly onSuccess: (value: unknown) => unknown
     readonly onFailure?: (error: unknown) => unknown
-  }) =>
-    invoke({
+  }) => ({
+    ...invoke({
       id: config.id,
       src: () =>
         effect(
@@ -6032,7 +6083,15 @@ export const invokeEffect = <
               onSuccess: (value) => Effect.succeed(config.onSuccess(value))
             })
         )
-    }))(config as any) as any
+    }),
+    [Activities.ActivityMetadataTypeId]: {
+      type: "effect",
+      outcomes: {
+        success: "dynamic",
+        failure: config.onFailure === undefined ? "none" : "dynamic"
+      }
+    }
+  }))(config as any) as any
 
 /**
  * Creates a cancellable state-scoped delayed event.
@@ -6048,11 +6107,17 @@ export const after = <Event extends { readonly _tag: PropertyKey }>(
   duration: Duration.Input,
   event: Event,
   options?: { readonly id?: InvokeLifecycleId }
-): InvokeEffectResult<never, Event> =>
-  invoke({
+): InvokeEffectResult<never, Event> => ({
+  ...invoke({
     id: options?.id ?? `Machine.after:${String(event._tag)}`,
     src: () => effect(Effect.as(Effect.sleep(duration), event))
-  })
+  }),
+  [Activities.ActivityMetadataTypeId]: {
+    type: "timer",
+    duration: Duration.format(Duration.fromInputUnsafe(duration)),
+    event: String(event._tag)
+  }
+})
 
 type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
 
@@ -6317,6 +6382,13 @@ export const invokeMachine: {
         : (internalProcess.toProcessLogic as any)(machine, config.input),
     snapshot: config.snapshot,
     onDone: config.onDone,
+    [Activities.ActivityMetadataTypeId]: {
+      type: "machine",
+      child: {
+        id: config.child.id,
+        machineId: machine.id ?? null
+      }
+    },
     [InvokeTypeId]: undefined as any
   }
 }) as any
@@ -6426,10 +6498,11 @@ export const planInitial: <
  *
  * **Details**
  *
- * The result includes atomic, compound, parallel, final, and history nodes.
- * Use each node's `parent` property to reconstruct the complete hierarchy.
- * History pseudo-states are intentionally omitted from `children` because they
- * can never appear in an active configuration.
+ * The result includes atomic, compound, parallel, final, history, and choice
+ * nodes together with their resolved descriptive annotations. Use each node's
+ * `parent` property to reconstruct the complete hierarchy. Pseudo-states are
+ * intentionally omitted from `children` because they can never appear in an
+ * active configuration.
  *
  * @category getters
  * @since 4.0.0
@@ -6473,13 +6546,33 @@ export const transitionDefinitions = <M extends Machine.Any>(
   >
 
 /**
+ * Returns serializable descriptions of every state-owned activity.
+ *
+ * **Details**
+ *
+ * Static `invoke`, `invokeEffect`, `after`, and `invokeMachine` descriptors
+ * expose stable ownership and lifecycle metadata without serializing runtime
+ * values. Function-valued invoke factories are represented as dynamic and are
+ * never evaluated during inspection.
+ *
+ * @category getters
+ * @since 4.0.0
+ */
+export const activityDefinitions = <M extends Machine.Any>(
+  machine: M
+): ReadonlyArray<Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>> =>
+  Activities.activityDefinitions(machine) as ReadonlyArray<
+    Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>
+  >
+
+/**
  * Returns every state node active in a decoded snapshot, in definition order.
  *
  * **Details**
  *
  * Active compound ancestors and parallel regions are included together with
- * their active descendants. History pseudo-states are never active and are not
- * returned.
+ * their active descendants. History and choice pseudo-states are never active
+ * and are not returned.
  *
  * @category getters
  * @since 4.0.0

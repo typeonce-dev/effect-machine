@@ -379,6 +379,39 @@ Refresh: {
 keyed by full dotted paths, such as `parents["Form.Editing"]`; `context.parent`
 provides the immediate parent directly and is `undefined` at a root state.
 
+Event, eventless, and completion transition contexts also expose `snapshot`, a
+read-only view of the complete logical configuration captured at the beginning
+of that transition microstep. This lets one parallel region inspect a sibling
+without copying active-state facts into parent values:
+
+```ts
+BufferReady: ;
+;(({ snapshot, target }) =>
+  States.matches(snapshot, "Player.Network.Online")
+    ? target.local.Playing(State.cases.Playing.make({}))
+    : undefined)
+```
+
+All non-conflicting handlers selected together observe the same captured
+snapshot. An Effectful handler keeps that value; it does not read mutable live
+runtime state later. `snapshot` is intentionally absent from entry, exit,
+invoke, and choice contexts. In particular, startup and chained choices may run
+before a complete stable snapshot containing their pseudo-source exists.
+
+Effect Schema annotations are the metadata source for active states. Annotate
+the schema itself; `Machine.stateNodes` exposes the resolved annotation map:
+
+```ts
+const Saving = State.cases.Saving.annotate({
+  title: "Saving document",
+  description: "Persisting local changes to the server"
+})
+```
+
+Schema-less choice and history nodes accept only descriptive `title`,
+`description`, and `documentation` annotations. Titles may be used as display
+labels, but structural paths remain the only identity and targeting mechanism.
+
 ## Planning Effects and staged actions
 
 An Effect returned by a transition handler is part of planning. Use it to read
@@ -471,6 +504,14 @@ const Editor = Machine.child("editor", EditorMachine)
 Descriptors are matched by id and machine identity, so independently created
 descriptors for the same pair address the same child without a global cache.
 Exporting one descriptor remains the clearest module boundary.
+
+`Machine.activityDefinitions(machine)` inspects state-owned work without
+executing it. Static descriptors report their source path, lifecycle id, and
+kind. Timers also report normalized duration and emitted event tag;
+`invokeEffect` mappings are described as dynamic; invoked machines expose only
+safe child identity. A function-valued `invoke` factory is reported as dynamic
+and is never evaluated during inspection. The result is serializable and does
+not contain Effects, closures, services, or child runtimes.
 
 ## Reactivity
 

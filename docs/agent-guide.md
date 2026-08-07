@@ -347,6 +347,47 @@ parents["Route.Ready.Editing"]
 
 Do not guess short properties such as `parents.Ready`.
 
+### Inspecting the full transition configuration
+
+Event, `always`, and `onDone` transition contexts include a fully typed
+`snapshot`. It is the complete logical snapshot at the beginning of that
+microstep, before any selected transition is applied:
+
+```ts
+BufferReady: ({ snapshot, target }) =>
+  States.matches(snapshot, "Player.Network.Online")
+    ? target.local.Playing(new Playing({}))
+    : undefined
+```
+
+Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
+`States.getSnapshot` helpers for cross-region reads. Parallel transitions
+selected in one microstep receive the same capture. Effectful handlers retain
+that captured value rather than consulting live runtime state.
+
+Do not expect `snapshot` in entry, exit, invoke, initializer, history-default,
+or choice contexts. Choice is an important soundness boundary: a startup or
+chained choice can run without a complete stable configuration containing the
+pseudo-source, so the API does not fabricate a partial `Machine.Snapshot`.
+
+### State annotations
+
+Attach active-state metadata through Effect Schema:
+
+```ts
+const Saving = State.cases.Saving.annotate({
+  title: "Saving document",
+  description: "Persisting local changes to the server",
+  documentation: "https://docs.example.test/saving"
+})
+```
+
+`Machine.stateNodes(machine)` returns the resolved annotation map. Choice and
+history definitions may declare an `annotations` object containing only
+`title`, `description`, and `documentation`. These values are descriptive;
+they cannot change behavior, identity, or targeting. Visualization may show a
+title, while the structural path remains authoritative.
+
 Use `Machine.retag(TargetCase, source, patch?)` when sibling state payloads
 share fields. It removes the source discriminator, reuses only compatible
 fields, and requires a patch for every missing or incompatible required field.
@@ -507,6 +548,25 @@ canonicalized. Prefer exporting one descriptor as the application boundary.
 Use the separate
 `Machine.childAddress<Event>(id)` constructor only for lower-level process
 logic that does not have a complete machine descriptor.
+
+### Inspecting state-owned activities
+
+Use `Machine.activityDefinitions(machine)` to inspect invokes without running
+them. Static `Machine.invoke`, `Machine.invokeEffect`, `Machine.after`, and
+`Machine.invokeMachine` descriptors expose serializable ownership metadata:
+
+```ts
+Machine.activityDefinitions(machine)
+// [{ source: "Loading", id: "load-timeout", type: "timer",
+//    duration: "10s", event: "LoadTimedOut" }]
+```
+
+Effect success/failure mappers are closures and therefore appear as dynamic
+outcomes. Child machines expose descriptor identity, never their runtime or
+implementation. A function-valued `invoke` factory is represented as a dynamic
+activity because inspection must not evaluate user code. The existing invoke
+helpers remain the only execution API; this metadata does not add lifecycle
+configuration syntax or affect execution.
 
 ## AtomMachine and React
 
