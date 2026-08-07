@@ -65,6 +65,66 @@ const scenarios = [
     label: "machine.handle (3 states, 2 transitions)",
     file: "handle.ts",
     control: "make"
+  },
+  {
+    id: "handle-depth-8-control",
+    label: "machine.handle depth 8 control",
+    file: "handle-depth-8-control.ts",
+    hidden: true
+  },
+  {
+    id: "handle-depth-8",
+    label: "machine.handle (depth 8)",
+    file: "handle-depth-8.ts",
+    control: "handle-depth-8-control"
+  },
+  {
+    id: "handle-depth-12-control",
+    label: "machine.handle depth 12 control",
+    file: "handle-depth-12-control.ts",
+    hidden: true
+  },
+  {
+    id: "handle-depth-12",
+    label: "machine.handle (depth 12)",
+    file: "handle-depth-12.ts",
+    control: "handle-depth-12-control"
+  },
+  {
+    id: "handle-depth-16-control",
+    label: "machine.handle depth 16 control",
+    file: "handle-depth-16-control.ts",
+    hidden: true
+  },
+  {
+    id: "handle-depth-16",
+    label: "machine.handle (depth 16)",
+    file: "handle-depth-16.ts",
+    control: "handle-depth-16-control"
+  },
+  {
+    id: "handle-depth-24-control",
+    label: "machine.handle depth 24 control",
+    file: "handle-depth-24-control.ts",
+    hidden: true
+  },
+  {
+    id: "handle-depth-24",
+    label: "machine.handle (depth 24)",
+    file: "handle-depth-24.ts",
+    control: "handle-depth-24-control"
+  },
+  {
+    id: "handle-depth-wide-16-control",
+    label: "machine.handle wide depth 16 control",
+    file: "handle-depth-wide-16-control.ts",
+    hidden: true
+  },
+  {
+    id: "handle-depth-wide-16",
+    label: "machine.handle (wide depth 16)",
+    file: "handle-depth-wide-16.ts",
+    control: "handle-depth-wide-16-control"
   }
 ]
 

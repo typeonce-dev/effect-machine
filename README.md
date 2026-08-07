@@ -66,6 +66,10 @@ const Counter = Machine.make({
 })
 ```
 
+Handler objects mirror the state definition recursively. `effect-machine` does
+not impose a fixed handler-tree depth; inference continues until TypeScript's
+normal, shape-dependent compiler limits.
+
 `initial` is always a function. For a machine with an input schema, the
 initializer receives the decoded input.
 

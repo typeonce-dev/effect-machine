@@ -4277,16 +4277,43 @@ export declare namespace Machine {
 
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
 
-  type HandlerStateId<
-    States extends StateSchemas,
-    Path extends string
-  > = StateIdentifierFromPath<States, Path>
-
   type HandlerNodeId<States extends StateSchemas, Path extends string> = Extract<Path, StateNodeIdentifier<States>>
 
   type HandlerConfigPart<Config> = {
     readonly [Key in keyof Config as Key extends "states" ? never : Key]: Config[Key]
   }
+
+  type HandlerNodeChildrenConfig<Config> = "states" extends keyof Config ?
+    Config extends { readonly states?: infer Children } ? NonNullable<Children>
+    : never
+    : never
+
+  type HandlerNodeByPath<States extends StateSchemas, Path extends string> = Path extends
+    `${infer Head}.${infer Rest}` ? Head extends keyof States ? States[Head] extends {
+        readonly states: infer Children extends StateSchemas
+      } ? HandlerNodeByPath<Children, Rest>
+      : never
+    : never
+    : Path extends keyof States ? States[Path]
+    : never
+
+  // Resolve only the supplied branch for a flattened state-node path. Keeping
+  // this recursion on the finite path avoids recursively expanding an open
+  // generic handler config.
+  type HandlerConfigAtPath<Config, Path extends string> = Path extends `${infer Head}.${infer Rest}` ?
+    Head extends keyof Config ? HandlerConfigAtPath<HandlerNodeChildrenConfig<Config[Head]>, Rest>
+    : never
+    : Path extends keyof Config ? Config[Path]
+    : never
+
+  // Rebuild the public nested handler shape so branded validation errors stay
+  // attached to the exact property that introduced them.
+  type HandlerValidationAtPath<Path extends string, Validation> = Path extends `${infer Head}.${infer Rest}` ? {
+      readonly [Key in Head]?: {
+        readonly states: HandlerValidationAtPath<Rest, Validation>
+      }
+    }
+    : { readonly [Key in Path]?: Validation }
 
   type HandlerNode<
     AllStates extends StateSchemas,
@@ -4520,50 +4547,29 @@ export declare namespace Machine {
     }
     : unknown
 
-  type HandlerDepth = readonly [unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown]
-
-  type HandlerNextDepth<Depth extends ReadonlyArray<unknown>> = Depth extends
-    readonly [unknown, ...infer Rest extends ReadonlyArray<unknown>] ? Rest
-    : readonly []
-
   type HandlerChildrenValidation<
-    AllStates extends StateSchemas,
     Node,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
     Prefix extends string,
-    Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>,
-    Depth extends ReadonlyArray<unknown>
-  > = "states" extends keyof Config ? Depth extends readonly [] ? {
-        readonly states: HandlerValidationError<"Handler nesting exceeds the supported depth", Prefix>
-      }
-    : Config extends { readonly states?: infer ChildrenConfig } ?
+    Config
+  > = "states" extends keyof Config ?
+    Config extends { readonly states?: infer ChildrenConfig } ?
       HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
             readonly states: HandlerValidationError<
               "Handler config contains child states for a state that has no children",
               Prefix
             >
           }
-        : HandlerTreeValidation<
-          AllStates,
-          Children,
-          Events,
-          Emits,
-          Prefix,
-          NonNullable<ChildrenConfig>,
-          AvailableOutputStates,
-          HandlerNextDepth<Depth>
-        > extends infer Validation ? unknown extends Validation ? unknown
+        : HandlerUnknownStateKeyValidation<Children, Prefix, NonNullable<ChildrenConfig>> extends infer Validation ?
+          unknown extends Validation ? unknown
           : { readonly states: Validation }
         : never
-      : {
-        readonly states: HandlerValidationError<
-          "Handler config contains child states for a state that has no children",
-          Prefix
-        >
-      }
-    : unknown
+      : never
+    : {
+      readonly states: HandlerValidationError<
+        "Handler config contains child states for a state that has no children",
+        Prefix
+      >
+    }
     : unknown
 
   type HandlerOutputRequirementValidation<
@@ -4603,8 +4609,7 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<AllStates>,
     Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>,
-    Depth extends ReadonlyArray<unknown>
+    AvailableOutputStates extends StateIdentifier<AllStates>
   > = StateId extends ChoiceIdentifier<AllStates> ?
       & HandlerChoiceUnknownConfigKeyValidation<StateId, Config>
       & HandlerChoiceTargetValidation<StateId, Config>
@@ -4618,7 +4623,7 @@ export declare namespace Machine {
         & HandlerInvokeOutputValidation<Events, StateId, Config>
         & HandlerInvokeEmitsValidation<Events, StateId, Config>
         & HandlerInvokeSnapshotValidation<Events, StateId, Config>
-        & HandlerChildrenValidation<AllStates, Node, Events, Emits, StateId, Config, AvailableOutputStates, Depth>
+        & HandlerChildrenValidation<Node, StateId, Config>
         & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
         & HandlerRuntimeValidation<Events, Emits, StateId, Config>
     : unknown
@@ -4702,95 +4707,56 @@ export declare namespace Machine {
   > = [Incompatible] extends [never] ? unknown
     : HandlerValidationError<"Handler config requires an incompatible machine runtime", StateId, Incompatible>
 
-  type HandlerTreeNodeValidationMap<
+  type HandlerNodeValidationAtPath<
     AllStates extends StateSchemas,
-    States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    Prefix extends string,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
-    Depth extends ReadonlyArray<unknown>
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]?: HandlerNodeValidation<
+    StateId extends StateNodeIdentifier<AllStates>,
+    NodeConfig = HandlerConfigAtPath<Config, StateId>
+  > = [NodeConfig] extends [never] ? never
+    : HandlerNodeValidation<
       AllStates,
-      States[Key],
+      HandlerNodeByPath<AllStates, StateId>,
       Events,
       Emits,
-      HandlerNodeId<AllStates, JoinPath<Prefix, Key>>,
-      Config[Key],
-      AvailableOutputStates,
-      Depth
-    >
-  }
-
-  type HandlerTreeNodeValidationErrors<Validations> = {
-    readonly [Key in keyof Validations as unknown extends Validations[Key] ? never : Key]?: Validations[Key]
-  }
+      StateId,
+      NodeConfig,
+      AvailableOutputStates
+    > extends infer Validation ? unknown extends Validation ? never
+      : HandlerValidationAtPath<StateId, Validation>
+    : never
 
   type HandlerTreeNodeValidations<
     AllStates extends StateSchemas,
-    States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    Prefix extends string,
     Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>,
-    Depth extends ReadonlyArray<unknown>
-  > = HandlerTreeNodeValidationMap<
-    AllStates,
-    States,
-    Events,
-    Emits,
-    Prefix,
-    Config,
-    AvailableOutputStates,
-    Depth
-  > extends infer Validations ?
-    HandlerTreeNodeValidationErrors<Validations> extends infer Errors ? keyof Errors extends never ? unknown : Errors
-    : never
-    : never
+    AvailableOutputStates extends StateIdentifier<AllStates>
+  > = Types.UnionToIntersection<
+    StateNodeIdentifier<AllStates> extends infer StateId extends StateNodeIdentifier<AllStates> ?
+      StateId extends StateNodeIdentifier<AllStates> ? HandlerNodeValidationAtPath<
+          AllStates,
+          Events,
+          Emits,
+          Config,
+          AvailableOutputStates,
+          StateId
+        >
+      : never
+      : never
+  >
 
   type HandlerTreeValidation<
     AllStates extends StateSchemas,
-    States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    Prefix extends string,
     Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
+    AvailableOutputStates extends StateIdentifier<AllStates>
   > =
-    & HandlerUnknownStateKeyValidation<States, Prefix, Config>
-    & HandlerTreeNodeValidations<AllStates, States, Events, Emits, Prefix, Config, AvailableOutputStates, Depth>
-
-  type HandlerNodeChildrenConfig<Config> = "states" extends keyof Config ?
-    Config extends { readonly states?: infer Children } ? NonNullable<Children>
-    : never
-    : never
-
-  type HandlerTreeStateIds<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | HandlerImplementedStateId<
-        AllStates,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key]
-      >
-      | HandlerNodeChildStateIds<
-        AllStates,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
-      >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
+    & HandlerUnknownStateKeyValidation<AllStates, "", Config>
+    & HandlerTreeNodeValidations<AllStates, Events, Emits, Config, AvailableOutputStates>
 
   type HandlerHasRequiredInitial<
     AllStates extends StateSchemas,
@@ -4830,17 +4796,6 @@ export declare namespace Machine {
       : never
     : never
 
-  type HandlerNodeChildStateIds<
-    AllStates extends StateSchemas,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeStateIds<AllStates, Children, Prefix, HandlerNodeChildrenConfig<Config>, HandlerNextDepth<Depth>>
-    : never
-
   type HandlerConfigError<Config> =
     | Effect.Error<EventHandlerReturn<Config>>
     | Effect.Error<AlwaysReturn<Config>>
@@ -4852,123 +4807,35 @@ export declare namespace Machine {
     | Effect.Error<ChoiceReturn<Config>>
     | InvokeError<Config>
 
-  type HandlerTreeError<
+  type HandlerNodeEvidence<
     AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    States extends StateSchemas,
-    Prefix extends string,
     Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | HandlerConfigError<HandlerConfigPart<Config[Key]>>
-      | HandlerNodeChildError<
+    StateId extends StateNodeIdentifier<AllStates>,
+    NodeConfig = HandlerConfigAtPath<Config, StateId>
+  > = [NodeConfig] extends [never] ? never : {
+    readonly stateId: StateId extends StateIdentifier<AllStates> ? HandlerImplementedStateId<
         AllStates,
-        Events,
-        Emits,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
+        HandlerNodeByPath<AllStates, StateId>,
+        StateId,
+        NodeConfig
       >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
+      : never
+    readonly error: HandlerConfigError<HandlerConfigPart<NodeConfig>>
+    readonly services: ConfigServices<HandlerConfigPart<NodeConfig>>
+    readonly outputState: StateId extends StateIdentifier<AllStates> ? HandlerOutputStates<
+        AllStates,
+        StateId,
+        HandlerConfigPart<NodeConfig>
+      >
+      : never
+  }
 
-  type HandlerNodeChildError<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeError<
-        AllStates,
-        Events,
-        Emits,
-        Children,
-        Prefix,
-        HandlerNodeChildrenConfig<Config>,
-        HandlerNextDepth<Depth>
-      >
+  // Compute every accumulated channel from one normalized node union instead
+  // of repeating recursive walks for states, errors, services, and outputs.
+  type HandlerTreeEvidence<AllStates extends StateSchemas, Config> = StateNodeIdentifier<AllStates> extends
+    infer StateId extends StateNodeIdentifier<AllStates> ?
+    StateId extends StateNodeIdentifier<AllStates> ? HandlerNodeEvidence<AllStates, Config, StateId>
     : never
-
-  type HandlerTreeServices<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    States extends StateSchemas,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | ConfigServices<HandlerConfigPart<Config[Key]>>
-      | HandlerNodeChildServices<
-        AllStates,
-        Events,
-        Emits,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
-      >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
-
-  type HandlerNodeChildServices<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeServices<
-        AllStates,
-        Events,
-        Emits,
-        Children,
-        Prefix,
-        HandlerNodeChildrenConfig<Config>,
-        HandlerNextDepth<Depth>
-      >
-    : never
-
-  type HandlerTreeOutputStates<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown> = HandlerDepth
-  > = {
-    readonly [Key in Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]:
-      | HandlerOutputStates<
-        AllStates,
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        HandlerConfigPart<Config[Key]>
-      >
-      | HandlerNodeChildOutputStates<
-        AllStates,
-        States[Key],
-        HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
-        Config[Key],
-        Depth
-      >
-  }[Extract<Extract<keyof Config, string>, Extract<keyof States, string>>]
-
-  type HandlerNodeChildOutputStates<
-    AllStates extends StateSchemas,
-    Node,
-    Prefix extends string,
-    Config,
-    Depth extends ReadonlyArray<unknown>
-  > = Depth extends readonly [] ? never
-    : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? never
-      : HandlerTreeOutputStates<AllStates, Children, Prefix, HandlerNodeChildrenConfig<Config>, HandlerNextDepth<Depth>>
     : never
 
   type HandleTreeResult<
@@ -4990,10 +4857,10 @@ export declare namespace Machine {
     AllStates,
     Events,
     Input,
-    Exclude<UnhandledStates, HandlerTreeStateIds<AllStates, AllStates, "", Config>>,
-    E | HandlerTreeError<AllStates, Events, Emits, AllStates, "", Config>,
+    Exclude<UnhandledStates, HandlerTreeEvidence<AllStates, Config>["stateId"]>,
+    E | HandlerTreeEvidence<AllStates, Config>["error"],
     ExcludeCompatibleRuntime<
-      R | HandlerTreeServices<AllStates, Events, Emits, AllStates, "", Config>,
+      R | HandlerTreeEvidence<AllStates, Config>["services"],
       EventOf<Events>,
       EmitOf<Emits>
     >,
@@ -5002,18 +4869,12 @@ export declare namespace Machine {
     FinalStates,
     Output,
     Emits,
-    OutputStates | Extract<HandlerTreeOutputStates<AllStates, AllStates, "", Config>, StateIdentifier<AllStates>>,
+    OutputStates | Extract<HandlerTreeEvidence<AllStates, Config>["outputState"], StateIdentifier<AllStates>>,
     InputEvents
   >
 
   /**
    * Adds state handlers from a root state object.
-   *
-   * **Gotchas**
-   *
-   * Type inference traverses up to eight nested child-state objects. Deeper
-   * handler trees are rejected explicitly instead of silently dropping their
-   * error, service, final-state, or output channels.
    *
    * @category combinators
    * @since 4.0.0
@@ -5038,14 +4899,12 @@ export declare namespace Machine {
         & Config
         & HandlerTreeValidation<
           States,
-          States,
           Events,
           Emits,
-          "",
           NoInfer<Config>,
           | OutputStates
           | Extract<
-            HandlerTreeOutputStates<States, States, "", NoInfer<Config>>,
+            HandlerTreeEvidence<States, NoInfer<Config>>["outputState"],
             StateIdentifier<States>
           >
         >

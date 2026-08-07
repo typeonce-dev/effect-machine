@@ -791,10 +791,11 @@ error defaults to `unknown`. Atoms created with an `AtomRuntime<R, E>` include
 `E` in their startup error type. Use `ChildOf<ParentAtom, Child>` to infer that
 exact channel from a parent instead of restating it manually.
 
-### Handler tree is too deeply nested
+### Handler tree reaches a compiler instantiation limit
 
-Type inference traverses at most eight nested handler objects. Split or flatten
-a deeper statechart instead of casting away the diagnostic.
+`effect-machine` does not impose a fixed handler-tree depth. Inference follows
+the nested handler object until TypeScript reaches its normal, shape-dependent
+compiler resource or instantiation limits.
 
 ## Unsupported and intentionally imperative features
 
