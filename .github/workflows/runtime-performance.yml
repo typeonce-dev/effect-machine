@@ -1,0 +1,96 @@
+name: Runtime performance
+
+on:
+  pull_request:
+
+concurrency:
+  group: runtime-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-performance:
+    name: runtime-performance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out base
+        uses: actions/checkout@v7
+        with:
+          path: base
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Check out pull request
+        uses: actions/checkout@v7
+        with:
+          path: head
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: head/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            base/pnpm-lock.yaml
+            head/pnpm-lock.yaml
+
+      - name: Install and build pull request
+        run: |
+          pnpm --dir head install --frozen-lockfile
+          pnpm --dir head build
+
+      - name: Install and build base when benchmarkable
+        if: ${{ hashFiles('base/scripts/runtime-performance.mjs') != '' }}
+        run: |
+          pnpm --dir base install --frozen-lockfile
+          pnpm --dir base build
+
+      - name: Measure base and pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          reports="$RUNNER_TEMP/runtime-performance"
+          mkdir -p "$reports/base" "$reports/head"
+
+          measure() {
+            local checkout="$1"
+            local output="$2"
+            (
+              cd "$checkout"
+              node --expose-gc scripts/runtime-performance.mjs --json
+            ) > "$output"
+          }
+
+          if [[ -f base/scripts/runtime-performance.mjs ]]; then
+            measure base "$reports/base/1.json"
+            measure head "$reports/head/1.json"
+            measure head "$reports/head/2.json"
+            measure base "$reports/base/2.json"
+            measure base "$reports/base/3.json"
+            measure head "$reports/head/3.json"
+          else
+            measure head "$reports/head/1.json"
+            measure head "$reports/head/2.json"
+            measure head "$reports/head/3.json"
+          fi
+
+          node head/scripts/compare-runtime-performance.mjs \
+            "$reports/base" \
+            "$reports/head" \
+            > "$RUNNER_TEMP/runtime-performance-report.md"
+          cat "$RUNNER_TEMP/runtime-performance-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report for the comment workflow
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-performance-report
+          path: ${{ runner.temp }}/runtime-performance
+          if-no-files-found: error
+          retention-days: 7
