@@ -127,8 +127,18 @@ const parallelModel: MachineTest.FiniteModel = {
   initial: "workflow",
   events: ["Left", "Right"],
   transitions: [
-    { source: "workflow.left.idle", event: "Left", target: "workflow.left.done", reenter: false },
-    { source: "workflow.right.idle", event: "Right", target: "workflow.right.done", reenter: false }
+    {
+      source: "workflow.left.idle",
+      trigger: { type: "event", event: "Left" },
+      target: "workflow.left.done",
+      reenter: false
+    },
+    {
+      source: "workflow.right.idle",
+      trigger: { type: "event", event: "Right" },
+      target: "workflow.right.done",
+      reenter: false
+    }
   ]
 }
 
@@ -150,10 +160,10 @@ const historyModel: MachineTest.FiniteModel = {
   initial: "owner",
   events: ["Next", "Leave", "Resume"],
   transitions: [
-    { source: "owner.a", event: "Next", target: "owner.b", reenter: false },
-    { source: "owner.a", event: "Leave", target: "outside", reenter: false },
-    { source: "owner.b", event: "Leave", target: "outside", reenter: false },
-    { source: "outside", event: "Resume", target: "owner.exact", reenter: false }
+    { source: "owner.a", trigger: { type: "event", event: "Next" }, target: "owner.b", reenter: false },
+    { source: "owner.a", trigger: { type: "event", event: "Leave" }, target: "outside", reenter: false },
+    { source: "owner.b", trigger: { type: "event", event: "Leave" }, target: "outside", reenter: false },
+    { source: "outside", trigger: { type: "event", event: "Resume" }, target: "owner.exact", reenter: false }
   ]
 }
 

@@ -28,6 +28,166 @@ const snapshotAtPath = (snapshot: unknown, path: string): unknown => {
 }
 
 describe("MachineTest finite-model reference interpreter", () => {
+  it.effect("stabilizes acyclic always and completion transitions in semantic order", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "flow",
+          value: 0,
+          initial: "idle",
+          states: [
+            { _tag: "Atomic", key: "idle", value: 1 },
+            {
+              _tag: "Compound",
+              key: "work",
+              value: 2,
+              initial: "finished",
+              states: [{ _tag: "Final", key: "finished", value: 3, output: "work:finished" }]
+            },
+            { _tag: "Atomic", key: "archived", value: 4 }
+          ]
+        }],
+        initial: "flow",
+        events: ["Tick"],
+        transitions: [
+          { source: "flow.idle", trigger: { type: "always" }, target: "flow.work" },
+          // Completion has priority over an `always` transition registered on
+          // the same newly completed state.
+          { source: "flow.work", trigger: { type: "always" }, target: "flow.idle" },
+          { source: "flow.work", trigger: { type: "done" }, target: "flow.archived" }
+        ]
+      }
+
+      const reference = MachineTest.interpretModel(model, [])
+      assert.deepStrictEqual(
+        reference.initial.microsteps.flatMap((microstep) => microstep.transitions.map(({ trigger }) => trigger)),
+        [{ type: "always" }, { type: "done" }]
+      )
+      assert.deepStrictEqual(reference.initial.state.activePaths, ["flow", "flow.archived"])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
+  it.effect("stabilizes event transitions through always transitions", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [
+          { _tag: "Atomic", key: "idle", value: 0 },
+          { _tag: "Atomic", key: "working", value: 1 },
+          { _tag: "Atomic", key: "ready", value: 2 }
+        ],
+        initial: "idle",
+        events: ["Start"],
+        transitions: [
+          { source: "idle", trigger: { type: "event", event: "Start" }, target: "working", reenter: false },
+          { source: "working", trigger: { type: "always" }, target: "ready" }
+        ]
+      }
+      const reference = MachineTest.interpretModel(model, ["Start"])
+      assert.deepStrictEqual(
+        reference.steps[0]?.microsteps.flatMap((microstep) => microstep.transitions.map(({ trigger }) => trigger)),
+        [{ type: "event", event: "Start" }, { type: "always" }]
+      )
+      assert.deepStrictEqual(reference.final.activePaths, ["ready"])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [event("Start")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
+  it.effect("recognizes completion again after exiting and reentering the same completed path", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "root",
+          value: 0,
+          initial: "job",
+          states: [{
+            _tag: "Compound",
+            key: "job",
+            value: 1,
+            initial: "done",
+            states: [{ _tag: "Final", key: "done", value: 2, output: "job:done" }]
+          }]
+        }],
+        initial: "root",
+        events: ["Reset"],
+        transitions: [
+          // This targetless completion consumes the completion generation
+          // without changing the retained completion metadata.
+          { source: "root.job", trigger: { type: "done" } },
+          { source: "root.job", trigger: { type: "event", event: "Reset" }, target: "root.job", reenter: true }
+        ]
+      }
+
+      const reference = MachineTest.interpretModel(model, ["Reset"])
+      assert.deepStrictEqual(
+        reference.initial.microsteps.map((microstep) => microstep.transitions[0]?.trigger.type),
+        ["done"]
+      )
+      assert.deepStrictEqual(
+        reference.steps[0]?.microsteps.map((microstep) => microstep.transitions[0]?.trigger.type),
+        ["event", "done"]
+      )
+      assert.deepStrictEqual(reference.initial.state.completions, reference.steps[0]?.after.completions)
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [event("Reset")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
+  it.effect("fails bounded planning for separate always and completion cycles", () =>
+    Effect.gen(function*() {
+      const always: MachineTest.FiniteModel = {
+        roots: [
+          { _tag: "Atomic", key: "left", value: 0 },
+          { _tag: "Atomic", key: "right", value: 1 }
+        ],
+        initial: "left",
+        events: ["Tick"],
+        transitions: [
+          { source: "left", trigger: { type: "always" }, target: "right" },
+          { source: "right", trigger: { type: "always" }, target: "left" }
+        ]
+      }
+      const completion: MachineTest.FiniteModel = {
+        roots: [
+          {
+            _tag: "Compound",
+            key: "left",
+            value: 0,
+            initial: "done",
+            states: [{ _tag: "Final", key: "done", value: 1, output: "left:done" }]
+          },
+          {
+            _tag: "Compound",
+            key: "right",
+            value: 2,
+            initial: "done",
+            states: [{ _tag: "Final", key: "done", value: 3, output: "right:done" }]
+          }
+        ],
+        initial: "left",
+        events: ["Tick"],
+        transitions: [
+          { source: "left", trigger: { type: "done" }, target: "right" },
+          { source: "right", trigger: { type: "done" }, target: "left" }
+        ]
+      }
+
+      for (const model of [always, completion]) {
+        // `compileModel` deliberately erases the generated machine to `Any`;
+        // planning readiness is established by the compiler for this fixture.
+        const error = yield* Machine.planInitial(MachineTest.compileModel(model) as any).pipe(Effect.flip)
+        assert.instanceOf(error, Machine.InfiniteTransitionError)
+        assert.strictEqual(error.maxIterations, 1000)
+      }
+    }))
+
   const parallelWorkflow = (
     transitions: ReadonlyArray<MachineTest.FiniteTransition>
   ): MachineTest.FiniteModel => ({
@@ -69,10 +229,30 @@ describe("MachineTest finite-model reference interpreter", () => {
   })
 
   const completionTransitions: ReadonlyArray<MachineTest.FiniteTransition> = [
-    { source: "workflow.left.idle", event: "Both", target: "workflow.left.done", reenter: false },
-    { source: "workflow.right.idle", event: "Both", target: "workflow.right.done", reenter: false },
-    { source: "workflow.left.idle", event: "Left", target: "workflow.left.done", reenter: false },
-    { source: "workflow.right.idle", event: "Right", target: "workflow.right.done", reenter: false }
+    {
+      source: "workflow.left.idle",
+      trigger: { type: "event", event: "Both" },
+      target: "workflow.left.done",
+      reenter: false
+    },
+    {
+      source: "workflow.right.idle",
+      trigger: { type: "event", event: "Both" },
+      target: "workflow.right.done",
+      reenter: false
+    },
+    {
+      source: "workflow.left.idle",
+      trigger: { type: "event", event: "Left" },
+      target: "workflow.left.done",
+      reenter: false
+    },
+    {
+      source: "workflow.right.idle",
+      trigger: { type: "event", event: "Right" },
+      target: "workflow.right.done",
+      reenter: false
+    }
   ]
 
   const idleParallelRegions = (offset: number): ReadonlyArray<MachineTest.FiniteState> => [
@@ -109,6 +289,76 @@ describe("MachineTest finite-model reference interpreter", () => {
 
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [event("Both")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
+  it.effect("propagates parallel completion into its completion transition", () =>
+    Effect.gen(function*() {
+      const model = parallelWorkflow([
+        ...completionTransitions,
+        { source: "workflow", trigger: { type: "done" }, target: "failed" }
+      ])
+      const reference = MachineTest.interpretModel(model, ["Both"])
+
+      assert.deepStrictEqual(
+        reference.steps[0]!.microsteps.map((microstep) =>
+          microstep.transitions.map(({ source, trigger }) => ({ source, trigger }))
+        ),
+        [
+          [
+            { source: "workflow.left.idle", trigger: { type: "event", event: "Both" } },
+            { source: "workflow.right.idle", trigger: { type: "event", event: "Both" } }
+          ],
+          [{ source: "workflow", trigger: { type: "done" } }]
+        ]
+      )
+      assert.deepStrictEqual(reference.final.activePaths, ["failed"])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [event("Both")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
+  it.effect("enters a choice from an always transition without a second trigger representation", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "flow",
+          value: 0,
+          initial: "idle",
+          states: [
+            { _tag: "Atomic", key: "idle", value: 1 },
+            {
+              _tag: "Choice",
+              key: "route",
+              targets: ["flow.ready"],
+              selected: "flow.ready"
+            },
+            { _tag: "Atomic", key: "ready", value: 2 }
+          ]
+        }],
+        initial: "flow",
+        events: ["Unused"],
+        transitions: [{
+          source: "flow.idle",
+          trigger: { type: "always" },
+          target: "flow.route"
+        }]
+      }
+      const reference = MachineTest.interpretModel(model, [])
+
+      assert.deepStrictEqual(
+        reference.initial.microsteps[0]!.transitions.map(({ source, trigger }) => ({ source, trigger })),
+        [
+          { source: "flow.idle", trigger: { type: "always" } },
+          { source: "flow.route", trigger: { type: "choice" } }
+        ]
+      )
+      assert.deepStrictEqual(reference.final.activePaths, ["flow", "flow.ready"])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [] })
       yield* MachineTest.verifyModel(model, trace)
     }))
 
@@ -149,7 +399,12 @@ describe("MachineTest finite-model reference interpreter", () => {
         ],
         initial: "idle",
         events: ["Start"],
-        transitions: [{ source: "idle", event: "Start", target: "workflow", reenter: false }]
+        transitions: [{
+          source: "idle",
+          trigger: { type: "event", event: "Start" },
+          target: "workflow",
+          reenter: false
+        }]
       }
       const reference = MachineTest.interpretModel(model, ["Start"])
 
@@ -171,8 +426,13 @@ describe("MachineTest finite-model reference interpreter", () => {
   it.effect("lets a child transition preempt an enabled parallel ancestor", () =>
     Effect.gen(function*() {
       const model = parallelWorkflow([
-        { source: "workflow", event: "Abort", target: "failed", reenter: false },
-        { source: "workflow.left.idle", event: "Abort", target: "workflow.left.done", reenter: false }
+        { source: "workflow", trigger: { type: "event", event: "Abort" }, target: "failed", reenter: false },
+        {
+          source: "workflow.left.idle",
+          trigger: { type: "event", event: "Abort" },
+          target: "workflow.left.done",
+          reenter: false
+        }
       ])
       const reference = MachineTest.interpretModel(model, ["Abort"])
       assert.deepStrictEqual(reference.steps[0]!.microsteps[0]!.transitions.map(({ source }) => source), [
@@ -194,8 +454,13 @@ describe("MachineTest finite-model reference interpreter", () => {
   it.effect("uses source document order for conflicting cross-root targets", () =>
     Effect.gen(function*() {
       const model = parallelWorkflow([
-        { source: "workflow.left.idle", event: "Abort", target: "failed", reenter: false },
-        { source: "workflow.right.idle", event: "Abort", target: "cancelled", reenter: false }
+        { source: "workflow.left.idle", trigger: { type: "event", event: "Abort" }, target: "failed", reenter: false },
+        {
+          source: "workflow.right.idle",
+          trigger: { type: "event", event: "Abort" },
+          target: "cancelled",
+          reenter: false
+        }
       ])
       const reference = MachineTest.interpretModel(model, ["Abort"])
       assert.deepStrictEqual(reference.steps[0]!.microsteps[0]!.transitions.map(({ source }) => source), [
@@ -261,7 +526,12 @@ describe("MachineTest finite-model reference interpreter", () => {
         }],
         initial: "app",
         events: ["Enter"],
-        transitions: [{ source: "app.idle", event: "Enter", target: "app.work", reenter: false }]
+        transitions: [{
+          source: "app.idle",
+          trigger: { type: "event", event: "Enter" },
+          target: "app.work",
+          reenter: false
+        }]
       }
 
       const reference = MachineTest.interpretModel(model, ["Enter"])
@@ -307,7 +577,12 @@ describe("MachineTest finite-model reference interpreter", () => {
         }],
         initial: "app",
         events: ["Enter"],
-        transitions: [{ source: "app.idle", event: "Enter", target: "app.running", reenter: false }]
+        transitions: [{
+          source: "app.idle",
+          trigger: { type: "event", event: "Enter" },
+          target: "app.running",
+          reenter: false
+        }]
       }
 
       const reference = MachineTest.interpretModel(model, ["Enter"])
@@ -377,7 +652,7 @@ describe("MachineTest finite-model reference interpreter", () => {
         events: ["Advance"],
         transitions: [{
           source: "app.work.left.idle",
-          event: "Advance",
+          trigger: { type: "event", event: "Advance" },
           target: "app.work.left.running",
           reenter: false
         }]
@@ -446,25 +721,25 @@ describe("MachineTest finite-model reference interpreter", () => {
         transitions: [
           {
             source: "app.work.left.idle",
-            event: "Move",
+            trigger: { type: "event", event: "Move" },
             target: "app.work.left.alternate",
             reenter: false
           },
           {
             source: "app.work.right.idle",
-            event: "Move",
+            trigger: { type: "event", event: "Move" },
             target: "app.work.right.alternate",
             reenter: false
           },
           {
             source: "app.work.left.alternate",
-            event: "ResetParallel",
+            trigger: { type: "event", event: "ResetParallel" },
             target: "app.work",
             reenter: false
           },
           {
             source: "app.work.left.alternate",
-            event: "ResetCompound",
+            trigger: { type: "event", event: "ResetCompound" },
             target: "app",
             reenter: false
           }
@@ -508,7 +783,7 @@ describe("MachineTest finite-model reference interpreter", () => {
         ],
         initial: "idle",
         events: ["Enter"],
-        transitions: [{ source: "idle", event: "Enter", target: "work", reenter: false }]
+        transitions: [{ source: "idle", trigger: { type: "event", event: "Enter" }, target: "work", reenter: false }]
       }
 
       const reference = MachineTest.interpretModel(model, ["Enter"])
@@ -550,8 +825,13 @@ describe("MachineTest finite-model reference interpreter", () => {
       assert.include(fields(droppedError), "microstep.transitions")
 
       const ancestorModel = parallelWorkflow([
-        { source: "workflow", event: "Abort", target: "failed", reenter: false },
-        { source: "workflow.left.idle", event: "Abort", target: "workflow.left.done", reenter: false }
+        { source: "workflow", trigger: { type: "event", event: "Abort" }, target: "failed", reenter: false },
+        {
+          source: "workflow.left.idle",
+          trigger: { type: "event", event: "Abort" },
+          target: "workflow.left.done",
+          reenter: false
+        }
       ])
       const ancestorMachine = MachineTest.compileModel(ancestorModel)
       const ancestor = yield* MachineTest.run(ancestorMachine, { events: [event("Abort")] })
@@ -574,12 +854,22 @@ describe("MachineTest finite-model reference interpreter", () => {
       assert.include(fields(ancestorError), "microstep.transitions")
 
       const conflictModel = parallelWorkflow([
-        { source: "workflow.left.idle", event: "Abort", target: "failed", reenter: false },
-        { source: "workflow.right.idle", event: "Abort", target: "cancelled", reenter: false }
+        { source: "workflow.left.idle", trigger: { type: "event", event: "Abort" }, target: "failed", reenter: false },
+        {
+          source: "workflow.right.idle",
+          trigger: { type: "event", event: "Abort" },
+          target: "cancelled",
+          reenter: false
+        }
       ])
       const reversedModel = parallelWorkflow([
-        { source: "workflow.left.idle", event: "Abort", target: "cancelled", reenter: false },
-        { source: "workflow.right.idle", event: "Abort", target: "failed", reenter: false }
+        {
+          source: "workflow.left.idle",
+          trigger: { type: "event", event: "Abort" },
+          target: "cancelled",
+          reenter: false
+        },
+        { source: "workflow.right.idle", trigger: { type: "event", event: "Abort" }, target: "failed", reenter: false }
       ])
       const reversedMachine = MachineTest.compileModel(reversedModel)
       const reversed = yield* MachineTest.run(reversedMachine, { events: [event("Abort")] })
@@ -721,7 +1011,7 @@ describe("MachineTest finite-model reference interpreter", () => {
         events: ["Start"],
         transitions: [{
           source: "workflow.idle",
-          event: "Start",
+          trigger: { type: "event", event: "Start" },
           target: "workflow.running",
           reenter: false
         }]
@@ -800,6 +1090,50 @@ describe("MachineTest finite-model reference interpreter", () => {
       yield* MachineTest.verifyModel(model, trace)
     }))
 
+  it.effect("propagates nested completion through a completion transition to the parent final", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "job",
+          value: 0,
+          initial: "phase",
+          states: [
+            {
+              _tag: "Compound",
+              key: "phase",
+              value: 1,
+              initial: "done",
+              states: [{ _tag: "Final", key: "done", value: 2, output: "phase:done" }]
+            },
+            { _tag: "Final", key: "done", value: 3, output: "job:done" }
+          ]
+        }],
+        initial: "job",
+        events: ["Unused"],
+        transitions: [{
+          source: "job.phase",
+          trigger: { type: "done" },
+          target: "job.done"
+        }]
+      }
+      const reference = MachineTest.interpretModel(model, [])
+
+      assert.deepStrictEqual(
+        reference.initial.microsteps.flatMap((microstep) => microstep.transitions.map(({ trigger }) => trigger)),
+        [{ type: "done" }]
+      )
+      assert.deepStrictEqual(reference.final.completions, [
+        { path: "job.done", output: "job:done" },
+        { path: "job", output: "job:done" }
+      ])
+      assert.strictEqual(reference.final.status, "done")
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
   it.effect("models targetless steps, broadened reentry, and cross-root lifecycle order", () =>
     Effect.gen(function*() {
       const model: MachineTest.FiniteModel = {
@@ -828,9 +1162,9 @@ describe("MachineTest finite-model reference interpreter", () => {
         initial: "left",
         events: ["Noop", "Reenter", "Switch"],
         transitions: [
-          { source: "left.branch.leaf", event: "Noop", reenter: false },
-          { source: "left.branch", event: "Reenter", target: "left.branch", reenter: true },
-          { source: "left.branch.leaf", event: "Switch", target: "right", reenter: false }
+          { source: "left.branch.leaf", trigger: { type: "event", event: "Noop" }, reenter: false },
+          { source: "left.branch", trigger: { type: "event", event: "Reenter" }, target: "left.branch", reenter: true },
+          { source: "left.branch.leaf", trigger: { type: "event", event: "Switch" }, target: "right", reenter: false }
         ]
       }
 
@@ -894,8 +1228,8 @@ describe("MachineTest finite-model reference interpreter", () => {
         initial: "root",
         events: ["Go"],
         transitions: [
-          { source: "root.branch", event: "Go", target: "root.other", reenter: false },
-          { source: "root.branch.leaf", event: "Go", target: "root.other", reenter: false }
+          { source: "root.branch", trigger: { type: "event", event: "Go" }, target: "root.other", reenter: false },
+          { source: "root.branch.leaf", trigger: { type: "event", event: "Go" }, target: "root.other", reenter: false }
         ]
       }
       const machine = MachineTest.compileModel(model)
@@ -988,7 +1322,7 @@ describe("MachineTest finite-model reference interpreter", () => {
         ],
         initial: "idle",
         events: ["Start"],
-        transitions: [{ source: "idle", event: "Start", target: "ready", reenter: false }]
+        transitions: [{ source: "idle", trigger: { type: "event", event: "Start" }, target: "ready", reenter: false }]
       }
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [event("Start")] })
@@ -1046,13 +1380,59 @@ describe("MachineTest finite-model reference interpreter", () => {
     initial,
     events: ["Advance", "Reset", "Leave", "Resume"],
     transitions: [
-      { source: "workspace.editor.writing", event: "Advance", target: "workspace.editor.preview", reenter: false },
-      { source: "workspace.editor.writing", event: "Leave", target: "outside", reenter: false },
-      { source: "workspace.editor.preview", event: "Reset", target: "workspace.editor.writing", reenter: false },
-      { source: "workspace.editor.preview", event: "Leave", target: "outside", reenter: false },
-      { source: "outside", event: "Resume", target: "workspace.recent", reenter: false }
+      {
+        source: "workspace.editor.writing",
+        trigger: { type: "event", event: "Advance" },
+        target: "workspace.editor.preview",
+        reenter: false
+      },
+      {
+        source: "workspace.editor.writing",
+        trigger: { type: "event", event: "Leave" },
+        target: "outside",
+        reenter: false
+      },
+      {
+        source: "workspace.editor.preview",
+        trigger: { type: "event", event: "Reset" },
+        target: "workspace.editor.writing",
+        reenter: false
+      },
+      {
+        source: "workspace.editor.preview",
+        trigger: { type: "event", event: "Leave" },
+        target: "outside",
+        reenter: false
+      },
+      { source: "outside", trigger: { type: "event", event: "Resume" }, target: "workspace.recent", reenter: false }
     ]
   })
+
+  it.effect("uses a history fallback entered by an always transition", () =>
+    Effect.gen(function*() {
+      const base = compoundHistoryModel("deep", "outside")
+      const model: MachineTest.FiniteModel = {
+        ...base,
+        transitions: [{
+          source: "outside",
+          trigger: { type: "always" },
+          target: "workspace.recent"
+        }]
+      }
+      const reference = MachineTest.interpretModel(model, [])
+
+      assert.deepStrictEqual(reference.final.activePaths, [
+        "workspace",
+        "workspace.editor",
+        "workspace.editor.writing"
+      ])
+      assert.deepStrictEqual(reference.final.history, {})
+      assert.deepStrictEqual(reference.initial.microsteps[0]!.transitions[0]!.trigger, { type: "always" })
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
 
   it.effect("uses fallback only before capture, then deep history overwrites and reuses its register", () =>
     Effect.gen(function*() {
@@ -1148,11 +1528,26 @@ describe("MachineTest finite-model reference interpreter", () => {
     initial: "workspace",
     events: ["Advance", "Leave", "ResumeShallow", "ResumeDeep"],
     transitions: [
-      { source: "workspace", event: "Leave", target: "outside", reenter: false },
-      { source: "workspace.editor.idle", event: "Advance", target: "workspace.editor.active", reenter: false },
-      { source: "workspace.sidebar.closed", event: "Advance", target: "workspace.sidebar.open", reenter: false },
-      { source: "outside", event: "ResumeShallow", target: "workspace.recent", reenter: false },
-      { source: "outside", event: "ResumeDeep", target: "workspace.exact", reenter: false }
+      { source: "workspace", trigger: { type: "event", event: "Leave" }, target: "outside", reenter: false },
+      {
+        source: "workspace.editor.idle",
+        trigger: { type: "event", event: "Advance" },
+        target: "workspace.editor.active",
+        reenter: false
+      },
+      {
+        source: "workspace.sidebar.closed",
+        trigger: { type: "event", event: "Advance" },
+        target: "workspace.sidebar.open",
+        reenter: false
+      },
+      {
+        source: "outside",
+        trigger: { type: "event", event: "ResumeShallow" },
+        target: "workspace.recent",
+        reenter: false
+      },
+      { source: "outside", trigger: { type: "event", event: "ResumeDeep" }, target: "workspace.exact", reenter: false }
     ]
   })
 
@@ -1233,14 +1628,24 @@ describe("MachineTest finite-model reference interpreter", () => {
         initial: "workspace",
         events: ["Advance", "Restore"],
         transitions: [
-          { source: "workspace.editor.writing", event: "Advance", target: "workspace.editor.preview", reenter: false },
+          {
+            source: "workspace.editor.writing",
+            trigger: { type: "event", event: "Advance" },
+            target: "workspace.editor.preview",
+            reenter: false
+          },
           {
             source: "workspace.sidebar.open",
-            event: "Restore",
+            trigger: { type: "event", event: "Restore" },
             target: "workspace.editor.exact",
             reenter: true
           },
-          { source: "workspace.sidebar.closed", event: "Advance", target: "workspace.sidebar.open", reenter: false }
+          {
+            source: "workspace.sidebar.closed",
+            trigger: { type: "event", event: "Advance" },
+            target: "workspace.sidebar.open",
+            reenter: false
+          }
         ]
       }
       const events = ["Advance", "Restore"]
@@ -1330,17 +1735,32 @@ describe("MachineTest finite-model reference interpreter", () => {
     initial,
     events: ["Advance", "Mutate", "Leave", "Resume"],
     transitions: [
-      { source: "workspace", event: "Leave", target: "outside", reenter: false },
+      { source: "workspace", trigger: { type: "event", event: "Leave" }, target: "outside", reenter: false },
       {
         source: "workspace.editor.writing",
-        event: "Mutate",
+        trigger: { type: "event", event: "Mutate" },
         target: "workspace.editor.writing",
         targetValue: 42,
         reenter: false
       },
-      { source: "workspace.editor.writing", event: "Advance", target: "workspace.editor.preview", reenter: false },
-      { source: "workspace.sidebar.closed", event: "Advance", target: "workspace.sidebar.open", reenter: false },
-      { source: "outside", event: "Resume", target: "workspace.editor.exact", reenter: false }
+      {
+        source: "workspace.editor.writing",
+        trigger: { type: "event", event: "Advance" },
+        target: "workspace.editor.preview",
+        reenter: false
+      },
+      {
+        source: "workspace.sidebar.closed",
+        trigger: { type: "event", event: "Advance" },
+        target: "workspace.sidebar.open",
+        reenter: false
+      },
+      {
+        source: "outside",
+        trigger: { type: "event", event: "Resume" },
+        target: "workspace.editor.exact",
+        reenter: false
+      }
     ]
   })
 

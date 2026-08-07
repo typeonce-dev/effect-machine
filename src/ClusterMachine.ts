@@ -19,6 +19,7 @@ import {
   Snowflake
 } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
+import type { EnsureExecutable } from "./internal/machineReadiness.js"
 import * as Machine from "./Machine.js"
 
 type EntityAddress = EntityAddress.EntityAddress
@@ -425,7 +426,7 @@ export const make = <
       OutputStates,
       InputEvents
     >
-    & Machine.Machine.EnsureOutputImplementations<States, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   options: {
     readonly version: string
   },

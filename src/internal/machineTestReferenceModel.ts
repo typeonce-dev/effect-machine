@@ -1,6 +1,6 @@
 /**
- * Independent hierarchical, parallel, and history statechart semantics for finite test
- * models.
+ * Independent hierarchical, parallel, history, choice, and automatic-
+ * transition statechart semantics for finite test models.
  *
  * This module deliberately knows nothing about `Machine`, its snapshots, the
  * finite-model compiler, target builders, or planner internals. The actual
@@ -17,7 +17,8 @@ import type {
   FiniteHistoryState,
   FiniteModel,
   FiniteState,
-  FiniteTransition
+  FiniteTransition,
+  FiniteTransitionTrigger
 } from "./machineTestFiniteModel.js"
 
 /**
@@ -83,6 +84,8 @@ export interface ReferenceTransition {
   readonly source: string
   readonly trigger:
     | { readonly type: "event"; readonly event: string }
+    | { readonly type: "always" }
+    | { readonly type: "done" }
     | { readonly type: "choice" }
   readonly reenter: boolean
   readonly target: string | undefined
@@ -243,6 +246,11 @@ interface ModelIndex {
   readonly histories: ReadonlyArray<IndexedState & { readonly node: FiniteHistoryState }>
 }
 
+const triggerKey = (trigger: FiniteTransitionTrigger): string =>
+  trigger.type === "event" ? `event:${trigger.event}` : trigger.type
+
+const reenters = (transition: FiniteTransition): boolean => "reenter" in transition && transition.reenter
+
 const ControlOrder: unique symbol = Symbol("MachineTestReferenceControlOrder")
 
 type InternalReferenceState = ReferenceState & {
@@ -298,7 +306,7 @@ const indexModel = (model: FiniteModel): ModelIndex => {
   visit(model.roots, undefined, undefined, 1)
   const byPath = new Map(ordered.map((state) => [state.path, state]))
   const transitions = new Map(
-    model.transitions.map((transition) => [`${transition.source}\u0000${transition.event}`, transition])
+    model.transitions.map((transition) => [`${transition.source}\u0000${triggerKey(transition.trigger)}`, transition])
   )
   const histories = ordered.filter(
     (state): state is IndexedState & { readonly node: FiniteHistoryState } => state.node._tag === "History"
@@ -420,6 +428,10 @@ const settleCompletions = (index: ModelIndex, state: ReferenceState): ReferenceS
       output = current.node.output
     } else if (current.node._tag === "Compound") {
       const child = directActiveChild(index, state, current.path)
+      // A compound completes only when its direct active child is final. A
+      // completed compound child instead enables that child's `done`
+      // transition; completion propagates when it transitions to a final
+      // sibling of the parent.
       if (child?.node._tag !== "Final") return undefined
       output = complete(child.path)
     } else if (current.node._tag === "Parallel") {
@@ -530,14 +542,14 @@ const activeLeaves = (index: ModelIndex, state: ReferenceState): ReadonlyArray<s
 const selectTransitions = (
   index: ModelIndex,
   state: ReferenceState,
-  event: string
+  trigger: FiniteTransitionTrigger
 ): ReadonlyArray<SelectedTransition> => {
   const selections: Array<SelectedTransition> = []
   const selectedSources = new Set<string>()
   for (const leaf of activeLeaves(index, state)) {
     const candidates = pathsToRoot(index, leaf).slice().reverse()
     for (const source of candidates) {
-      const transition = index.transitions.get(`${source}\u0000${event}`)
+      const transition = index.transitions.get(`${source}\u0000${triggerKey(trigger)}`)
       if (transition === undefined) continue
       if (!selectedSources.has(source)) {
         selectedSources.add(source)
@@ -616,9 +628,8 @@ const choiceResolvedTargetPath = (index: ModelIndex, path: string): string => {
   if (selected.node._tag === "Choice") return choiceResolvedTargetPath(index, selected.path)
   return runtimeTargetPath(index, {
     source: choice.path,
-    event: "__choice__",
-    target: selected.path,
-    reenter: false
+    trigger: { type: "always" },
+    target: selected.path
   })!
 }
 
@@ -767,8 +778,8 @@ const resolveHistoryState = (
 ): ReferenceState => {
   const historyState = getState(index, transition.target!) as IndexedState & { readonly node: FiniteHistoryState }
   const owner = historyState.parent!
-  const reenteredOwner = transition.reenter && before.activePaths.includes(owner)
-  const provisionalBoundary = transition.reenter
+  const reenteredOwner = reenters(transition) && before.activePaths.includes(owner)
+  const provisionalBoundary = reenters(transition)
     ? getState(index, transition.source).parent
     : leastCommonAncestor(index, leaf, owner)
   const provisionalExitPaths = reenteredOwner
@@ -897,8 +908,8 @@ const targetState = (
 
 const transitionRecord = (index: ModelIndex, transition: FiniteTransition): ReferenceTransition => ({
   source: transition.source,
-  trigger: { type: "event", event: transition.event },
-  reenter: transition.reenter,
+  trigger: transition.trigger,
+  reenter: reenters(transition),
   // Retain the target identity returned by the compiler's selected builder;
   // the finite AST keeps the broader declared bound separately.
   target: transition.target !== undefined && getState(index, transition.target).node._tag === "History"
@@ -960,7 +971,7 @@ const evaluateTransition = (
   const { transition } = selection
   const targetPath = runtimeTargetPath(index, transition)
   const next = targetState(index, before, transition, selection.leaf)
-  const changed = transition.reenter || !samePaths(before.activePaths, next.activePaths)
+  const changed = reenters(transition) || !samePaths(before.activePaths, next.activePaths)
   if (!changed) {
     return { ...selection, next, targetPath, changed, exitPaths: [], entryPaths: [] }
   }
@@ -970,13 +981,13 @@ const evaluateTransition = (
   const choiceEntry = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
   const choiceResolvesToActiveAncestor = choiceEntry !== undefined &&
     isPathInSubtree(transition.source, resolveChoicePath(index, choiceEntry))
-  const boundary = transition.reenter
+  const boundary = reenters(transition)
     ? !choiceResolvesToActiveAncestor
       ? broadenBoundary(index, naturalBoundary, getState(index, transition.source).parent)
       : getState(index, transition.source).parent
     : naturalBoundary
   const historyTarget = transition.target === undefined ? undefined : getState(index, transition.target)
-  const reenteredHistoryOwner = historyTarget?.node._tag === "History" && transition.reenter &&
+  const reenteredHistoryOwner = historyTarget?.node._tag === "History" && reenters(transition) &&
     historyTarget.parent !== undefined && before.activePaths.includes(historyTarget.parent)
   return {
     ...selection,
@@ -1037,6 +1048,107 @@ const removeConflicts = (
   return retained
 }
 
+const applySelections = (
+  index: ModelIndex,
+  before: ReferenceState,
+  selected: ReadonlyArray<SelectedTransition>,
+  event: string
+): { readonly microstep: ReferenceMicrostep; readonly after: ReferenceState } => {
+  const retained = removeConflicts(index, selected.map((selection) => evaluateTransition(index, before, selection)))
+  const sorted = sortByDocumentOrder(index, retained)
+  let next = before
+  const applicationOrder = [
+    ...sorted.filter((transition) => !transition.changed),
+    ...sorted.filter((transition) => transition.changed)
+  ]
+  for (const evaluated of applicationOrder) {
+    next = targetState(index, next, evaluated.transition, evaluated.leaf)
+  }
+  const changed = sorted.some((transition) => transition.changed)
+  const exitPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.exitPaths), undefined, "exit")
+  const entryPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.entryPaths), undefined, "entry")
+  next = captureHistory(index, before, next, exitPaths)
+  const enteredChoice = sorted.some(({ transition }) =>
+    transition.target !== undefined && entryChoicePath(index, transition.target) !== undefined
+  )
+  if (enteredChoice) next = withControlOrder({ ...next, completions: [] }, controlOrder(next))
+
+  return {
+    microstep: {
+      next,
+      event,
+      transitions: sorted.flatMap(({ transition }) => {
+        const choice = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
+        return [
+          transitionRecord(index, transition),
+          ...(choice === undefined ? [] : choiceTransitionRecords(index, choice))
+        ]
+      }),
+      exitPaths,
+      entryPaths,
+      changed
+    },
+    after: settleCompletions(index, next)
+  }
+}
+
+const automaticTransitions = (
+  index: ModelIndex,
+  initial: ReferenceState,
+  event: string,
+  completedBefore: ReadonlyArray<ReferenceCompletion>,
+  refreshedByExit: ReadonlyArray<string> = []
+): { readonly state: ReferenceState; readonly microsteps: ReadonlyArray<ReferenceMicrostep> } => {
+  const microsteps: Array<ReferenceMicrostep> = []
+  let current = initial
+  let previousCompletions = completedBefore
+  const newlyCompleted = (
+    state: ReferenceState,
+    previous: ReadonlyArray<ReferenceCompletion>,
+    exited: ReadonlyArray<string>
+  ): ReadonlyArray<ReferenceCompletion> =>
+    state.completions.filter((completion) =>
+      (!previous.some(({ path }) => path === completion.path) || exited.includes(completion.path)) &&
+      index.transitions.has(`${completion.path}\u0000${triggerKey({ type: "done" })}`)
+    )
+  const pendingDone: Array<ReferenceCompletion> = [
+    ...newlyCompleted(current, previousCompletions, refreshedByExit)
+  ]
+  let shouldRunAlways = true
+  let iterations = 0
+
+  while (true) {
+    iterations += 1
+    if (iterations > 1000) {
+      throw new Error("MachineTest.interpretModel detected an infinite automatic-transition cycle")
+    }
+
+    const completion = pendingDone.shift()
+    if (completion !== undefined && current.activePaths.includes(completion.path)) {
+      const transition = index.transitions.get(`${completion.path}\u0000${triggerKey({ type: "done" })}`)!
+      const applied = applySelections(index, current, [{ transition, leaf: completion.path }], event)
+      microsteps.push(applied.microstep)
+      previousCompletions = current.completions
+      current = applied.after
+      pendingDone.push(...newlyCompleted(current, previousCompletions, applied.microstep.exitPaths))
+      shouldRunAlways = applied.microstep.changed
+      continue
+    }
+
+    if (current.status === "done") break
+    const always = shouldRunAlways ? selectTransitions(index, current, { type: "always" }) : []
+    if (always.length === 0) break
+    const applied = applySelections(index, current, always, event)
+    microsteps.push(applied.microstep)
+    previousCompletions = current.completions
+    current = applied.after
+    pendingDone.push(...newlyCompleted(current, previousCompletions, applied.microstep.exitPaths))
+    shouldRunAlways = applied.microstep.changed
+  }
+
+  return { state: current, microsteps }
+}
+
 const stepModel = (
   index: ModelIndex,
   before: ReferenceState,
@@ -1057,7 +1169,7 @@ const stepModel = (
     }
   }
 
-  const selected = selectTransitions(index, before, event)
+  const selected = selectTransitions(index, before, { type: "event", event })
   if (selected.length === 0) {
     return {
       index: stepIndex,
@@ -1070,48 +1182,22 @@ const stepModel = (
     }
   }
 
-  const retained = removeConflicts(index, selected.map((selection) => evaluateTransition(index, before, selection)))
-  const sorted = sortByDocumentOrder(index, retained)
-  let next = before
-  const applicationOrder = [
-    ...sorted.filter((transition) => !transition.changed),
-    ...sorted.filter((transition) => transition.changed)
-  ]
-  for (const evaluated of applicationOrder) {
-    next = targetState(index, next, evaluated.transition, evaluated.leaf)
-  }
-  const changed = sorted.some((transition) => transition.changed)
-  const exitPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.exitPaths), undefined, "exit")
-  const entryPaths = lifecyclePaths(index, sorted.flatMap((transition) => transition.entryPaths), undefined, "entry")
-  next = captureHistory(index, before, next, exitPaths)
-  const enteredChoice = sorted.some(({ transition }) =>
-    transition.target !== undefined && entryChoicePath(index, transition.target) !== undefined
-  )
-  if (enteredChoice) next = withControlOrder({ ...next, completions: [] }, controlOrder(next))
-
-  const microstep: ReferenceMicrostep = {
-    next,
+  const applied = applySelections(index, before, selected, event)
+  const stabilized = automaticTransitions(
+    index,
+    applied.after,
     event,
-    transitions: sorted.flatMap(({ transition }) => {
-      const choice = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
-      return [
-        transitionRecord(index, transition),
-        ...(choice === undefined ? [] : choiceTransitionRecords(index, choice))
-      ]
-    }),
-    exitPaths,
-    entryPaths,
-    changed
-  }
-  const after = settleCompletions(index, next)
+    before.completions,
+    applied.microstep.exitPaths
+  )
   return {
     index: stepIndex,
     event,
     before,
-    microsteps: [microstep],
-    after,
-    done: after.status === "done",
-    output: after.output
+    microsteps: [applied.microstep, ...stabilized.microsteps],
+    after: stabilized.state,
+    done: stabilized.state.status === "done",
+    output: stabilized.state.output
   }
 }
 
@@ -1134,23 +1220,27 @@ export const interpretModel = (
   const startingState = makeUnsettledState(index, model.initial)
   const initialState = settleCompletions(index, startingState)
   const initialChoiceTransitions = initialChoiceTransitionRecords(index, model.initial)
+  const stabilizedInitial = automaticTransitions(index, initialState, "InitialEvent", [])
   const initial: ReferenceInitialStep = {
     startingState,
     initialEntryPaths: startingState.activePaths,
-    state: initialState,
-    microsteps: initialChoiceTransitions.length === 0 ? [] : [{
-      next: startingState,
-      event: "InitialEvent",
-      transitions: initialChoiceTransitions,
-      exitPaths: [],
-      entryPaths: [],
-      changed: false
-    }],
-    done: initialState.status === "done",
-    output: initialState.output
+    state: stabilizedInitial.state,
+    microsteps: [
+      ...(initialChoiceTransitions.length === 0 ? [] : [{
+        next: startingState,
+        event: "InitialEvent",
+        transitions: initialChoiceTransitions,
+        exitPaths: [],
+        entryPaths: [],
+        changed: false
+      }]),
+      ...stabilizedInitial.microsteps
+    ],
+    done: stabilizedInitial.state.status === "done",
+    output: stabilizedInitial.state.output
   }
   const steps: Array<ReferenceStep> = []
-  let current = initialState
+  let current = stabilizedInitial.state
   for (let eventIndex = 0; eventIndex < events.length; eventIndex++) {
     const step = stepModel(index, current, events[eventIndex]!, eventIndex)
     steps.push(step)

@@ -30,6 +30,8 @@ for (let index = 2; index < process.argv.length; index += 1) {
 const root = options.root
 const tsc = resolve(root, "node_modules", "typescript", "bin", "tsc")
 
+// Instantiation counts are deterministic for the pinned compiler. Budgets keep
+// roughly thirty percent headroom; wall-clock check time is never gated.
 const scenarios = [
   {
     id: "effect-only",
@@ -46,7 +48,9 @@ const scenarios = [
     id: "define-states",
     label: "Machine.defineStates (3 states)",
     file: "define-states.ts",
-    control: "import-only"
+    control: "import-only",
+    maxInstantiations: 3_800,
+    maxMarginalInstantiations: 3_700
   },
   {
     id: "make-control",
@@ -58,13 +62,17 @@ const scenarios = [
     id: "make",
     label: "Machine.make (3 states, 2 events)",
     file: "make.ts",
-    control: "make-control"
+    control: "make-control",
+    maxInstantiations: 11_000,
+    maxMarginalInstantiations: 7_500
   },
   {
     id: "handle",
     label: "machine.handle (3 states, 2 transitions)",
     file: "handle.ts",
-    control: "make"
+    control: "make",
+    maxInstantiations: 30_000,
+    maxMarginalInstantiations: 19_000
   },
   {
     id: "handle-depth-8-control",
@@ -76,7 +84,9 @@ const scenarios = [
     id: "handle-depth-8",
     label: "machine.handle (depth 8)",
     file: "handle-depth-8.ts",
-    control: "handle-depth-8-control"
+    control: "handle-depth-8-control",
+    maxInstantiations: 145_000,
+    maxMarginalInstantiations: 136_000
   },
   {
     id: "handle-depth-12-control",
@@ -88,7 +98,9 @@ const scenarios = [
     id: "handle-depth-12",
     label: "machine.handle (depth 12)",
     file: "handle-depth-12.ts",
-    control: "handle-depth-12-control"
+    control: "handle-depth-12-control",
+    maxInstantiations: 160_000,
+    maxMarginalInstantiations: 150_000
   },
   {
     id: "handle-depth-16-control",
@@ -100,7 +112,9 @@ const scenarios = [
     id: "handle-depth-16",
     label: "machine.handle (depth 16)",
     file: "handle-depth-16.ts",
-    control: "handle-depth-16-control"
+    control: "handle-depth-16-control",
+    maxInstantiations: 180_000,
+    maxMarginalInstantiations: 168_000
   },
   {
     id: "handle-depth-24-control",
@@ -112,7 +126,9 @@ const scenarios = [
     id: "handle-depth-24",
     label: "machine.handle (depth 24)",
     file: "handle-depth-24.ts",
-    control: "handle-depth-24-control"
+    control: "handle-depth-24-control",
+    maxInstantiations: 230_000,
+    maxMarginalInstantiations: 215_000
   },
   {
     id: "handle-depth-wide-16-control",
@@ -124,7 +140,65 @@ const scenarios = [
     id: "handle-depth-wide-16",
     label: "machine.handle (wide depth 16)",
     file: "handle-depth-wide-16.ts",
-    control: "handle-depth-wide-16-control"
+    control: "handle-depth-wide-16-control",
+    maxInstantiations: 268_000,
+    maxMarginalInstantiations: 255_000
+  },
+  {
+    id: "composition-control",
+    label: "parallel/history/choice control",
+    file: "composition-control.ts",
+    hidden: true
+  },
+  {
+    id: "composition",
+    label: "machine.handle (parallel/history/choice)",
+    file: "composition.ts",
+    control: "composition-control",
+    maxInstantiations: 165_000,
+    maxMarginalInstantiations: 142_000
+  },
+  {
+    id: "successive-handle-control",
+    label: "successive machine.handle control",
+    file: "successive-handle-control.ts",
+    hidden: true
+  },
+  {
+    id: "successive-handle",
+    label: "machine.handle (4 successive calls)",
+    file: "successive-handle.ts",
+    control: "successive-handle-control",
+    maxInstantiations: 166_000,
+    maxMarginalInstantiations: 147_000
+  },
+  {
+    id: "exact-channels-control",
+    label: "exact machine channels control",
+    file: "exact-channels-control.ts",
+    hidden: true
+  },
+  {
+    id: "exact-channels",
+    label: "machine exact input/output/error/services",
+    file: "exact-channels.ts",
+    control: "exact-channels-control",
+    maxInstantiations: 138_000,
+    maxMarginalInstantiations: 123_000
+  },
+  {
+    id: "adapter-readiness-control",
+    label: "adapter readiness control",
+    file: "adapter-readiness-control.ts",
+    hidden: true
+  },
+  {
+    id: "adapter-readiness",
+    label: "execution adapter readiness",
+    file: "adapter-readiness.ts",
+    control: "adapter-readiness-control",
+    maxInstantiations: 158_000,
+    maxMarginalInstantiations: 125_000
   }
 ]
 
@@ -199,6 +273,35 @@ for (const scenario of scenarios) {
 const visibleScenarios = scenarios.filter(
   (scenario) => scenario.hidden !== true && results.has(scenario.id)
 )
+
+for (const scenario of visibleScenarios) {
+  const result = results.get(scenario.id)
+  const control = scenario.control === undefined ? undefined : results.get(scenario.control)
+  const marginalInstantiations = control === undefined
+    ? undefined
+    : result.instantiations - control.instantiations
+
+  if (
+    scenario.maxInstantiations !== undefined &&
+    result.instantiations > scenario.maxInstantiations
+  ) {
+    throw new Error(
+      `Type-performance budget exceeded for ${scenario.id}: ` +
+        `${result.instantiations} instantiations > ${scenario.maxInstantiations}`
+    )
+  }
+  if (
+    scenario.maxMarginalInstantiations !== undefined &&
+    marginalInstantiations !== undefined &&
+    marginalInstantiations > scenario.maxMarginalInstantiations
+  ) {
+    throw new Error(
+      `Marginal type-performance budget exceeded for ${scenario.id}: ` +
+        `${marginalInstantiations} instantiations > ${scenario.maxMarginalInstantiations}`
+    )
+  }
+}
+
 const rows = visibleScenarios.map((scenario) => {
   const result = results.get(scenario.id)
   const control = scenario.control === undefined ? undefined : results.get(scenario.control)
@@ -229,6 +332,8 @@ if (options.json) {
             instantiations: result.instantiations,
             marginalInstantiations:
               control === undefined ? null : result.instantiations - control.instantiations,
+            maxInstantiations: scenario.maxInstantiations ?? null,
+            maxMarginalInstantiations: scenario.maxMarginalInstantiations ?? null,
             checkTimeSeconds: result.checkTime
           }
         })
@@ -278,3 +383,4 @@ for (const row of rows) {
 
 console.log("\nMarginal is measured against the matching setup without that API call.")
 console.log("Check time is informational; instantiations are the stable comparison metric.")
+console.log("Configured total and marginal instantiation budgets are enforced before reporting.")

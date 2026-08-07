@@ -10,6 +10,7 @@ import * as Graph from "effect/Graph"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import { FastCheck } from "effect/testing"
+import type { EnsureExecutable } from "./internal/machineReadiness.js"
 import type { FiniteModel } from "./internal/machineTestFiniteModel.js"
 import * as ReferenceModel from "./internal/machineTestReferenceModel.js"
 import * as Machine from "./Machine.js"
@@ -42,7 +43,9 @@ export {
 export {
   compileModel,
   type FiniteAtomicState,
+  type FiniteAutomaticTransition,
   type FiniteCompoundState,
+  type FiniteEventTransition,
   type FiniteFinalState,
   type FiniteHistoryMutation,
   type FiniteHistoryScenario,
@@ -55,7 +58,8 @@ export {
   finiteModels,
   type FiniteParallelState,
   type FiniteState,
-  type FiniteTransition
+  type FiniteTransition,
+  type FiniteTransitionTrigger
 } from "./internal/machineTestFiniteModel.js"
 
 export {
@@ -103,13 +107,10 @@ type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extend
 
 type ReadyMachine<M extends AnyMachine> =
   & M
-  & Machine.Machine.EnsureOutputImplementations<
+  & EnsureExecutable<
     Machine.Machine.States<M>,
+    Machine.Machine.UnhandledStates<M>,
     Machine.Machine.OutputStates<M>
-  >
-  & Machine.Machine.EnsureHistoryImplementations<
-    Machine.Machine.States<M>,
-    Machine.Machine.UnhandledStates<M>
   >
 
 /**

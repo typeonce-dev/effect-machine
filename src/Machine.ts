@@ -29,7 +29,9 @@ import { ProcessLocalError as ProcessLocalErrorValue } from "./internal/machineE
 import * as Model from "./internal/machineModel.js"
 import * as internalPlanner from "./internal/machinePlanner.js"
 import * as internalProcess from "./internal/machineProcess.js"
+import type { EnsureExecutable } from "./internal/machineReadiness.js"
 import * as internalRuntime from "./internal/machineRuntime.js"
+import * as StateDefinition from "./internal/machineStateDefinition.js"
 
 /**
  * String literal type used as the runtime type identifier for `Machine`
@@ -429,8 +431,14 @@ type EnsureCompatibleRuntime<Requirements, Events, Emits> = [IncompatibleRuntime
   readonly [RuntimeCompatibilityErrorTypeId]: IncompatibleRuntime<Requirements, Events, Emits>
 }
 
-type StateDefinitionError<Message extends string> = {
+type StateDefinitionError<
+  Message extends string,
+  Path extends PropertyKey = never,
+  Details extends PropertyKey = never
+> = {
   readonly "~effect/Machine/DefinitionError": Message
+  readonly path: Path
+  readonly details: Details
 }
 
 type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKey<States>
@@ -439,18 +447,79 @@ type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryState
 
 type ChoiceStateKey<States extends Machine.StateSchemas> = Machine.ChoiceStateKey<States>
 
-type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends boolean = false> = {
-  readonly [Key in keyof States]: ValidateStateNode<States[Key], AllowHistory>
+type StateDefinitionPath<Prefix extends string, Key extends PropertyKey> = Key extends string ?
+  Key extends "" ? Prefix extends "" ? "<empty>" : `${Prefix}.<empty>`
+  : Prefix extends "" ? Key
+  : `${Prefix}.${Key}`
+  : Key extends number ? Prefix extends "" ? `${Key}` : `${Prefix}.${Key}`
+  : Prefix extends "" ? "<symbol>"
+  : `${Prefix}.<symbol>`
+
+type ValidateStateKey<Key extends PropertyKey, Prefix extends string> = Key extends symbol ?
+  StateDefinitionError<"State keys must be strings, not symbols", StateDefinitionPath<Prefix, Key>, Key>
+  : Key extends number ?
+    StateDefinitionError<"State keys cannot use numeric forms", StateDefinitionPath<Prefix, Key>, Key>
+  : Key extends "" ? StateDefinitionError<"State keys cannot be empty", StateDefinitionPath<Prefix, Key>, Key>
+  : Key extends "__proto__" ?
+    StateDefinitionError<"The state key \"__proto__\" is not allowed", StateDefinitionPath<Prefix, Key>, Key>
+  : Key extends `${string}.${string}` ?
+    StateDefinitionError<"State keys cannot contain \".\"", StateDefinitionPath<Prefix, Key>, Key>
+  : Key extends `${number}` ?
+    StateDefinitionError<"State keys cannot use numeric forms", StateDefinitionPath<Prefix, Key>, Key>
+  : unknown
+
+type ValidateStateTree<
+  States extends Machine.StateSchemas,
+  AllowHistory extends boolean = false,
+  Prefix extends string = ""
+> = {
+  readonly [Key in keyof States]:
+    & ValidateStateKey<Key, Prefix>
+    & ValidateStateNode<States[Key], AllowHistory, StateDefinitionPath<Prefix, Key>>
 }
 
-type ValidateStateNode<Node, AllowHistory extends boolean> = Node extends Machine.HistoryStateNodeConfig ?
-  AllowHistory extends true ? ValidateHistoryStateNode<Node>
-  : StateDefinitionError<"History states must be declared below an active parent state">
-  : Node extends Machine.ChoiceStateNodeConfig ? AllowHistory extends true ? ValidateChoiceStateNode<Node>
-    : StateDefinitionError<"Choice states must be declared below an active parent state">
-  : Node extends Machine.TaggedSchema ? unknown
-  : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node>
-  : StateDefinitionError<"State nodes must be tagged schemas or state node configs">
+type UnknownStateNodeProperty<Node, Kind extends StateDefinition.StateNodeKind> = Exclude<
+  keyof Node,
+  StateDefinition.AllowedStateNodeProperty<Kind>
+>
+
+type ValidateExactStateNodeProperties<
+  Node,
+  Kind extends StateDefinition.StateNodeKind,
+  Path extends PropertyKey
+> = [UnknownStateNodeProperty<Node, Kind>] extends [never] ? unknown
+  : StateDefinitionError<
+    "State nodes cannot declare properties outside their state kind",
+    Path,
+    Extract<UnknownStateNodeProperty<Node, Kind>, PropertyKey>
+  >
+
+type UnknownPseudoAnnotationProperty<Node> = Node extends { readonly annotations: infer Annotations } ?
+  Exclude<keyof Annotations, StateDefinition.AllowedPseudoStateAnnotationProperty>
+  : never
+
+type ValidatePseudoStateAnnotations<Node, Path extends PropertyKey> = [UnknownPseudoAnnotationProperty<Node>] extends
+  [never] ? unknown
+  : StateDefinitionError<
+    "Pseudo-state annotations contain unknown properties",
+    Path,
+    Extract<UnknownPseudoAnnotationProperty<Node>, PropertyKey>
+  >
+
+type ValidateStateNode<Node, AllowHistory extends boolean, Path extends PropertyKey> = Node extends
+  Machine.TaggedSchema ? unknown
+  : Node extends Machine.HistoryStateNodeConfig ?
+      & ValidateExactStateNodeProperties<Node, "history", Path>
+      & ValidatePseudoStateAnnotations<Node, Path>
+      & (AllowHistory extends true ? ValidateHistoryStateNode<Node>
+        : StateDefinitionError<"History states must be declared below an active parent state", Path>)
+  : Node extends Machine.ChoiceStateNodeConfig ?
+      & ValidateExactStateNodeProperties<Node, "choice", Path>
+      & ValidatePseudoStateAnnotations<Node, Path>
+      & (AllowHistory extends true ? ValidateChoiceStateNode<Node>
+        : StateDefinitionError<"Choice states must be declared below an active parent state", Path>)
+  : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node, Path>
+  : StateDefinitionError<"State nodes must be tagged schemas or state node configs", Path>
 
 type ValidateHistoryStateNode<Node extends Machine.HistoryStateNodeConfig> = [
   Extract<keyof Node, "schema" | "states" | "initial" | "output" | "choice">
@@ -462,9 +531,21 @@ type ValidateChoiceStateNode<Node extends Machine.ChoiceStateNodeConfig> = [
 ] extends [never] ? unknown
   : StateDefinitionError<"Choice states cannot declare schemas, children, initial states, output, or history">
 
-type ValidateStateNodeConfig<Node extends { readonly schema: Machine.TaggedSchema }> = Node extends
-  { readonly states: infer Children } ? ValidateStateNodeWithChildren<Node, Children>
-  : ValidateStateNodeWithoutChildren<Node>
+type ValidateStateNodeConfig<
+  Node extends { readonly schema: Machine.TaggedSchema },
+  Path extends PropertyKey
+> = Node extends { readonly type: "parallel" } ?
+    & ValidateExactStateNodeProperties<Node, "parallel", Path>
+    & ValidateStateNodeWithChildren<Node, Node extends { readonly states: infer Children } ? Children : never, Path>
+  : Node extends { readonly type: "final" } ?
+      & ValidateExactStateNodeProperties<Node, "final", Path>
+      & ValidateStateNodeWithoutChildren<Node>
+  : Node extends { readonly states: infer Children } ?
+      & ValidateExactStateNodeProperties<Node, "compound", Path>
+      & ValidateStateNodeWithChildren<Node, Children, Path>
+  :
+    & ValidateExactStateNodeProperties<Node, "atomic", Path>
+    & ValidateStateNodeWithoutChildren<Node>
 
 type ValidateOutputSchema<Node> = "output" extends keyof Node ? Node extends { readonly output: Schema.Top } ? unknown
   : StateDefinitionError<"State output must be a schema">
@@ -472,22 +553,24 @@ type ValidateOutputSchema<Node> = "output" extends keyof Node ? Node extends { r
 
 type ValidateStateNodeWithChildren<
   Node extends { readonly schema: Machine.TaggedSchema },
-  Children
+  Children,
+  Path extends PropertyKey
 > = Children extends Machine.StateSchemas ?
   Node extends { readonly type: "final" } ? StateDefinitionError<"Final states cannot declare child states">
   : Node extends { readonly type: "parallel" } ?
     "initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
-    : { readonly states: ValidateStateTree<Children, true> } & ValidateOutputSchema<Node>
+    : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> } & ValidateOutputSchema<Node>
   : "output" extends keyof Node ? StateDefinitionError<"Only final and parallel states can declare output">
-  : ValidateCompoundStateNode<Node, Children>
+  : ValidateCompoundStateNode<Node, Children, Path>
   : StateDefinitionError<"Child states must be a state tree">
 
 type ValidateCompoundStateNode<
   Node extends { readonly schema: Machine.TaggedSchema },
-  Children extends Machine.StateSchemas
+  Children extends Machine.StateSchemas,
+  Path extends PropertyKey
 > = Node extends { readonly initial: infer Initial } ?
   Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> ? {
-      readonly states: ValidateStateTree<Children, true>
+      readonly states: ValidateStateTree<Children, true, Extract<Path, string>>
     }
   : StateDefinitionError<"Compound initial must be one of its direct child keys">
   : StateDefinitionError<"Compound states must declare an initial child">
@@ -2160,6 +2243,9 @@ export declare namespace Machine {
   /**
    * Object state tree keyed by state path.
    *
+   * Keys must be non-empty, non-numeric strings without `.`. The
+   * prototype-mutating key `__proto__` and symbol keys are not accepted.
+   *
    * @category models
    * @since 4.0.0
    */
@@ -2264,27 +2350,120 @@ export declare namespace Machine {
    */
   export type ValidateStateSchemas<States extends StateSchemas> = ValidateStateTree<States>
 
+  /** Properties shared by every compiled state-node variant. */
+  export interface StateNodeBase<Path extends string = string> {
+    readonly path: Path
+    readonly key: string
+    /** Resolved Effect Schema annotations, or descriptive pseudo-state annotations. */
+    readonly annotations: Readonly<StateNodeAnnotations> | undefined
+    readonly order: number
+  }
+
+  /** Runtime metadata for a compiled atomic state. */
+  export interface AtomicStateNode<OwnPath extends string = string, ActivePath extends string = OwnPath>
+    extends StateNodeBase<OwnPath>
+  {
+    readonly type: "atomic"
+    readonly schema: TaggedSchema
+    readonly output: undefined
+    readonly history: undefined
+    readonly parent: ActivePath | undefined
+    readonly children: readonly []
+    readonly initial: undefined
+  }
+
+  /** Runtime metadata for a compiled compound state. */
+  export interface CompoundStateNode<
+    OwnPath extends string = string,
+    ActivePath extends string = OwnPath,
+    ChoicePath extends string = ActivePath
+  > extends StateNodeBase<OwnPath> {
+    readonly type: "compound"
+    readonly schema: TaggedSchema
+    readonly output: undefined
+    readonly history: undefined
+    readonly parent: ActivePath | undefined
+    /** Active child paths. Pseudo-states are available through their `parent` relationship. */
+    readonly children: ReadonlyArray<ActivePath>
+    readonly initial: ActivePath | ChoicePath
+  }
+
+  /** Runtime metadata for a compiled parallel state. */
+  export interface ParallelStateNode<OwnPath extends string = string, ActivePath extends string = OwnPath>
+    extends StateNodeBase<OwnPath>
+  {
+    readonly type: "parallel"
+    readonly schema: TaggedSchema
+    readonly output: Schema.Top | undefined
+    readonly history: undefined
+    readonly parent: ActivePath | undefined
+    /** Active child paths. Pseudo-states are available through their `parent` relationship. */
+    readonly children: ReadonlyArray<ActivePath>
+    readonly initial: undefined
+  }
+
+  /** Runtime metadata for a compiled final state. */
+  export interface FinalStateNode<OwnPath extends string = string, ActivePath extends string = OwnPath>
+    extends StateNodeBase<OwnPath>
+  {
+    readonly type: "final"
+    readonly schema: TaggedSchema
+    readonly output: Schema.Top | undefined
+    readonly history: undefined
+    readonly parent: ActivePath | undefined
+    readonly children: readonly []
+    readonly initial: undefined
+  }
+
+  /** Runtime metadata for a compiled history pseudo-state. */
+  export interface HistoryStateNode<OwnPath extends string = string, ActivePath extends string = string>
+    extends StateNodeBase<OwnPath>
+  {
+    readonly type: "history"
+    readonly schema: undefined
+    readonly output: undefined
+    readonly history: "shallow" | "deep"
+    readonly parent: ActivePath
+    readonly children: readonly []
+    readonly initial: undefined
+  }
+
+  /** Runtime metadata for a compiled choice pseudo-state. */
+  export interface ChoiceStateNode<OwnPath extends string = string, ActivePath extends string = string>
+    extends StateNodeBase<OwnPath>
+  {
+    readonly type: "choice"
+    readonly schema: undefined
+    readonly output: undefined
+    readonly history: undefined
+    readonly parent: ActivePath
+    readonly children: readonly []
+    readonly initial: undefined
+  }
+
   /**
    * Runtime metadata for a compiled state node.
+   *
+   * The `type` discriminator narrows every kind-specific topology and schema
+   * property while preserving a uniform inspection shape.
    *
    * @category models
    * @since 4.0.0
    */
-  export interface StateNode<Path extends string = string> {
-    readonly path: Path
-    readonly key: string
-    readonly schema: TaggedSchema | undefined
-    readonly output: Schema.Top | undefined
-    /** Resolved Effect Schema annotations, or descriptive pseudo-state annotations. */
-    readonly annotations: Readonly<StateNodeAnnotations> | undefined
-    readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
-    readonly history: "shallow" | "deep" | undefined
-    readonly parent: Path | undefined
-    /** Active child paths. Pseudo-states are available through their `parent` relationship. */
-    readonly children: ReadonlyArray<Path>
-    readonly initial: Path | undefined
-    readonly order: number
-  }
+  export type ActiveStateNode<ActivePath extends string = string, ChoicePath extends string = ActivePath> =
+    | AtomicStateNode<ActivePath, ActivePath>
+    | CompoundStateNode<ActivePath, ActivePath, ChoicePath>
+    | ParallelStateNode<ActivePath, ActivePath>
+    | FinalStateNode<ActivePath, ActivePath>
+
+  export type StateNode<
+    ActivePath extends string = string,
+    HistoryPath extends string = ActivePath,
+    ChoicePath extends string = ActivePath
+  > =
+    | ActiveStateNode<ActivePath, ChoicePath>
+    | HistoryStateNode<HistoryPath, ActivePath>
+    | ChoiceStateNode<ChoicePath, ActivePath>
 
   /**
    * Runtime lookup table for state nodes.
@@ -2292,9 +2471,13 @@ export declare namespace Machine {
    * @category models
    * @since 4.0.0
    */
-  export interface StateNodes<Path extends string = string> {
-    readonly byPath: ReadonlyMap<Path, StateNode<Path>>
-    readonly roots: ReadonlyArray<Path>
+  export interface StateNodes<
+    ActivePath extends string = string,
+    HistoryPath extends string = ActivePath,
+    ChoicePath extends string = ActivePath
+  > {
+    readonly byPath: ReadonlyMap<ActivePath | HistoryPath | ChoicePath, StateNode<ActivePath, HistoryPath, ChoicePath>>
+    readonly roots: ReadonlyArray<ActivePath>
   }
 
   /**
@@ -3167,7 +3350,15 @@ export declare namespace Machine {
   export type EventByTag<
     Events extends ReadonlyArray<TaggedSchema>,
     Tag extends TagOf<Events[number]>
-  > = Extract<EventOf<Events>, { readonly _tag: Tag }>
+  > =
+    | Extract<EventOf<Events>, { readonly _tag: Tag }>
+    | (EventOf<Events> extends infer Event ? Event extends {
+        readonly _tag: infer EventTag extends PropertyKey
+      } ? [EventTag] extends [Tag] ? never
+        : [Tag] extends [EventTag] ? Omit<Event, "_tag"> & { readonly _tag: Tag }
+        : never
+      : never
+      : never)
 
   /**
    * Opaque state construction returned by a builder's `.from` method.
@@ -5151,7 +5342,7 @@ const makeHandle = (self: Machine.Any): Machine.Any["handle"] =>
  */
 export const isMachine = (
   u: unknown
-): u is Machine.Any => hasProperty(u, TypeId)
+): u is Machine.Any => hasProperty(u, TypeId) && u[TypeId] === TypeId
 
 /**
  * Returns `true` if a state snapshot is final for a machine.
@@ -5668,22 +5859,25 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
  */
 export const defineStates: DefineStates = (<const States extends Machine.StateSchemas>(
   states: States
-): Machine.DefinedStates<States> => ({
-  states: states as States,
-  initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
-  get: ((snapshot, path) =>
-    Model.getSnapshotByPath(snapshot, path).pipe(
-      Option.map((snapshot) => snapshot.value)
-    )) as Machine.DefinedStates<States>["get"],
-  getWithParents: ((snapshot, path) => {
-    const parents: Record<string, unknown> = {}
-    return Model.getSnapshotByPath(snapshot, path, parents).pipe(
-      Option.map((snapshot) => ({ value: snapshot.value, parents }))
-    )
-  }) as Machine.DefinedStates<States>["getWithParents"],
-  getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
-  matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
-})) as DefineStates
+): Machine.DefinedStates<States> => {
+  StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
+  return {
+    states: states as States,
+    initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
+    get: ((snapshot, path) =>
+      Model.getSnapshotByPath(snapshot, path).pipe(
+        Option.map((snapshot) => snapshot.value)
+      )) as Machine.DefinedStates<States>["get"],
+    getWithParents: ((snapshot, path) => {
+      const parents: Record<string, unknown> = {}
+      return Model.getSnapshotByPath(snapshot, path, parents).pipe(
+        Option.map((snapshot) => ({ value: snapshot.value, parents }))
+      )
+    }) as Machine.DefinedStates<States>["getWithParents"],
+    getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
+    matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
+  }
+}) as DefineStates
 
 type MakeConfig<
   States extends Machine.StateSchemas,
@@ -5829,6 +6023,7 @@ export const make: Make = (<
     readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
   }
 ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents> => {
+  StateDefinition.validateStateDefinitions(config.states, "Machine.make")
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
@@ -6306,8 +6501,7 @@ export const invokeMachine: {
             OutputStates,
             InputEvents
           >
-          & Machine.EnsureOutputImplementations<States, OutputStates>
-          & Machine.EnsureHistoryImplementations<States, UnhandledStates>
+          & EnsureExecutable<States, UnhandledStates, OutputStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
@@ -6384,8 +6578,7 @@ export const invokeMachine: {
             OutputStates,
             InputEvents
           >
-          & Machine.EnsureOutputImplementations<States, OutputStates>
-          & Machine.EnsureHistoryImplementations<States, UnhandledStates>
+          & EnsureExecutable<States, UnhandledStates, OutputStates>
         >
         readonly snapshot?: (
           context: Machine.InvokeSnapshotContext<
@@ -6507,8 +6700,7 @@ export const planInitial: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>
-    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   & {
@@ -6569,9 +6761,19 @@ export const planInitial: <
  */
 export const stateNodes = <M extends Machine.Any>(
   machine: M
-): ReadonlyArray<Machine.StateNode<Machine.StateNodeIdentifier<Machine.States<M>>>> =>
+): ReadonlyArray<
+  Machine.StateNode<
+    Machine.StateIdentifier<Machine.States<M>>,
+    Machine.HistoryIdentifier<Machine.States<M>>,
+    Machine.ChoiceIdentifier<Machine.States<M>>
+  >
+> =>
   Array.from(machine.stateNodes.byPath.values()) as unknown as ReadonlyArray<
-    Machine.StateNode<Machine.StateNodeIdentifier<Machine.States<M>>>
+    Machine.StateNode<
+      Machine.StateIdentifier<Machine.States<M>>,
+      Machine.HistoryIdentifier<Machine.States<M>>,
+      Machine.ChoiceIdentifier<Machine.States<M>>
+    >
   >
 
 /**
@@ -6640,11 +6842,19 @@ export const activityDefinitions = <M extends Machine.Any>(
 export const configuration = <M extends Machine.Any>(
   machine: M,
   state: Machine.Snapshot<Machine.States<M>>
-): ReadonlyArray<Machine.StateNode<Machine.StateIdentifier<Machine.States<M>>>> => {
-  const active = Model.normalizeConfiguration(machine, state).active
-  return stateNodes(machine).filter((node) => active.has(node.path)) as ReadonlyArray<
-    Machine.StateNode<Machine.StateIdentifier<Machine.States<M>>>
+): ReadonlyArray<
+  Machine.ActiveStateNode<
+    Machine.StateIdentifier<Machine.States<M>>,
+    Machine.ChoiceIdentifier<Machine.States<M>>
   >
+> => {
+  const active = Model.normalizeConfiguration(machine, state).active
+  return stateNodes(machine).filter(
+    (node): node is Machine.ActiveStateNode<
+      Machine.StateIdentifier<Machine.States<M>>,
+      Machine.ChoiceIdentifier<Machine.States<M>>
+    > => node.type !== "history" && node.type !== "choice" && active.has(node.path)
+  )
 }
 
 /**
@@ -6740,8 +6950,7 @@ export const plan: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>
-    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   state: Machine.Snapshot<States>,
   event: Machine.EventOf<InputEvents>
 ) => Effect.Effect<
@@ -7226,8 +7435,7 @@ export const start: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>
-    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   MachineRef<
@@ -7314,8 +7522,7 @@ export const resume: <
       OutputStates,
       InputEvents
     >
-    & Machine.EnsureOutputImplementations<States, OutputStates>
-    & Machine.EnsureHistoryImplementations<States, UnhandledStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
   snapshot: Machine.Snapshot<States>
 ) => Effect.Effect<
   MachineRef<

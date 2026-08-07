@@ -1,6 +1,6 @@
 /**
- * Finite hierarchical, parallel, and history statechart models used by the public testing
- * module.
+ * Finite hierarchical, parallel, history, choice, and automatic-transition
+ * statechart models used by the public testing module.
  *
  * This module intentionally compiles through the public Machine API. It must
  * not share planner helpers with the implementation that later reference
@@ -118,20 +118,61 @@ export type FiniteState =
   | FiniteChoiceState
 
 /**
- * One deterministic event transition in a finite generated model.
+ * The single trigger representation used by generated and hand-authored finite
+ * transitions. Event, always, and completion registrations therefore share the
+ * same validation, compilation, and reference interpretation path.
  *
  * @category models
  * @since 4.0.0
  */
-export interface FiniteTransition {
+export type FiniteTransitionTrigger =
+  | { readonly type: "event"; readonly event: string }
+  | { readonly type: "always" }
+  | { readonly type: "done" }
+
+/**
+ * One deterministic transition in a finite generated model.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+interface FiniteTransitionBase {
   readonly source: string
-  readonly event: string
   /** Omission represents a targetless transition. */
   readonly target?: string
   /** Optional schema-valid value supplied for the declared target state. */
   readonly targetValue?: number
+}
+
+/**
+ * A public event transition may explicitly request source reentry.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type FiniteEventTransition = FiniteTransitionBase & {
+  readonly trigger: Extract<FiniteTransitionTrigger, { readonly type: "event" }>
   readonly reenter: boolean
 }
+
+/**
+ * An always or completion transition. Automatic transitions deliberately omit
+ * the event-only reentry option.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type FiniteAutomaticTransition = FiniteTransitionBase & {
+  readonly trigger: Exclude<FiniteTransitionTrigger, { readonly type: "event" }>
+}
+
+/**
+ * One deterministic event or automatic transition in a finite model.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type FiniteTransition = FiniteEventTransition | FiniteAutomaticTransition
 
 /**
  * The exact generated transition that changes a value before history capture.
@@ -254,7 +295,8 @@ export interface FiniteModelDiagnostics {
     readonly choiceInitialWitnesses: true
     readonly structurallyValid: true
     readonly shrinkPreservesValidity: true
-    readonly eventlessTransitions: false
+    readonly eventlessTransitions: true
+    readonly acyclicAutomaticTransitions: true
   }
 }
 
@@ -299,9 +341,12 @@ interface FlatFiniteState {
 
 interface TransitionCandidate {
   readonly source: string
-  readonly event: string
+  readonly trigger: FiniteTransitionTrigger
   readonly targets: ReadonlyArray<string>
 }
+
+const triggerKey = (trigger: FiniteTransitionTrigger): string =>
+  trigger.type === "event" ? `event:${trigger.event}` : trigger.type
 
 const defaults = {
   maxRoots: 3 as const,
@@ -610,47 +655,61 @@ const freezeModel = (
 
 const makeTransitionArbitrary = (
   roots: ReadonlyArray<FiniteState>,
+  initial: string,
   events: ReadonlyArray<string>,
   maxTransitions: number,
   historyScenarios: ReadonlyArray<FiniteHistoryScenario> = []
 ): FastCheck.Arbitrary<ReadonlyArray<FiniteTransition>> => {
   const states = flattenStates(roots)
   const sourceOrder = new Map(states.map((state, index) => [state.path, index]))
+  const stateByPath = new Map(states.map((state) => [state.path, state]))
+  const initiallyActive = new Set(
+    initialLeaves(stateByPath, initial).flatMap((leaf) => {
+      const parts = leaf.split(".")
+      return parts.map((_, index) => parts.slice(0, index + 1).join("."))
+    })
+  )
+  const triggerOrder = (trigger: FiniteTransitionTrigger): number =>
+    trigger.type === "event"
+      ? events.indexOf(trigger.event)
+      : events.length + (trigger.type === "always" ? 0 : 1)
   const orderTransitions = (transitions: ReadonlyArray<FiniteTransition>): ReadonlyArray<FiniteTransition> =>
     transitions.slice().sort((left, right) =>
       sourceOrder.get(left.source)! - sourceOrder.get(right.source)! ||
-      events.indexOf(left.event) - events.indexOf(right.event)
+      triggerOrder(left.trigger) - triggerOrder(right.trigger)
     )
   const active = states.filter(({ node }) => node._tag !== "Final" && node._tag !== "History" && node._tag !== "Choice")
   const mandatory = historyScenarios.flatMap((scenario): ReadonlyArray<FiniteTransition> => [
     {
       source: scenario.mutation.source,
-      event: scenario.mutation.event,
+      trigger: { type: "event", event: scenario.mutation.event },
       target: scenario.mutation.target,
       targetValue: scenario.mutation.value,
       reenter: false
     },
     {
       source: scenario.leave.source,
-      event: scenario.leave.event,
+      trigger: { type: "event", event: scenario.leave.event },
       target: scenario.leave.target,
       reenter: false
     },
     {
       source: scenario.resume.source,
-      event: scenario.resume.event,
+      trigger: { type: "event", event: scenario.resume.event },
       target: scenario.resume.target,
       reenter: false
     }
   ])
-  const mandatoryRegistrations = new Set(mandatory.map(({ source, event }) => `${source}\u0000${event}`))
+  const mandatoryRegistrations = new Set(
+    mandatory.map(({ source, trigger }) => `${source}\u0000${triggerKey(trigger)}`)
+  )
   const reservedEvents = new Set(
     historyScenarios.flatMap(({ leave, mutation }) => [leave.event, mutation.event])
   )
-  const candidates = active.flatMap(({ path: source, root }) =>
+  const eventCandidates = active.flatMap(({ path: source, root }) =>
     events.map((event): TransitionCandidate => ({
       source,
-      event,
+      trigger: { type: "event", event },
       // `branch` addresses the source root while `full` replaces another root.
       // Same-root targets may select any state, including a parallel state or
       // a compound state whose initial descent enters a parallel state. The
@@ -660,49 +719,127 @@ const makeTransitionArbitrary = (
       )
         .map(({ path }) => path)
     }))
-  ).filter(({ source, event }) =>
-    !mandatoryRegistrations.has(`${source}\u0000${event}`) &&
-    !reservedEvents.has(event)
+  ).filter(({ source, trigger }) =>
+    !mandatoryRegistrations.has(`${source}\u0000${triggerKey(trigger)}`) &&
+    (trigger.type !== "event" || !reservedEvents.has(trigger.event))
   )
-
-  return FastCheck.subarray(candidates, {
-    minLength: 0,
-    maxLength: Math.min(maxTransitions - mandatory.length, candidates.length)
-  }).chain((selected) => {
-    if (selected.length === 0) {
-      return FastCheck.constant<ReadonlyArray<FiniteTransition>>(orderTransitions(mandatory))
+  const exitsSourceTargets = (source: FlatFiniteState): ReadonlyArray<string> =>
+    states.filter((target, targetIndex) => {
+      if (
+        targetIndex <= sourceOrder.get(source.path)! || target.node._tag === "History" ||
+        target.node._tag === "Choice"
+      ) return false
+      // A generated automatic transition must make its source inactive. This
+      // gives the independent oracle a structurally acyclic witness instead of
+      // relying on runtime iteration bounds. A later sibling under a compound
+      // parent exits the source branch; a later root replaces the whole root.
+      if (source.parent === undefined) {
+        return target.parent === undefined && target.root !== source.root
+      }
+      return stateByPath.get(source.parent)?.node._tag === "Compound" && target.parent === source.parent
+    }).map(({ path }) => path)
+  const automaticCandidates: ReadonlyArray<TransitionCandidate> = historyScenarios.length === 0
+    ? [
+      ...active.flatMap((source): ReadonlyArray<TransitionCandidate> =>
+        source.node._tag !== "Atomic" ? [] : [{
+          source: source.path,
+          trigger: { type: "always" },
+          targets: exitsSourceTargets(source)
+        }]
+      ),
+      ...states.flatMap((source): ReadonlyArray<TransitionCandidate> =>
+        source.node._tag !== "Compound" && source.node._tag !== "Parallel" ? [] : [{
+          source: source.path,
+          trigger: { type: "done" },
+          targets: exitsSourceTargets(source)
+        }]
+      )
+    ].filter(({ targets }) => targets.length > 0)
+    : []
+  const completesOnEntry = (path: string): boolean => {
+    const state = stateByPath.get(path)!
+    if (state.node._tag === "Final") return true
+    if (state.node._tag === "Compound") {
+      const node = state.node
+      return node.states.some(({ key, _tag }) => key === node.initial && _tag === "Final")
     }
+    if (state.node._tag === "Parallel") {
+      return state.node.states
+        .filter(({ _tag }) => _tag !== "History" && _tag !== "Choice")
+        .every((child) => completesOnEntry(`${path}.${child.key}`))
+    }
+    return false
+  }
+  const materialize = (
+    selected: ReadonlyArray<TransitionCandidate>,
+    allowTargetlessEvents = true
+  ): FastCheck.Arbitrary<ReadonlyArray<FiniteTransition>> => {
+    if (selected.length === 0) return FastCheck.constant([])
     const decisions = selected.map((candidate) =>
       FastCheck.record({
-        targetIndex: FastCheck.integer({ min: 0, max: candidate.targets.length }),
+        // Targetless event transitions remain useful witnesses. Generated
+        // automatic transitions always exit their source so stabilization is
+        // acyclic by construction; targetless automatic semantics are covered
+        // by focused examples rather than mixed into the finite-model oracle.
+        targetIndex: FastCheck.integer({
+          min: candidate.trigger.type === "event" && allowTargetlessEvents ? 0 : 1,
+          max: candidate.targets.length
+        }),
         targetValueOffset: FastCheck.integer({ min: 0, max: 2 }),
         reenter: FastCheck.boolean()
       })
     )
     return FastCheck.tuple(...decisions).map((values) =>
-      orderTransitions([
-        ...mandatory,
-        ...selected.map((candidate, index): FiniteTransition => {
-          const decision = values[index]!
-          const target = decision.targetIndex === 0 ? undefined : candidate.targets[decision.targetIndex - 1]
-          const targetState = target === undefined ? undefined : states.find(({ path }) => path === target)
-          const targetValue = targetState?.node._tag === "Atomic" &&
-              decision.targetValueOffset !== 0
-            ? targetState.node.value + decision.targetValueOffset
-            : undefined
-          return target === undefined
-            ? { source: candidate.source, event: candidate.event, reenter: decision.reenter }
-            : {
-              source: candidate.source,
-              event: candidate.event,
-              target,
-              ...(targetValue === undefined ? {} : { targetValue }),
-              reenter: decision.reenter
-            }
-        })
-      ])
+      selected.map((candidate, index): FiniteTransition => {
+        const decision = values[index]!
+        const target = decision.targetIndex === 0 ? undefined : candidate.targets[decision.targetIndex - 1]
+        const targetState = target === undefined ? undefined : states.find(({ path }) => path === target)
+        const targetValue = targetState?.node._tag === "Atomic" &&
+            decision.targetValueOffset !== 0
+          ? targetState.node.value + decision.targetValueOffset
+          : undefined
+        const targetFields = target === undefined
+          ? {}
+          : { target, ...(targetValue === undefined ? {} : { targetValue }) }
+        const trigger = candidate.trigger
+        return trigger.type === "event"
+          ? { source: candidate.source, trigger, reenter: decision.reenter, ...targetFields }
+          : { source: candidate.source, trigger, ...targetFields }
+      })
     )
+  }
+  const optionalBudget = maxTransitions - mandatory.length
+  const general = FastCheck.subarray([...eventCandidates, ...automaticCandidates], {
+    minLength: 0,
+    maxLength: Math.min(optionalBudget, eventCandidates.length + automaticCandidates.length)
+  }).chain((selected) => materialize(selected).map((transitions) => orderTransitions([...mandatory, ...transitions])))
+
+  if (mandatory.length > 0 || optionalBudget < 2 || automaticCandidates.length === 0) return general
+
+  // Bias one branch toward a reachable public-event -> automatic-transition
+  // chain. The automatic edge itself still moves forward in document order,
+  // so combining the two trigger kinds cannot introduce an automatic cycle.
+  const chainCandidates = eventCandidates.flatMap((eventCandidate) => {
+    const source = stateByPath.get(eventCandidate.source)!
+    if (source.node._tag !== "Atomic" || !initiallyActive.has(source.path)) return []
+    return automaticCandidates.flatMap((automaticCandidate) => {
+      if (
+        automaticCandidate.source === eventCandidate.source ||
+        !eventCandidate.targets.includes(automaticCandidate.source) ||
+        (automaticCandidate.trigger.type === "done" && !completesOnEntry(automaticCandidate.source))
+      ) return []
+      return [{
+        event: { ...eventCandidate, targets: [automaticCandidate.source] },
+        automatic: automaticCandidate
+      }]
+    })
   })
+  if (chainCandidates.length === 0) return general
+
+  const chain = FastCheck.constantFrom(...chainCandidates).chain(({ automatic, event }) =>
+    materialize([event, automatic], false).map((transitions) => orderTransitions(transitions))
+  )
+  return FastCheck.oneof(general, chain)
 }
 
 /**
@@ -712,7 +849,9 @@ const makeTransitionArbitrary = (
  * Generation is composed from shrinkable topology, initial-state, event, and
  * transition decisions. Paths and transition candidates are rebuilt after a
  * topology shrink, so a shrink can never retain a dangling source or target.
- * Eventless transitions are intentionally outside this model stage.
+ * Generated automatic transitions are acyclic by construction: `always`
+ * transitions leave atomic sources and completion transitions leave compound
+ * or parallel sources. Separate focused witnesses cover cyclic stabilization.
  *
  * @category constructors
  * @since 4.0.0
@@ -746,7 +885,7 @@ export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => 
       const roots = generated.scenarios.length === 0
         ? addGeneratedChoices(generated.roots, limits.maxChoiceStates)
         : generated.roots
-      return makeTransitionArbitrary(roots, events, limits.maxTransitions, generated.scenarios).map(
+      return makeTransitionArbitrary(roots, initial, events, limits.maxTransitions, generated.scenarios).map(
         (transitions) => freezeModel(roots, initial, events, transitions, generated.scenarios)
       )
     })
@@ -766,7 +905,8 @@ export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => 
         choiceInitialWitnesses: true,
         structurallyValid: true,
         shrinkPreservesValidity: true,
-        eventlessTransitions: false
+        eventlessTransitions: true,
+        acyclicAutomaticTransitions: true
       }
     }
   }
@@ -892,13 +1032,24 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
     ) {
       throw new Error(`MachineTest.compileModel received invalid transition source "${transition.source}"`)
     }
-    if (!events.has(transition.event)) {
-      throw new Error(`MachineTest.compileModel received unknown transition event "${transition.event}"`)
+    if (transition.trigger.type === "event" && !events.has(transition.trigger.event)) {
+      throw new Error(`MachineTest.compileModel received unknown transition event "${transition.trigger.event}"`)
     }
-    const registration = `${transition.source}\u0000${transition.event}`
+    if (
+      transition.trigger.type === "done" && source.node._tag !== "Compound" && source.node._tag !== "Parallel"
+    ) {
+      throw new Error(
+        `MachineTest.compileModel received completion transition for non-composite "${transition.source}"`
+      )
+    }
+    if (transition.trigger.type !== "event" && "reenter" in transition) {
+      throw new Error(`MachineTest.compileModel received event-only reenter option from "${transition.source}"`)
+    }
+    const registration = `${transition.source}\u0000${triggerKey(transition.trigger)}`
     if (registrations.has(registration)) {
       throw new Error(
-        `MachineTest.compileModel received duplicate transition for "${transition.source}" on "${transition.event}"`
+        `MachineTest.compileModel received duplicate transition for "${transition.source}" on ` +
+          `"${triggerKey(transition.trigger)}"`
       )
     }
     registrations.add(registration)
@@ -996,14 +1147,16 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
     scenarioEvents.add(scenario.mutation.event)
     scenarioEvents.add(scenario.leave.event)
     for (const [expected, targetValue] of expectedTransitions) {
-      const registration = `${expected.source}\u0000${expected.event}`
+      const registration = `${expected.source}\u0000${triggerKey({ type: "event", event: expected.event })}`
       if (scenarioRegistrations.has(registration)) {
         throw new Error(`MachineTest.compileModel received duplicate history witness for "${scenario.history}"`)
       }
       scenarioRegistrations.add(registration)
       const transition = transitionsByRegistration.get(registration)
       if (
-        transition?.target !== expected.target || transition.reenter || transition.targetValue !== targetValue
+        transition?.trigger.type !== "event" || transition.trigger.event !== expected.event ||
+        transition.target !== expected.target || !("reenter" in transition) || transition.reenter ||
+        transition.targetValue !== targetValue
       ) {
         throw new Error(`MachineTest.compileModel could not replay history scenario for "${scenario.history}"`)
       }
@@ -1233,10 +1386,12 @@ const makeHandlers = (
       continue
     }
     const on: Record<string, unknown> = Object.create(null)
-    for (const [registration, transition] of transitions) {
-      if (!registration.startsWith(`${path}\u0000`)) continue
-      on[transition.event] = {
-        reenter: transition.reenter,
+    let always: unknown
+    let onDone: unknown
+    for (const transition of transitions.values()) {
+      if (transition.source !== path) continue
+      const config = {
+        ...("reenter" in transition ? { reenter: transition.reenter } : {}),
         ...(transition.target === undefined
           ? {}
           : {
@@ -1256,6 +1411,9 @@ const makeHandlers = (
           return selectSnapshot(builder, parts[0]!, byPath, parts, 0, path, transition.targetValue)
         }
       }
+      if (transition.trigger.type === "event") on[transition.trigger.event] = config
+      else if (transition.trigger.type === "always") always = config
+      else onDone = config
     }
     const history = node._tag === "Compound" || node._tag === "Parallel"
       ? Object.fromEntries(node.states.flatMap((child) => {
@@ -1277,6 +1435,8 @@ const makeHandlers = (
       : {}
     handlers[node.key] = {
       ...(Object.keys(on).length === 0 ? {} : { on }),
+      ...(always === undefined ? {} : { always }),
+      ...(onDone === undefined ? {} : { onDone }),
       ...(node._tag === "Compound" || node._tag === "Parallel"
         ? {
           ...(node._tag === "Parallel" ? { output: () => node.output } : {}),
@@ -1325,7 +1485,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
     initial: () => selectSnapshot(defined.initial as any, initial.path, byPath, [initial.path], 0) as any
   })
   const transitions = new Map(model.transitions.map((transition) => [
-    `${transition.source}\u0000${transition.event}`,
+    `${transition.source}\u0000${triggerKey(transition.trigger)}`,
     transition
   ]))
   return machine.handle(makeHandlers(model.roots, undefined, byPath, transitions) as any) as Machine.Machine.Any

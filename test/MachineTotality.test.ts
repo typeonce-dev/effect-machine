@@ -28,14 +28,29 @@ const generatedCases = generatedModels.arbitrary.chain((model) =>
 )
 
 const generatedResumeCases = generatedCases.map((generated) => {
-  const reference = MachineTest.interpretModel(generated.model, generated.events)
+  // Automatic-transition restoration has focused witnesses in the finite
+  // reference-model suite. Keep this broad continuation property on
+  // deterministic state-changing event targets (plus complete generated
+  // history scenarios), where a runtime publication is an honest delivery
+  // barrier for every suffix event.
+  const model: MachineTest.FiniteModel = {
+    ...generated.model,
+    transitions: (generated.model.historyScenarios?.length ?? 0) > 0
+      ? generated.model.transitions
+      : generated.model.transitions.filter((transition) =>
+        transition.trigger.type === "event" && transition.target !== undefined && "reenter" in transition &&
+        !transition.reenter && transition.target !== transition.source
+      )
+  }
+  const reference = MachineTest.interpretModel(model, generated.events)
   let lastObservable = -1
   for (let index = 0; index < reference.steps.length; index++) {
-    if (reference.steps[index]!.microsteps.length > 0) lastObservable = index
+    if (reference.steps[index]!.microsteps.some(({ changed }) => changed)) lastObservable = index
   }
   const events = lastObservable < 0 ? [] : generated.events.slice(0, lastObservable + 1)
   return {
     ...generated,
+    model,
     events,
     boundary: Math.min(generated.boundary, events.length)
   }
@@ -121,10 +136,14 @@ const deliverAndObserve = Effect.fn(function*(
   machine: any,
   ref: Machine.MachineRef<any, any, any, any>,
   event: { readonly _tag: string },
-  planned: { readonly next: unknown; readonly microsteps: ReadonlyArray<unknown> },
+  planned: {
+    readonly next: unknown
+    readonly microsteps: ReadonlyArray<{ readonly changed: boolean }>
+    readonly done: boolean
+  },
   index: number
 ) {
-  if (planned.microsteps.length === 0) {
+  if (!planned.microsteps.some(({ changed }) => changed)) {
     const sendExit = yield* Effect.exit(ref.send(event))
     assertNoUnexpectedDefect(`post-resume send ${index}`, sendExit)
     return planned.next
@@ -133,8 +152,10 @@ const deliverAndObserve = Effect.fn(function*(
   const expected = yield* encodeWithoutDefect(machine, planned.next, `post-resume expected ${index}`)
   const observed = yield* waitForSnapshot(
     ref,
-    (snapshot) => snapshot.status === "error" || isDeepStrictEqual(snapshot.state, planned.next)
-  ).pipe(Effect.forkChild)
+    (snapshot) =>
+      snapshot.status === "error" ||
+      (isDeepStrictEqual(snapshot.state, planned.next) && (!planned.done || snapshot.status === "done"))
+  ).pipe(Effect.forkChild({ startImmediately: true }))
   const sendExit = yield* Effect.exit(ref.send(event))
   assertNoUnexpectedDefect(`post-resume send ${index}`, sendExit)
   const published = yield* Fiber.join(observed)

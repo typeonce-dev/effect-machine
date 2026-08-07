@@ -4,6 +4,25 @@ import { Machine } from "../src/index.js"
 import { MachineTest } from "../src/testing.js"
 
 describe("MachineTest finite models", () => {
+  it("uses one discriminated trigger representation", () => {
+    expect<MachineTest.FiniteTransition["trigger"]>().type.toBe<MachineTest.FiniteTransitionTrigger>()
+    expect<MachineTest.FiniteTransitionTrigger>().type.toBe<
+      | { readonly type: "event"; readonly event: string }
+      | { readonly type: "always" }
+      | { readonly type: "done" }
+    >()
+    expect<Extract<MachineTest.FiniteTransition, { readonly trigger: { readonly type: "event" } }>>()
+      .type.toBe<MachineTest.FiniteEventTransition>()
+    expect<Exclude<MachineTest.FiniteTransition, { readonly trigger: { readonly type: "event" } }>>()
+      .type.toBe<MachineTest.FiniteAutomaticTransition>()
+    expect<keyof MachineTest.FiniteEventTransition>().type.toBe<
+      "source" | "trigger" | "target" | "targetValue" | "reenter"
+    >()
+    expect<keyof MachineTest.FiniteAutomaticTransition>().type.toBe<
+      "source" | "trigger" | "target" | "targetValue"
+    >()
+  })
+
   const generated = MachineTest.finiteModels({
     maxRoots: 2,
     maxDepth: 3,
@@ -24,7 +43,8 @@ describe("MachineTest finite models", () => {
     expect(generated.diagnostics.guarantees.historyLeaveResumeSequences).type.toBe<true>()
     expect(generated.diagnostics.guarantees.historyValueScenarios).type.toBe<true>()
     expect(generated.diagnostics.guarantees.structurallyValid).type.toBe<true>()
-    expect(generated.diagnostics.guarantees.eventlessTransitions).type.toBe<false>()
+    expect(generated.diagnostics.guarantees.eventlessTransitions).type.toBe<true>()
+    expect(generated.diagnostics.guarantees.acyclicAutomaticTransitions).type.toBe<true>()
   })
 
   it("models atomic, final, compound, and parallel nodes", () => {
@@ -54,7 +74,7 @@ describe("MachineTest finite models", () => {
       roots: [{ _tag: "Atomic", key: "idle", value: 0 }],
       initial: "idle",
       events: ["Tick"],
-      transitions: [{ source: "idle", event: "Tick", target: "idle", reenter: false }]
+      transitions: [{ source: "idle", trigger: { type: "event", event: "Tick" }, target: "idle", reenter: false }]
     }
     const machine = MachineTest.compileModel(model)
     expect(machine).type.toBe<Machine.Machine.Any>()
@@ -100,7 +120,12 @@ describe("MachineTest finite models", () => {
       }],
       initial: "root",
       events: ["Restore"],
-      transitions: [{ source: "root.idle", event: "Restore", target: "root.recent", reenter: true }]
+      transitions: [{
+        source: "root.idle",
+        trigger: { type: "event", event: "Restore" },
+        target: "root.recent",
+        reenter: true
+      }]
     }
     expect(model.roots[0]).type.toBe<MachineTest.FiniteState | undefined>()
   })

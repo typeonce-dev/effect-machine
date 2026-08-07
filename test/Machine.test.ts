@@ -316,6 +316,18 @@ describe("Machine", () => {
       assert.deepStrictEqual(planned.state.value, new Idle({ userId: "user-1" }))
     }))
 
+  it("isMachine requires the machine brand value, not only its property key", () => {
+    const states = Machine.defineStates({ Idle })
+    const machine = Machine.make({
+      states: states.states,
+      events: [],
+      initial: () => states.initial.Idle(new Idle({ userId: "user-1" }))
+    })
+
+    assert.strictEqual(Machine.isMachine(machine), true)
+    assert.strictEqual(Machine.isMachine({ [Machine.TypeId]: "not-a-machine" }), false)
+  })
+
   it("retag constructs the target case without copying the source discriminator", () => {
     const result = Machine.retag(RequestSucceeded, new Submit({ value: "loaded" }))
 
