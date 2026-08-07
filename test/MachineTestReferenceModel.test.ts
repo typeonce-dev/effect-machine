@@ -112,6 +112,62 @@ describe("MachineTest finite-model reference interpreter", () => {
       yield* MachineTest.verifyModel(model, trace)
     }))
 
+  it.effect("follows choice chains entered through a selected compound initializer", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [
+          { _tag: "Atomic", key: "idle", value: 0 },
+          {
+            _tag: "Compound",
+            key: "workflow",
+            value: 1,
+            initial: "route",
+            states: [
+              {
+                _tag: "Compound",
+                key: "running",
+                value: 2,
+                initial: "phase",
+                states: [
+                  { _tag: "Atomic", key: "ready", value: 3 },
+                  {
+                    _tag: "Choice",
+                    key: "phase",
+                    targets: ["workflow.running.ready"],
+                    selected: "workflow.running.ready"
+                  }
+                ]
+              },
+              {
+                _tag: "Choice",
+                key: "route",
+                targets: ["workflow.running"],
+                selected: "workflow.running"
+              }
+            ]
+          }
+        ],
+        initial: "idle",
+        events: ["Start"],
+        transitions: [{ source: "idle", event: "Start", target: "workflow", reenter: false }]
+      }
+      const reference = MachineTest.interpretModel(model, ["Start"])
+
+      assert.deepStrictEqual(
+        reference.steps[0]!.microsteps[0]!.transitions.map(({ source }) => source),
+        ["idle", "workflow.route", "workflow.running.phase"]
+      )
+      assert.deepStrictEqual(reference.final.activePaths, [
+        "workflow",
+        "workflow.running",
+        "workflow.running.ready"
+      ])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [event("Start")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
   it.effect("lets a child transition preempt an enabled parallel ancestor", () =>
     Effect.gen(function*() {
       const model = parallelWorkflow([

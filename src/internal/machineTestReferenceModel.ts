@@ -622,6 +622,20 @@ const choiceResolvedTargetPath = (index: ModelIndex, path: string): string => {
   })!
 }
 
+const choiceChainResolvedTargetPath = (index: ModelIndex, path: string): string => {
+  let current = getState(index, path)
+  const seen = new Set<string>()
+  while (current.node._tag === "Choice") {
+    if (seen.has(current.path)) return choiceResolvedTargetPath(index, current.path)
+    seen.add(current.path)
+    const selected = getState(index, current.node.selected)
+    const nestedChoice = entryChoicePath(index, selected.path)
+    if (nestedChoice === undefined) return choiceResolvedTargetPath(index, current.path)
+    current = getState(index, nestedChoice)
+  }
+  return current.path
+}
+
 const isPathInSubtree = (path: string, root: string): boolean => path === root || path.startsWith(`${root}.`)
 
 const expandSelection = (
@@ -898,7 +912,7 @@ const transitionRecord = (index: ModelIndex, transition: FiniteTransition): Refe
     ? runtimeTargetPath(index, transition)
     : entryChoicePath(index, transition.target) === undefined
     ? runtimeTargetPath(index, transition)
-    : choiceResolvedTargetPath(index, entryChoicePath(index, transition.target)!)
+    : choiceChainResolvedTargetPath(index, entryChoicePath(index, transition.target)!)
 })
 
 const choiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray<ReferenceTransition> => {
@@ -909,9 +923,8 @@ const choiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray
     if (seen.has(current.path)) break
     seen.add(current.path)
     const selected = getState(index, current.node.selected)
-    const selectedTarget = selected.node._tag === "Choice"
-      ? selected.path
-      : choiceResolvedTargetPath(index, current.path)
+    const nestedChoice = entryChoicePath(index, selected.path)
+    const selectedTarget = nestedChoice ?? choiceResolvedTargetPath(index, current.path)
     records.push({
       source: current.path,
       trigger: { type: "choice" },
@@ -919,7 +932,8 @@ const choiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray
       target: selectedTarget,
       resolvedTarget: choiceResolvedTargetPath(index, current.path)
     })
-    current = getState(index, resolveChoicePath(index, selected.path))
+    if (nestedChoice === undefined) break
+    current = getState(index, nestedChoice)
   }
   return records
 }
@@ -927,8 +941,7 @@ const choiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray
 const initialChoiceTransitionRecords = (index: ModelIndex, path: string): ReadonlyArray<ReferenceTransition> => {
   const current = getState(index, path)
   if (current.node._tag === "Choice") {
-    const records = choiceTransitionRecords(index, current.path)
-    return [...records, ...initialChoiceTransitionRecords(index, resolveChoicePath(index, current.path))]
+    return choiceTransitionRecords(index, current.path)
   }
   if (current.node._tag === "Compound") {
     return initialChoiceTransitionRecords(index, initialChildPath(current))

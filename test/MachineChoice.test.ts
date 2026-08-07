@@ -66,6 +66,47 @@ describe("Machine choice pseudo-states", () => {
       ])
     }))
 
+  it.effect("does not retain an abandoned initial root after a full choice target", () =>
+    Effect.gen(function*() {
+      class Outside extends Schema.TaggedClass<Outside>("InitialChoiceOutside")("InitialChoiceOutside", {}) {}
+      const states = Machine.defineStates({
+        Flow: {
+          schema: Flow,
+          initial: "Routing",
+          states: { Routing: { type: "choice" }, Approved }
+        },
+        Outside
+      })
+      const entries: Array<string> = []
+      const routed = Machine.make({
+        states: states.states,
+        events: [],
+        initial: () => states.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
+      }).handle({
+        Flow: {
+          entry: () => Machine.action(Effect.sync(() => entries.push("Flow"))),
+          states: {
+            Routing: {
+              choice: {
+                targets: ["Outside"],
+                transition: ({ target }) => target.full.Outside(new Outside({}))
+              }
+            }
+          }
+        },
+        Outside: { entry: () => Machine.action(Effect.sync(() => entries.push("Outside"))) }
+      })
+
+      const plan = yield* Machine.planInitial(routed)
+      assert.deepStrictEqual(Machine.configuration(routed, plan.startingState).map(({ path }) => path), ["Outside"])
+      assert.deepStrictEqual(plan.initialEntryPaths, ["Outside"])
+      yield* Machine.runActions(plan.actions, {
+        raise: () => Effect.void,
+        sendParent: () => Effect.void
+      })
+      assert.deepStrictEqual(entries, ["Outside"])
+    }))
+
   it.effect("targets a choice from an event and preserves that event", () =>
     Effect.gen(function*() {
       const initial = yield* Machine.planInitial(machine)
@@ -495,6 +536,61 @@ describe("Machine choice pseudo-states", () => {
 
       const plan = yield* Machine.planInitial(initialHistory)
       assert.strictEqual(plan.state.state.path, "Flow.Active")
+    }))
+
+  it.effect("resolves a nested choice inside a first-use history fallback", () =>
+    Effect.gen(function*() {
+      class Active extends Schema.TaggedClass<Active>("FallbackChoiceActive")("FallbackChoiceActive", {}) {}
+      class Outside extends Schema.TaggedClass<Outside>("FallbackChoiceOutside")("FallbackChoiceOutside", {}) {}
+      class Resume extends Schema.TaggedClass<Resume>("FallbackChoiceResume")("FallbackChoiceResume", {}) {}
+      const states = Machine.defineStates({
+        Flow: {
+          schema: Flow,
+          initial: "Active",
+          states: {
+            Active,
+            Routing: { type: "choice" },
+            Recent: { type: "history" }
+          }
+        },
+        Outside
+      })
+      const historyChoice = Machine.make({
+        states: states.states,
+        events: [Resume],
+        initial: () => states.initial.Outside(new Outside({}))
+      }).handle({
+        Flow: {
+          history: {
+            Recent: {
+              default: ({ target }) => target.Flow(new Flow({ score: 1 }), (flow) => flow.Routing())
+            }
+          },
+          states: {
+            Routing: {
+              choice: {
+                targets: ["Flow.Active"],
+                transition: ({ target }) => target.local.Active(new Active({}))
+              }
+            }
+          }
+        },
+        Outside: {
+          on: { FallbackChoiceResume: ({ target }) => target.history.Flow.Recent() }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(historyChoice)
+      const resumed = yield* Machine.plan(historyChoice, initial.state, new Resume({}))
+      assert.strictEqual(resumed.next.path, "Flow")
+      if (resumed.next.path === "Flow") assert.strictEqual(resumed.next.state.path, "Flow.Active")
+      assert.deepStrictEqual(
+        resumed.microsteps[0]?.transitions.map(({ source, trigger }) => ({ source, trigger: trigger.type })),
+        [
+          { source: "Outside", trigger: "event" },
+          { source: "Flow.Routing", trigger: "choice" }
+        ]
+      )
     }))
 
   it("inspects declared choice edges without executing the resolver", () => {

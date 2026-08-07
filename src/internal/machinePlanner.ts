@@ -463,7 +463,8 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
       }),
       actions: completed.actions,
       raisedEvents: completed.raisedEvents,
-      emittedEvents: completed.emittedEvents
+      emittedEvents: completed.emittedEvents,
+      transitions: []
     }
   }
 
@@ -481,7 +482,37 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
   if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
     throw new Error(`Machine history default for "${target.path}" must return a complete snapshot containing its owner`)
   }
-  const fallbackConfiguration = yield* normalizeConfigurationEffect(machine, collected.state as any)
+  const fallbackChoice = choiceFromTarget(collected.state)
+  const choiceResolution = fallbackChoice === undefined
+    ? undefined
+    : yield* resolveChoiceTarget(
+      machine,
+      {
+        active: new Set(),
+        values: new Map(),
+        outputs: new Map(),
+        history: configuration.history
+      },
+      collected.state,
+      event
+    )
+  let fallbackConfiguration = choiceResolution === undefined
+    ? yield* normalizeConfigurationEffect(machine, collected.state as any)
+    : yield* normalizeTargetConfigurationEffect(machine, {
+      active: new Set(),
+      values: new Map(),
+      outputs: new Map(),
+      history: configuration.history
+    }, choiceResolution.target as any)
+  for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
+    fallbackConfiguration = yield* normalizeTargetConfigurationEffect(
+      machine,
+      fallbackConfiguration,
+      additionalTarget as
+        | Machine.Snapshot<any>
+        | Machine.Target<any, string>
+    )
+  }
   if (!fallbackConfiguration.active.has(target.parent)) {
     throw new Error(
       `Machine history default for "${target.path}" returned a configuration that does not contain owner state "${target.parent}"`
@@ -494,9 +525,10 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
       snapshot: snapshot as any,
       values: values as any
     }),
-    actions: collected.actions,
-    raisedEvents: collected.raisedEvents,
-    emittedEvents: collected.emittedEvents
+    actions: [...collected.actions, ...(choiceResolution?.actions ?? [])],
+    raisedEvents: [...collected.raisedEvents, ...(choiceResolution?.raisedEvents ?? [])],
+    emittedEvents: [...collected.emittedEvents, ...(choiceResolution?.emittedEvents ?? [])],
+    transitions: choiceResolution?.transitions ?? []
   }
 })
 
@@ -1090,6 +1122,14 @@ const withChoiceValues = (target: unknown, values: Readonly<Record<string, unkno
   })
 }
 
+interface ResolvedChoiceTransition {
+  readonly source: string
+  readonly trigger: Machine.TransitionTrigger
+  readonly reenter: false
+  readonly target: string
+  readonly resolvedTarget: string
+}
+
 const resolveChoiceTarget = Effect.fnUntraced(function*(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
@@ -1101,13 +1141,7 @@ const resolveChoiceTarget = Effect.fnUntraced(function*(
   const actions: Array<DeferredAction> = []
   const raisedEvents: Array<unknown> = []
   const emittedEvents: Array<unknown> = []
-  const transitions: Array<{
-    readonly source: string
-    readonly trigger: Machine.TransitionTrigger
-    readonly reenter: false
-    readonly target: string
-    readonly resolvedTarget: string
-  }> = []
+  const transitions: Array<ResolvedChoiceTransition> = []
   let iterations = 0
 
   while (pending.length > 0) {
@@ -1231,6 +1265,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     readonly actions: ReadonlyArray<DeferredAction>
     readonly raisedEvents: ReadonlyArray<unknown>
     readonly emittedEvents: ReadonlyArray<unknown>
+    readonly transitions: ReadonlyArray<ResolvedChoiceTransition>
   } | undefined
   const reenteredHistoryParent = choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget) &&
     selection.transition.reenter && state.active.has(choiceResolvedTarget.parent)
@@ -1269,6 +1304,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
   const additionalHistoryActions: Array<DeferredAction> = []
   const additionalHistoryRaisedEvents: Array<unknown> = []
   const additionalHistoryEmittedEvents: Array<unknown> = []
+  const additionalHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
   const additionalChoiceTargets: Array<
     Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
   > = []
@@ -1287,6 +1323,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     additionalHistoryActions.push(...resolved.actions)
     additionalHistoryRaisedEvents.push(...resolved.raisedEvents)
     additionalHistoryEmittedEvents.push(...resolved.emittedEvents)
+    additionalHistoryChoiceTransitions.push(...resolved.transitions)
   }
   const targetPath = target === undefined
     ? undefined
@@ -1331,7 +1368,11 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       changed,
       exitPaths: [],
       entryPaths: [],
-      choiceTransitions: choiceResolution?.transitions ?? []
+      choiceTransitions: [
+        ...(choiceResolution?.transitions ?? []),
+        ...(historyResolution?.transitions ?? []),
+        ...additionalHistoryChoiceTransitions
+      ]
     } as EvaluatedTransition<States, Event, E, R, Context>
   }
 
@@ -1380,7 +1421,11 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
         )
       )
       : getEntryPaths(machine, stateAfterTransition, boundary),
-    choiceTransitions: choiceResolution?.transitions ?? []
+    choiceTransitions: [
+      ...(choiceResolution?.transitions ?? []),
+      ...(historyResolution?.transitions ?? []),
+      ...additionalHistoryChoiceTransitions
+    ]
   } as EvaluatedTransition<States, Event, E, R, Context>
 })
 
@@ -1553,6 +1598,7 @@ export const planInitial: <
     const initialHistoryActions: Array<DeferredAction> = []
     const initialHistoryRaisedEvents: Array<unknown> = []
     const initialHistoryEmittedEvents: Array<unknown> = []
+    const initialHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
     const resolvedInitialTargets: Array<unknown> = []
     for (
       const target of choiceResolution === undefined
@@ -1568,6 +1614,7 @@ export const planInitial: <
       initialHistoryActions.push(...history.actions)
       initialHistoryRaisedEvents.push(...history.raisedEvents)
       initialHistoryEmittedEvents.push(...history.emittedEvents)
+      initialHistoryChoiceTransitions.push(...history.transitions)
     }
     let resolvedConfiguration = choiceResolution === undefined
       ? yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
@@ -1585,19 +1632,7 @@ export const planInitial: <
         additionalTarget as Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
       )
     }
-    const configuration: ActiveConfiguration = initialChoice === undefined
-      ? resolvedConfiguration
-      : {
-        ...resolvedConfiguration,
-        active: new Set([
-          ...resolvedConfiguration.active,
-          ...Object.keys(initialChoice.values).filter((path) => {
-            const node = getNode(machine, path)
-            return node.type !== "choice" && node.type !== "history"
-          })
-        ]),
-        values: new Map([...Object.entries(initialChoice.values), ...resolvedConfiguration.values])
-      }
+    const configuration: ActiveConfiguration = resolvedConfiguration
     validateInitialConfiguration(machine, configuration)
     const startingState = snapshotFromConfiguration<States>(machine, configuration)
     const initialEntryPaths = getInitialEntryPaths(machine, configuration)
@@ -1634,7 +1669,7 @@ export const planInitial: <
         choiceResolution === undefined ? [] : [{
           next: configuration,
           event: InitialEvent,
-          transitions: choiceResolution.transitions,
+          transitions: [...choiceResolution.transitions, ...initialHistoryChoiceTransitions],
           actions: [...choiceResolution.actions, ...initialHistoryActions] as ReadonlyArray<Effect.Effect<void, E, R>>,
           raisedEvents: [
             ...choiceResolution.raisedEvents,
