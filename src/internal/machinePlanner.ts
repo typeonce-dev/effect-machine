@@ -239,12 +239,14 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
   | TransitionHandler<States, E, R, Context>
   | {
     readonly reenter?: boolean
+    readonly when?: (context: any) => boolean | Effect.Effect<boolean, E, R>
     readonly targets?: ReadonlyArray<string>
     readonly transition: TransitionHandler<States, E, R, Context>
   }
 
 type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
+  readonly when: ((context: any) => boolean | Effect.Effect<boolean, E, R>) | undefined
   readonly targets: ReadonlyArray<string> | undefined
   readonly transition: TransitionHandler<States, E, R, Context>
 }
@@ -256,9 +258,10 @@ const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>
     return undefined
   }
   return typeof transition === "function"
-    ? { reenter: false, targets: undefined, transition }
+    ? { reenter: false, when: undefined, targets: undefined, transition }
     : {
       reenter: transition.reenter === true,
+      when: transition.when,
       targets: transition.targets,
       transition: transition.transition
     }
@@ -694,6 +697,25 @@ const makeTransitionContext = <
   target: machine.makeTargetBuilder(path as StateId)
 })
 
+const makeTransitionWhenContext = <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateIdentifier<States>,
+  EventTag extends Machine.TagOf<Events[number]>
+>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  path: string,
+  event: Machine.EventByTag<Events, EventTag>,
+  snapshot: Machine.Snapshot<States>
+): Machine.TransitionWhenContext<States, Events, StateId, EventTag> => ({
+  state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
+  parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
+  event,
+  snapshot
+})
+
 const makeDoneContext = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -886,7 +908,7 @@ const selectDoneTransitions = <
   return selected
 }
 
-const selectEventTransitions = <
+const selectEventTransitions = Effect.fnUntraced(function*<
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema>,
@@ -896,14 +918,7 @@ const selectEventTransitions = <
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   event: Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
-): ReadonlyArray<
-  SelectedTransition<
-    States,
-    E,
-    R,
-    Machine.HandlerContext<States, Events, Emits, Machine.StateIdentifier<States>, Machine.TagOf<Events[number]>, E, R>
-  >
-> => {
+) {
   const selected: Array<
     SelectedTransition<
       States,
@@ -921,12 +936,51 @@ const selectEventTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  const eligibility = new Map<string, boolean>()
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
-      const transition = normalizeTransition(machine.handlers[path]?.on?.[event._tag])
+      const transition = normalizeTransition<
+        States,
+        E,
+        R,
+        Machine.HandlerContext<
+          States,
+          Events,
+          Emits,
+          Machine.StateIdentifier<States>,
+          Machine.TagOf<Events[number]>,
+          E,
+          R
+        >
+      >(machine.handlers[path]?.on?.[event._tag] as any)
       if (transition !== undefined) {
+        let eligible = eligibility.get(path)
+        if (eligible === undefined) {
+          if (transition.when === undefined) {
+            eligible = true
+          } else {
+            const result = transition.when(
+              makeTransitionWhenContext<
+                States,
+                Events,
+                Machine.StateIdentifier<States>,
+                Machine.TagOf<Events[number]>
+              >(machine, configuration, path, event, capturedSnapshot())
+            )
+            eligible = Effect.isEffect(result) ? yield* result : result
+            if (typeof eligible !== "boolean") {
+              throw new Error(
+                `Machine transition condition for state "${path}" on "${String(event._tag)}" must return a boolean`
+              )
+            }
+          }
+          eligibility.set(path, eligible)
+        }
+        if (!eligible) {
+          continue
+        }
         if (!selectedSources.has(path)) {
           selectedSources.add(path)
           selected.push({
@@ -961,7 +1015,7 @@ const selectEventTransitions = <
     }
   }
   return selected
-}
+})
 
 const getTargetNodePath = <const States extends Machine.StateSchemas>(
   target:
@@ -2051,7 +2105,7 @@ const settle: <
     // internal queue, so decoding it again here only repeats schema work.
     const raisedEvent = raisedEventValue
     currentEvent = raisedEvent
-    const raisedSelections = selectEventTransitions<States, Events, Emits, E, R>(
+    const raisedSelections = yield* selectEventTransitions<States, Events, Emits, E, R>(
       machine,
       currentState,
       raisedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
@@ -2143,7 +2197,7 @@ const macrostep: <
     }
   }
 
-  const selections = selectEventTransitions<States, Events, Emits, E, R>(
+  const selections = yield* selectEventTransitions<States, Events, Emits, E, R>(
     machine,
     configuration,
     decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>

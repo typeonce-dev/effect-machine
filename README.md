@@ -428,6 +428,59 @@ runtime state later. `snapshot` is intentionally absent from entry, exit,
 invoke, and choice contexts. In particular, startup and chained choices may run
 before a complete stable snapshot containing their pseudo-source exists.
 
+### Conditional ancestor fallback
+
+Use ordinary TypeScript control flow when one selected handler owns the whole
+decision:
+
+```ts
+const handlers = {
+  on: {
+    Submit: ({ state, target }) =>
+      state.valid
+        ? target.local.Submitting.from()
+        : target.local.Invalid.from()
+  }
+}
+```
+
+An object-form event transition may instead declare `when` when a rejected
+child transition must let normal hierarchical selection continue at its
+ancestors:
+
+```ts
+Workspace: {
+  on: {
+    Close: ({ target }) => target.full.Closed.from()
+  },
+  states: {
+    Editing: {
+      on: {
+        Close: {
+          when: ({ state }) => state.dirty,
+          targets: ["Workspace.ConfirmClose"],
+          transition: ({ target }) => target.local.ConfirmClose.from()
+        }
+      }
+    }
+  }
+}
+```
+
+When `Editing` is dirty, its conditional transition intercepts `Close`. When it
+is clean, `when` returns `false`, the child transition is not selected, and the
+`Workspace` handler closes normally. By contrast, a selected transition whose
+`transition` returns `undefined` is targetless and still consumes the event.
+
+`when` receives only `state`, `parent`, `parents`, `event`, and the captured
+`snapshot`; it cannot target, raise, emit, stage actions, or access the managed
+runtime. It may return a boolean or an Effect producing a boolean. Treat that
+Effect as an observationally pure eligibility check: perform external work in
+the selected transition through `Machine.action`. `targets` remains optional,
+but declaring it makes the conditional edge visible to inspection and
+visualization. `Machine.transitionDefinitions` marks these edges with
+`conditional: true` without evaluating the predicate.
+
 Effect Schema annotations are the metadata source for active states. Annotate
 the schema itself; `Machine.stateNodes` exposes the resolved annotation map:
 
@@ -636,9 +689,11 @@ restoration.
 
 ## Current limits
 
-Declarative first-class guards are not part of the current API. Ordinary
-TypeScript conditions implement guards. Use `Machine.after` for a cancellable
-state-scoped delayed event.
+The library intentionally does not include general guard registries,
+combinators, or guarded transition arrays. Use ordinary TypeScript conditions
+for decisions local to one handler, choice states for explicit transient
+routing, and `when` only for conditional hierarchical fallback. Use
+`Machine.after` for a cancellable state-scoped delayed event.
 
 ## Guidance for agents and contributors
 

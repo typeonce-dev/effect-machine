@@ -65,6 +65,9 @@ class methods or nominal class identity.
   transport boundary.
 - Return snapshots or typed target-builder results from transitions. Do not
   return raw decoded state values.
+- Use ordinary `if`/`else` inside a transition for decisions owned by that
+  handler. Use object-form `when` only when `false` must reject the child
+  transition and continue hierarchical selection at an ancestor.
 - Effects returned by handlers are planning Effects. Wrap external effects in
   `Machine.action`.
 - Put data on the narrowest state where it is valid. Put data shared by sibling
@@ -444,6 +447,39 @@ Submit: ({ target }) => Machine.action(writeAuditLog, target.local.Saving(new Sa
 `Machine.action(effect, next)` stages the same action and returns `next`, which
 is convenient when the transition does not otherwise need an Effect generator.
 
+### Conditional hierarchical selection
+
+Do not introduce `when` merely to replace ordinary control flow:
+
+```ts
+// Preferred: this handler owns both outcomes.
+Submit: ({ state, target }) =>
+  state.valid ? target.local.Ready.from() : target.local.Invalid.from()
+```
+
+Use `when` only when a nested state conditionally intercepts an event that an
+ancestor otherwise handles:
+
+```ts
+Editing: {
+  on: {
+    Close: {
+      when: ({ state }) => state.dirty,
+      targets: ["Workspace.ConfirmClose"],
+      transition: ({ target }) => target.local.ConfirmClose.from()
+    }
+  }
+}
+```
+
+`false` means this transition is ineligible, so selection continues toward the
+root. Once selected, returning `undefined` still means a targetless transition
+that consumes the event. A `when` predicate sees only read-only state, parent,
+parents, event, and snapshot data. It may use an Effect to read services, but it
+must be observationally pure; actions, emissions, raised events, and runtime
+operations belong in `transition`. Use a choice state instead when one
+already-selected transition needs explicit multi-destination routing.
+
 The managed runtime executes staged actions before publishing the planned
 state. If an action fails, it retains the previous state and suppresses planned
 emissions.
@@ -801,9 +837,10 @@ compiler resource or instantiation limits.
 
 The current API does not include:
 
-- declarative first-class guards;
+- guard registries, guard combinators, or guarded transition arrays;
 - a complete inspectable graph for arbitrary transition Effects.
 
-Use ordinary TypeScript conditions for guards and `Machine.after` for
-state-scoped timers. Do not invent undocumented state-node properties such as
-`guard`.
+Use ordinary TypeScript conditions for local decisions, `when` for conditional
+ancestor fallback, and `Machine.after` for state-scoped timers. Do not invent
+undocumented properties such as `guard` or add `when` to `always`, `onDone`, or
+choice transitions.

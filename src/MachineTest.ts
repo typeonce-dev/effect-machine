@@ -852,6 +852,7 @@ export interface TransitionCoverageItem<
   readonly source: SourcePath
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
+  readonly conditional?: true
   readonly targets: Machine.Machine.TransitionTargets<TargetPath>
 }
 
@@ -1126,6 +1127,7 @@ export const coverage = <M extends AnyMachine>(
       source: definition.source,
       trigger: definition.trigger,
       reenter: definition.reenter,
+      ...(definition.conditional === true ? { conditional: true as const } : {}),
       targets: definition.targets
     })
   )

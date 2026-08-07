@@ -32,6 +32,7 @@ interface TransitionDefinition {
       readonly type: "choice"
     }
   readonly reenter: boolean
+  readonly conditional?: true
   readonly targets:
     | {
       readonly type: "dynamic"
@@ -110,7 +111,9 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   const events = definitions.flatMap((definition) =>
     definition.trigger.type === "event" ?
       [
-        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${targets(definition)}`
+        `${String(definition.trigger.event)}${definition.conditional ? " [when]" : ""}${
+          definition.reenter ? " [reenter]" : ""
+        }${targets(definition)}`
       ]
       : []
   )

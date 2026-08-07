@@ -568,6 +568,9 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "event", event },
         reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
+        ...(typeof handler === "object" && handler !== null && typeof handler.when === "function"
+          ? { conditional: true as const }
+          : {}),
         targets: transitionTargets(handler)
       })
     }
@@ -735,7 +738,7 @@ export const decodeBoundary = <A>(
   options: DecodeBoundaryOptions
 ): Effect.Effect<A, MachineSchemaDecodeError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
-    Effect.mapError((cause) =>
+    Effect.mapError((cause: Schema.SchemaError) =>
       new MachineSchemaDecodeError({
         machineId: machine.id,
         boundary: options.boundary,

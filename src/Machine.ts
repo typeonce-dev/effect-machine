@@ -104,9 +104,10 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Gotchas**
  *
- * Declarative first-class guards are not part of the current API. Conditional
- * behavior can be expressed in typed handlers with ordinary TypeScript control
- * flow. Use `after` for cancellable state-scoped delayed events.
+ * Use ordinary TypeScript control flow for decisions owned by one handler.
+ * Object-form event transitions accept `when` only for the distinct case where
+ * a rejected child transition must let hierarchical selection continue at its
+ * ancestors. Use `after` for cancellable state-scoped delayed events.
  *
  * @category models
  * @since 4.0.0
@@ -2538,6 +2539,8 @@ export declare namespace Machine {
     readonly source: SourcePath
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
+    /** Present when selection evaluates a `when` predicate before retaining this transition. */
+    readonly conditional?: true
     readonly targets: TransitionTargets<TargetPath>
   }
 
@@ -3620,6 +3623,39 @@ export declare namespace Machine {
   }
 
   /**
+   * Read-only context passed to an event transition's `when` predicate.
+   *
+   * A predicate only decides whether its transition participates in
+   * hierarchical selection. It cannot construct targets, stage actions, raise
+   * or emit events, or access the managed runtime. Returning `false` continues
+   * selection at ancestor states.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export type TransitionWhenContext<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateIdentifier<States>,
+    EventTag extends TagOf<Events[number]>
+  > = Pick<
+    HandlerContext<States, Events, readonly [], StateId, EventTag, never, never>,
+    "state" | "parent" | "parents" | "snapshot" | "event"
+  >
+
+  /** Predicate evaluated before an event transition is selected. */
+  export type TransitionWhen<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateIdentifier<States>,
+    EventTag extends TagOf<Events[number]>,
+    E,
+    R
+  > = (
+    context: TransitionWhenContext<States, Events, StateId, EventTag>
+  ) => boolean | Effect.Effect<boolean, E, R>
+
+  /**
    * Context passed to an entry or exit state handler.
    *
    * @category models
@@ -3987,6 +4023,14 @@ export declare namespace Machine {
       keyof On
     ]
     : never
+  /** Extracts the return values from event-transition eligibility predicates. */
+  export type EventWhenReturn<Config> = Config extends { readonly on?: infer On } ? {
+      readonly [EventTag in keyof On]: NonNullable<On[EventTag]> extends {
+        readonly when?: infer When
+      } ? NonNullable<When> extends (...args: any) => infer Ret ? Ret : never
+        : never
+    }[keyof On]
+    : never
   /**
    * Extracts the invoke config or configs from a state config.
    *
@@ -4124,6 +4168,7 @@ export declare namespace Machine {
    */
   export type ConfigServices<Config> =
     | Effect.Services<EventHandlerReturn<Config>>
+    | Effect.Services<EventWhenReturn<Config>>
     | Effect.Services<AlwaysReturn<Config>>
     | Effect.Services<DoneReturn<Config>>
     | Effect.Services<StateActionReturn<Config, "entry">>
@@ -4302,6 +4347,13 @@ export declare namespace Machine {
         ) => HandlerResult<States, any, any>)
         | {
           readonly reenter?: boolean
+          /**
+           * Makes this transition eligible for selection. Returning `false`
+           * continues normal hierarchical selection at ancestor states. Use
+           * ordinary control flow inside `transition` for decisions owned by
+           * this handler.
+           */
+          readonly when?: TransitionWhen<States, Events, StateId, EventTag, any, any>
           /**
            * Upper bound of state or history paths this handler may target.
            * Returning `void` is always permitted. Declaring a parent state also
@@ -4738,6 +4790,21 @@ export declare namespace Machine {
     }
     : unknown
 
+  type HandlerDirectWhenValidation<
+    StateId extends string,
+    Config,
+    Trigger extends "always" | "onDone",
+    Transition = Config extends { readonly [Key in Trigger]?: infer Value } ? NonNullable<Value> : never
+  > = Trigger extends keyof Config ? "when" extends keyof Transition ? {
+        readonly [Key in Trigger]: HandlerValidationError<
+          "Transition conditions are only supported for event handlers",
+          StateId,
+          Trigger
+        >
+      }
+    : unknown
+    : unknown
+
   type HandlerChildrenValidation<
     Node,
     Prefix extends string,
@@ -4811,6 +4878,8 @@ export declare namespace Machine {
         & HandlerOnTargetValidation<StateId, Config>
         & HandlerDirectTargetValidation<StateId, Config, "always">
         & HandlerDirectTargetValidation<StateId, Config, "onDone">
+        & HandlerDirectWhenValidation<StateId, Config, "always">
+        & HandlerDirectWhenValidation<StateId, Config, "onDone">
         & HandlerInvokeOutputValidation<Events, StateId, Config>
         & HandlerInvokeEmitsValidation<Events, StateId, Config>
         & HandlerInvokeSnapshotValidation<Events, StateId, Config>
@@ -4989,6 +5058,7 @@ export declare namespace Machine {
 
   type HandlerConfigError<Config> =
     | Effect.Error<EventHandlerReturn<Config>>
+    | Effect.Error<EventWhenReturn<Config>>
     | Effect.Error<AlwaysReturn<Config>>
     | Effect.Error<DoneReturn<Config>>
     | Effect.Error<StateActionReturn<Config, "entry">>
@@ -5147,6 +5217,7 @@ export declare namespace Machine {
       | ((context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>) => HandlerResult<States, E, R>)
       | {
         readonly reenter?: boolean
+        readonly when?: TransitionWhen<States, Events, StateId, EventTag, E, R>
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
@@ -5273,6 +5344,27 @@ const validateTransitionTargets = (
   }
 }
 
+const validateTransitionWhen = (
+  path: string,
+  trigger: PropertyKey,
+  transition: unknown,
+  allowed: boolean
+): void => {
+  if (typeof transition !== "object" || transition === null || !hasProperty(transition, "when")) {
+    return
+  }
+  if (!allowed) {
+    throw new Error(
+      `Machine transition for state "${path}" on "${String(trigger)}" cannot declare when`
+    )
+  }
+  if (typeof transition.when !== "function") {
+    throw new Error(
+      `Machine expected transition condition for state "${path}" on "${String(trigger)}" to be a function`
+    )
+  }
+}
+
 const flattenHandlers = (
   handlers: Record<PropertyKey, Machine.AnyStateConfig>,
   stateNodes: Machine.StateNodes,
@@ -5293,12 +5385,17 @@ const flattenHandlers = (
     const on = stateConfig.on
     if (typeof on === "object" && on !== null) {
       for (const event of Reflect.ownKeys(on)) {
-        validateTransitionTargets(stateNodes, path, event, (on as Record<PropertyKey, unknown>)[event])
+        const transition = (on as Record<PropertyKey, unknown>)[event]
+        validateTransitionTargets(stateNodes, path, event, transition)
+        validateTransitionWhen(path, event, transition, true)
       }
     }
     validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
     validateTransitionTargets(stateNodes, path, "done", stateConfig.onDone)
     validateTransitionTargets(stateNodes, path, "choice", stateConfig.choice)
+    validateTransitionWhen(path, "always", stateConfig.always, false)
+    validateTransitionWhen(path, "done", stateConfig.onDone, false)
+    validateTransitionWhen(path, "choice", stateConfig.choice, false)
     const node = stateNodes.byPath.get(path)
     if (node?.type === "choice") {
       if (
@@ -6785,7 +6882,8 @@ export const stateNodes = <M extends Machine.Any>(
  * are followed by eventless and completion handlers. This function does not
  * execute handlers. Object-form event, eventless, and completion handlers with
  * a `targets` declaration expose those possible paths; handlers without one
- * remain dynamic.
+ * remain dynamic. Conditional event transitions are marked without evaluating
+ * their `when` predicate.
  *
  * @category getters
  * @since 4.0.0
@@ -6858,7 +6956,11 @@ export const configuration = <M extends Machine.Any>(
 }
 
 /**
- * Returns the event tags handled by the current state snapshot.
+ * Returns the potential event tags handled by the current state snapshot.
+ *
+ * Conditional transitions are included without evaluating their `when`
+ * predicates because this getter receives neither an event value nor Effect
+ * services.
  *
  * @category getters
  * @since 4.0.0
