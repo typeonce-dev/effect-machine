@@ -269,14 +269,24 @@ const collectStateAction = Effect.fnUntraced(function*<Context, Event, E, R>(
   handler: ((context: Context) => Machine.StateActionResult<E, R>) | undefined,
   context: Context
 ) {
-  const deferredActions = yield* makeDeferredActions
-  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  if (handler !== undefined) {
-    const result = handler(context)
-    if (Effect.isEffect(result)) {
-      yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
+  if (handler === undefined) {
+    return {
+      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
+      raisedEvents: [] as ReadonlyArray<Event>,
+      emittedEvents: [] as ReadonlyArray<unknown>
     }
   }
+  const result = handler(context)
+  if (!Effect.isEffect(result)) {
+    return {
+      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
+      raisedEvents: [] as ReadonlyArray<Event>,
+      emittedEvents: [] as ReadonlyArray<unknown>
+    }
+  }
+  const deferredActions = yield* makeDeferredActions
+  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
+  yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
   const actions = yield* deferredActions.read
   const raisedEvents = yield* deferredRaisedEvents.read
   const emittedEvents = yield* deferredRaisedEvents.readEmitted
@@ -298,12 +308,18 @@ const collectTransition = Effect.fnUntraced(function*<
   transition: TransitionHandler<States, E, R, Context>,
   context: Context
 ) {
+  const result = transition(context)
+  if (!Effect.isEffect(result)) {
+    return {
+      state: result,
+      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
+      raisedEvents: [] as ReadonlyArray<Event>,
+      emittedEvents: [] as ReadonlyArray<unknown>
+    }
+  }
   const deferredActions = yield* makeDeferredActions
   const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  const result = transition(context)
-  const state = Effect.isEffect(result)
-    ? yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
-    : result
+  const state = yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
   const actions = yield* deferredActions.read
   const raisedEvents = yield* deferredRaisedEvents.read
   const emittedEvents = yield* deferredRaisedEvents.readEmitted
@@ -320,12 +336,18 @@ const collectStateInitializer = Effect.fnUntraced(function*(
   handler: (context: any) => unknown,
   context: any
 ) {
+  const result = handler(context)
+  if (!Effect.isEffect(result)) {
+    return {
+      value: result,
+      actions: [] as ReadonlyArray<DeferredAction>,
+      raisedEvents: [] as ReadonlyArray<unknown>,
+      emittedEvents: [] as ReadonlyArray<unknown>
+    }
+  }
   const deferredActions = yield* makeDeferredActions
   const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  const result = handler(context)
-  const value = Effect.isEffect(result)
-    ? yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
-    : result
+  const value = yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
   return {
     value,
     actions: yield* deferredActions.read,
@@ -2123,7 +2145,6 @@ const macrostep: <
   event: Machine.EventOf<Events>
 ) {
   const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
-  const snapshot = snapshotFromConfiguration<States>(machine, configuration)
   const decodedEvent = yield* decodeEvent<Events>(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
     const completed = yield* completeConfigurationEffect(machine, configuration, decodedEvent)
@@ -2150,7 +2171,7 @@ const macrostep: <
   )
   if (selections.length === 0) {
     return {
-      next: snapshot,
+      next: snapshotFromConfiguration<States>(machine, configuration),
       actions: [],
       emittedEvents: [],
       microsteps: [],

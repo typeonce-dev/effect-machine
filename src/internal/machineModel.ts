@@ -698,6 +698,22 @@ interface MachineProtocolSchemas {
   readonly emit: Schema.Top
 }
 
+type BoundaryDecoder = (value: unknown) => Effect.Effect<unknown, Schema.SchemaError, unknown>
+
+const boundaryDecoderCache = new WeakMap<object, BoundaryDecoder>()
+const pathToRootCache = new WeakMap<Machine.StateNodes, Map<string, ReadonlyArray<string>>>()
+
+const getBoundaryDecoder = (schema: Schema.Top): BoundaryDecoder => {
+  const key = schema as object
+  const cached = boundaryDecoderCache.get(key)
+  if (cached !== undefined) {
+    return cached
+  }
+  const decoder = Schema.decodeUnknownEffect(Schema.toType(schema)) as BoundaryDecoder
+  boundaryDecoderCache.set(key, decoder)
+  return decoder
+}
+
 const MachineProtocolTypeId = Symbol.for("effect/Machine/protocol")
 
 const getProtocolSchemas = (machine: Machine.Any): MachineProtocolSchemas => {
@@ -734,7 +750,7 @@ export const decodeBoundary = <A>(
   value: unknown,
   options: DecodeBoundaryOptions
 ): Effect.Effect<A, MachineSchemaDecodeError> =>
-  Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
+  getBoundaryDecoder(schema)(value).pipe(
     Effect.mapError((cause) =>
       new MachineSchemaDecodeError({
         machineId: machine.id,
@@ -829,12 +845,22 @@ export const isPathInSubtree = (path: string, ancestor: string): boolean =>
   path === ancestor || isDescendantOf(path, ancestor)
 
 export const getPathToRoot = (machine: Machine.Any, path: string): ReadonlyArray<string> => {
+  let pathsByLeaf = pathToRootCache.get(machine.stateNodes)
+  if (pathsByLeaf === undefined) {
+    pathsByLeaf = new Map()
+    pathToRootCache.set(machine.stateNodes, pathsByLeaf)
+  }
+  const cached = pathsByLeaf.get(path)
+  if (cached !== undefined) {
+    return cached
+  }
   const paths: Array<string> = []
   let current: string | undefined = path
   while (current !== undefined) {
     paths.unshift(current)
     current = getNode(machine, current).parent
   }
+  pathsByLeaf.set(path, paths)
   return paths
 }
 
