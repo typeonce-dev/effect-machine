@@ -95,6 +95,14 @@ export interface FiniteHistoryState {
   readonly fallback: string
 }
 
+/** A deterministic transient choice pseudo-state in a finite model. */
+export interface FiniteChoiceState {
+  readonly _tag: "Choice"
+  readonly key: string
+  readonly targets: ReadonlyArray<string>
+  readonly selected: string
+}
+
 /**
  * A finite model state.
  *
@@ -107,6 +115,7 @@ export type FiniteState =
   | FiniteCompoundState
   | FiniteParallelState
   | FiniteHistoryState
+  | FiniteChoiceState
 
 /**
  * One deterministic event transition in a finite generated model.
@@ -214,6 +223,8 @@ export interface FiniteModelOptions {
   readonly maxTransitions?: number
   /** Maximum number of history pseudo-states added to one generated model. */
   readonly maxHistoryStates?: number
+  /** Maximum number of deterministic choice witnesses added to a generated model. */
+  readonly maxChoiceStates?: number
 }
 
 /**
@@ -231,6 +242,7 @@ export interface FiniteModelDiagnostics {
     readonly maxEvents: number
     readonly maxTransitions: number
     readonly maxHistoryStates: number
+    readonly maxChoiceStates: number
   }
   readonly guarantees: {
     readonly compoundOnly: false
@@ -238,6 +250,8 @@ export interface FiniteModelDiagnostics {
     readonly historyStates: true
     readonly historyLeaveResumeSequences: true
     readonly historyValueScenarios: true
+    readonly choiceStates: true
+    readonly choiceInitialWitnesses: true
     readonly structurallyValid: true
     readonly shrinkPreservesValidity: true
     readonly eventlessTransitions: false
@@ -296,7 +310,8 @@ const defaults = {
   maxParallelRegions: 3 as const,
   maxEvents: 3,
   maxTransitions: 12,
-  maxHistoryStates: 2
+  maxHistoryStates: 2,
+  maxChoiceStates: 1
 }
 
 const validateLimit = (name: string, value: number, maximum: number): void => {
@@ -313,7 +328,8 @@ const resolveOptions = (options: FiniteModelOptions): FiniteModelDiagnostics["li
     maxParallelRegions: options.maxParallelRegions ?? defaults.maxParallelRegions,
     maxEvents: options.maxEvents ?? defaults.maxEvents,
     maxTransitions: options.maxTransitions ?? defaults.maxTransitions,
-    maxHistoryStates: options.maxHistoryStates ?? defaults.maxHistoryStates
+    maxHistoryStates: options.maxHistoryStates ?? defaults.maxHistoryStates,
+    maxChoiceStates: options.maxChoiceStates ?? defaults.maxChoiceStates
   }
   validateLimit("maxRoots", limits.maxRoots, 3)
   validateLimit("maxDepth", limits.maxDepth, 6)
@@ -326,6 +342,9 @@ const resolveOptions = (options: FiniteModelOptions): FiniteModelDiagnostics["li
   validateLimit("maxTransitions", limits.maxTransitions, 256)
   if (!Number.isSafeInteger(limits.maxHistoryStates) || limits.maxHistoryStates < 0 || limits.maxHistoryStates > 8) {
     throw new Error("MachineTest.finiteModels expected maxHistoryStates to be an integer between 0 and 8")
+  }
+  if (!Number.isSafeInteger(limits.maxChoiceStates) || limits.maxChoiceStates < 0 || limits.maxChoiceStates > 8) {
+    throw new Error("MachineTest.finiteModels expected maxChoiceStates to be an integer between 0 and 8")
   }
   return limits
 }
@@ -415,12 +434,13 @@ const initialLeaves = (
   path: string
 ): ReadonlyArray<string> => {
   const state = states.get(path)!
+  if (state.node._tag === "Choice") return initialLeaves(states, state.node.selected)
   if (state.node._tag === "Compound") {
     return initialLeaves(states, `${path}.${state.node.initial}`)
   }
   if (state.node._tag === "Parallel") {
     return state.node.states
-      .filter((child) => child._tag !== "History")
+      .filter((child) => child._tag !== "History" && child._tag !== "Choice")
       .flatMap((child) => initialLeaves(states, `${path}.${child.key}`))
   }
   return state.node._tag === "Atomic" ? [path] : []
@@ -531,6 +551,48 @@ const addGeneratedHistory = (
   }
 }
 
+const addGeneratedChoices = (
+  roots: ReadonlyArray<FiniteState>,
+  maxChoiceStates: number
+): ReadonlyArray<FiniteState> => {
+  if (maxChoiceStates === 0) return roots
+  let remaining = maxChoiceStates
+  const visit = (
+    states: ReadonlyArray<FiniteState>,
+    parent: string | undefined,
+    insideParallel: boolean
+  ): ReadonlyArray<FiniteState> =>
+    Object.freeze(states.map((state): FiniteState => {
+      const path = parent === undefined ? state.key : `${parent}.${state.key}`
+      if (state._tag === "Compound") {
+        const children = visit(state.states, path, insideParallel)
+        if (remaining > 0 && !insideParallel) {
+          const concrete = children.filter((child) =>
+            child._tag !== "History" && child._tag !== "Choice" && child._tag !== "Parallel"
+          )
+          if (concrete.some((child) => child.key === state.initial)) {
+            remaining -= 1
+            const choice: FiniteChoiceState = Object.freeze({
+              _tag: "Choice",
+              key: `choice${remaining}`,
+              targets: Object.freeze(concrete.map((child) => `${path}.${child.key}`)),
+              selected: `${path}.${state.initial}`
+            })
+            return Object.freeze({
+              ...state,
+              initial: choice.key,
+              states: Object.freeze([...children, choice])
+            })
+          }
+        }
+        return Object.freeze({ ...state, states: children })
+      }
+      if (state._tag === "Parallel") return Object.freeze({ ...state, states: visit(state.states, path, true) })
+      return state
+    }))
+  return visit(roots, undefined, false)
+}
+
 const freezeModel = (
   roots: ReadonlyArray<FiniteState>,
   initial: string,
@@ -559,7 +621,7 @@ const makeTransitionArbitrary = (
       sourceOrder.get(left.source)! - sourceOrder.get(right.source)! ||
       events.indexOf(left.event) - events.indexOf(right.event)
     )
-  const active = states.filter(({ node }) => node._tag !== "Final" && node._tag !== "History")
+  const active = states.filter(({ node }) => node._tag !== "Final" && node._tag !== "History" && node._tag !== "Choice")
   const mandatory = historyScenarios.flatMap((scenario): ReadonlyArray<FiniteTransition> => [
     {
       source: scenario.mutation.source,
@@ -681,8 +743,11 @@ export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => 
         events,
         historyDecisions
       )
-      return makeTransitionArbitrary(generated.roots, events, limits.maxTransitions, generated.scenarios).map(
-        (transitions) => freezeModel(generated.roots, initial, events, transitions, generated.scenarios)
+      const roots = generated.scenarios.length === 0
+        ? addGeneratedChoices(generated.roots, limits.maxChoiceStates)
+        : generated.roots
+      return makeTransitionArbitrary(roots, events, limits.maxTransitions, generated.scenarios).map(
+        (transitions) => freezeModel(roots, initial, events, transitions, generated.scenarios)
       )
     })
   })
@@ -697,6 +762,8 @@ export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => 
         historyStates: true,
         historyLeaveResumeSequences: true,
         historyValueScenarios: true,
+        choiceStates: true,
+        choiceInitialWitnesses: true,
         structurallyValid: true,
         shrinkPreservesValidity: true,
         eventlessTransitions: false
@@ -725,7 +792,7 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
       }
       siblingKeys.add(node.key)
       const path = parent === undefined ? node.key : `${parent}.${node.key}`
-      if (node._tag !== "History" && !Number.isSafeInteger(node.value)) {
+      if (node._tag !== "History" && node._tag !== "Choice" && !Number.isSafeInteger(node.value)) {
         throw new Error(`MachineTest.compileModel expected state "${path}" value to be a safe integer`)
       }
       if (node._tag === "History") {
@@ -737,13 +804,19 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
         }
         continue
       }
+      if (node._tag === "Choice") {
+        if (parent === undefined || node.targets.length === 0 || !node.targets.includes(node.selected)) {
+          throw new Error(`MachineTest.compileModel received invalid choice state "${path}"`)
+        }
+        continue
+      }
       if (node._tag === "Compound") {
         if (!node.states.some((child) => child.key === node.initial && child._tag !== "History")) {
           throw new Error(`MachineTest.compileModel received unknown initial child "${node.initial}" for "${path}"`)
         }
         visit(node.states, path)
       } else if (node._tag === "Parallel") {
-        const regions = node.states.filter((child) => child._tag !== "History")
+        const regions = node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice")
         if (regions.length < 2 || regions.length > 3) {
           throw new Error(`MachineTest.compileModel expected parallel state "${path}" to contain two or three regions`)
         }
@@ -777,6 +850,22 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
   const flattened = flattenStates(model.roots)
   const byPath = new Map(flattened.map((state) => [state.path, state]))
   for (const state of flattened) {
+    if (state.node._tag !== "Choice") continue
+    const owner = state.parent === undefined ? undefined : byPath.get(state.parent)
+    if (owner?.node._tag !== "Compound") {
+      throw new Error(`MachineTest.compileModel expected choice state "${state.path}" to belong to a compound state`)
+    }
+    for (const targetPath of state.node.targets) {
+      const target = byPath.get(targetPath)
+      if (
+        target === undefined || target.node._tag === "History" || target.node._tag === "Choice" ||
+        target.parent !== owner.path
+      ) {
+        throw new Error(`MachineTest.compileModel received invalid choice target "${targetPath}"`)
+      }
+    }
+  }
+  for (const state of flattened) {
     if (state.node._tag !== "History") continue
     const owner = state.parent === undefined ? undefined : byPath.get(state.parent)
     const fallback = byPath.get(state.node.fallback)
@@ -797,7 +886,10 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
   const transitionsByRegistration = new Map<string, FiniteTransition>()
   for (const transition of model.transitions) {
     const source = byPath.get(transition.source)
-    if (source === undefined || source.node._tag === "Final" || source.node._tag === "History") {
+    if (
+      source === undefined || source.node._tag === "Final" || source.node._tag === "History" ||
+      source.node._tag === "Choice"
+    ) {
       throw new Error(`MachineTest.compileModel received invalid transition source "${transition.source}"`)
     }
     if (!events.has(transition.event)) {
@@ -825,7 +917,8 @@ const validateModel = (model: FiniteModel): ReadonlyArray<FlatFiniteState> => {
     if (
       transition.targetValue !== undefined &&
       (!Number.isSafeInteger(transition.targetValue) || transition.target === undefined ||
-        byPath.get(transition.target)?.node._tag === "History")
+        byPath.get(transition.target)?.node._tag === "History" ||
+        byPath.get(transition.target)?.node._tag === "Choice")
     ) {
       throw new Error(
         `MachineTest.compileModel received invalid target value for transition from "${transition.source}"`
@@ -925,8 +1018,8 @@ const stateValue = (
   state: FlatFiniteState,
   value?: number
 ): { readonly _tag: string; readonly value: number } => {
-  if (state.node._tag === "History") {
-    throw new Error(`MachineTest.compileModel cannot construct a value for history state "${state.path}"`)
+  if (state.node._tag === "History" || state.node._tag === "Choice") {
+    throw new Error(`MachineTest.compileModel cannot construct a value for pseudo-state "${state.path}"`)
   }
   return { _tag: stateTag(state.path), value: value ?? state.node.value }
 }
@@ -939,6 +1032,7 @@ const runtimeTargetPath = (
   const source = byPath.get(sourcePath)!
   const requested = byPath.get(requestedPath)!
   if (requested.node._tag === "History") return requested.parent!
+  if (requested.node._tag === "Choice") return runtimeTargetPath(byPath, sourcePath, requested.node.selected)
   if (source.root !== requested.root) return requested.path
 
   const initial = (path: string): string => {
@@ -982,6 +1076,10 @@ const makeStateTree = (
       }
       continue
     }
+    if (node._tag === "Choice") {
+      tree[node.key] = { type: "choice" }
+      continue
+    }
     const schema = Schema.TaggedStruct(stateTag(path), { value: Schema.Number })
     if (node._tag === "Atomic") {
       tree[node.key] = schema
@@ -1018,6 +1116,9 @@ const selectSnapshot = (
   if (state.node._tag === "History") {
     throw new Error(`MachineTest.compileModel cannot construct active history state "${path}"`)
   }
+  if (state.node._tag === "Choice") {
+    return (builder[state.node.key] as () => unknown)()
+  }
   const method = builder[state.node.key] as (value: unknown, selector?: (builder: any) => unknown) => unknown
   const value = stateValue(state, path === requestedParts?.join(".") ? requestedValue : undefined)
   if (state.node._tag === "Atomic" || state.node._tag === "Final") return method(value)
@@ -1028,7 +1129,7 @@ const selectSnapshot = (
     const sourceInside = sourcePath === path || sourcePath?.startsWith(`${path}.`) === true
     if (sourceInside) {
       const childKey = requestedChild ?? (sourcePath === path
-        ? parallel.states.find((child) => child._tag !== "History")!.key
+        ? parallel.states.find((child) => child._tag !== "History" && child._tag !== "Choice")!.key
         : sourcePath!.slice(path.length + 1).split(".")[0]!)
       return method(
         value,
@@ -1046,7 +1147,7 @@ const selectSnapshot = (
     }
     return method(value, (children: Record<string, any>) => {
       let selected: unknown = children
-      for (const child of parallel.states.filter((child) => child._tag !== "History")) {
+      for (const child of parallel.states.filter((child) => child._tag !== "History" && child._tag !== "Choice")) {
         const isRequestedRegion = requestedChild === child.key
         selected = selectSnapshot(
           selected as Record<string, any>,
@@ -1113,6 +1214,20 @@ const makeHandlers = (
   for (const node of states) {
     const path = parent === undefined ? node.key : `${parent}.${node.key}`
     if (node._tag === "History") continue
+    if (node._tag === "Choice") {
+      handlers[node.key] = {
+        choice: {
+          targets: node.targets,
+          transition: ({ target }: { readonly target: Record<string, Record<string, any>> }) => {
+            const selected = byPath.get(node.selected)!
+            const parts = selected.path.split(".")
+            const builder = selected.root === byPath.get(path)!.root ? target.branch : target.full
+            return selectSnapshot(builder, parts[0]!, byPath, parts, 0, path)
+          }
+        }
+      }
+      continue
+    }
     if (node._tag === "Final") {
       handlers[node.key] = { output: () => node.output }
       continue
@@ -1126,7 +1241,8 @@ const makeHandlers = (
           ? {}
           : {
             targets: [
-              byPath.get(transition.target)!.node._tag === "History"
+              byPath.get(transition.target)!.node._tag === "History" ||
+                byPath.get(transition.target)!.node._tag === "Choice"
                 ? transition.target
                 : runtimeTargetPath(byPath, path, transition.target)
             ]
@@ -1174,7 +1290,7 @@ const makeHandlers = (
               initial: () =>
                 Object.fromEntries(
                   node.states
-                    .filter((child) => child._tag !== "History")
+                    .filter((child) => child._tag !== "History" && child._tag !== "Choice")
                     .map((child) => [child.key, stateValue(byPath.get(`${path}.${child.key}`)!)])
                 )
             }),

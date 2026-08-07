@@ -33,11 +33,13 @@ import {
   getPathToRoot,
   getRootPath,
   isActiveFinalConfiguration,
+  isChoiceTarget,
   isDescendantOf,
   isHistoryTarget,
   isPathInSubtree,
   isSnapshot,
   isTarget,
+  makeChoiceTarget,
   makeTarget,
   normalizeConfiguration,
   normalizeConfigurationEffect,
@@ -45,6 +47,7 @@ import {
   pathDepth,
   snapshotFromConfiguration,
   snapshotFromConfigurationAtPath,
+  TargetSnapshotTypeId,
   validateInitialConfiguration
 } from "./machineModel.js"
 import type { ProcessScope } from "./machineRuntime.js"
@@ -503,6 +506,7 @@ type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Conte
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
     | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
+    | Machine.ChoiceTarget<States, Machine.ChoiceIdentifier<States>>
     | undefined
   readonly target:
     | Machine.Snapshot<States>
@@ -514,6 +518,13 @@ type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Conte
   readonly changed: boolean
   readonly exitPaths: ReadonlyArray<string>
   readonly entryPaths: ReadonlyArray<string>
+  readonly choiceTransitions: ReadonlyArray<{
+    readonly source: string
+    readonly trigger: Machine.TransitionTrigger
+    readonly reenter: false
+    readonly target: string
+    readonly resolvedTarget: string
+  }>
 }
 
 const getCandidatePaths = (machine: Machine.Any, configuration: ActiveConfiguration): ReadonlyArray<string> =>
@@ -905,8 +916,9 @@ const getTargetNodePath = <const States extends Machine.StateSchemas>(
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
     | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
+    | Machine.ChoiceTarget<States, Machine.ChoiceIdentifier<States>>
 ): string => {
-  if (isHistoryTarget(target)) {
+  if (isHistoryTarget(target) || isChoiceTarget(target)) {
     return String(target.path)
   }
   if (isTarget(target)) {
@@ -1013,6 +1025,148 @@ const removeConflictingTransitions = <
   return filtered
 }
 
+const choicesFromTarget = (
+  target: unknown,
+  inheritedValues: Readonly<Record<string, unknown>> = {}
+): ReadonlyArray<{
+  readonly target: ReturnType<typeof makeChoiceTarget>
+  readonly values: Readonly<Record<string, unknown>>
+}> => {
+  const values: Record<string, unknown> = { ...inheritedValues }
+  const choices: Array<ReturnType<typeof makeChoiceTarget>> = []
+  const visit = (current: unknown): void => {
+    if (isChoiceTarget(current)) {
+      Object.assign(values, current.values ?? {})
+      choices.push(current)
+      return
+    }
+    if (typeof current !== "object" || current === null || !("path" in current) || !("value" in current)) return
+    values[String(current.path)] = current.value
+    if ("state" in current) visit(current.state)
+    if ("states" in current && typeof current.states === "object" && current.states !== null) {
+      for (const state of Object.values(current.states)) visit(state)
+    }
+  }
+  visit(target)
+  return choices.map((choice) => ({
+    target: makeChoiceTarget(choice.path, choice.parent, values),
+    values
+  }))
+}
+
+const choiceFromTarget = (
+  target: unknown,
+  inheritedValues: Readonly<Record<string, unknown>> = {}
+) => choicesFromTarget(target, inheritedValues)[0]
+
+const withChoiceValues = (target: unknown, values: Readonly<Record<string, unknown>>): unknown => {
+  if (isChoiceTarget(target)) {
+    return makeChoiceTarget(target.path, target.parent, { ...values, ...(target.values ?? {}) })
+  }
+  if (!isTarget(target) || Object.keys(values).length === 0) return target
+  return makeTarget(target.path as any, target.value, {
+    snapshot: (target as any)[TargetSnapshotTypeId],
+    values: { ...values, ...(target.values ?? {}) } as any
+  })
+}
+
+const resolveChoiceTarget = Effect.fnUntraced(function*(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  initialTarget: unknown,
+  event: unknown
+) {
+  const pending: Array<unknown> = [initialTarget]
+  const resolvedTargets: Array<unknown> = []
+  const actions: Array<DeferredAction> = []
+  const raisedEvents: Array<unknown> = []
+  const emittedEvents: Array<unknown> = []
+  const transitions: Array<{
+    readonly source: string
+    readonly trigger: Machine.TransitionTrigger
+    readonly reenter: false
+    readonly target: string
+    readonly resolvedTarget: string
+  }> = []
+  let iterations = 0
+
+  while (pending.length > 0) {
+    let current: unknown = pending.shift()
+    while (true) {
+      const extractedChoices = choicesFromTarget(current)
+      const extracted = extractedChoices[0]
+      if (extracted === undefined) break
+      pending.unshift(...extractedChoices.slice(1).map(({ target }) => target))
+      iterations += 1
+      if (iterations > MaxMacrostepIterations) {
+        return yield* new InfiniteTransitionError({
+          machineId: machine.id,
+          state: extracted.target.path,
+          maxIterations: MaxMacrostepIterations
+        })
+      }
+      const node = getNode(machine, extracted.target.path)
+      if (node.type !== "choice" || node.parent !== extracted.target.parent) {
+        throw new Error(`Machine expected choice target "${extracted.target.path}" to resolve to its declared parent`)
+      }
+      const choice = (machine.handlers[node.path] as any)?.choice
+      if (choice === undefined || typeof choice.transition !== "function") {
+        throw new Error(`Machine choice state "${node.path}" requires an implementation`)
+      }
+      const provisional: ActiveConfiguration = {
+        active: new Set([
+          ...configuration.active,
+          ...Object.keys(extracted.values)
+        ]),
+        values: new Map([
+          ...configuration.values,
+          ...Object.entries(extracted.values)
+        ]),
+        outputs: configuration.outputs,
+        history: configuration.history
+      }
+      const collected = yield* collectTransition(machine, choice.transition, {
+        parent: getParentValue(machine, provisional, node.path),
+        parents: getParentValues(machine, provisional, node.path),
+        event,
+        ...makePlanningCapabilities(),
+        target: machine.makeTargetBuilder(node.path as any)
+      })
+      if (collected.state === undefined) {
+        throw new Error(`Machine choice resolver for "${node.path}" must return a target`)
+      }
+      validateDeclaredTransitionTarget(node.path, { type: "choice" }, choice.targets, collected.state)
+      const returnedPath = getTargetNodePath(collected.state as any)
+      current = withChoiceValues(collected.state, extracted.values)
+      const nested = choiceFromTarget(current)
+      transitions.push({
+        source: node.path,
+        trigger: { type: "choice" },
+        reenter: false,
+        target: returnedPath,
+        resolvedTarget: nested?.target.path ?? returnedPath
+      })
+      actions.push(...collected.actions)
+      raisedEvents.push(...collected.raisedEvents)
+      emittedEvents.push(...collected.emittedEvents)
+    }
+
+    if (!isTarget(current) && !isSnapshot(current) && !isHistoryTarget(current)) {
+      throw new Error("Machine choice resolver must return a concrete typed target")
+    }
+    resolvedTargets.push(current)
+  }
+
+  return {
+    target: resolvedTargets[0],
+    additionalTargets: resolvedTargets.slice(1),
+    actions,
+    raisedEvents,
+    emittedEvents,
+    transitions
+  }
+})
+
 const collectEvaluatedTransition = Effect.fnUntraced(function*<
   const States extends Machine.StateSchemas,
   Event,
@@ -1036,56 +1190,99 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       | Machine.Snapshot<States>
       | Machine.Target<States, Machine.StateIdentifier<States>>
       | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
+      | Machine.ChoiceTarget<States, Machine.ChoiceIdentifier<States>>
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
     selection.transition.targets,
     unresolvedTarget
   )
+  const choiceResolution = unresolvedTarget === undefined
+    ? undefined
+    : yield* (resolveChoiceTarget(
+      machine,
+      state,
+      unresolvedTarget,
+      (selection.context as any).event
+    ) as Effect.Effect<any, E | InfiniteTransitionError | MachineSchemaDecodeError, R>)
+  const choiceResolvedTarget = choiceResolution?.target ?? unresolvedTarget
   let historyResolution: {
     readonly target: unknown
     readonly actions: ReadonlyArray<DeferredAction>
     readonly raisedEvents: ReadonlyArray<unknown>
     readonly emittedEvents: ReadonlyArray<unknown>
   } | undefined
-  const reenteredHistoryParent = unresolvedTarget !== undefined && isHistoryTarget(unresolvedTarget) &&
-    selection.transition.reenter && state.active.has(unresolvedTarget.parent)
-  if (unresolvedTarget !== undefined && isHistoryTarget(unresolvedTarget)) {
+  const reenteredHistoryParent = choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget) &&
+    selection.transition.reenter && state.active.has(choiceResolvedTarget.parent)
+  if (choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget)) {
     // A reentering transition may exit the history node's own parent. SCXML
     // history observes that same exit, so resolve against a provisional
     // capture rather than an older record (or the default).
     const provisionalBoundary = selection.transition.reenter
       ? getNode(machine, selection.sourcePath).parent
-      : getLeastCommonAncestor(machine, stateIdentifier, unresolvedTarget.parent)
+      : getLeastCommonAncestor(machine, stateIdentifier, choiceResolvedTarget.parent)
     const provisionalExitPaths = reenteredHistoryParent
       ? sortExitPaths(
         machine,
-        Array.from(state.active).filter((path) => isPathInSubtree(path, unresolvedTarget.parent))
+        Array.from(state.active).filter((path) => isPathInSubtree(path, choiceResolvedTarget.parent))
       )
       : getExitPaths(machine, state, provisionalBoundary)
-    const stateAtHistoryResolution = provisionalExitPaths.includes(unresolvedTarget.parent)
+    const stateAtHistoryResolution = provisionalExitPaths.includes(choiceResolvedTarget.parent)
       ? captureHistory(machine, state, state, provisionalExitPaths)
       : state
     historyResolution = yield* resolveHistoryTarget(
       machine,
       stateAtHistoryResolution,
-      unresolvedTarget,
+      choiceResolvedTarget,
       (selection.context as any).event
     )
   }
   const target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>> | undefined =
     historyResolution === undefined
-      ? unresolvedTarget as
+      ? choiceResolvedTarget as
         | Machine.Snapshot<States>
         | Machine.Target<States, Machine.StateIdentifier<States>>
         | undefined
       : historyResolution.target as
         | Machine.Snapshot<States>
         | Machine.Target<States, Machine.StateIdentifier<States>>
-  const targetPath = target === undefined ? undefined : getTargetNodePath(target)
-  const stateAfterTransition = target === undefined
+  const additionalHistoryActions: Array<DeferredAction> = []
+  const additionalHistoryRaisedEvents: Array<unknown> = []
+  const additionalHistoryEmittedEvents: Array<unknown> = []
+  const additionalChoiceTargets: Array<
+    Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+  > = []
+  for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
+    if (!isHistoryTarget(additionalTarget)) {
+      additionalChoiceTargets.push(additionalTarget as any)
+      continue
+    }
+    const resolved = yield* resolveHistoryTarget(
+      machine,
+      state,
+      additionalTarget,
+      (selection.context as any).event
+    )
+    additionalChoiceTargets.push(resolved.target as any)
+    additionalHistoryActions.push(...resolved.actions)
+    additionalHistoryRaisedEvents.push(...resolved.raisedEvents)
+    additionalHistoryEmittedEvents.push(...resolved.emittedEvents)
+  }
+  const targetPath = target === undefined
+    ? undefined
+    : additionalChoiceTargets.length === 0 || unresolvedTarget === undefined
+    ? getTargetNodePath(target)
+    : getTargetNodePath(unresolvedTarget)
+  let stateAfterTransition = target === undefined
     ? state
     : yield* normalizeTargetConfigurationEffect<States>(machine, state, target)
+  for (const additionalTarget of additionalChoiceTargets) {
+    stateAfterTransition = yield* normalizeTargetConfigurationEffect<States>(
+      machine,
+      stateAfterTransition,
+      additionalTarget
+    )
+  }
   const changed = selection.transition.reenter || !hasSameActivePaths(state, stateAfterTransition)
 
   if (!changed) {
@@ -1093,12 +1290,28 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       selection,
       unresolvedTarget,
       target,
-      actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
-      raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
-      emittedEvents: [...transitionResult.emittedEvents, ...(historyResolution?.emittedEvents ?? [])],
+      actions: [
+        ...transitionResult.actions,
+        ...(choiceResolution?.actions ?? []),
+        ...(historyResolution?.actions ?? []),
+        ...additionalHistoryActions
+      ],
+      raisedEvents: [
+        ...transitionResult.raisedEvents,
+        ...(choiceResolution?.raisedEvents ?? []),
+        ...(historyResolution?.raisedEvents ?? []),
+        ...additionalHistoryRaisedEvents
+      ],
+      emittedEvents: [
+        ...transitionResult.emittedEvents,
+        ...(choiceResolution?.emittedEvents ?? []),
+        ...(historyResolution?.emittedEvents ?? []),
+        ...additionalHistoryEmittedEvents
+      ],
       changed,
       exitPaths: [],
-      entryPaths: []
+      entryPaths: [],
+      choiceTransitions: choiceResolution?.transitions ?? []
     } as EvaluatedTransition<States, Event, E, R, Context>
   }
 
@@ -1114,22 +1327,40 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     selection,
     unresolvedTarget,
     target,
-    actions: [...transitionResult.actions, ...(historyResolution?.actions ?? [])],
-    raisedEvents: [...transitionResult.raisedEvents, ...(historyResolution?.raisedEvents ?? [])],
-    emittedEvents: [...transitionResult.emittedEvents, ...(historyResolution?.emittedEvents ?? [])],
+    actions: [
+      ...transitionResult.actions,
+      ...(choiceResolution?.actions ?? []),
+      ...(historyResolution?.actions ?? []),
+      ...additionalHistoryActions
+    ],
+    raisedEvents: [
+      ...transitionResult.raisedEvents,
+      ...(choiceResolution?.raisedEvents ?? []),
+      ...(historyResolution?.raisedEvents ?? []),
+      ...additionalHistoryRaisedEvents
+    ],
+    emittedEvents: [
+      ...transitionResult.emittedEvents,
+      ...(choiceResolution?.emittedEvents ?? []),
+      ...(historyResolution?.emittedEvents ?? []),
+      ...additionalHistoryEmittedEvents
+    ],
     changed,
     exitPaths: reenteredHistoryParent
       ? sortExitPaths(
         machine,
-        Array.from(state.active).filter((path) => isPathInSubtree(path, unresolvedTarget!.parent))
+        Array.from(state.active).filter((path) => isPathInSubtree(path, (choiceResolvedTarget as any).parent))
       )
       : getExitPaths(machine, state, boundary),
     entryPaths: reenteredHistoryParent
       ? sortEntryPaths(
         machine,
-        Array.from(stateAfterTransition.active).filter((path) => isPathInSubtree(path, unresolvedTarget!.parent))
+        Array.from(stateAfterTransition.active).filter((path) =>
+          isPathInSubtree(path, (choiceResolvedTarget as any).parent)
+        )
       )
-      : getEntryPaths(machine, stateAfterTransition, boundary)
+      : getEntryPaths(machine, stateAfterTransition, boundary),
+    choiceTransitions: choiceResolution?.transitions ?? []
   } as EvaluatedTransition<States, Event, E, R, Context>
 })
 
@@ -1270,23 +1501,101 @@ export const planInitial: <
     const result = machine.initial(...inputArgs)
     const state = Effect.isEffect(result)
       ? yield* (provideDeferredServices(
-        result as Effect.Effect<Machine.Snapshot<States>, InitialE, InitialR>,
+        result as unknown as Effect.Effect<Machine.InitialSnapshot<States>, InitialE, InitialR>,
         machine,
         deferredActions,
         deferredRaisedEvents
-      ) as Effect.Effect<
-        Machine.Snapshot<States>,
+      ) as unknown as Effect.Effect<
+        Machine.InitialSnapshot<States>,
         InitialE | MachineSchemaDecodeError,
         ExcludeCompatibleRuntime<InitialR, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
       >)
       : result
-    const configuration = yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
+    const emptyConfiguration: ActiveConfiguration = {
+      active: new Set(),
+      values: new Map(),
+      outputs: new Map(),
+      history: new Map()
+    }
+    const initialChoice = choiceFromTarget(state)
+    const choiceResolution = initialChoice === undefined
+      ? undefined
+      : yield* (resolveChoiceTarget(
+        machine,
+        emptyConfiguration,
+        state,
+        InitialEvent
+      ) as Effect.Effect<
+        any,
+        E | InfiniteTransitionError | MachineSchemaDecodeError,
+        ExcludeCompatibleRuntime<R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
+      >)
+    const initialHistoryActions: Array<DeferredAction> = []
+    const initialHistoryRaisedEvents: Array<unknown> = []
+    const initialHistoryEmittedEvents: Array<unknown> = []
+    const resolvedInitialTargets: Array<unknown> = []
+    for (
+      const target of choiceResolution === undefined
+        ? []
+        : [choiceResolution.target, ...choiceResolution.additionalTargets]
+    ) {
+      if (!isHistoryTarget(target)) {
+        resolvedInitialTargets.push(target)
+        continue
+      }
+      const history = yield* resolveHistoryTarget(machine, emptyConfiguration, target, InitialEvent)
+      resolvedInitialTargets.push(history.target)
+      initialHistoryActions.push(...history.actions)
+      initialHistoryRaisedEvents.push(...history.raisedEvents)
+      initialHistoryEmittedEvents.push(...history.emittedEvents)
+    }
+    let resolvedConfiguration = choiceResolution === undefined
+      ? yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
+      : yield* normalizeTargetConfigurationEffect<States>(
+        machine,
+        emptyConfiguration,
+        resolvedInitialTargets[0] as
+          | Machine.Snapshot<States>
+          | Machine.Target<States, Machine.StateIdentifier<States>>
+      )
+    for (const additionalTarget of resolvedInitialTargets.slice(1)) {
+      resolvedConfiguration = yield* normalizeTargetConfigurationEffect<States>(
+        machine,
+        resolvedConfiguration,
+        additionalTarget as Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+      )
+    }
+    const configuration: ActiveConfiguration = initialChoice === undefined
+      ? resolvedConfiguration
+      : {
+        ...resolvedConfiguration,
+        active: new Set([
+          ...resolvedConfiguration.active,
+          ...Object.keys(initialChoice.values).filter((path) => {
+            const node = getNode(machine, path)
+            return node.type !== "choice" && node.type !== "history"
+          })
+        ]),
+        values: new Map([...Object.entries(initialChoice.values), ...resolvedConfiguration.values])
+      }
     validateInitialConfiguration(machine, configuration)
     const startingState = snapshotFromConfiguration<States>(machine, configuration)
     const initialEntryPaths = getInitialEntryPaths(machine, configuration)
-    const actions = yield* deferredActions.read
-    const raisedEvents = yield* deferredRaisedEvents.read
-    const emittedEvents = yield* deferredRaisedEvents.readEmitted
+    const actions = [
+      ...yield* deferredActions.read,
+      ...(choiceResolution?.actions ?? []),
+      ...initialHistoryActions
+    ]
+    const raisedEvents = [
+      ...yield* deferredRaisedEvents.read,
+      ...(choiceResolution?.raisedEvents ?? []),
+      ...initialHistoryRaisedEvents
+    ]
+    const emittedEvents = [
+      ...yield* deferredRaisedEvents.readEmitted,
+      ...(choiceResolution?.emittedEvents ?? []),
+      ...initialHistoryEmittedEvents
+    ]
     const settled = yield* (Effect.gen(function*() {
       const entry = yield* collectStateActions<States, Events, Emits, E, R>(
         machine,
@@ -1302,7 +1611,20 @@ export const planInitial: <
         [...entry.actions] as Array<Effect.Effect<void, E, R>>,
         [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
         [...emittedEvents, ...entry.emittedEvents],
-        []
+        choiceResolution === undefined ? [] : [{
+          next: configuration,
+          event: InitialEvent,
+          transitions: choiceResolution.transitions,
+          actions: [...choiceResolution.actions, ...initialHistoryActions] as ReadonlyArray<Effect.Effect<void, E, R>>,
+          raisedEvents: [
+            ...choiceResolution.raisedEvents,
+            ...initialHistoryRaisedEvents
+          ] as ReadonlyArray<Machine.EventOf<Events>>,
+          emittedEvents: [...choiceResolution.emittedEvents, ...initialHistoryEmittedEvents],
+          exitPaths: [],
+          entryPaths: [],
+          changed: false
+        }]
       ) as Effect.Effect<MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>>)
     }) as Effect.Effect<
       MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
@@ -1453,13 +1775,16 @@ const microstep: <
 
   const transitions = removeConflictingTransitions(machine, evaluatedTransitions)
   const sortedTransitions = sortEvaluatedTransitions(machine, transitions)
-  const retainedTransitions = sortedTransitions.map((transition) => ({
-    source: transition.selection.sourcePath,
-    trigger: transition.selection.trigger,
-    reenter: transition.selection.transition.reenter,
-    target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
-    resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
-  }))
+  const retainedTransitions = sortedTransitions.flatMap((transition) => [
+    {
+      source: transition.selection.sourcePath,
+      trigger: transition.selection.trigger,
+      reenter: transition.selection.transition.reenter,
+      target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
+      resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
+    },
+    ...transition.choiceTransitions
+  ])
   let stateAfterTransition = state
   // Value-only targets are evaluated against the original configuration. If
   // one is applied after a control-changing transition, it can resurrect a

@@ -1,7 +1,7 @@
 interface StateNode {
   readonly path: string
   readonly key: string
-  readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+  readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
   readonly history: "shallow" | "deep" | undefined
   readonly parent: string | undefined
   readonly children: ReadonlyArray<string>
@@ -24,6 +24,9 @@ interface TransitionDefinition {
     }
     | {
       readonly type: "done"
+    }
+    | {
+      readonly type: "choice"
     }
   readonly reenter: boolean
   readonly targets:
@@ -79,6 +82,8 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
       labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
     } else if (definition.trigger.type === "done") {
       labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
+    } else if (definition.trigger.type === "choice") {
+      labels.push(`◇ choice${targets(definition)}`)
     }
   }
   return labels

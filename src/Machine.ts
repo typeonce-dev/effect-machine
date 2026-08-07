@@ -189,7 +189,7 @@ export interface Machine<
   readonly stateNodes: Machine.StateNodes
 
   /** @internal */
-  readonly makeTargetBuilder: <Source extends Machine.StateIdentifier<States>>(
+  readonly makeTargetBuilder: <Source extends Machine.StateNodeIdentifier<States>>(
     source: Source
   ) => Machine.TargetBuilder<States, Source>
 
@@ -436,6 +436,8 @@ type ActiveStateKey<States extends Machine.StateSchemas> = Machine.ActiveStateKe
 
 type HistoryStateKey<States extends Machine.StateSchemas> = Machine.HistoryStateKey<States>
 
+type ChoiceStateKey<States extends Machine.StateSchemas> = Machine.ChoiceStateKey<States>
+
 type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends boolean = false> = {
   readonly [Key in keyof States]: ValidateStateNode<States[Key], AllowHistory>
 }
@@ -443,14 +445,21 @@ type ValidateStateTree<States extends Machine.StateSchemas, AllowHistory extends
 type ValidateStateNode<Node, AllowHistory extends boolean> = Node extends Machine.HistoryStateNodeConfig ?
   AllowHistory extends true ? ValidateHistoryStateNode<Node>
   : StateDefinitionError<"History states must be declared below an active parent state">
+  : Node extends Machine.ChoiceStateNodeConfig ? AllowHistory extends true ? ValidateChoiceStateNode<Node>
+    : StateDefinitionError<"Choice states must be declared below an active parent state">
   : Node extends Machine.TaggedSchema ? unknown
   : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node>
   : StateDefinitionError<"State nodes must be tagged schemas or state node configs">
 
 type ValidateHistoryStateNode<Node extends Machine.HistoryStateNodeConfig> = [
-  Extract<keyof Node, "schema" | "states" | "initial" | "output">
+  Extract<keyof Node, "schema" | "states" | "initial" | "output" | "choice">
 ] extends [never] ? unknown
   : StateDefinitionError<"History states cannot declare schemas, children, initial states, or output">
+
+type ValidateChoiceStateNode<Node extends Machine.ChoiceStateNodeConfig> = [
+  Extract<keyof Node, "schema" | "states" | "initial" | "output" | "history">
+] extends [never] ? unknown
+  : StateDefinitionError<"Choice states cannot declare schemas, children, initial states, output, or history">
 
 type ValidateStateNodeConfig<Node extends { readonly schema: Machine.TaggedSchema }> = Node extends
   { readonly states: infer Children } ? ValidateStateNodeWithChildren<Node, Children>
@@ -475,7 +484,8 @@ type ValidateStateNodeWithChildren<
 type ValidateCompoundStateNode<
   Node extends { readonly schema: Machine.TaggedSchema },
   Children extends Machine.StateSchemas
-> = Node extends { readonly initial: infer Initial } ? Initial extends ActiveStateKey<Children> ? {
+> = Node extends { readonly initial: infer Initial } ?
+  Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> ? {
       readonly states: ValidateStateTree<Children, true>
     }
   : StateDefinitionError<"Compound initial must be one of its direct child keys">
@@ -497,10 +507,11 @@ type DefineStateTreeInput<States extends Machine.StateSchemas> = {
 
 type DefineStateNodeInput<Node> = Node extends Machine.TaggedSchema ? Node
   : Node extends Machine.HistoryStateNodeConfig ? Machine.HistoryStateNodeConfig
+  : Node extends Machine.ChoiceStateNodeConfig ? Machine.ChoiceStateNodeConfig
   : Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
     Omit<Node, "states"> & { readonly states: DefineStateTreeInput<Children> }
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? Omit<Node, "initial" | "states"> & {
-      readonly initial: ActiveStateKey<Children>
+      readonly initial: ActiveStateKey<Children> | ChoiceStateKey<Children>
       readonly states: DefineStateTreeInput<Children>
     }
   : Node
@@ -604,9 +615,13 @@ type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input
 type InitialSnapshotBuilderWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string = ""
-> = {
-  readonly [Key in ActiveStateKey<States>]: InitialSnapshotMethod<States, Key, Prefix>
-}
+> =
+  & {
+    readonly [Key in ActiveStateKey<States>]: InitialSnapshotMethod<States, Key, Prefix>
+  }
+  & {
+    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTargetInstruction<Machine.JoinPath<Prefix, Key>>
+  }
 
 type InitialSnapshotMethod<
   States extends Machine.StateSchemas,
@@ -634,11 +649,11 @@ type InitialSnapshotArguments<
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>>
     ]
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? [
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ? [
         value: Machine.NodeSchema<Node>["Type"],
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
-        ) => InitialSnapshotResult<Children, Initial, Path>
+        ) => InitialSelectableResult<Children, Initial, Path>
       ]
     : never
   : [value: Machine.NodeSchema<Node>["Type"]]
@@ -657,11 +672,11 @@ type InitialSnapshotFromArguments<
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>, boolean>
     ]
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? [
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ? [
         input: Machine.NodeSchema<Node>["~type.make.in"],
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
-        ) => ConstructionResult<InitialSnapshotResult<Children, Initial, Path>>
+        ) => ConstructionResult<InitialSelectableResult<Children, Initial, Path>>
       ]
     : never
   : [input: Machine.NodeSchema<Node>["~type.make.in"]]
@@ -680,13 +695,22 @@ type InitialSnapshotResult<
       InitialSnapshotRegionsWithPrefix<Children, Path>
     >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> } ? Machine.CompoundSnapshot<
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ?
+      Machine.CompoundSnapshot<
         Path,
         Machine.NodeSchema<Node>["Type"],
-        InitialSnapshotResult<Children, Initial, Path>
+        InitialSelectableResult<Children, Initial, Path>
       >
     : never
   : Machine.AtomicSnapshot<Path, Machine.NodeSchema<Node>["Type"]>
+  : never
+
+type InitialSelectableResult<
+  States extends Machine.StateSchemas,
+  StateId extends ActiveStateKey<States> | ChoiceStateKey<States>,
+  Prefix extends string
+> = StateId extends ChoiceStateKey<States> ? Machine.ChoiceTargetInstruction<Machine.JoinPath<Prefix, StateId>>
+  : StateId extends ActiveStateKey<States> ? InitialSnapshotResult<States, StateId, Prefix>
   : never
 
 type InitialSnapshotRegionsWithPrefix<
@@ -732,9 +756,13 @@ type InitialParallelBuilder<
 type FullSnapshotBuilderWithPrefix<
   States extends Machine.StateSchemas,
   Prefix extends string = ""
-> = {
-  readonly [Key in ActiveStateKey<States>]: FullSnapshotMethod<States, Key, Prefix>
-}
+> =
+  & {
+    readonly [Key in ActiveStateKey<States>]: FullSnapshotMethod<States, Key, Prefix>
+  }
+  & {
+    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTargetInstruction<Machine.JoinPath<Prefix, Key>>
+  }
 
 type FullSnapshotMethod<
   States extends Machine.StateSchemas,
@@ -765,7 +793,9 @@ type FullSnapshotArguments<
       value: Machine.NodeSchema<Node>["Type"],
       state: (
         builder: FullSnapshotBuilderWithPrefix<Children, Path>
-      ) => Machine.SnapshotWithPrefix<Children, Path>
+      ) =>
+        | Machine.SnapshotWithPrefix<Children, Path>
+        | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
     ]
   : [value: Machine.NodeSchema<Node>["Type"]]
   : never
@@ -786,7 +816,10 @@ type FullSnapshotFromArguments<
       input: Machine.NodeSchema<Node>["~type.make.in"],
       state: (
         builder: FullSnapshotBuilderWithPrefix<Children, Path>
-      ) => ConstructionResult<Machine.SnapshotWithPrefix<Children, Path>>
+      ) => ConstructionResult<
+        | Machine.SnapshotWithPrefix<Children, Path>
+        | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
+      >
     ]
   : [input: Machine.NodeSchema<Node>["~type.make.in"]]
   : never
@@ -841,8 +874,12 @@ type IsCompoundNode<Node> = Node extends { readonly type: "parallel" } ? false
 
 type NearestCompoundScope<
   States extends Machine.StateSchemas,
-  Source extends Machine.StateIdentifier<States>
-> = IsCompoundNode<Machine.NodeByIdentifier<States, Source>> extends true ? Source
+  Source extends Machine.StateNodeIdentifier<States>
+> = Source extends Machine.StateIdentifier<States> ?
+  IsCompoundNode<Machine.NodeByIdentifier<States, Source>> extends true ? Source
+  : ParentPath<Source> extends infer Parent extends Machine.StateIdentifier<States> ?
+    NearestCompoundScope<States, Parent>
+  : never
   : ParentPath<Source> extends infer Parent extends Machine.StateIdentifier<States> ?
     NearestCompoundScope<States, Parent>
   : never
@@ -875,25 +912,37 @@ type LocalTargetResultWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   Prefix extends string
-> = {
-  readonly [Key in ActiveStateKey<States>]: LocalTargetResult<AllStates, States, Key, Prefix>
-}[ActiveStateKey<States>]
+> =
+  | {
+    readonly [Key in ActiveStateKey<States>]: LocalTargetResult<AllStates, States, Key, Prefix>
+  }[ActiveStateKey<States>]
+  | Machine.ChoiceTarget<
+    AllStates,
+    Extract<Machine.JoinPath<Prefix, ChoiceStateKey<States>>, Machine.ChoiceIdentifier<AllStates>>
+  >
 
 type LocalTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   Prefix extends string,
-  Source extends Machine.StateIdentifier<AllStates>
-> = {
-  readonly [Key in ActiveStateKey<States>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
-}
+  Source extends Machine.StateNodeIdentifier<AllStates>
+> =
+  & {
+    readonly [Key in ActiveStateKey<States>]: LocalTargetMethod<AllStates, States, Key, Prefix, Source>
+  }
+  & {
+    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTarget<
+      AllStates,
+      Extract<Machine.JoinPath<Prefix, Key>, Machine.ChoiceIdentifier<AllStates>>
+    >
+  }
 
 type LocalTargetMethod<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   StateId extends ActiveStateKey<States>,
   Prefix extends string,
-  Source extends Machine.StateIdentifier<AllStates>,
+  Source extends Machine.StateNodeIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
@@ -955,7 +1004,7 @@ type LocalTargetMethod<
 type LocalTargetBuilderForScope<
   States extends Machine.StateSchemas,
   Scope extends Machine.StateIdentifier<States>,
-  Source extends Machine.StateIdentifier<States>
+  Source extends Machine.StateNodeIdentifier<States>
 > = ChildrenOf<States, Scope> extends infer Children extends Machine.StateSchemas ?
     & LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
     & {
@@ -998,25 +1047,37 @@ type BranchTargetResultWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   Prefix extends string
-> = {
-  readonly [Key in ActiveStateKey<States>]: BranchTargetResult<AllStates, States, Key, Prefix>
-}[ActiveStateKey<States>]
+> =
+  | {
+    readonly [Key in ActiveStateKey<States>]: BranchTargetResult<AllStates, States, Key, Prefix>
+  }[ActiveStateKey<States>]
+  | Machine.ChoiceTarget<
+    AllStates,
+    Extract<Machine.JoinPath<Prefix, ChoiceStateKey<States>>, Machine.ChoiceIdentifier<AllStates>>
+  >
 
 type BranchTargetBuilderWithPrefix<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   Prefix extends string,
-  Source extends Machine.StateIdentifier<AllStates>
-> = {
-  readonly [Key in ActiveStateKey<States>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
-}
+  Source extends Machine.StateNodeIdentifier<AllStates>
+> =
+  & {
+    readonly [Key in ActiveStateKey<States>]: BranchTargetMethod<AllStates, States, Key, Prefix, Source>
+  }
+  & {
+    readonly [Key in ChoiceStateKey<States>]: () => Machine.ChoiceTarget<
+      AllStates,
+      Extract<Machine.JoinPath<Prefix, Key>, Machine.ChoiceIdentifier<AllStates>>
+    >
+  }
 
 type BranchTargetMethod<
   AllStates extends Machine.StateSchemas,
   States extends Machine.StateSchemas,
   StateId extends ActiveStateKey<States>,
   Prefix extends string,
-  Source extends Machine.StateIdentifier<AllStates>,
+  Source extends Machine.StateNodeIdentifier<AllStates>,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
@@ -1080,7 +1141,7 @@ type BranchTargetMethod<
 type BranchTargetBuilderForRoot<
   States extends Machine.StateSchemas,
   Root extends ActiveStateKey<States>,
-  Source extends Machine.StateIdentifier<States>
+  Source extends Machine.StateNodeIdentifier<States>
 > = {
   readonly [Key in Root]: BranchTargetMethod<States, States, Key, "", Source>
 }
@@ -1870,6 +1931,20 @@ export declare namespace Machine {
   }
 
   /**
+   * Transient decision pseudo-state resolved immediately when targeted.
+   *
+   * Choice nodes have no value and never belong to an active configuration.
+   * Their required `choice` implementation uses ordinary TypeScript or an
+   * Effect to select a typed target.
+   *
+   * @category models
+   * @since 4.0.0
+   */
+  export interface ChoiceStateNodeConfig {
+    readonly type: "choice"
+  }
+
+  /**
    * Configuration accepted for an object state node.
    *
    * @category models
@@ -1880,6 +1955,7 @@ export declare namespace Machine {
     | CompoundStateNodeConfig
     | ParallelStateNodeConfig
     | HistoryStateNodeConfig
+    | ChoiceStateNodeConfig
 
   /**
    * Object state tree keyed by state path.
@@ -1999,7 +2075,7 @@ export declare namespace Machine {
     readonly key: string
     readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
-    readonly type: "atomic" | "compound" | "parallel" | "final" | "history"
+    readonly type: "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
     readonly history: "shallow" | "deep" | undefined
     readonly parent: Path | undefined
     /** Active child paths. History pseudo-states are available through their `parent` relationship. */
@@ -2035,6 +2111,9 @@ export declare namespace Machine {
     }
     | {
       readonly type: "done"
+    }
+    | {
+      readonly type: "choice"
     }
 
   /**
@@ -2152,7 +2231,8 @@ export declare namespace Machine {
     States extends StateSchemas,
     Prefix extends string = ""
   > = {
-    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends
+      HistoryStateNodeConfig | ChoiceStateNodeConfig ? never
       : States[Key] extends { readonly states: infer Children }
         ? Children extends StateSchemas ?
           JoinPath<Prefix, Key> | StateIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
@@ -2168,13 +2248,19 @@ export declare namespace Machine {
    */
   export type HistoryIdentifier<States extends StateSchemas> = HistoryIdentifierWithPrefix<States>
 
+  /** Extracts the transition-only choice pseudo-state paths. */
+  export type ChoiceIdentifier<States extends StateSchemas> = ChoiceIdentifierWithPrefix<States>
+
   /**
    * Extracts every compiled state-node path, including history pseudo-states.
    *
    * @category utility types
    * @since 4.0.0
    */
-  export type StateNodeIdentifier<States extends StateSchemas> = StateIdentifier<States> | HistoryIdentifier<States>
+  export type StateNodeIdentifier<States extends StateSchemas> =
+    | StateIdentifier<States>
+    | HistoryIdentifier<States>
+    | ChoiceIdentifier<States>
 
   /** @internal */
   export type HistoryIdentifierWithPrefix<
@@ -2187,14 +2273,32 @@ export declare namespace Machine {
       : never
   }[Extract<keyof States, string>]
 
+  /** @internal */
+  export type ChoiceIdentifierWithPrefix<
+    States extends StateSchemas,
+    Prefix extends string = ""
+  > = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends ChoiceStateNodeConfig ? JoinPath<Prefix, Key>
+      : States[Key] extends { readonly states: infer Children extends StateSchemas } ?
+        ChoiceIdentifierWithPrefix<Children, JoinPath<Prefix, Key>>
+      : never
+  }[Extract<keyof States, string>]
+
   /** Active keys directly declared in a state tree. */
   export type ActiveStateKey<States extends StateSchemas> = {
-    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? never : Key
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig | ChoiceStateNodeConfig
+      ? never
+      : Key
   }[Extract<keyof States, string>]
 
   /** History pseudo-state keys directly declared in a state tree. */
   export type HistoryStateKey<States extends StateSchemas> = {
     readonly [Key in Extract<keyof States, string>]: States[Key] extends HistoryStateNodeConfig ? Key : never
+  }[Extract<keyof States, string>]
+
+  /** Choice pseudo-state keys directly declared in a state tree. */
+  export type ChoiceStateKey<States extends StateSchemas> = {
+    readonly [Key in Extract<keyof States, string>]: States[Key] extends ChoiceStateNodeConfig ? Key : never
   }[Extract<keyof States, string>]
 
   /**
@@ -2213,21 +2317,44 @@ export declare namespace Machine {
     ? HistoryId extends string ? Extract<ImmediateParentStateIdentifier<HistoryId>, StateIdentifier<States>> : never
     : never
 
+  /** Active parent states that own one or more choice pseudo-states. */
+  export type ChoiceParentIdentifier<States extends StateSchemas> = ChoiceIdentifier<States> extends infer ChoiceId
+    ? ChoiceId extends string ? Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>> : never
+    : never
+
   /** History defaults and implicit initializers that remain unimplemented. */
   export type MissingHistoryImplementations<
     States extends StateSchemas,
     UnhandledStates extends StateIdentifier<States>
   > = Extract<UnhandledStates, HistoryParentIdentifier<States> | RequiredHistoryInitializers<States>>
 
+  /** Choice-owning active parents that remain unimplemented. */
+  export type MissingChoiceImplementations<
+    States extends StateSchemas,
+    UnhandledStates extends StateIdentifier<States>
+  > = Extract<UnhandledStates, ChoiceParentIdentifier<States>>
+
+  /** @internal Readiness proof for required choice resolvers. */
+  export type EnsureChoiceImplementations<
+    States extends StateSchemas,
+    UnhandledStates extends StateIdentifier<States>
+  > = [ChoiceIdentifier<States>] extends [never] ? unknown
+    : [MissingChoiceImplementations<States, UnhandledStates>] extends [never] ? unknown
+    : {
+      readonly "~effect/Machine/MissingChoiceImplementation": MissingChoiceImplementations<States, UnhandledStates>
+    }
+
   /** @internal Readiness proof required by planning and managed execution. */
   export type EnsureHistoryImplementations<
     States extends StateSchemas,
     UnhandledStates extends StateIdentifier<States>
-  > = [HistoryIdentifier<States>] extends [never] ? unknown
-    : [MissingHistoryImplementations<States, UnhandledStates>] extends [never] ? unknown :
-    {
-      readonly "~effect/Machine/MissingHistoryImplementation": MissingHistoryImplementations<States, UnhandledStates>
-    }
+  > =
+    & ([HistoryIdentifier<States>] extends [never] ? unknown
+      : [MissingHistoryImplementations<States, UnhandledStates>] extends [never] ? unknown :
+      {
+        readonly "~effect/Machine/MissingHistoryImplementation": MissingHistoryImplementations<States, UnhandledStates>
+      })
+    & EnsureChoiceImplementations<States, UnhandledStates>
 
   /**
    * Extracts a state-tree node by state path.
@@ -2867,6 +2994,22 @@ export declare namespace Machine {
     readonly parent: Extract<ParentPath<HistoryId>, StateIdentifier<States>>
   }
 
+  /** Branded transient target instruction used while constructing initial states. */
+  export interface ChoiceTargetInstruction<ChoiceId extends string = string> {
+    readonly [Model.ChoiceTargetTypeId]: typeof Model.ChoiceTargetTypeId
+    readonly path: ChoiceId
+    readonly parent: ParentPath<ChoiceId>
+    readonly values?: Readonly<Record<string, unknown>>
+  }
+
+  /** Transition instruction that enters a transient choice pseudo-state. */
+  export interface ChoiceTarget<
+    States extends StateSchemas,
+    ChoiceId extends ChoiceIdentifier<States>
+  > extends ChoiceTargetInstruction<ChoiceId> {
+    readonly parent: Extract<ParentPath<ChoiceId>, StateIdentifier<States>>
+  }
+
   /** Builder containing only history pseudo-state paths. */
   export type HistoryTargetBuilder<States extends StateSchemas> = HistoryTargetBuilderWithPrefix<States, States, "">
 
@@ -2896,7 +3039,7 @@ export declare namespace Machine {
    */
   export type LocalTargetBuilder<
     States extends StateSchemas,
-    Source extends StateIdentifier<States>
+    Source extends StateNodeIdentifier<States>
   > = NearestCompoundScope<States, Source> extends infer Scope ? [Scope] extends [never] ? {}
     : Scope extends StateIdentifier<States> ? LocalTargetBuilderForScope<States, Scope, Source>
     : {}
@@ -2915,7 +3058,7 @@ export declare namespace Machine {
    */
   export type BranchTargetBuilder<
     States extends StateSchemas,
-    Source extends StateIdentifier<States>
+    Source extends StateNodeIdentifier<States>
   > = BranchTargetBuilderForRoot<
     States,
     Extract<RootStateIdentifier<Source>, ActiveStateKey<States>>,
@@ -2943,7 +3086,7 @@ export declare namespace Machine {
    */
   export interface TargetBuilder<
     States extends StateSchemas,
-    Source extends StateIdentifier<States>
+    Source extends StateNodeIdentifier<States>
   > {
     /**
      * Moves to another state in the same local group. The value of the state
@@ -3160,6 +3303,28 @@ export declare namespace Machine {
     readonly target: TargetBuilder<States, StateId>
   }
 
+  /** Context passed to a transient choice resolver. There is no `state` value. */
+  export interface ChoiceContext<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ChoiceId extends ChoiceIdentifier<States>
+  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+    readonly parent: StateByIdentifier<
+      States,
+      Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
+    >
+    readonly parents: {
+      readonly [Parent in Extract<ParentStateIdentifier<ChoiceId>, StateIdentifier<States>>]: StateByIdentifier<
+        States,
+        Parent
+      >
+    }
+    readonly event: LifecycleEvent<Events>
+    readonly runtime: RuntimeEffect<Events, Emits>
+    readonly target: TargetBuilder<States, ChoiceId>
+  }
+
   /**
    * Context passed to a final state output function.
    *
@@ -3229,8 +3394,20 @@ export declare namespace Machine {
    */
   export type InitialResult<States extends StateSchemas, E, R> =
     | Snapshot<States>
-    | StateConstruction<Snapshot<States>>
-    | Effect.Effect<Snapshot<States> | StateConstruction<Snapshot<States>>, E, R>
+    | InitialSnapshot<States>
+    | StateConstruction<Snapshot<States> | InitialSnapshot<States>>
+    | Effect.Effect<
+      | Snapshot<States>
+      | InitialSnapshot<States>
+      | StateConstruction<Snapshot<States> | InitialSnapshot<States>>,
+      E,
+      R
+    >
+
+  /** Initial snapshots may transiently terminate in a declared choice node. */
+  export type InitialSnapshot<States extends StateSchemas> = {
+    readonly [StateId in ActiveStateKey<States>]: InitialSnapshotResult<States, StateId, "">
+  }[ActiveStateKey<States>]
 
   /**
    * Return value accepted from transition handlers.
@@ -3248,18 +3425,53 @@ export declare namespace Machine {
     | Snapshot<States>
     | Target<States, StateIdentifier<States>>
     | HistoryTarget<States, HistoryIdentifier<States>>
+    | ChoiceTarget<States, ChoiceIdentifier<States>>
     | StateConstruction<
-      Snapshot<States> | Target<States, StateIdentifier<States>> | HistoryTarget<States, HistoryIdentifier<States>>
+      | Snapshot<States>
+      | Target<States, StateIdentifier<States>>
+      | HistoryTarget<States, HistoryIdentifier<States>>
+      | ChoiceTarget<States, ChoiceIdentifier<States>>
     >
     | void
     | Effect.Effect<
       | Snapshot<States>
       | Target<States, StateIdentifier<States>>
       | HistoryTarget<States, HistoryIdentifier<States>>
+      | ChoiceTarget<States, ChoiceIdentifier<States>>
       | StateConstruction<
-        Snapshot<States> | Target<States, StateIdentifier<States>> | HistoryTarget<States, HistoryIdentifier<States>>
+        | Snapshot<States>
+        | Target<States, StateIdentifier<States>>
+        | HistoryTarget<States, HistoryIdentifier<States>>
+        | ChoiceTarget<States, ChoiceIdentifier<States>>
       >
       | void,
+      E,
+      R
+    >
+
+  /** A choice resolver must always select a typed target, directly or through Effect. */
+  export type ChoiceResult<States extends StateSchemas, E, R> =
+    | Snapshot<States>
+    | Target<States, StateIdentifier<States>>
+    | HistoryTarget<States, HistoryIdentifier<States>>
+    | ChoiceTarget<States, ChoiceIdentifier<States>>
+    | StateConstruction<
+      | Snapshot<States>
+      | Target<States, StateIdentifier<States>>
+      | HistoryTarget<States, HistoryIdentifier<States>>
+      | ChoiceTarget<States, ChoiceIdentifier<States>>
+    >
+    | Effect.Effect<
+      | Snapshot<States>
+      | Target<States, StateIdentifier<States>>
+      | HistoryTarget<States, HistoryIdentifier<States>>
+      | ChoiceTarget<States, ChoiceIdentifier<States>>
+      | StateConstruction<
+        | Snapshot<States>
+        | Target<States, StateIdentifier<States>>
+        | HistoryTarget<States, HistoryIdentifier<States>>
+        | ChoiceTarget<States, ChoiceIdentifier<States>>
+      >,
       E,
       R
     >
@@ -3313,6 +3525,11 @@ export declare namespace Machine {
         never
     }[keyof NonNullable<History>]
     : never
+  /** Extracts the return value from a choice resolver. */
+  export type ChoiceReturn<Config> = Config extends {
+    readonly choice: { readonly transition: (...args: any) => infer Ret }
+  } ? Ret :
+    never
   /**
    * Extracts the return value from an event transition config.
    *
@@ -3476,6 +3693,7 @@ export declare namespace Machine {
     | Effect.Services<StateActionReturn<Config, "exit">>
     | Effect.Services<StateInitialReturn<Config>>
     | Effect.Services<HistoryDefaultReturn<Config>>
+    | Effect.Services<ChoiceReturn<Config>>
     | InvokeRequirements<Config>
 
   /**
@@ -3738,6 +3956,30 @@ export declare namespace Machine {
     }
   }
 
+  /** Required implementation for a choice pseudo-state. */
+  export interface ChoiceStateConfig<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ChoiceId extends ChoiceIdentifier<States>
+  > {
+    readonly choice: {
+      /** Statically inspectable upper bound of every possible target. */
+      readonly targets: readonly [StateNodeIdentifier<States>, ...ReadonlyArray<StateNodeIdentifier<States>>]
+      readonly transition: (
+        context: ChoiceContext<States, Events, Emits, ChoiceId>
+      ) => ChoiceResult<States, any, any>
+    }
+    readonly entry?: never
+    readonly exit?: never
+    readonly invoke?: never
+    readonly always?: never
+    readonly on?: never
+    readonly onDone?: never
+    readonly output?: never
+    readonly initial?: never
+  }
+
   /**
    * Configuration accepted for a final state.
    *
@@ -3774,12 +4016,25 @@ export declare namespace Machine {
     FinalStateConfig<States, Events, Emits, StateId>
     : ActiveStateConfig<States, Events, Emits, StateId, E, R>
 
+  type HandlerNodeConfig<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Path extends StateNodeIdentifier<States>,
+    E,
+    R
+  > = Path extends ChoiceIdentifier<States> ? ChoiceStateConfig<States, Events, Emits, Path>
+    : Path extends StateIdentifier<States> ? HandlerConfig<States, Events, Emits, Path, E, R>
+    : never
+
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
 
   type HandlerStateId<
     States extends StateSchemas,
     Path extends string
   > = StateIdentifierFromPath<States, Path>
+
+  type HandlerNodeId<States extends StateSchemas, Path extends string> = Extract<Path, StateNodeIdentifier<States>>
 
   type HandlerConfigPart<Config> = {
     readonly [Key in keyof Config as Key extends "states" ? never : Key]: Config[Key]
@@ -3792,17 +4047,35 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     E,
     R,
-    StateId extends StateIdentifier<AllStates>
+    StateId extends StateNodeIdentifier<AllStates>
   > =
-    & HandlerConfig<AllStates, Events, Emits, StateId, E, R>
-    & (HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
-          readonly states?: never
-          readonly history?: never
-        }
-      : {
-        readonly states?: HandlerTree<AllStates, Children, Events, Emits, E, R, StateId>
-        readonly history?: HistoryDefaultConfig<AllStates, Events, Emits, StateId, Children>
+    & HandlerNodeConfig<AllStates, Events, Emits, StateId, E, R>
+    & (StateId extends ChoiceIdentifier<AllStates> ? {
+        readonly states?: never
+        readonly history?: never
       }
+      : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
+            readonly states?: never
+            readonly history?: never
+          }
+        : {
+          readonly states?: HandlerTree<
+            AllStates,
+            Children,
+            Events,
+            Emits,
+            E,
+            R,
+            Extract<StateId, StateIdentifier<AllStates>>
+          >
+          readonly history?: HistoryDefaultConfig<
+            AllStates,
+            Events,
+            Emits,
+            Extract<StateId, StateIdentifier<AllStates>>,
+            Children
+          >
+        }
       : {
         readonly states?: never
         readonly history?: never
@@ -3817,19 +4090,20 @@ export declare namespace Machine {
     R,
     Prefix extends string
   > = {
-    readonly [Key in ActiveStateKey<States>]?: HandlerNode<
+    readonly [Key in ActiveStateKey<States> | ChoiceStateKey<States>]?: HandlerNode<
       AllStates,
       States[Key],
       Events,
       Emits,
       E,
       R,
-      HandlerStateId<AllStates, JoinPath<Prefix, Key>>
+      HandlerNodeId<AllStates, JoinPath<Prefix, Key>>
     >
   }
 
   type HandlerNodeConfigKey =
     | "always"
+    | "choice"
     | "entry"
     | "exit"
     | "history"
@@ -4079,22 +4353,50 @@ export declare namespace Machine {
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<AllStates>,
+    StateId extends StateNodeIdentifier<AllStates>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
     Depth extends ReadonlyArray<unknown>
-  > =
-    & HandlerUnknownConfigKeyValidation<StateId, Config>
-    & HandlerOnKeyValidation<Events, StateId, Config>
-    & HandlerOnTargetValidation<StateId, Config>
-    & HandlerDirectTargetValidation<StateId, Config, "always">
-    & HandlerDirectTargetValidation<StateId, Config, "onDone">
-    & HandlerInvokeOutputValidation<Events, StateId, Config>
-    & HandlerInvokeEmitsValidation<Events, StateId, Config>
-    & HandlerInvokeSnapshotValidation<Events, StateId, Config>
-    & HandlerChildrenValidation<AllStates, Node, Events, Emits, StateId, Config, AvailableOutputStates, Depth>
-    & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
-    & HandlerRuntimeValidation<Events, Emits, StateId, Config>
+  > = StateId extends ChoiceIdentifier<AllStates> ?
+      & HandlerChoiceUnknownConfigKeyValidation<StateId, Config>
+      & HandlerChoiceTargetValidation<StateId, Config>
+      & HandlerRuntimeValidation<Events, Emits, StateId, Config>
+    : StateId extends StateIdentifier<AllStates> ?
+        & HandlerUnknownConfigKeyValidation<StateId, Config>
+        & HandlerOnKeyValidation<Events, StateId, Config>
+        & HandlerOnTargetValidation<StateId, Config>
+        & HandlerDirectTargetValidation<StateId, Config, "always">
+        & HandlerDirectTargetValidation<StateId, Config, "onDone">
+        & HandlerInvokeOutputValidation<Events, StateId, Config>
+        & HandlerInvokeEmitsValidation<Events, StateId, Config>
+        & HandlerInvokeSnapshotValidation<Events, StateId, Config>
+        & HandlerChildrenValidation<AllStates, Node, Events, Emits, StateId, Config, AvailableOutputStates, Depth>
+        & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
+        & HandlerRuntimeValidation<Events, Emits, StateId, Config>
+    : unknown
+
+  type HandlerChoiceUnknownConfigKeyValidation<
+    StateId extends string,
+    Config,
+    UnknownKeys extends string = Exclude<Extract<keyof Config, string>, "choice">
+  > = [UnknownKeys] extends [never] ? unknown : {
+    readonly [Key in UnknownKeys]: HandlerValidationError<
+      "Choice handler config contains an invalid key",
+      StateId,
+      Key
+    >
+  }
+
+  type HandlerChoiceTargetValidation<StateId extends string, Config> = Config extends {
+    readonly choice: infer Choice
+  } ? [UndeclaredTransitionTarget<Choice>] extends [never] ? unknown : {
+      readonly choice: HandlerValidationError<
+        "Choice resolver returns a target not listed in targets",
+        StateId,
+        UndeclaredTransitionTarget<Choice>
+      >
+    }
+    : unknown
 
   type HandlerInvokeOutputValidation<
     Events extends ReadonlyArray<TaggedSchema>,
@@ -4167,7 +4469,7 @@ export declare namespace Machine {
       States[Key],
       Events,
       Emits,
-      HandlerStateId<AllStates, JoinPath<Prefix, Key>>,
+      HandlerNodeId<AllStates, JoinPath<Prefix, Key>>,
       Config[Key],
       AvailableOutputStates,
       Depth
@@ -4258,14 +4560,26 @@ export declare namespace Machine {
     : false
     : true
 
+  type HandlerHasRequiredChoices<Node, Config> = Node extends {
+    readonly states: infer Children extends StateSchemas
+  } ? [ChoiceStateKey<Children>] extends [never] ? true
+    : Config extends { readonly states?: infer ChildrenConfig } ? [
+        Exclude<ChoiceStateKey<Children>, Extract<keyof NonNullable<ChildrenConfig>, string>>
+      ] extends [never] ? true
+      : false
+    : false
+    : true
+
   type HandlerImplementedStateId<
     AllStates extends StateSchemas,
     Node,
     StateId extends StateIdentifier<AllStates>,
     Config
-  > = [HistoryIdentifier<AllStates>] extends [never] ? StateId
+  > = [HistoryIdentifier<AllStates> | ChoiceIdentifier<AllStates>] extends [never] ? StateId
     : HandlerHasRequiredInitial<AllStates, StateId, Config> extends true ?
-      HandlerHasRequiredHistoryDefaults<Node, Config> extends true ? StateId : never
+      HandlerHasRequiredHistoryDefaults<Node, Config> extends true ?
+        HandlerHasRequiredChoices<Node, Config> extends true ? StateId : never
+      : never
     : never
 
   type HandlerNodeChildStateIds<
@@ -4287,6 +4601,7 @@ export declare namespace Machine {
     | Effect.Error<StateActionReturn<Config, "exit">>
     | Effect.Error<StateInitialReturn<Config>>
     | Effect.Error<HistoryDefaultReturn<Config>>
+    | Effect.Error<ChoiceReturn<Config>>
     | InvokeError<Config>
 
   type HandlerTreeError<
@@ -4510,7 +4825,9 @@ export declare namespace Machine {
    * @category utility types
    * @since 4.0.0
    */
-  export type AnyStateConfig = StateConfig<any, any, any, any, any, any, any>
+  export type AnyStateConfig =
+    | StateConfig<any, any, any, any, any, any, any>
+    | ChoiceStateConfig<any, any, any, any>
 
   /**
    * Runtime event-handler map stored for a single state tag.
@@ -4595,7 +4912,13 @@ export declare namespace Machine {
     EventTag extends TagOf<Events[number]>,
     E,
     R
-  > = Readonly<Record<PropertyKey, StateConfig<States, Events, Emits, StateId, EventTag, E, R>>>
+  > = Readonly<
+    Record<
+      PropertyKey,
+      | StateConfig<States, Events, Emits, StateId, EventTag, E, R>
+      | ChoiceStateConfig<States, Events, Emits, ChoiceIdentifier<States>>
+    >
+  >
 }
 
 const Proto = {
@@ -4677,6 +5000,18 @@ const flattenHandlers = (
     }
     validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
     validateTransitionTargets(stateNodes, path, "done", stateConfig.onDone)
+    validateTransitionTargets(stateNodes, path, "choice", stateConfig.choice)
+    const node = stateNodes.byPath.get(path)
+    if (node?.type === "choice") {
+      if (
+        typeof stateConfig.choice !== "object" || stateConfig.choice === null ||
+        !hasProperty(stateConfig.choice, "transition") || typeof stateConfig.choice.transition !== "function" ||
+        !hasProperty(stateConfig.choice, "targets") || !Array.isArray(stateConfig.choice.targets) ||
+        stateConfig.choice.targets.length === 0
+      ) {
+        throw new Error(`Machine choice state "${path}" requires a transition and at least one declared target`)
+      }
+    }
     handlers[path] = stateConfig as Machine.AnyStateConfig
     if (childConfig !== undefined) {
       const node = Model.getStateNodeDefinition(path, states[key])
@@ -4779,10 +5114,15 @@ const makeSnapshotBuilder = (
 ): unknown => {
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    const pseudoType = (states[key] as { readonly type?: unknown }).type
+    if (pseudoType === "history") {
       continue
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
+    if (pseudoType === "choice") {
+      builder[key] = () => Model.makeChoiceTarget(path, getParentPathRuntime(path))
+      continue
+    }
     const node = Model.getStateNodeDefinition(path, states[key])
     builder[key] = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) =>
@@ -4808,7 +5148,8 @@ const makeParallelSnapshotBuilder = (
     enumerable: false
   })
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    const pseudoType = (states[key] as { readonly type?: unknown }).type
+    if (pseudoType === "history" || pseudoType === "choice") {
       continue
     }
     if (hasProperty(regions, key)) {
@@ -4841,7 +5182,8 @@ const getParallelSnapshotBuilderRegions = (
     SnapshotBuilderStateTypeId
   ]
   for (const key of Object.keys(states)) {
-    if ((states[key] as { readonly type?: unknown }).type === "history") {
+    const pseudoType = (states[key] as { readonly type?: unknown }).type
+    if (pseudoType === "history" || pseudoType === "choice") {
       continue
     }
     if (!hasProperty(regions, key)) {
@@ -4992,8 +5334,16 @@ const makeLocalTargetChildBuilder = (
 ): unknown => {
   const parent = getTargetBuilderNode(stateNodes, parentPath)
   const builder: Record<string, unknown> = {}
-  for (const childPath of parent.children) {
+  for (
+    const childPath of Array.from(stateNodes.byPath.values())
+      .filter((node) => node.parent === parent.path && node.type !== "history")
+      .map((node) => node.path)
+  ) {
     const child = getTargetBuilderNode(stateNodes, childPath)
+    if (child.type === "choice") {
+      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
+      continue
+    }
     builder[child.key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
       if (child.type === "atomic" || child.type === "final") {
         return makeTargetWithValues(child.path, value, values)
@@ -5056,8 +5406,16 @@ const addBranchTargetChildren = (
   source: string
 ): void => {
   const parent = getTargetBuilderNode(stateNodes, parentPath)
-  for (const childPath of parent.children) {
+  for (
+    const childPath of Array.from(stateNodes.byPath.values())
+      .filter((node) => node.parent === parent.path && node.type !== "history")
+      .map((node) => node.path)
+  ) {
     const child = getTargetBuilderNode(stateNodes, childPath)
+    if (child.type === "choice") {
+      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
+      continue
+    }
     builder[child.key] = makeBranchTargetNodeBuilder(states, stateNodes, child.path, values, source)
   }
 }
@@ -5158,7 +5516,7 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
 ) => {
   const full = makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Machine.FullTargetBuilder<States>
   const history = makeHistoryTargetBuilder(states, "") as Machine.HistoryTargetBuilder<States>
-  return <Source extends Machine.StateIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
+  return <Source extends Machine.StateNodeIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
     ({
       local: makeLocalTargetBuilder(states, stateNodes, source),
       branch: makeBranchTargetBuilder(states, stateNodes, source),
@@ -6034,7 +6392,7 @@ export const planInitial: <
       readonly event: Machine.EventOf<Events> | InitialEvent
       readonly transitions: ReadonlyArray<
         Machine.RetainedTransition<
-          Machine.StateIdentifier<States>,
+          Machine.StateNodeIdentifier<States>,
           Machine.TagOf<Events[number]>,
           Machine.StateNodeIdentifier<States>
         >
@@ -6101,14 +6459,14 @@ export const transitionDefinitions = <M extends Machine.Any>(
   machine: M
 ): ReadonlyArray<
   Machine.TransitionDefinition<
-    Machine.StateIdentifier<Machine.States<M>>,
+    Machine.StateNodeIdentifier<Machine.States<M>>,
     Machine.TagOf<Machine.Events<M>[number]>,
     Machine.StateNodeIdentifier<Machine.States<M>>
   >
 > =>
   Model.transitionDefinitions(machine) as ReadonlyArray<
     Machine.TransitionDefinition<
-      Machine.StateIdentifier<Machine.States<M>>,
+      Machine.StateNodeIdentifier<Machine.States<M>>,
       Machine.TagOf<Machine.Events<M>[number]>,
       Machine.StateNodeIdentifier<Machine.States<M>>
     >
@@ -6243,7 +6601,7 @@ export const plan: <
       readonly event: Machine.EventOf<Events> | InitialEvent
       readonly transitions: ReadonlyArray<
         Machine.RetainedTransition<
-          Machine.StateIdentifier<States>,
+          Machine.StateNodeIdentifier<States>,
           Machine.TagOf<Events[number]>,
           Machine.StateNodeIdentifier<States>
         >

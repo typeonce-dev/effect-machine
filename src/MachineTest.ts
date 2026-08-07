@@ -454,7 +454,7 @@ const rawConfigurationPaths = <M extends AnyMachine>(
   }
   visit(snapshot)
   return Machine.stateNodes(machine)
-    .filter((node) => node.type !== "history" && active.has(node.path))
+    .filter((node) => node.type !== "history" && node.type !== "choice" && active.has(node.path))
     .map((node) => node.path) as ReadonlyArray<StatePath<M>>
 }
 
@@ -935,6 +935,7 @@ export interface MicrostepCoverageEvidence {
   readonly eventTriggered: number
   readonly alwaysTriggered: number
   readonly doneTriggered: number
+  readonly choiceTriggered: number
 }
 
 /**
@@ -975,7 +976,7 @@ export interface Coverage<M extends AnyMachine> {
   readonly states: StateCoverage<StatePath<M>>
   readonly transitions: CoverageSummary<
     TransitionCoverageItem<
-      StatePath<M>,
+      StateNodePath<M>,
       Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
       StateNodePath<M>
     >
@@ -1099,7 +1100,7 @@ export const coverage = <M extends AnyMachine>(
 ): Coverage<M> => {
   const traces = normalizeTraces(traceOrTraces)
   const stateNodes = Machine.stateNodes(machine)
-  const activeNodes = stateNodes.filter((node) => node.type !== "history").map(
+  const activeNodes = stateNodes.filter((node) => node.type !== "history" && node.type !== "choice").map(
     (node): StateCoverageItem<StatePath<M>> => ({
       path: node.path as StatePath<M>,
       type: node.type as StateCoverageItem["type"]
@@ -1115,7 +1116,7 @@ export const coverage = <M extends AnyMachine>(
       definition,
       index
     ): TransitionCoverageItem<
-      StatePath<M>,
+      StateNodePath<M>,
       Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
       StateNodePath<M>
     > => ({
@@ -1146,6 +1147,7 @@ export const coverage = <M extends AnyMachine>(
   let eventTriggered = 0
   let alwaysTriggered = 0
   let doneTriggered = 0
+  let choiceTriggered = 0
   let donePlans = 0
   let completionRecordObservations = 0
   const completionPaths = new Set<string>()
@@ -1195,7 +1197,8 @@ export const coverage = <M extends AnyMachine>(
       if (retained.target === undefined) targetlessTransitions += 1
       if (retained.trigger.type === "event") eventTriggered += 1
       else if (retained.trigger.type === "always") alwaysTriggered += 1
-      else doneTriggered += 1
+      else if (retained.trigger.type === "done") doneTriggered += 1
+      else choiceTriggered += 1
       if (retained.target !== undefined && nodeByPath.get(retained.target)?.type === "history") {
         historyTargets += 1
         if (retained.resolvedTarget !== undefined) resolvedHistoryTargets += 1
@@ -1290,7 +1293,8 @@ export const coverage = <M extends AnyMachine>(
       emitted: emittedEvents,
       eventTriggered,
       alwaysTriggered,
-      doneTriggered
+      doneTriggered,
+      choiceTriggered
     },
     completion: {
       donePlans,
@@ -1836,9 +1840,9 @@ export const verify = <M extends AnyMachine>(
           path
         )
       }
-      if (node.type === "history") {
+      if (node.type === "history" || node.type === "choice") {
         if (reportConfiguration) {
-          add("configuration.path", location, `${label} activates history pseudo-state "${path}"`, path)
+          add("configuration.path", location, `${label} activates ${node.type} pseudo-state "${path}"`, path)
         }
         return
       }
@@ -1993,7 +1997,7 @@ export const verify = <M extends AnyMachine>(
         }
         remembered.add(path)
         const node = byPath.get(path)
-        if (node === undefined || node.type === "history") {
+        if (node === undefined || node.type === "history" || node.type === "choice") {
           add(
             "history.path",
             location,
@@ -2367,7 +2371,10 @@ export const verify = <M extends AnyMachine>(
         add("microsteps.changed", location, "changed microstep has no control-state change or reentry evidence")
       }
       for (const transition of microstep.transitions) {
-        if (!before.active.has(String(transition.source))) {
+        if (
+          !before.active.has(String(transition.source)) &&
+          byPath.get(String(transition.source))?.type !== "choice"
+        ) {
           add(
             "microsteps.activeBefore",
             location,

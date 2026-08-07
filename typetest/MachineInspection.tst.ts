@@ -38,7 +38,7 @@ describe("Machine inspection", () => {
 
   it("preserves source paths and event tags for transition inspection", () => {
     const definition = Machine.transitionDefinitions(machine)[0]!
-    expect(definition.source).type.toBe<"root" | "root.idle">()
+    expect(definition.source).type.toBe<"root" | "root.idle" | "root.recent">()
     if (definition.trigger.type === "event") {
       expect(definition.trigger.event).type.toBe<"Reset">()
     }

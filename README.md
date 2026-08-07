@@ -147,7 +147,7 @@ masquerade as an internal result.
 
 ## Statechart structure
 
-`Machine.defineStates` accepts atomic, compound, parallel, final, and history
+`Machine.defineStates` accepts atomic, compound, parallel, final, choice, and history
 nodes:
 
 ```ts
@@ -204,6 +204,65 @@ parent, not on the final leaf.
 Put data on the narrowest state where it is valid. If several sibling phases
 share data, prefer storing it on their compound parent instead of copying it
 into every child state.
+
+### Choice states
+
+A choice is a transient, targetable decision point. Declare it with only
+`type: "choice"`; it has no schema, value, children, lifecycle actions, invoke,
+or event handlers. A choice is therefore absent from `StateIdentifier`, stable
+snapshots, configurations, and encoded snapshots.
+
+```ts
+const States = Machine.defineStates({
+  Flow: {
+    schema: State.cases.Flow,
+    initial: "Routing",
+    states: {
+      Routing: { type: "choice" },
+      Approved: State.cases.Approved,
+      Rejected: State.cases.Rejected
+    }
+  }
+})
+
+const machine = Machine.make({
+  states: States.states,
+  events: [Event],
+  initial: () =>
+    States.initial.Flow(
+      State.cases.Flow.make({ score: 80 }),
+      (flow) => flow.Routing()
+    )
+}).handle({
+  Flow: {
+    states: {
+      Routing: {
+        choice: {
+          targets: ["Flow.Approved", "Flow.Rejected"],
+          transition: ({ parent, target }) =>
+            parent.score >= 70
+              ? target.local.Approved(State.cases.Approved.make({}))
+              : target.local.Rejected(State.cases.Rejected.make({}))
+        }
+      }
+    }
+  }
+})
+```
+
+The resolver is ordinary TypeScript or an `Effect`. It receives the triggering
+lifecycle event, typed parent values, target builders, and the normal planning
+capabilities, but no `state` because the choice itself has no state value. Its
+declared `targets` are both a compile-time bound and inspectable graph edges.
+The resolver must return one of them; missing, malformed, or undeclared targets
+fail planning. Choice implementations are required before execution APIs are
+available.
+
+Initial, event, completion, always, history-default, and other choice
+transitions settle in the same macrostep. Chained choices use the normal
+infinite-transition limit. Choice nodes never run entry or exit actions and
+never become active while their resolution remains visible in traces and
+coverage as a `choice` transition trigger.
 
 ### History states
 

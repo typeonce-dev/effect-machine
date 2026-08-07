@@ -29,7 +29,7 @@ describe("MachineTest finite models", () => {
 
   it("models atomic, final, compound, and parallel nodes", () => {
     const state = {} as MachineTest.FiniteState
-    expect(state._tag).type.toBe<"Atomic" | "Final" | "Compound" | "Parallel" | "History">()
+    expect(state._tag).type.toBe<"Atomic" | "Final" | "Compound" | "Parallel" | "History" | "Choice">()
     if (state._tag === "Compound") {
       expect(state.initial).type.toBe<string>()
       expect(state.states).type.toBe<ReadonlyArray<MachineTest.FiniteState>>()
