@@ -8,17 +8,6 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends <Type>
 type Expect<Type extends true> = Type
 
 class ExternalService extends Context.Service<ExternalService, string>()("consumer/ExternalService") {}
-class InitialService extends Context.Service<InitialService, string>()("consumer/InitialService") {}
-
-class InitialFailure {
-  readonly _tag = "InitialFailure"
-}
-class TransitionFailure {
-  readonly _tag = "TransitionFailure"
-}
-class ActionFailure {
-  readonly _tag = "ActionFailure"
-}
 class RuntimeFailure {
   readonly _tag = "RuntimeFailure"
 }
@@ -62,13 +51,9 @@ const childMachine = Machine.make({
   initial: ({ value }) => ChildStates.initial.Done(ChildState.cases.Done.make({ value }))
 }).handle({
   Done: {
-    entry: ({ state }) =>
-      Machine.action(
-        Effect.gen(function*() {
-          const runtime = yield* Machine.runtime<{ readonly emits: typeof Internal.cases.ChildNotice.Type }>()
-          yield* runtime.sendParent(Internal.cases.ChildNotice.make({ value: state.value }))
-        })
-      ),
+    entry: ({ state }, enqueue) => {
+      enqueue.emit(Internal.cases.ChildNotice.make({ value: state.value }))
+    },
     output: ({ state }) => state.value
   }
 })
@@ -103,12 +88,7 @@ const machine = Machine.make({
   internalEvents: [Internal.cases.Loaded, Internal.cases.ChildCompleted, ...childMachine.emits],
   emits: [Emitted.cases.Notice],
   input: Schema.Struct({ seed: Schema.String }),
-  initial: ({ seed }) =>
-    Effect.gen(function*() {
-      yield* InitialService
-      if (seed.length < 0) return yield* Effect.fail(new InitialFailure())
-      return States.initial.Idle(State.cases.Idle.make({}))
-    })
+  initial: ({ seed: _seed }) => States.initial.Idle(State.cases.Idle.make({}))
 }).handle({
   Idle: {
     invoke: Machine.invoke({
@@ -131,15 +111,8 @@ const machine = Machine.make({
         states: {
           Editing: {
             on: {
-              Save: ({ event, target }) =>
-                Machine.action(
-                  Effect.gen(function*() {
-                    yield* ExternalService
-                    return yield* Effect.fail(new ActionFailure())
-                  }),
-                  target.local.Saving(State.cases.Saving.make({ value: event.value }))
-                ),
-              Loaded: () => Effect.fail(new TransitionFailure())
+              Save: ({ event, target }) => target.local.Saving(State.cases.Saving.make({ value: event.value })),
+              Loaded: () => undefined
             }
           },
           Saving: {
@@ -150,14 +123,10 @@ const machine = Machine.make({
                 onDone: ({ output }) => Internal.cases.ChildCompleted.make({ value: output })
               }),
             on: {
-              ChildNotice: ({ event, target }) =>
-                Machine.action(
-                  Effect.gen(function*() {
-                    const runtime = yield* Machine.runtime<{ readonly emits: typeof Emitted.cases.Notice.Type }>()
-                    yield* runtime.sendParent(Emitted.cases.Notice.make({ value: event.value }))
-                  }),
-                  target.local.Saving(State.cases.Saving.make({ value: event.value }))
-                ),
+              ChildNotice: ({ event, target }, enqueue) => {
+                enqueue.emit(Emitted.cases.Notice.make({ value: event.value }))
+                return target.local.Saving(State.cases.Saving.make({ value: event.value }))
+              },
               ChildCompleted: ({ event, target }) => target.full.Done(State.cases.Done.make({ value: event.value }))
             }
           }
@@ -170,12 +139,6 @@ const machine = Machine.make({
   }
 })
 
-class PackagedDeepService extends Context.Service<PackagedDeepService, string>()(
-  "consumer/PackagedDeepService"
-) {}
-class PackagedDeepFailure {
-  readonly _tag = "PackagedDeepFailure"
-}
 const PackagedDeepState = Schema.TaggedStruct("PackagedDeepState", {})
 const PackagedDeepStates = Machine.defineStates({
   n0: {
@@ -288,11 +251,7 @@ const packagedDeepMachine = Machine.make({
                                               n11: {
                                                 states: {
                                                   n12: {
-                                                    entry: () =>
-                                                      Effect.flatMap(
-                                                        PackagedDeepService,
-                                                        () => Effect.fail(new PackagedDeepFailure())
-                                                      ),
+                                                    entry: () => {},
                                                     output: () => "packaged"
                                                   }
                                                 }
@@ -320,12 +279,8 @@ const packagedDeepMachine = Machine.make({
     }
   }
 })
-type PackagedDeepErrorIsExact = Expect<
-  Equal<Machine.Machine.Error<typeof packagedDeepMachine>, PackagedDeepFailure>
->
-type PackagedDeepServicesAreExact = Expect<
-  Equal<Machine.Machine.Services<typeof packagedDeepMachine>, PackagedDeepService>
->
+type PackagedDeepErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof packagedDeepMachine>, never>>
+type PackagedDeepServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof packagedDeepMachine>, never>>
 type PackagedDeepUnhandledIsExact = Expect<
   Equal<Machine.Machine.UnhandledStates<typeof packagedDeepMachine>, never>
 >
@@ -334,7 +289,6 @@ void Machine.planInitial(packagedDeepMachine)
 const runtime = Atom.runtime(
   Layer.mergeAll(
     Layer.succeed(ExternalService, "provided"),
-    Layer.succeed(InitialService, "provided"),
     Layer.effectDiscard(Effect.fail(new RuntimeFailure()))
   )
 )
@@ -350,9 +304,6 @@ type Failure = Atom.Failure<typeof machineAtom.result>
 type StateIsExact = Expect<Equal<StateSuccess, Snapshot>>
 type EventsArePublicOnly = Expect<Equal<SendEvent, typeof Event.Type>>
 type OutputIsExact = Expect<Equal<Output, string>>
-type InitialErrorIsPreserved = Expect<Equal<Extract<Failure, InitialFailure>, InitialFailure>>
-type TransitionErrorIsPreserved = Expect<Equal<Extract<Failure, TransitionFailure>, TransitionFailure>>
-type ActionErrorIsPreserved = Expect<Equal<Extract<Failure, ActionFailure>, ActionFailure>>
 type RuntimeErrorIsPreserved = Expect<Equal<Extract<Failure, RuntimeFailure>, RuntimeFailure>>
 type FailureIsNotUnknown = Expect<Equal<unknown extends Failure ? true : false, false>>
 type MachineServicesAreNotAny = Expect<
@@ -371,16 +322,13 @@ Bound.make(erased, { seed: "initial" })
 
 void machineAtom
 export type {
-  ActionErrorIsPreserved,
   EventsArePublicOnly,
   FailureIsNotUnknown,
-  InitialErrorIsPreserved,
   MachineServicesAreNotAny,
   OutputIsExact,
   PackagedDeepErrorIsExact,
   PackagedDeepServicesAreExact,
   PackagedDeepUnhandledIsExact,
   RuntimeErrorIsPreserved,
-  StateIsExact,
-  TransitionErrorIsPreserved
+  StateIsExact
 }

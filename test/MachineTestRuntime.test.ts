@@ -291,37 +291,6 @@ describe("MachineTest runtime commands", () => {
       assert.strictEqual(transcript.final.status, "stopped")
     }))
 
-  it.effect("supports Effectful inspection of observable emission logs", () =>
-    Effect.gen(function*() {
-      const log = yield* Ref.make<ReadonlyArray<number>>([])
-      const machine = makeCounterMachine().handle({
-        Counter: {
-          on: {
-            Add: ({ event, state, target }) =>
-              Machine.action(
-                Ref.update(log, (values) => [...values, event.amount]),
-                target.full.Counter(new Counter({ count: state.count + event.amount }))
-              )
-          }
-        }
-      })
-      const ref = yield* Machine.start(machine)
-      const transcript = yield* MachineTest.runRuntimeCommands(ref, [MachineTest.sendCommand(new Add({ amount: 3 }))], {
-        initialModel: 0,
-        transition: (model) =>
-          Effect.succeed({
-            model: model + 3,
-            expected: [3],
-            synchronize: MachineTest.RuntimeSynchronization.next
-          }),
-        inspect: () => Ref.get(log),
-        assert: ({ actual, expected }) => Effect.sync(() => assert.deepStrictEqual(actual.inspected, expected))
-      })
-
-      assert.deepStrictEqual(transcript.records[0]?.actual.inspected, [3])
-      yield* ref.stop
-    }))
-
   it.effect("retains a replayable prefix and attempted command in typed failures", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())

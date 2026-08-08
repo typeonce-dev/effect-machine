@@ -65,8 +65,8 @@ class methods or nominal class identity.
   transport boundary.
 - Return snapshots or typed target-builder results from transitions. Do not
   return raw decoded state values.
-- Effects returned by handlers are planning Effects. Wrap external effects in
-  `Machine.action`.
+- Transition and lifecycle callbacks are synchronous. Put asynchronous work in
+  an invoked Effect, actor, or child machine and map its result to an event.
 - Put data on the narrowest state where it is valid. Put data shared by sibling
   phases on their compound parent.
 - Declare finality only in the state definition. Do not put `type: "final"` in
@@ -101,9 +101,8 @@ its extra control is required:
   `Machine.childAddress<Event>(id)` for a low-level process address. An
   invocation is addressable only when `Machine.invoke` receives that address
   explicitly.
-- Stage external effects with `Machine.action`; its optional second argument is
-  the same operation with a returned transition value, not a separate action
-  API.
+- Use the callback's `enqueue` argument for `raise`, `emit`, `sendTo`, and
+  `stop`. These operations record closed actor commands and do not run Effects.
 
 ## Atomic, compound, parallel, and history states
 
@@ -389,8 +388,8 @@ BufferReady: ({ snapshot, target }) =>
 
 Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
 `States.getSnapshot` helpers for cross-region reads. Parallel transitions
-selected in one microstep receive the same capture. Effectful handlers retain
-that captured value rather than consulting live runtime state.
+selected in one microstep receive the same capture. Synchronous handlers use
+that captured value and cannot consult live runtime state later.
 
 Do not expect `snapshot` in entry, exit, invoke, initializer, history-default,
 or choice contexts. Choice is an important soundness boundary: a startup or
@@ -423,30 +422,25 @@ it through every phase.
 
 ## Planning, actions, raised events, and emissions
 
-A transition may return a target directly or compute it in an Effect:
+A transition returns a target synchronously:
 
 ```ts
-Submit: Effect.fn(function* ({ state, target }) {
-  const service = yield* SaveService
-  const canSave = yield* service.validate(state.draft)
-
-  return canSave ? target.local.Saving(new Saving({ draft: state.draft })) : undefined
-})
+Submit: ({ state, target }) =>
+  state.valid ? target.local.Saving(new Saving({ draft: state.draft })) : undefined
 ```
 
-That Effect runs during planning. External side effects must be staged:
+Closed statechart and actor operations use `enqueue`:
 
 ```ts
-Submit: ({ target }) => Machine.action(writeAuditLog, target.local.Saving(new Saving({})))
+Submit: ({ target }, enqueue) => {
+  enqueue.emit(new SaveRequested({}))
+  return target.local.Saving(new Saving({}))
+}
 ```
 
-`Machine.action(effect)` stages the action and returns `void`.
-`Machine.action(effect, next)` stages the same action and returns `next`, which
-is convenient when the transition does not otherwise need an Effect generator.
-
-The managed runtime executes staged actions before publishing the planned
-state. If an action fails, it retains the previous state and suppresses planned
-emissions.
+For asynchronous validation or persistence, invoke an Effect or child machine
+from the state and handle its typed success or failure event in a later
+transition. This keeps `(state, event) => [nextState, commands]` synchronous.
 
 Plans have a discriminated completion result:
 

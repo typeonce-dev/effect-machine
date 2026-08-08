@@ -339,7 +339,7 @@ export type ExecutionServices<Requirements> =
   | Exclude<ActionServices<Requirements>, MachineRuntimeRequirement>
 
 /**
- * Runtime capability available to machine actions.
+ * Managed runtime capability used to deliver raised and emitted events.
  *
  * @category models
  * @since 4.0.0
@@ -361,13 +361,53 @@ export interface Runtime<in Events, in Emits> {
 }
 
 /**
+ * Synchronous commands available while a machine transition is being
+ * selected. Enqueuing only records statechart and actor operations; it never
+ * executes an Effect.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Enqueue<in Events, in Emits> {
+  /** Raises an event inside the current macrostep. */
+  readonly raise: (event: Events) => void
+
+  /** Emits an event through the machine's parent boundary. */
+  readonly emit: (event: Emits) => void
+
+  /** Sends an event to an invoked child after the transition is selected. */
+  readonly sendTo: {
+    <Child extends ChildMachine.Any>(child: Child, event: ChildMachine.Event<Child>): void
+    <Address extends ChildAddress<never>>(child: Address, event: ChildAddress.Event<Address>): void
+  }
+
+  /** Stops an invoked child after the transition is selected. */
+  readonly stop: {
+    <Child extends ChildMachine.Any>(child: Child): void
+    <Event>(child: ChildAddress<Event>): void
+  }
+}
+
+/** A closed actor command recorded by a synchronous machine transition. */
+export type Command =
+  | {
+    readonly _tag: "SendTo"
+    readonly child: ChildMachine.Any | ChildAddress<never>
+    readonly event: unknown
+  }
+  | {
+    readonly _tag: "Stop"
+    readonly child: ChildMachine.Any | ChildAddress<never>
+  }
+
+/**
  * Namespace containing type-level members associated with `Runtime`.
  *
  * @since 4.0.0
  */
 export declare namespace Runtime {
   /**
-   * Protocol annotation accepted by {@link runtime}.
+   * Protocol annotation for managed event delivery.
    *
    * @category models
    * @since 4.0.0
@@ -2819,21 +2859,6 @@ export declare namespace Machine {
   export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> = EventOf<Events> | InitialEvent
 
   /**
-   * Runtime capability specialized to a machine's event protocols.
-   *
-   * @category utility types
-   * @since 4.0.0
-   */
-  export type RuntimeEffect<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>
-  > = Effect.Effect<
-    Runtime<EventOf<Events>, EmitOf<Emits>>,
-    never,
-    Runtime.Requirement<EventOf<Events>, EmitOf<Emits>>
-  >
-
-  /**
    * Extracts a state value from a state definition by identifier.
    *
    * @category utility types
@@ -3555,39 +3580,6 @@ export declare namespace Machine {
   }
 
   /**
-   * Stages an Effect to run after the current machine step is planned.
-   *
-   * The two-argument overload returns `next` after staging the Effect, which is
-   * useful when a handler should stage one action and return a target without
-   * introducing an Effect generator.
-   *
-   * @category models
-   * @since 4.0.0
-   */
-  export interface Action {
-    <E, R>(effect: Effect.Effect<void, E, R>): Effect.Effect<void, never, ActionRequirement<E, R>>
-    <E, R, Next>(
-      effect: Effect.Effect<void, E, R>,
-      next: Next
-    ): Effect.Effect<Next, never, ActionRequirement<E, R>>
-  }
-
-  /**
-   * Planning capabilities shared by transition and lifecycle callbacks.
-   *
-   * @category models
-   * @since 4.0.0
-   */
-  export interface PlanningCapabilities<Events, Emits> {
-    readonly raise: (
-      event: Events
-    ) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError, Runtime.Requirement<Events, Emits>>
-    readonly emit: (
-      event: Emits
-    ) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError, Runtime.Requirement<Events, Emits>>
-  }
-
-  /**
    * Context passed to a state/event handler.
    *
    * @category models
@@ -3601,14 +3593,13 @@ export declare namespace Machine {
     EventTag extends TagOf<Events[number]>,
     E,
     R
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
     readonly event: EventByTag<Events, EventTag>
-    readonly runtime: RuntimeEffect<Events, Emits>
 
     /**
      * Provides typed builders for choosing the next active state from this
@@ -3630,12 +3621,11 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
-    readonly runtime: RuntimeEffect<Events, Emits>
   }
 
   /**
@@ -3654,7 +3644,6 @@ export declare namespace Machine {
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
-    readonly runtime: RuntimeEffect<Events, Emits>
   }
 
   /**
@@ -3690,14 +3679,13 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
-    readonly runtime: RuntimeEffect<Events, Emits>
 
     /**
      * Provides typed builders for choosing the next active state from this
@@ -3720,7 +3708,7 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly state: StateByIdentifier<States, StateId>
     readonly parent: ParentStateValue<States, StateId>
     readonly parents: ParentStateValues<States, StateId>
@@ -3728,7 +3716,6 @@ export declare namespace Machine {
     readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
     readonly output: CompletionOutputByIdentifier<States, StateId>
-    readonly runtime: RuntimeEffect<Events, Emits>
 
     /**
      * Provides typed builders for choosing the next active state after this
@@ -3746,7 +3733,7 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     ChoiceId extends ChoiceIdentifier<States>
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly parent: StateByIdentifier<
       States,
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
@@ -3758,7 +3745,6 @@ export declare namespace Machine {
       >
     }
     readonly event: LifecycleEvent<Events>
-    readonly runtime: RuntimeEffect<Events, Emits>
     readonly target: TargetBuilder<States, ChoiceId>
   }
 
@@ -3821,7 +3807,7 @@ export declare namespace Machine {
    * @category utility types
    * @since 4.0.0
    */
-  export type StateActionResult<E, R> = void | Effect.Effect<void, E, R>
+  export type StateActionResult<E, R> = undefined
 
   /**
    * Return value accepted from a machine initial state function.
@@ -3833,13 +3819,6 @@ export declare namespace Machine {
     | Snapshot<States>
     | InitialSnapshot<States>
     | StateConstruction<Snapshot<States> | InitialSnapshot<States>>
-    | Effect.Effect<
-      | Snapshot<States>
-      | InitialSnapshot<States>
-      | StateConstruction<Snapshot<States> | InitialSnapshot<States>>,
-      E,
-      R
-    >
 
   /** Initial snapshots may transiently terminate in a declared choice node. */
   export type InitialSnapshot<States extends StateSchemas> = {
@@ -3870,23 +3849,8 @@ export declare namespace Machine {
       | ChoiceTarget<States, ChoiceIdentifier<States>>
     >
     | void
-    | Effect.Effect<
-      | Snapshot<States>
-      | Target<States, StateIdentifier<States>>
-      | HistoryTarget<States, HistoryIdentifier<States>>
-      | ChoiceTarget<States, ChoiceIdentifier<States>>
-      | StateConstruction<
-        | Snapshot<States>
-        | Target<States, StateIdentifier<States>>
-        | HistoryTarget<States, HistoryIdentifier<States>>
-        | ChoiceTarget<States, ChoiceIdentifier<States>>
-      >
-      | void,
-      E,
-      R
-    >
 
-  /** A choice resolver must always select a typed target, directly or through Effect. */
+  /** A choice resolver must always select a typed target synchronously. */
   export type ChoiceResult<States extends StateSchemas, E, R> =
     | Snapshot<States>
     | Target<States, StateIdentifier<States>>
@@ -3897,20 +3861,6 @@ export declare namespace Machine {
       | Target<States, StateIdentifier<States>>
       | HistoryTarget<States, HistoryIdentifier<States>>
       | ChoiceTarget<States, ChoiceIdentifier<States>>
-    >
-    | Effect.Effect<
-      | Snapshot<States>
-      | Target<States, StateIdentifier<States>>
-      | HistoryTarget<States, HistoryIdentifier<States>>
-      | ChoiceTarget<States, ChoiceIdentifier<States>>
-      | StateConstruction<
-        | Snapshot<States>
-        | Target<States, StateIdentifier<States>>
-        | HistoryTarget<States, HistoryIdentifier<States>>
-        | ChoiceTarget<States, ChoiceIdentifier<States>>
-      >,
-      E,
-      R
     >
 
   /**
@@ -4274,31 +4224,46 @@ export declare namespace Machine {
     E,
     R
   > = {
-    readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
-    readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
+    readonly entry?: (
+      context: StateActionContext<States, Events, Emits, StateId>,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ) => StateActionResult<any, any>
+    readonly exit?: (
+      context: StateActionContext<States, Events, Emits, StateId>,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ) => StateActionResult<any, any>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
     readonly always?:
-      | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
+      | ((
+        context: AlwaysContext<States, Events, Emits, StateId>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+      ) => HandlerResult<States, any, any>)
       | {
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: AlwaysContext<States, Events, Emits, StateId>
+          context: AlwaysContext<States, Events, Emits, StateId>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>
       }
     readonly onDone?:
-      | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, any, any>)
+      | ((
+        context: DoneContext<States, Events, Emits, StateId>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+      ) => HandlerResult<States, any, any>)
       | {
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: DoneContext<States, Events, Emits, StateId>
+          context: DoneContext<States, Events, Emits, StateId>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>
       }
     readonly on?: {
       readonly [EventTag in TagOf<Events[number]>]?:
         | ((
-          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
+          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>)
         | {
           readonly reenter?: boolean
@@ -4309,7 +4274,8 @@ export declare namespace Machine {
            */
           readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
           readonly transition: (
-            context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
+            context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+            enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
           ) => HandlerResult<States, any, any>
         }
     }
@@ -4343,9 +4309,10 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
-  > = (context: StateInitialContext<States, Events, Emits, StateId>) =>
-    | StateInitialValue<States, StateId>
-    | Effect.Effect<StateInitialValue<States, StateId>, any, any>
+  > = (
+    context: StateInitialContext<States, Events, Emits, StateId>,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) => StateInitialValue<States, StateId>
 
   /** Context used only when a history node has no previously captured record. */
   export interface HistoryDefaultContext<
@@ -4353,9 +4320,8 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     ParentId extends StateIdentifier<States>
-  > extends PlanningCapabilities<EventOf<Events>, EmitOf<Emits>> {
+  > {
     readonly event: LifecycleEvent<Events>
-    readonly runtime: RuntimeEffect<Events, Emits>
     readonly target: HistoryDefaultTargetBuilder<States, ParentId>
     readonly parent: ParentId
   }
@@ -4372,15 +4338,12 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     ParentId extends StateIdentifier<States>
-  > = (context: HistoryDefaultContext<States, Events, Emits, ParentId>) =>
+  > = (
+    context: HistoryDefaultContext<States, Events, Emits, ParentId>,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) =>
     | CompleteSnapshotContaining<States, ParentId>
     | StateConstruction<CompleteSnapshotContaining<States, ParentId>>
-    | Effect.Effect<
-      | CompleteSnapshotContaining<States, ParentId>
-      | StateConstruction<CompleteSnapshotContaining<States, ParentId>>,
-      any,
-      any
-    >
 
   /** Default implementations keyed by direct history child. */
   export type HistoryDefaultConfig<
@@ -4406,7 +4369,8 @@ export declare namespace Machine {
       /** Statically inspectable upper bound of every possible target. */
       readonly targets: readonly [StateNodeIdentifier<States>, ...ReadonlyArray<StateNodeIdentifier<States>>]
       readonly transition: (
-        context: ChoiceContext<States, Events, Emits, ChoiceId>
+        context: ChoiceContext<States, Events, Emits, ChoiceId>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
       ) => ChoiceResult<States, any, any>
     }
     readonly entry?: never
@@ -4431,7 +4395,10 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
   > = {
-    readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<any, any>
+    readonly entry?: (
+      context: StateActionContext<States, Events, Emits, StateId>,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ) => StateActionResult<any, any>
     readonly exit?: never
     readonly always?: never
     readonly onDone?: never
@@ -5144,13 +5111,17 @@ export declare namespace Machine {
   > = Readonly<
     Record<
       PropertyKey,
-      | ((context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>) => HandlerResult<States, E, R>)
+      | ((
+        context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+      ) => HandlerResult<States, E, R>)
       | {
         readonly reenter?: boolean
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>
+          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, E, R>
       }
     >
@@ -5171,23 +5142,37 @@ export declare namespace Machine {
     E,
     R
   > {
-    readonly entry?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
-    readonly exit?: (context: StateActionContext<States, Events, Emits, StateId>) => StateActionResult<E, R>
+    readonly entry?: (
+      context: StateActionContext<States, Events, Emits, StateId>,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ) => StateActionResult<E, R>
+    readonly exit?: (
+      context: StateActionContext<States, Events, Emits, StateId>,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ) => StateActionResult<E, R>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
     readonly always?:
-      | ((context: AlwaysContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
+      | ((
+        context: AlwaysContext<States, Events, Emits, StateId>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+      ) => HandlerResult<States, E, R>)
       | {
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: AlwaysContext<States, Events, Emits, StateId>
+          context: AlwaysContext<States, Events, Emits, StateId>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, E, R>
       }
     readonly onDone?:
-      | ((context: DoneContext<States, Events, Emits, StateId>) => HandlerResult<States, E, R>)
+      | ((
+        context: DoneContext<States, Events, Emits, StateId>,
+        enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+      ) => HandlerResult<States, E, R>)
       | {
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: DoneContext<States, Events, Emits, StateId>
+          context: DoneContext<States, Events, Emits, StateId>,
+          enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, E, R>
       }
     readonly output?:
@@ -6647,22 +6632,22 @@ export const invokeMachine: {
 }) as any
 
 /**
- * Plans the initial state for a machine without running deferred actions.
+ * Plans the initial state for a machine without executing actor commands.
  *
  * **Details**
  *
- * The returned plan contains the settled initial snapshot, staged actions,
+ * The returned plan contains the settled initial snapshot, actor commands,
  * emitted events, optional final output, and every startup microstep. Planning
  * may evaluate transition logic and follow completion, eventless, and
- * raised-event steps, but it does not execute effects passed to `action`.
+ * raised-event steps. Transition callbacks are evaluated synchronously.
  * `startingState` and `initialEntryPaths` describe the normalized
  * configuration before entry callbacks and settlement begin.
  *
  * **Gotchas**
  *
- * Callers that execute a plan manually must run actions sequentially before
- * publishing its state or delivering its emitted events. `start` performs this
- * protocol automatically.
+ * `start` executes the closed command list as part of the managed actor commit
+ * protocol. Manual planners may inspect commands but need a running actor scope
+ * to execute child-addressed operations.
  *
  * @see {@link plan} for planning a received event.
  * @see {@link start} for the managed runtime protocol.
@@ -6707,9 +6692,7 @@ export const planInitial: <
     readonly startingState: Machine.Snapshot<States>
     readonly initialEntryPaths: ReadonlyArray<Machine.StateIdentifier<States>>
     readonly state: Machine.Snapshot<States>
-    readonly actions: ReadonlyArray<
-      Effect.Effect<void, ActionError<InitialR | R>, ActionServices<InitialR | R>>
-    >
+    readonly commands: ReadonlyArray<Command>
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
     readonly microsteps: ReadonlyArray<{
       readonly next: Machine.Snapshot<States>
@@ -6721,9 +6704,7 @@ export const planInitial: <
           Machine.StateNodeIdentifier<States>
         >
       >
-      readonly actions: ReadonlyArray<
-        Effect.Effect<void, ActionError<InitialR | R>, ActionServices<InitialR | R>>
-      >
+      readonly commands: ReadonlyArray<Command>
       readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
       readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
       readonly exitPaths: ReadonlyArray<string>
@@ -6742,7 +6723,7 @@ export const planInitial: <
     }
   ),
   InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
-  ExcludeCompatibleRuntime<PlanningServices<InitialR | R>, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
+  never
 > = internalPlanner.planInitial as any
 
 /**
@@ -6897,7 +6878,7 @@ export const enabled = <
 ): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine as any, state)
 
 /**
- * Plans the next state snapshot without running deferred actions.
+ * Plans the next state snapshot synchronously.
  *
  * **Details**
  *
@@ -6908,11 +6889,10 @@ export const enabled = <
  *
  * **Gotchas**
  *
- * `plan` returns data; it does not implement the runtime commit protocol. Run
- * actions sequentially, publish `next` only after they succeed, and then
- * deliver `emittedEvents`. A failed action must retain the previously
- * published state and suppress emissions. Events with no enabled transition
- * are ignored and produce an unchanged plan.
+ * `plan` returns data; it does not implement the actor commit protocol.
+ * `start` executes child commands, publishes `next`, and then delivers
+ * `emittedEvents`. Events with no enabled transition are ignored and produce
+ * an unchanged plan.
  *
  * @see {@link planInitial} for planning machine startup.
  * @see {@link start} for managed execution and lifecycle observation.
@@ -6956,7 +6936,7 @@ export const plan: <
 ) => Effect.Effect<
   & {
     readonly next: Machine.Snapshot<States>
-    readonly actions: ReadonlyArray<Effect.Effect<void, ActionError<R>, ActionServices<R>>>
+    readonly commands: ReadonlyArray<Command>
     readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
     readonly microsteps: ReadonlyArray<{
       readonly next: Machine.Snapshot<States>
@@ -6968,7 +6948,7 @@ export const plan: <
           Machine.StateNodeIdentifier<States>
         >
       >
-      readonly actions: ReadonlyArray<Effect.Effect<void, ActionError<R>, ActionServices<R>>>
+      readonly commands: ReadonlyArray<Command>
       readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
       readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
       readonly exitPaths: ReadonlyArray<string>
@@ -6987,115 +6967,8 @@ export const plan: <
     }
   ),
   E | InfiniteTransitionError | MachineSchemaDecodeError,
-  ExcludeCompatibleRuntime<PlanningServices<R>, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
+  never
 > = internalPlanner.plan as any
-
-/**
- * Defers an effectful action until the current machine step is planned.
- *
- * **Details**
- *
- * The action's error and service requirements are retained in the machine
- * type without becoming requirements of `plan` or `planInitial`. The managed
- * runtime executes staged actions sequentially before publishing the planned
- * state. Pass a second argument when the planning Effect should return that
- * value after staging.
- *
- * **Example** (Typed staged action)
- *
- * ```ts
- * import { Context, Effect } from "effect"
- * import { Machine } from "@typeonce/effect-machine"
- *
- * class Audit extends Context.Service<Audit, {
- *   readonly write: Effect.Effect<void, "AuditError">
- * }>()("example/Audit") {}
- *
- * const writeAudit = Machine.action(
- *   Effect.flatMap(Audit, (audit) => audit.write)
- * )
- * ```
- *
- * @see {@link plan} for inspecting staged actions without executing them.
- * @category combinators
- * @since 4.0.0
- */
-export const action: Machine.Action = (<E, R, Next>(
-  effect: Effect.Effect<void, E, R>,
-  ...next: readonly [Next] | readonly []
-): Effect.Effect<void | Next, never, ActionRequirement<E, R>> => {
-  const staged = internalPlanner.action(effect)
-  return next.length === 0 ? staged : Effect.as(staged, next[0])
-}) as Machine.Action
-
-const processLocal = (operation: string): Effect.Effect<never> => Effect.die(new ProcessLocalErrorValue({ operation }))
-
-const standaloneProcessRuntime = internalRuntime.MachineRuntime.of({
-  self: {
-    id: "Machine.runActions",
-    sessionId: "Machine.runActions",
-    stop: processLocal("stop self"),
-    send: () => processLocal("send to self")
-  },
-  parent: undefined,
-  spawn: () => processLocal("spawn"),
-  sendParent: () => processLocal("send to parent"),
-  sendTo: () => processLocal("send to child"),
-  stopChild: () => processLocal("stop child"),
-  failCause: () => processLocal("fail process")
-} as internalRuntime.ProcessScope<any>)
-
-/**
- * Runs staged machine actions sequentially with the supplied runtime.
- *
- * **When to use**
- *
- * Use when you implement a commit protocol around `plan` or `planInitial` and
- * need to execute their staged actions before publishing the planned snapshot.
- *
- * **Gotchas**
- *
- * This function only runs actions. The caller remains responsible for
- * publishing the planned state and delivering planned emitted events after all
- * actions succeed. Process-local operations such as `spawn`, `sendTo`, and
- * `stopChild` fail with `ProcessLocalError` because no managed machine process
- * owns the actions.
- *
- * @see {@link plan} for creating a transition plan.
- * @see {@link planInitial} for creating an initial plan.
- * @category running
- * @since 4.0.0
- */
-export const runActions = <E, R, Events, Emits>(
-  actions: Iterable<Effect.Effect<void, E, R>>,
-  runtime: Runtime<Events, Emits>
-): Effect.Effect<
-  void,
-  E | ProcessLocalError,
-  Exclude<ExcludeCompatibleRuntime<R, Events, Emits>, MachineRuntimeRequirement>
-> =>
-  internalRuntime.provideMachineRuntime(
-    internalPlanner.runActions(actions, runtime),
-    standaloneProcessRuntime
-  ).pipe(
-    Effect.catchDefect((defect) =>
-      defect instanceof ProcessLocalErrorValue
-        ? Effect.fail(defect)
-        : Effect.die(defect)
-    )
-  )
-
-/**
- * Returns the typed runtime capability for the current machine.
- *
- * @category combinators
- * @since 4.0.0
- */
-export const runtime = <const Protocol extends Runtime.Protocol = {}>(): Effect.Effect<
-  Runtime<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>,
-  never,
-  Runtime.Requirement<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>
-> => internalPlanner.runtime<Protocol>()
 
 /**
  * Creates a one-shot child process from an Effect.

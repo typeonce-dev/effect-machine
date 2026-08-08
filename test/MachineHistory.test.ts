@@ -134,8 +134,12 @@ const makeCheckoutMachine = (
     initial: () => initial
   }).handle({
     checkout: {
-      entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:checkout"))),
-      exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:checkout"))),
+      entry: () => {
+        lifecycle?.push("entry:checkout")
+      },
+      exit: () => {
+        lifecycle?.push("exit:checkout")
+      },
       history: {
         recent: {
           default: () => {
@@ -169,24 +173,36 @@ const makeCheckoutMachine = (
           }
         },
         payment: {
-          entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:payment"))),
-          exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:payment"))),
+          entry: () => {
+            lifecycle?.push("entry:payment")
+          },
+          exit: () => {
+            lifecycle?.push("exit:payment")
+          },
           initial: ({ state }) => {
             onInitialize?.()
             return new CardEntry({ cardNumber: `fresh-${state.attempt}` })
           },
           states: {
             verifying: {
-              entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:verifying"))),
-              exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:verifying")))
+              entry: () => {
+                lifecycle?.push("entry:verifying")
+              },
+              exit: () => {
+                lifecycle?.push("exit:verifying")
+              }
             }
           }
         }
       }
     },
     support: {
-      entry: () => Machine.action(Effect.sync(() => lifecycle?.push("entry:support"))),
-      exit: () => Machine.action(Effect.sync(() => lifecycle?.push("exit:support"))),
+      entry: () => {
+        lifecycle?.push("entry:support")
+      },
+      exit: () => {
+        lifecycle?.push("exit:support")
+      },
       on: {
         ResumeShallow: ({ target }) => target.history.checkout.recent(),
         ResumeDeep: ({ target }) => target.history.checkout.exact()
@@ -441,44 +457,6 @@ const nestedHistoryMachine = Machine.make({
     }
   }
 })
-
-const makeEffectfulInitializerMachine = (initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>) =>
-  Machine.make({
-    states: CheckoutStates.states,
-    events: [Leave, ResumeShallow],
-    initial: () => initial
-  }).handle({
-    checkout: {
-      history: {
-        recent: {
-          default: () => checkoutShipping("fallback", "fallback")
-        },
-        exact: {
-          default: () => checkoutShipping("fallback", "fallback")
-        }
-      },
-      on: {
-        Leave: ({ target }) => target.full.support(new Support({ ticket: "ticket-1" }))
-      },
-      states: {
-        payment: {
-          initial: ({ state }) =>
-            Effect.gen(function*() {
-              const defaults = yield* CardDefaults
-              if (state.attempt < 0) {
-                return yield* new InitializerFailure({ attempt: state.attempt })
-              }
-              return new CardEntry({ cardNumber: defaults.cardNumber })
-            })
-        }
-      }
-    },
-    support: {
-      on: {
-        ResumeShallow: ({ target }) => target.history.checkout.recent()
-      }
-    }
-  })
 
 describe("Machine history states", () => {
   it.effect("uses the typed default before a history record exists", () =>
@@ -765,30 +743,6 @@ describe("Machine history states", () => {
           "Machine history default for \"checkout.exact\" returned a configuration that does not contain owner state \"checkout\""
         )
       }
-    }))
-
-  it.effect("runs effectful shallow initializers with their service and error channels", () =>
-    Effect.gen(function*() {
-      const defaults = CardDefaults.of({ cardNumber: "4242" })
-      const original = checkoutPaymentVerifying("order-1", 4, "challenge-7")
-      const machine = makeEffectfulInitializerMachine(original)
-      const left = yield* Machine.plan(machine, original, new Leave({})).pipe(
-        Effect.provideService(CardDefaults, defaults)
-      )
-      const resumed = yield* Machine.plan(machine, left.next, new ResumeShallow({})).pipe(
-        Effect.provideService(CardDefaults, defaults)
-      )
-      assert.deepStrictEqual((resumed.next as any).state.state.value, new CardEntry({ cardNumber: "4242" }))
-
-      const invalid = checkoutPaymentVerifying("order-2", -1, "challenge-8")
-      const invalidLeft = yield* Machine.plan(machine, invalid, new Leave({})).pipe(
-        Effect.provideService(CardDefaults, defaults)
-      )
-      const error = yield* Machine.plan(machine, invalidLeft.next, new ResumeShallow({})).pipe(
-        Effect.provideService(CardDefaults, defaults),
-        Effect.flip
-      )
-      assert.deepStrictEqual(error, new InitializerFailure({ attempt: -1 }))
     }))
 
   it.effect("exits leaf-to-root and re-enters root-to-leaf on every history restoration", () =>

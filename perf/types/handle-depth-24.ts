@@ -60,14 +60,7 @@ const handled = machine.handle({
                                                                                               n23: {
                                                                                                 states: {
                                                                                                   n24: {
-                                                                                                    entry: () =>
-                                                                                                      Effect.flatMap(
-                                                                                                        DeepService,
-                                                                                                        () =>
-                                                                                                          Effect.fail(
-                                                                                                            new DeepFailure()
-                                                                                                          )
-                                                                                                      ),
+                                                                                                    entry: () => {},
                                                                                                     output: () => "done"
                                                                                                   }
                                                                                                 }
@@ -120,8 +113,8 @@ const handled = machine.handle({
   }
 })
 
-type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof handled>, DeepFailure>>
-type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof handled>, DeepService>>
+type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof handled>, never>>
+type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof handled>, never>>
 type EveryStateIsHandled = Expect<Equal<Machine.Machine.UnhandledStates<typeof handled>, never>>
 
 void Machine.planInitial(handled)

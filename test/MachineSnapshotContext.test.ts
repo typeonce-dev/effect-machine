@@ -55,13 +55,12 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   on: {
-                    BufferReady: ({ snapshot, target }) =>
-                      Effect.sync(() => {
-                        captured = snapshot
-                        return States.matches(snapshot, "System.Network.Online")
-                          ? target.local.Playing(new Playing({}))
-                          : undefined
-                      })
+                    BufferReady: ({ snapshot, target }) => {
+                      captured = snapshot
+                      return States.matches(snapshot, "System.Network.Online")
+                        ? target.local.Playing(new Playing({}))
+                        : undefined
+                    }
                   }
                 }
               }
@@ -107,11 +106,10 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Online: {
                   on: {
-                    Disconnect: ({ snapshot, target }) =>
-                      Effect.sync(() => {
-                        captured.push(snapshot)
-                        return target.local.Offline(new Offline({}))
-                      })
+                    Disconnect: ({ snapshot, target }) => {
+                      captured.push(snapshot)
+                      return target.local.Offline(new Offline({}))
+                    }
                   }
                 }
               }

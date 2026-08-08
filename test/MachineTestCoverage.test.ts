@@ -54,13 +54,13 @@ const StartupStates = Machine.defineStates({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
   events: [Add],
-  initial: Effect.fn(function*() {
-    const runtime = yield* Machine.runtime<{ readonly events: Add }>()
-    yield* runtime.raise(new Add({ amount: 1 }))
-    return StartupStates.initial.count(new Count({ value: 0 }))
-  })
+  initial: () => StartupStates.initial.count(new Count({ value: 0 }))
 }).handle({
   count: {
+    always: ({ target, state }) =>
+      state.value === 0
+        ? target.full.count(new Count({ value: 1 }))
+        : undefined,
     on: {
       Add: ({ event, state, target }) => target.full.count(new Count({ value: state.value + event.amount }))
     }

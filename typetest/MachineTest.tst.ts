@@ -92,27 +92,6 @@ describe("MachineTest", () => {
     >()
   })
 
-  it("preserves the original cause in structured run failures", () => {
-    class PlanningFailure extends Data.TaggedError("PlanningFailure")<{}> {}
-    const failing = Machine.make({
-      states: States.states,
-      events: [PublicEvent],
-      initial: () =>
-        Effect.fail(new PlanningFailure()).pipe(
-          Effect.as(States.initial.idle(new Idle({})))
-        )
-    }).handle({ idle: {} })
-    const executed = MachineTest.run(failing, { events: [] })
-
-    expect<PlanningFailure>().type.toBeAssignableTo<Effect.Error<typeof executed>["cause"]>()
-    expect(Effect.flip(executed)).type.toBe<
-      Effect.Effect<
-        MachineTest.RunFailure<MachineTest.RunError<typeof failing>, typeof failing>,
-        MachineTest.Trace<typeof failing>
-      >
-    >()
-  })
-
   it("keeps runtime commands on the public event protocol", () => {
     const generated = MachineTest.runtimeCommands(machine)
     expect(generated.arbitrary).type.toBe<

@@ -36,11 +36,7 @@ const withIdle = withFlow.handle({
     states: {
       Idle: {
         on: {
-          Start: ({ target }) =>
-            Effect.flatMap(IdleService, () =>
-              Math.random() > 2
-                ? Effect.fail(new IdleFailure())
-                : Effect.succeed(target.local.Running(Running.make({}))))
+          Start: ({ target }) => target.local.Running(Running.make({}))
         }
       }
     }
@@ -52,11 +48,7 @@ const withRunning = withIdle.handle({
     states: {
       Running: {
         on: {
-          Finish: ({ event, target }) =>
-            Effect.flatMap(RunningService, () =>
-              Math.random() > 2
-                ? Effect.fail(new RunningFailure())
-                : Effect.succeed(target.local.Done(Done.make({ value: event.value }))))
+          Finish: ({ event, target }) => target.local.Done(Done.make({ value: event.value }))
         }
       }
     }
@@ -73,8 +65,8 @@ const complete = withRunning.handle({
   }
 })
 
-type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof complete>, IdleFailure | RunningFailure>>
-type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof complete>, IdleService | RunningService>>
+type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof complete>, never>>
+type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof complete>, never>>
 type OutputIsExact = Expect<Equal<Machine.Machine.Output<typeof complete>, string>>
 type EveryStateIsHandled = Expect<Equal<Machine.Machine.UnhandledStates<typeof complete>, never>>
 type ErrorIsNotAny = Expect<Equal<IsAny<Machine.Machine.Error<typeof complete>>, false>>

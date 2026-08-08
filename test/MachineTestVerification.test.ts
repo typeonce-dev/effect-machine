@@ -45,13 +45,10 @@ const navigationMachine = Machine.make({
 const raisedNavigationMachine = Machine.make({
   states: NavigationStates.states,
   events: [Go],
-  initial: Effect.fn(function*() {
-    const runtime = yield* Machine.runtime<{ readonly events: Go }>()
-    yield* runtime.raise(new Go({}))
-    return NavigationStates.initial.off(new Off({}))
-  })
+  initial: () => NavigationStates.initial.off(new Off({}))
 }).handle({
   off: {
+    always: ({ target }) => target.full.app(new App({}), (app) => app.one(new One({}))),
     on: {
       Go: ({ target }) => target.full.app(new App({}), (app) => app.one(new One({})))
     }

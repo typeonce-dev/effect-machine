@@ -58,37 +58,29 @@ describe("Machine choice pseudo-states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
   })
 
-  it("preserves choice resolver Effect error and service inference", () => {
-    class Decision extends Context.Service<Decision, { readonly approved: boolean }>()("types/choice/Decision") {}
-    class DecisionError extends Data.TaggedError("DecisionError")<{}> {}
-    const complete = Machine.make({
+  it("rejects Effects returned by choice resolvers", () => {
+    const machine = Machine.make({
       states: States.states,
       events: [],
       initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
-    }).handle({
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
       Flow: {
         states: {
           Routing: {
             choice: {
               targets: ["Flow.Approved"],
-              transition: Effect.fn(function*({ target }) {
-                yield* Decision
-                if (Math.random() > 2) return yield* new DecisionError()
-                return target.local.Approved(new Approved({}))
-              })
+              transition: ({ target }: Machine.Machine.ChoiceContext<
+                typeof States.states,
+                readonly [],
+                readonly [],
+                "Flow.Routing"
+              >) => Effect.succeed(target.local.Approved(new Approved({})))
             }
           }
         }
       }
     })
-    const planned = Machine.planInitial(complete)
-    expect<Effect.Error<typeof planned>>().type.toBe<
-      | DecisionError
-      | Machine.InfiniteTransitionError
-      | Machine.MachineSchemaDecodeError
-      | Machine.StartupError
-    >()
-    expect<Effect.Services<typeof planned>>().type.toBe<Decision>()
   })
 
   it("rejects every active definition and handler property", () => {

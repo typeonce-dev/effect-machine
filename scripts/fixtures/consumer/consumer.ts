@@ -54,7 +54,6 @@ const invoked = Machine.invokeEffect({
   onSuccess: (value) => InternalEvent.cases.Loaded.make({ value })
 })
 const delayed = Machine.after("1 second", InternalEvent.cases.Loaded.make({ value: "late" }))
-const staged = Machine.action(Effect.succeed(undefined), "next" as const)
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 
 type InputEvent = Machine.Machine.InputEvent<typeof machine>
@@ -74,7 +73,6 @@ void [
   cluster,
   invoked,
   delayed,
-  staged,
   generated,
   start,
   loaded,

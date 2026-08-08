@@ -37,27 +37,22 @@ const makeTraceMachine = (onAction: () => void) =>
     states: States.states,
     events: [Start, Add],
     input: TestInput,
-    initial: Effect.fn(function*({ userId }) {
-      const runtime = yield* Machine.runtime<{ readonly events: Start | Add }>()
-      yield* runtime.raise(new Start({}))
-      return States.initial.Idle(new Idle({ userId }))
-    })
+    initial: ({ userId }) => States.initial.Ready(new Ready({ count: userId.length - userId.length }))
   }).handle({
     Idle: {
       on: {
-        Start: Effect.fn(function*({ target }) {
-          yield* Machine.action(Effect.sync(onAction))
+        Start: ({ target }) => {
+          onAction()
           return target.full.Ready(new Ready({ count: 0 }))
-        })
+        }
       }
     },
     Ready: {
       on: {
-        Add: ({ event, state, target }) =>
-          Machine.action(
-            Effect.sync(onAction),
-            target.full.Ready(new Ready({ count: state.count + event.amount }))
-          )
+        Add: ({ event, state, target }) => {
+          onAction()
+          return target.full.Ready(new Ready({ count: state.count + event.amount }))
+        }
       }
     }
   })
@@ -114,7 +109,7 @@ describe("MachineTest", () => {
     )
   })
 
-  it.effect("runs startup and event plans without executing staged actions", () =>
+  it.effect("runs synchronous startup and event plans", () =>
     Effect.gen(function*() {
       let actionsExecuted = 0
       const machine = makeTraceMachine(() => {
@@ -127,19 +122,12 @@ describe("MachineTest", () => {
 
       const trace = yield* MachineTest.run(machine, scenario)
 
-      assert.strictEqual(actionsExecuted, 0)
-      assert.deepStrictEqual(trace.initial.startingConfiguration, ["Idle"])
-      assert.deepStrictEqual(trace.initial.initialEntryPaths, ["Idle"])
-      assert.deepStrictEqual(trace.initial.startingState.value, new Idle({ userId: "user-1" }))
+      assert.strictEqual(actionsExecuted, 2)
+      assert.deepStrictEqual(trace.initial.startingConfiguration, ["Ready"])
+      assert.deepStrictEqual(trace.initial.initialEntryPaths, ["Ready"])
+      assert.deepStrictEqual(trace.initial.startingState.value, new Ready({ count: 0 }))
       assert.deepStrictEqual(trace.initial.configuration, ["Ready"])
-      assert.strictEqual(trace.initial.plan.microsteps.length, 1)
-      assert.deepStrictEqual(trace.initial.plan.microsteps[0]?.transitions, [{
-        source: "Idle",
-        trigger: { type: "event", event: "Start" },
-        reenter: false,
-        target: "Ready",
-        resolvedTarget: "Ready"
-      }])
+      assert.strictEqual(trace.initial.plan.microsteps.length, 0)
       assert.deepStrictEqual(trace.steps.map((step) => (step.after.value as Ready).count), [2, 5])
       assert.deepStrictEqual(trace.finalConfiguration, ["Ready"])
       const formatted = MachineTest.formatTrace(trace)
@@ -150,72 +138,6 @@ describe("MachineTest", () => {
       assert.match(formatted, /microstep 0: event=/)
       assert.match(formatted, / next=/)
       assert.match(formatted, /final: configuration=\[Ready\]/)
-    }))
-
-  it.effect("retains structured startup failures for formatting", () =>
-    Effect.gen(function*() {
-      const machine = Machine.make({
-        states: States.states,
-        events: [],
-        input: TestInput,
-        initial: ({ userId }) =>
-          Effect.fail(new InitialPlanFailure({ reason: userId })).pipe(
-            Effect.as(States.initial.Idle(new Idle({ userId })))
-          )
-      })
-      const scenario: MachineTest.Scenario<typeof machine> = {
-        input: new TestInput({ userId: "startup" }),
-        events: []
-      }
-
-      const failure = yield* MachineTest.run(machine, scenario).pipe(Effect.flip)
-
-      assert.strictEqual(failure.phase, "initial")
-      assert.strictEqual(failure.initial, undefined)
-      assert.deepStrictEqual(failure.steps, [])
-      assert.deepStrictEqual(failure.cause, new InitialPlanFailure({ reason: "startup" }))
-      const formatted = MachineTest.formatTrace(failure)
-      assert.notMatch(formatted, /\ninitial:/)
-      assert.match(formatted, /failure: phase=initial/)
-      assert.match(formatted, /InitialPlanFailure/)
-    }))
-
-  it.effect("retains the successful trace prefix when an event plan fails", () =>
-    Effect.gen(function*() {
-      const machine = Machine.make({
-        states: States.states,
-        events: [Add],
-        initial: () => States.initial.Ready(new Ready({ count: 0 }))
-      }).handle({
-        Ready: {
-          on: {
-            Add: ({ event, state, target }) =>
-              event.amount < 0
-                ? Effect.fail(new EventPlanFailure({ amount: event.amount }))
-                : Effect.succeed(target.full.Ready(new Ready({ count: state.count + event.amount })))
-          }
-        }
-      })
-      const scenario: MachineTest.Scenario<typeof machine> = {
-        events: [new Add({ amount: 2 }), new Add({ amount: -1 })]
-      }
-
-      const failure = yield* MachineTest.run(machine, scenario).pipe(Effect.flip)
-
-      assert.strictEqual(failure.phase, "event")
-      if (failure.phase === "event") {
-        assert.strictEqual(failure.eventIndex, 1)
-        assert.deepStrictEqual(failure.event, new Add({ amount: -1 }))
-        assert.strictEqual(failure.steps.length, 1)
-        assert.deepStrictEqual(failure.steps[0]?.after.value, new Ready({ count: 2 }))
-        assert.deepStrictEqual(failure.cause, new EventPlanFailure({ amount: -1 }))
-      }
-      const formatted = MachineTest.formatTrace(failure)
-      assert.match(formatted, /\ninitial:/)
-      assert.match(formatted, /\nstep 0:/)
-      assert.match(formatted, /failure: phase=event eventIndex=1/)
-      assert.match(formatted, /EventPlanFailure/)
-      assert.notMatch(formatted, /\nfinal:/)
     }))
 
   it.effect("retains only transitions that survive parallel conflict resolution", () =>

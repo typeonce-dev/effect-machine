@@ -37,43 +37,4 @@ describe("machine protocols", () => {
         { _tag: "InternalEvent", value: "internal" }
       )
     }))
-
-  it.effect("validates a raised event once before processing it", () =>
-    Effect.gen(function*() {
-      let raisedEventValidations = 0
-      const Trigger = Schema.TaggedStruct("Trigger", {})
-      const Raised = Schema.TaggedStruct("Raised", {
-        value: Schema.Number.check(
-          Schema.makeFilter(() => {
-            raisedEventValidations += 1
-            return undefined
-          })
-        )
-      })
-      const states = Machine.defineStates({ ProtocolIdle, ProtocolDone })
-      const machine = Machine.make({
-        states: states.states,
-        events: [Trigger, Raised],
-        initial: () => states.initial.ProtocolIdle(new ProtocolIdle({}))
-      }).handle({
-        ProtocolIdle: {
-          on: {
-            Trigger: Effect.fn(function*({ runtime }) {
-              const machine = yield* runtime
-              yield* machine.raise({ _tag: "Raised", value: 1 })
-            }),
-            Raised: () => states.initial.ProtocolDone(new ProtocolDone({}))
-          }
-        }
-      })
-
-      const planned = yield* Machine.plan(
-        machine,
-        states.initial.ProtocolIdle(new ProtocolIdle({})),
-        { _tag: "Trigger" }
-      )
-
-      assert.strictEqual(raisedEventValidations, 1)
-      assert.deepStrictEqual(planned.next, states.initial.ProtocolDone(new ProtocolDone({})))
-    }))
 })

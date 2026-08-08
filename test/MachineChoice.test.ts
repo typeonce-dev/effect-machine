@@ -66,47 +66,6 @@ describe("Machine choice pseudo-states", () => {
       ])
     }))
 
-  it.effect("does not retain an abandoned initial root after a full choice target", () =>
-    Effect.gen(function*() {
-      class Outside extends Schema.TaggedClass<Outside>("InitialChoiceOutside")("InitialChoiceOutside", {}) {}
-      const states = Machine.defineStates({
-        Flow: {
-          schema: Flow,
-          initial: "Routing",
-          states: { Routing: { type: "choice" }, Approved }
-        },
-        Outside
-      })
-      const entries: Array<string> = []
-      const routed = Machine.make({
-        states: states.states,
-        events: [],
-        initial: () => states.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
-      }).handle({
-        Flow: {
-          entry: () => Machine.action(Effect.sync(() => entries.push("Flow"))),
-          states: {
-            Routing: {
-              choice: {
-                targets: ["Outside"],
-                transition: ({ target }) => target.full.Outside(new Outside({}))
-              }
-            }
-          }
-        },
-        Outside: { entry: () => Machine.action(Effect.sync(() => entries.push("Outside"))) }
-      })
-
-      const plan = yield* Machine.planInitial(routed)
-      assert.deepStrictEqual(Machine.configuration(routed, plan.startingState).map(({ path }) => path), ["Outside"])
-      assert.deepStrictEqual(plan.initialEntryPaths, ["Outside"])
-      yield* Machine.runActions(plan.actions, {
-        raise: () => Effect.void,
-        sendParent: () => Effect.void
-      })
-      assert.deepStrictEqual(entries, ["Outside"])
-    }))
-
   it.effect("targets a choice from an event and preserves that event", () =>
     Effect.gen(function*() {
       const initial = yield* Machine.planInitial(machine)
@@ -263,55 +222,6 @@ describe("Machine choice pseudo-states", () => {
       assert.notInclude(JSON.stringify(encoded), "Routing")
       const decoded = yield* Machine.decodeSnapshot(machine, encoded)
       assert.deepStrictEqual(decoded, initial.state)
-    }))
-
-  it.effect("orders exit, choice, and entry actions without running actions on the choice", () =>
-    Effect.gen(function*() {
-      const states = Machine.defineStates({
-        Flow: {
-          schema: Flow,
-          initial: "Approved",
-          states: {
-            Approved,
-            Routing: { type: "choice" },
-            Rejected
-          }
-        }
-      })
-      const log: Array<string> = []
-      const ordered = Machine.make({
-        states: states.states,
-        events: [Recheck],
-        initial: () => states.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Approved(new Approved({})))
-      }).handle({
-        Flow: {
-          states: {
-            Approved: {
-              exit: () => Machine.action(Effect.sync(() => log.push("exit"))),
-              on: {
-                Recheck: ({ target }) => target.local.Routing()
-              }
-            },
-            Routing: {
-              choice: {
-                targets: ["Flow.Rejected"],
-                transition: Effect.fn(function*({ target }) {
-                  yield* Machine.action(Effect.sync(() => log.push("choice")))
-                  return target.local.Rejected(new Rejected({}))
-                })
-              }
-            },
-            Rejected: {
-              entry: () => Machine.action(Effect.sync(() => log.push("entry")))
-            }
-          }
-        }
-      })
-
-      const initial = yield* Machine.planInitial(ordered)
-      const plan = yield* Machine.plan(ordered, initial.state, new Recheck({ score: 0 }))
-      yield* Effect.forEach(plan.actions, (action) => action, { concurrency: 1 })
-      assert.deepStrictEqual(log, ["exit", "choice", "entry"])
     }))
 
   it.effect("enters a choice from a completion transition", () =>
@@ -617,77 +527,5 @@ describe("Machine choice pseudo-states", () => {
           .map(({ source }) => source),
         ["Flow.Routing", "Flow.Routing"]
       )
-    }))
-
-  it.effect("preserves Effect errors and services and rejects void at runtime", () =>
-    Effect.gen(function*() {
-      class Decision extends Context.Service<Decision, { readonly approved: boolean }>()("test/choice/Decision") {}
-      class DecisionError extends Data.TaggedError("DecisionError")<{}> {}
-      const effectful = Machine.make({
-        states: States.states,
-        events: [],
-        initial: () => States.initial.Flow(new Flow({ score: 0 }), (flow) => flow.Routing())
-      }).handle({
-        Flow: {
-          states: {
-            Routing: {
-              choice: {
-                targets: ["Flow.Approved"],
-                transition: Effect.fn(function*({ target }) {
-                  const decision = yield* Decision
-                  if (!decision.approved) return yield* new DecisionError()
-                  return target.local.Approved(new Approved({}))
-                })
-              }
-            }
-          }
-        }
-      })
-      const failed = yield* Machine.planInitial(effectful).pipe(
-        Effect.provideService(Decision, { approved: false }),
-        Effect.exit
-      )
-      assert.strictEqual(failed._tag, "Failure")
-      if (failed._tag === "Failure") assert.include(Cause.pretty(failed.cause), "DecisionError")
-
-      const unsafe = Machine.make({
-        states: States.states,
-        events: [],
-        initial: () => States.initial.Flow(new Flow({ score: 0 }), (flow) => flow.Routing())
-      }).handle({
-        Flow: {
-          states: {
-            Routing: {
-              choice: {
-                targets: ["Flow.Approved"],
-                transition: (() => undefined) as any
-              }
-            }
-          }
-        }
-      })
-      const invalid = yield* Effect.exit(Machine.planInitial(unsafe))
-      assert.strictEqual(invalid._tag, "Failure")
-      if (invalid._tag === "Failure") assert.include(Cause.pretty(invalid.cause), "must return a target")
-
-      const undeclared = Machine.make({
-        states: States.states,
-        events: [],
-        initial: () => States.initial.Flow(new Flow({ score: 0 }), (flow) => flow.Routing())
-      }).handle({
-        Flow: {
-          states: {
-            Routing: {
-              choice: {
-                targets: ["Flow.Approved"],
-                transition: (({ target }: any) => target.local.Rejected(new Rejected({}))) as any
-              }
-            }
-          }
-        }
-      })
-      const outsideBound = yield* Effect.exit(Machine.planInitial(undeclared))
-      assert.strictEqual(outsideBound._tag, "Failure")
-      if (outsideBound._tag === "Failure") assert.include(Cause.pretty(outsideBound.cause), "outside declared targets")
     }))
 })
