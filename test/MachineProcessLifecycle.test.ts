@@ -371,6 +371,68 @@ describe("machine process lifecycle", () => {
       )
     }))
 
+  it.effect("delivers done, failure, and stopped child outcomes exactly once", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const outcomes = yield* Ref.make<ReadonlyArray<string>>([])
+      const parentLogic: MachineRuntime.ProcessLogic<undefined, never> = {
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      }
+      const parent = yield* MachineRuntime.startProcess(parentLogic)
+      const scope = yield* Deferred.await(parentScope)
+      const recordOutcome = (id: string) => (outcome: MachineRuntime.RuntimeOutcome<unknown, unknown, unknown>) =>
+        Ref.update(outcomes, (current) => [...current, `${id}:${outcome._tag}`])
+
+      const done = yield* scope.spawn(
+        Machine.logic({ initial: 0, run: () => Effect.succeed("output") }),
+        { id: "done", onOutcome: recordOutcome("done") }
+      )
+      assert.strictEqual(yield* done.join, "output")
+
+      const failed = yield* scope.spawn(
+        Machine.logic({ initial: 0, run: () => Effect.fail("failure") }),
+        { id: "failed", onOutcome: recordOutcome("failed") }
+      )
+      assert.strictEqual(yield* Effect.flip(failed.join), "failure")
+
+      const stopped = yield* scope.spawn(
+        Machine.logic({ initial: 0, run: () => Effect.never }),
+        { id: "stopped", onOutcome: recordOutcome("stopped") }
+      )
+      yield* stopped.stop
+
+      assert.deepStrictEqual(yield* Ref.get(outcomes), [
+        "done:Done",
+        "failed:Failure",
+        "stopped:Stopped"
+      ])
+      yield* parent.stop
+    }))
+
+  it.effect("isolates child terminalization from outcome callback defects", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const parentLogic: MachineRuntime.ProcessLogic<undefined, never> = {
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      }
+      const parent = yield* MachineRuntime.startProcess(parentLogic)
+      const child = yield* (yield* Deferred.await(parentScope)).spawn(
+        Machine.logic({ initial: 0, run: () => Effect.succeed("output") }),
+        { id: "child", onOutcome: () => Effect.die("callback defect") }
+      )
+
+      assert.strictEqual(yield* child.join, "output")
+      assert.deepStrictEqual(yield* child.snapshot, {
+        status: "done",
+        state: 0,
+        output: "output"
+      })
+      assert.deepStrictEqual(yield* parent.snapshot, { status: "active", state: undefined })
+      yield* parent.stop
+    }))
+
   it.effect("publishes and cleans up exactly once when stop races process completion", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)

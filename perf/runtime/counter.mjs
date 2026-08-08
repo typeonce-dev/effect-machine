@@ -71,6 +71,20 @@ const counterParentMachine = Machine.make({
   }
 })
 
+const counterSnapshotParentMachine = Machine.make({
+  id: "RuntimeBenchmarkSnapshotCounterParent",
+  states: ParentStates.states,
+  events: [],
+  initial: () => ParentStates.initial.Active(ParentState.cases.Active.make({}))
+}).handle({
+  Active: {
+    invoke: Machine.invokeMachine({
+      child: CounterChild,
+      snapshot: () => undefined
+    })
+  }
+})
+
 export const incrementEvent = CounterEvent.cases.Increment.make({})
 const finishEvent = CounterEvent.cases.Finish.make({})
 
@@ -254,6 +268,20 @@ const startObservedChildCounters = (count) =>
     )
   )
 
+const startSnapshotObservedChildCounters = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () =>
+        Effect.gen(function*() {
+          const parent = yield* Machine.start(counterSnapshotParentMachine)
+          yield* waitForCounterChild(parent)
+          return parent
+        }),
+      { concurrency: 1 }
+    )
+  )
+
 const stopObservedChildCounters = (units) =>
   Effect.runPromise(
     Effect.forEach(
@@ -327,6 +355,11 @@ export const effectMachineAdapter = {
       label: "Parent with observed child registry",
       start: startObservedChildCounters,
       stop: stopObservedChildCounters
+    },
+    "snapshot-observed-parent-with-child": {
+      label: "Parent with invoked child snapshot watcher",
+      start: startSnapshotObservedChildCounters,
+      stop: stopChildCounters
     }
   }
 }

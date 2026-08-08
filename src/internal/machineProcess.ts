@@ -6,12 +6,12 @@
 
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import type * as Schema from "effect/Schema"
-import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
 import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError } from "./machineErrors.js"
@@ -34,7 +34,7 @@ type AnyInvokeConfig = Machine.InvokeConfig<any, any, any, any, any, any, any, a
 
 interface InvokeSession {
   readonly token: symbol
-  readonly scope: Scope.Closeable
+  readonly watcher: Fiber.Fiber<void> | undefined
   readonly childId: string
   readonly path: string
 }
@@ -240,10 +240,17 @@ const makeProcessLogic: <
                 return Option.isSome(current) && current.value.token === token
               })
             )
+          const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> =>
+            Effect.all(
+              [
+                ...(session.watcher === undefined ? [] : [Fiber.interrupt(session.watcher)]),
+                context.stopChild(session.childId)
+              ],
+              { discard: true, concurrency: "unbounded" }
+            )
           const removeInvoke = (
             key: string,
-            token: symbol | undefined,
-            exit: Exit.Exit<unknown, unknown>
+            token: symbol | undefined
           ): Effect.Effect<void> =>
             Ref.modify(invokeSessions, (sessions) => {
               const current = HashMap.get(sessions, key)
@@ -254,80 +261,87 @@ const makeProcessLogic: <
               Effect.flatMap((session) =>
                 session === undefined
                   ? Effect.void
-                  : Scope.close(session.scope, exit).pipe(
-                    Effect.andThen(context.stopChild(session.childId))
-                  )
+                  : stopInvokeSession(session)
               )
             )
-          const stopInvoke = (key: string, exit: Exit.Exit<unknown, unknown>): Effect.Effect<void> =>
-            removeInvoke(key, undefined, exit)
-          const stopAllInvokes = (exit: Exit.Exit<unknown, unknown>): Effect.Effect<void> =>
-            Ref.modify(invokeSessions, (sessions) => [HashMap.toEntries(sessions), HashMap.empty()] as const).pipe(
+          const stopInvoke = (key: string): Effect.Effect<void> => removeInvoke(key, undefined)
+          const stopAllInvokes: Effect.Effect<void> = Ref.modify(invokeSessions, (sessions) =>
+            [HashMap.toEntries(sessions), HashMap.empty()] as const).pipe(
               Effect.flatMap((sessions) =>
                 Effect.all(
                   sessions.map(([, session]) =>
-                    Scope.close(session.scope, exit).pipe(
-                      Effect.andThen(context.stopChild(session.childId))
-                    )
+                    stopInvokeSession(session)
                   ),
                   { discard: true, concurrency: "unbounded" }
                 )
               )
             )
-          const startInvokeWatchers = Effect.fnUntraced(function*(
+          const handleInvokeOutcome = (
+            config: AnyInvokeConfig,
+            key: string,
+            token: symbol,
+            outcome: internalRuntime.RuntimeOutcome<any, any, any>
+          ): Effect.Effect<void> =>
+            isCurrentInvoke(key, token).pipe(
+              Effect.flatMap((isCurrent) => {
+                if (!isCurrent || outcome._tag === "Stopped") {
+                  return Effect.void
+                }
+                if (outcome._tag === "Done") {
+                  const mappedEvent = config.onDone === undefined
+                    ? outcome.output
+                    : config.onDone({ id: config.id, output: outcome.output })
+                  return mappedEvent === undefined
+                    ? Effect.void
+                    : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
+                      Effect.catchTag("StoppedError", () => Effect.void)
+                    )
+                }
+                return context.failCause(outcome.cause)
+              })
+            )
+          const startInvokeSnapshotWatcher = Effect.fnUntraced(function*(
             config: AnyInvokeConfig,
             child: internalRuntime.MachineRef<any, any, any, any>,
             key: string,
-            token: symbol,
-            scope: Scope.Closeable
+            token: symbol
           ) {
-            if (config.snapshot !== undefined) {
-              const mapSnapshot = config.snapshot
-              yield* child.changes.pipe(
-                Stream.filter((snapshot) => snapshot.status === "active"),
-                Stream.runForEach((snapshot) =>
-                  isCurrentInvoke(key, token).pipe(
-                    Effect.flatMap((isCurrent) => {
-                      if (!isCurrent) {
-                        return Effect.void
-                      }
-                      const mappedEvent = mapSnapshot({ id: config.id, snapshot })
-                      return mappedEvent === undefined
-                        ? Effect.void
-                        : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                          Effect.catchTag("StoppedError", () => Effect.void)
-                        )
-                    })
-                  )
-                ),
-                Effect.forkIn(scope),
-                Effect.asVoid
-              )
+            if (config.snapshot === undefined) {
+              return
             }
-            yield* internalRuntime.watch(child).pipe(
-              Stream.runForEach((outcome) =>
+            const mapSnapshot = config.snapshot
+            const watcher = yield* child.changes.pipe(
+              Stream.filter((snapshot) => snapshot.status === "active"),
+              Stream.runForEach((snapshot) =>
                 isCurrentInvoke(key, token).pipe(
                   Effect.flatMap((isCurrent) => {
-                    if (!isCurrent || outcome._tag === "Stopped") {
+                    if (!isCurrent) {
                       return Effect.void
                     }
-                    if (outcome._tag === "Done") {
-                      const mappedEvent = config.onDone === undefined
-                        ? outcome.output
-                        : config.onDone({ id: config.id, output: outcome.output })
-                      return mappedEvent === undefined
-                        ? Effect.void
-                        : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                          Effect.catchTag("StoppedError", () => Effect.void)
-                        )
-                    }
-                    return context.failCause(outcome.cause)
+                    const mappedEvent = mapSnapshot({ id: config.id, snapshot })
+                    return mappedEvent === undefined
+                      ? Effect.void
+                      : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
+                        Effect.catchTag("StoppedError", () => Effect.void)
+                      )
                   })
                 )
               ),
-              Effect.forkIn(scope),
-              Effect.asVoid
+              Effect.forkChild
             )
+            const installed = yield* Ref.modify(invokeSessions, (sessions) => {
+              const current = HashMap.get(sessions, key)
+              if (Option.isNone(current) || current.value.token !== token) {
+                return [false, sessions] as const
+              }
+              return [
+                true,
+                HashMap.set(sessions, key, { ...current.value, watcher })
+              ] as const
+            })
+            if (!installed) {
+              yield* Fiber.interrupt(watcher)
+            }
           })
           const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
             path: StateId,
@@ -337,13 +351,11 @@ const makeProcessLogic: <
             const invokeId = String(config.id)
             const key = makeInvokeSessionKey(path, invokeId)
             const childId = config.address === undefined ? makeInvokeChildId(path, invokeId) : String(config.address)
-            const scope = yield* Scope.make("parallel")
             const reserved = yield* Ref.modify(invokeSessions, (sessions) =>
               HashMap.has(sessions, key)
                 ? [false, sessions] as const
-                : [true, HashMap.set(sessions, key, { token, scope, childId, path })] as const)
+                : [true, HashMap.set(sessions, key, { token, watcher: undefined, childId, path })] as const)
             if (!reserved) {
-              yield* Scope.close(scope, Exit.void)
               return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
             }
             const logic = config.src()
@@ -358,24 +370,19 @@ const makeProcessLogic: <
                 initial: (childScope) => logic.initial({ ...childScope, sendParent }),
                 run: (childContext) => logic.run({ ...childContext, sendParent })
               },
-              config.descriptor === undefined
-                ? { id: childId }
-                : { id: childId, descriptor: config.descriptor }
+              {
+                id: childId,
+                ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
+                onOutcome: (outcome) => handleInvokeOutcome(config, key, token, outcome)
+              }
             ).pipe(
               Effect.onExit((exit) =>
                 Exit.isFailure(exit)
-                  ? Ref.update(invokeSessions, (sessions) => {
-                    const current = HashMap.get(sessions, key)
-                    return Option.isSome(current) && current.value.token === token
-                      ? HashMap.remove(sessions, key)
-                      : sessions
-                  }).pipe(
-                    Effect.andThen(Scope.close(scope, Exit.failCause(exit.cause)))
-                  )
+                  ? removeInvoke(key, token)
                   : Effect.void
               )
             )
-            yield* startInvokeWatchers(config, child, key, token, scope)
+            yield* startInvokeSnapshotWatcher(config, child, key, token)
           })
           const startInvokes: (
             configuration: Model.ActiveConfiguration,
@@ -412,7 +419,7 @@ const makeProcessLogic: <
                   internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
                     HashMap.toEntries(sessions)
                       .filter(([, session]) => session.path === path)
-                      .map(([key]) => stopInvoke(key, Exit.void))
+                      .map(([key]) => stopInvoke(key))
                   ),
                   { discard: true, concurrency: "unbounded" }
                 )
@@ -481,7 +488,7 @@ const makeProcessLogic: <
 
                     if (planned.done) {
                       terminal = { output: planned.output as Output }
-                      yield* stopAllInvokes(Exit.succeed(planned.output))
+                      yield* stopAllInvokes
                     } else {
                       if (changed) {
                         for (const [path, entryEvent] of entryEvents) {
@@ -509,7 +516,7 @@ const makeProcessLogic: <
             }
             return terminal.output
           }).pipe(
-            Effect.onExit((exit) => stopAllInvokes(exit))
+            Effect.onExit(() => stopAllInvokes)
           )
         }),
         context
