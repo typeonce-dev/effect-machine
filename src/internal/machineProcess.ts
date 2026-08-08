@@ -6,10 +6,8 @@
 
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
-import * as Ref from "effect/Ref"
 import type * as Schema from "effect/Schema"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
 import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError } from "./machineErrors.js"
@@ -222,29 +220,27 @@ const makeProcessLogic: <
             return terminal.output
           }
 
-          const invokeSessions = yield* Ref.make<HashMap.HashMap<string, InvokeSession>>(
-            HashMap.empty()
-          )
+          // Every session mutation is deferred inside `Effect.sync`, making a
+          // compact mutable table atomic with respect to Effect fiber steps.
+          // Tokens still distinguish stale child callbacks after reentry.
+          const invokeSessions = new Map<string, InvokeSession>()
           const makeInvokeSessionKey = (path: string, id: string): string => `${path.length}:${path}${id}`
           const makeInvokeChildId = (path: string, id: string): string =>
             `Machine.invoke:${makeInvokeSessionKey(path, id)}`
           const isCurrentInvoke = (key: string, token: symbol): Effect.Effect<boolean> =>
-            Ref.get(invokeSessions).pipe(
-              Effect.map((sessions) => {
-                const current = HashMap.get(sessions, key)
-                return Option.isSome(current) && current.value.token === token
-              })
-            )
+            Effect.sync(() => invokeSessions.get(key)?.token === token)
           const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> => context.stopChild(session.childId)
           const removeInvoke = (
             key: string,
             token: symbol | undefined
           ): Effect.Effect<void> =>
-            Ref.modify(invokeSessions, (sessions) => {
-              const current = HashMap.get(sessions, key)
-              return Option.isSome(current) && (token === undefined || current.value.token === token)
-                ? [current.value, HashMap.remove(sessions, key)] as const
-                : [undefined, sessions] as const
+            Effect.sync(() => {
+              const current = invokeSessions.get(key)
+              if (current === undefined || (token !== undefined && current.token !== token)) {
+                return undefined
+              }
+              invokeSessions.delete(key)
+              return current
             }).pipe(
               Effect.flatMap((session) =>
                 session === undefined
@@ -253,17 +249,18 @@ const makeProcessLogic: <
               )
             )
           const stopInvoke = (key: string): Effect.Effect<void> => removeInvoke(key, undefined)
-          const stopAllInvokes: Effect.Effect<void> = Ref.modify(invokeSessions, (sessions) =>
-            [HashMap.toEntries(sessions), HashMap.empty()] as const).pipe(
-              Effect.flatMap((sessions) =>
-                Effect.all(
-                  sessions.map(([, session]) =>
-                    stopInvokeSession(session)
-                  ),
-                  { discard: true, concurrency: "unbounded" }
-                )
+          const stopAllInvokes: Effect.Effect<void> = Effect.sync(() => {
+            const sessions = Array.from(invokeSessions.values())
+            invokeSessions.clear()
+            return sessions
+          }).pipe(
+            Effect.flatMap((sessions) =>
+              Effect.all(
+                sessions.map((session) => stopInvokeSession(session)),
+                { discard: true, concurrency: "unbounded" }
               )
             )
+          )
           const handleInvokeOutcome = (
             config: AnyInvokeConfig,
             key: string,
@@ -319,10 +316,13 @@ const makeProcessLogic: <
             const invokeId = String(config.id)
             const key = makeInvokeSessionKey(path, invokeId)
             const childId = config.address === undefined ? makeInvokeChildId(path, invokeId) : String(config.address)
-            const reserved = yield* Ref.modify(invokeSessions, (sessions) =>
-              HashMap.has(sessions, key)
-                ? [false, sessions] as const
-                : [true, HashMap.set(sessions, key, { token, childId, path })] as const)
+            const reserved = yield* Effect.sync(() => {
+              if (invokeSessions.has(key)) {
+                return false
+              }
+              invokeSessions.set(key, { token, childId, path })
+              return true
+            })
             if (!reserved) {
               return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
             }
@@ -388,14 +388,16 @@ const makeProcessLogic: <
             )
           })
           const stopInvokes = (paths: ReadonlyArray<string>): Effect.Effect<void> =>
-            Ref.get(invokeSessions).pipe(
-              Effect.flatMap((sessions) =>
+            Effect.sync(() =>
+              internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
+                Array.from(invokeSessions.entries())
+                  .filter(([, session]) => session.path === path)
+                  .map(([key]) => key)
+              )
+            ).pipe(
+              Effect.flatMap((keys) =>
                 Effect.all(
-                  internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
-                    HashMap.toEntries(sessions)
-                      .filter(([, session]) => session.path === path)
-                      .map(([key]) => stopInvoke(key))
-                  ),
+                  keys.map(stopInvoke),
                   { discard: true, concurrency: "unbounded" }
                 )
               )
