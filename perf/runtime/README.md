@@ -15,12 +15,18 @@ The command reports:
 - repeated child lookup and delivery to one running child;
 - machine start-and-stop throughput;
 - parent-with-child start-and-stop throughput;
+- Effect-only lifecycle reference points for a suspended fiber, a queue worker,
+  a minimal actor shell, and a two-shell family;
+- Effect-only coordination reference points for an owner-only mutable snapshot,
+  a synchronized snapshot, and a terminal `Deferred` latch;
 - heap and resident-memory growth at 100, 500, and 1,000 live units, including
-  a raw managed process, an idle statechart, two independent statecharts, a
-  parent with one child, that relationship with child-registry observation
-  active, and an invoked child whose active snapshots are observed;
+  a raw generic process, a raw compiled process, an idle statechart, two
+  independent statecharts, a parent with one child, that relationship with
+  child-registry observation active, and an invoked child whose active snapshots
+  are observed;
 - lower-bound memory profiles for Effect itself: a suspended fiber, a queue
-  with a waiting fiber, and a minimal mailbox/state/completion actor shell.
+  with a waiting fiber, a minimal mailbox/state/completion actor shell, and a
+  minimal two-shell family.
 
 The comparison dependencies use package aliases, so XState 5 and 6 can be
 loaded by the same process:
@@ -62,6 +68,11 @@ registry and invoked-snapshot observation. Invoked snapshot mapping uses a
 direct, state-scoped delivery path; its profile measures the retained callback
 and mapping state rather than a general `changes` stream subscription. The
 Effect profiles are primitive lower bounds, not feature-equivalent competitors.
+The Effect throughput reference points similarly bound individual runtime
+operations rather than predicting a complete machine by themselves. In
+particular, the owner-only mutable snapshot is safe only when one process fiber
+owns active state writes; terminal arbitration and externally visible
+observation still require separate coordination.
 Resident memory is reported as a raw diagnostic because V8 and the
 operating-system allocator can reuse already committed pages. The
 capacity-per-GiB value is a linear estimate that excludes shared process
@@ -96,6 +107,7 @@ to update the comment.
 
 The implementation lives in `scripts/runtime-performance.mjs`; the Effect
 Machine fixture is in `perf/runtime/counter.mjs`, and the comparison adapter is
-in `perf/runtime/xstate.mjs`. Add new scenarios only when every implementation
-performs equivalent observable work and the result is consumed and checked so
-the JavaScript engine cannot discard it.
+in `perf/runtime/xstate.mjs`. Effect runtime reference fixtures are in
+`perf/runtime/effect-runtime.mjs`. Add cross-library scenarios only when every
+implementation performs equivalent observable work and the result is consumed
+and checked so the JavaScript engine cannot discard it.

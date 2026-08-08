@@ -44,6 +44,7 @@ const validateReport = (report, path) => {
       !isShortString(benchmark.id, 100) ||
       !isShortString(benchmark.label, 200) ||
       !isShortString(benchmark.unit, 100) ||
+      (benchmark.group !== undefined && benchmark.group !== "machine" && benchmark.group !== "effect-runtime") ||
       !isBoundedNumber(benchmark.medianThroughput) ||
       benchmark.medianThroughput < 0 ||
       !isBoundedNumber(benchmark.relativeMarginOfError) ||
@@ -256,8 +257,17 @@ const formatDifference = (before, after) => {
     : `${sign}${decimal.format(percentage)}%`
 }
 
+const machineBenchmarks = pullRequest.benchmarks.filter((benchmark) => benchmark.group !== "effect-runtime")
+const runtimeBenchmarks = pullRequest.benchmarks.filter((benchmark) => benchmark.group === "effect-runtime")
 const benchmarkImplementations = [...new Map(
-  pullRequest.benchmarks.map((benchmark) => [benchmark.implementation, {
+  machineBenchmarks.map((benchmark) => [benchmark.implementation, {
+    id: benchmark.implementation,
+    label: benchmark.implementationLabel,
+    version: benchmark.implementationVersion
+  }])
+).values()]
+const runtimeImplementations = [...new Map(
+  runtimeBenchmarks.map((benchmark) => [benchmark.implementation, {
     id: benchmark.implementation,
     label: benchmark.implementationLabel,
     version: benchmark.implementationVersion
@@ -269,10 +279,20 @@ const memoryImplementations = pullRequest.memory.map((measurement) => ({
   version: measurement.implementationVersion
 }))
 const reportedImplementations = [...new Map(
-  [...benchmarkImplementations, ...memoryImplementations].map((implementation) => [implementation.id, implementation])
+  [...benchmarkImplementations, ...runtimeImplementations, ...memoryImplementations].map((implementation) => [
+    implementation.id,
+    implementation
+  ])
 ).values()]
-const scenarios = [...new Map(
-  pullRequest.benchmarks.map((benchmark) => [benchmark.id, {
+const machineScenarios = [...new Map(
+  machineBenchmarks.map((benchmark) => [benchmark.id, {
+    id: benchmark.id,
+    label: benchmark.label,
+    unit: benchmark.unit
+  }])
+).values()]
+const runtimeScenarios = [...new Map(
+  runtimeBenchmarks.map((benchmark) => [benchmark.id, {
     id: benchmark.id,
     label: benchmark.label,
     unit: benchmark.unit
@@ -290,7 +310,7 @@ const lines = [
   `| --- | ${benchmarkImplementations.map(() => "---:").join(" | ")} |`
 ]
 
-for (const scenario of scenarios) {
+for (const scenario of machineScenarios) {
   lines.push(
     `| ${escapeCell(scenario.label)} | ${benchmarkImplementations.map((implementation) => {
       const benchmark = pullRequest.benchmarks.find((candidate) =>
@@ -299,6 +319,26 @@ for (const scenario of scenarios) {
       return benchmark === undefined ? "—" : formatThroughput(benchmark.medianThroughput, benchmark.unit)
     }).join(" | ")} |`
   )
+}
+
+if (runtimeScenarios.length > 0) {
+  lines.push(
+    "",
+    "### Effect runtime reference points",
+    "",
+    `| Scenario | ${runtimeImplementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
+    `| --- | ${runtimeImplementations.map(() => "---:").join(" | ")} |`
+  )
+  for (const scenario of runtimeScenarios) {
+    lines.push(
+      `| ${escapeCell(scenario.label)} | ${runtimeImplementations.map((implementation) => {
+        const benchmark = runtimeBenchmarks.find((candidate) =>
+          candidate.implementation === implementation.id && candidate.id === scenario.id
+        )
+        return benchmark === undefined ? "—" : formatThroughput(benchmark.medianThroughput, benchmark.unit)
+      }).join(" | ")} |`
+    )
+  }
 }
 
 const memoryProfiles = [...new Map(
@@ -349,7 +389,7 @@ if (base === undefined) {
     "| Metric | Base | Base variability | PR | PR variability | Difference |",
     "| --- | ---: | ---: | ---: | ---: | ---: |"
   )
-  for (const scenario of scenarios) {
+  for (const scenario of machineScenarios) {
     const before = baseEffect.get(scenario.id)
     const after = pullRequestEffect.get(scenario.id)
     if (before !== undefined && after !== undefined && before.unit === after.unit) {
@@ -366,6 +406,34 @@ if (base === undefined) {
       if (afterProfile !== undefined) {
         lines.push(
           `| ${escapeCell(beforeProfile.label)} heap per unit | ${formatHeap(beforeProfile.heapBytesPerIdleMachine)} | ${formatVariability(beforeProfile.processRelativeMad)} | ${formatHeap(afterProfile.heapBytesPerIdleMachine)} | ${formatVariability(afterProfile.processRelativeMad)} | ${formatDifference(beforeProfile.heapBytesPerIdleMachine, afterProfile.heapBytesPerIdleMachine)} |`
+        )
+      }
+    }
+  }
+  const baseRuntime = new Map(
+    base.benchmarks
+      .filter((benchmark) => benchmark.group === "effect-runtime")
+      .map((benchmark) => [benchmark.id, benchmark])
+  )
+  const pullRequestRuntime = new Map(
+    pullRequest.benchmarks
+      .filter((benchmark) => benchmark.group === "effect-runtime")
+      .map((benchmark) => [benchmark.id, benchmark])
+  )
+  if (baseRuntime.size > 0 && pullRequestRuntime.size > 0) {
+    lines.push(
+      "",
+      "### Effect runtime reference change from base",
+      "",
+      "| Metric | Base | Base variability | PR | PR variability | Difference |",
+      "| --- | ---: | ---: | ---: | ---: | ---: |"
+    )
+    for (const scenario of runtimeScenarios) {
+      const before = baseRuntime.get(scenario.id)
+      const after = pullRequestRuntime.get(scenario.id)
+      if (before !== undefined && after !== undefined && before.unit === after.unit) {
+        lines.push(
+          `| ${escapeCell(scenario.label)} | ${formatThroughput(before.medianThroughput, before.unit)} | ${formatVariability(before.processRelativeMad)} | ${formatThroughput(after.medianThroughput, after.unit)} | ${formatVariability(after.processRelativeMad)} | ${formatDifference(before.medianThroughput, after.medianThroughput)} |`
         )
       }
     }
