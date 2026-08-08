@@ -433,6 +433,60 @@ describe("machine process lifecycle", () => {
       yield* parent.stop
     }))
 
+  it.effect("delivers committed active child snapshots directly and in order", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const snapshots = yield* Ref.make<ReadonlyArray<number>>([])
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const child = yield* (yield* Deferred.await(parentScope)).spawn(
+        Machine.logic({
+          initial: 0,
+          run: ({ setState }) =>
+            setState(1).pipe(
+              Effect.andThen(setState(2)),
+              Effect.as("output")
+            )
+        }),
+        {
+          id: "child",
+          [MachineRuntime.activeSnapshotObserver]: (snapshot) =>
+            Ref.update(snapshots, (current) => [...current, snapshot.state])
+        }
+      )
+
+      assert.strictEqual(yield* child.join, "output")
+      assert.deepStrictEqual(yield* Ref.get(snapshots), [0, 1, 2])
+      yield* parent.stop
+    }))
+
+  it.effect("isolates active child state updates from snapshot callback defects", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const child = yield* (yield* Deferred.await(parentScope)).spawn(
+        Machine.logic({
+          initial: 0,
+          run: ({ setState }) => setState(1).pipe(Effect.as("output"))
+        }),
+        { id: "child", [MachineRuntime.activeSnapshotObserver]: () => Effect.die("callback defect") }
+      )
+
+      assert.strictEqual(yield* child.join, "output")
+      assert.deepStrictEqual(yield* child.snapshot, {
+        status: "done",
+        state: 1,
+        output: "output"
+      })
+      assert.deepStrictEqual(yield* parent.snapshot, { status: "active", state: undefined })
+      yield* parent.stop
+    }))
+
   it.effect("publishes and cleans up exactly once when stop races process completion", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)

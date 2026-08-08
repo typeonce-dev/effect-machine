@@ -58,10 +58,12 @@ The fitted heap slope is the primary idle-capacity metric. Compare adjacent
 profiles to attribute retained memory: raw process to idle statechart isolates
 statechart machinery, two independent machines to parent-with-child isolates
 relationship bookkeeping, while the two observed parent-child profiles isolate
-registry and invoked-snapshot observation. The Effect profiles are primitive
-lower bounds, not feature-equivalent competitors. Resident memory is reported
-as a raw diagnostic because V8 and the operating-system allocator can reuse
-already committed pages. The
+registry and invoked-snapshot observation. Invoked snapshot mapping uses a
+direct, state-scoped delivery path; its profile measures the retained callback
+and mapping state rather than a general `changes` stream subscription. The
+Effect profiles are primitive lower bounds, not feature-equivalent competitors.
+Resident memory is reported as a raw diagnostic because V8 and the
+operating-system allocator can reuse already committed pages. The
 capacity-per-GiB value is a linear estimate that excludes shared process
 overhead; it is not a run-until-OOM limit.
 
