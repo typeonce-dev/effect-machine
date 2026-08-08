@@ -127,12 +127,6 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   readonly childChanges: (child: any) => Stream.Stream<Option.Option<any>>
 }
 
-interface InternalMachineRef<out State, in Event, out Error = never, out Output = never>
-  extends MachineRef<State, Event, Error, Output>
-{
-  readonly requestStop: Effect.Effect<void>
-}
-
 interface ProcessAddress<in Event> {
   readonly id: string
   readonly sessionId: string
@@ -283,7 +277,10 @@ const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
 interface StartInternalOptions {
   readonly detached?: boolean
   readonly id?: string
-  readonly onReady?: (ref: InternalMachineRef<any, any, any, any>) => Effect.Effect<void>
+  readonly onReady?: (
+    ref: MachineRef<any, any, any, any>,
+    requestStop: Effect.Effect<void>
+  ) => Effect.Effect<void>
   readonly onStop?: Effect.Effect<void>
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime
@@ -337,7 +334,7 @@ const startInternal: <
       if (current.closed) {
         return [undefined, current] as const
       }
-      if (current.scope === undefined && HashMap.isEmpty(current.children)) {
+      if (current.scope === undefined) {
         return [undefined, { ...current, closed: true }] as const
       }
       const children = Array.from(HashMap.values(current.children)).flatMap((entry) =>
@@ -582,7 +579,7 @@ const startInternal: <
   > {
     const token = Symbol()
     const key = spawnOptions?.id ?? token
-    let startedChild: InternalMachineRef<any, any, any, any> | undefined
+    let startedChild: MachineRef<any, any, any, any> | undefined
     return getOrCreateChildScope.pipe(
       Effect.flatMap((childScope) =>
         childScope === undefined
@@ -595,12 +592,12 @@ const startInternal: <
             return yield* startInternal(logic, {
               detached: true,
               ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
-              onReady: (child) =>
+              onReady: (child, requestChildStop) =>
                 Effect.sync(() => {
                   startedChild = child
                 }).pipe(
                   Effect.andThen(registerStartedChild(key, token, child, spawnOptions?.descriptor)),
-                  Effect.flatMap((registered) => registered ? Effect.void : child.requestStop)
+                  Effect.flatMap((registered) => registered ? Effect.void : requestChildStop)
                 ),
               onStop: unregisterChild(key, token),
               parent: self as ProcessAddress<unknown>,
@@ -913,14 +910,13 @@ const startInternal: <
     })
   )
 
-  const ref: InternalMachineRef<State, Event, Error, Output> = {
+  const ref: MachineRef<State, Event, Error, Output> = {
     id,
     sessionId,
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
     join: Deferred.await(done),
-    requestStop,
     stop,
     send: self.send,
     child: getChild,
@@ -928,7 +924,7 @@ const startInternal: <
   }
 
   if (options.onReady !== undefined) {
-    yield* options.onReady(ref)
+    yield* options.onReady(ref, requestStop)
   }
 
   const reserveTermination = (termination: ProcessTermination) => {
