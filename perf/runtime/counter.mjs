@@ -229,11 +229,26 @@ const rawProcessLogic = {
   run: () => Effect.never
 }
 
+const rawCompiledProcessLogic = {
+  [machineRuntime.compiledProcess]: true,
+  initial: () => Effect.succeed(0),
+  run: () => Effect.never
+}
+
 const startRawProcesses = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
       () => machineRuntime.startProcess(rawProcessLogic),
+      { concurrency: 1 }
+    )
+  )
+
+const startCompiledRawProcesses = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () => machineRuntime.startProcess(rawCompiledProcessLogic),
       { concurrency: 1 }
     )
   )
@@ -330,6 +345,23 @@ export const effectMachineAdapter = {
   stopChildCounters,
   stopObservedCounter,
   stopCounters,
+  runtimeBenchmarks: [
+    {
+      id: "compiled-process-start-stop",
+      label: "Start and stop a raw compiled process",
+      unit: "processes/s",
+      async: true,
+      operations: () => 1,
+      run: async () => {
+        const refs = await startCompiledRawProcesses(1)
+        try {
+          return refs.length
+        } finally {
+          await stopCounters(refs)
+        }
+      }
+    }
+  ],
   memoryProfiles: {
     idle: {
       label: "Idle machine",
@@ -337,8 +369,13 @@ export const effectMachineAdapter = {
       stop: stopCounters
     },
     "raw-process": {
-      label: "Raw managed process",
+      label: "Raw generic managed process",
       start: startRawProcesses,
+      stop: stopCounters
+    },
+    "compiled-raw-process": {
+      label: "Raw compiled process",
+      start: startCompiledRawProcesses,
       stop: stopCounters
     },
     "two-independent": {

@@ -5,7 +5,12 @@ import { resolve } from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
 import { Bench } from "tinybench"
-import { implementations, memoryImplementations, packageVersions } from "../perf/runtime/implementations.mjs"
+import {
+  implementations,
+  memoryImplementations,
+  packageVersions,
+  runtimeReferenceImplementations
+} from "../perf/runtime/implementations.mjs"
 const sourceRevision = (() => {
   try {
     return {
@@ -58,6 +63,7 @@ const configuration = options.quick
     planningBatchSize: 25,
     burstBatchSize: 25,
     childBatchSize: 10,
+    primitiveBatchSize: 100,
     memoryCounts: [25, 100]
   }
   : {
@@ -68,6 +74,7 @@ const configuration = options.quick
     planningBatchSize: 100,
     burstBatchSize: 250,
     childBatchSize: 100,
+    primitiveBatchSize: 1_000,
     memoryCounts: [100, 500, 1_000]
   }
 
@@ -87,7 +94,8 @@ for (const implementation of implementations) {
   const metadata = {
     implementation: implementation.implementation,
     implementationLabel: implementation.label,
-    implementationVersion: implementation.version
+    implementationVersion: implementation.version,
+    group: "machine"
   }
   const planningTask = `${implementation.implementation}:plan-counter`
   benchmarkDefinitions.set(planningTask, {
@@ -255,6 +263,36 @@ for (const implementation of implementations) {
       }
       : () => implementation.runChildLifecycle()
   )
+}
+
+for (const implementation of runtimeReferenceImplementations) {
+  for (const runtimeBenchmark of implementation.runtimeBenchmarks) {
+    const task = `${implementation.implementation}:${runtimeBenchmark.id}`
+    const operations = runtimeBenchmark.operations(configuration)
+    benchmarkDefinitions.set(task, {
+      implementation: implementation.implementation,
+      implementationLabel: implementation.label,
+      implementationVersion: implementation.version,
+      group: "effect-runtime",
+      id: runtimeBenchmark.id,
+      label: runtimeBenchmark.label,
+      unit: runtimeBenchmark.unit,
+      operationsPerIteration: operations
+    })
+    const validate = (completed) => {
+      if (completed !== operations) {
+        throw new Error(
+          `${runtimeBenchmark.label} completed ${completed} operations, expected ${operations}`
+        )
+      }
+    }
+    bench.add(
+      task,
+      runtimeBenchmark.async
+        ? async () => validate(await runtimeBenchmark.run(operations))
+        : () => validate(runtimeBenchmark.run(operations))
+    )
+  }
 }
 
 try {

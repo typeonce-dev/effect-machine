@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import * as XStateV5 from "xstate-v5"
 import * as XStateV6 from "xstate-v6"
 import { effectMachineAdapter } from "./counter.mjs"
-import { makeEffectMemoryAdapter } from "./effect-memory.mjs"
+import { makeEffectRuntimeAdapter } from "./effect-runtime.mjs"
 import { makeXStateAdapter } from "./xstate.mjs"
 
 const readPackageVersion = (path) => JSON.parse(readFileSync(path, "utf8")).version
@@ -36,7 +36,13 @@ export const implementations = [
   })
 ]
 
+export const effectRuntimeImplementation = makeEffectRuntimeAdapter(packageVersions.effect)
+export const runtimeReferenceImplementations = [
+  ...implementations.filter((implementation) => implementation.runtimeBenchmarks !== undefined),
+  effectRuntimeImplementation
+]
+
 export const memoryImplementations = [
   ...implementations,
-  makeEffectMemoryAdapter(packageVersions.effect)
+  effectRuntimeImplementation
 ]
