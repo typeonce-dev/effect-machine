@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as HashMap from "effect/HashMap"
+import * as MutableRef from "effect/MutableRef"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
 import * as Queue from "effect/Queue"
@@ -1244,7 +1245,12 @@ const startCompiledInternal: <
       initializing = false
     }))
   )
-  const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
+  // Compiled drains have one active-state writer. MutableRef operations run in
+  // synchronous Effect steps, so external terminal reservation and lazy
+  // observer installation still arbitrate atomically without retaining a
+  // semaphore per process. Effectful custom updates validate the revision
+  // again before committing across their asynchronous boundary.
+  const current = MutableRef.make<VersionedSnapshot<State, Error, Output>>({
     revision: 0,
     terminalizing: false,
     changes: undefined,
@@ -1253,6 +1259,7 @@ const startCompiledInternal: <
       state: initial
     }
   })
+  const getCurrent = Effect.sync(() => MutableRef.get(current))
   const publishSnapshot: (
     snapshot: VersionedSnapshot<State, Error, Output>
   ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = options.onSnapshot === undefined
@@ -1289,7 +1296,7 @@ const startCompiledInternal: <
   const publishIfCurrent = (
     snapshot: VersionedSnapshot<State, Error, Output>
   ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
-    SynchronizedRef.get(current).pipe(
+    getCurrent.pipe(
       Effect.flatMap((
         currentSnapshot
       ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
@@ -1299,39 +1306,57 @@ const startCompiledInternal: <
       )
     )
 
-  type SnapshotModification = readonly [
-    VersionedSnapshot<State, Error, Output> | undefined,
-    VersionedSnapshot<State, Error, Output>
-  ]
-
   const updateSnapshot = <E2, R2>(
     f: (
       snapshot: RuntimeSnapshot<State, Error, Output>
     ) => Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2>
   ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2> =>
-    SynchronizedRef.modifyEffect(
-      current,
-      (current) =>
-        current.terminalizing
-          ? Effect.succeed([undefined, current] as const)
-          : Effect.map(
-            f(current.snapshot),
-            (next) => {
-              if (next === undefined) {
-                return [undefined, current] as const
-              }
-              const versioned = {
-                revision: current.revision + 1,
-                snapshot: next,
-                terminalizing: false,
-                changes: current.changes
-              }
-              return [versioned, versioned] as const
+    Effect.suspend(() => {
+      const observed = MutableRef.get(current)
+      if (observed.terminalizing) {
+        return Effect.succeed(undefined)
+      }
+      return f(observed.snapshot).pipe(
+        Effect.flatMap((next) =>
+          Effect.sync(() => {
+            const latest = MutableRef.get(current)
+            if (next === undefined || latest.terminalizing || latest.revision !== observed.revision) {
+              return undefined
             }
-          )
-    ).pipe(
+            const versioned = {
+              revision: latest.revision + 1,
+              snapshot: next,
+              terminalizing: false,
+              changes: latest.changes
+            }
+            MutableRef.set(current, versioned)
+            return versioned
+          })
+        ),
+        Effect.flatMap((versioned) =>
+          versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)
+        ),
+        Effect.map((published) => published?.snapshot)
+      )
+    })
+
+  const setActiveState = (state: State) =>
+    Effect.sync(() => {
+      const latest = MutableRef.get(current)
+      if (latest.terminalizing || latest.snapshot.status !== "active") {
+        return undefined
+      }
+      const versioned = {
+        revision: latest.revision + 1,
+        snapshot: { status: "active" as const, state },
+        terminalizing: false,
+        changes: latest.changes
+      }
+      MutableRef.set(current, versioned)
+      return versioned
+    }).pipe(
       Effect.flatMap((versioned) => versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)),
-      Effect.map((published) => published?.snapshot)
+      Effect.asVoid
     )
 
   const reserveTerminalSnapshot = (
@@ -1339,49 +1364,39 @@ const startCompiledInternal: <
       snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
     ) => RuntimeSnapshot<State, Error, Output>
   ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined> =>
-    SynchronizedRef.modify(
-      current,
-      (current): SnapshotModification => {
-        if (current.terminalizing || current.snapshot.status !== "active") {
-          return [undefined, current]
-        }
-        return [
-          {
-            revision: current.revision + 1,
-            snapshot: f(current.snapshot),
-            terminalizing: true,
-            changes: current.changes
-          },
-          { ...current, terminalizing: true }
-        ]
+    Effect.sync(() => {
+      const latest = MutableRef.get(current)
+      if (latest.terminalizing || latest.snapshot.status !== "active") {
+        return undefined
       }
-    ).pipe(Effect.map((versioned) => versioned?.snapshot))
+      const reserved = {
+        revision: latest.revision + 1,
+        snapshot: f(latest.snapshot),
+        terminalizing: true,
+        changes: latest.changes
+      }
+      MutableRef.set(current, { ...latest, terminalizing: true })
+      return reserved.snapshot
+    })
 
   const setAndPublishSnapshot = (
     snapshot: RuntimeSnapshot<State, Error, Output>
   ): Effect.Effect<void> =>
-    SynchronizedRef.updateAndGet(current, (current) => ({
-      revision: current.revision + 1,
-      snapshot,
-      terminalizing: true,
-      changes: current.changes
-    })).pipe(
+    Effect.sync(() => {
+      const latest = MutableRef.get(current)
+      const versioned = {
+        revision: latest.revision + 1,
+        snapshot,
+        terminalizing: true,
+        changes: latest.changes
+      }
+      MutableRef.set(current, versioned)
+      return versioned
+    }).pipe(
       Effect.flatMap(publishSnapshot),
       Effect.flatMap(completeIfTerminal),
       Effect.asVoid
     )
-
-  const setActiveState = (state: State) =>
-    updateSnapshot((snapshot) =>
-      Effect.succeed(
-        snapshot.status === "active"
-          ? {
-            status: "active",
-            state
-          }
-          : undefined
-      )
-    ).pipe(Effect.asVoid)
 
   const terminalizeWith = (
     snapshot: RuntimeSnapshot<State, Error, Output>,
@@ -1523,7 +1538,7 @@ const startCompiledInternal: <
     ...scope,
     receive: Queue.take(queue),
     mailbox: queue,
-    state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
+    state: getCurrent.pipe(Effect.map((current) => current.snapshot.state)),
     setState: setActiveState,
     updateState: (f) =>
       updateSnapshot((snapshot) =>
@@ -1538,29 +1553,45 @@ const startCompiledInternal: <
       ).pipe(Effect.asVoid)
   }
 
-  const getOrCreateChanges = SynchronizedRef.modifyEffect(
-    current,
-    (current) => {
-      if (current.snapshot.status !== "active") {
-        return Effect.succeed([undefined, current] as const)
-      }
-      if (current.changes !== undefined) {
-        return Effect.succeed([current.changes, current] as const)
-      }
-      return PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({ replay: 1 }).pipe(
-        Effect.map((changes) => [changes, { ...current, changes }] as const)
-      )
+  const getOrCreateChanges = Effect.suspend(() => {
+    const observed = MutableRef.get(current)
+    if (observed.snapshot.status !== "active") {
+      return Effect.succeed(undefined)
     }
-  )
+    if (observed.changes !== undefined) {
+      return Effect.succeed(observed.changes)
+    }
+    return PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({ replay: 1 }).pipe(
+      Effect.flatMap((candidate) =>
+        Effect.sync(() => {
+          const latest = MutableRef.get(current)
+          if (latest.snapshot.status !== "active") {
+            return [undefined, true] as const
+          }
+          if (latest.changes !== undefined) {
+            return [latest.changes, true] as const
+          }
+          MutableRef.set(current, { ...latest, changes: candidate })
+          return [candidate, false] as const
+        }).pipe(
+          Effect.flatMap(([changes, discardCandidate]) =>
+            discardCandidate
+              ? PubSub.shutdown(candidate).pipe(Effect.as(changes))
+              : Effect.succeed(changes)
+          )
+        )
+      )
+    )
+  })
 
   const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
     Effect.gen(function*() {
       const changes = yield* getOrCreateChanges
       if (changes === undefined) {
-        return Stream.succeed((yield* SynchronizedRef.get(current)).snapshot)
+        return Stream.succeed((yield* getCurrent).snapshot)
       }
       const subscription = yield* PubSub.subscribe(changes)
-      const captured = yield* SynchronizedRef.get(current)
+      const captured = yield* getCurrent
       if (captured.snapshot.status !== "active") {
         return Stream.succeed(captured.snapshot)
       }
@@ -1578,8 +1609,8 @@ const startCompiledInternal: <
   const ref: MachineRef<State, Event, Error, Output> = {
     id,
     sessionId,
-    state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
-    snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
+    state: getCurrent.pipe(Effect.map((current) => current.snapshot.state)),
+    snapshot: getCurrent.pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
     join: Deferred.await(done),
     stop,
