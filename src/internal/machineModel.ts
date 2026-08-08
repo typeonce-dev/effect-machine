@@ -807,7 +807,7 @@ export const decodeStateValue = (
           machineId: machine.id,
           boundary: "state",
           state: node.path,
-          cause
+          cause: new Schema.SchemaError(cause)
         })
       )
     )

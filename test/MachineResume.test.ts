@@ -445,7 +445,7 @@ describe("Machine.resume", () => {
       class FailedEvent extends Schema.TaggedClass<FailedEvent>("FailedEvent")("FailedEvent", {
         message: Schema.String
       }) {}
-      class LoadFailure extends Schema.TaggedErrorClass<LoadFailure>("LoadFailure")("LoadFailure", {
+      class LoadFailure extends Schema.TaggedError<LoadFailure>()("LoadFailure", {
         message: Schema.String
       }) {}
       const runs = yield* Ref.make(0)
