@@ -173,7 +173,7 @@ const makeProcessLogic: <
                   const current = yield* state
                   const planned = yield* internalPlanner.plan(machine, current, event)
                   if (planned.microsteps.length === 0) {
-                    return yield* Effect.yieldNow
+                    return
                   }
 
                   yield* internalPlanner.runActions(planned.actions, liveRuntime)
@@ -185,8 +185,6 @@ const makeProcessLogic: <
 
                   if (planned.done) {
                     terminal = { output: planned.output }
-                  } else {
-                    yield* Effect.yieldNow
                   }
                 }),
               step: () => undefined
@@ -409,7 +407,7 @@ const makeProcessLogic: <
                   const current = yield* state
                   const planned = yield* internalPlanner.plan(machine, current, event)
                   if (planned.microsteps.length === 0) {
-                    return yield* Effect.yieldNow
+                    return
                   }
                   const changed = planned.microsteps.some((step) => step.changed)
                   const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
@@ -441,7 +439,6 @@ const makeProcessLogic: <
                         yield* startInvokes(planned.next, [path], entryEvent)
                       }
                     }
-                    yield* Effect.yieldNow
                   }
                 }),
               step: () => undefined
