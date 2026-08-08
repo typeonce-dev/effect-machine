@@ -180,6 +180,9 @@ export interface ProcessSpawn {
     options: {
       readonly id: string
       readonly descriptor?: ChildDescriptor
+      readonly onOutcome?: (
+        outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
+      ) => Effect.Effect<void>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -277,6 +280,7 @@ const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
 interface StartInternalOptions {
   readonly detached?: boolean
   readonly id?: string
+  readonly onOutcome?: (outcome: RuntimeOutcome<any, any, any>) => Effect.Effect<void>
   readonly onReady?: (
     ref: MachineRef<any, any, any, any>,
     requestStop: Effect.Effect<void>
@@ -560,6 +564,9 @@ const startInternal: <
     spawnOptions: {
       readonly id: string
       readonly descriptor?: ChildDescriptor
+      readonly onOutcome?: (
+        outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
+      ) => Effect.Effect<void>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -571,6 +578,9 @@ const startInternal: <
     spawnOptions?: {
       readonly id: string
       readonly descriptor?: ChildDescriptor
+      readonly onOutcome?: (
+        outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
+      ) => Effect.Effect<void>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -592,6 +602,7 @@ const startInternal: <
             return yield* startInternal(logic, {
               detached: true,
               ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
+              ...(spawnOptions?.onOutcome === undefined ? undefined : { onOutcome: spawnOptions.onOutcome }),
               onReady: (child, requestChildStop) =>
                 Effect.sync(() => {
                   startedChild = child
@@ -794,15 +805,23 @@ const startInternal: <
     snapshot: RuntimeSnapshot<State, Error, Output>,
     exit: Exit.Exit<unknown, unknown>,
     completeDone: Effect.Effect<void>
-  ): Effect.Effect<void> =>
-    Effect.uninterruptible(
+  ): Effect.Effect<void> => {
+    const notifyOutcome = options.onOutcome === undefined
+      ? Effect.void
+      : Effect.suspend(() => options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
+        Effect.exit,
+        Effect.asVoid
+      )
+    return Effect.uninterruptible(
       Queue.shutdown(queue).pipe(
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
+        Effect.andThen(notifyOutcome),
         Effect.andThen(cleanup),
         Effect.andThen(completeDone)
       )
     )
+  }
 
   const reserveStoppedSnapshot = reserveTerminalSnapshot((snapshot) => ({
     status: "stopped",

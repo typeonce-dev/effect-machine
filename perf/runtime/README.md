@@ -17,7 +17,8 @@ The command reports:
 - parent-with-child start-and-stop throughput;
 - heap and resident-memory growth at 100, 500, and 1,000 live units, including
   a raw managed process, an idle statechart, two independent statecharts, a
-  parent with one child, and that relationship with child observation active;
+  parent with one child, that relationship with child-registry observation
+  active, and an invoked child whose active snapshots are observed;
 - lower-bound memory profiles for Effect itself: a suspended fiber, a queue
   with a waiting fiber, and a minimal mailbox/state/completion actor shell.
 
@@ -56,10 +57,11 @@ same runtime guarantees.
 The fitted heap slope is the primary idle-capacity metric. Compare adjacent
 profiles to attribute retained memory: raw process to idle statechart isolates
 statechart machinery, two independent machines to parent-with-child isolates
-relationship bookkeeping, and unobserved to observed parent-child isolates
-observation. The Effect profiles are primitive lower bounds, not feature-equivalent
-competitors. Resident memory is reported as a raw diagnostic because V8 and the
-operating-system allocator can reuse already committed pages. The
+relationship bookkeeping, while the two observed parent-child profiles isolate
+registry and invoked-snapshot observation. The Effect profiles are primitive
+lower bounds, not feature-equivalent competitors. Resident memory is reported
+as a raw diagnostic because V8 and the operating-system allocator can reuse
+already committed pages. The
 capacity-per-GiB value is a linear estimate that excludes shared process
 overhead; it is not a run-until-OOM limit.
 
