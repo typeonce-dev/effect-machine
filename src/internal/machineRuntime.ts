@@ -80,6 +80,7 @@ interface VersionedSnapshot<State, Error, Output> {
   readonly revision: number
   readonly snapshot: RuntimeSnapshot<State, Error, Output>
   readonly terminalizing: boolean
+  readonly changes: PubSub.PubSub<Take.Take<VersionedSnapshot<State, Error, Output>>> | undefined
 }
 
 export type RuntimeOutcome<State, Error = never, Output = never> =
@@ -309,9 +310,6 @@ const startInternal: <
   const terminalized = yield* Deferred.make<void>()
   const externalFailure = yield* Deferred.make<never, Error>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
-  const changes = yield* PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({
-    replay: 1
-  })
   const childResourcesState = yield* SynchronizedRef.make<ChildResourcesState>({
     closed: false,
     resources: undefined
@@ -634,6 +632,7 @@ const startInternal: <
   const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
     revision: 0,
     terminalizing: false,
+    changes: undefined,
     snapshot: {
       status: "active",
       state: initial
@@ -642,11 +641,16 @@ const startInternal: <
   const publishSnapshot = (
     snapshot: VersionedSnapshot<State, Error, Output>
   ): Effect.Effect<VersionedSnapshot<State, Error, Output>> =>
-    PubSub.publish(changes, [snapshot] as const).pipe(Effect.as(snapshot))
+    snapshot.changes === undefined
+      ? Effect.succeed(snapshot)
+      : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
 
-  const completeChanges: Effect.Effect<void> = PubSub.publish(changes, Exit.succeed<void>(undefined)).pipe(
-    Effect.asVoid
-  )
+  const completeChanges = (
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<void> =>
+    snapshot.changes === undefined
+      ? Effect.void
+      : PubSub.publish(snapshot.changes, Exit.succeed<void>(undefined)).pipe(Effect.asVoid)
 
   const completeIfTerminal = (
     snapshot: VersionedSnapshot<State, Error, Output>
@@ -654,7 +658,7 @@ const startInternal: <
     if (snapshot.snapshot.status === "active") {
       return Effect.succeed(snapshot)
     }
-    return completeChanges.pipe(Effect.as(snapshot))
+    return completeChanges(snapshot).pipe(Effect.as(snapshot))
   }
 
   const publishIfCurrent = (
@@ -694,7 +698,8 @@ const startInternal: <
               const versioned = {
                 revision: current.revision + 1,
                 snapshot: next,
-                terminalizing: false
+                terminalizing: false,
+                changes: current.changes
               }
               return [versioned, versioned] as const
             }
@@ -719,7 +724,8 @@ const startInternal: <
           {
             revision: current.revision + 1,
             snapshot: f(current.snapshot),
-            terminalizing: true
+            terminalizing: true,
+            changes: current.changes
           },
           { ...current, terminalizing: true }
         ]
@@ -732,7 +738,8 @@ const startInternal: <
     SynchronizedRef.updateAndGet(current, (current) => ({
       revision: current.revision + 1,
       snapshot,
-      terminalizing: true
+      terminalizing: true,
+      changes: current.changes
     })).pipe(
       Effect.flatMap(publishSnapshot),
       Effect.flatMap(completeIfTerminal),
@@ -844,10 +851,27 @@ const startInternal: <
       ).pipe(Effect.asVoid)
   }
 
-  yield* publishSnapshot(yield* SynchronizedRef.get(current))
+  const getOrCreateChanges = SynchronizedRef.modifyEffect(
+    current,
+    (current) => {
+      if (current.snapshot.status !== "active") {
+        return Effect.succeed([undefined, current] as const)
+      }
+      if (current.changes !== undefined) {
+        return Effect.succeed([current.changes, current] as const)
+      }
+      return PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({ replay: 1 }).pipe(
+        Effect.map((changes) => [changes, { ...current, changes }] as const)
+      )
+    }
+  )
 
   const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
     Effect.gen(function*() {
+      const changes = yield* getOrCreateChanges
+      if (changes === undefined) {
+        return Stream.succeed((yield* SynchronizedRef.get(current)).snapshot)
+      }
       const subscription = yield* PubSub.subscribe(changes)
       const captured = yield* SynchronizedRef.get(current)
       if (captured.snapshot.status !== "active") {
