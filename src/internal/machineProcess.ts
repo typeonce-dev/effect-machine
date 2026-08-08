@@ -129,15 +129,16 @@ const makeProcessLogic: <
             return yield* Model.normalizeSnapshotEffect(machine, entry.snapshot)
           }
           const planned = yield* internalPlanner.planInitial(machine, ...entry.args)
-          const runtime = internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(
-            machine,
-            scope
-          )
           yield* internalPlanner.runCommands(
             planned.commands,
             scope
           )
-          yield* internalPlanner.runEmittedEvents(planned.emittedEvents, runtime)
+          if (planned.emittedEvents.length > 0) {
+            yield* internalPlanner.runEmittedEvents(
+              planned.emittedEvents,
+              internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
+            )
+          }
           return planned.state
         }),
         scope
@@ -157,64 +158,60 @@ const makeProcessLogic: <
             )
           }
 
-          const liveRuntime = internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(
-            machine,
-            context
-          )
-
           if (!hasInvokes) {
             // A queued batch is produced entirely by this worker, so its
             // configuration is already validated. Drop both caches before
             // blocking again so idle machines retain only the public snapshot.
+            // Keeping the loop in this generator avoids a suspended generator
+            // per iteration; every iteration still crosses Effect boundaries,
+            // so the Effect scheduler remains responsible for cooperative yield.
             let configuration: Model.ActiveConfiguration | undefined
             let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
             let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
-            yield* Effect.whileLoop({
-              while: () => terminal === undefined,
-              body: () =>
-                Effect.gen(function*() {
-                  const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
-                  pendingEvent = Option.none()
-                  let planned
-                  try {
-                    planned = internalPlanner.planConfiguration(
-                      machine,
-                      configuration ?? Model.normalizeConfigurationSync(machine, current),
-                      event
-                    )
-                  } catch (error) {
-                    if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
-                      return yield* error
-                    }
-                    throw error
-                  }
-                  configuration = planned.next
+            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
+            while (terminal === undefined) {
+              const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
+              pendingEvent = Option.none()
+              let planned
+              try {
+                planned = internalPlanner.planConfiguration(
+                  machine,
+                  configuration ?? Model.normalizeConfigurationSync(machine, current),
+                  event
+                )
+              } catch (error) {
+                if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
+                  return yield* error
+                }
+                throw error
+              }
+              configuration = planned.next
 
-                  if (planned.microsteps.length > 0) {
-                    const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                    yield* internalPlanner.runCommands(planned.commands, context)
-                    yield* setState(next)
-                    current = next
-                    yield* internalPlanner.runEmittedEvents(
-                      planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                      liveRuntime
-                    )
+              if (planned.microsteps.length > 0) {
+                const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
+                yield* internalPlanner.runCommands(planned.commands, context)
+                yield* setState(next)
+                current = next
+                if (planned.emittedEvents.length > 0) {
+                  yield* internalPlanner.runEmittedEvents(
+                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                    liveRuntime ??= internalPlanner.makeLiveRuntime(machine, context)
+                  )
+                }
 
-                    if (planned.done) {
-                      terminal = { output: planned.output as Output }
-                    }
-                  }
+                if (planned.done) {
+                  terminal = { output: planned.output as Output }
+                }
+              }
 
-                  if (terminal === undefined) {
-                    pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
-                    if (Option.isNone(pendingEvent)) {
-                      configuration = undefined
-                      pollEvent = undefined
-                    }
-                  }
-                }),
-              step: () => undefined
-            })
+              if (terminal === undefined) {
+                pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                if (Option.isNone(pendingEvent)) {
+                  configuration = undefined
+                  pollEvent = undefined
+                }
+              }
+            }
 
             if (terminal === undefined) {
               return yield* Effect.die(
@@ -414,73 +411,71 @@ const makeProcessLogic: <
             configuration = undefined
             let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
             let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
+            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
 
-            yield* Effect.whileLoop({
-              while: () => terminal === undefined,
-              body: () =>
-                Effect.gen(function*() {
-                  const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
-                  pendingEvent = Option.none()
-                  let planned
-                  try {
-                    planned = internalPlanner.planConfiguration(
-                      machine,
-                      configuration ?? Model.normalizeConfigurationSync(machine, current),
-                      event
-                    )
-                  } catch (error) {
-                    if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
-                      return yield* error
-                    }
-                    throw error
-                  }
-                  configuration = planned.next
-                  if (planned.microsteps.length > 0) {
-                    const changed = planned.microsteps.some((step) => step.changed)
-                    const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
-                    const entryEvents = new Map<string, Machine.LifecycleEvent<Events>>()
-                    for (const step of planned.microsteps) {
-                      if (step.changed) {
-                        for (const path of step.entryPaths) {
-                          entryEvents.set(path, step.event as Machine.LifecycleEvent<Events>)
-                        }
-                      }
-                    }
-
-                    const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                    yield* internalPlanner.runCommands(planned.commands, context)
-                    if (changed) {
-                      yield* stopInvokes(exitPaths)
-                    }
-                    yield* setState(next)
-                    current = next
-                    yield* internalPlanner.runEmittedEvents(
-                      planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                      liveRuntime
-                    )
-
-                    if (planned.done) {
-                      terminal = { output: planned.output as Output }
-                      yield* stopAllInvokes
-                    } else {
-                      if (changed) {
-                        for (const [path, entryEvent] of entryEvents) {
-                          yield* startInvokes(planned.next, [path], entryEvent)
-                        }
-                      }
+            // Match the compact non-invoke loop while retaining state-scoped
+            // child lifecycle work at the same ordered Effect boundaries.
+            while (terminal === undefined) {
+              const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
+              pendingEvent = Option.none()
+              let planned
+              try {
+                planned = internalPlanner.planConfiguration(
+                  machine,
+                  configuration ?? Model.normalizeConfigurationSync(machine, current),
+                  event
+                )
+              } catch (error) {
+                if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
+                  return yield* error
+                }
+                throw error
+              }
+              configuration = planned.next
+              if (planned.microsteps.length > 0) {
+                const changed = planned.microsteps.some((step) => step.changed)
+                const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
+                const entryEvents = new Map<string, Machine.LifecycleEvent<Events>>()
+                for (const step of planned.microsteps) {
+                  if (step.changed) {
+                    for (const path of step.entryPaths) {
+                      entryEvents.set(path, step.event as Machine.LifecycleEvent<Events>)
                     }
                   }
+                }
 
-                  if (terminal === undefined) {
-                    pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
-                    if (Option.isNone(pendingEvent)) {
-                      configuration = undefined
-                      pollEvent = undefined
-                    }
+                const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
+                yield* internalPlanner.runCommands(planned.commands, context)
+                if (changed) {
+                  yield* stopInvokes(exitPaths)
+                }
+                yield* setState(next)
+                current = next
+                if (planned.emittedEvents.length > 0) {
+                  yield* internalPlanner.runEmittedEvents(
+                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                    liveRuntime ??= internalPlanner.makeLiveRuntime(machine, context)
+                  )
+                }
+
+                if (planned.done) {
+                  terminal = { output: planned.output as Output }
+                  yield* stopAllInvokes
+                } else if (changed) {
+                  for (const [path, entryEvent] of entryEvents) {
+                    yield* startInvokes(planned.next, [path], entryEvent)
                   }
-                }),
-              step: () => undefined
-            })
+                }
+              }
+
+              if (terminal === undefined) {
+                pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                if (Option.isNone(pendingEvent)) {
+                  configuration = undefined
+                  pollEvent = undefined
+                }
+              }
+            }
 
             if (terminal === undefined) {
               return yield* Effect.die(
