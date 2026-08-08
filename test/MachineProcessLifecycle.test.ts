@@ -1,9 +1,47 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Stream } from "effect"
 import { Machine } from "../src/index.js"
 import * as MachineRuntime from "../src/internal/machineRuntime.js"
 
 describe("machine process lifecycle", () => {
+  it.effect("wakes an on-demand compiled process across consecutive idle periods", () =>
+    Effect.gen(function*() {
+      type Event = {
+        readonly value: number
+        readonly processed: Deferred.Deferred<void>
+      }
+      const ref = yield* MachineRuntime.startProcess<number, Event>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        initial: () => Effect.succeed(0),
+        run: () => Effect.never,
+        drain: (context) =>
+          Effect.gen(function*() {
+            while (true) {
+              const event = yield* Queue.poll(context.mailbox)
+              if (Option.isNone(event)) {
+                return Option.none()
+              }
+              yield* context.setState(event.value.value)
+              yield* Deferred.succeed(event.value.processed, undefined)
+            }
+          })
+      })
+
+      for (let value = 1; value <= 100; value += 1) {
+        const processed = yield* Deferred.make<void>()
+        yield* ref.send({ value, processed })
+        yield* Deferred.await(processed)
+        if (value % 2 === 0) {
+          yield* Effect.yieldNow
+        }
+      }
+
+      assert.strictEqual(yield* ref.state, 100)
+      yield* ref.stop
+      assert.deepStrictEqual(yield* ref.snapshot, { status: "stopped", state: 100 })
+    }))
+
   it.effect("provides empty child operations for childless process logic", () =>
     Effect.gen(function*() {
       const processScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
