@@ -122,6 +122,7 @@ const makeProcessLogic: <
 ) => {
   const hasInvokes = hasInvokeCapability(machine)
   return ({
+    [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
     initial: (scope) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
@@ -326,6 +327,7 @@ const makeProcessLogic: <
               return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
             }
             const logic = config.src()
+            const processLogic = logic as internalRuntime.ProcessLogic<any, any, any, any, any, any>
             const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
               isCurrentInvoke(key, token).pipe(
                 Effect.flatMap((isCurrent) =>
@@ -334,6 +336,9 @@ const makeProcessLogic: <
               )
             yield* context.spawn(
               {
+                ...(processLogic[internalRuntime.childlessProcess] === true
+                  ? { [internalRuntime.childlessProcess]: true as const }
+                  : undefined),
                 initial: (childScope) => logic.initial({ ...childScope, sendParent }),
                 run: (childContext) => logic.run({ ...childContext, sendParent })
               },
