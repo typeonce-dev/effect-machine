@@ -4,6 +4,25 @@ import { Machine } from "../src/index.js"
 import * as MachineRuntime from "../src/internal/machineRuntime.js"
 
 describe("machine process lifecycle", () => {
+  it.effect("provides empty child operations for childless process logic", () =>
+    Effect.gen(function*() {
+      const processScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const ref = yield* MachineRuntime.startProcess({
+        [MachineRuntime.childlessProcess]: true,
+        initial: (scope) => Deferred.succeed(processScope, scope).pipe(Effect.as(0)),
+        run: () => Effect.never
+      })
+      const scope = yield* Deferred.await(processScope)
+
+      assert(Option.isNone(yield* ref.child("missing")))
+      assert(Option.isNone(yield* ref.childChanges("missing").pipe(Stream.runHead, Effect.map(Option.flatten))))
+      yield* scope.sendTo("missing", undefined)
+      yield* scope.stopChild("missing")
+
+      yield* ref.stop
+      assert(Option.isNone(yield* ref.child("missing")))
+    }))
+
   it.effect("allows initialization to request and await self-stop before a run fiber exists", () =>
     Effect.gen(function*() {
       const initializedAfterStop = yield* Ref.make(false)
