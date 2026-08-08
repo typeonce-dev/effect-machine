@@ -215,6 +215,7 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
 })
 
 const historyToSnapshot = (
+  machine: Machine.Any,
   history: ReadonlyMap<string, HistoryRecord>
 ): Readonly<
   Record<string, {
@@ -229,10 +230,11 @@ const historyToSnapshot = (
     readonly values: Readonly<Record<string, unknown>>
   }> = {}
   for (const [path, record] of history) {
+    const active = Array.from(record.active).sort((left, right) => compareDocumentOrder(machine, left, right))
     entries[path] = {
       mode: record.mode,
-      active: Array.from(record.active),
-      values: Object.fromEntries(record.values)
+      active,
+      values: Object.fromEntries(active.map((path) => [path, record.values.get(path)]))
     }
   }
   return entries
@@ -1009,7 +1011,7 @@ export const snapshotFromConfiguration = <const States extends Machine.StateSche
     }).completed = completed
   }
   if (configuration.history.size > 0) {
-    Object.assign(snapshot, { history: historyToSnapshot(configuration.history) })
+    Object.assign(snapshot, { history: historyToSnapshot(machine, configuration.history) })
   }
   return snapshot
 }
@@ -1024,7 +1026,7 @@ export const snapshotFromConfigurationAtPath = <const States extends Machine.Sta
 ): Machine.SnapshotByIdentifier<States, Machine.StateIdentifier<States>> => {
   const snapshot = snapshotFromPath<States>(machine, configuration, path)
   if (configuration.history.size > 0) {
-    Object.assign(snapshot, { history: historyToSnapshot(configuration.history) })
+    Object.assign(snapshot, { history: historyToSnapshot(machine, configuration.history) })
   }
   return snapshot
 }

@@ -2107,6 +2107,121 @@ const settle: <
     : { ...result, done: false, output: undefined }
 })
 
+const macrostepConfiguration: <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never
+>(
+  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  configuration: ActiveConfiguration,
+  event: Machine.EventOf<Events>
+) => Effect.Effect<
+  MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
+  E | InfiniteTransitionError | MachineSchemaDecodeError,
+  R
+> = Effect.fnUntraced(function*<
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never
+>(
+  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  configuration: ActiveConfiguration,
+  event: Machine.EventOf<Events>
+) {
+  const decodedEvent = yield* decodeEvent<Events>(machine, event)
+  if (isActiveFinalConfiguration(machine, configuration)) {
+    const completed = yield* completeConfigurationEffect(machine, configuration, decodedEvent)
+    const root = getRootPath(machine, completed.configuration)
+    if (!completed.configuration.outputs.has(root)) {
+      return yield* Effect.die(
+        new Error("Machine reached a terminal configuration without a completed root output")
+      )
+    }
+    return {
+      next: completed.configuration,
+      actions: [],
+      emittedEvents: [],
+      microsteps: [],
+      done: true,
+      output: completed.configuration.outputs.get(root) as Output
+    }
+  }
+
+  const selections = selectEventTransitions<States, Events, Emits, E, R>(
+    machine,
+    configuration,
+    decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
+  )
+  if (selections.length === 0) {
+    return {
+      next: configuration,
+      actions: [],
+      emittedEvents: [],
+      microsteps: [],
+      done: false,
+      output: undefined
+    }
+  }
+  const step = yield* microstep(
+    machine,
+    configuration,
+    decodedEvent,
+    selections
+  )
+  const actions = [...step.actions]
+  const raisedEvents = [...step.raisedEvents]
+  const emittedEvents = [...step.emittedEvents]
+  const microsteps = [step]
+  return yield* settle(machine, step.next, decodedEvent, actions, raisedEvents, emittedEvents, microsteps)
+})
+
+const snapshotMacrostep = <
+  const States extends Machine.StateSchemas,
+  Event,
+  E,
+  R,
+  Output
+>(
+  machine: Machine.Any,
+  settled: MacrostepPlan<ActiveConfiguration, Event, E, R, Output>
+): MacrostepPlan<Machine.Snapshot<States>, Event, E, R, Output> => {
+  const planned = {
+    next: snapshotFromConfiguration<States>(machine, settled.next),
+    actions: settled.actions,
+    emittedEvents: settled.emittedEvents,
+    microsteps: settled.microsteps.map((step) => ({
+      next: snapshotFromConfiguration<States>(machine, step.next),
+      event: step.event,
+      transitions: step.transitions,
+      actions: step.actions,
+      raisedEvents: step.raisedEvents,
+      emittedEvents: step.emittedEvents,
+      exitPaths: step.exitPaths,
+      entryPaths: step.entryPaths,
+      changed: step.changed
+    }))
+  }
+  return settled.done
+    ? { ...planned, done: true, output: settled.output }
+    : { ...planned, done: false, output: undefined }
+}
+
 const macrostep: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -2145,73 +2260,13 @@ const macrostep: <
   event: Machine.EventOf<Events>
 ) {
   const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
-  const decodedEvent = yield* decodeEvent<Events>(machine, event)
-  if (isActiveFinalConfiguration(machine, configuration)) {
-    const completed = yield* completeConfigurationEffect(machine, configuration, decodedEvent)
-    const root = getRootPath(machine, completed.configuration)
-    if (!completed.configuration.outputs.has(root)) {
-      return yield* Effect.die(
-        new Error("Machine reached a terminal configuration without a completed root output")
-      )
-    }
-    return {
-      next: snapshotFromConfiguration<States>(machine, completed.configuration),
-      actions: [],
-      emittedEvents: [],
-      microsteps: [],
-      done: true,
-      output: completed.configuration.outputs.get(root) as Output
-    }
-  }
-
-  const selections = selectEventTransitions<States, Events, Emits, E, R>(
-    machine,
-    configuration,
-    decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
-  )
-  if (selections.length === 0) {
-    return {
-      next: snapshotFromConfiguration<States>(machine, configuration),
-      actions: [],
-      emittedEvents: [],
-      microsteps: [],
-      done: false,
-      output: undefined
-    }
-  }
-  const step = yield* microstep(
-    machine,
-    configuration,
-    decodedEvent,
-    selections
-  )
-  const actions = [...step.actions]
-  const raisedEvents = [...step.raisedEvents]
-  const emittedEvents = [...step.emittedEvents]
-  const microsteps = [step]
-  const settled = yield* settle(machine, step.next, decodedEvent, actions, raisedEvents, emittedEvents, microsteps)
-  const planned = {
-    next: snapshotFromConfiguration<States>(machine, settled.next),
-    actions: settled.actions,
-    emittedEvents: settled.emittedEvents,
-    microsteps: settled.microsteps.map((step) => ({
-      next: snapshotFromConfiguration<States>(machine, step.next),
-      event: step.event,
-      transitions: step.transitions,
-      actions: step.actions,
-      raisedEvents: step.raisedEvents,
-      emittedEvents: step.emittedEvents,
-      exitPaths: step.exitPaths,
-      entryPaths: step.entryPaths,
-      changed: step.changed
-    }))
-  }
-  return settled.done
-    ? { ...planned, done: true, output: settled.output }
-    : { ...planned, done: false, output: undefined }
+  const settled = yield* macrostepConfiguration(machine, configuration, event)
+  return snapshotMacrostep<States, Machine.EventOf<Events>, E, R, Output>(machine, settled)
 })
 
 export const plan = macrostep
+
+export const planConfiguration = macrostepConfiguration
 
 const actionUnsafe = Effect.fnUntraced(function*<E, R>(
   effect: Effect.Effect<void, E, R>
