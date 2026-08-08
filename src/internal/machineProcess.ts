@@ -281,10 +281,13 @@ const makeProcessLogic: <
             key: string,
             token: symbol,
             outcome: internalRuntime.RuntimeOutcome<any, any, any>
-          ): Effect.Effect<void> =>
-            isCurrentInvoke(key, token).pipe(
+          ): Effect.Effect<void> => {
+            if (outcome._tag === "Stopped") {
+              return Effect.void
+            }
+            return isCurrentInvoke(key, token).pipe(
               Effect.flatMap((isCurrent) => {
-                if (!isCurrent || outcome._tag === "Stopped") {
+                if (!isCurrent) {
                   return Effect.void
                 }
                 if (outcome._tag === "Done") {
@@ -300,6 +303,7 @@ const makeProcessLogic: <
                 return context.failCause(outcome.cause)
               })
             )
+          }
           const startInvokeSnapshotWatcher = Effect.fnUntraced(function*(
             config: AnyInvokeConfig,
             child: internalRuntime.MachineRef<any, any, any, any>,
