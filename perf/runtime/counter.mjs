@@ -357,7 +357,7 @@ export const effectMachineAdapter = {
       stop: stopObservedChildCounters
     },
     "snapshot-observed-parent-with-child": {
-      label: "Parent with invoked child snapshot watcher",
+      label: "Parent with observed invoked child snapshots",
       start: startSnapshotObservedChildCounters,
       stop: stopChildCounters
     }

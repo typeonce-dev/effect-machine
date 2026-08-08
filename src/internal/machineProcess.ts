@@ -6,13 +6,11 @@
 
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import * as Fiber from "effect/Fiber"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import type * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
 import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError } from "./machineErrors.js"
 import type { StartupError, StoppedError } from "./machineErrors.js"
@@ -34,7 +32,6 @@ type AnyInvokeConfig = Machine.InvokeConfig<any, any, any, any, any, any, any, a
 
 interface InvokeSession {
   readonly token: symbol
-  readonly watcher: Fiber.Fiber<void> | undefined
   readonly childId: string
   readonly path: string
 }
@@ -240,14 +237,7 @@ const makeProcessLogic: <
                 return Option.isSome(current) && current.value.token === token
               })
             )
-          const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> =>
-            Effect.all(
-              [
-                ...(session.watcher === undefined ? [] : [Fiber.interrupt(session.watcher)]),
-                context.stopChild(session.childId)
-              ],
-              { discard: true, concurrency: "unbounded" }
-            )
+          const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> => context.stopChild(session.childId)
           const removeInvoke = (
             key: string,
             token: symbol | undefined
@@ -304,49 +294,25 @@ const makeProcessLogic: <
               })
             )
           }
-          const startInvokeSnapshotWatcher = Effect.fnUntraced(function*(
+          const handleInvokeSnapshot = (
             config: AnyInvokeConfig,
-            child: internalRuntime.MachineRef<any, any, any, any>,
             key: string,
-            token: symbol
-          ) {
-            if (config.snapshot === undefined) {
-              return
-            }
-            const mapSnapshot = config.snapshot
-            const watcher = yield* child.changes.pipe(
-              Stream.filter((snapshot) => snapshot.status === "active"),
-              Stream.runForEach((snapshot) =>
-                isCurrentInvoke(key, token).pipe(
-                  Effect.flatMap((isCurrent) => {
-                    if (!isCurrent) {
-                      return Effect.void
-                    }
-                    const mappedEvent = mapSnapshot({ id: config.id, snapshot })
-                    return mappedEvent === undefined
-                      ? Effect.void
-                      : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                        Effect.catchTag("StoppedError", () => Effect.void)
-                      )
-                  })
-                )
-              ),
-              Effect.forkChild
+            token: symbol,
+            snapshot: Extract<internalRuntime.RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
+          ): Effect.Effect<void> =>
+            isCurrentInvoke(key, token).pipe(
+              Effect.flatMap((isCurrent) => {
+                if (!isCurrent || config.snapshot === undefined) {
+                  return Effect.void
+                }
+                const mappedEvent = config.snapshot({ id: config.id, snapshot })
+                return mappedEvent === undefined
+                  ? Effect.void
+                  : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
+                    Effect.catchTag("StoppedError", () => Effect.void)
+                  )
+              })
             )
-            const installed = yield* Ref.modify(invokeSessions, (sessions) => {
-              const current = HashMap.get(sessions, key)
-              if (Option.isNone(current) || current.value.token !== token) {
-                return [false, sessions] as const
-              }
-              return [
-                true,
-                HashMap.set(sessions, key, { ...current.value, watcher })
-              ] as const
-            })
-            if (!installed) {
-              yield* Fiber.interrupt(watcher)
-            }
-          })
           const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
             path: StateId,
             config: AnyInvokeConfig
@@ -358,7 +324,7 @@ const makeProcessLogic: <
             const reserved = yield* Ref.modify(invokeSessions, (sessions) =>
               HashMap.has(sessions, key)
                 ? [false, sessions] as const
-                : [true, HashMap.set(sessions, key, { token, watcher: undefined, childId, path })] as const)
+                : [true, HashMap.set(sessions, key, { token, childId, path })] as const)
             if (!reserved) {
               return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
             }
@@ -369,7 +335,7 @@ const makeProcessLogic: <
                   isCurrent ? context.self.send(event as Machine.EventOf<Events>) : Effect.void
                 )
               )
-            const child = yield* context.spawn(
+            yield* context.spawn(
               {
                 initial: (childScope) => logic.initial({ ...childScope, sendParent }),
                 run: (childContext) => logic.run({ ...childContext, sendParent })
@@ -377,7 +343,11 @@ const makeProcessLogic: <
               {
                 id: childId,
                 ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
-                onOutcome: (outcome) => handleInvokeOutcome(config, key, token, outcome)
+                onOutcome: (outcome) => handleInvokeOutcome(config, key, token, outcome),
+                ...(config.snapshot === undefined ? undefined : {
+                  [internalRuntime.activeSnapshotObserver]: (snapshot) =>
+                    handleInvokeSnapshot(config, key, token, snapshot)
+                })
               }
             ).pipe(
               Effect.onExit((exit) =>
@@ -386,7 +356,6 @@ const makeProcessLogic: <
                   : Effect.void
               )
             )
-            yield* startInvokeSnapshotWatcher(config, child, key, token)
           })
           const startInvokes: (
             configuration: Model.ActiveConfiguration,

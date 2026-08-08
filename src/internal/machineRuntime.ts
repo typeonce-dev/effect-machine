@@ -43,6 +43,9 @@ type ChildEntry =
 type ChildSelector = string | ChildDescriptor
 type ChildKey = string | symbol
 
+/** @internal */
+export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
+
 interface ChildRegistrySnapshot {
   readonly closed: boolean
   readonly revision: number
@@ -183,6 +186,9 @@ export interface ProcessSpawn {
       readonly onOutcome?: (
         outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
       ) => Effect.Effect<void>
+      readonly [activeSnapshotObserver]?: (
+        snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
+      ) => Effect.Effect<void>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -257,6 +263,17 @@ const classifyOutcome = <State, Error, Output>(
   }
 }
 
+const notifyActiveSnapshot = <State, Error, Output>(
+  onSnapshot: (
+    snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
+  ) => Effect.Effect<void>,
+  snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
+): Effect.Effect<void> =>
+  Effect.suspend(() => onSnapshot(snapshot)).pipe(
+    Effect.exit,
+    Effect.asVoid
+  )
+
 export const watch = <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
 ): Stream.Stream<RuntimeOutcome<State, Error, Output>> =>
@@ -281,6 +298,9 @@ interface StartInternalOptions {
   readonly detached?: boolean
   readonly id?: string
   readonly onOutcome?: (outcome: RuntimeOutcome<any, any, any>) => Effect.Effect<void>
+  readonly onSnapshot?: (
+    snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
+  ) => Effect.Effect<void>
   readonly onReady?: (
     ref: MachineRef<any, any, any, any>,
     requestStop: Effect.Effect<void>
@@ -567,6 +587,9 @@ const startInternal: <
       readonly onOutcome?: (
         outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
       ) => Effect.Effect<void>
+      readonly [activeSnapshotObserver]?: (
+        snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
+      ) => Effect.Effect<void>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -580,6 +603,9 @@ const startInternal: <
       readonly descriptor?: ChildDescriptor
       readonly onOutcome?: (
         outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
+      ) => Effect.Effect<void>
+      readonly [activeSnapshotObserver]?: (
+        snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
       ) => Effect.Effect<void>
     }
   ): Effect.Effect<
@@ -603,6 +629,9 @@ const startInternal: <
               detached: true,
               ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
               ...(spawnOptions?.onOutcome === undefined ? undefined : { onOutcome: spawnOptions.onOutcome }),
+              ...(spawnOptions?.[activeSnapshotObserver] === undefined
+                ? undefined
+                : { onSnapshot: spawnOptions[activeSnapshotObserver] }),
               onReady: (child, requestChildStop) =>
                 Effect.sync(() => {
                   startedChild = child
@@ -681,12 +710,22 @@ const startInternal: <
       state: initial
     }
   })
-  const publishSnapshot = (
+  const publishSnapshot: (
     snapshot: VersionedSnapshot<State, Error, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error, Output>> =>
-    snapshot.changes === undefined
-      ? Effect.succeed(snapshot)
-      : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = options.onSnapshot === undefined
+    ? (snapshot) =>
+      snapshot.changes === undefined
+        ? Effect.succeed(snapshot)
+        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+    : (snapshot) => {
+      const publish = snapshot.changes === undefined
+        ? Effect.succeed(snapshot)
+        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+      const runtimeSnapshot = snapshot.snapshot
+      return runtimeSnapshot.status !== "active"
+        ? publish
+        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(options.onSnapshot!, runtimeSnapshot)))
+    }
 
   const completeChanges = (
     snapshot: VersionedSnapshot<State, Error, Output>
@@ -944,6 +983,9 @@ const startInternal: <
 
   if (options.onReady !== undefined) {
     yield* options.onReady(ref, requestStop)
+  }
+  if (options.onSnapshot !== undefined) {
+    yield* notifyActiveSnapshot(options.onSnapshot, { status: "active", state: initial })
   }
 
   const reserveTermination = (termination: ProcessTermination) => {
