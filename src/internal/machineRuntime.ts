@@ -49,6 +49,9 @@ export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/
 /** @internal */
 export const childlessProcess: unique symbol = Symbol.for("effect/Machine/childlessProcess")
 
+/** @internal */
+export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compiledProcess")
+
 interface ChildRegistrySnapshot {
   readonly closed: boolean
   readonly revision: number
@@ -170,6 +173,7 @@ export interface ProcessLogic<
   out InitialError = never
 > {
   readonly [childlessProcess]?: true
+  readonly [compiledProcess]?: true
   initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
@@ -610,7 +614,7 @@ const makeChildRuntime = (
               if (!reserved) {
                 return yield* Effect.interrupt
               }
-              return yield* startInternal(logic, {
+              return yield* startLogicInternal(logic, {
                 detached: true,
                 ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
                 ...(spawnOptions?.onOutcome === undefined ? undefined : { onOutcome: spawnOptions.onOutcome }),
@@ -648,7 +652,10 @@ const makeChildRuntime = (
     return { close, spawn, get, changes, sendTo, stop }
   })
 
-const startInternal: <
+// `Machine.logic` permits an arbitrary Effect program, including programs that
+// suspend or supervise their own fibers. Keep its two-fiber worker/supervisor
+// protocol as the general contract rather than weakening it for statecharts.
+const startGenericInternal: <
   State,
   Event,
   Error = never,
@@ -1105,6 +1112,490 @@ const startInternal: <
   return ref
 })
 
+// Compiled statecharts have a bounded runtime shape: initialization is already
+// complete and `run` is the generated event loop. That lets one fiber own both
+// event processing and terminal publication without changing the generic
+// `Machine.logic` contract above.
+const startCompiledInternal: <
+  State,
+  Event,
+  Error = never,
+  Requirements = never,
+  Output = never,
+  InitialError = never
+>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  options: StartInternalOptions
+) => Effect.Effect<
+  MachineRef<State, Event, Error, Output>,
+  InitialError,
+  Requirements
+> = Effect.fnUntraced(function*<State, Event, Error, Requirements, Output, InitialError>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  options: StartInternalOptions
+) {
+  type ProcessTermination =
+    | { readonly _tag: "Stopped" }
+    | { readonly _tag: "Done"; readonly output: Output }
+    | { readonly _tag: "Failure"; readonly cause: Cause.Cause<Error> }
+
+  const sessionId = yield* options.runtime.nextSessionId
+  const id = options.id ?? sessionId
+  const queue = yield* Queue.unbounded<Event>()
+  const termination = yield* Deferred.make<ProcessTermination>()
+  const done = yield* Deferred.make<Output, Error | StoppedError>()
+  const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
+  let worker: Fiber.Fiber<any, never> | undefined
+  let requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
+    Deferred.succeed(termination, requested)
+  const interruptWorker: Effect.Effect<void> = Effect.suspend(() =>
+    worker === undefined ? Effect.void : Fiber.interrupt(worker)
+  )
+  let initializing = true
+  const requestStop = requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
+  const self: ProcessAddress<Event> = {
+    id,
+    sessionId,
+    // Initialization must finish constructing a state before a stopped
+    // snapshot can be published. A stop requested there is therefore recorded
+    // and returns so initialization can finish. Once running, a compiled
+    // process owns terminalization in this fiber, so self-stop interrupts it
+    // directly after atomically freezing the active snapshot.
+    stop: Effect.suspend(() => {
+      if (initializing) {
+        return requestStop
+      }
+      return requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.andThen(Effect.interrupt))
+    }),
+    send: (event: Event) =>
+      Queue.offer(queue, event).pipe(
+        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+      )
+  }
+
+  let {
+    changes: childChanges,
+    close: closeChildren,
+    get: getChild,
+    sendTo,
+    spawn,
+    stop: stopChild
+  } = childlessRuntime
+  if (logic[childlessProcess] !== true) {
+    ;({
+      changes: childChanges,
+      close: closeChildren,
+      get: getChild,
+      sendTo,
+      spawn,
+      stop: stopChild
+    } = yield* makeChildRuntime(self, options))
+  }
+  const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
+    Exit.isFailure(exit)
+      ? closeChildren(exit)
+      : Effect.void
+  const cleanup = options.onStop ?? Effect.void
+  const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
+    options.parent === undefined ? Effect.void : options.parent.send(event)
+
+  const scope: ProcessScope<Event> = {
+    self,
+    parent: options.parent,
+    spawn,
+    sendParent,
+    sendTo,
+    stopChild,
+    failCause: (cause) => {
+      const requested = {
+        _tag: "Failure",
+        cause: cause as Cause.Cause<Error>
+      } as const
+      return requestRuntimeTermination(requested).pipe(
+        Effect.flatMap((accepted) =>
+          accepted && worker !== undefined
+            ? Effect.forkDetach(interruptWorker).pipe(Effect.asVoid)
+            : Effect.void
+        )
+      )
+    }
+  }
+
+  const initial = yield* logic.initial(scope).pipe(
+    Effect.onExit(cleanupStartupFailure),
+    Effect.ensuring(Effect.sync(() => {
+      initializing = false
+    }))
+  )
+  const current = yield* SynchronizedRef.make<VersionedSnapshot<State, Error, Output>>({
+    revision: 0,
+    terminalizing: false,
+    changes: undefined,
+    snapshot: {
+      status: "active",
+      state: initial
+    }
+  })
+  const publishSnapshot: (
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = options.onSnapshot === undefined
+    ? (snapshot) =>
+      snapshot.changes === undefined
+        ? Effect.succeed(snapshot)
+        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+    : (snapshot) => {
+      const publish = snapshot.changes === undefined
+        ? Effect.succeed(snapshot)
+        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+      const runtimeSnapshot = snapshot.snapshot
+      return runtimeSnapshot.status !== "active"
+        ? publish
+        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(options.onSnapshot!, runtimeSnapshot)))
+    }
+
+  const completeChanges = (
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<void> =>
+    snapshot.changes === undefined
+      ? Effect.void
+      : PubSub.publish(snapshot.changes, Exit.succeed<void>(undefined)).pipe(Effect.asVoid)
+
+  const completeIfTerminal = (
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<VersionedSnapshot<State, Error, Output>> => {
+    if (snapshot.snapshot.status === "active") {
+      return Effect.succeed(snapshot)
+    }
+    return completeChanges(snapshot).pipe(Effect.as(snapshot))
+  }
+
+  const publishIfCurrent = (
+    snapshot: VersionedSnapshot<State, Error, Output>
+  ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
+    SynchronizedRef.get(current).pipe(
+      Effect.flatMap((
+        currentSnapshot
+      ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
+        currentSnapshot.revision === snapshot.revision
+          ? publishSnapshot(snapshot).pipe(Effect.flatMap(completeIfTerminal))
+          : Effect.succeed(undefined)
+      )
+    )
+
+  type SnapshotModification = readonly [
+    VersionedSnapshot<State, Error, Output> | undefined,
+    VersionedSnapshot<State, Error, Output>
+  ]
+
+  const updateSnapshot = <E2, R2>(
+    f: (
+      snapshot: RuntimeSnapshot<State, Error, Output>
+    ) => Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2>
+  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2> =>
+    SynchronizedRef.modifyEffect(
+      current,
+      (current) =>
+        current.terminalizing
+          ? Effect.succeed([undefined, current] as const)
+          : Effect.map(
+            f(current.snapshot),
+            (next) => {
+              if (next === undefined) {
+                return [undefined, current] as const
+              }
+              const versioned = {
+                revision: current.revision + 1,
+                snapshot: next,
+                terminalizing: false,
+                changes: current.changes
+              }
+              return [versioned, versioned] as const
+            }
+          )
+    ).pipe(
+      Effect.flatMap((versioned) => versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)),
+      Effect.map((published) => published?.snapshot)
+    )
+
+  const reserveTerminalSnapshot = (
+    f: (
+      snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
+    ) => RuntimeSnapshot<State, Error, Output>
+  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined> =>
+    SynchronizedRef.modify(
+      current,
+      (current): SnapshotModification => {
+        if (current.terminalizing || current.snapshot.status !== "active") {
+          return [undefined, current]
+        }
+        return [
+          {
+            revision: current.revision + 1,
+            snapshot: f(current.snapshot),
+            terminalizing: true,
+            changes: current.changes
+          },
+          { ...current, terminalizing: true }
+        ]
+      }
+    ).pipe(Effect.map((versioned) => versioned?.snapshot))
+
+  const setAndPublishSnapshot = (
+    snapshot: RuntimeSnapshot<State, Error, Output>
+  ): Effect.Effect<void> =>
+    SynchronizedRef.updateAndGet(current, (current) => ({
+      revision: current.revision + 1,
+      snapshot,
+      terminalizing: true,
+      changes: current.changes
+    })).pipe(
+      Effect.flatMap(publishSnapshot),
+      Effect.flatMap(completeIfTerminal),
+      Effect.asVoid
+    )
+
+  const setActiveState = (state: State) =>
+    updateSnapshot((snapshot) =>
+      Effect.succeed(
+        snapshot.status === "active"
+          ? {
+            status: "active",
+            state
+          }
+          : undefined
+      )
+    ).pipe(Effect.asVoid)
+
+  const terminalizeWith = (
+    snapshot: RuntimeSnapshot<State, Error, Output>,
+    exit: Exit.Exit<unknown, unknown>,
+    completeDone: Effect.Effect<void>
+  ): Effect.Effect<void> => {
+    const notifyOutcome = options.onOutcome === undefined
+      ? Effect.void
+      : Effect.suspend(() => options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
+        Effect.exit,
+        Effect.asVoid
+      )
+    return Effect.uninterruptible(
+      Queue.shutdown(queue).pipe(
+        Effect.andThen(closeChildren(exit)),
+        Effect.andThen(setAndPublishSnapshot(snapshot)),
+        Effect.andThen(notifyOutcome),
+        Effect.andThen(cleanup),
+        Effect.andThen(completeDone)
+      )
+    )
+  }
+
+  const reserveStoppedSnapshot = reserveTerminalSnapshot((snapshot) => ({
+    status: "stopped",
+    state: snapshot.state
+  }))
+
+  const reserveFailureSnapshot = (cause: Cause.Cause<Error>) =>
+    reserveTerminalSnapshot((snapshot) => ({
+      status: "error",
+      state: snapshot.state,
+      cause
+    }))
+
+  const reserveSuccessSnapshot = (output: Output) =>
+    reserveTerminalSnapshot((snapshot) => ({
+      status: "done",
+      state: snapshot.state,
+      output
+    }))
+
+  const terminalizeReservedStop = (
+    snapshot: RuntimeSnapshot<State, Error, Output>
+  ): Effect.Effect<void> => {
+    const exit = Exit.void
+    return terminalizeWith(
+      snapshot,
+      exit,
+      Deferred.fail(done, new StoppedError())
+    )
+  }
+
+  const terminalizeReservedFailure = (
+    snapshot: RuntimeSnapshot<State, Error, Output>,
+    cause: Cause.Cause<Error>
+  ): Effect.Effect<void> => {
+    const exit = Exit.failCause(cause)
+    return terminalizeWith(snapshot, exit, Deferred.failCause(done, cause))
+  }
+
+  const terminalizeReservedSuccess = (
+    snapshot: RuntimeSnapshot<State, Error, Output>,
+    output: Output
+  ): Effect.Effect<void> => {
+    const exit = Exit.succeed(output)
+    return terminalizeWith(snapshot, exit, Deferred.succeed(done, output))
+  }
+
+  const reserveTermination = (termination: ProcessTermination) => {
+    switch (termination._tag) {
+      case "Stopped":
+        return reserveStoppedSnapshot
+      case "Done":
+        return reserveSuccessSnapshot(termination.output)
+      case "Failure":
+        return reserveFailureSnapshot(termination.cause)
+    }
+  }
+
+  const completeTermination = (
+    termination: ProcessTermination,
+    snapshot: RuntimeSnapshot<State, Error, Output>
+  ) => {
+    switch (termination._tag) {
+      case "Stopped":
+        return terminalizeReservedStop(snapshot)
+      case "Done":
+        return terminalizeReservedSuccess(snapshot, termination.output)
+      case "Failure":
+        return terminalizeReservedFailure(snapshot, termination.cause)
+    }
+  }
+
+  let reservedTerminationSnapshot: RuntimeSnapshot<State, Error, Output> | undefined
+  requestRuntimeTermination = (requested) =>
+    Deferred.succeed(termination, requested).pipe(
+      Effect.flatMap((accepted) =>
+        accepted
+          ? reserveTermination(requested).pipe(
+            Effect.tap((snapshot) =>
+              Effect.sync(() => {
+                reservedTerminationSnapshot = snapshot
+              })
+            ),
+            Effect.as(true)
+          )
+          : Effect.succeed(false)
+      )
+    )
+
+  const stop: Effect.Effect<void> = Effect.uninterruptible(
+    requestRuntimeTermination({ _tag: "Stopped" }).pipe(
+      Effect.andThen(interruptWorker),
+      Effect.andThen(awaitCompletion)
+    )
+  )
+
+  const context: ProcessContext<State, Event> = {
+    ...scope,
+    receive: Queue.take(queue),
+    mailbox: queue,
+    state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
+    setState: setActiveState,
+    updateState: (f) =>
+      updateSnapshot((snapshot) =>
+        snapshot.status === "active"
+          ? f(snapshot.state).pipe(
+            Effect.map((state) => ({
+              status: "active" as const,
+              state
+            }))
+          )
+          : Effect.succeed(undefined)
+      ).pipe(Effect.asVoid)
+  }
+
+  const getOrCreateChanges = SynchronizedRef.modifyEffect(
+    current,
+    (current) => {
+      if (current.snapshot.status !== "active") {
+        return Effect.succeed([undefined, current] as const)
+      }
+      if (current.changes !== undefined) {
+        return Effect.succeed([current.changes, current] as const)
+      }
+      return PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({ replay: 1 }).pipe(
+        Effect.map((changes) => [changes, { ...current, changes }] as const)
+      )
+    }
+  )
+
+  const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
+    Effect.gen(function*() {
+      const changes = yield* getOrCreateChanges
+      if (changes === undefined) {
+        return Stream.succeed((yield* SynchronizedRef.get(current)).snapshot)
+      }
+      const subscription = yield* PubSub.subscribe(changes)
+      const captured = yield* SynchronizedRef.get(current)
+      if (captured.snapshot.status !== "active") {
+        return Stream.succeed(captured.snapshot)
+      }
+      return Stream.succeed(captured.snapshot).pipe(
+        Stream.concat(
+          Stream.fromChannel(Channel.fromEffectTake(PubSub.take(subscription))).pipe(
+            Stream.filter((next) => next.revision > captured.revision),
+            Stream.map((next) => next.snapshot)
+          )
+        )
+      )
+    })
+  )
+
+  const ref: MachineRef<State, Event, Error, Output> = {
+    id,
+    sessionId,
+    state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
+    snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
+    changes: changesStream,
+    join: Deferred.await(done),
+    stop,
+    send: self.send,
+    child: getChild,
+    childChanges
+  }
+
+  if (options.onReady !== undefined) {
+    yield* options.onReady(ref, requestStop)
+  }
+  if (options.onSnapshot !== undefined) {
+    yield* notifyActiveSnapshot(options.onSnapshot, { status: "active", state: initial })
+  }
+
+  const pendingTermination = yield* Deferred.poll(termination)
+  const compiledRuntime: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function*() {
+      let requested: ProcessTermination
+      if (Option.isSome(pendingTermination)) {
+        requested = yield* pendingTermination.value
+      } else {
+        const exit = yield* restore(Effect.suspend(() => logic.run(context))).pipe(Effect.exit)
+        const completed: ProcessTermination = Exit.isFailure(exit)
+          ? { _tag: "Failure", cause: exit.cause }
+          : { _tag: "Done", output: exit.value }
+        yield* Deferred.succeed(termination, completed)
+        requested = yield* Deferred.await(termination)
+      }
+
+      const snapshot = reservedTerminationSnapshot ?? (yield* reserveTermination(requested))
+      if (snapshot === undefined) {
+        return yield* awaitCompletion
+      }
+      return yield* completeTermination(requested, snapshot)
+    })
+  )
+
+  worker = yield* (options.detached === true
+    ? Effect.forkDetach(compiledRuntime, { startImmediately: true })
+    : Effect.forkChild(compiledRuntime, { startImmediately: true }))
+  return ref
+})
+
+const startLogicInternal: typeof startGenericInternal = ((
+  logic: ProcessLogic<any, any, any, any, any, any>,
+  options: StartInternalOptions
+) =>
+  logic[compiledProcess] === true
+    ? startCompiledInternal(logic, options)
+    : startGenericInternal(logic, options)) as typeof startGenericInternal
+
 export const startProcess: <
   State,
   Event,
@@ -1128,7 +1619,7 @@ export const startProcess: <
   }
 ) {
   const runtime = yield* makeProcessRuntime
-  return yield* startInternal(
+  return yield* startLogicInternal(
     logic,
     options === undefined
       ? {

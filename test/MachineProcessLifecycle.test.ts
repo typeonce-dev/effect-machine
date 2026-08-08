@@ -73,6 +73,29 @@ describe("machine process lifecycle", () => {
       }
     }))
 
+  it.effect("preserves single-owner stop arbitration for compiled processes", () =>
+    Effect.gen(function*() {
+      const cleanupCount = yield* Ref.make(0)
+      const ref = yield* MachineRuntime.startProcess({
+        [MachineRuntime.compiledProcess]: true,
+        initial: () => Effect.succeed(1),
+        run: (context) =>
+          Effect.never.pipe(
+            Effect.ensuring(
+              Ref.update(cleanupCount, (count) => count + 1).pipe(
+                Effect.andThen(context.setState(2))
+              )
+            )
+          )
+      })
+
+      yield* Effect.all([ref.stop, ref.stop, ref.stop], { concurrency: "unbounded" })
+
+      assert.strictEqual(yield* Ref.get(cleanupCount), 1)
+      assert.deepStrictEqual(yield* ref.snapshot, { status: "stopped", state: 1 })
+      assert.instanceOf(yield* Effect.flip(ref.join), Machine.StoppedError)
+    }))
+
   it.effect("terminalizes once when concurrent callers stop the same process", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)

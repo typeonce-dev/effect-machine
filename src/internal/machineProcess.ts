@@ -121,6 +121,7 @@ const makeProcessLogic: <
   const hasInvokes = hasInvokeCapability(machine)
   return ({
     [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
+    [internalRuntime.compiledProcess]: true,
     initial: (scope) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
@@ -338,6 +339,9 @@ const makeProcessLogic: <
               {
                 ...(processLogic[internalRuntime.childlessProcess] === true
                   ? { [internalRuntime.childlessProcess]: true as const }
+                  : undefined),
+                ...(processLogic[internalRuntime.compiledProcess] === true
+                  ? { [internalRuntime.compiledProcess]: true as const }
                   : undefined),
                 initial: (childScope) => logic.initial({ ...childScope, sendParent }),
                 run: (childContext) => logic.run({ ...childContext, sendParent })
