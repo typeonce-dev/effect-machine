@@ -1,6 +1,6 @@
 import process from "node:process"
 import { setImmediate as yieldToEventLoop } from "node:timers/promises"
-import { implementations } from "./implementations.mjs"
+import { memoryImplementations } from "./implementations.mjs"
 
 if (typeof globalThis.gc !== "function") {
   throw new Error("Runtime memory benchmarks require Node.js with --expose-gc")
@@ -9,27 +9,16 @@ if (typeof globalThis.gc !== "function") {
 const implementationId = process.argv[2]
 const counts = JSON.parse(process.argv[3] ?? "[]")
 const profileId = process.argv[4] ?? "idle"
-const implementation = implementations.find((candidate) => candidate.implementation === implementationId)
+const implementation = memoryImplementations.find((candidate) => candidate.implementation === implementationId)
 
 if (implementation === undefined) {
   throw new Error(`Unknown runtime benchmark implementation: ${implementationId}`)
 }
 
-const profile = profileId === "idle"
-  ? {
-    id: "idle",
-    label: "Idle machine",
-    start: implementation.startCounters,
-    stop: implementation.stopCounters
-  }
-  : profileId === "parent-with-child"
-  ? {
-    id: "parent-with-child",
-    label: "Idle parent with one child",
-    start: implementation.startChildCounters,
-    stop: implementation.stopChildCounters
-  }
-  : undefined
+const configuredProfile = implementation.memoryProfiles?.[profileId]
+const profile = configuredProfile === undefined
+  ? undefined
+  : { id: profileId, ...configuredProfile }
 
 if (profile === undefined) {
   throw new Error(`Unknown runtime memory profile: ${profileId}`)

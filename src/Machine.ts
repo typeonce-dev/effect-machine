@@ -7141,15 +7141,14 @@ export const childAddress = <Event = never>(id: string): ChildAddress<Event> => 
  *
  * **When to use**
  *
- * Use to create child processes from machine actions when the child
- * should be addressed or stopped by the owning machine instead of tied to a
- * single state's `invoke` lifecycle.
+ * Use from lower-level process logic to create children that should be
+ * addressed or stopped by the owning process instead of tied to a single
+ * state's `invoke` lifecycle.
  *
  * **Gotchas**
  *
- * This effect requires the machine runtime, so it only runs from machine
- * actions. A named child id must be unique for the current parent machine until
- * that child stops.
+ * This Effect requires a managed process runtime. A named child id must be
+ * unique for the current parent until that child stops.
  *
  * @see {@link invoke} for children that start and stop with a state.
  * @see {@link sendTo} for sending events to named children.
@@ -7259,11 +7258,10 @@ export const watch = <State, Event, Error = never, Output = never>(
  *
  * **Details**
  *
- * For each accepted event the runtime plans the complete macrostep, runs staged
- * actions sequentially, stops invokes for exited states, publishes the new
- * state, delivers emitted events, and then starts invokes for entered states.
- * If an action fails, the previous published state is retained and emissions
- * from that plan are suppressed.
+ * For each accepted event the runtime plans the complete synchronous
+ * macrostep, executes closed actor commands, stops invokes for exited states,
+ * publishes the new state, delivers emitted events, and then starts invokes
+ * for entered states.
  *
  * **Gotchas**
  *

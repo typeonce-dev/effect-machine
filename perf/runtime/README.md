@@ -15,8 +15,11 @@ The command reports:
 - repeated child lookup and delivery to one running child;
 - machine start-and-stop throughput;
 - parent-with-child start-and-stop throughput;
-- heap and resident-memory growth for both idle machines and idle parents with
-  one child, at 100, 500, and 1,000 live units.
+- heap and resident-memory growth at 100, 500, and 1,000 live units, including
+  a raw managed process, an idle statechart, two independent statecharts, a
+  parent with one child, and that relationship with child observation active;
+- lower-bound memory profiles for Effect itself: a suspended fiber, a queue
+  with a waiting fiber, and a minimal mailbox/state/completion actor shell.
 
 The comparison dependencies use package aliases, so XState 5 and 6 can be
 loaded by the same process:
@@ -43,17 +46,22 @@ in a fresh child process so garbage from one library cannot distort another
 library's baseline.
 
 These scenarios compare observable work, not identical internals. Effect
-Machine plans through an `Effect`, validates schema-backed state and events,
-and its running machine provisions Effect queues, fibers, synchronization,
-change publication, and child/invoke lifecycle machinery. XState's counter is
-a smaller synchronous actor. Treat the comparison as an application-level
-cost baseline, not a claim that the libraries provide the same runtime
-guarantees.
+Machine plans transitions synchronously and validates schema-backed state and
+events, while its running machine provisions Effect queues, fibers,
+synchronization, change publication, and child/invoke lifecycle machinery.
+XState's counter is a smaller synchronous actor. Treat the comparison as an
+application-level cost baseline, not a claim that the libraries provide the
+same runtime guarantees.
 
-The fitted heap slope is the primary idle-capacity metric. Resident memory is
-reported as a raw diagnostic because V8 and the operating-system allocator can
-reuse already committed pages. The capacity-per-GiB value is a linear estimate
-that excludes shared process overhead; it is not a run-until-OOM limit.
+The fitted heap slope is the primary idle-capacity metric. Compare adjacent
+profiles to attribute retained memory: raw process to idle statechart isolates
+statechart machinery, two independent machines to parent-with-child isolates
+relationship bookkeeping, and unobserved to observed parent-child isolates
+observation. The Effect profiles are primitive lower bounds, not feature-equivalent
+competitors. Resident memory is reported as a raw diagnostic because V8 and the
+operating-system allocator can reuse already committed pages. The
+capacity-per-GiB value is a linear estimate that excludes shared process
+overhead; it is not a run-until-OOM limit.
 
 Use a shorter smoke run while changing the harness:
 
