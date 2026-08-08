@@ -41,20 +41,17 @@ type ChildEntry =
   }
 
 type ChildSelector = string | ChildDescriptor
+type ChildKey = string | symbol
 
-interface ChildRegistry {
-  readonly revision: number
-  readonly children: HashMap.HashMap<string, ChildEntry>
-}
-
-interface ChildResources {
-  readonly scope: Scope.Closeable
-  readonly registry: SubscriptionRef.SubscriptionRef<ChildRegistry>
-}
-
-interface ChildResourcesState {
+interface ChildRegistrySnapshot {
   readonly closed: boolean
-  readonly resources: ChildResources | undefined
+  readonly revision: number
+  readonly children: HashMap.HashMap<ChildKey, ChildEntry>
+}
+
+interface ChildRegistry extends ChildRegistrySnapshot {
+  readonly changes: SubscriptionRef.SubscriptionRef<ChildRegistrySnapshot> | undefined
+  readonly scope: Scope.Closeable | undefined
 }
 
 export type RuntimeSnapshot<State, Error = never, Output = never> =
@@ -279,9 +276,11 @@ const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
 
 interface StartInternalOptions {
   readonly detached?: boolean
-  readonly fiberScope?: Scope.Scope
   readonly id?: string
-  readonly onReady?: (ref: MachineRef<any, any, any, any>) => Effect.Effect<void>
+  readonly onReady?: (
+    ref: MachineRef<any, any, any, any>,
+    requestStop: Effect.Effect<void>
+  ) => Effect.Effect<void>
   readonly onStop?: Effect.Effect<void>
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime
@@ -316,37 +315,45 @@ const startInternal: <
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
-  const childResourcesState = yield* SynchronizedRef.make<ChildResourcesState>({
+  const childRegistry = yield* SynchronizedRef.make<ChildRegistry>({
     closed: false,
-    resources: undefined
+    revision: 0,
+    children: HashMap.empty(),
+    changes: undefined,
+    scope: undefined
   })
 
-  const getOrCreateChildResources: Effect.Effect<ChildResources | undefined> = SynchronizedRef.modifyEffect(
-    childResourcesState,
-    (state) => {
-      if (state.resources !== undefined || state.closed) {
-        return Effect.succeed([state.resources, state] as const)
+  const childRegistrySnapshot = (registry: ChildRegistry): ChildRegistrySnapshot => ({
+    closed: registry.closed,
+    revision: registry.revision,
+    children: registry.children
+  })
+
+  const closeChildren = <A, E>(_exit: Exit.Exit<A, E>): Effect.Effect<void> =>
+    SynchronizedRef.modify(childRegistry, (current) => {
+      if (current.closed) {
+        return [undefined, current] as const
       }
-      return Effect.all({
-        scope: Scope.make("parallel"),
-        registry: SubscriptionRef.make<ChildRegistry>({ revision: 0, children: HashMap.empty() })
-      }).pipe(
-        Effect.map((resources) => [resources, { closed: false, resources }] as const)
+      if (current.scope === undefined) {
+        return [undefined, { ...current, closed: true }] as const
+      }
+      const children = Array.from(HashMap.values(current.children)).flatMap((entry) =>
+        entry._tag === "Started" ? [entry.ref] : []
       )
-    }
-  )
-
-  const getExistingChildResources: Effect.Effect<ChildResources | undefined> = SynchronizedRef.get(
-    childResourcesState
-  ).pipe(Effect.map((state) => state.resources))
-
-  const closeChildren = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
-    SynchronizedRef.modify(childResourcesState, (state) =>
-      state.closed
-        ? [undefined, state] as const
-        : [state.resources, { ...state, closed: true }] as const).pipe(
-        Effect.flatMap((resources) => resources === undefined ? Effect.void : Scope.close(resources.scope, exit))
+      return [{ children, scope: current.scope }, { ...current, closed: true }] as const
+    }).pipe(
+      Effect.flatMap((resources) =>
+        resources === undefined
+          ? Effect.void
+          : Effect.all(
+            [
+              ...resources.children.map((child) => child.stop),
+              ...(resources.scope === undefined ? [] : [Scope.close(resources.scope, _exit)])
+            ],
+            { concurrency: "unbounded", discard: true }
+          )
       )
+    )
 
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
@@ -355,61 +362,92 @@ const startInternal: <
 
   const cleanup = options.onStop ?? Effect.void
 
-  const reserveChildId = (
-    registry: SubscriptionRef.SubscriptionRef<ChildRegistry>,
-    id: string,
+  const getOrCreateChildScope: Effect.Effect<Scope.Closeable | undefined> = SynchronizedRef.modifyEffect(
+    childRegistry,
+    (current) => {
+      if (current.closed || current.scope !== undefined) {
+        return Effect.succeed([current.scope, current] as const)
+      }
+      return Scope.make("parallel").pipe(
+        Effect.map((scope) => [scope, { ...current, scope }] as const)
+      )
+    }
+  )
+
+  const reserveChild = (
+    key: ChildKey,
     token: symbol
-  ): Effect.Effect<void, ChildAlreadyExistsError> =>
-    SubscriptionRef.modifyEffect(registry, (current) =>
-      HashMap.has(current.children, id)
-        ? Effect.fail(new ChildAlreadyExistsError({ id }))
-        : Effect.succeed(
-          [undefined, {
-            revision: current.revision,
-            children: HashMap.set(current.children, id, { _tag: "Starting", token })
-          }] as const
-        ))
+  ): Effect.Effect<boolean, ChildAlreadyExistsError> =>
+    SynchronizedRef.modifyEffect(childRegistry, (current) => {
+      if (current.closed) {
+        return Effect.succeed([false, current] as const)
+      }
+      if (typeof key === "string" && HashMap.has(current.children, key)) {
+        return Effect.fail(new ChildAlreadyExistsError({ id: key }))
+      }
+      return Effect.succeed(
+        [
+          true,
+          { ...current, children: HashMap.set(current.children, key, { _tag: "Starting", token }) }
+        ] as const
+      )
+    })
 
   const unregisterChild = (
-    registry: SubscriptionRef.SubscriptionRef<ChildRegistry>,
-    id: string,
+    key: ChildKey,
     token: symbol
   ): Effect.Effect<void> =>
-    SubscriptionRef.modify(registry, (current) => {
-      const entry = HashMap.get(current.children, id)
+    SynchronizedRef.modifyEffect(childRegistry, (current) => {
+      const entry = HashMap.get(current.children, key)
       if (Option.isNone(entry) || entry.value.token !== token) {
-        return [undefined, current] as const
+        return Effect.succeed([undefined, current] as const)
       }
+      const observable = typeof key === "string"
       const next = {
-        revision: current.revision + 1,
-        children: HashMap.remove(current.children, id)
+        ...current,
+        revision: observable ? current.revision + 1 : current.revision,
+        children: HashMap.remove(current.children, key)
       }
-      return [next, next] as const
-    }).pipe(Effect.asVoid)
+      return observable && next.changes !== undefined
+        ? SubscriptionRef.set(next.changes, childRegistrySnapshot(next)).pipe(
+          Effect.as([undefined, next] as const)
+        )
+        : Effect.succeed([undefined, next] as const)
+    })
 
   const registerStartedChild = (
-    registry: SubscriptionRef.SubscriptionRef<ChildRegistry>,
-    id: string,
+    key: ChildKey,
     token: symbol,
     ref: MachineRef<any, any, any, any>,
     descriptor: ChildDescriptor | undefined
   ): Effect.Effect<boolean> =>
-    SubscriptionRef.modify<ChildRegistry, boolean>(
-      registry,
+    SynchronizedRef.modifyEffect(
+      childRegistry,
       (current) => {
-        const entry = HashMap.get(current.children, id)
-        if (Option.isNone(entry) || entry.value._tag !== "Starting" || entry.value.token !== token) {
-          return [false, current] as const
+        const entry = HashMap.get(current.children, key)
+        if (
+          current.closed ||
+          Option.isNone(entry) ||
+          entry.value._tag !== "Starting" ||
+          entry.value.token !== token
+        ) {
+          return Effect.succeed([false, current] as const)
         }
+        const observable = typeof key === "string"
         const next = {
-          revision: current.revision + 1,
+          ...current,
+          revision: observable ? current.revision + 1 : current.revision,
           children: HashMap.set(
-            HashMap.remove(current.children, id),
-            id,
+            HashMap.remove(current.children, key),
+            key,
             { _tag: "Started", token, descriptor, ref }
           )
         }
-        return [true, next] as const
+        return observable && next.changes !== undefined
+          ? SubscriptionRef.set(next.changes, childRegistrySnapshot(next)).pipe(
+            Effect.as([true, next] as const)
+          )
+          : Effect.succeed([true, next] as const)
       }
     )
 
@@ -427,19 +465,16 @@ const startInternal: <
     child: ChildSelector
   ): Effect.Effect<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>> => {
     const id = typeof child === "string" ? child : child.id
-    return getExistingChildResources.pipe(
-      Effect.flatMap((resources) =>
-        resources === undefined
-          ? Effect.succeed(Option.none())
-          : SubscriptionRef.get(resources.registry).pipe(
-            Effect.map((registry) => {
-              const entry = HashMap.get(registry.children, id)
-              return Option.isSome(entry) && matchesChildSelector(entry.value, child)
-                ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
-                : Option.none()
-            })
-          )
-      )
+    return SynchronizedRef.get(childRegistry).pipe(
+      Effect.map((registry) => {
+        if (registry.closed) {
+          return Option.none()
+        }
+        const entry = HashMap.get(registry.children, id)
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+          ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
+          : Option.none()
+      })
     )
   }
 
@@ -448,56 +483,65 @@ const startInternal: <
   ): Stream.Stream<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>> => {
     const id = typeof child === "string" ? child : child.id
     return Stream.unwrap(
-      getOrCreateChildResources.pipe(
-        Effect.map((resources) =>
-          resources === undefined
-            ? Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never))
-            : SubscriptionRef.changes(resources.registry).pipe(
-              Stream.map((registry) => {
-                const entry = HashMap.get(registry.children, id)
-                return Option.isSome(entry) && matchesChildSelector(entry.value, child)
-                  ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
-                  : Option.none()
-              })
-            )
+      SynchronizedRef.modifyEffect(childRegistry, (current) => {
+        if (current.closed) {
+          return Effect.succeed([undefined, current] as const)
+        }
+        if (current.changes !== undefined) {
+          return Effect.succeed([current.changes, current] as const)
+        }
+        return SubscriptionRef.make(childRegistrySnapshot(current)).pipe(
+          Effect.map((changes) => [changes, { ...current, changes }] as const)
         )
+      }).pipe(
+        Effect.flatMap((changes) => {
+          if (changes === undefined) {
+            return Effect.succeed(Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never)))
+          }
+          const selectChild = (registry: ChildRegistrySnapshot) => {
+            if (registry.closed) {
+              return Option.none()
+            }
+            const entry = HashMap.get(registry.children, id)
+            return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+              ? Option.some(entry.value.ref as MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>)
+              : Option.none()
+          }
+          return Effect.succeed(
+            SubscriptionRef.changes(changes).pipe(Stream.map(selectChild))
+          )
+        })
       )
     )
   }
 
   const sendTo = (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError> => {
     const id = typeof child === "string" ? child : child.id
-    return getExistingChildResources.pipe(
-      Effect.flatMap((resources) =>
-        resources === undefined
-          ? Effect.void
-          : SubscriptionRef.get(resources.registry).pipe(
-            Effect.flatMap((registry) => {
-              const entry = HashMap.get(registry.children, id)
-              return Option.isSome(entry) && matchesChildSelector(entry.value, child)
-                ? entry.value.ref.send(event)
-                : Effect.void
-            })
-          )
-      )
+    return SynchronizedRef.get(childRegistry).pipe(
+      Effect.flatMap((registry) => {
+        if (registry.closed) {
+          return Effect.void
+        }
+        const entry = HashMap.get(registry.children, id)
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+          ? entry.value.ref.send(event)
+          : Effect.void
+      })
     )
   }
 
   const stopChild = (child: ChildSelector): Effect.Effect<void> => {
     const id = typeof child === "string" ? child : child.id
-    return getExistingChildResources.pipe(
-      Effect.flatMap((resources) =>
-        resources === undefined
-          ? Effect.void
-          : SubscriptionRef.get(resources.registry).pipe(
-            Effect.flatMap((registry) => {
-              const entry = HashMap.get(registry.children, id)
-              return Option.isSome(entry) && matchesChildSelector(entry.value, child)
-                ? entry.value.ref.stop
-                : Effect.void
-            })
-          )
-      )
+    return SynchronizedRef.get(childRegistry).pipe(
+      Effect.flatMap((registry) => {
+        if (registry.closed) {
+          return Effect.void
+        }
+        const entry = HashMap.get(registry.children, id)
+        return Option.isSome(entry) && matchesChildSelector(entry.value, child)
+          ? entry.value.ref.stop
+          : Effect.void
+      })
     )
   }
 
@@ -533,61 +577,41 @@ const startInternal: <
     ChildAlreadyExistsError | ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   > {
-    if (spawnOptions?.id === undefined) {
-      return getOrCreateChildResources.pipe(
-        Effect.flatMap((resources) =>
-          resources === undefined
-            ? Effect.interrupt
-            : Effect.acquireRelease(
-              startInternal(logic, {
-                fiberScope: resources.scope,
-                parent: self as MachineRef<unknown, unknown, unknown, unknown>,
-                runtime: options.runtime
-              }),
-              (child) => child.stop
-            ).pipe(Scope.provide(resources.scope))
-        )
-      ) as Effect.Effect<
-        MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
-        ChildInitialError,
-        Exclude<ChildRequirements, Scope.Scope>
-      >
-    }
-
-    const childId = spawnOptions.id
-    return getOrCreateChildResources.pipe(
-      Effect.flatMap((resources) =>
-        resources === undefined
+    const token = Symbol()
+    const key = spawnOptions?.id ?? token
+    let startedChild: MachineRef<any, any, any, any> | undefined
+    return getOrCreateChildScope.pipe(
+      Effect.flatMap((childScope) =>
+        childScope === undefined
           ? Effect.interrupt
-          : Effect.acquireRelease(
-            Effect.gen(function*() {
-              const token = Symbol()
-              yield* reserveChildId(resources.registry, childId, token)
-              const child = yield* startInternal(logic, {
-                fiberScope: resources.scope,
-                id: childId,
-                onReady: (child) =>
-                  registerStartedChild(
-                    resources.registry,
-                    childId,
-                    token,
-                    child,
-                    spawnOptions.descriptor
-                  ).pipe(Effect.asVoid),
-                onStop: unregisterChild(resources.registry, childId, token),
-                parent: self as ProcessAddress<unknown>,
-                runtime: options.runtime
-              }).pipe(
-                Effect.onExit((exit) =>
-                  Exit.isFailure(exit)
-                    ? unregisterChild(resources.registry, childId, token)
-                    : Effect.void
-                )
+          : Effect.gen(function*() {
+            const reserved = yield* reserveChild(key, token)
+            if (!reserved) {
+              return yield* Effect.interrupt
+            }
+            return yield* startInternal(logic, {
+              detached: true,
+              ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
+              onReady: (child, requestChildStop) =>
+                Effect.sync(() => {
+                  startedChild = child
+                }).pipe(
+                  Effect.andThen(registerStartedChild(key, token, child, spawnOptions?.descriptor)),
+                  Effect.flatMap((registered) => registered ? Effect.void : requestChildStop)
+                ),
+              onStop: unregisterChild(key, token),
+              parent: self as ProcessAddress<unknown>,
+              runtime: options.runtime
+            }).pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit)
+                  ? unregisterChild(key, token).pipe(
+                    Effect.andThen(startedChild === undefined ? Effect.void : startedChild.stop)
+                  )
+                  : Effect.void
               )
-              return child
-            }),
-            (child) => child.stop
-          ).pipe(Scope.provide(resources.scope))
+            )
+          }).pipe(Scope.provide(childScope))
       )
     ) as Effect.Effect<
       MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -900,7 +924,7 @@ const startInternal: <
   }
 
   if (options.onReady !== undefined) {
-    yield* options.onReady(ref)
+    yield* options.onReady(ref, requestStop)
   }
 
   const reserveTermination = (termination: ProcessTermination) => {
@@ -929,9 +953,7 @@ const startInternal: <
   }
 
   const forkRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    options.fiberScope !== undefined
-      ? Effect.forkIn(effect, options.fiberScope)
-      : options.detached === true
+    options.detached === true
       ? Effect.forkDetach(effect)
       : Effect.forkChild(effect)
 

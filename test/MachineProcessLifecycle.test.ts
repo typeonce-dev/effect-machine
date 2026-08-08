@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Fiber, Ref, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Stream } from "effect"
 import { Machine } from "../src/index.js"
 import * as MachineRuntime from "../src/internal/machineRuntime.js"
 
@@ -241,6 +241,134 @@ describe("machine process lifecycle", () => {
       yield* parent.stop
 
       assert.deepStrictEqual(yield* replacement.snapshot, { status: "stopped", state: 2 })
+    }))
+
+  it.effect("stops named and anonymous children exactly once with their parent", () =>
+    Effect.gen(function*() {
+      const namedCleanup = yield* Ref.make(0)
+      const anonymousCleanup = yield* Ref.make(0)
+      const childrenReady = yield* Deferred.make<{
+        readonly named: Machine.MachineRef<number, never>
+        readonly anonymous: Machine.MachineRef<number, never>
+      }>()
+      const childLogic = (cleanup: Ref.Ref<number>) =>
+        Machine.logic({
+          initial: 0,
+          run: () =>
+            Effect.never.pipe(
+              Effect.ensuring(Ref.update(cleanup, (count) => count + 1))
+            )
+        })
+      const parent = yield* MachineRuntime.startProcess(
+        Machine.logic({
+          initial: undefined,
+          run: ({ spawn }) =>
+            Effect.gen(function*() {
+              const named = yield* spawn(childLogic(namedCleanup), { id: "named" })
+              const anonymous = yield* spawn(childLogic(anonymousCleanup))
+              yield* Deferred.succeed(childrenReady, { named, anonymous })
+              return yield* Effect.never
+            })
+        })
+      )
+      const children = yield* Deferred.await(childrenReady)
+
+      yield* parent.stop
+
+      assert.strictEqual(yield* Ref.get(namedCleanup), 1)
+      assert.strictEqual(yield* Ref.get(anonymousCleanup), 1)
+      assert.deepStrictEqual(yield* children.named.snapshot, { status: "stopped", state: 0 })
+      assert.deepStrictEqual(yield* children.anonymous.snapshot, { status: "stopped", state: 0 })
+    }))
+
+  it.effect("does not orphan a child when parent stop races child initialization", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const childInitializing = yield* Deferred.make<void>()
+      const releaseChild = yield* Deferred.make<void>()
+      const resourceCleanup = yield* Ref.make(0)
+      const parentLogic: MachineRuntime.ProcessLogic<undefined, never> = {
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      }
+      const parent = yield* MachineRuntime.startProcess(
+        parentLogic
+      )
+      const scope = yield* Deferred.await(parentScope)
+      const childFiber = yield* scope.spawn(
+        Machine.logic({
+          initial: () =>
+            Effect.acquireRelease(
+              Effect.void,
+              () => Ref.update(resourceCleanup, (count) => count + 1)
+            ).pipe(
+              Effect.andThen(Deferred.succeed(childInitializing, void 0)),
+              Effect.andThen(Deferred.await(releaseChild)),
+              Effect.as(0)
+            ),
+          run: () => Effect.never
+        }),
+        { id: "racing" }
+      ).pipe(Effect.forkChild)
+
+      yield* Deferred.await(childInitializing)
+      yield* parent.stop
+      yield* Deferred.succeed(releaseChild, void 0)
+      const child = yield* Fiber.join(childFiber)
+      yield* Effect.exit(child.join)
+
+      assert.strictEqual(yield* Ref.get(resourceCleanup), 1)
+      assert.deepStrictEqual(yield* child.snapshot, { status: "stopped", state: 0 })
+      assert(Option.isNone(yield* parent.child("racing")))
+    }))
+
+  it.effect("does not miss a named child when first observation races registration", () =>
+    Effect.gen(function*() {
+      yield* Effect.forEach(
+        Array.from({ length: 50 }),
+        () =>
+          Effect.gen(function*() {
+            const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+            const race = yield* Deferred.make<void>()
+            const parentLogic: MachineRuntime.ProcessLogic<undefined, never> = {
+              initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+              run: () => Effect.never
+            }
+            const parent = yield* MachineRuntime.startProcess(
+              parentLogic
+            )
+            const scope = yield* Deferred.await(parentScope)
+            const observed = yield* Deferred.await(race).pipe(
+              Effect.andThen(
+                parent.childChanges("worker").pipe(
+                  Stream.filter(Option.isSome),
+                  Stream.runHead
+                )
+              ),
+              Effect.forkChild
+            )
+            const spawned = yield* Deferred.await(race).pipe(
+              Effect.andThen(
+                scope.spawn(
+                  Machine.logic({ initial: 0, run: () => Effect.never }),
+                  { id: "worker" }
+                )
+              ),
+              Effect.forkChild
+            )
+
+            yield* Deferred.succeed(race, void 0)
+            const child = yield* Fiber.join(spawned)
+            const observation = yield* Fiber.join(observed)
+
+            assert(Option.isSome(observation))
+            if (Option.isSome(observation)) {
+              assert.strictEqual(observation.value.value.sessionId, child.sessionId)
+            }
+            yield* parent.stop
+          }),
+        { concurrency: 10 }
+      )
     }))
 
   it.effect("publishes and cleans up exactly once when stop races process completion", () =>
