@@ -157,12 +157,46 @@ export interface ProcessScope<Event> {
 
 export interface ProcessContext<State, Event> extends ProcessScope<Event> {
   readonly receive: Effect.Effect<Event>
-  readonly mailbox: Queue.Dequeue<Event>
+  /** @internal */
+  readonly mailbox?: Queue.Dequeue<Event>
+  /** @internal */
+  readonly poll?: Effect.Effect<Option.Option<Event>>
   readonly state: Effect.Effect<State>
   readonly setState: (state: State) => Effect.Effect<void>
   readonly updateState: <E, R>(
     f: (state: State) => Effect.Effect<State, E, R>
   ) => Effect.Effect<void, E, R>
+}
+
+interface CompactProcessMailbox<Event> {
+  items: Array<Event> | undefined
+  index: number
+  closed: boolean
+}
+
+const offerCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>, event: Event): void => {
+  const items = mailbox.items ?? []
+  mailbox.items = items
+  items.push(event)
+}
+
+const pollCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>): Option.Option<Event> => {
+  if (mailbox.items === undefined) {
+    return Option.none()
+  }
+  const event = mailbox.items[mailbox.index]!
+  mailbox.index += 1
+  if (mailbox.index === mailbox.items.length) {
+    mailbox.items = undefined
+    mailbox.index = 0
+  }
+  return Option.some(event)
+}
+
+const closeCompactMailbox = (mailbox: CompactProcessMailbox<unknown>): void => {
+  mailbox.closed = true
+  mailbox.items = undefined
+  mailbox.index = 0
 }
 
 export interface ProcessLogic<
@@ -1145,11 +1179,24 @@ const startCompiledInternal: <
 
   const sessionId = yield* options.runtime.nextSessionId
   const id = options.id ?? sessionId
-  const queue = yield* Queue.unbounded<Event>()
+  const onDemand = logic.drain !== undefined
+  const queue = onDemand ? undefined : yield* Queue.unbounded<Event>()
+  // An on-demand drain never blocks on mailbox input: send schedules its owner
+  // whenever the FIFO becomes non-empty. Keep persistent custom processes on
+  // Queue, but avoid retaining Queue's waiting/backpressure machinery for the
+  // compiled protocol that only needs synchronous offer and poll operations.
+  const compactMailbox: CompactProcessMailbox<Event> | undefined = onDemand
+    ? { items: undefined, index: 0, closed: false }
+    : undefined
+  const poll = compactMailbox === undefined
+    ? Queue.poll(queue!)
+    : Effect.sync(() => pollCompactMailbox(compactMailbox))
+  const shutdownMailbox = compactMailbox === undefined
+    ? Queue.shutdown(queue!)
+    : Effect.sync(() => closeCompactMailbox(compactMailbox))
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
-  const onDemand = logic.drain !== undefined
   const drainServices = onDemand ? yield* Effect.context<Requirements>() : undefined
   let worker: Fiber.Fiber<any, never> | undefined
   let draining = false
@@ -1158,10 +1205,12 @@ const startCompiledInternal: <
   let terminationRequested = false
   let requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
     Deferred.succeed(termination, requested)
-  let sendEvent = (event: Event): Effect.Effect<void, StoppedError> =>
-    Queue.offer(queue, event).pipe(
-      Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
-    )
+  let sendEvent = compactMailbox !== undefined
+    ? (event: Event): Effect.Effect<void, StoppedError> => Effect.sync(() => offerCompactMailbox(compactMailbox, event))
+    : (event: Event): Effect.Effect<void, StoppedError> =>
+      Queue.offer(queue!, event).pipe(
+        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+      )
   let settleRequestedTermination = (_requested: ProcessTermination): Effect.Effect<void> => Effect.void
   const interruptWorker: Effect.Effect<void> = Effect.suspend(() =>
     worker === undefined
@@ -1410,7 +1459,7 @@ const startCompiledInternal: <
         Effect.asVoid
       )
     return Effect.uninterruptible(
-      Queue.shutdown(queue).pipe(
+      shutdownMailbox.pipe(
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
         Effect.andThen(notifyOutcome),
@@ -1536,8 +1585,8 @@ const startCompiledInternal: <
 
   const context: ProcessContext<State, Event> = {
     ...scope,
-    receive: Queue.take(queue),
-    mailbox: queue,
+    receive: queue === undefined ? Effect.never : Queue.take(queue),
+    poll,
     state: getCurrent.pipe(Effect.map((current) => current.snapshot.state)),
     setState: setActiveState,
     updateState: (f) =>
@@ -1683,13 +1732,11 @@ const startCompiledInternal: <
     sendEvent = (event) =>
       Effect.uninterruptible(
         Effect.suspend(() => {
-          if (!Queue.offerUnsafe(queue, event)) {
+          if (compactMailbox!.closed || terminationRequested) {
             return Effect.fail(new StoppedError())
           }
+          offerCompactMailbox(compactMailbox!, event)
           offerRevision += 1
-          if (terminationRequested) {
-            return Effect.fail(new StoppedError())
-          }
           if (draining) {
             return Effect.void
           }
