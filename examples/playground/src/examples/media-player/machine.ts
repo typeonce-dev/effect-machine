@@ -1,105 +1,309 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
-
-export const MediaPlayerState = Schema.TaggedUnion({
-  Player: {},
-  playback: {},
-  Empty: {},
-  Loading: {},
-  Paused: {},
-  Playing: {},
-  Buffering: {},
-  Ended: {},
-  Failed: { message: Schema.String },
-  volume: {},
-  Audible: { volume: Schema.Number },
-  Muted: { previousVolume: Schema.Number }
-})
-
-export const MediaPlayerEvent = Schema.TaggedUnion({
-  SourceSelected: { url: Schema.String },
-  PlayRequested: {},
-  PauseRequested: {},
-  MediaPlaying: {},
-  MediaPaused: {},
-  MediaWaiting: {},
-  MediaCanPlay: {},
-  MediaEnded: {},
-  MediaFailed: { message: Schema.String },
-  VolumeChanged: { volume: Schema.Number },
-  MuteToggled: {}
-})
-
-export const MediaPlayerStates = Machine.defineStates({
-  Player: {
-    schema: MediaPlayerState.cases.Player,
-    type: "parallel",
-    states: {
-      playback: {
-        schema: MediaPlayerState.cases.playback,
-        initial: "Empty",
-        states: {
-          Empty: MediaPlayerState.cases.Empty,
-          Loading: MediaPlayerState.cases.Loading,
-          Paused: MediaPlayerState.cases.Paused,
-          Playing: MediaPlayerState.cases.Playing,
-          Buffering: MediaPlayerState.cases.Buffering,
-          Ended: MediaPlayerState.cases.Ended,
-          Failed: MediaPlayerState.cases.Failed
-        }
-      },
-      volume: {
-        schema: MediaPlayerState.cases.volume,
-        initial: "Audible",
-        states: {
-          Audible: MediaPlayerState.cases.Audible,
-          Muted: MediaPlayerState.cases.Muted
-        }
-      }
-    }
-  }
-})
+import { Effect } from "effect"
+import { analyzeAudio, loadAudio, pauseAudio, playAudio, restartAudio } from "./invocations.ts"
+import {
+  initialAudioSettings,
+  initialPlaybackData,
+  MediaPlayerEvent,
+  MediaPlayerInternalEvent,
+  MediaPlayerState,
+  MediaPlayerStates,
+  toAudioSettings,
+  updatePlaybackData
+} from "./schemas.ts"
+import { MediaPlayer } from "./service.ts"
 
 const initialPlayer = () =>
   MediaPlayerStates.initial.Player(MediaPlayerState.cases.Player.make({}), (player) =>
     player
-      .playback(
-        MediaPlayerState.cases.playback.make({}),
-        (playback) => playback.Empty(MediaPlayerState.cases.Empty.make({}))
+      .transport(
+        MediaPlayerState.cases.Transport.make({}),
+        (transport) => transport.Empty(MediaPlayerState.cases.Empty.make({}))
       )
-      .volume(
-        MediaPlayerState.cases.volume.make({}),
-        (volume) => volume.Audible(MediaPlayerState.cases.Audible.make({ volume: 1 }))
+      .settings(
+        MediaPlayerState.cases.Settings.make({}),
+        (settings) =>
+          settings.Audible(MediaPlayerState.cases.Audible.make({
+            volume: initialAudioSettings.volume,
+            playbackRate: initialAudioSettings.playbackRate
+          }))
       ))
 
-/**
- * The browser event protocol and parallel topology are ready. Keep calls to
- * HTMLAudioElement.play/pause in the React adapter (or staged actions), and
- * feed resulting DOM events back into this machine.
- */
 export const MediaPlayerMachine = Machine.make({
   id: "MediaPlayer",
   states: MediaPlayerStates.states,
   events: [MediaPlayerEvent],
+  internalEvents: [MediaPlayerInternalEvent],
   initial: initialPlayer
 }).handle({
   Player: {
+    on: {
+      AudioElementMounted: ({ event }) =>
+        Machine.action(
+          Effect.gen(function*() {
+            const mediaPlayer = yield* MediaPlayer
+            yield* mediaPlayer.register(event.audioRef)
+          })
+        )
+    },
     states: {
-      playback: {
+      transport: {
+        on: {
+          SourceSelected: {
+            reenter: true,
+            transition: ({ event, target }) =>
+              target.local.Loading(MediaPlayerState.cases.Loading.make({ url: event.url }))
+          },
+
+          MediaFailed: ({ event, target }) =>
+            target.local.Failed(MediaPlayerState.cases.Failed.make({ message: event.message })),
+
+          OperationFailed: ({ event, target }) =>
+            target.local.Failed(MediaPlayerState.cases.Failed.make({ message: event.message }))
+        },
         states: {
           Empty: {},
-          Loading: {},
-          Paused: {},
-          Playing: {},
-          Buffering: {},
-          Ended: {},
-          Failed: {}
+
+          Loading: {
+            invoke: ({ state }) => loadAudio(state.url),
+            on: {
+              LoadSucceeded: ({ target }) =>
+                target.local.Ready(
+                  MediaPlayerState.cases.Ready.make({}),
+                  (ready) => ready.Paused(MediaPlayerState.cases.Paused.make(initialPlaybackData))
+                )
+            }
+          },
+
+          Ready: {
+            states: {
+              Paused: {
+                invoke: pauseAudio,
+                on: {
+                  PlayRequested: ({ state, target }) =>
+                    target.local.Playing(
+                      MediaPlayerState.cases.Playing.make({
+                        ...updatePlaybackData(state, {}),
+                        loudness: null
+                      })
+                    ),
+
+                  RestartRequested: ({ state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
+                    )
+                }
+              },
+
+              Playing: {
+                invoke: [playAudio, analyzeAudio],
+                on: {
+                  PauseRequested: ({ state, target }) =>
+                    target.local.Paused(
+                      MediaPlayerState.cases.Paused.make(updatePlaybackData(state, {}))
+                    ),
+
+                  RestartRequested: ({ state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
+                    ),
+
+                  MediaWaiting: ({ state, target }) =>
+                    target.local.Buffering(
+                      MediaPlayerState.cases.Buffering.make(updatePlaybackData(state, {}))
+                    ),
+
+                  PlaybackEnded: ({ event, state, target }) =>
+                    target.local.Ended(
+                      MediaPlayerState.cases.Ended.make(
+                        updatePlaybackData(state, { currentTime: event.currentTime })
+                      )
+                    ),
+
+                  TimeUpdated: ({ event, state, target }) =>
+                    target.local.Playing(
+                      MediaPlayerState.cases.Playing.make({
+                        currentTime: event.currentTime,
+                        loudness: state.loudness
+                      })
+                    ),
+
+                  LoudnessMeasured: ({ event, state, target }) =>
+                    target.local.Playing(
+                      MediaPlayerState.cases.Playing.make({
+                        currentTime: state.currentTime,
+                        loudness: {
+                          rms: event.rms,
+                          peak: event.peak,
+                          decibels: event.decibels
+                        }
+                      })
+                    )
+                }
+              },
+
+              Buffering: {
+                on: {
+                  MediaCanPlay: ({ state, target }) =>
+                    target.local.Playing(
+                      MediaPlayerState.cases.Playing.make({
+                        ...updatePlaybackData(state, {}),
+                        loudness: null
+                      })
+                    ),
+
+                  PauseRequested: ({ state, target }) =>
+                    target.local.Paused(
+                      MediaPlayerState.cases.Paused.make(updatePlaybackData(state, {}))
+                    ),
+
+                  RestartRequested: ({ state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
+                    ),
+
+                  PlaybackEnded: ({ event, state, target }) =>
+                    target.local.Ended(
+                      MediaPlayerState.cases.Ended.make(
+                        updatePlaybackData(state, { currentTime: event.currentTime })
+                      )
+                    ),
+
+                  TimeUpdated: ({ event, state, target }) =>
+                    target.local.Buffering(
+                      MediaPlayerState.cases.Buffering.make(
+                        updatePlaybackData(state, { currentTime: event.currentTime })
+                      )
+                    )
+                }
+              },
+
+              Restarting: {
+                invoke: restartAudio,
+                on: {
+                  RestartSucceeded: ({ target }) =>
+                    target.local.Playing(
+                      MediaPlayerState.cases.Playing.make({ currentTime: 0, loudness: null })
+                    ),
+
+                  TimeUpdated: ({ event, state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(
+                        updatePlaybackData(state, { currentTime: event.currentTime })
+                      )
+                    )
+                }
+              },
+
+              Ended: {
+                on: {
+                  PlayRequested: ({ state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
+                    ),
+
+                  RestartRequested: ({ state, target }) =>
+                    target.local.Restarting(
+                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
+                    )
+                }
+              }
+            }
+          },
+
+          Failed: {
+            invoke: ({ state }) =>
+              Machine.invoke({
+                id: "report-error",
+                src: () =>
+                  Machine.effect(
+                    Effect.gen(function*() {
+                      const mediaPlayer = yield* MediaPlayer
+                      yield* mediaPlayer.reportError(state.message)
+                    })
+                  )
+              })
+          }
         }
       },
-      volume: {
+
+      settings: {
         states: {
-          Audible: {},
-          Muted: {}
+          Audible: {
+            on: {
+              VolumeChanged: ({ event, state, target }) => {
+                const next = { volume: event.volume, playbackRate: state.playbackRate }
+                return Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(next, false))
+                  }),
+                  target.local.Audible(MediaPlayerState.cases.Audible.make(next))
+                )
+              },
+
+              PlaybackRateChanged: ({ event, state, target }) => {
+                const next = { volume: state.volume, playbackRate: event.playbackRate }
+                return Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(next, false))
+                  }),
+                  target.local.Audible(MediaPlayerState.cases.Audible.make(next))
+                )
+              },
+
+              MuteRequested: ({ state, target }) =>
+                Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(state, true))
+                  }),
+                  target.local.Muted(MediaPlayerState.cases.Muted.make({
+                    volume: state.volume,
+                    playbackRate: state.playbackRate
+                  }))
+                )
+            }
+          },
+
+          Muted: {
+            on: {
+              VolumeChanged: ({ event, state, target }) => {
+                const next = { volume: event.volume, playbackRate: state.playbackRate }
+                return Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(next, true))
+                  }),
+                  target.local.Muted(MediaPlayerState.cases.Muted.make(next))
+                )
+              },
+
+              PlaybackRateChanged: ({ event, state, target }) => {
+                const next = { volume: state.volume, playbackRate: event.playbackRate }
+                return Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(next, true))
+                  }),
+                  target.local.Muted(MediaPlayerState.cases.Muted.make(next))
+                )
+              },
+
+              UnmuteRequested: ({ state, target }) =>
+                Machine.action(
+                  Effect.gen(function*() {
+                    const mediaPlayer = yield* MediaPlayer
+                    yield* mediaPlayer.applySettings(toAudioSettings(state, false))
+                  }),
+                  target.local.Audible(MediaPlayerState.cases.Audible.make({
+                    volume: state.volume,
+                    playbackRate: state.playbackRate
+                  }))
+                )
+            }
+          }
         }
       }
     }
