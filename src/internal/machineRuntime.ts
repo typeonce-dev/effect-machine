@@ -176,6 +176,10 @@ export interface ProcessLogic<
   readonly [compiledProcess]?: true
   initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
+  /** @internal */
+  readonly drain?: (
+    context: ProcessContext<State, Event>
+  ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
 }
 
 export interface ProcessSpawn {
@@ -1112,10 +1116,9 @@ const startGenericInternal: <
   return ref
 })
 
-// Compiled statecharts have a bounded runtime shape: initialization is already
-// complete and `run` is the generated event loop. That lets one fiber own both
-// event processing and terminal publication without changing the generic
-// `Machine.logic` contract above.
+// Compiled statecharts have a bounded runtime shape. Their optional `drain`
+// protocol lets a fiber own event processing and terminal publication only
+// while work exists; custom process logic keeps the persistent `run` contract.
 const startCompiledInternal: <
   State,
   Event,
@@ -1145,11 +1148,28 @@ const startCompiledInternal: <
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
+  const onDemand = logic.drain !== undefined
+  const drainServices = onDemand ? yield* Effect.context<Requirements>() : undefined
   let worker: Fiber.Fiber<any, never> | undefined
+  let draining = false
+  let offerRevision = 0
+  let interruptRequested = false
+  let terminationRequested = false
   let requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
     Deferred.succeed(termination, requested)
+  let sendEvent = (event: Event): Effect.Effect<void, StoppedError> =>
+    Queue.offer(queue, event).pipe(
+      Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+    )
+  let settleRequestedTermination = (_requested: ProcessTermination): Effect.Effect<void> => Effect.void
   const interruptWorker: Effect.Effect<void> = Effect.suspend(() =>
-    worker === undefined ? Effect.void : Fiber.interrupt(worker)
+    worker === undefined
+      ? onDemand
+        ? Effect.sync(() => {
+          interruptRequested = true
+        })
+        : Effect.void
+      : Fiber.interrupt(worker)
   )
   let initializing = true
   const requestStop = requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
@@ -1167,10 +1187,7 @@ const startCompiledInternal: <
       }
       return requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.andThen(Effect.interrupt))
     }),
-    send: (event: Event) =>
-      Queue.offer(queue, event).pipe(
-        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
-      )
+    send: (event: Event) => Effect.suspend(() => sendEvent(event))
   }
 
   let {
@@ -1213,8 +1230,8 @@ const startCompiledInternal: <
       } as const
       return requestRuntimeTermination(requested).pipe(
         Effect.flatMap((accepted) =>
-          accepted && worker !== undefined
-            ? Effect.forkDetach(interruptWorker).pipe(Effect.asVoid)
+          accepted
+            ? Effect.forkDetach(settleRequestedTermination(requested)).pipe(Effect.asVoid)
             : Effect.void
         )
       )
@@ -1467,6 +1484,7 @@ const startCompiledInternal: <
           ? reserveTermination(requested).pipe(
             Effect.tap((snapshot) =>
               Effect.sync(() => {
+                terminationRequested = true
                 reservedTerminationSnapshot = snapshot
               })
             ),
@@ -1476,11 +1494,29 @@ const startCompiledInternal: <
       )
     )
 
-  const stop: Effect.Effect<void> = Effect.uninterruptible(
-    requestRuntimeTermination({ _tag: "Stopped" }).pipe(
-      Effect.andThen(interruptWorker),
-      Effect.andThen(awaitCompletion)
+  const finishRequestedTermination = (requested: ProcessTermination): Effect.Effect<void> =>
+    Effect.gen(function*() {
+      const snapshot = reservedTerminationSnapshot ?? (yield* reserveTermination(requested))
+      if (snapshot === undefined) {
+        return yield* awaitCompletion
+      }
+      return yield* completeTermination(requested, snapshot)
+    })
+
+  settleRequestedTermination = (requested) =>
+    Effect.suspend(() =>
+      onDemand && !draining
+        ? finishRequestedTermination(requested)
+        : interruptWorker.pipe(Effect.andThen(awaitCompletion))
     )
+
+  const stop: Effect.Effect<void> = Effect.uninterruptible(
+    Effect.suspend(() => {
+      const requested = { _tag: "Stopped" } as const
+      return requestRuntimeTermination(requested).pipe(
+        Effect.flatMap((accepted) => accepted ? settleRequestedTermination(requested) : awaitCompletion)
+      )
+    })
   )
 
   const context: ProcessContext<State, Event> = {
@@ -1557,6 +1593,96 @@ const startCompiledInternal: <
   }
   if (options.onSnapshot !== undefined) {
     yield* notifyActiveSnapshot(options.onSnapshot, { status: "active", state: initial })
+  }
+
+  if (onDemand) {
+    const drainRuntime: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function*() {
+        let observedRevision = offerRevision
+        while (true) {
+          const pending = yield* Deferred.poll(termination)
+          if (Option.isSome(pending)) {
+            return yield* finishRequestedTermination(yield* pending.value)
+          }
+
+          const exit = yield* restore(Effect.suspend(() => logic.drain!(context))).pipe(Effect.exit)
+          if (Exit.isFailure(exit)) {
+            const completed: ProcessTermination = { _tag: "Failure", cause: exit.cause }
+            yield* Deferred.succeed(termination, completed)
+            return yield* finishRequestedTermination(yield* Deferred.await(termination))
+          }
+          if (Option.isSome(exit.value)) {
+            const completed: ProcessTermination = { _tag: "Done", output: exit.value.value }
+            yield* Deferred.succeed(termination, completed)
+            return yield* finishRequestedTermination(yield* Deferred.await(termination))
+          }
+
+          const requested = yield* Deferred.poll(termination)
+          if (Option.isSome(requested)) {
+            return yield* finishRequestedTermination(yield* requested.value)
+          }
+
+          const continueDraining = yield* Effect.sync(() => {
+            if (offerRevision !== observedRevision) {
+              observedRevision = offerRevision
+              return true
+            }
+            draining = false
+            worker = undefined
+            return false
+          })
+          if (!continueDraining) {
+            return
+          }
+        }
+      })
+    )
+
+    const providedDrainRuntime = Effect.provideContext(drainRuntime, drainServices!)
+    // Claim ownership before yielding so a concurrent stop can always find or
+    // request interruption of this worker. The yield also keeps `send` as a
+    // mailbox operation: user transition work never runs inline in the sender.
+    const scheduledDrainRuntime = Effect.uninterruptible(
+      Effect.yieldNow.pipe(Effect.andThen(providedDrainRuntime))
+    )
+    const forkDrain = options.detached === true
+      ? Effect.forkDetach(scheduledDrainRuntime, { startImmediately: true })
+      : Effect.forkChild(scheduledDrainRuntime, { startImmediately: true })
+
+    sendEvent = (event) =>
+      Effect.uninterruptible(
+        Effect.suspend(() => {
+          if (!Queue.offerUnsafe(queue, event)) {
+            return Effect.fail(new StoppedError())
+          }
+          offerRevision += 1
+          if (terminationRequested) {
+            return Effect.fail(new StoppedError())
+          }
+          if (draining) {
+            return Effect.void
+          }
+          draining = true
+          return forkDrain.pipe(
+            Effect.flatMap((fiber) =>
+              Effect.sync(() => {
+                worker = fiber
+                if (!interruptRequested) {
+                  return false
+                }
+                interruptRequested = false
+                return true
+              }).pipe(
+                Effect.flatMap((interrupt) => interrupt ? Fiber.interrupt(fiber) : Effect.void)
+              )
+            )
+          )
+        })
+      )
+
+    draining = true
+    yield* providedDrainRuntime
+    return ref
   }
 
   const pendingTermination = yield* Deferred.poll(termination)

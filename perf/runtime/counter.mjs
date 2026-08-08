@@ -232,7 +232,8 @@ const rawProcessLogic = {
 const rawCompiledProcessLogic = {
   [machineRuntime.compiledProcess]: true,
   initial: () => Effect.succeed(0),
-  run: () => Effect.never
+  run: () => Effect.never,
+  drain: () => Effect.succeed(Option.none())
 }
 
 const startRawProcesses = (count) =>
