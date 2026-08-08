@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
+import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
 import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
@@ -147,14 +148,14 @@ const makeProcessLogic: <
     run: (context) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
-          const { receive, state, setState } = context
+          const { mailbox, receive, state, setState } = context
           let terminal: { readonly output: Output } | undefined
 
-          const initialState = yield* state
-          if (internalPlanner.isFinalState(machine, initialState)) {
+          let current = yield* state
+          if (internalPlanner.isFinalState(machine, current)) {
             return yield* internalPlanner.getFinalOutputEffect<States, Events, Output>(
               machine,
-              initialState,
+              current,
               internalPlanner.InitialEvent
             )
           }
@@ -165,26 +166,46 @@ const makeProcessLogic: <
           )
 
           if (!hasInvokes) {
+            // A queued batch is produced entirely by this worker, so its
+            // configuration is already validated. Drop both caches before
+            // blocking again so idle machines retain only the public snapshot.
+            let configuration: Model.ActiveConfiguration | undefined
+            let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
+            let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
             yield* Effect.whileLoop({
               while: () => terminal === undefined,
               body: () =>
                 Effect.gen(function*() {
-                  const event = yield* receive
-                  const current = yield* state
-                  const planned = yield* internalPlanner.plan(machine, current, event)
-                  if (planned.microsteps.length === 0) {
-                    return
+                  const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
+                  pendingEvent = Option.none()
+                  const planned = yield* internalPlanner.planConfiguration(
+                    machine,
+                    configuration ?? (yield* Model.normalizeConfigurationEffect(machine, current)),
+                    event
+                  )
+                  configuration = planned.next
+
+                  if (planned.microsteps.length > 0) {
+                    const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
+                    yield* internalPlanner.runActions(planned.actions, liveRuntime)
+                    yield* setState(next)
+                    current = next
+                    yield* internalPlanner.runEmittedEvents(
+                      planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                      liveRuntime
+                    )
+
+                    if (planned.done) {
+                      terminal = { output: planned.output }
+                    }
                   }
 
-                  yield* internalPlanner.runActions(planned.actions, liveRuntime)
-                  yield* setState(planned.next)
-                  yield* internalPlanner.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                    liveRuntime
-                  )
-
-                  if (planned.done) {
-                    terminal = { output: planned.output }
+                  if (terminal === undefined) {
+                    pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                    if (Option.isNone(pendingEvent)) {
+                      configuration = undefined
+                      pollEvent = undefined
+                    }
                   }
                 }),
               step: () => undefined
@@ -349,15 +370,14 @@ const makeProcessLogic: <
             yield* startInvokeWatchers(config, child, key, token, scope)
           })
           const startInvokes: (
-            state: Machine.Snapshot<States>,
+            configuration: Model.ActiveConfiguration,
             paths: ReadonlyArray<string>,
             event: Machine.LifecycleEvent<Events>
           ) => Effect.Effect<void, E | MachineSchemaDecodeError, R> = Effect.fnUntraced(function*(
-            state: Machine.Snapshot<States>,
+            configuration: Model.ActiveConfiguration,
             paths: ReadonlyArray<string>,
             event: Machine.LifecycleEvent<Events>
           ) {
-            const configuration = yield* Model.normalizeConfigurationEffect(machine, state)
             yield* Effect.all(
               internalPlanner.sortEntryPaths(machine, paths)
                 .filter((path) => configuration.active.has(path))
@@ -393,51 +413,74 @@ const makeProcessLogic: <
             )
 
           return yield* Effect.gen(function*() {
+            let configuration: Model.ActiveConfiguration | undefined = yield* Model.normalizeConfigurationEffect(
+              machine,
+              current
+            )
             yield* startInvokes(
-              initialState,
-              Model.getInitialEntryPaths(machine, yield* Model.normalizeConfigurationEffect(machine, initialState)),
+              configuration,
+              Model.getInitialEntryPaths(machine, configuration),
               internalPlanner.InitialEvent
             )
+            // As above, keep the normalized configuration only while this
+            // worker can continue draining an already queued batch.
+            configuration = undefined
+            let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
+            let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
 
             yield* Effect.whileLoop({
               while: () => terminal === undefined,
               body: () =>
                 Effect.gen(function*() {
-                  const event = yield* receive
-                  const current = yield* state
-                  const planned = yield* internalPlanner.plan(machine, current, event)
-                  if (planned.microsteps.length === 0) {
-                    return
-                  }
-                  const changed = planned.microsteps.some((step) => step.changed)
-                  const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
-                  const entryEvents = new Map<string, Machine.LifecycleEvent<Events>>()
-                  for (const step of planned.microsteps) {
-                    if (step.changed) {
-                      for (const path of step.entryPaths) {
-                        entryEvents.set(path, step.event as Machine.LifecycleEvent<Events>)
+                  const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
+                  pendingEvent = Option.none()
+                  const planned = yield* internalPlanner.planConfiguration(
+                    machine,
+                    configuration ?? (yield* Model.normalizeConfigurationEffect(machine, current)),
+                    event
+                  )
+                  configuration = planned.next
+                  if (planned.microsteps.length > 0) {
+                    const changed = planned.microsteps.some((step) => step.changed)
+                    const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
+                    const entryEvents = new Map<string, Machine.LifecycleEvent<Events>>()
+                    for (const step of planned.microsteps) {
+                      if (step.changed) {
+                        for (const path of step.entryPaths) {
+                          entryEvents.set(path, step.event as Machine.LifecycleEvent<Events>)
+                        }
+                      }
+                    }
+
+                    const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
+                    yield* internalPlanner.runActions(planned.actions, liveRuntime)
+                    if (changed) {
+                      yield* stopInvokes(exitPaths)
+                    }
+                    yield* setState(next)
+                    current = next
+                    yield* internalPlanner.runEmittedEvents(
+                      planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                      liveRuntime
+                    )
+
+                    if (planned.done) {
+                      terminal = { output: planned.output }
+                      yield* stopAllInvokes(Exit.succeed(planned.output))
+                    } else {
+                      if (changed) {
+                        for (const [path, entryEvent] of entryEvents) {
+                          yield* startInvokes(planned.next, [path], entryEvent)
+                        }
                       }
                     }
                   }
 
-                  yield* internalPlanner.runActions(planned.actions, liveRuntime)
-                  if (changed) {
-                    yield* stopInvokes(exitPaths)
-                  }
-                  yield* setState(planned.next)
-                  yield* internalPlanner.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                    liveRuntime
-                  )
-
-                  if (planned.done) {
-                    terminal = { output: planned.output }
-                    yield* stopAllInvokes(Exit.succeed(planned.output))
-                  } else {
-                    if (changed) {
-                      for (const [path, entryEvent] of entryEvents) {
-                        yield* startInvokes(planned.next, [path], entryEvent)
-                      }
+                  if (terminal === undefined) {
+                    pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                    if (Option.isNone(pendingEvent)) {
+                      configuration = undefined
+                      pollEvent = undefined
                     }
                   }
                 }),

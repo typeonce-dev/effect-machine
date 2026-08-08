@@ -149,6 +149,7 @@ export interface ProcessScope<Event> {
 
 export interface ProcessContext<State, Event> extends ProcessScope<Event> {
   readonly receive: Effect.Effect<Event>
+  readonly mailbox: Queue.Dequeue<Event>
   readonly state: Effect.Effect<State>
   readonly setState: (state: State) => Effect.Effect<void>
   readonly updateState: <E, R>(
@@ -836,6 +837,7 @@ const startInternal: <
   const context: ProcessContext<State, Event> = {
     ...scope,
     receive: Queue.take(queue),
+    mailbox: queue,
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     setState: setActiveState,
     updateState: (f) =>
