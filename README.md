@@ -8,11 +8,11 @@ Schema-first state machines and statecharts for Effect.
 ## Installation
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0-beta.102
+pnpm add @typeonce/effect-machine effect@4.0.0-beta.105
 ```
 
 `effect` is an exact peer dependency, not a bundled runtime dependency.
-Consumers must install `effect@4.0.0-beta.102`. Upgrading this package may
+Consumers must install `effect@4.0.0-beta.105`. Upgrading this package may
 require upgrading Effect in lockstep; do not override the peer to another beta.
 
 ## Entrypoints

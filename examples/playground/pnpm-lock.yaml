@@ -5,24 +5,26 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  effect: 4.0.0-beta.102
+  effect: 4.0.0-beta.105
+  '@effect/atom-react': 4.0.0-beta.105
+  '@effect/vitest': 4.0.0-beta.105
 
 importers:
 
   .:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)(react@19.2.7)(scheduler@0.27.0)
       '@tanstack/react-router':
         specifier: 1.170.18
         version: 1.170.18(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@typeonce/effect-machine':
         specifier: file:../..
-        version: file:../..(effect@4.0.0-beta.102)
+        version: file:../..(effect@4.0.0-beta.105)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -34,8 +36,8 @@ importers:
         version: 0.27.0
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))
       '@types/react':
         specifier: 19.2.17
         version: 19.2.17
@@ -57,18 +59,18 @@ importers:
 
 packages:
 
-  '@effect/atom-react@4.0.0-beta.102':
-    resolution: {integrity: sha512-6SX11h7OFwje4YhxYUml9qGjBU8hvnEMrLWe3TKI3lEH/W6tkU/BzajC263eXkxM68h+BJNzE81Ipi5DTfEgug==}
+  '@effect/atom-react@4.0.0-beta.105':
+    resolution: {integrity: sha512-ldHOwlnrHMYCDb6ln6+uR+LwYV8Q2aQksaXQ92wAxP+YMvIpXP8PVfBdBoAooagmj9hGBgbyRnyE+wnjQRPkTQ==}
     peerDependencies:
-      effect: 4.0.0-beta.102
-      react: ^19.2.4
-      scheduler: '*'
+      effect: 4.0.0-beta.105
+      react: '>=19.2.7 <20.0.0'
+      scheduler: '>=0.27.0 <0.28.0'
 
-  '@effect/vitest@4.0.0-beta.102':
-    resolution: {integrity: sha512-4dipFAYG6imOzrY3zy3BgzCJkbb9xESyzUef0WSx8bsK0/SpITqbJpdwKeOyDWLZ+rimjua8IbTFMAde865pIQ==}
+  '@effect/vitest@4.0.0-beta.105':
+    resolution: {integrity: sha512-2t1J/H/+9hAKDC1S3iFyUVZJhdMpKvuggnOGNXPTmxZcVdxG/VkhjQjo7wzOHWs6SZcX8Cr/EsB+uiVAn9G0Ng==}
     peerDependencies:
-      effect: 4.0.0-beta.102
-      vitest: ^3.0.0 || ^4.0.0
+      effect: 4.0.0-beta.105
+      vitest: '>=4.1.0 <5.0.0'
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -254,7 +256,7 @@ packages:
     resolution: {directory: ../.., type: directory}
     engines: {node: '>=20'}
     peerDependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -336,8 +338,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  effect@4.0.0-beta.102:
-    resolution: {integrity: sha512-z8Y+Q76Hh/kjLFZrXu8tGn6e+tDsg45R+UHhxd190pXxD53OGwf/G/zDxXTkse4HJ5mobNZfitLfUCp4fMvu6w==}
+  effect@4.0.0-beta.105:
+    resolution: {integrity: sha512-7U5OzWVNlpnZFvXiZfOeu8V+dCQUa3Om569HnYG2Dx8C8V6uoKS920kFJkIDEYVhlSGhzkRqaGKmYY9bPkBMMQ==}
 
   es-module-lexer@2.3.1:
     resolution: {integrity: sha512-shc1dbU90Yl/xq1QrC7QRtfcwURZuVRfPhZbDoldJ1cn1gzDvBaBWlv0eFolj5+0znnPJz5TXLxsN77X/12KTA==}
@@ -362,17 +364,10 @@ packages:
       picomatch:
         optional: true
 
-  find-my-way-ts@0.1.6:
-    resolution: {integrity: sha512-a85L9ZoXtNAey3Y6Z+eBWW658kO/MwR7zIafkIUPUMf3isZG0NCs2pjW2wtjxAKuJPxMAsHUIP4ZPGv0o5gyTA==}
-
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
-
-  ini@7.0.0:
-    resolution: {integrity: sha512-ifK0CgjALofS5bkrcTy4RaQ9Vx2Knf/eLeIO+NaswQEpH1UblrtTSCIvN71qQDMq0PeQ/SSPojvEJp9vvvfr+w==}
-    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   isbot@5.2.1:
     resolution: {integrity: sha512-dJ+LpKyClQZ7NG+j3OensC/mAZkGpukE9YUrgPYvAZj2doVL0edfDgywTUh5CXa0o+nW9a1V9e5+CJTX8+SxRw==}
@@ -465,9 +460,6 @@ packages:
   msgpackr@2.0.5:
     resolution: {integrity: sha512-cef05H/dSYpLpqp3sj/qyZh5vhUYCalnaLO7j1yOmpsR0y/XwLVtK7r5gn+U/F7CTEfMowcGhlUQJDLcLf7jcA==}
 
-  multipasta@0.2.8:
-    resolution: {integrity: sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q==}
-
   nanoid@3.3.16:
     resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -552,10 +544,6 @@ packages:
   tinyrainbow@3.1.1:
     resolution: {integrity: sha512-yau8yJdTt989Mm0Bd/236QnzEiPf2xLLTqUZRUJOo/3CB078LSwzei343DgtJVmfJKJE3TMINY1u42SQsP6mXw==}
     engines: {node: '>=14.0.0'}
-
-  toml@4.3.0:
-    resolution: {integrity: sha512-lVb8X9BsPVuH0M4BKeS91tXAmJvCjQ5UIyAbQFaxkKGyUFK2RPkhwaFSQH8vbpl1d23eu/IBH+dwVMHWaq9A5A==}
-    engines: {node: '>=20'}
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -670,15 +658,15 @@ packages:
 
 snapshots:
 
-  '@effect/atom-react@4.0.0-beta.102(effect@4.0.0-beta.102)(react@19.2.7)(scheduler@0.27.0)':
+  '@effect/atom-react@4.0.0-beta.105(effect@4.0.0-beta.105)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
       react: 19.2.7
       scheduler: 0.27.0
 
-  '@effect/vitest@4.0.0-beta.102(effect@4.0.0-beta.102)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))':
+  '@effect/vitest@4.0.0-beta.105(effect@4.0.0-beta.105)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
       vitest: 4.1.10(vite@8.1.5(yaml@2.9.0))
 
   '@emnapi/core@1.11.1':
@@ -811,9 +799,9 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.102)':
+  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.105)':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@types/chai@5.2.3':
     dependencies:
@@ -890,18 +878,13 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  effect@4.0.0-beta.102:
+  effect@4.0.0-beta.105:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      find-my-way-ts: 0.1.6
-      ini: 7.0.0
       kubernetes-types: 1.30.0
       msgpackr: 2.0.5
-      multipasta: 0.2.8
-      toml: 4.3.0
       uuid: 14.0.1
-      yaml: 2.9.0
 
   es-module-lexer@2.3.1: {}
 
@@ -919,12 +902,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
-  find-my-way-ts@0.1.6: {}
-
   fsevents@2.3.3:
     optional: true
-
-  ini@7.0.0: {}
 
   isbot@5.2.1: {}
 
@@ -998,8 +977,6 @@ snapshots:
   msgpackr@2.0.5:
     optionalDependencies:
       msgpackr-extract: 3.0.4
-
-  multipasta@0.2.8: {}
 
   nanoid@3.3.16: {}
 
@@ -1079,8 +1056,6 @@ snapshots:
 
   tinyrainbow@3.1.1: {}
 
-  toml@4.3.0: {}
-
   tslib@2.8.1:
     optional: true
 
@@ -1133,4 +1108,5 @@ snapshots:
       siginfo: 2.0.0
       stackback: 0.0.2
 
-  yaml@2.9.0: {}
+  yaml@2.9.0:
+    optional: true

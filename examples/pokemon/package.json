@@ -12,10 +12,10 @@
     "check": "pnpm build"
   },
   "dependencies": {
-    "@effect/atom-react": "4.0.0-beta.102",
+    "@effect/atom-react": "4.0.0-beta.105",
     "@tanstack/react-router": "1.170.18",
     "@typeonce/effect-machine": "file:../..",
-    "effect": "4.0.0-beta.102",
+    "effect": "4.0.0-beta.105",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "scheduler": "0.27.0"

@@ -5,25 +5,25 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  effect: 4.0.0-beta.102
-  '@effect/atom-react': 4.0.0-beta.102
+  effect: 4.0.0-beta.105
+  '@effect/atom-react': 4.0.0-beta.105
 
 importers:
 
   .:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102(effect@4.0.0-beta.102)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105(effect@4.0.0-beta.105)(react@19.2.7)(scheduler@0.27.0)
       '@tanstack/react-router':
         specifier: 1.170.18
         version: 1.170.18(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@typeonce/effect-machine':
         specifier: file:../..
-        version: file:../..(effect@4.0.0-beta.102)
+        version: file:../..(effect@4.0.0-beta.105)
       effect:
-        specifier: 4.0.0-beta.102
-        version: 4.0.0-beta.102
+        specifier: 4.0.0-beta.105
+        version: 4.0.0-beta.105
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -52,12 +52,12 @@ importers:
 
 packages:
 
-  '@effect/atom-react@4.0.0-beta.102':
-    resolution: {integrity: sha512-6SX11h7OFwje4YhxYUml9qGjBU8hvnEMrLWe3TKI3lEH/W6tkU/BzajC263eXkxM68h+BJNzE81Ipi5DTfEgug==}
+  '@effect/atom-react@4.0.0-beta.105':
+    resolution: {integrity: sha512-ldHOwlnrHMYCDb6ln6+uR+LwYV8Q2aQksaXQ92wAxP+YMvIpXP8PVfBdBoAooagmj9hGBgbyRnyE+wnjQRPkTQ==}
     peerDependencies:
-      effect: 4.0.0-beta.102
-      react: ^19.2.4
-      scheduler: '*'
+      effect: 4.0.0-beta.105
+      react: '>=19.2.7 <20.0.0'
+      scheduler: '>=0.27.0 <0.28.0'
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -395,7 +395,7 @@ packages:
     resolution: {directory: ../.., type: directory}
     engines: {node: '>=20'}
     peerDependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@types/react-dom@19.2.2':
     resolution: {integrity: sha512-9KQPoO6mZCi7jcIStSnlOWn2nEF3mNmyr3rIAsGnAbQKYbRLyqmeSc39EVgtxXVia+LMT8j3knZLAZAh+xLmrw==}
@@ -428,8 +428,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  effect@4.0.0-beta.102:
-    resolution: {integrity: sha512-z8Y+Q76Hh/kjLFZrXu8tGn6e+tDsg45R+UHhxd190pXxD53OGwf/G/zDxXTkse4HJ5mobNZfitLfUCp4fMvu6w==}
+  effect@4.0.0-beta.105:
+    resolution: {integrity: sha512-7U5OzWVNlpnZFvXiZfOeu8V+dCQUa3Om569HnYG2Dx8C8V6uoKS920kFJkIDEYVhlSGhzkRqaGKmYY9bPkBMMQ==}
 
   esbuild@0.28.1:
     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
@@ -449,17 +449,10 @@ packages:
       picomatch:
         optional: true
 
-  find-my-way-ts@0.1.6:
-    resolution: {integrity: sha512-a85L9ZoXtNAey3Y6Z+eBWW658kO/MwR7zIafkIUPUMf3isZG0NCs2pjW2wtjxAKuJPxMAsHUIP4ZPGv0o5gyTA==}
-
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
-
-  ini@7.0.0:
-    resolution: {integrity: sha512-ifK0CgjALofS5bkrcTy4RaQ9Vx2Knf/eLeIO+NaswQEpH1UblrtTSCIvN71qQDMq0PeQ/SSPojvEJp9vvvfr+w==}
-    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   isbot@5.2.1:
     resolution: {integrity: sha512-dJ+LpKyClQZ7NG+j3OensC/mAZkGpukE9YUrgPYvAZj2doVL0edfDgywTUh5CXa0o+nW9a1V9e5+CJTX8+SxRw==}
@@ -549,9 +542,6 @@ packages:
   msgpackr@2.0.4:
     resolution: {integrity: sha512-o1C5KRmuRt+apqMr1HuGSqWStZoRBUpEsCsl15uM9VdAF1qHLtvMOU2En747EnTyEl6c4pzPewRMFF31s1CNbA==}
 
-  multipasta@0.2.8:
-    resolution: {integrity: sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q==}
-
   nanoid@3.3.16:
     resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -609,10 +599,6 @@ packages:
   tinyglobby@0.2.17:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
-
-  toml@4.3.0:
-    resolution: {integrity: sha512-lVb8X9BsPVuH0M4BKeS91tXAmJvCjQ5UIyAbQFaxkKGyUFK2RPkhwaFSQH8vbpl1d23eu/IBH+dwVMHWaq9A5A==}
-    engines: {node: '>=20'}
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -681,9 +667,9 @@ packages:
 
 snapshots:
 
-  '@effect/atom-react@4.0.0-beta.102(effect@4.0.0-beta.102)(react@19.2.7)(scheduler@0.27.0)':
+  '@effect/atom-react@4.0.0-beta.105(effect@4.0.0-beta.105)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
       react: 19.2.7
       scheduler: 0.27.0
 
@@ -893,9 +879,9 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.102)':
+  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.105)':
     dependencies:
-      effect: 4.0.0-beta.102
+      effect: 4.0.0-beta.105
 
   '@types/react-dom@19.2.2(@types/react@19.2.17)':
     dependencies:
@@ -916,18 +902,13 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  effect@4.0.0-beta.102:
+  effect@4.0.0-beta.105:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      find-my-way-ts: 0.1.6
-      ini: 7.0.0
       kubernetes-types: 1.30.0
       msgpackr: 2.0.4
-      multipasta: 0.2.8
-      toml: 4.3.0
       uuid: 14.0.1
-      yaml: 2.9.0
 
   esbuild@0.28.1:
     optionalDependencies:
@@ -967,12 +948,8 @@ snapshots:
     optionalDependencies:
       picomatch: 4.0.5
 
-  find-my-way-ts@0.1.6: {}
-
   fsevents@2.3.3:
     optional: true
-
-  ini@7.0.0: {}
 
   isbot@5.2.1: {}
 
@@ -1043,8 +1020,6 @@ snapshots:
     optionalDependencies:
       msgpackr-extract: 3.0.4
 
-  multipasta@0.2.8: {}
-
   nanoid@3.3.16: {}
 
   node-gyp-build-optional-packages@5.2.2:
@@ -1107,8 +1082,6 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.5)
       picomatch: 4.0.5
 
-  toml@4.3.0: {}
-
   tslib@2.8.1:
     optional: true
 
@@ -1132,4 +1105,5 @@ snapshots:
       fsevents: 2.3.3
       yaml: 2.9.0
 
-  yaml@2.9.0: {}
+  yaml@2.9.0:
+    optional: true
