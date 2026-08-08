@@ -114,6 +114,36 @@ describe("machine process lifecycle", () => {
       assert.deepStrictEqual(yield* ref.snapshot, { status: "stopped", state: 1 })
     }))
 
+  it.effect("interrupts the worker before publishing an externally requested failure", () =>
+    Effect.gen(function*() {
+      const runtime = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const cleanupCount = yield* Ref.make(0)
+      const logic: MachineRuntime.ProcessLogic<number, never, string> = {
+        initial: (scope) => Deferred.succeed(runtime, scope).pipe(Effect.as(1)),
+        run: () =>
+          Effect.never.pipe(
+            Effect.ensuring(Ref.update(cleanupCount, (count) => count + 1))
+          )
+      }
+      const ref = yield* MachineRuntime.startProcess(
+        logic
+      )
+
+      yield* (yield* Deferred.await(runtime)).failCause(Cause.fail("external"))
+      const joined = yield* Effect.exit(ref.join)
+
+      assert.strictEqual(yield* Ref.get(cleanupCount), 1)
+      assert.deepStrictEqual(yield* ref.snapshot, {
+        status: "error",
+        state: 1,
+        cause: Cause.fail("external")
+      })
+      assert(Exit.isFailure(joined))
+      if (Exit.isFailure(joined)) {
+        assert.strictEqual(joined.cause.reasons.find(Cause.isFailReason)?.error, "external")
+      }
+    }))
+
   it.effect("completes a first changes subscription started after terminalization", () =>
     Effect.gen(function*() {
       const ref = yield* MachineRuntime.startProcess(
