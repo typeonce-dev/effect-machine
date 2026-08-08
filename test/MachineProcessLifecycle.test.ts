@@ -114,6 +114,64 @@ describe("machine process lifecycle", () => {
       assert.deepStrictEqual(yield* ref.snapshot, { status: "stopped", state: 1 })
     }))
 
+  it.effect("completes a first changes subscription started after terminalization", () =>
+    Effect.gen(function*() {
+      const ref = yield* MachineRuntime.startProcess(
+        Machine.logic({
+          initial: 1,
+          run: () => Effect.never
+        })
+      )
+
+      yield* ref.stop
+
+      assert.deepStrictEqual(Array.from(yield* Stream.runCollect(ref.changes)), [
+        { status: "stopped", state: 1 }
+      ])
+    }))
+
+  it.effect("does not lose completion when a first changes subscription races terminal publication", () =>
+    Effect.gen(function*() {
+      yield* Effect.forEach(
+        Array.from({ length: 100 }),
+        () =>
+          Effect.gen(function*() {
+            const release = yield* Deferred.make<void>()
+            const race = yield* Deferred.make<void>()
+            const ref = yield* MachineRuntime.startProcess(
+              Machine.logic({
+                initial: 0,
+                run: (context) =>
+                  Deferred.await(release).pipe(
+                    Effect.andThen(context.setState(1)),
+                    Effect.as("done")
+                  )
+              })
+            )
+            const changes = yield* Deferred.await(race).pipe(
+              Effect.andThen(Stream.runCollect(ref.changes)),
+              Effect.forkChild
+            )
+            const completion = yield* Deferred.await(race).pipe(
+              Effect.andThen(Deferred.succeed(release, void 0)),
+              Effect.forkChild
+            )
+
+            yield* Deferred.succeed(race, void 0)
+            const snapshots = Array.from(yield* Fiber.join(changes))
+            yield* Fiber.join(completion)
+
+            assert.deepStrictEqual(snapshots.at(-1), {
+              status: "done",
+              state: 1,
+              output: "done"
+            })
+            assert.strictEqual(snapshots.filter((snapshot) => snapshot.status === "done").length, 1)
+          }),
+        { concurrency: "unbounded" }
+      )
+    }))
+
   it.effect("releases a child id after that child requests self-stop during initialization", () =>
     Effect.gen(function*() {
       const firstRunCount = yield* Ref.make(0)
