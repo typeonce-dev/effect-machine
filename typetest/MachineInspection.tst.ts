@@ -256,11 +256,11 @@ describe("Machine inspection", () => {
     } as const
 
     expect(flat.handle).type.toBeCallableWith(direct)
-    expect(flat.handle).type.toBeCallableWith(effectful)
+    expect(flat.handle).type.not.toBeCallableWith(effectful)
     expect(flat.handle).type.toBeCallableWith(constructed)
     expect(flat.handle).type.toBeCallableWith(multiple)
     expect(flat.handle).type.toBeCallableWith(always)
-    expect(flat.handle).type.toBeCallableWith(onDone)
+    expect(flat.handle).type.not.toBeCallableWith(onDone)
     expect(flat.handle).type.not.toBeCallableWith(undeclared)
     expect(flat.handle).type.not.toBeCallableWith(partiallyUndeclared)
     expect(flat.handle).type.not.toBeCallableWith(undeclaredAlways)

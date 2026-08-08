@@ -14,8 +14,8 @@ import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
-import { ChildAlreadyExistsError } from "./machineErrors.js"
-import type { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./machineErrors.js"
+import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError } from "./machineErrors.js"
+import type { StartupError, StoppedError } from "./machineErrors.js"
 import * as Model from "./machineModel.js"
 import * as internalPlanner from "./machinePlanner.js"
 import * as internalRuntime from "./machineRuntime.js"
@@ -136,9 +136,9 @@ const makeProcessLogic: <
             machine,
             scope
           )
-          yield* internalPlanner.runActions(
-            planned.actions,
-            runtime
+          yield* internalPlanner.runCommands(
+            planned.commands,
+            scope
           )
           yield* internalPlanner.runEmittedEvents(planned.emittedEvents, runtime)
           return planned.state
@@ -178,16 +178,24 @@ const makeProcessLogic: <
                 Effect.gen(function*() {
                   const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
                   pendingEvent = Option.none()
-                  const planned = yield* internalPlanner.planConfiguration(
-                    machine,
-                    configuration ?? (yield* Model.normalizeConfigurationEffect(machine, current)),
-                    event
-                  )
+                  let planned
+                  try {
+                    planned = internalPlanner.planConfiguration(
+                      machine,
+                      configuration ?? Model.normalizeConfigurationSync(machine, current),
+                      event
+                    )
+                  } catch (error) {
+                    if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
+                      return yield* error
+                    }
+                    throw error
+                  }
                   configuration = planned.next
 
                   if (planned.microsteps.length > 0) {
                     const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                    yield* internalPlanner.runActions(planned.actions, liveRuntime)
+                    yield* internalPlanner.runCommands(planned.commands, context)
                     yield* setState(next)
                     current = next
                     yield* internalPlanner.runEmittedEvents(
@@ -196,7 +204,7 @@ const makeProcessLogic: <
                     )
 
                     if (planned.done) {
-                      terminal = { output: planned.output }
+                      terminal = { output: planned.output as Output }
                     }
                   }
 
@@ -386,8 +394,7 @@ const makeProcessLogic: <
                     state: Model.getActiveValue(configuration, path),
                     parent: Model.getParentValue(machine, configuration, path),
                     parents: Model.getParentValues(machine, configuration, path),
-                    event,
-                    runtime: internalPlanner.runtimeFor<Machine.EventOf<Events>, Machine.EmitOf<Emits>>()
+                    event
                   }).map((config) =>
                     startInvoke(
                       path as Machine.StateIdentifier<States>,
@@ -434,11 +441,19 @@ const makeProcessLogic: <
                 Effect.gen(function*() {
                   const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
                   pendingEvent = Option.none()
-                  const planned = yield* internalPlanner.planConfiguration(
-                    machine,
-                    configuration ?? (yield* Model.normalizeConfigurationEffect(machine, current)),
-                    event
-                  )
+                  let planned
+                  try {
+                    planned = internalPlanner.planConfiguration(
+                      machine,
+                      configuration ?? Model.normalizeConfigurationSync(machine, current),
+                      event
+                    )
+                  } catch (error) {
+                    if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
+                      return yield* error
+                    }
+                    throw error
+                  }
                   configuration = planned.next
                   if (planned.microsteps.length > 0) {
                     const changed = planned.microsteps.some((step) => step.changed)
@@ -453,7 +468,7 @@ const makeProcessLogic: <
                     }
 
                     const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                    yield* internalPlanner.runActions(planned.actions, liveRuntime)
+                    yield* internalPlanner.runCommands(planned.commands, context)
                     if (changed) {
                       yield* stopInvokes(exitPaths)
                     }
@@ -465,7 +480,7 @@ const makeProcessLogic: <
                     )
 
                     if (planned.done) {
-                      terminal = { output: planned.output }
+                      terminal = { output: planned.output as Output }
                       yield* stopAllInvokes(Exit.succeed(planned.output))
                     } else {
                       if (changed) {

@@ -52,8 +52,10 @@ export const ReplaceMachine = Machine.make({
   Replacing: {
     invoke: () => ReplaceWithRandomMachine,
     on: {
-      Replaced: ({ event, target, emit, state }) =>
-        emit(new ReplaceInTeam({ id: state.id, pokemon: event.pokemon })).pipe(Effect.as(target.full.Idle(new Idle())))
+      Replaced: ({ event, target, state }, enqueue) => {
+        enqueue.emit(new ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
+        return target.full.Idle(new Idle())
+      }
     }
   }
 })

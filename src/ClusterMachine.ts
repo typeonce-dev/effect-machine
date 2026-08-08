@@ -534,24 +534,26 @@ export const make = <
             return yield* fail("InvalidCheckpoint", "The request was recorded without a checkpoint")
           }
 
-          const runtime: Machine.Runtime<any, any> = {
-            raise: () => Effect.die(new Machine.ProcessLocalError({ operation: "runtime.raise" })),
-            sendParent: (event) =>
-              Effect.sync(() => {
-                emitted.push(event)
-              })
-          }
-
           if (current === undefined) {
             const initial = yield* Machine.planInitial(machine, ...input as any)
-            yield* Machine.runActions(initial.actions, runtime)
+            if (initial.commands.length > 0) {
+              return yield* fail(
+                "UnsupportedProcessLocal",
+                "Machine actor commands require a managed local process"
+              )
+            }
             current = initial.state
             emitted.push(...initial.emittedEvents as any)
           }
 
           if (!Machine.isFinal(machine, current)) {
             const planned = yield* Machine.plan(machine, current, request.payload)
-            yield* Machine.runActions(planned.actions, runtime)
+            if (planned.commands.length > 0) {
+              return yield* fail(
+                "UnsupportedProcessLocal",
+                "Machine actor commands require a managed local process"
+              )
+            }
             current = planned.next
             emitted.push(...planned.emittedEvents as any)
           }

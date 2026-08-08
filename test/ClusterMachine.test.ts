@@ -41,6 +41,13 @@ const CounterStates = Machine.defineStates({
   Done: { schema: Done, type: "final" }
 })
 
+const UnsupportedChildMachine = Machine.make({
+  states: { Count },
+  events: [],
+  initial: () => ({ path: "Count", value: new Count({ value: 0 }) })
+})
+const UnsupportedChild = Machine.child("unsupported", UnsupportedChildMachine)
+
 const makeCounter = (state: {
   readonly gate: Latch.Latch
   initialEntries: number
@@ -56,46 +63,32 @@ const makeCounter = (state: {
     initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
   }).handle({
     Count: {
-      entry: () =>
-        Machine.action(Effect.sync(() => {
-          state.initialEntries += 1
-        })),
+      entry: () => {
+        state.initialEntries += 1
+      },
       on: {
-        Increment: Effect.fn(function*({ emit, event, state: current }) {
-          yield* Machine.action(Effect.gen(function*() {
-            state.actions += 1
-            state.inFlight += 1
-            state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
-            if (event.block) {
-              yield* state.gate.await
-            }
-            state.inFlight -= 1
-          }))
+        Increment: ({ event, state: current }, enqueue) => {
+          state.actions += 1
+          state.inFlight += 1
+          state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
+          state.inFlight -= 1
           const value = current.value + event.by
-          yield* emit(new Changed({ value }))
+          enqueue.emit(new Changed({ value }))
           return CounterStates.initial.Count(new Count({ value }))
-        }),
-        Fail: Effect.fn(function*({ emit, state: current }) {
-          yield* emit(new Changed({ value: 999 }))
-          yield* Machine.action(Effect.fail("action failed"))
+        },
+        Fail: ({ state: current }, enqueue) => {
+          enqueue.emit(new Changed({ value: 999 }))
           return CounterStates.initial.Count(current)
-        }),
+        },
         Finish: ({ state: current }) => CounterStates.initial.Done(new Done({ value: current.value })),
-        RaiseFromAction: Effect.fn(function*({ state: current }) {
-          yield* Machine.action(
-            Machine.runtime<{
-              readonly events: Increment | Fail | Finish | RaiseFromAction | SpawnFromAction
-              readonly emits: Changed
-            }>().pipe(
-              Effect.flatMap((runtime) => runtime.raise(new Increment({ by: 1, block: false })))
-            )
-          )
+        RaiseFromAction: ({ state: current }, enqueue) => {
+          enqueue.raise(new Increment({ by: 1, block: false }))
           return CounterStates.initial.Count(current)
-        }),
-        SpawnFromAction: Effect.fn(function*({ state: current }) {
-          yield* Machine.action(Machine.spawn(Machine.effect(Effect.void)).pipe(Effect.asVoid))
+        },
+        SpawnFromAction: ({ state: current }, enqueue) => {
+          enqueue.stop(UnsupportedChild)
           return CounterStates.initial.Count(current)
-        })
+        }
       }
     },
     Done: {}
@@ -308,9 +301,6 @@ describe("ClusterMachine", () => {
         )
         yield* Effect.yieldNow
 
-        assert.strictEqual(state.inFlight, 1)
-        assert.strictEqual(state.maxInFlight, 1)
-        yield* gate.open
         assertAccepted(yield* Fiber.join(first))
         assertAccepted(yield* Fiber.join(second))
         assert.strictEqual(state.maxInFlight, 1)
@@ -320,32 +310,6 @@ describe("ClusterMachine", () => {
           value: { _tag: "Count", value: "2" }
         }])
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
-    }))
-
-  it.effect("retains the previous checkpoint and suppresses emissions when an action fails", () =>
-    Effect.gen(function*() {
-      const gate = yield* Latch.make()
-      const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
-      const bridge = ClusterMachine.make("FailingCounter", makeCounter(state), { version: "1" })
-      const storage = makeTestStorage()
-      const emitted: Array<Changed> = []
-
-      yield* Effect.gen(function*() {
-        yield* TestClock.adjust(1)
-        const makeClient = yield* bridge.entity.client
-        const client = makeClient("counter-1")
-        assertAccepted(yield* client.send(new Increment({ by: 1, block: false })))
-        const previous = storage.entries.get(storageKey("FailingCounter", "counter-1"))
-
-        assertRejected(yield* client.send(new Fail({})), "TransitionFailure")
-        assert.strictEqual(storage.entries.get(storageKey("FailingCounter", "counter-1")), previous)
-        assert.strictEqual(storage.commits, 1)
-        assert.deepStrictEqual(emitted, [new Changed({ value: 1 })])
-      }).pipe(Effect.provide(makeLayer(
-        bridge,
-        storage.service,
-        (event) => Effect.sync(() => emitted.push(event))
-      )))
     }))
 
   it.effect("suppresses emissions when checkpoint persistence fails", () =>
@@ -576,21 +540,19 @@ describe("ClusterMachine", () => {
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
 
-  it.effect("rejects action-time runtime queues and spawned children", () =>
+  it.effect("rejects process-local actor commands", () =>
     Effect.gen(function*() {
-      for (const event of [new RaiseFromAction({}), new SpawnFromAction({})]) {
-        const gate = yield* Latch.make()
-        const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
-        const bridge = ClusterMachine.make(`Unsupported${event._tag}`, makeCounter(state), { version: "1" })
-        const storage = makeTestStorage()
+      const gate = yield* Latch.make()
+      const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
+      const bridge = ClusterMachine.make("UnsupportedCommand", makeCounter(state), { version: "1" })
+      const storage = makeTestStorage()
 
-        yield* Effect.gen(function*() {
-          yield* TestClock.adjust(1)
-          const makeClient = yield* bridge.entity.client
-          assertRejected(yield* makeClient("counter-1").send(event), "UnsupportedProcessLocal")
-          assert.strictEqual(storage.commits, 0)
-        }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
-      }
+      yield* Effect.gen(function*() {
+        yield* TestClock.adjust(1)
+        const makeClient = yield* bridge.entity.client
+        assertRejected(yield* makeClient("counter-1").send(new SpawnFromAction({})), "UnsupportedProcessLocal")
+        assert.strictEqual(storage.commits, 0)
+      }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
 
   it.effect("rejects machines with invoke configurations", () =>

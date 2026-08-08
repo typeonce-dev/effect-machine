@@ -408,34 +408,25 @@ describe("Machine history states", () => {
     })
   })
 
-  it("preserves exact error and service inference for effectful nested defaults", () => {
+  it("rejects Effects returned by nested history defaults", () => {
     const machine = Machine.make({
       states: NestedStates.states,
       events: [Resume],
       initial: () => NestedStates.initial.Closed(new Closed({}))
-    }).handle({
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
       App: {
         states: {
           Workspace: {
             history: {
               resume: {
-                default: ({ target }) =>
-                  Effect.gen(function*() {
-                    const requirement = yield* FallbackRequirement
-                    if (requirement.workspaceId === "") {
-                      return yield* Effect.fail("fallback-failed" as const)
-                    }
-                    return constructedNestedFallback(target, requirement.workspaceId)
-                  })
+                default: () => Effect.succeed(null)
               }
             }
           }
         }
       }
     })
-
-    expect<Machine.Machine.Error<typeof machine>>().type.toBe<"fallback-failed">()
-    expect<Machine.Machine.Services<typeof machine>>().type.toBe<FallbackRequirement>()
   })
 
   it("tracks defaults and shallow initializers across successive handle calls", () => {
@@ -470,22 +461,15 @@ describe("Machine history states", () => {
       checkout: {
         states: {
           payment: {
-            initial: ({ state }) =>
-              Effect.gen(function*() {
-                const defaults = yield* InitialRequirement
-                if (state.attempt < 0) {
-                  return yield* Effect.fail("initial-failed" as const)
-                }
-                return new CardEntry({ cardNumber: defaults.cardNumber })
-              })
+            initial: ({ state }) => new CardEntry({ cardNumber: String(state.attempt) })
           }
         }
       }
     })
 
     expect(Machine.planInitial).type.toBeCallableWith(complete)
-    expect<Machine.Machine.Services<typeof complete>>().type.toBe<InitialRequirement>()
-    expect<Machine.Machine.Error<typeof complete>>().type.toBe<"initial-failed">()
+    expect<Machine.Machine.Services<typeof complete>>().type.toBe<never>()
+    expect<Machine.Machine.Error<typeof complete>>().type.toBe<never>()
   })
 
   it("does not require nested initializers for deep-only history", () => {

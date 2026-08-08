@@ -110,15 +110,13 @@ export const SelectionMachine = Machine.make({
         states: {
           WithPokemon: {
             on: {
-              ReplacePokemon: ({ event, emit, state, target }) =>
-                emit(new ReplaceInTeam({ id: event.id, pokemon: state.pokemon })).pipe(
-                  Effect.as(
-                    target.full.form(new Form(), (form) =>
-                      form
-                        .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
-                        .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
-                  )
-                )
+              ReplacePokemon: ({ event, state, target }, enqueue) => {
+                enqueue.emit(new ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
+                return target.full.form(new Form(), (form) =>
+                  form
+                    .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
+                    .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
+              }
             }
           },
           Searching: {

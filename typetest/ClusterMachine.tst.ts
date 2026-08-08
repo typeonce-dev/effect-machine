@@ -50,11 +50,7 @@ describe("ClusterMachine", () => {
   }).handle({
     Count: {
       on: {
-        Increment: Effect.fn(function*({ event, state }) {
-          yield* PlanningService
-          yield* Machine.action(Effect.flatMap(ActionService, (service) => service.run))
-          return states.initial.Count(new Count({ value: state.value + event.by }))
-        }),
+        Increment: ({ event, state }) => states.initial.Count(new Count({ value: state.value + event.by })),
         Reset: () => states.initial.Count(new Count({ value: 0 }))
       }
     }
@@ -80,10 +76,10 @@ describe("ClusterMachine", () => {
     expect<Rpc.Payload<InternalRpcs>>().type.toBe<Increment>()
   })
 
-  it("retains machine and Cluster service requirements", () => {
+  it("retains Cluster service requirements", () => {
     const layer = bridge.toLayer()
     expect<Layer.Services<typeof layer>>().type.toBe<
-      ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding | PlanningService | ActionService
+      ClusterMachine.Storage | MessageStorage.MessageStorage | Sharding.Sharding
     >()
   })
 
@@ -174,17 +170,5 @@ describe("ClusterMachine", () => {
       | SnapshotDecoding
       | SnapshotEncoding
     >()
-  })
-
-  it("runs staged actions with a supplied runtime", () => {
-    const action = Machine.runtime<{
-      readonly events: Increment | Reset
-    }>().pipe(Effect.asVoid)
-    const run = Machine.runActions([action], {
-      raise: () => Effect.void,
-      sendParent: () => Effect.void
-    })
-
-    expect<Effect.Services<typeof run>>().type.toBe<never>()
   })
 })

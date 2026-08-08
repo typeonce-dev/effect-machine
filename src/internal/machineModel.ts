@@ -8,6 +8,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type { Machine } from "../Machine.js"
 import { MachineSchemaDecodeError, MachineSchemaEncodeError } from "./machineErrors.js"
@@ -112,13 +113,12 @@ const historyFromSnapshot = (
       if (
         node.type === "history" || node.type === "choice" ||
         !(isPathInSubtree(activePath, historyNode.parent) ||
-          getPathToRoot(machine, historyNode.parent).includes(activePath)) ||
-        !Schema.is(getStateNodeSchema(node))(entry.values[activePath])
+          getPathToRoot(machine, historyNode.parent).includes(activePath))
       ) {
         throw new Error(`Machine snapshot contains invalid remembered value for "${activePath}"`)
       }
       active.add(activePath)
-      values.set(activePath, entry.values[activePath])
+      values.set(activePath, decodeStateValueSync(machine, node, entry.values[activePath]))
     }
     if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
       throw new Error(`Machine snapshot contains incomplete history record "${path}"`)
@@ -701,8 +701,10 @@ interface MachineProtocolSchemas {
 }
 
 type BoundaryDecoder = (value: unknown) => Effect.Effect<unknown, Schema.SchemaError, unknown>
+type BoundaryResultDecoder = (value: unknown) => Result.Result<unknown, Schema.SchemaError>
 
 const boundaryDecoderCache = new WeakMap<object, BoundaryDecoder>()
+const boundaryResultDecoderCache = new WeakMap<object, BoundaryResultDecoder>()
 const pathToRootCache = new WeakMap<Machine.StateNodes, Map<string, ReadonlyArray<string>>>()
 
 const getBoundaryDecoder = (schema: Schema.Top): BoundaryDecoder => {
@@ -713,6 +715,17 @@ const getBoundaryDecoder = (schema: Schema.Top): BoundaryDecoder => {
   }
   const decoder = Schema.decodeUnknownEffect(Schema.toType(schema)) as BoundaryDecoder
   boundaryDecoderCache.set(key, decoder)
+  return decoder
+}
+
+const getBoundaryResultDecoder = (schema: Schema.Top): BoundaryResultDecoder => {
+  const key = schema as object
+  const cached = boundaryResultDecoderCache.get(key)
+  if (cached !== undefined) {
+    return cached
+  }
+  const decoder = Schema.decodeUnknownResult(Schema.toType(schema)) as BoundaryResultDecoder
+  boundaryResultDecoderCache.set(key, decoder)
   return decoder
 }
 
@@ -764,6 +777,25 @@ export const decodeBoundary = <A>(
     )
   ) as Effect.Effect<A, MachineSchemaDecodeError>
 
+export const decodeBoundarySync = <A>(
+  machine: Machine.Any,
+  schema: Schema.Top,
+  value: unknown,
+  options: DecodeBoundaryOptions
+): A => {
+  const decoded = getBoundaryResultDecoder(schema)(value)
+  if (Result.isFailure(decoded)) {
+    throw new MachineSchemaDecodeError({
+      machineId: machine.id,
+      boundary: options.boundary,
+      cause: decoded.failure,
+      ...(options.state === undefined ? {} : { state: options.state }),
+      ...(options.event === undefined ? {} : { event: options.event })
+    })
+  }
+  return decoded.success as A
+}
+
 export const decodeInput = <Input extends Schema.Top>(
   machine: Machine.Any,
   schema: Input,
@@ -784,6 +816,19 @@ export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSch
   )
 }
 
+export const decodeEventSync = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  machine: Machine.Any,
+  event: unknown
+): Machine.EventOf<Events> => {
+  const eventName = getEventName(event)
+  return decodeBoundarySync<Machine.EventOf<Events>>(
+    machine,
+    getProtocolSchemas(machine).event,
+    event,
+    eventName === undefined ? { boundary: "event" } : { boundary: "event", event: eventName }
+  )
+}
+
 export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchema>>(
   machine: Machine.Any,
   event: unknown
@@ -796,6 +841,25 @@ export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchem
     eventName === undefined ? { boundary: "emit" } : { boundary: "emit", event: eventName }
   )
 }
+
+export const decodeEmitSync = <const Emits extends ReadonlyArray<Machine.TaggedSchema>>(
+  machine: Machine.Any,
+  event: unknown
+): Machine.EmitOf<Emits> => {
+  const eventName = getEventName(event)
+  return decodeBoundarySync<Machine.EmitOf<Emits>>(
+    machine,
+    getProtocolSchemas(machine).emit,
+    event,
+    eventName === undefined ? { boundary: "emit" } : { boundary: "emit", event: eventName }
+  )
+}
+
+export const decodeInputSync = <Input extends Schema.Top>(
+  machine: Machine.Any,
+  schema: Input,
+  value: unknown
+): Input["Type"] => decodeBoundarySync<Input["Type"]>(machine, schema, value, { boundary: "input" })
 
 export const decodeStateValue = (
   machine: Machine.Any,
@@ -815,6 +879,31 @@ export const decodeStateValue = (
     )
     : decodeBoundary(machine, getStateNodeSchema(node), value, { boundary: "state", state: node.path })
 
+export const decodeStateValueSync = (
+  machine: Machine.Any,
+  node: Machine.StateNode,
+  value: unknown
+): unknown => {
+  if (!isStateInput(value)) {
+    return decodeBoundarySync(machine, getStateNodeSchema(node), value, { boundary: "state", state: node.path })
+  }
+  try {
+    return getStateNodeSchema(node).make(value.input as never)
+  } catch (cause) {
+    const issue = cause instanceof Error ? cause.cause : undefined
+    throw new MachineSchemaDecodeError({
+      machineId: machine.id,
+      boundary: "state",
+      state: node.path,
+      cause: Schema.isSchemaError(cause)
+        ? cause
+        : hasProperty(issue, "~effect/SchemaIssue/Issue")
+        ? new Schema.SchemaError(issue as any)
+        : Cause.die(cause)
+    })
+  }
+}
+
 export const decodeOutputValue = (
   machine: Machine.Any,
   node: Machine.StateNode,
@@ -823,6 +912,15 @@ export const decodeOutputValue = (
   node.output === undefined
     ? Effect.succeed(value)
     : decodeBoundary(machine, node.output, value, { boundary: "output", state: node.path })
+
+export const decodeOutputValueSync = (
+  machine: Machine.Any,
+  node: Machine.StateNode,
+  value: unknown
+): unknown =>
+  node.output === undefined
+    ? value
+    : decodeBoundarySync(machine, node.output, value, { boundary: "output", state: node.path })
 
 export const getNode = (machine: Machine.Any, path: string): Machine.StateNode => {
   const node = machine.stateNodes.byPath.get(path)
@@ -1041,11 +1139,9 @@ export const configurationFromSnapshot = (
 
   const visit = (current: Machine.AtomicSnapshot<string, unknown>): void => {
     const node = getNode(machine, String(current.path))
-    if (!Schema.is(getStateNodeSchema(node))(current.value)) {
-      throw new Error(`Machine expected snapshot for "${node.path}" to match its schema`)
-    }
+    const value = decodeStateValueSync(machine, node, current.value)
     active.add(node.path)
-    values.set(node.path, current.value)
+    values.set(node.path, value)
     if (node.type === "compound") {
       if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
         throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
@@ -1092,6 +1188,24 @@ export const normalizeConfiguration = <const States extends Machine.StateSchemas
   machine: Machine.Any,
   state: Machine.Snapshot<States>
 ): ActiveConfiguration => configurationFromSnapshot(machine, state)
+
+export const normalizeConfigurationSync = <const States extends Machine.StateSchemas>(
+  machine: Machine.Any,
+  state: Machine.Snapshot<States>
+): ActiveConfiguration => {
+  try {
+    return configurationFromSnapshot(machine, state)
+  } catch (cause) {
+    if (cause instanceof MachineSchemaDecodeError) {
+      throw cause
+    }
+    throw new MachineSchemaDecodeError({
+      machineId: machine.id,
+      boundary: "configuration",
+      cause: Cause.die(cause)
+    })
+  }
+}
 
 export const configurationFromSnapshotEffect = Effect.fnUntraced(function*(
   machine: Machine.Any,
@@ -1455,6 +1569,144 @@ export const normalizeTargetConfigurationEffect = <const States extends Machine.
   throw new Error("Machine expected transition target to be a snapshot or target builder result")
 }
 
+const configurationFromTargetPathSync = (
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  path: string,
+  value: unknown,
+  providedValues: Readonly<Record<string, unknown>> | undefined
+): ActiveConfiguration => {
+  const node = getNode(machine, path)
+  const active = new Set<string>()
+  const values = new Map<string, unknown>()
+  const outputs = new Map<string, unknown>()
+  const paths = getPathToRoot(machine, node.path)
+  const pathSet = new Set(paths)
+
+  for (const currentPath of paths) {
+    const currentNode = getNode(machine, currentPath)
+    active.add(currentPath)
+    if (currentPath === node.path) {
+      values.set(currentPath, decodeStateValueSync(machine, currentNode, value))
+    } else if (providedValues !== undefined && hasOwn(providedValues, currentPath)) {
+      values.set(currentPath, decodeStateValueSync(machine, currentNode, providedValues[currentPath]))
+    } else if (current.values.has(currentPath)) {
+      values.set(currentPath, current.values.get(currentPath))
+    } else {
+      throw new Error(`Machine target "${node.path}" requires a value for ancestor state "${currentPath}"`)
+    }
+  }
+
+  for (const ancestor of paths) {
+    const ancestorNode = getNode(machine, ancestor)
+    if (ancestorNode.type !== "parallel") continue
+    for (const child of ancestorNode.children) {
+      if (pathSet.has(child) || !current.active.has(child)) continue
+      for (const activePath of current.active) {
+        if (!isPathInSubtree(activePath, child)) continue
+        active.add(activePath)
+        if (current.values.has(activePath)) values.set(activePath, current.values.get(activePath))
+        if (current.outputs.has(activePath)) outputs.set(activePath, current.outputs.get(activePath))
+      }
+    }
+  }
+
+  if (node.type === "compound" || node.type === "parallel") {
+    throw new Error(`Machine target "${node.path}" must include an active child state`)
+  }
+  return { active, values, outputs, history: current.history }
+}
+
+const configurationFromTargetSnapshotSync = (
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  snapshot: Machine.AtomicSnapshot<string, unknown>,
+  providedValues: Readonly<Record<string, unknown>> | undefined
+): ActiveConfiguration => {
+  const subtree = configurationFromSnapshot(machine, snapshot)
+  const active = new Set(subtree.active)
+  const values = new Map(subtree.values)
+  const outputs = new Map(subtree.outputs)
+  const paths = getPathToRoot(machine, String(snapshot.path))
+  const pathSet = new Set(paths)
+
+  for (const ancestor of paths.slice(0, -1)) {
+    const node = getNode(machine, ancestor)
+    active.add(ancestor)
+    if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
+      values.set(ancestor, decodeStateValueSync(machine, node, providedValues[ancestor]))
+    } else if (current.values.has(ancestor)) {
+      values.set(ancestor, current.values.get(ancestor))
+    } else {
+      throw new Error(`Machine target "${snapshot.path}" requires a value for ancestor state "${ancestor}"`)
+    }
+  }
+
+  for (const ancestor of paths.slice(0, -1)) {
+    const ancestorNode = getNode(machine, ancestor)
+    if (ancestorNode.type !== "parallel") continue
+    for (const child of ancestorNode.children) {
+      if (pathSet.has(child)) continue
+      if (current.active.has(child)) {
+        for (const activePath of current.active) {
+          if (!isPathInSubtree(activePath, child)) continue
+          active.add(activePath)
+          if (current.values.has(activePath)) values.set(activePath, current.values.get(activePath))
+          if (current.outputs.has(activePath)) outputs.set(activePath, current.outputs.get(activePath))
+        }
+        continue
+      }
+      if (providedValues !== undefined && hasOwn(providedValues, child)) {
+        for (const [providedPath, providedValue] of Object.entries(providedValues)) {
+          if (!isPathInSubtree(providedPath, child)) continue
+          const providedNode = getNode(machine, providedPath)
+          active.add(providedPath)
+          values.set(providedPath, decodeStateValueSync(machine, providedNode, providedValue))
+        }
+      }
+    }
+  }
+  return {
+    active,
+    values,
+    outputs,
+    history: new Map([...current.history, ...subtree.history])
+  }
+}
+
+export const normalizeTargetConfigurationSync = <const States extends Machine.StateSchemas>(
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+): ActiveConfiguration => {
+  if (isTarget(target)) {
+    const snapshot = target[TargetSnapshotTypeId]
+    if (snapshot !== undefined) {
+      if (String(snapshot.path) !== String(target.path)) {
+        throw new Error(`Machine expected target snapshot path to be "${target.path}"`)
+      }
+      return configurationFromTargetSnapshotSync(
+        machine,
+        current,
+        snapshot,
+        target.values as Readonly<Record<string, unknown>> | undefined
+      )
+    }
+    return configurationFromTargetPathSync(
+      machine,
+      current,
+      target.path,
+      target.value,
+      target.values as Readonly<Record<string, unknown>> | undefined
+    )
+  }
+  if (isSnapshot(target)) {
+    const configuration = normalizeConfigurationSync(machine, target)
+    return { ...configuration, history: new Map([...current.history, ...configuration.history]) }
+  }
+  throw new Error("Machine expected transition target to be a snapshot or target builder result")
+}
+
 export const getStateConfigByPath = (
   machine: Machine.Any,
   path: string
@@ -1690,6 +1942,94 @@ export const completeConfigurationEffect: <
     readonly completions: ReadonlyArray<FinalCompletion>
   }
 })
+
+const resolveFinalOutputSync = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  path: string,
+  event: Machine.LifecycleEvent<Events>,
+  outputs?: Readonly<Record<string, unknown>>
+): unknown => {
+  const node = getNode(machine, path)
+  const output = getStateConfigByPath(machine, path)?.output?.({
+    state: getActiveValue(configuration, path),
+    parent: getParentValue(machine, configuration, path),
+    parents: getParentValues(machine, configuration, path),
+    event,
+    outputs
+  } as any)
+  return decodeOutputValueSync(machine, node, output)
+}
+
+const completeActiveFinalNodeSync = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  path: string,
+  event: Machine.LifecycleEvent<Events>,
+  outputs: Map<string, unknown>,
+  completions: Array<FinalCompletion>
+): CompletionResult | undefined => {
+  if (!configuration.active.has(path)) return undefined
+  if (outputs.has(path)) return { path, output: outputs.get(path), isNew: false }
+  const node = getNode(machine, path)
+  if (node.type === "compound") {
+    const child = getActiveChildPath(machine, configuration, path)
+    if (child === undefined || !isDirectFinalPath(machine, child)) return undefined
+    const childCompletion = completeActiveFinalNodeSync(machine, configuration, child, event, outputs, completions)
+    if (childCompletion === undefined) return undefined
+    const completion = setCompletedOutput(outputs, path, childCompletion.output)
+    if (completion.isNew) completions.push(completion)
+    return completion
+  }
+  if (node.type === "parallel") {
+    const regionOutputs: Record<string, unknown> = {}
+    let completed = true
+    for (const child of node.children) {
+      const childCompletion = completeActiveFinalNodeSync(machine, configuration, child, event, outputs, completions)
+      if (childCompletion === undefined) completed = false
+      else regionOutputs[getNode(machine, child).key] = childCompletion.output
+    }
+    if (!completed) return undefined
+    const completion = setCompletedOutput(
+      outputs,
+      path,
+      resolveFinalOutputSync(machine, configuration, path, event, regionOutputs)
+    )
+    if (completion.isNew) completions.push(completion)
+    return completion
+  }
+  if (!isDirectFinalPath(machine, path)) return undefined
+  const completion = setCompletedOutput(outputs, path, resolveFinalOutputSync(machine, configuration, path, event))
+  if (completion.isNew) completions.push(completion)
+  return completion
+}
+
+export const completeConfigurationSync = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  event: Machine.LifecycleEvent<Events>
+): {
+  readonly configuration: ActiveConfiguration
+  readonly completions: ReadonlyArray<FinalCompletion>
+} => {
+  const outputs = new Map(configuration.outputs)
+  const completions: Array<FinalCompletion> = []
+  const completed: ActiveConfiguration = {
+    active: configuration.active,
+    values: configuration.values,
+    outputs,
+    history: configuration.history
+  }
+  for (
+    const path of Array.from(completed.active).sort((left, right) => {
+      const depth = pathDepth(machine, right) - pathDepth(machine, left)
+      return depth === 0 ? compareDocumentOrder(machine, left, right) : depth
+    })
+  ) {
+    completeActiveFinalNodeSync(machine, completed, path, event, outputs, completions)
+  }
+  return { configuration: completed, completions }
+}
 
 const EncodedSnapshotSchema = Schema.Struct({
   _tag: Schema.Literal("MachineSnapshot"),

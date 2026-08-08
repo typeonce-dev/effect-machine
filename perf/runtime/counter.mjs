@@ -11,6 +11,9 @@ const effectPackagePath = implementationRequire.resolve("effect/package.json")
 const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"))
 const effect = await import(pathToFileURL(resolve(dirname(effectPackagePath), effectPackage.exports["."])).href)
 const { Machine } = await import(pathToFileURL(join(implementationRoot, "dist/index.js")).href)
+const machineRuntime = await import(
+  pathToFileURL(join(implementationRoot, "dist/internal/machineRuntime.js")).href
+)
 const { Effect, Fiber, Option, Schema, Stream } = effect
 
 const CounterState = Schema.TaggedUnion({
@@ -207,6 +210,59 @@ export const startChildCounters = (count) =>
 
 export const stopChildCounters = stopCounters
 
+const rawProcessLogic = {
+  initial: () => Effect.succeed(0),
+  run: () => Effect.never
+}
+
+const startRawProcesses = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () => machineRuntime.startProcess(rawProcessLogic),
+      { concurrency: 1 }
+    )
+  )
+
+const startIndependentCounterPairs = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () => Effect.all([Machine.start(counterMachine), Machine.start(counterMachine)], { concurrency: 1 }),
+      { concurrency: 1 }
+    )
+  )
+
+const stopIndependentCounterPairs = (pairs) => stopCounters(pairs.flat())
+
+const startObservedChildCounters = (count) =>
+  Effect.runPromise(
+    Effect.forEach(
+      Array.from({ length: count }),
+      () =>
+        Effect.gen(function*() {
+          const parent = yield* Machine.start(counterParentMachine)
+          yield* waitForCounterChild(parent)
+          const observer = yield* parent.childChanges(CounterChild).pipe(
+            Stream.runDrain,
+            Effect.forkDetach
+          )
+          yield* Effect.yieldNow
+          return { parent, observer }
+        }),
+      { concurrency: 1 }
+    )
+  )
+
+const stopObservedChildCounters = (units) =>
+  Effect.runPromise(
+    Effect.forEach(
+      units,
+      ({ parent, observer }) => parent.stop.pipe(Effect.ensuring(Fiber.interrupt(observer))),
+      { concurrency: "unbounded", discard: true }
+    )
+  )
+
 export const effectMachineAdapter = {
   implementation: "effect-machine",
   label: "Effect Machine",
@@ -245,5 +301,32 @@ export const effectMachineAdapter = {
   stopChildCounter,
   stopChildCounters,
   stopObservedCounter,
-  stopCounters
+  stopCounters,
+  memoryProfiles: {
+    idle: {
+      label: "Idle machine",
+      start: startCounters,
+      stop: stopCounters
+    },
+    "raw-process": {
+      label: "Raw managed process",
+      start: startRawProcesses,
+      stop: stopCounters
+    },
+    "two-independent": {
+      label: "Two independent idle machines",
+      start: startIndependentCounterPairs,
+      stop: stopIndependentCounterPairs
+    },
+    "parent-with-child": {
+      label: "Idle parent with one child",
+      start: startChildCounters,
+      stop: stopChildCounters
+    },
+    "observed-parent-with-child": {
+      label: "Parent with observed child registry",
+      start: startObservedChildCounters,
+      stop: stopObservedChildCounters
+    }
+  }
 }

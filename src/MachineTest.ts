@@ -323,9 +323,7 @@ export interface Microstep<
       StateNodePath<M>
     >
   >
-  readonly actions: ReadonlyArray<
-    Effect.Effect<void, Machine.ActionError<Requirements>, Machine.ActionServices<Requirements>>
-  >
+  readonly commands: ReadonlyArray<Machine.Command>
   readonly raisedEvents: ReadonlyArray<Machine.Machine.Event<M>>
   readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
   readonly exitPaths: ReadonlyArray<string>
@@ -344,13 +342,7 @@ export type InitialPlan<M extends AnyMachine> =
     readonly startingState: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly initialEntryPaths: ReadonlyArray<StatePath<M>>
     readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-    readonly actions: ReadonlyArray<
-      Effect.Effect<
-        void,
-        Machine.ActionError<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>,
-        Machine.ActionServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
-      >
-    >
+    readonly commands: ReadonlyArray<Machine.Command>
     readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
     readonly microsteps: ReadonlyArray<
       Microstep<M, Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
@@ -367,13 +359,7 @@ export type InitialPlan<M extends AnyMachine> =
 export type EventPlan<M extends AnyMachine> =
   & {
     readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-    readonly actions: ReadonlyArray<
-      Effect.Effect<
-        void,
-        Machine.ActionError<Machine.Machine.Services<M>>,
-        Machine.ActionServices<Machine.Machine.Services<M>>
-      >
-    >
+    readonly commands: ReadonlyArray<Machine.Command>
     readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
     readonly microsteps: ReadonlyArray<Microstep<M>>
   }
@@ -2571,7 +2557,7 @@ const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Micros
     }))
     return `  microstep ${index}: event=${formatValue(microstep.event)} changed=${String(microstep.changed)} ` +
       `transitions=${formatValue(transitions)} exit=${formatConfiguration(microstep.exitPaths)} ` +
-      `entry=${formatConfiguration(microstep.entryPaths)} actions=${microstep.actions.length} ` +
+      `entry=${formatConfiguration(microstep.entryPaths)} commands=${microstep.commands.length} ` +
       `raised=${formatValue(microstep.raisedEvents)} emitted=${formatValue(microstep.emittedEvents)} ` +
       `next=${formatValue(microstep.next)}`
   })
@@ -2583,7 +2569,7 @@ const formatInitial = <M extends AnyMachine>(initial: InitialTrace<M>): Array<st
   } ` +
   `configuration=${formatConfiguration(initial.configuration)} state=${formatValue(initial.plan.state)} ` +
   `done=${String(initial.plan.done)} output=${formatValue(initial.plan.output)} ` +
-  `actions=${initial.plan.actions.length} emitted=${formatValue(initial.plan.emittedEvents)}`,
+  `commands=${initial.plan.commands.length} emitted=${formatValue(initial.plan.emittedEvents)}`,
   ...formatMicrosteps(initial.plan.microsteps)
 ]
 
@@ -2591,7 +2577,7 @@ const formatStep = <M extends AnyMachine>(step: TraceStep<M>): Array<string> => 
   `step ${step.index}: event=${formatValue(step.event)} before=${formatConfiguration(step.beforeConfiguration)} ` +
   `after=${formatConfiguration(step.afterConfiguration)} state=${formatValue(step.after)} ` +
   `done=${String(step.plan.done)} output=${formatValue(step.plan.output)} ` +
-  `actions=${step.plan.actions.length} emitted=${formatValue(step.plan.emittedEvents)}`,
+  `commands=${step.plan.commands.length} emitted=${formatValue(step.plan.emittedEvents)}`,
   ...formatMicrosteps(step.plan.microsteps)
 ]
 

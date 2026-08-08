@@ -256,12 +256,20 @@ const formatDifference = (before, after) => {
     : `${sign}${decimal.format(percentage)}%`
 }
 
-const implementations = [...new Map(
+const benchmarkImplementations = [...new Map(
   pullRequest.benchmarks.map((benchmark) => [benchmark.implementation, {
     id: benchmark.implementation,
     label: benchmark.implementationLabel,
     version: benchmark.implementationVersion
   }])
+).values()]
+const memoryImplementations = pullRequest.memory.map((measurement) => ({
+  id: measurement.implementation,
+  label: measurement.implementationLabel,
+  version: measurement.implementationVersion
+}))
+const reportedImplementations = [...new Map(
+  [...benchmarkImplementations, ...memoryImplementations].map((implementation) => [implementation.id, implementation])
 ).values()]
 const scenarios = [...new Map(
   pullRequest.benchmarks.map((benchmark) => [benchmark.id, {
@@ -278,13 +286,13 @@ const lines = [
   "",
   "### Pull request baseline",
   "",
-  `| Scenario | ${implementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
-  `| --- | ${implementations.map(() => "---:").join(" | ")} |`
+  `| Scenario | ${benchmarkImplementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
+  `| --- | ${benchmarkImplementations.map(() => "---:").join(" | ")} |`
 ]
 
 for (const scenario of scenarios) {
   lines.push(
-    `| ${escapeCell(scenario.label)} | ${implementations.map((implementation) => {
+    `| ${escapeCell(scenario.label)} | ${benchmarkImplementations.map((implementation) => {
       const benchmark = pullRequest.benchmarks.find((candidate) =>
         candidate.implementation === implementation.id && candidate.id === scenario.id
       )
@@ -293,15 +301,19 @@ for (const scenario of scenarios) {
   )
 }
 
-const memoryProfiles = pullRequest.memory[0]?.profiles ?? []
+const memoryProfiles = [...new Map(
+  pullRequest.memory.flatMap((measurement) =>
+    (measurement.profiles ?? []).map((profile) => [profile.id, { id: profile.id, label: profile.label }])
+  )
+).values()]
 lines.push(
   "",
-  `| Memory profile | ${implementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
-  `| --- | ${implementations.map(() => "---:").join(" | ")} |`
+  `| Memory profile | ${memoryImplementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
+  `| --- | ${memoryImplementations.map(() => "---:").join(" | ")} |`
 )
 for (const profile of memoryProfiles) {
   lines.push(
-    `| ${escapeCell(profile.label)} | ${implementations.map((implementation) => {
+    `| ${escapeCell(profile.label)} | ${memoryImplementations.map((implementation) => {
       const measurement = pullRequest.memory.find((candidate) => candidate.implementation === implementation.id)
       const implementationProfile = measurement?.profiles?.find((candidate) => candidate.id === profile.id)
       return implementationProfile === undefined ? "—" : formatHeap(implementationProfile.heapBytesPerIdleMachine)
@@ -365,7 +377,7 @@ lines.push(
   "<details>",
   "<summary>Versions and interpretation</summary>",
   "",
-  ...implementations.map((implementation) =>
+  ...reportedImplementations.map((implementation) =>
     `- ${escapeCell(implementation.label)}: ${code(implementation.version)}`
   ),
   "",

@@ -361,16 +361,6 @@ describe("Machine", () => {
     })
   })
 
-  it("make accepts effectful initial snapshots", () => {
-    const machine = Machine.make({
-      states: UpStates.states,
-      events: [SignIn],
-      initial: () => Effect.succeed(UpStates.initial.down(new Down({})))
-    })
-
-    expect(machine.states).type.toBe<typeof UpStates.states>()
-  })
-
   it("encodes and decodes snapshots with typed effects", () => {
     const machine = Machine.make({
       states: UpStates.states,
@@ -392,82 +382,59 @@ describe("Machine", () => {
     expect<Effect.Services<typeof decoded>>().type.toBe<never>()
   })
 
-  it("planInitial carries external initial and lifecycle requirements", () => {
+  it("planInitial is synchronous at the transition boundary", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: [SignIn],
-      initial: () => Effect.as(InitialRequirement, UpStates.initial.down(new Down({})))
+      initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
-        entry: () => Effect.as(EntryRequirement, undefined)
+        entry: () => {}
       }
-    })
-
-    const planned = Machine.planInitial(machine)
-
-    expect<Effect.Services<typeof planned>>().type.toBe<InitialRequirement | EntryRequirement>()
-    expect<Effect.Services<Effect.Success<typeof planned>["actions"][number]>>().type.toBe<never>()
-  })
-
-  it("planInitial provides compatible machine runtime requirements", () => {
-    const machine = Machine.make({
-      states: UpStates.states,
-      events: [SignIn],
-      initial: () =>
-        Effect.gen(function*() {
-          const runtime = yield* Machine.runtime<{ readonly events: SignIn }>()
-          yield* runtime.raise(new SignIn({ userId: "user-1" }))
-          return UpStates.initial.down(new Down({}))
-        })
     })
 
     const planned = Machine.planInitial(machine)
 
     expect<Effect.Services<typeof planned>>().type.toBe<never>()
-  })
+    expect<Effect.Success<typeof planned>["commands"]>().type.toBe<ReadonlyArray<Machine.Command>>()
 
-  it("handle rejects incompatible machine runtime requirements", () => {
-    const machine = Machine.make({
+    expect(Machine.make).type.not.toBeCallableWith({
       states: UpStates.states,
       events: [SignIn],
-      initial: () => UpStates.initial.down(new Down({}))
-    })
-
-    expect(machine.handle).type.toBeCallableWith({
-      down: {
-        entry: () => Machine.runtime<{ readonly events: SignIn }>()
-      }
+      initial: () => Effect.succeed(UpStates.initial.down(new Down({})))
     })
     expect(machine.handle).type.not.toBeCallableWith({
-      down: {
-        entry: () => Machine.runtime<{ readonly events: Down }>()
-      }
+      down: { entry: () => Effect.void }
     })
   })
 
-  it("keeps staged action errors and services out of planning", () => {
+  it("types the closed enqueue protocol without exposing Effects", () => {
+    const worker = Machine.childAddress<SignIn>("worker")
     const machine = Machine.make({
       states: UpStates.states,
       events: [SignIn],
+      emits: [SignInCompleted],
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
-        entry: () =>
-          Machine.action(
-            DeferredRequirement.pipe(
-              Effect.andThen(Effect.fail("action-failed" as const))
-            )
-          )
+        on: {
+          SignIn: ({ event, target }, enqueue) => {
+            expect(enqueue.raise).type.toBeCallableWith(event)
+            expect(enqueue.raise).type.not.toBeCallableWith(new Down({}))
+            expect(enqueue.emit).type.toBeCallableWith(new SignInCompleted({ userId: event.userId }))
+            expect(enqueue.emit).type.not.toBeCallableWith(event)
+            expect(enqueue.sendTo).type.toBeCallableWith(worker, event)
+            expect(enqueue.sendTo).type.not.toBeCallableWith(worker, new Down({}))
+            expect(enqueue.stop).type.toBeCallableWith(worker)
+            expect(enqueue.stop).type.not.toBeCallableWith("worker")
+            return target.full.down(new Down({}))
+          }
+        }
       }
     })
 
-    const planned = Machine.planInitial(machine)
-    const started = Machine.start(machine)
-
-    expect<Effect.Services<typeof planned>>().type.toBe<never>()
-    expect<Effect.Error<Effect.Success<typeof planned>["actions"][number]>>().type.toBe<"action-failed">()
-    expect<Effect.Services<Effect.Success<typeof planned>["actions"][number]>>().type.toBe<DeferredRequirement>()
-    expect<"action-failed">().type.toBeAssignableTo<Effect.Error<typeof started>>()
+    expect<Machine.Machine.Error<typeof machine>>().type.toBe<never>()
+    expect<Machine.Machine.Services<typeof machine>>().type.toBe<never>()
   })
 
   it("effect infers output, errors, and requirements without an event protocol", () => {
@@ -506,36 +473,6 @@ describe("Machine", () => {
         return Effect.void
       }
     })
-  })
-
-  it("start discharges machine-scoped child runtime requirements", () => {
-    const child = Machine.transition(0, (_state: number, _event: SignIn) => Effect.succeed(1))
-    const machine = Machine.make({
-      states: UpStates.states,
-      events: [SignIn],
-      initial: () => UpStates.initial.down(new Down({}))
-    }).handle({
-      down: {
-        entry: () => Machine.action(Machine.spawn(child).pipe(Effect.asVoid))
-      }
-    })
-    const started = Machine.start(machine)
-
-    expect<Effect.Services<typeof started>>().type.toBe<never>()
-  })
-
-  it("runActions owns process-local runtime requirements", () => {
-    const child = Machine.transition(0, (_state: number, _event: SignIn) => Effect.succeed(1))
-    const run = Machine.runActions(
-      [Machine.spawn(child).pipe(Effect.asVoid)],
-      {
-        raise: () => Effect.void,
-        sendParent: () => Effect.void
-      }
-    )
-
-    expect<Effect.Services<typeof run>>().type.toBe<never>()
-    expect<Effect.Error<typeof run>>().type.toBe<Machine.ProcessLocalError>()
   })
 
   it("invoke requires one-shot outputs to be parent machine events or void", () => {
@@ -665,14 +602,6 @@ describe("Machine", () => {
         }
       }
     })
-  })
-
-  it("action can stage an Effect and return one transition target", () => {
-    const target = UpStates.initial.down(new Down({}))
-    const staged = Machine.action(Effect.void, target)
-
-    expect<Effect.Success<typeof staged>>().type.toBe<typeof target>()
-    expect<Effect.Error<typeof staged>>().type.toBe<never>()
   })
 
   it("retag reuses compatible fields and requires missing target fields", () => {
@@ -900,37 +829,27 @@ describe("Machine", () => {
     >()
   })
 
-  it("start exposes startup and runtime failure channels", () => {
+  it("start exposes machine infrastructure failure channels", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: [SignIn],
-      initial: () => Effect.fail("initial-failed" as const)
+      initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
         on: {
-          SignIn: () => Effect.fail("transition-failed" as const)
+          SignIn: ({ target }) => target.full.down(new Down({}))
         }
       }
     })
     const started = Machine.start(machine)
 
-    expect<"initial-failed">().type.toBeAssignableTo<Effect.Error<typeof started>>()
-    expect<"transition-failed">().type.toBeAssignableTo<Effect.Error<typeof started>>()
-    expect<Machine.MachineSchemaDecodeError>().type.toBeAssignableTo<Effect.Error<typeof started>>()
-    expect<Machine.StartupError>().type.toBeAssignableTo<Effect.Error<typeof started>>()
-    expect<Machine.InfiniteTransitionError>().type.toBeAssignableTo<Effect.Error<typeof started>>()
-    expect<"transition-failed">().type.toBeAssignableTo<Effect.Error<Effect.Success<typeof started>["join"]>>()
-    expect<Machine.InfiniteTransitionError>().type.toBeAssignableTo<
-      Effect.Error<Effect.Success<typeof started>["join"]>
-    >()
-    expect<"initial-failed">().type.not.toBeAssignableTo<
-      Effect.Error<Effect.Success<typeof started>["join"]>
-    >()
-    expect<Machine.StartupError>().type.not.toBeAssignableTo<
-      Effect.Error<Effect.Success<typeof started>["join"]>
+    expect<Effect.Error<typeof started>>().type.toBe<
+      | Machine.MachineSchemaDecodeError
+      | Machine.StartupError
+      | Machine.InfiniteTransitionError
+      | Machine.StoppedError
     >()
     expect<Effect.Error<Effect.Success<typeof started>["join"]>>().type.toBe<
-      | "transition-failed"
       | Machine.InfiniteTransitionError
       | Machine.MachineSchemaDecodeError
       | Machine.StoppedError
@@ -940,7 +859,6 @@ describe("Machine", () => {
     type ChildError = Effect.Error<Machine.ChildMachine.Ref<typeof Child>["join"]>
 
     expect<ChildError>().type.toBe<
-      | "transition-failed"
       | Machine.InfiniteTransitionError
       | Machine.MachineSchemaDecodeError
       | Machine.StoppedError
@@ -950,7 +868,6 @@ describe("Machine", () => {
       snapshot: () => undefined
     })
     expect<Machine.Machine.InvokeRuntimeError<typeof invocation>>().type.toBe<
-      | "transition-failed"
       | Machine.InfiniteTransitionError
       | Machine.MachineSchemaDecodeError
       | Machine.StoppedError
@@ -1086,7 +1003,7 @@ describe("Machine", () => {
     })
   })
 
-  it("onDone handlers receive typed state context and contribute effect requirements", () => {
+  it("onDone handlers receive typed state context without Effect requirements", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: [SignIn],
@@ -1112,7 +1029,7 @@ describe("Machine", () => {
               expect(event).type.toBe<SignIn | Machine.InitialEvent>()
               expect(output).type.toBe<undefined>()
               expect(state).type.toBe<Auth>()
-              return Effect.as(DoneRequirement, target.full.down(new Down({})))
+              return target.full.down(new Down({}))
             },
             states: {
               signedIn: {}
@@ -1140,7 +1057,7 @@ describe("Machine", () => {
       new SignIn({ userId: "user-1" })
     )
 
-    expect<Effect.Services<typeof planned>>().type.toBe<DoneRequirement>()
+    expect<Effect.Services<typeof planned>>().type.toBe<never>()
   })
 
   it("handle rejects old property and callback APIs", () => {

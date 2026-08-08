@@ -423,8 +423,8 @@ BufferReady: ;
 ```
 
 All non-conflicting handlers selected together observe the same captured
-snapshot. An Effectful handler keeps that value; it does not read mutable live
-runtime state later. `snapshot` is intentionally absent from entry, exit,
+snapshot. Handlers are synchronous and cannot read mutable live runtime state
+later. `snapshot` is intentionally absent from entry, exit,
 invoke, and choice contexts. In particular, startup and chained choices may run
 before a complete stable snapshot containing their pseudo-source exists.
 
@@ -442,25 +442,25 @@ Schema-less choice and history nodes accept only descriptive `title`,
 `description`, and `documentation` annotations. Titles may be used as display
 labels, but structural paths remain the only identity and targeting mechanism.
 
-## Planning Effects and staged actions
+## Synchronous transitions and actor commands
 
-An Effect returned by a transition handler is part of planning. Use it to read
-services, choose a target, raise an event, or emit an event. Wrap external side
-effects in `Machine.action`; actions are staged during planning and run by the
-managed runtime before it publishes the next state.
+Transition, entry, exit, choice, initial, and history callbacks are synchronous.
+They select state and may enqueue only explicit statechart or actor operations:
+raise an internal event, emit to the parent, send to an invoked child, or stop a
+child. Arbitrary Effects are not accepted at this boundary.
 
 ```ts
 const handlers = {
-  Save: ({ target }) => Machine.action(writeAuditLog, target.local.Saving.from())
+  Save: ({ target }, enqueue) => {
+    enqueue.emit(new SaveRequested({}))
+    return target.local.Saving.from()
+  }
 }
 ```
 
-The one-argument form returns `void` after staging. The two-argument form
-returns its second argument, which avoids a generator when an action and the
-next target are the whole transition.
-
-If an action fails, the runtime keeps the previously published state and
-suppresses emissions from that plan.
+Use `Machine.invokeEffect`, `Machine.invoke`, or an invoked child machine for
+asynchronous work. Their results return to the parent as typed events, keeping
+the transition core deterministic and synchronous.
 
 `Machine.plan` and `Machine.planInitial` return a `done` discriminator. When
 `done` is `true`, `output` is the schema-derived structural terminal union;

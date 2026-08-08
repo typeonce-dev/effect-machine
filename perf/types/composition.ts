@@ -42,11 +42,7 @@ const handled = machine.handle({
           Editor: {
             states: {
               Editing: {
-                entry: () =>
-                  Effect.flatMap(
-                    CompositionService,
-                    () => Math.random() > 2 ? Effect.fail(new CompositionFailure()) : Effect.void
-                  )
+                entry: () => {}
               },
               Done: {
                 output: ({ state }) => state.value
@@ -81,8 +77,8 @@ const handled = machine.handle({
   }
 })
 
-type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof handled>, CompositionFailure>>
-type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof handled>, CompositionService>>
+type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof handled>, never>>
+type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof handled>, never>>
 type OutputIsExact = Expect<
   Equal<
     Machine.Machine.OutputByIdentifier<typeof States.states, "App.Workspace">,

@@ -10,20 +10,44 @@ class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTea
   team: Schema.Array(Pokemon)
 }) {}
 
-export const States = Machine.defineStates({ ActiveTeam })
+class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
+
+class TeamLoaded extends Schema.TaggedClass<TeamLoaded>("TeamLoaded")("TeamLoaded", {
+  team: Schema.Array(Pokemon)
+}) {}
+
+class TeamLoadFailed extends Schema.TaggedClass<TeamLoadFailed>("TeamLoadFailed")("TeamLoadFailed", {}) {}
+
+class Failed extends Schema.TaggedClass<Failed>("Failed")("Failed", {}) {}
+
+export const States = Machine.defineStates({ Loading, ActiveTeam, Failed })
 
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
+const LoadTeam = Machine.invokeEffect({
+  id: "load-team",
+  effect: Effect.gen(function*() {
+    const service = yield* PokemonService
+    return yield* service.getRandomTeam()
+  }),
+  onSuccess: (team) => new TeamLoaded({ team }),
+  onFailure: () => new TeamLoadFailed({})
+})
+
 const machine = Machine.make({
   states: States.states,
   events: [ReplaceInTeam],
-  initial: Effect.fn(function*() {
-    const pk = yield* PokemonService
-    const team = yield* pk.getRandomTeam()
-    return States.initial.ActiveTeam(new ActiveTeam({ team }))
-  })
+  internalEvents: [TeamLoaded, TeamLoadFailed],
+  initial: () => States.initial.Loading(new Loading({}))
 }).handle({
+  Loading: {
+    invoke: LoadTeam,
+    on: {
+      TeamLoaded: ({ event, target }) => target.full.ActiveTeam(new ActiveTeam({ team: event.team })),
+      TeamLoadFailed: ({ target }) => target.full.Failed(new Failed({}))
+    }
+  },
   ActiveTeam: {
     invoke: [Machine.invokeMachine({ child: SelectionChild }), Machine.invokeMachine({ child: ReplaceChild })],
     on: {
@@ -32,7 +56,8 @@ const machine = Machine.make({
           new ActiveTeam({ team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon)) })
         )
     }
-  }
+  },
+  Failed: {}
 })
 
 const atomRuntime = Atom.runtime(PokemonService.layer)

@@ -36,18 +36,6 @@ class Online extends Schema.TaggedClass<Online>("Online")("Online", {}) {}
 
 class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 
-class StartError extends Data.TaggedError("StartError")<{
-  readonly reason: string
-}> {}
-
-class RuntimeError extends Data.TaggedError("RuntimeError")<{
-  readonly reason: string
-}> {}
-
-class Multiplier extends Context.Service<Multiplier, {
-  readonly multiply: (value: number) => number
-}>()("test/AtomMachine/Multiplier") {}
-
 const MachineInitial = Machine.defineStates({
   Count,
   Done: { schema: Done, type: "final" },
@@ -95,50 +83,19 @@ const makeCounterMachine = () =>
     Done: {}
   })
 
-const makeFailingCounterMachine = () =>
-  Machine.make({
-    states: CounterStates.states,
-    events: [Finish],
-    initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
-  }).handle({
-    Count: {
-      on: {
-        Finish: () => Effect.fail(new RuntimeError({ reason: "transition" }))
-      }
-    },
-    Done: {}
-  })
-
-const makeDelayedCounterMachine = (release: Deferred.Deferred<void>) =>
-  Machine.make({
-    states: CounterStates.states,
-    events: [Finish],
-    initial: () =>
-      Deferred.await(release).pipe(
-        Effect.as(MachineInitial.Count(new Count({ value: 0 })))
-      )
-  }).handle({
-    Count: {
-      on: {
-        Finish: ({ state, event }) => MachineInitial.Count(new Count({ value: state.value + event.by }))
-      }
-    },
-    Done: {}
-  })
-
 describe("AtomMachine", () => {
   it.effect("resumes lazily once per registry and disposes the resumed runtime", () =>
     Effect.gen(function*() {
-      const initialCalls = yield* Ref.make(0)
+      let initialCalls = 0
       const invokeStarts = yield* Ref.make(0)
       const invokeStopped = yield* Deferred.make<void>()
       const machine = Machine.make({
         states: CounterStates.states,
         events: [Finish],
-        initial: () =>
-          Ref.update(initialCalls, (n) => n + 1).pipe(
-            Effect.as(CounterStates.initial.Count(new Count({ value: 0 })))
-          )
+        initial: () => {
+          initialCalls += 1
+          return CounterStates.initial.Count(new Count({ value: 0 }))
+        }
       }).handle({
         Count: {
           invoke: Machine.invoke({
@@ -169,7 +126,7 @@ describe("AtomMachine", () => {
         path: "Count",
         value: new Count({ value: 5 })
       })
-      assert.strictEqual(yield* Ref.get(initialCalls), 0)
+      assert.strictEqual(initialCalls, 0)
       assert.strictEqual(yield* Ref.get(invokeStarts), 2)
 
       const stopped = yield* first.changes.pipe(
@@ -271,52 +228,6 @@ describe("AtomMachine", () => {
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), false)
     })))
 
-  it.effect("exposes invoked child runtime failures through result", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const Child = Machine.child("failing-counter", makeFailingCounterMachine())
-      const parent = Machine.make({
-        states: { Count, ValueRead },
-        events: [Finish],
-        initial: () => MachineInitial.Count(new Count({ value: 0 }))
-      }).handle({
-        Count: {
-          on: {
-            Finish: () => MachineInitial.ValueRead(new ValueRead({ value: "active" }))
-          }
-        },
-        ValueRead: {
-          invoke: Machine.invokeMachine({ child: Child })
-        }
-      })
-      const parentAtoms = AtomMachine.make(parent)
-      const childAtoms = parentAtoms.child(Child)
-      yield* mount(registry, childAtoms.result)
-      yield* AtomRegistry.getResult(registry, parentAtoms.ref)
-
-      yield* Effect.sync(() => registry.set(parentAtoms.send, new Finish({ by: 0 })))
-      const initial = yield* waitForResult(registry, childAtoms.result, Option.isSome)
-      assert(Option.isSome(initial))
-      assert.strictEqual(initial.value.value.value, 0)
-
-      const failureFiber = yield* AtomRegistry.toStream(registry, childAtoms.result).pipe(
-        Stream.filter(AsyncResult.isFailure),
-        Stream.take(1),
-        Stream.runCollect,
-        Effect.forkChild({ startImmediately: true })
-      )
-      yield* Effect.sync(() => registry.set(childAtoms.send, new Finish({ by: 1 })))
-
-      const failed = Array.from(yield* Fiber.join(failureFiber))[0]!
-      assert(AsyncResult.isFailure(failed))
-      const error = Cause.findErrorOption(failed.cause)
-      assert(Option.isSome(error))
-      assert.instanceOf(error.value, RuntimeError)
-      const previous = AsyncResult.value(failed)
-      assert(Option.isSome(previous))
-      assert.deepStrictEqual(previous.value, Option.some(initial.value))
-    })))
-
   it.effect("exposes snapshots and sends events", () =>
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry
@@ -339,41 +250,6 @@ describe("AtomMachine", () => {
         path: "Count",
         value: new Count({ value: 2 })
       })
-    })))
-
-  it.effect("exposes runtime failures without changing the legacy state atom", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const bridge = AtomMachine.make(makeFailingCounterMachine())
-      yield* mount(registry, bridge.result)
-      yield* mount(registry, bridge.state)
-
-      const initial = yield* AtomRegistry.getResult(registry, bridge.result)
-      assert.deepStrictEqual(initial, {
-        path: "Count",
-        value: new Count({ value: 0 })
-      })
-
-      const failureFiber = yield* AtomRegistry.toStream(registry, bridge.result).pipe(
-        Stream.filter(AsyncResult.isFailure),
-        Stream.take(1),
-        Stream.runCollect,
-        Effect.forkChild({ startImmediately: true })
-      )
-      yield* Effect.sync(() => registry.set(bridge.send, new Finish({ by: 1 })))
-
-      const failed = Array.from(yield* Fiber.join(failureFiber))[0]!
-      assert(AsyncResult.isFailure(failed))
-      const error = Cause.findErrorOption(failed.cause)
-      assert(Option.isSome(error))
-      assert.instanceOf(error.value, RuntimeError)
-      const previous = AsyncResult.value(failed)
-      assert(Option.isSome(previous))
-      assert.deepStrictEqual(previous.value, initial)
-
-      const state = yield* Effect.sync(() => registry.get(bridge.state))
-      assert(AsyncResult.isSuccess(state))
-      assert.deepStrictEqual(state.value, initial)
     })))
 
   it.effect("provides equality-aware typed state selectors", () =>
@@ -480,58 +356,6 @@ describe("AtomMachine", () => {
       assert.strictEqual(yield* AtomRegistry.getResult(registry, offline), false)
     })))
 
-  it.effect("rejects sends while the machine is starting", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const release = yield* Deferred.make<void>()
-      const bridge = AtomMachine.make(makeDelayedCounterMachine(release))
-      yield* mount(registry, bridge.send)
-
-      yield* Effect.sync(() => registry.set(bridge.send, new Finish({ by: 2 })))
-
-      const result = yield* Effect.sync(() => registry.get(bridge.send))
-      assert(AsyncResult.isFailure(result))
-      const error = Cause.findErrorOption(result.cause)
-      assert(Option.isSome(error))
-      assert.instanceOf(error.value, AtomMachine.NotReadyError)
-
-      yield* Deferred.succeed(release, void 0)
-      const snapshot = yield* AtomRegistry.getResult(registry, bridge.snapshot)
-      assert.deepStrictEqual(snapshot, {
-        status: "active",
-        state: {
-          path: "Count",
-          value: new Count({ value: 0 })
-        }
-      })
-    })))
-
-  it.effect("rejects stops while the machine is starting", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const release = yield* Deferred.make<void>()
-      const bridge = AtomMachine.make(makeDelayedCounterMachine(release))
-      yield* mount(registry, bridge.stop)
-
-      yield* Effect.sync(() => registry.set(bridge.stop, undefined))
-
-      const result = yield* Effect.sync(() => registry.get(bridge.stop))
-      assert(AsyncResult.isFailure(result))
-      const error = Cause.findErrorOption(result.cause)
-      assert(Option.isSome(error))
-      assert.instanceOf(error.value, AtomMachine.NotReadyError)
-
-      yield* Deferred.succeed(release, void 0)
-      const snapshot = yield* AtomRegistry.getResult(registry, bridge.snapshot)
-      assert.deepStrictEqual(snapshot, {
-        status: "active",
-        state: {
-          path: "Count",
-          value: new Count({ value: 0 })
-        }
-      })
-    })))
-
   it.effect("stops the machine when the registry is disposed", () =>
     Effect.gen(function*() {
       const registry = AtomRegistry.make()
@@ -561,53 +385,6 @@ describe("AtomMachine", () => {
 
       const snapshot = yield* waitForResult(registry, bridge.snapshot, (snapshot) => snapshot.status === "stopped")
       assert.deepStrictEqual(snapshot, {
-        status: "stopped",
-        state: {
-          path: "Count",
-          value: new Count({ value: 0 })
-        }
-      })
-    })))
-
-  it.effect("keeps snapshot previous success when refresh startup fails", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const failOnStart = Atom.make(false)
-      const machine = Machine.make({
-        states: { Count },
-        events: [Finish],
-        initial: Effect.fn(function*() {
-          const fail = yield* Atom.get(failOnStart)
-          if (fail) {
-            return yield* Effect.fail(new StartError({ reason: "refresh" }))
-          }
-          return MachineInitial.Count(new Count({ value: 0 }))
-        })
-      }).handle({
-        Count: {}
-      })
-      const bridge = AtomMachine.make(machine)
-      yield* mount(registry, bridge.snapshot)
-
-      const initial = yield* AtomRegistry.getResult(registry, bridge.snapshot)
-      assert.deepStrictEqual(initial, {
-        status: "active",
-        state: {
-          path: "Count",
-          value: new Count({ value: 0 })
-        }
-      })
-
-      yield* Effect.sync(() => {
-        registry.set(failOnStart, true)
-        registry.refresh(bridge.ref)
-      })
-
-      const failed = yield* Effect.sync(() => registry.get(bridge.snapshot))
-      assert(AsyncResult.isFailure(failed))
-      const previous = AsyncResult.value(failed)
-      assert(Option.isSome(previous))
-      assert.deepStrictEqual(previous.value, {
         status: "stopped",
         state: {
           path: "Count",
@@ -682,76 +459,6 @@ describe("AtomMachine", () => {
           completed: [{ path: "Done", output: 4 }]
         },
         output: 4
-      })
-    })))
-
-  it.effect("provides AtomRegistry to machine effects", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const valueAtom = Atom.make("from-atom")
-      const machine = Machine.make({
-        states: {
-          Count,
-          ValueRead: { schema: ValueRead, type: "final" }
-        },
-        events: [ReadValue],
-        initial: () => MachineInitial.Count(new Count({ value: 0 }))
-      }).handle({
-        Count: {
-          on: {
-            ReadValue: Effect.fn(function*() {
-              const value = yield* Atom.get(valueAtom)
-              return MachineInitial.ValueRead(new ValueRead({ value }))
-            })
-          }
-        },
-        ValueRead: {}
-      })
-      const bridge = AtomMachine.make(machine)
-      yield* mount(registry, bridge.snapshot)
-
-      yield* Effect.sync(() => registry.set(bridge.send, new ReadValue({})))
-
-      const state = yield* waitForResult(registry, bridge.state, (state) => state.value._tag === "ValueRead")
-      assert.deepStrictEqual(state, {
-        path: "ValueRead",
-        value: new ValueRead({ value: "from-atom" }),
-        completed: [{ path: "ValueRead", output: undefined }]
-      })
-    })))
-
-  it.effect("uses AtomRuntime services when starting a machine", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const registry = yield* makeRegistry
-      const runtime = Atom.runtime(Layer.succeed(
-        Multiplier,
-        Multiplier.of({
-          multiply: (value) => value * 2
-        })
-      ))
-      const machine = Machine.make({
-        states: { Count },
-        events: [Finish],
-        initial: () => MachineInitial.Count(new Count({ value: 0 }))
-      }).handle({
-        Count: {
-          on: {
-            Finish: Effect.fn(function*({ event }) {
-              const multiplier = yield* Multiplier
-              return MachineInitial.Count(new Count({ value: multiplier.multiply(event.by) }))
-            })
-          }
-        }
-      })
-      const bridge = AtomMachine.bind(runtime).make(machine)
-      yield* mount(registry, bridge.state)
-
-      yield* Effect.sync(() => registry.set(bridge.send, new Finish({ by: 3 })))
-
-      const state = yield* waitForResult(registry, bridge.state, (state) => state.value.value === 6)
-      assert.deepStrictEqual(state, {
-        path: "Count",
-        value: new Count({ value: 6 })
       })
     })))
 })

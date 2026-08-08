@@ -5,22 +5,26 @@
  */
 
 import * as Cause from "effect/Cause"
-import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
-import type { ActionRequirement, InitialEvent as MachineInitialEvent, Machine, Runtime } from "../Machine.js"
+import type { Command, Enqueue, InitialEvent as MachineInitialEvent, Machine, Runtime } from "../Machine.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./machineErrors.js"
 import {
   type ActiveConfiguration,
   captureHistory,
   compareDocumentOrder,
   completeConfigurationEffect,
+  completeConfigurationSync,
   configurationFromHistoryRecord,
   decodeEmit,
+  decodeEmitSync,
   decodeEvent,
+  decodeEventSync,
   decodeInput,
+  decodeInputSync,
   decodeStateValue,
+  decodeStateValueSync,
   getActiveLeafPathFrom,
   getActiveLeafPaths,
   getActiveValue,
@@ -43,7 +47,9 @@ import {
   makeTarget,
   normalizeConfiguration,
   normalizeConfigurationEffect,
+  normalizeConfigurationSync,
   normalizeTargetConfigurationEffect,
+  normalizeTargetConfigurationSync,
   pathDepth,
   snapshotFromConfiguration,
   snapshotFromConfigurationAtPath,
@@ -52,133 +58,62 @@ import {
 } from "./machineModel.js"
 import type { ProcessScope } from "./machineRuntime.js"
 
-type DeferredAction<E = any, R = any> = Effect.Effect<void, E, R>
+export type RuntimeCommand = Command
 
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
-
-interface DeferredQueue<A> {
-  readonly add: (value: A) => Effect.Effect<void>
-  readonly read: Effect.Effect<ReadonlyArray<A>>
+interface Collected<Event> {
+  readonly enqueue: Enqueue<Event, unknown>
+  readonly commands: Array<RuntimeCommand>
+  readonly raisedEvents: Array<Event>
+  readonly emittedEvents: Array<unknown>
 }
 
-class DeferredActions extends Context.Service<DeferredActions, {
-  readonly add: <E, R>(effect: DeferredAction<E, R>) => Effect.Effect<void>
-  readonly read: Effect.Effect<ReadonlyArray<DeferredAction>>
-}>()("effect/Machine/DeferredActions") {}
-
-class DeferredRaisedEvents extends Context.Service<DeferredRaisedEvents, {
-  readonly add: <Event>(event: Event) => Effect.Effect<void>
-  readonly addEmitted: <Event>(event: Event) => Effect.Effect<void>
-  readonly read: Effect.Effect<ReadonlyArray<any>>
-  readonly readEmitted: Effect.Effect<ReadonlyArray<any>>
-}>()("effect/Machine/DeferredRaisedEvents") {}
-
-class RuntimeContext extends Context.Service<RuntimeContext, Runtime<any, any>>()(
-  "effect/Machine/Runtime"
-) {}
-
-const makeDeferredQueue = <A>(): Effect.Effect<DeferredQueue<A>> =>
-  Effect.sync(() => {
-    const values: Array<A> = []
-    return {
-      read: Effect.sync(() => values),
-      add: (value) =>
-        Effect.sync(() => {
-          values.push(value)
-        })
+const makeCollector = <Event>(machine: Machine.Any): Collected<Event> => {
+  const commands: Array<RuntimeCommand> = []
+  const raisedEvents: Array<Event> = []
+  const emittedEvents: Array<unknown> = []
+  return {
+    commands,
+    raisedEvents,
+    emittedEvents,
+    enqueue: {
+      raise: (event) => {
+        raisedEvents.push(decodeEventSync(machine, event) as Event)
+      },
+      emit: (event) => {
+        emittedEvents.push(decodeEmitSync(machine, event))
+      },
+      sendTo: (child: unknown, event: unknown) => {
+        commands.push({ _tag: "SendTo", child: child as any, event })
+      },
+      stop: (child: unknown) => {
+        commands.push({ _tag: "Stop", child: child as any })
+      }
     }
-  })
-
-const makeDeferredActions = Effect.map(
-  makeDeferredQueue<DeferredAction>(),
-  (queue) =>
-    DeferredActions.of({
-      read: queue.read,
-      add: (effect) => queue.add(effect)
-    })
-)
-
-const makeDeferredRaisedEvents = Effect.gen(function*() {
-  const raised = yield* makeDeferredQueue<any>()
-  const emitted = yield* makeDeferredQueue<any>()
-  return (
-    DeferredRaisedEvents.of({
-      read: raised.read,
-      readEmitted: emitted.read,
-      add: (event) => raised.add(event),
-      addEmitted: (event) => emitted.add(event)
-    })
-  )
-})
-
-const provideDeferredServices = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  machine: Machine.Any,
-  deferredActions: DeferredActions["Service"],
-  deferredRaisedEvents: DeferredRaisedEvents["Service"]
-): Effect.Effect<A, E | MachineSchemaDecodeError, R> =>
-  effect.pipe(
-    Effect.provideService(DeferredActions, deferredActions),
-    Effect.provideService(DeferredRaisedEvents, deferredRaisedEvents),
-    Effect.provideService(RuntimeContext, makePlanningRuntime(machine, deferredRaisedEvents))
-  )
-
-const provideRuntimeContext = <A, E, R, Events, Emits>(
-  effect: Effect.Effect<A, E, R>,
-  runtime: Runtime<Events, Emits>
-): Effect.Effect<A, E, ExcludeCompatibleRuntime<R, Events, Emits>> =>
-  Effect.provideService(
-    effect as Effect.Effect<A, E, R | RuntimeContext>,
-    RuntimeContext,
-    runtime as Runtime<any, any>
-  ) as Effect.Effect<A, E, ExcludeCompatibleRuntime<R, Events, Emits>>
-
-const makePlanningRuntime = <Events, Emits>(
-  machine: Machine.Any,
-  deferredRaisedEvents: DeferredRaisedEvents["Service"]
-): Runtime<Events, Emits> =>
-  RuntimeContext.of({
-    raise: (event) =>
-      decodeEvent(machine, event).pipe(
-        Effect.flatMap((event) => deferredRaisedEvents.add(event))
-      ),
-    sendParent: (event) =>
-      decodeEmit(machine, event).pipe(
-        Effect.flatMap((event) => deferredRaisedEvents.addEmitted(event))
-      )
-  })
+  }
+}
 
 export const makeLiveRuntime = <Events, Emits>(
   machine: Machine.Any,
   scope: ProcessScope<Events>
-): Runtime<Events, Emits> =>
-  RuntimeContext.of({
-    raise: (event) =>
-      decodeEvent(machine, event).pipe(
-        Effect.flatMap((event) => scope.self.send(event as Events))
-      ),
-    sendParent: (event) =>
-      decodeEmit(machine, event).pipe(
-        Effect.flatMap((event) => scope.sendParent(event))
-      )
-  })
+): Runtime<Events, Emits> => ({
+  raise: (event) =>
+    decodeEvent(machine, event).pipe(
+      Effect.flatMap((event) => scope.self.send(event as Events))
+    ),
+  sendParent: (event) =>
+    decodeEmit(machine, event).pipe(
+      Effect.flatMap((event) => scope.sendParent(event))
+    )
+})
 
-export const runActions = <E, R, Events, Emits>(
-  actions: Iterable<Effect.Effect<void, E, R>>,
-  runtime: Runtime<Events, Emits>
-): Effect.Effect<void, E, ExcludeCompatibleRuntime<R, Events, Emits>> =>
-  Effect.all(
-    Array.from(actions, (action) => provideRuntimeContext(action, runtime)),
-    { discard: true }
-  )
+export const runCommands = <Event>(
+  commands: Iterable<RuntimeCommand>,
+  scope: ProcessScope<Event>
+) =>
+  Effect.forEach(commands, (command) =>
+    command._tag === "SendTo"
+      ? scope.sendTo(command.child as never, command.event)
+      : scope.stopChild(command.child as never), { discard: true })
 
 export const runEmittedEvents = <Events, Emits>(
   events: Iterable<Emits>,
@@ -188,12 +123,6 @@ export const runEmittedEvents = <Events, Emits>(
     Array.from(events, (event) => runtime.sendParent(event)),
     { discard: true }
   )
-
-export const runtimeFor = <Events, Emits>(): Effect.Effect<
-  Runtime<Events, Emits>,
-  never,
-  Runtime.Requirement<Events, Emits>
-> => runtime<{ readonly events: Events; readonly emits: Emits }>()
 
 export type MicrostepPlan<State, Event, E, R> = {
   readonly next: State
@@ -205,7 +134,7 @@ export type MicrostepPlan<State, Event, E, R> = {
     readonly target: string | undefined
     readonly resolvedTarget: string | undefined
   }>
-  readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
+  readonly commands: ReadonlyArray<RuntimeCommand>
   readonly raisedEvents: ReadonlyArray<Event>
   readonly emittedEvents: ReadonlyArray<unknown>
   readonly exitPaths: ReadonlyArray<string>
@@ -216,7 +145,7 @@ export type MicrostepPlan<State, Event, E, R> = {
 export type MacrostepPlan<State, Event, E, R, Output> =
   & {
     readonly next: State
-    readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
+    readonly commands: ReadonlyArray<RuntimeCommand>
     readonly microsteps: ReadonlyArray<MicrostepPlan<State, Event, E, R>>
     readonly emittedEvents: ReadonlyArray<unknown>
   }
@@ -232,7 +161,8 @@ export type MacrostepPlan<State, Event, E, R, Output> =
   )
 
 type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = (
-  context: Context
+  context: Context,
+  enqueue: Enqueue<any, any>
 ) => Machine.HandlerResult<States, E, R>
 
 type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
@@ -264,40 +194,28 @@ const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>
     }
 }
 
-const collectStateAction = Effect.fnUntraced(function*<Context, Event, E, R>(
+const collectStateAction = <Context, Event, E, R>(
   machine: Machine.Any,
-  handler: ((context: Context) => Machine.StateActionResult<E, R>) | undefined,
+  handler: ((context: Context, enqueue: Enqueue<any, any>) => Machine.StateActionResult<E, R>) | undefined,
   context: Context
-) {
+) => {
+  const collected = makeCollector<Event>(machine)
   if (handler === undefined) {
     return {
-      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
-      raisedEvents: [] as ReadonlyArray<Event>,
-      emittedEvents: [] as ReadonlyArray<unknown>
+      commands: collected.commands,
+      raisedEvents: collected.raisedEvents,
+      emittedEvents: collected.emittedEvents
     }
   }
-  const result = handler(context)
-  if (!Effect.isEffect(result)) {
-    return {
-      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
-      raisedEvents: [] as ReadonlyArray<Event>,
-      emittedEvents: [] as ReadonlyArray<unknown>
-    }
-  }
-  const deferredActions = yield* makeDeferredActions
-  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
-  const actions = yield* deferredActions.read
-  const raisedEvents = yield* deferredRaisedEvents.read
-  const emittedEvents = yield* deferredRaisedEvents.readEmitted
+  handler(context, collected.enqueue)
   return {
-    actions: actions as ReadonlyArray<DeferredAction<E, R>>,
-    raisedEvents: raisedEvents as ReadonlyArray<Event>,
-    emittedEvents
+    commands: collected.commands,
+    raisedEvents: collected.raisedEvents,
+    emittedEvents: collected.emittedEvents
   }
-})
+}
 
-const collectTransition = Effect.fnUntraced(function*<
+const collectTransition = <
   const States extends Machine.StateSchemas,
   Event,
   E,
@@ -307,66 +225,42 @@ const collectTransition = Effect.fnUntraced(function*<
   machine: Machine.Any,
   transition: TransitionHandler<States, E, R, Context>,
   context: Context
-) {
-  const result = transition(context)
-  if (!Effect.isEffect(result)) {
-    return {
-      state: result,
-      actions: [] as ReadonlyArray<DeferredAction<E, R>>,
-      raisedEvents: [] as ReadonlyArray<Event>,
-      emittedEvents: [] as ReadonlyArray<unknown>
-    }
-  }
-  const deferredActions = yield* makeDeferredActions
-  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  const state = yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
-  const actions = yield* deferredActions.read
-  const raisedEvents = yield* deferredRaisedEvents.read
-  const emittedEvents = yield* deferredRaisedEvents.readEmitted
+) => {
+  const collected = makeCollector<Event>(machine)
+  const state = transition(context, collected.enqueue)
   return {
     state,
-    actions: actions as ReadonlyArray<DeferredAction<E, R>>,
-    raisedEvents: raisedEvents as ReadonlyArray<Event>,
-    emittedEvents
+    commands: collected.commands,
+    raisedEvents: collected.raisedEvents,
+    emittedEvents: collected.emittedEvents
   }
-})
+}
 
-const collectStateInitializer = Effect.fnUntraced(function*(
+const collectStateInitializer = (
   machine: Machine.Any,
-  handler: (context: any) => unknown,
+  handler: (context: any, enqueue: Enqueue<any, any>) => unknown,
   context: any
-) {
-  const result = handler(context)
-  if (!Effect.isEffect(result)) {
-    return {
-      value: result,
-      actions: [] as ReadonlyArray<DeferredAction>,
-      raisedEvents: [] as ReadonlyArray<unknown>,
-      emittedEvents: [] as ReadonlyArray<unknown>
-    }
-  }
-  const deferredActions = yield* makeDeferredActions
-  const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-  const value = yield* provideDeferredServices(result, machine, deferredActions, deferredRaisedEvents)
+) => {
+  const collected = makeCollector<unknown>(machine)
   return {
-    value,
-    actions: yield* deferredActions.read,
-    raisedEvents: yield* deferredRaisedEvents.read,
-    emittedEvents: yield* deferredRaisedEvents.readEmitted
+    value: handler(context, collected.enqueue),
+    commands: collected.commands,
+    raisedEvents: collected.raisedEvents,
+    emittedEvents: collected.emittedEvents
   }
-})
+}
 
 /** Completes the intentionally partial configuration held by shallow history.
  * Only a compound node with no remembered child invokes an initializer; deep
  * history never reaches this path. */
-const completeHistoryConfiguration = Effect.fnUntraced(function*(
+const completeHistoryConfiguration = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   event: unknown
-) {
+) => {
   const active = new Set(configuration.active)
   const values = new Map(configuration.values)
-  const actions: Array<DeferredAction> = []
+  const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<unknown> = []
   const emittedEvents: Array<unknown> = []
 
@@ -389,17 +283,16 @@ const completeHistoryConfiguration = Effect.fnUntraced(function*(
           outputs: configuration.outputs,
           history: configuration.history
         } as ActiveConfiguration
-        const initialized = yield* collectStateInitializer(machine, initializer, {
+        const initialized = collectStateInitializer(machine, initializer, {
           state: getActiveValue(current, path),
           parent: getParentValue(machine, current, path),
           parents: getParentValues(machine, current, path),
-          event,
-          ...makePlanningCapabilities()
+          event
         })
         const child = getNode(machine, node.initial)
         active.add(child.path)
-        values.set(child.path, yield* decodeStateValue(machine, child, initialized.value))
-        actions.push(...initialized.actions)
+        values.set(child.path, decodeStateValueSync(machine, child, initialized.value))
+        commands.push(...initialized.commands)
         raisedEvents.push(...initialized.raisedEvents)
         emittedEvents.push(...initialized.emittedEvents)
         changed = true
@@ -417,12 +310,11 @@ const completeHistoryConfiguration = Effect.fnUntraced(function*(
             outputs: configuration.outputs,
             history: configuration.history
           } as ActiveConfiguration
-          const initialized = yield* collectStateInitializer(machine, initializer, {
+          const initialized = collectStateInitializer(machine, initializer, {
             state: getActiveValue(current, path),
             parent: getParentValue(machine, current, path),
             parents: getParentValues(machine, current, path),
-            event,
-            ...makePlanningCapabilities()
+            event
           })
           if (typeof initialized.value !== "object" || initialized.value === null) {
             throw new Error(`Machine parallel state initializer for "${path}" must return its region values`)
@@ -435,10 +327,10 @@ const completeHistoryConfiguration = Effect.fnUntraced(function*(
             active.add(child.path)
             values.set(
               child.path,
-              yield* decodeStateValue(machine, child, (initialized.value as Record<string, unknown>)[child.key])
+              decodeStateValueSync(machine, child, (initialized.value as Record<string, unknown>)[child.key])
             )
           }
-          actions.push(...initialized.actions)
+          commands.push(...initialized.commands)
           raisedEvents.push(...initialized.raisedEvents)
           emittedEvents.push(...initialized.emittedEvents)
           changed = true
@@ -453,18 +345,18 @@ const completeHistoryConfiguration = Effect.fnUntraced(function*(
       outputs: new Map<string, unknown>(),
       history: configuration.history
     } as ActiveConfiguration,
-    actions,
+    commands,
     raisedEvents,
     emittedEvents
   }
-})
+}
 
-const resolveHistoryTarget = Effect.fnUntraced(function*(
+const resolveHistoryTarget = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   target: { readonly path: string; readonly parent: string },
   event: unknown
-) {
+) => {
   const node = getNode(machine, target.path)
   if (node.type !== "history" || node.parent !== target.parent) {
     throw new Error(`Machine expected history target "${target.path}" to resolve to its declared parent`)
@@ -475,7 +367,7 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
     // Deep records are already complete below the history parent. This pass is
     // still required for parallel ancestors outside that parent whose other
     // regions must be initialized when the ancestor is re-entered.
-    const completed = yield* completeHistoryConfiguration(machine, restored, event)
+    const completed = completeHistoryConfiguration(machine, restored, event)
     const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.parent)
     const values = Object.fromEntries(completed.configuration.values)
     return {
@@ -483,7 +375,7 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
         snapshot: snapshot as any,
         values: values as any
       }),
-      actions: completed.actions,
+      commands: completed.commands,
       raisedEvents: completed.raisedEvents,
       emittedEvents: completed.emittedEvents,
       transitions: []
@@ -495,9 +387,8 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
   if (fallback === undefined) {
     throw new Error(`Machine history state "${target.path}" requires a default implementation`)
   }
-  const collected = yield* collectTransition(machine, fallback, {
+  const collected = collectTransition(machine, fallback, {
     event,
-    ...makePlanningCapabilities(),
     target: machine.makeTargetBuilder(target.parent).full,
     parent: target.parent
   })
@@ -507,7 +398,7 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
   const fallbackChoice = choiceFromTarget(collected.state)
   const choiceResolution = fallbackChoice === undefined
     ? undefined
-    : yield* resolveChoiceTarget(
+    : resolveChoiceTarget(
       machine,
       {
         active: new Set(),
@@ -519,15 +410,15 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
       event
     )
   let fallbackConfiguration = choiceResolution === undefined
-    ? yield* normalizeConfigurationEffect(machine, collected.state as any)
-    : yield* normalizeTargetConfigurationEffect(machine, {
+    ? normalizeConfigurationSync(machine, collected.state as any)
+    : normalizeTargetConfigurationSync(machine, {
       active: new Set(),
       values: new Map(),
       outputs: new Map(),
       history: configuration.history
     }, choiceResolution.target as any)
   for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
-    fallbackConfiguration = yield* normalizeTargetConfigurationEffect(
+    fallbackConfiguration = normalizeTargetConfigurationSync(
       machine,
       fallbackConfiguration,
       additionalTarget as
@@ -547,12 +438,12 @@ const resolveHistoryTarget = Effect.fnUntraced(function*(
       snapshot: snapshot as any,
       values: values as any
     }),
-    actions: [...collected.actions, ...(choiceResolution?.actions ?? [])],
+    commands: [...collected.commands, ...(choiceResolution?.commands ?? [])],
     raisedEvents: [...collected.raisedEvents, ...(choiceResolution?.raisedEvents ?? [])],
     emittedEvents: [...collected.emittedEvents, ...(choiceResolution?.emittedEvents ?? [])],
     transitions: choiceResolution?.transitions ?? []
   }
-})
+}
 
 type SelectedTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly sourcePath: string
@@ -574,7 +465,7 @@ type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Conte
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
     | undefined
-  readonly actions: ReadonlyArray<Effect.Effect<void, E, R>>
+  readonly commands: ReadonlyArray<RuntimeCommand>
   readonly raisedEvents: ReadonlyArray<Event>
   readonly emittedEvents: ReadonlyArray<unknown>
   readonly changed: boolean
@@ -665,17 +556,6 @@ export const sortEntryPaths = (machine: Machine.Any, paths: Iterable<string>): R
       return depth === 0 ? compareDocumentOrder(machine, left, right) : depth
     })
 
-const makePlanningCapabilities = <Events, Emits>(): Machine.PlanningCapabilities<Events, Emits> & {
-  readonly runtime: Effect.Effect<Runtime<Events, Emits>, never, Runtime.Requirement<Events, Emits>>
-} => {
-  const runtimeEffect = runtimeFor<Events, Emits>()
-  return {
-    runtime: runtimeEffect,
-    raise: (event) => Effect.flatMap(runtimeEffect, (runtime) => runtime.raise(event)),
-    emit: (event) => Effect.flatMap(runtimeEffect, (runtime) => runtime.sendParent(event))
-  }
-}
-
 const makeStateActionContext = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -690,8 +570,7 @@ const makeStateActionContext = <
   state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
-  event,
-  ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>()
+  event
 })
 
 const makeTransitionContext = <
@@ -712,7 +591,6 @@ const makeTransitionContext = <
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   snapshot,
-  ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
   target: machine.makeTargetBuilder(path as StateId)
 })
 
@@ -735,11 +613,10 @@ const makeDoneContext = <
   event,
   output: output as Machine.CompletionOutputByIdentifier<States, StateId>,
   snapshot,
-  ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
   target: machine.makeTargetBuilder(path as StateId)
 })
 
-const collectStateActions = Effect.fnUntraced(function*<
+const collectStateActions = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema>,
@@ -751,12 +628,12 @@ const collectStateActions = Effect.fnUntraced(function*<
   paths: ReadonlyArray<string>,
   event: Machine.LifecycleEvent<Events>,
   key: "entry" | "exit"
-) {
-  const actions: Array<DeferredAction<E, R>> = []
+) => {
+  const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<Machine.EventOf<Events>> = []
   const emittedEvents: Array<Machine.EmitOf<Emits>> = []
   for (const path of paths) {
-    const collected = yield* collectStateAction<
+    const collected = collectStateAction<
       Machine.StateActionContext<States, Events, Emits, Machine.StateIdentifier<States>>,
       Machine.EventOf<Events>,
       E,
@@ -771,12 +648,12 @@ const collectStateActions = Effect.fnUntraced(function*<
         event
       )
     )
-    actions.push(...collected.actions)
+    commands.push(...collected.commands)
     raisedEvents.push(...collected.raisedEvents)
     emittedEvents.push(...collected.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>)
   }
-  return { actions, emittedEvents, raisedEvents }
-})
+  return { commands, emittedEvents, raisedEvents }
+}
 
 const selectAlwaysTransitions = <
   const States extends Machine.StateSchemas,
@@ -838,7 +715,6 @@ const selectAlwaysTransitions = <
               >,
               event,
               snapshot: capturedSnapshot(),
-              ...makePlanningCapabilities<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(),
               target: machine.makeTargetBuilder(path as Machine.StateIdentifier<States>)
             }
           })
@@ -1152,15 +1028,15 @@ interface ResolvedChoiceTransition {
   readonly resolvedTarget: string
 }
 
-const resolveChoiceTarget = Effect.fnUntraced(function*(
+const resolveChoiceTarget = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   initialTarget: unknown,
   event: unknown
-) {
+) => {
   const pending: Array<unknown> = [initialTarget]
   const resolvedTargets: Array<unknown> = []
-  const actions: Array<DeferredAction> = []
+  const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<unknown> = []
   const emittedEvents: Array<unknown> = []
   const transitions: Array<ResolvedChoiceTransition> = []
@@ -1175,7 +1051,7 @@ const resolveChoiceTarget = Effect.fnUntraced(function*(
       pending.unshift(...extractedChoices.slice(1).map(({ target }) => target))
       iterations += 1
       if (iterations > MaxMacrostepIterations) {
-        return yield* new InfiniteTransitionError({
+        throw new InfiniteTransitionError({
           machineId: machine.id,
           state: extracted.target.path,
           maxIterations: MaxMacrostepIterations
@@ -1201,11 +1077,10 @@ const resolveChoiceTarget = Effect.fnUntraced(function*(
         outputs: configuration.outputs,
         history: configuration.history
       }
-      const collected = yield* collectTransition(machine, choice.transition, {
+      const collected = collectTransition(machine, choice.transition, {
         parent: getParentValue(machine, provisional, node.path),
         parents: getParentValues(machine, provisional, node.path),
         event,
-        ...makePlanningCapabilities(),
         target: machine.makeTargetBuilder(node.path as any)
       })
       if (collected.state === undefined) {
@@ -1222,7 +1097,7 @@ const resolveChoiceTarget = Effect.fnUntraced(function*(
         target: returnedPath,
         resolvedTarget: nested?.target.path ?? returnedPath
       })
-      actions.push(...collected.actions)
+      commands.push(...collected.commands)
       raisedEvents.push(...collected.raisedEvents)
       emittedEvents.push(...collected.emittedEvents)
     }
@@ -1236,14 +1111,14 @@ const resolveChoiceTarget = Effect.fnUntraced(function*(
   return {
     target: resolvedTargets[0],
     additionalTargets: resolvedTargets.slice(1),
-    actions,
+    commands,
     raisedEvents,
     emittedEvents,
     transitions
   }
-})
+}
 
-const collectEvaluatedTransition = Effect.fnUntraced(function*<
+const collectEvaluatedTransition = <
   const States extends Machine.StateSchemas,
   Event,
   E,
@@ -1253,9 +1128,9 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
   machine: Machine.Any,
   state: ActiveConfiguration,
   selection: SelectedTransition<States, E, R, Context>
-) {
+) => {
   const stateIdentifier = selection.leafPath
-  const transitionResult = yield* collectTransition<States, Event, E, R, Context>(
+  const transitionResult = collectTransition<States, Event, E, R, Context>(
     machine,
     selection.transition.transition,
     selection.context
@@ -1275,16 +1150,16 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
   )
   const choiceResolution = unresolvedTarget === undefined
     ? undefined
-    : yield* (resolveChoiceTarget(
+    : resolveChoiceTarget(
       machine,
       state,
       unresolvedTarget,
       (selection.context as any).event
-    ) as Effect.Effect<any, E | InfiniteTransitionError | MachineSchemaDecodeError, R>)
+    )
   const choiceResolvedTarget = choiceResolution?.target ?? unresolvedTarget
   let historyResolution: {
     readonly target: unknown
-    readonly actions: ReadonlyArray<DeferredAction>
+    readonly commands: ReadonlyArray<RuntimeCommand>
     readonly raisedEvents: ReadonlyArray<unknown>
     readonly emittedEvents: ReadonlyArray<unknown>
     readonly transitions: ReadonlyArray<ResolvedChoiceTransition>
@@ -1307,7 +1182,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     const stateAtHistoryResolution = provisionalExitPaths.includes(choiceResolvedTarget.parent)
       ? captureHistory(machine, state, state, provisionalExitPaths)
       : state
-    historyResolution = yield* resolveHistoryTarget(
+    historyResolution = resolveHistoryTarget(
       machine,
       stateAtHistoryResolution,
       choiceResolvedTarget,
@@ -1323,7 +1198,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       : historyResolution.target as
         | Machine.Snapshot<States>
         | Machine.Target<States, Machine.StateIdentifier<States>>
-  const additionalHistoryActions: Array<DeferredAction> = []
+  const additionalHistoryActions: Array<RuntimeCommand> = []
   const additionalHistoryRaisedEvents: Array<unknown> = []
   const additionalHistoryEmittedEvents: Array<unknown> = []
   const additionalHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
@@ -1335,14 +1210,14 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       additionalChoiceTargets.push(additionalTarget as any)
       continue
     }
-    const resolved = yield* resolveHistoryTarget(
+    const resolved = resolveHistoryTarget(
       machine,
       state,
       additionalTarget,
       (selection.context as any).event
     )
     additionalChoiceTargets.push(resolved.target as any)
-    additionalHistoryActions.push(...resolved.actions)
+    additionalHistoryActions.push(...resolved.commands)
     additionalHistoryRaisedEvents.push(...resolved.raisedEvents)
     additionalHistoryEmittedEvents.push(...resolved.emittedEvents)
     additionalHistoryChoiceTransitions.push(...resolved.transitions)
@@ -1354,9 +1229,9 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     : getTargetNodePath(unresolvedTarget)
   let stateAfterTransition = target === undefined
     ? state
-    : yield* normalizeTargetConfigurationEffect<States>(machine, state, target)
+    : normalizeTargetConfigurationSync<States>(machine, state, target)
   for (const additionalTarget of additionalChoiceTargets) {
-    stateAfterTransition = yield* normalizeTargetConfigurationEffect<States>(
+    stateAfterTransition = normalizeTargetConfigurationSync<States>(
       machine,
       stateAfterTransition,
       additionalTarget
@@ -1369,10 +1244,10 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       selection,
       unresolvedTarget,
       target,
-      actions: [
-        ...transitionResult.actions,
-        ...(choiceResolution?.actions ?? []),
-        ...(historyResolution?.actions ?? []),
+      commands: [
+        ...transitionResult.commands,
+        ...(choiceResolution?.commands ?? []),
+        ...(historyResolution?.commands ?? []),
         ...additionalHistoryActions
       ],
       raisedEvents: [
@@ -1410,10 +1285,10 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
     selection,
     unresolvedTarget,
     target,
-    actions: [
-      ...transitionResult.actions,
-      ...(choiceResolution?.actions ?? []),
-      ...(historyResolution?.actions ?? []),
+    commands: [
+      ...transitionResult.commands,
+      ...(choiceResolution?.commands ?? []),
+      ...(historyResolution?.commands ?? []),
       ...additionalHistoryActions
     ],
     raisedEvents: [
@@ -1449,7 +1324,7 @@ const collectEvaluatedTransition = Effect.fnUntraced(function*<
       ...additionalHistoryChoiceTransitions
     ]
   } as EvaluatedTransition<States, Event, E, R, Context>
-})
+}
 
 const MaxMacrostepIterations = 1000
 export const InitialEventTypeId: unique symbol = Symbol("effect/Machine/InitialEvent")
@@ -1526,7 +1401,7 @@ export const isFinal = <
   state: Machine.Snapshot<States>
 ): state is Machine.SnapshotContainingFinal<States, FinalStates> => isFinalState(machine, state)
 
-export const planInitial: <
+export const planInitialSync = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -1541,200 +1416,136 @@ export const planInitial: <
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  & {
-    readonly state: Machine.Snapshot<States>
-    readonly actions: ReadonlyArray<
-      Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>
-    >
-    readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+) => {
+  const inputArgs = machine.input === undefined
+    ? args
+    : args.length === 0
+    ? (decodeInputSync(machine, machine.input, undefined), args)
+    : [decodeInputSync(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
+  const state = machine.initial(...inputArgs)
+  const emptyConfiguration: ActiveConfiguration = {
+    active: new Set(),
+    values: new Map(),
+    outputs: new Map(),
+    history: new Map()
   }
-  & (
-    | {
-      readonly done: true
-      readonly output: Output
+  const initialChoice = choiceFromTarget(state)
+  const choiceResolution = initialChoice === undefined
+    ? undefined
+    : resolveChoiceTarget(
+      machine,
+      emptyConfiguration,
+      state,
+      InitialEvent
+    )
+  const initialHistoryActions: Array<RuntimeCommand> = []
+  const initialHistoryRaisedEvents: Array<unknown> = []
+  const initialHistoryEmittedEvents: Array<unknown> = []
+  const initialHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
+  const resolvedInitialTargets: Array<unknown> = []
+  for (
+    const target of choiceResolution === undefined
+      ? []
+      : [choiceResolution.target, ...choiceResolution.additionalTargets]
+  ) {
+    if (!isHistoryTarget(target)) {
+      resolvedInitialTargets.push(target)
+      continue
     }
-    | {
-      readonly done: false
-      readonly output: undefined
-    }
-  ),
-  InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
-  ExcludeCompatibleRuntime<InitialR | R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
-> = Effect.fnUntraced(function*<
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
-) {
-  return yield* catchStartup(Effect.gen(function*() {
-    const deferredActions = yield* makeDeferredActions
-    const deferredRaisedEvents = yield* makeDeferredRaisedEvents
-    const inputArgs = machine.input === undefined
-      ? args
-      : args.length === 0
-      ? (yield* decodeInput(machine, machine.input, undefined), args)
-      : [yield* decodeInput(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
-    const result = machine.initial(...inputArgs)
-    const state = Effect.isEffect(result)
-      ? yield* (provideDeferredServices(
-        result as unknown as Effect.Effect<Machine.InitialSnapshot<States>, InitialE, InitialR>,
-        machine,
-        deferredActions,
-        deferredRaisedEvents
-      ) as unknown as Effect.Effect<
-        Machine.InitialSnapshot<States>,
-        InitialE | MachineSchemaDecodeError,
-        ExcludeCompatibleRuntime<InitialR, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
-      >)
-      : result
-    const emptyConfiguration: ActiveConfiguration = {
-      active: new Set(),
-      values: new Map(),
-      outputs: new Map(),
-      history: new Map()
-    }
-    const initialChoice = choiceFromTarget(state)
-    const choiceResolution = initialChoice === undefined
-      ? undefined
-      : yield* (resolveChoiceTarget(
-        machine,
-        emptyConfiguration,
-        state,
-        InitialEvent
-      ) as Effect.Effect<
-        any,
-        E | InfiniteTransitionError | MachineSchemaDecodeError,
-        ExcludeCompatibleRuntime<R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
-      >)
-    const initialHistoryActions: Array<DeferredAction> = []
-    const initialHistoryRaisedEvents: Array<unknown> = []
-    const initialHistoryEmittedEvents: Array<unknown> = []
-    const initialHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
-    const resolvedInitialTargets: Array<unknown> = []
-    for (
-      const target of choiceResolution === undefined
-        ? []
-        : [choiceResolution.target, ...choiceResolution.additionalTargets]
-    ) {
-      if (!isHistoryTarget(target)) {
-        resolvedInitialTargets.push(target)
-        continue
-      }
-      const history = yield* resolveHistoryTarget(machine, emptyConfiguration, target, InitialEvent)
-      resolvedInitialTargets.push(history.target)
-      initialHistoryActions.push(...history.actions)
-      initialHistoryRaisedEvents.push(...history.raisedEvents)
-      initialHistoryEmittedEvents.push(...history.emittedEvents)
-      initialHistoryChoiceTransitions.push(...history.transitions)
-    }
-    let resolvedConfiguration = choiceResolution === undefined
-      ? yield* normalizeConfigurationEffect<States>(machine, state as Machine.Snapshot<States>)
-      : yield* normalizeTargetConfigurationEffect<States>(
-        machine,
-        emptyConfiguration,
-        resolvedInitialTargets[0] as
-          | Machine.Snapshot<States>
-          | Machine.Target<States, Machine.StateIdentifier<States>>
-      )
-    for (const additionalTarget of resolvedInitialTargets.slice(1)) {
-      resolvedConfiguration = yield* normalizeTargetConfigurationEffect<States>(
-        machine,
-        resolvedConfiguration,
-        additionalTarget as Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
-      )
-    }
-    const configuration: ActiveConfiguration = resolvedConfiguration
-    validateInitialConfiguration(machine, configuration)
-    const startingState = snapshotFromConfiguration<States>(machine, configuration)
-    const initialEntryPaths = getInitialEntryPaths(machine, configuration)
-    const actions = [
-      ...yield* deferredActions.read,
-      ...(choiceResolution?.actions ?? []),
-      ...initialHistoryActions
-    ]
-    const raisedEvents = [
-      ...yield* deferredRaisedEvents.read,
-      ...(choiceResolution?.raisedEvents ?? []),
-      ...initialHistoryRaisedEvents
-    ]
-    const emittedEvents = [
-      ...yield* deferredRaisedEvents.readEmitted,
-      ...(choiceResolution?.emittedEvents ?? []),
-      ...initialHistoryEmittedEvents
-    ]
-    const settled = yield* (Effect.gen(function*() {
-      const entry = yield* collectStateActions<States, Events, Emits, E, R>(
-        machine,
-        configuration,
-        initialEntryPaths,
-        InitialEvent,
-        "entry"
-      )
-      return yield* (settle(
-        machine,
-        configuration,
-        InitialEvent,
-        [...entry.actions] as Array<Effect.Effect<void, E, R>>,
-        [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
-        [...emittedEvents, ...entry.emittedEvents],
-        choiceResolution === undefined ? [] : [{
-          next: configuration,
-          event: InitialEvent,
-          transitions: [...choiceResolution.transitions, ...initialHistoryChoiceTransitions],
-          actions: [...choiceResolution.actions, ...initialHistoryActions] as ReadonlyArray<Effect.Effect<void, E, R>>,
-          raisedEvents: [
-            ...choiceResolution.raisedEvents,
-            ...initialHistoryRaisedEvents
-          ] as ReadonlyArray<Machine.EventOf<Events>>,
-          emittedEvents: [...choiceResolution.emittedEvents, ...initialHistoryEmittedEvents],
-          exitPaths: [],
-          entryPaths: [],
-          changed: false
-        }]
-      ) as Effect.Effect<MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>>)
-    }) as Effect.Effect<
-      MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
-      E | InfiniteTransitionError | MachineSchemaDecodeError,
-      ExcludeCompatibleRuntime<R, Machine.EventOf<Events>, Machine.EmitOf<Emits>>
-    >)
+    const history = resolveHistoryTarget(machine, emptyConfiguration, target, InitialEvent)
+    resolvedInitialTargets.push(history.target)
+    initialHistoryActions.push(...history.commands)
+    initialHistoryRaisedEvents.push(...history.raisedEvents)
+    initialHistoryEmittedEvents.push(...history.emittedEvents)
+    initialHistoryChoiceTransitions.push(...history.transitions)
+  }
+  let resolvedConfiguration = choiceResolution === undefined
+    ? normalizeConfigurationSync<States>(machine, state as Machine.Snapshot<States>)
+    : normalizeTargetConfigurationSync<States>(
+      machine,
+      emptyConfiguration,
+      resolvedInitialTargets[0] as
+        | Machine.Snapshot<States>
+        | Machine.Target<States, Machine.StateIdentifier<States>>
+    )
+  for (const additionalTarget of resolvedInitialTargets.slice(1)) {
+    resolvedConfiguration = normalizeTargetConfigurationSync<States>(
+      machine,
+      resolvedConfiguration,
+      additionalTarget as Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
+    )
+  }
+  const configuration: ActiveConfiguration = resolvedConfiguration
+  validateInitialConfiguration(machine, configuration)
+  const startingState = snapshotFromConfiguration<States>(machine, configuration)
+  const initialEntryPaths = getInitialEntryPaths(machine, configuration)
+  const commands = [
+    ...(choiceResolution?.commands ?? []),
+    ...initialHistoryActions
+  ]
+  const raisedEvents = [
+    ...(choiceResolution?.raisedEvents ?? []),
+    ...initialHistoryRaisedEvents
+  ]
+  const emittedEvents = [
+    ...(choiceResolution?.emittedEvents ?? []),
+    ...initialHistoryEmittedEvents
+  ]
+  const entry = collectStateActions<States, Events, Emits, E, R>(
+    machine,
+    configuration,
+    initialEntryPaths,
+    InitialEvent,
+    "entry"
+  )
+  const settled = settle(
+    machine,
+    configuration,
+    InitialEvent,
+    [...entry.commands],
+    [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
+    [...emittedEvents, ...entry.emittedEvents],
+    choiceResolution === undefined ? [] : [{
+      next: configuration,
+      event: InitialEvent,
+      transitions: [...choiceResolution.transitions, ...initialHistoryChoiceTransitions],
+      commands: [...choiceResolution.commands, ...initialHistoryActions],
+      raisedEvents: [
+        ...choiceResolution.raisedEvents,
+        ...initialHistoryRaisedEvents
+      ] as ReadonlyArray<Machine.EventOf<Events>>,
+      emittedEvents: [...choiceResolution.emittedEvents, ...initialHistoryEmittedEvents],
+      exitPaths: [],
+      entryPaths: [],
+      changed: false
+    }]
+  )
 
-    const planned = {
-      startingState,
-      initialEntryPaths,
-      state: snapshotFromConfiguration<States>(machine, settled.next),
-      actions: [
-        ...actions,
-        ...settled.actions
-      ] as ReadonlyArray<Effect.Effect<void, InitialE | MachineSchemaDecodeError | StartupError, InitialR | R>>,
-      emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-      microsteps: settled.microsteps.map((step) => ({
-        next: snapshotFromConfiguration<States>(machine, step.next),
-        event: step.event,
-        transitions: step.transitions,
-        actions: step.actions,
-        raisedEvents: step.raisedEvents,
-        emittedEvents: step.emittedEvents,
-        exitPaths: step.exitPaths,
-        entryPaths: step.entryPaths,
-        changed: step.changed
-      }))
-    }
-    return settled.done
-      ? { ...planned, done: true as const, output: settled.output }
-      : { ...planned, done: false as const, output: undefined }
-  }))
-})
+  const planned = {
+    startingState,
+    initialEntryPaths,
+    state: snapshotFromConfiguration<States>(machine, settled.next),
+    commands: [
+      ...commands,
+      ...settled.commands
+    ],
+    emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+    microsteps: settled.microsteps.map((step) => ({
+      next: snapshotFromConfiguration<States>(machine, step.next),
+      event: step.event,
+      transitions: step.transitions,
+      commands: step.commands,
+      raisedEvents: step.raisedEvents,
+      emittedEvents: step.emittedEvents,
+      exitPaths: step.exitPaths,
+      entryPaths: step.entryPaths,
+      changed: step.changed
+    }))
+  }
+  return settled.done
+    ? { ...planned, done: true as const, output: settled.output }
+    : { ...planned, done: false as const, output: undefined }
+}
 
 export const enabled = <
   const States extends Machine.StateSchemas,
@@ -1783,7 +1594,7 @@ export const enabled = <
   return tags
 }
 
-const microstep: <
+const microstep = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -1801,35 +1612,13 @@ const microstep: <
   state: ActiveConfiguration,
   event: Machine.LifecycleEvent<Events>,
   selections: ReadonlyArray<SelectedTransition<States, E, R, Context>>
-) => Effect.Effect<
-  MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R>,
-  E | MachineSchemaDecodeError,
-  R
-> = Effect.fnUntraced(function*<
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  Context = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  state: ActiveConfiguration,
-  event: Machine.LifecycleEvent<Events>,
-  selections: ReadonlyArray<SelectedTransition<States, E, R, Context>>
-) {
+) => {
   if (selections.length === 0) {
     return {
       next: state,
       event,
       transitions: [],
-      actions: [],
+      commands: [],
       raisedEvents: [],
       emittedEvents: [],
       exitPaths: [],
@@ -1842,7 +1631,7 @@ const microstep: <
   const evaluatedTransitions: Array<EvaluatedTransition<States, Machine.EventOf<Events>, E, R, Context>> = []
   for (const selection of activeSelections) {
     evaluatedTransitions.push(
-      yield* collectEvaluatedTransition<States, Machine.EventOf<Events>, E, R, Context>(
+      collectEvaluatedTransition<States, Machine.EventOf<Events>, E, R, Context>(
         machine,
         state,
         selection
@@ -1874,7 +1663,7 @@ const microstep: <
   ]
   for (const transition of targetApplicationOrder) {
     if (transition.target !== undefined) {
-      stateAfterTransition = yield* normalizeTargetConfigurationEffect<States>(
+      stateAfterTransition = normalizeTargetConfigurationSync<States>(
         machine,
         stateAfterTransition,
         transition.target
@@ -1884,7 +1673,7 @@ const microstep: <
 
   const changed = transitions.some((transition) => transition.changed)
   const transitionActions = sortedTransitions
-    .flatMap((transition) => transition.actions)
+    .flatMap((transition) => transition.commands)
   const transitionRaisedEvents = sortedTransitions
     .flatMap((transition) => transition.raisedEvents)
   const transitionEmittedEvents = sortedTransitions
@@ -1895,7 +1684,7 @@ const microstep: <
       next: stateAfterTransition,
       event,
       transitions: retainedTransitions,
-      actions: transitionActions,
+      commands: transitionActions,
       raisedEvents: transitionRaisedEvents,
       emittedEvents: transitionEmittedEvents,
       exitPaths: [],
@@ -1907,14 +1696,14 @@ const microstep: <
   const exitPaths = sortExitPaths(machine, sortedTransitions.flatMap((transition) => transition.exitPaths))
   const entryPaths = sortEntryPaths(machine, sortedTransitions.flatMap((transition) => transition.entryPaths))
   stateAfterTransition = captureHistory(machine, state, stateAfterTransition, exitPaths)
-  const exit = yield* collectStateActions<States, Events, Emits, E, R>(
+  const exit = collectStateActions<States, Events, Emits, E, R>(
     machine,
     state,
     exitPaths,
     event,
     "exit"
   )
-  const entry = yield* collectStateActions<States, Events, Emits, E, R>(
+  const entry = collectStateActions<States, Events, Emits, E, R>(
     machine,
     stateAfterTransition,
     entryPaths,
@@ -1926,9 +1715,7 @@ const microstep: <
     next: stateAfterTransition,
     event,
     transitions: retainedTransitions,
-    actions: [...exit.actions, ...transitionActions, ...entry.actions] as ReadonlyArray<
-      Effect.Effect<void, E, R>
-    >,
+    commands: [...exit.commands, ...transitionActions, ...entry.commands],
     raisedEvents: [...exit.raisedEvents, ...transitionRaisedEvents, ...entry.raisedEvents] as ReadonlyArray<
       Machine.EventOf<Events>
     >,
@@ -1937,9 +1724,9 @@ const microstep: <
     entryPaths,
     changed: true
   }
-})
+}
 
-const settle: <
+const settle = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -1955,35 +1742,11 @@ const settle: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   state: ActiveConfiguration,
   event: Machine.LifecycleEvent<Events>,
-  actions: Array<Effect.Effect<void, E, R>>,
+  commands: Array<RuntimeCommand>,
   raisedEvents: Array<Machine.EventOf<Events>>,
   emittedEvents: Array<unknown>,
   microsteps: Array<MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R>>
-) => Effect.Effect<
-  MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
-  E | InfiniteTransitionError | MachineSchemaDecodeError,
-  R
-> = Effect.fnUntraced(function*<
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  state: ActiveConfiguration,
-  event: Machine.LifecycleEvent<Events>,
-  actions: Array<Effect.Effect<void, E, R>>,
-  raisedEvents: Array<Machine.EventOf<Events>>,
-  emittedEvents: Array<unknown>,
-  microsteps: Array<MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R>>
-) {
+) => {
   let currentState = state
   let currentEvent = event
   let shouldRunAlways = true
@@ -1996,14 +1759,14 @@ const settle: <
   while (true) {
     iterations += 1
     if (iterations > MaxMacrostepIterations) {
-      return yield* new InfiniteTransitionError({
+      throw new InfiniteTransitionError({
         machineId: machine.id,
         state: String(getLeafPath(machine, currentState)),
         maxIterations: MaxMacrostepIterations
       })
     }
 
-    const completed = yield* completeConfigurationEffect(machine, currentState, currentEvent)
+    const completed = completeConfigurationSync(machine, currentState, currentEvent)
     currentState = completed.configuration
     pendingCompletions.push(
       ...completed.completions.filter((completion) => machine.handlers[completion.path]?.onDone !== undefined)
@@ -2018,13 +1781,13 @@ const settle: <
       pendingCompletions.length === 0 ? [] : [pendingCompletions.shift()!]
     )
     if (done.length > 0) {
-      const doneStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = yield* microstep(
+      const doneStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
         machine,
         currentState,
         currentEvent,
         done
       )
-      actions.push(...doneStep.actions)
+      commands.push(...doneStep.commands)
       raisedEvents.push(...doneStep.raisedEvents)
       emittedEvents.push(...doneStep.emittedEvents)
       microsteps.push(doneStep)
@@ -2035,9 +1798,7 @@ const settle: <
     if (isActiveFinalConfiguration(machine, currentState)) {
       const root = getRootPath(machine, currentState)
       if (!currentState.outputs.has(root)) {
-        return yield* Effect.die(
-          new Error("Machine reached a terminal configuration without a completed root output")
-        )
+        throw new Error("Machine reached a terminal configuration without a completed root output")
       }
       completedTerminal = true
       finalOutput = currentState.outputs.get(root) as Output
@@ -2048,13 +1809,13 @@ const settle: <
       ? selectAlwaysTransitions<States, Events, Emits, E, R>(machine, currentState, currentEvent)
       : []
     if (always.length > 0) {
-      const alwaysStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = yield* microstep(
+      const alwaysStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
         machine,
         currentState,
         currentEvent,
         always
       )
-      actions.push(...alwaysStep.actions)
+      commands.push(...alwaysStep.commands)
       raisedEvents.push(...alwaysStep.raisedEvents)
       emittedEvents.push(...alwaysStep.emittedEvents)
       microsteps.push(alwaysStep)
@@ -2082,13 +1843,13 @@ const settle: <
       shouldRunAlways = true
       continue
     }
-    const raisedStep = yield* microstep(
+    const raisedStep = microstep(
       machine,
       currentState,
       raisedEvent,
       raisedSelections
     )
-    actions.push(...raisedStep.actions)
+    commands.push(...raisedStep.commands)
     raisedEvents.push(...raisedStep.raisedEvents)
     emittedEvents.push(...raisedStep.emittedEvents)
     microsteps.push(raisedStep)
@@ -2098,16 +1859,16 @@ const settle: <
 
   const result = {
     next: currentState,
-    actions,
+    commands,
     emittedEvents,
     microsteps
   }
   return completedTerminal
-    ? { ...result, done: true, output: finalOutput as Output }
-    : { ...result, done: false, output: undefined }
-})
+    ? { ...result, done: true as const, output: finalOutput as Output }
+    : { ...result, done: false as const, output: undefined }
+}
 
-const macrostepConfiguration: <
+const macrostepConfiguration = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -2123,42 +1884,20 @@ const macrostepConfiguration: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   configuration: ActiveConfiguration,
   event: Machine.EventOf<Events>
-) => Effect.Effect<
-  MacrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R, Output>,
-  E | InfiniteTransitionError | MachineSchemaDecodeError,
-  R
-> = Effect.fnUntraced(function*<
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  configuration: ActiveConfiguration,
-  event: Machine.EventOf<Events>
-) {
-  const decodedEvent = yield* decodeEvent<Events>(machine, event)
+) => {
+  const decodedEvent = decodeEventSync<Events>(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
-    const completed = yield* completeConfigurationEffect(machine, configuration, decodedEvent)
+    const completed = completeConfigurationSync(machine, configuration, decodedEvent)
     const root = getRootPath(machine, completed.configuration)
     if (!completed.configuration.outputs.has(root)) {
-      return yield* Effect.die(
-        new Error("Machine reached a terminal configuration without a completed root output")
-      )
+      throw new Error("Machine reached a terminal configuration without a completed root output")
     }
     return {
       next: completed.configuration,
-      actions: [],
+      commands: [],
       emittedEvents: [],
       microsteps: [],
-      done: true,
+      done: true as const,
       output: completed.configuration.outputs.get(root) as Output
     }
   }
@@ -2171,25 +1910,25 @@ const macrostepConfiguration: <
   if (selections.length === 0) {
     return {
       next: configuration,
-      actions: [],
+      commands: [],
       emittedEvents: [],
       microsteps: [],
-      done: false,
+      done: false as const,
       output: undefined
     }
   }
-  const step = yield* microstep(
+  const step = microstep(
     machine,
     configuration,
     decodedEvent,
     selections
   )
-  const actions = [...step.actions]
+  const commands = [...step.commands]
   const raisedEvents = [...step.raisedEvents]
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
-  return yield* settle(machine, step.next, decodedEvent, actions, raisedEvents, emittedEvents, microsteps)
-})
+  return settle(machine, step.next, decodedEvent, commands, raisedEvents, emittedEvents, microsteps)
+}
 
 const snapshotMacrostep = <
   const States extends Machine.StateSchemas,
@@ -2203,13 +1942,13 @@ const snapshotMacrostep = <
 ): MacrostepPlan<Machine.Snapshot<States>, Event, E, R, Output> => {
   const planned = {
     next: snapshotFromConfiguration<States>(machine, settled.next),
-    actions: settled.actions,
+    commands: settled.commands,
     emittedEvents: settled.emittedEvents,
     microsteps: settled.microsteps.map((step) => ({
       next: snapshotFromConfiguration<States>(machine, step.next),
       event: step.event,
       transitions: step.transitions,
-      actions: step.actions,
+      commands: step.commands,
       raisedEvents: step.raisedEvents,
       emittedEvents: step.emittedEvents,
       exitPaths: step.exitPaths,
@@ -2222,7 +1961,7 @@ const snapshotMacrostep = <
     : { ...planned, done: false, output: undefined }
 }
 
-const macrostep: <
+const macrostep = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -2238,67 +1977,39 @@ const macrostep: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   state: Machine.Snapshot<States>,
   event: Machine.EventOf<Events>
-) => Effect.Effect<
-  MacrostepPlan<Machine.Snapshot<States>, Machine.EventOf<Events>, E, R, Output>,
-  E | InfiniteTransitionError | MachineSchemaDecodeError,
-  R
-> = Effect.fnUntraced(function*<
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  state: Machine.Snapshot<States>,
-  event: Machine.EventOf<Events>
-) {
-  const configuration = yield* normalizeConfigurationEffect<States>(machine, state)
-  const settled = yield* macrostepConfiguration(machine, configuration, event)
+) => {
+  const configuration = normalizeConfigurationSync<States>(machine, state)
+  const settled = macrostepConfiguration(machine, configuration, event)
   return snapshotMacrostep<States, Machine.EventOf<Events>, E, R, Output>(machine, settled)
-})
+}
 
-export const plan = macrostep
+export const planSync = macrostep
 
 export const planConfiguration = macrostepConfiguration
 
-const actionUnsafe = Effect.fnUntraced(function*<E, R>(
-  effect: Effect.Effect<void, E, R>
-) {
-  const actions = yield* DeferredActions
-  yield* actions.add(effect)
-})
+const planningEffect = <A>(thunk: () => A): Effect.Effect<A, InfiniteTransitionError | MachineSchemaDecodeError> =>
+  Effect.suspend(() => {
+    try {
+      return Effect.succeed(thunk())
+    } catch (error) {
+      return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
+        ? Effect.fail(error)
+        : Effect.die(error)
+    }
+  })
 
-/**
- * Defers an effectful action until the current machine step is planned.
- *
- * @category combinators
- * @since 4.0.0
- */
-export const action = <E, R>(
-  effect: Effect.Effect<void, E, R>
-): Effect.Effect<void, never, ActionRequirement<E, R>> =>
-  actionUnsafe(effect) as unknown as Effect.Effect<void, never, ActionRequirement<E, R>>
+export const plan = (machine: Machine.Any, state: Machine.Snapshot<any>, event: unknown) =>
+  planningEffect(() => planSync(machine as any, state, event as any))
 
-/**
- * Returns the typed runtime capability for the current machine.
- *
- * @category combinators
- * @since 4.0.0
- */
-export const runtime = <const Protocol extends Runtime.Protocol = {}>(): Effect.Effect<
-  Runtime<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>,
-  never,
-  Runtime.Requirement<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>
-> =>
-  RuntimeContext as unknown as Effect.Effect<
-    Runtime<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>,
-    never,
-    Runtime.Requirement<Runtime.Events<Protocol>, Runtime.Emits<Protocol>>
-  >
+export const planInitial = (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<unknown>
+): Effect.Effect<any, InfiniteTransitionError | MachineSchemaDecodeError | StartupError> =>
+  Effect.try({
+    try: () => (planInitialSync as any)(machine, ...args),
+    catch: (error) => {
+      return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
+        ? error
+        : new StartupError({ cause: Cause.die(error) })
+    }
+  })

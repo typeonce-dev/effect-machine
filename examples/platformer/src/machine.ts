@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Effect, Schema } from "effect"
+import { Schema } from "effect"
 
 // Domain schemas are shared by state payloads and the public physics protocol.
 export const Axis = Schema.Literals([-1, 0, 1])
@@ -280,15 +280,14 @@ export const CharacterMachine = Machine.make({
                 on: {
                   JumpPressed: {
                     targets: [],
-                    transition: Effect.fn(function*({ event, runtime }) {
-                      const machine = yield* runtime
+                    transition: ({ event }, enqueue) => {
                       const push = awayFrom(event.wall)
-                      yield* machine.raise(
+                      enqueue.raise(
                         push === 0
                           ? InternalEvent.cases.TryAirJump.make({ at: event.at })
                           : InternalEvent.cases.WallJump.make({ at: event.at, push })
                       )
-                    })
+                    }
                   },
                   Landed: {
                     targets: ["Character.locomotion.Playing.Grounded.Landing"],
@@ -386,11 +385,10 @@ export const CharacterMachine = Machine.make({
                         on: {
                           TryAirJump: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpSpent"],
-                            transition: Effect.fn(function*({ event, runtime, target }) {
-                              const machine = yield* runtime
-                              yield* machine.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
+                            transition: ({ event, target }, enqueue) => {
+                              enqueue.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
                               return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
-                            })
+                            }
                           }
                         }
                       },

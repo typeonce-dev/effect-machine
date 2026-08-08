@@ -182,7 +182,7 @@ describe("pure planning and managed runtime differential", () => {
       })
     }))
 
-  it.effect("preserves raised-event, action, and planned emission order", () =>
+  it.effect("preserves raised-event, lifecycle, and planned emission order", () =>
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("DifferentialIdle")("Idle", {}) {}
       class Working extends Schema.TaggedClass<Working>("DifferentialWorking")("Working", {}) {}
@@ -192,8 +192,10 @@ describe("pure planning and managed runtime differential", () => {
       class RaisedTwo extends Schema.TaggedClass<RaisedTwo>("DifferentialRaisedTwo")("RaisedTwo", {}) {}
       class Notice extends Schema.TaggedClass<Notice>("DifferentialNotice")("Notice", { label: Schema.String }) {}
 
-      const actions = yield* Ref.make<ReadonlyArray<string>>([])
-      const record = (label: string) => Machine.action(Ref.update(actions, (labels) => [...labels, label]))
+      const actions: Array<string> = []
+      const record = (label: string) => {
+        actions.push(label)
+      }
       const states = Machine.defineStates({
         Idle,
         Working,
@@ -207,43 +209,49 @@ describe("pure planning and managed runtime differential", () => {
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: {
-          entry: ({ emit }) => Effect.andThen(record("entry:idle"), emit(new Notice({ label: "initial" }))),
+          entry: (_, enqueue) => {
+            record("entry:idle")
+            enqueue.emit(new Notice({ label: "initial" }))
+          },
           on: {
-            Begin: Effect.fn(function*({ emit, raise, target }) {
-              yield* record("transition:begin")
-              yield* emit(new Notice({ label: "transition" }))
-              yield* raise(new RaisedOne({}))
+            Begin: ({ target }, enqueue) => {
+              record("transition:begin")
+              enqueue.emit(new Notice({ label: "transition" }))
+              enqueue.raise(new RaisedOne({}))
               return target.full.Working(new Working({}))
-            })
+            }
           }
         },
         Working: {
-          entry: Effect.fn(function*({ emit, raise }) {
-            yield* record("entry:working")
-            yield* emit(new Notice({ label: "entry" }))
-            yield* raise(new RaisedTwo({}))
-          }),
+          entry: (_, enqueue) => {
+            record("entry:working")
+            enqueue.emit(new Notice({ label: "entry" }))
+            enqueue.raise(new RaisedTwo({}))
+          },
           on: {
-            RaisedOne: Effect.fn(function*({ emit }) {
-              yield* record("raised:one")
-              yield* emit(new Notice({ label: "raised-one" }))
-            }),
-            RaisedTwo: Effect.fn(function*({ emit, target }) {
-              yield* record("raised:two")
-              yield* emit(new Notice({ label: "raised-two" }))
+            RaisedOne: (_, enqueue) => {
+              record("raised:one")
+              enqueue.emit(new Notice({ label: "raised-one" }))
+            },
+            RaisedTwo: ({ target }, enqueue) => {
+              record("raised:two")
+              enqueue.emit(new Notice({ label: "raised-two" }))
               return target.full.Finished(new Finished({}))
-            })
+            }
           }
         },
         Finished: {
-          entry: ({ emit }) => Effect.andThen(record("entry:finished"), emit(new Notice({ label: "finished" }))),
+          entry: (_, enqueue) => {
+            record("entry:finished")
+            enqueue.emit(new Notice({ label: "finished" }))
+          },
           output: () => "complete"
         }
       })
 
       const initial = yield* Machine.planInitial(machine)
       assert.deepStrictEqual(initial.emittedEvents.map(({ label }) => label), ["initial"])
-      assert.deepStrictEqual(yield* Ref.get(actions), [])
+      assert.deepStrictEqual(actions, ["entry:idle"])
       const planned = yield* Machine.plan(machine, initial.state, new Begin({}))
       assert.deepStrictEqual(
         planned.microsteps.map(({ event }) => event._tag),
@@ -256,12 +264,21 @@ describe("pure planning and managed runtime differential", () => {
         "raised-two",
         "finished"
       ])
+      assert.deepStrictEqual(actions, [
+        "entry:idle",
+        "transition:begin",
+        "entry:working",
+        "raised:one",
+        "raised:two",
+        "entry:finished"
+      ])
+      actions.length = 0
 
       const actor = yield* Machine.start(machine)
-      assert.deepStrictEqual(yield* Ref.get(actions), ["entry:idle"])
+      assert.deepStrictEqual(actions, ["entry:idle"])
       yield* actor.send(new Begin({}))
       assert.strictEqual(yield* actor.join, "complete")
-      assert.deepStrictEqual(yield* Ref.get(actions), [
+      assert.deepStrictEqual(actions, [
         "entry:idle",
         "transition:begin",
         "entry:working",
@@ -274,72 +291,18 @@ describe("pure planning and managed runtime differential", () => {
         yield* Machine.encodeSnapshot(machine, planned.next)
       )
 
-      yield* Ref.set(actions, [])
+      actions.length = 0
       const resumed = yield* Machine.resume(machine, initial.state)
-      assert.deepStrictEqual(yield* Ref.get(actions), [], "resume must not replay initial entry actions")
+      assert.deepStrictEqual(actions, [], "resume must not replay initial entry actions")
       yield* resumed.send(new Begin({}))
       assert.strictEqual(yield* resumed.join, "complete")
-      assert.deepStrictEqual(yield* Ref.get(actions), [
+      assert.deepStrictEqual(actions, [
         "transition:begin",
         "entry:working",
         "raised:one",
         "raised:two",
         "entry:finished"
       ])
-    }))
-
-  it.effect("retains the last published state when a planned action fails", () =>
-    Effect.gen(function*() {
-      class Idle extends Schema.TaggedClass<Idle>("DifferentialFailureIdle")("Idle", {}) {}
-      class Finished extends Schema.TaggedClass<Finished>("DifferentialFailureFinished")("Finished", {}) {}
-      class Go extends Schema.TaggedClass<Go>("DifferentialFailureGo")("Go", {}) {}
-      class Notice extends Schema.TaggedClass<Notice>("DifferentialFailureNotice")("Notice", {}) {}
-      class ActionFailure extends Data.TaggedError("ActionFailure")<{}> {}
-
-      const actions = yield* Ref.make<ReadonlyArray<string>>([])
-      const states = Machine.defineStates({ Idle, Finished })
-      const machine = Machine.make({
-        states: states.states,
-        events: [Go],
-        emits: [Notice],
-        initial: () => states.initial.Idle(new Idle({}))
-      }).handle({
-        Idle: {
-          on: {
-            Go: Effect.fn(function*({ emit, target }) {
-              yield* Machine.action(Ref.update(actions, (labels) => [...labels, "before"]))
-              yield* Machine.action(Effect.fail(new ActionFailure()))
-              yield* Machine.action(Ref.update(actions, (labels) => [...labels, "after"]))
-              yield* emit(new Notice({}))
-              return target.full.Finished(new Finished({}))
-            })
-          }
-        },
-        Finished: {}
-      })
-      const initial = yield* Machine.planInitial(machine)
-      const planned = yield* Machine.plan(machine, initial.state, new Go({}))
-      assert.deepStrictEqual(planned.next, states.initial.Finished(new Finished({})))
-      assert.strictEqual(planned.actions.length, 3)
-      assert.strictEqual(planned.emittedEvents.length, 1)
-
-      const actor = yield* Machine.start(machine)
-      const failure = yield* actor.changes.pipe(
-        Stream.filter((snapshot) => snapshot.status === "error"),
-        Stream.take(1),
-        Stream.runCollect,
-        Effect.map((snapshots) => Array.from(snapshots)[0]!),
-        Effect.forkChild({ startImmediately: true })
-      )
-      yield* actor.send(new Go({}))
-      const snapshot = yield* Fiber.join(failure)
-      assert.strictEqual(snapshot.status, "error")
-      if (snapshot.status === "error") {
-        assert.deepStrictEqual(snapshot.state, initial.state)
-        assert.instanceOf(snapshot.cause.reasons.find(Cause.isFailReason)?.error, ActionFailure)
-      }
-      assert.deepStrictEqual(yield* Ref.get(actions), ["before"])
-      assert.deepStrictEqual(yield* actor.snapshot, snapshot)
     }))
 
   it.effect("does not publish for an unhandled event before the next handled event", () =>

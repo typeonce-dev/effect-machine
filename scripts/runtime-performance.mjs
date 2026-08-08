@@ -5,7 +5,7 @@ import { resolve } from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
 import { Bench } from "tinybench"
-import { implementations, packageVersions } from "../perf/runtime/implementations.mjs"
+import { implementations, memoryImplementations, packageVersions } from "../perf/runtime/implementations.mjs"
 const sourceRevision = (() => {
   try {
     return {
@@ -308,9 +308,8 @@ const benchmarks = bench.tasks.map((task) => {
 })
 
 const memoryWorker = fileURLToPath(new URL("../perf/runtime/memory-worker.mjs", import.meta.url))
-const memoryProfileIds = ["idle", "parent-with-child"]
-const memory = implementations.map((implementation) => {
-  const profiles = memoryProfileIds.map((profileId) =>
+const memory = memoryImplementations.map((implementation) => {
+  const profiles = Object.keys(implementation.memoryProfiles).map((profileId) =>
     JSON.parse(
       execFileSync(
         process.execPath,

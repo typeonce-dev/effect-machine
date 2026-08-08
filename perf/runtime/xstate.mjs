@@ -176,6 +176,16 @@ export const makeXStateAdapter = (options) => {
 
   const stopChildCounters = stopCounters
 
+  const startIndependentCounterPairs = (count) => {
+    const pairs = []
+    for (let index = 0; index < count; index += 1) {
+      pairs.push([startCounter(), startCounter()])
+    }
+    return pairs
+  }
+
+  const stopIndependentCounterPairs = (pairs) => stopCounters(pairs.flat())
+
   return {
     implementation,
     label,
@@ -196,6 +206,23 @@ export const makeXStateAdapter = (options) => {
     stopChildCounter,
     stopChildCounters,
     stopCounters,
-    stopObservedCounter
+    stopObservedCounter,
+    memoryProfiles: {
+      idle: {
+        label: "Idle machine",
+        start: startCounters,
+        stop: stopCounters
+      },
+      "two-independent": {
+        label: "Two independent idle machines",
+        start: startIndependentCounterPairs,
+        stop: stopIndependentCounterPairs
+      },
+      "parent-with-child": {
+        label: "Idle parent with one child",
+        start: startChildCounters,
+        stop: stopChildCounters
+      }
+    }
   }
 }
