@@ -282,6 +282,52 @@ describe("machine process lifecycle", () => {
       )
     }))
 
+  it.effect("does not lose on-demand completion when first observation races publication", () =>
+    Effect.gen(function*() {
+      yield* Effect.forEach(
+        Array.from({ length: 100 }),
+        () =>
+          Effect.gen(function*() {
+            const race = yield* Deferred.make<void>()
+            const ref = yield* MachineRuntime.startProcess<number, void, never, never, string>({
+              [MachineRuntime.childlessProcess]: true,
+              [MachineRuntime.compiledProcess]: true,
+              initial: () => Effect.succeed(0),
+              run: () => Effect.never,
+              drain: (context) =>
+                Effect.gen(function*() {
+                  const event = yield* Queue.poll(context.mailbox)
+                  if (Option.isNone(event)) {
+                    return Option.none()
+                  }
+                  yield* context.setState(1)
+                  return Option.some("done")
+                })
+            })
+            const changes = yield* Deferred.await(race).pipe(
+              Effect.andThen(Stream.runCollect(ref.changes)),
+              Effect.forkChild
+            )
+            const completion = yield* Deferred.await(race).pipe(
+              Effect.andThen(ref.send(undefined)),
+              Effect.andThen(ref.join),
+              Effect.forkChild
+            )
+
+            yield* Deferred.succeed(race, undefined)
+            const snapshots = Array.from(yield* Fiber.join(changes))
+            assert.strictEqual(yield* Fiber.join(completion), "done")
+            assert.deepStrictEqual(snapshots.at(-1), {
+              status: "done",
+              state: 1,
+              output: "done"
+            })
+            assert.strictEqual(snapshots.filter((snapshot) => snapshot.status === "done").length, 1)
+          }),
+        { concurrency: "unbounded" }
+      )
+    }))
+
   it.effect("releases a child id after that child requests self-stop during initialization", () =>
     Effect.gen(function*() {
       const firstRunCount = yield* Ref.make(0)
