@@ -1136,6 +1136,34 @@ describe("Machine", () => {
         assertMachineSchemaDecodeError(error, "state", { state: "NonEmptyLoading" })
       }))
 
+    it.effect("decodes same-state atomic snapshot targets in the compiled runtime", () =>
+      Effect.gen(function*() {
+        const states = Machine.defineStates({ NonEmptyIdle })
+        const machine = Machine.make({
+          states: states.states,
+          events: [NonEmptySubmit],
+          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+        }).handle({
+          NonEmptyIdle: {
+            on: {
+              NonEmptySubmit: ({ target }) =>
+                target.full.NonEmptyIdle(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+            }
+          }
+        })
+        const actor = yield* Machine.start(machine)
+
+        const snapshot = yield* sendAndWaitForSnapshot(
+          actor,
+          new NonEmptySubmit({ value: "request-1" }),
+          (snapshot) => snapshot.status === "error"
+        )
+        const error = yield* Effect.flip(actor.join)
+
+        assertMachineSchemaDecodeError(error, "state", { state: "NonEmptyIdle" })
+        assert.strictEqual(snapshot.status, "error")
+      }))
+
     it.effect("decodes final state output before caching it", () =>
       Effect.gen(function*() {
         const states = Machine.defineStates({

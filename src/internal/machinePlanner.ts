@@ -2537,10 +2537,12 @@ const planIndexedFlatConfiguration = (
 
       let next = current
       if (target !== undefined) {
-        const targetIndex = isTarget(target) ? descriptor.indexByPath.get(String(target.path)) : undefined
+        const targetIndex = descriptor.indexByPath.get(String(target.path))
+        const isSimpleTarget = isTarget(target)
+          ? target[TargetSnapshotTypeId] === undefined && target.values === undefined
+          : !("state" in target) && !("states" in target) && !("completed" in target) && !("history" in target)
         if (
-          targetIndex === sourceIndex && isTarget(target) && target[TargetSnapshotTypeId] === undefined &&
-          target.values === undefined && current.completedOrder.length === 0
+          targetIndex === sourceIndex && isSimpleTarget && current.completedOrder.length === 0
         ) {
           current.values[sourceIndex] = decodeStateValueSync(
             machine,
