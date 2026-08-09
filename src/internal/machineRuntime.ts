@@ -469,56 +469,43 @@ const makeChildRuntime = (
       }
     }
 
-    const close = <A, E>(_exit: Exit.Exit<A, E>): Effect.Effect<void> =>
-      Effect.sync(() => {
+    const close = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
+      Effect.suspend(() => {
         if (registry.closed) {
-          return undefined
+          return Effect.void
         }
         registry.closed = true
         if (registry.scope === undefined) {
-          return undefined
+          return Effect.void
         }
-        const children = Array.from(registry.children.values()).flatMap((entry) =>
-          entry._tag === "Started" ? [entry.ref] : []
-        )
-        return { children, scope: registry.scope }
-      }).pipe(
-        Effect.flatMap((resources) =>
-          resources === undefined
-            ? Effect.void
-            : Effect.all(
-              [
-                ...resources.children.map((child) => child.stop),
-                ...(resources.scope === undefined ? [] : [Scope.close(resources.scope, _exit)])
-              ],
-              { concurrency: "unbounded", discard: true }
-            )
-        )
-      )
-
-    const getOrCreateScope: Effect.Effect<Scope.Closeable | undefined> = Effect.sync(() => {
-      if (registry.closed) {
-        return undefined
-      }
-      if (registry.scope === undefined) {
-        registry.scope = Scope.makeUnsafe("parallel")
-      }
-      return registry.scope
-    })
-
-    const reserve = (
-      key: ChildKey,
-      token: symbol
-    ): Effect.Effect<boolean, ChildAlreadyExistsError> =>
-      Effect.suspend(() => {
-        if (registry.closed) {
-          return Effect.succeed(false)
+        const finalizers = Scope.closeUnsafe(registry.scope, exit)
+        let first: Effect.Effect<void> | undefined
+        let rest: Array<Effect.Effect<void>> | undefined
+        for (const entry of registry.children.values()) {
+          if (entry._tag !== "Started") {
+            continue
+          }
+          if (first === undefined) {
+            first = entry.ref.stop
+          } else {
+            rest ??= [first]
+            rest.push(entry.ref.stop)
+          }
         }
-        if (typeof key === "string" && registry.children.has(key)) {
-          return Effect.fail(new ChildAlreadyExistsError({ id: key }))
+        if (finalizers !== undefined) {
+          if (first === undefined) {
+            first = finalizers
+          } else {
+            rest ??= [first]
+            rest.push(finalizers)
+          }
         }
-        registry.children.set(key, { _tag: "Starting", token })
-        return Effect.succeed(true)
+        const cleanup = rest ?? first
+        return cleanup === undefined
+          ? Effect.void
+          : Array.isArray(cleanup)
+          ? Effect.all(cleanup, { concurrency: "unbounded", discard: true })
+          : cleanup
       })
 
     const unregister = (
@@ -681,47 +668,50 @@ const makeChildRuntime = (
       const token = Symbol()
       const key = spawnOptions?.id ?? token
       let startedChild: MachineRef<any, any, any, any> | undefined
-      return getOrCreateScope.pipe(
-        Effect.flatMap((childScope) =>
-          childScope === undefined
-            ? Effect.interrupt
-            : Effect.gen(function*() {
-              const reserved = yield* reserve(key, token)
-              if (!reserved) {
-                return yield* Effect.interrupt
-              }
-              return yield* startLogicInternal(logic, {
-                detached: true,
-                ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
-                ...(spawnOptions?.onOutcome === undefined ? undefined : { onOutcome: spawnOptions.onOutcome }),
-                ...(spawnOptions?.[activeSnapshotObserver] === undefined
-                  ? undefined
-                  : { onSnapshot: spawnOptions[activeSnapshotObserver] }),
-                ...(spawnOptions?.[sendParentOverride] === undefined
-                  ? undefined
-                  : { sendParent: spawnOptions[sendParentOverride] }),
-                onReady: (child, requestChildStop) =>
-                  Effect.sync(() => {
-                    startedChild = child
-                  }).pipe(
-                    Effect.andThen(register(key, token, child, spawnOptions?.descriptor)),
-                    Effect.flatMap((registered) => registered ? Effect.void : requestChildStop)
-                  ),
-                onStop: unregister(key, token),
-                parent: self,
-                runtime
-              }).pipe(
-                Effect.onExit((exit) =>
-                  Exit.isFailure(exit)
-                    ? unregister(key, token).pipe(
-                      Effect.andThen(startedChild === undefined ? Effect.void : startedChild.stop)
-                    )
-                    : Effect.void
-                )
+      return Effect.suspend((): Effect.Effect<
+        MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
+        ChildAlreadyExistsError | ChildInitialError,
+        Exclude<ChildRequirements, Scope.Scope>
+      > => {
+        if (registry.closed) {
+          return Effect.interrupt
+        }
+        if (typeof key === "string" && registry.children.has(key)) {
+          return Effect.fail(new ChildAlreadyExistsError({ id: key }))
+        }
+        registry.scope ??= Scope.makeUnsafe("parallel")
+        registry.children.set(key, { _tag: "Starting", token })
+        return startLogicInternal(logic, {
+          detached: true,
+          ...(spawnOptions?.id === undefined ? undefined : { id: spawnOptions.id }),
+          ...(spawnOptions?.onOutcome === undefined ? undefined : { onOutcome: spawnOptions.onOutcome }),
+          ...(spawnOptions?.[activeSnapshotObserver] === undefined
+            ? undefined
+            : { onSnapshot: spawnOptions[activeSnapshotObserver] }),
+          ...(spawnOptions?.[sendParentOverride] === undefined
+            ? undefined
+            : { sendParent: spawnOptions[sendParentOverride] }),
+          onReady: (child, requestChildStop) =>
+            Effect.sync(() => {
+              startedChild = child
+            }).pipe(
+              Effect.andThen(register(key, token, child, spawnOptions?.descriptor)),
+              Effect.flatMap((registered) => registered ? Effect.void : requestChildStop)
+            ),
+          onStop: unregister(key, token),
+          parent: self,
+          runtime
+        }).pipe(
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit)
+              ? unregister(key, token).pipe(
+                Effect.andThen(startedChild === undefined ? Effect.void : startedChild.stop)
               )
-            }).pipe(Scope.provide(childScope))
+              : Effect.void
+          ),
+          Scope.provide(registry.scope)
         )
-      ) as Effect.Effect<
+      }) as Effect.Effect<
         MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
         ChildAlreadyExistsError | ChildInitialError,
         Exclude<ChildRequirements, Scope.Scope>

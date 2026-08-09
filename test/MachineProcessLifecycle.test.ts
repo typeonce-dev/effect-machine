@@ -647,6 +647,47 @@ describe("machine process lifecycle", () => {
       assert.deepStrictEqual(yield* children.anonymous.snapshot, { status: "stopped", state: 0 })
     }))
 
+  it.effect("keeps child interruption parallel with scoped resource finalization", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const childInterrupted = yield* Deferred.make<void>()
+      const resourceFinalized = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const child = yield* (yield* Deferred.await(parentScope)).spawn(
+        Machine.logic({
+          initial: () =>
+            Effect.acquireRelease(
+              Effect.void,
+              () =>
+                Deferred.succeed(resourceFinalized, undefined).pipe(
+                  Effect.andThen(Deferred.await(release))
+                )
+            ).pipe(Effect.as(0)),
+          run: () =>
+            Effect.never.pipe(
+              Effect.ensuring(
+                Deferred.succeed(childInterrupted, undefined).pipe(
+                  Effect.andThen(Deferred.await(release))
+                )
+              )
+            )
+        }),
+        { id: "child" }
+      )
+      const stopping = yield* parent.stop.pipe(Effect.forkChild)
+
+      yield* Deferred.await(childInterrupted)
+      yield* Deferred.await(resourceFinalized)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(stopping)
+
+      assert.deepStrictEqual(yield* child.snapshot, { status: "stopped", state: 0 })
+    }))
+
   it.effect("does not orphan a child when parent stop races child initialization", () =>
     Effect.gen(function*() {
       const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
