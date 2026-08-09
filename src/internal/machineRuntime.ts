@@ -54,6 +54,9 @@ export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compile
 export const compiledProcessDrain: unique symbol = Symbol.for("effect/Machine/compiledProcessDrain")
 
 /** @internal */
+export const compiledProcessInitial: unique symbol = Symbol.for("effect/Machine/compiledProcessInitial")
+
+/** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
@@ -276,6 +279,15 @@ export interface ProcessLogic<
   readonly [childlessProcess]?: true
   readonly [compiledProcess]?: true
   initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
+  /** @internal */
+  readonly [compiledProcessInitial]?: (
+    scope: ProcessScope<Event>
+  ) => Effect.Effect<
+    | { readonly state: State; readonly done: false; readonly output: undefined }
+    | { readonly state: State; readonly done: true; readonly output: Output },
+    InitialError,
+    Requirements
+  >
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
   /** @internal */
   readonly drain?: (
@@ -1308,12 +1320,27 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
-      const initial = yield* self.logic.initial(self.processScope).pipe(
+      const compiledInitial = self.logic[compiledProcessInitial]
+      const initializeEffect: Effect.Effect<
+        {
+          readonly state: unknown
+          readonly done: boolean | undefined
+          readonly output: unknown
+        },
+        unknown,
+        any
+      > = compiledInitial === undefined
+        ? self.logic.initial(self.processScope).pipe(
+          Effect.map((state) => ({ state, done: undefined, output: undefined } as const))
+        )
+        : compiledInitial(self.processScope)
+      const initialized = yield* initializeEffect.pipe(
         Effect.onExit(cleanupStartupFailure),
         Effect.ensuring(Effect.sync(() => {
           self.initializing = false
         }))
       )
+      const initial = initialized.state
       self.current = {
         revision: 0,
         terminalizing: false,
@@ -1338,6 +1365,21 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       }
       if (self.options.onSnapshot !== undefined) {
         yield* notifyActiveSnapshot(self.options.onSnapshot, { status: "active", state: initial })
+      }
+      if (initialized.done === true && self.requestedTermination === undefined) {
+        yield* self.requestTermination({ _tag: "Done", output: initialized.output })
+      }
+
+      // A compiled machine startup plan has already settled entry actions,
+      // raised events, and eventless transitions. If it is known active and
+      // neither startup hooks nor emitted work queued an event, there is no
+      // first drain to perform. Future sends observe `draining === false` and
+      // schedule the ordinary compiled worker.
+      if (
+        initialized.done === false && self.logic[childlessProcess] === true &&
+        self.requestedTermination === undefined && self.mailbox.items === undefined
+      ) {
+        return self
       }
 
       self.draining = true
@@ -1465,6 +1507,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       if (this.completion !== undefined) {
         return Effect.void
       }
+      if (this.finishIdleChildlessStop()) {
+        return Effect.void
+      }
       const requested = { _tag: "Stopped" } as const
       return this.requestTermination(requested).pipe(
         Effect.flatMap((accepted) =>
@@ -1474,6 +1519,37 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         )
       )
     })
+  }
+
+  private finishIdleChildlessStop(): boolean {
+    if (
+      this.logic[childlessProcess] !== true || this.draining || this.worker !== undefined ||
+      this.requestedTermination !== undefined || this.options.onOutcome !== undefined ||
+      this.options.onStop !== undefined || this.current.changes !== undefined ||
+      this.current.terminalizing || this.current.snapshot.status !== "active"
+    ) {
+      return false
+    }
+    const snapshot = { status: "stopped" as const, state: this.current.snapshot.state }
+    this.requestedTermination = { _tag: "Stopped" }
+    this.reservedTerminationSnapshot = snapshot
+    closeCompactMailbox(this.mailbox)
+    this.current = {
+      revision: this.current.revision + 1,
+      terminalizing: true,
+      changes: undefined,
+      snapshot
+    }
+    this.interruptRequested = false
+    if (this.compiledContext !== undefined) {
+      this.compiledContext.executionState = undefined
+    }
+    this.completion = CompiledStoppedCompletion
+    if (this.waiter !== undefined) {
+      Deferred.doneUnsafe(this.waiter, this.resolveCompletion(CompiledStoppedCompletion))
+      this.waiter = undefined
+    }
+    return true
   }
 
   private settleRequestedTermination(): Effect.Effect<void> {
