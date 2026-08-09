@@ -85,8 +85,136 @@ const counterSnapshotParentMachine = Machine.make({
   }
 })
 
+const HierarchicalState = Schema.TaggedUnion({
+  Active: {},
+  Count: { value: Schema.Number },
+  Complete: { value: Schema.Number }
+})
+
+const HierarchicalEvent = Schema.TaggedUnion({
+  Increment: {},
+  IncrementLeft: {},
+  IncrementRight: {},
+  Finish: {}
+})
+
+const HierarchicalStates = Machine.defineStates({
+  Active: {
+    schema: HierarchicalState.cases.Active,
+    initial: "Count",
+    states: {
+      Count: HierarchicalState.cases.Count
+    }
+  },
+  Complete: {
+    schema: HierarchicalState.cases.Complete,
+    type: "final",
+    output: Schema.Number
+  }
+})
+
+const hierarchicalCounterMachine = Machine.make({
+  id: "RuntimeBenchmarkHierarchicalCounter",
+  states: HierarchicalStates.states,
+  events: [HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish],
+  initial: () =>
+    HierarchicalStates.initial.Active(
+      HierarchicalState.cases.Active.make({}),
+      (active) => active.Count(HierarchicalState.cases.Count.make({ value: 0 }))
+    )
+}).handle({
+  Active: {
+    states: {
+      Count: {
+        on: {
+          Increment: ({ state, target }) =>
+            target.local.Count(HierarchicalState.cases.Count.make({ value: state.value + 1 })),
+          Finish: ({ state, target }) =>
+            target.full.Complete(HierarchicalState.cases.Complete.make({ value: state.value }))
+        }
+      }
+    }
+  },
+  Complete: {
+    output: ({ state }) => state.value
+  }
+})
+
+const ParallelState = Schema.TaggedUnion({
+  Active: {},
+  Left: { value: Schema.Number },
+  Right: { value: Schema.Number },
+  Complete: { value: Schema.Number }
+})
+
+const ParallelStates = Machine.defineStates({
+  Active: {
+    schema: ParallelState.cases.Active,
+    type: "parallel",
+    states: {
+      Left: ParallelState.cases.Left,
+      Right: ParallelState.cases.Right
+    }
+  },
+  Complete: {
+    schema: ParallelState.cases.Complete,
+    type: "final",
+    output: Schema.Number
+  }
+})
+
+const parallelCounterMachine = Machine.make({
+  id: "RuntimeBenchmarkParallelCounter",
+  states: ParallelStates.states,
+  events: [
+    HierarchicalEvent.cases.IncrementLeft,
+    HierarchicalEvent.cases.IncrementRight,
+    HierarchicalEvent.cases.Finish
+  ],
+  initial: () =>
+    ParallelStates.initial.Active(
+      ParallelState.cases.Active.make({}),
+      (active) =>
+        active
+          .Left(ParallelState.cases.Left.make({ value: 0 }))
+          .Right(ParallelState.cases.Right.make({ value: 0 }))
+    )
+}).handle({
+  Active: {
+    on: {
+      Finish: ({ snapshot, target }) =>
+        target.full.Complete(
+          ParallelState.cases.Complete.make({
+            value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+          })
+        )
+    },
+    states: {
+      Left: {
+        on: {
+          IncrementLeft: ({ state, target }) =>
+            target.branch.Active.Left(ParallelState.cases.Left.make({ value: state.value + 1 }))
+        }
+      },
+      Right: {
+        on: {
+          IncrementRight: ({ state, target }) =>
+            target.branch.Active.Right(ParallelState.cases.Right.make({ value: state.value + 1 }))
+        }
+      }
+    }
+  },
+  Complete: {
+    output: ({ state }) => state.value
+  }
+})
+
 export const incrementEvent = CounterEvent.cases.Increment.make({})
 const finishEvent = CounterEvent.cases.Finish.make({})
+const hierarchicalIncrementEvent = HierarchicalEvent.cases.Increment.make({})
+const parallelIncrementLeftEvent = HierarchicalEvent.cases.IncrementLeft.make({})
+const parallelIncrementRightEvent = HierarchicalEvent.cases.IncrementRight.make({})
+const hierarchicalFinishEvent = HierarchicalEvent.cases.Finish.make({})
 
 export const initialCounterSnapshot = Effect.runSync(
   Machine.planInitial(counterMachine).pipe(Effect.map((planned) => planned.state))
@@ -187,6 +315,31 @@ export const runCounterBurst = (ref, size) =>
         yield* ref.send(incrementEvent)
       }
       yield* ref.send(finishEvent)
+      return yield* ref.join
+    })
+  )
+
+const startHierarchicalCounter = () => Effect.runPromise(Machine.start(hierarchicalCounterMachine))
+const startParallelCounter = () => Effect.runPromise(Machine.start(parallelCounterMachine))
+
+const runHierarchicalCounterBurst = (ref, size) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      for (let index = 0; index < size; index += 1) {
+        yield* ref.send(hierarchicalIncrementEvent)
+      }
+      yield* ref.send(hierarchicalFinishEvent)
+      return yield* ref.join
+    })
+  )
+
+const runParallelCounterBurst = (ref, size) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      for (let index = 0; index < size; index += 1) {
+        yield* ref.send(index % 2 === 0 ? parallelIncrementLeftEvent : parallelIncrementRightEvent)
+      }
+      yield* ref.send(hierarchicalFinishEvent)
       return yield* ref.join
     })
   )
@@ -346,6 +499,28 @@ export const effectMachineAdapter = {
   stopChildCounters,
   stopObservedCounter,
   stopCounters,
+  additionalMachineBenchmarks: [
+    {
+      id: "hierarchical-runtime-burst",
+      label: "Drain burst through a compound state",
+      unit: "events/s",
+      operations: ({ burstBatchSize }) => burstBatchSize,
+      expected: (operations) => operations,
+      start: startHierarchicalCounter,
+      run: runHierarchicalCounterBurst,
+      stop: stopCounter
+    },
+    {
+      id: "parallel-runtime-burst",
+      label: "Drain burst through two parallel regions",
+      unit: "events/s",
+      operations: ({ burstBatchSize }) => burstBatchSize,
+      expected: (operations) => operations,
+      start: startParallelCounter,
+      run: runParallelCounterBurst,
+      stop: stopCounter
+    }
+  ],
   runtimeBenchmarks: [
     {
       id: "compiled-process-start-stop",

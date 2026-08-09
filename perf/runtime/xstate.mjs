@@ -1,4 +1,6 @@
 const incrementEvent = Object.freeze({ type: "Increment" })
+const incrementLeftEvent = Object.freeze({ type: "IncrementLeft" })
+const incrementRightEvent = Object.freeze({ type: "IncrementRight" })
 const finishEvent = Object.freeze({ type: "Finish" })
 
 export const makeXStateAdapter = (options) => {
@@ -37,6 +39,55 @@ export const makeXStateAdapter = (options) => {
           src: machine
         }
       }
+    }
+  })
+  const hierarchicalMachine = xstate.createMachine({
+    id: `RuntimeBenchmarkHierarchicalCounter-${implementation}`,
+    context: { value: 0 },
+    initial: "active",
+    states: {
+      active: {
+        initial: "counting",
+        states: {
+          counting: {
+            on: {
+              Increment: increment,
+              Finish: { target: "#complete" }
+            }
+          }
+        }
+      },
+      complete: { id: "complete", type: "final" }
+    }
+  })
+  const parallelIncrement = (key) =>
+    typeof xstate.assign === "function"
+      ? {
+        actions: xstate.assign({
+          [key]: ({ context }) => context[key] + 1
+        })
+      }
+      : ({ context }) => ({
+        context: { ...context, [key]: context[key] + 1 }
+      })
+  const parallelMachine = xstate.createMachine({
+    id: `RuntimeBenchmarkParallelCounter-${implementation}`,
+    context: { left: 0, right: 0 },
+    initial: "active",
+    states: {
+      active: {
+        type: "parallel",
+        on: { Finish: { target: "complete" } },
+        states: {
+          left: {
+            on: { IncrementLeft: parallelIncrement("left") }
+          },
+          right: {
+            on: { IncrementRight: parallelIncrement("right") }
+          }
+        }
+      },
+      complete: { type: "final" }
     }
   })
   const initialSnapshot = xstate.initialTransition(machine)[0]
@@ -93,6 +144,18 @@ export const makeXStateAdapter = (options) => {
       throw new Error(`${label} terminal fence produced status ${snapshot.status}`)
     }
     return snapshot.context.value
+  }
+
+  const runMachineBurst = (actor, size, readValue, eventAt = () => incrementEvent) => {
+    for (let index = 0; index < size; index += 1) {
+      actor.send(eventAt(index))
+    }
+    actor.send(finishEvent)
+    const snapshot = actor.getSnapshot()
+    if (snapshot.status !== "done") {
+      throw new Error(`${label} hierarchical terminal fence produced status ${snapshot.status}`)
+    }
+    return readValue(snapshot.context)
   }
 
   const runObservedCounterBurst = async ({ actor, completion, getObserved }, size) => {
@@ -207,6 +270,34 @@ export const makeXStateAdapter = (options) => {
     stopChildCounters,
     stopCounters,
     stopObservedCounter,
+    additionalMachineBenchmarks: [
+      {
+        id: "hierarchical-runtime-burst",
+        label: "Drain burst through a compound state",
+        unit: "events/s",
+        operations: ({ burstBatchSize }) => burstBatchSize,
+        expected: (operations) => operations,
+        start: () => xstate.createActor(hierarchicalMachine).start(),
+        run: (actor, size) => runMachineBurst(actor, size, (context) => context.value),
+        stop: stopCounter
+      },
+      {
+        id: "parallel-runtime-burst",
+        label: "Drain burst through two parallel regions",
+        unit: "events/s",
+        operations: ({ burstBatchSize }) => burstBatchSize,
+        expected: (operations) => operations,
+        start: () => xstate.createActor(parallelMachine).start(),
+        run: (actor, size) =>
+          runMachineBurst(
+            actor,
+            size,
+            (context) => context.left + context.right,
+            (index) => index % 2 === 0 ? incrementLeftEvent : incrementRightEvent
+          ),
+        stop: stopCounter
+      }
+    ],
     memoryProfiles: {
       idle: {
         label: "Idle machine",
