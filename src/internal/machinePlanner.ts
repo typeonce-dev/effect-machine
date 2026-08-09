@@ -2186,24 +2186,17 @@ const makeIndexedTransitionContext = (
   event: any
 ): any => {
   const source = descriptor.nodes[sourceIndex]!
-  let snapshot: Machine.Snapshot<any> | undefined
+  const parentIndex = descriptor.parentIndices[sourceIndex]!
+  const parents: Record<string, unknown> = {}
+  for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
+    parents[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
+  }
   return {
     state: configuration.values[sourceIndex],
-    get parent() {
-      const parentIndex = descriptor.parentIndices[sourceIndex]!
-      return parentIndex < 0 ? undefined : configuration.values[parentIndex]
-    },
-    get parents() {
-      const parents: Record<string, unknown> = {}
-      for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
-        parents[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
-      }
-      return parents
-    },
+    parent: parentIndex < 0 ? undefined : configuration.values[parentIndex],
+    parents,
     event,
-    get snapshot() {
-      return snapshot ??= snapshotFromIndexed(descriptor, configuration)
-    },
+    snapshot: snapshotFromIndexed(descriptor, configuration),
     target: getTargetBuilder(machine, source.path)
   }
 }
