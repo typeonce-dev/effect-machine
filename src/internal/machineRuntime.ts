@@ -30,12 +30,18 @@ type ChildEntry =
   | {
     readonly _tag: "Starting"
     readonly token: symbol
+    readonly ownerKey?: string
+    readonly ownerPath?: string
+    ownerActive?: boolean
   }
   | {
     readonly _tag: "Started"
     readonly token: symbol
     readonly descriptor: ChildDescriptor | undefined
     readonly ref: MachineRef<any, any, any, any>
+    readonly ownerKey?: string
+    readonly ownerPath?: string
+    ownerActive?: boolean
   }
 
 type ChildSelector = string | ChildDescriptor
@@ -104,6 +110,68 @@ interface ChildRegistry {
   readonly children: Map<ChildKey, ChildEntry>
   observers: Set<ChildObserver> | undefined
   scope: Scope.Closeable | undefined
+}
+
+const matchesChild = (
+  entry: ChildEntry,
+  child: ChildSelector
+): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
+  entry._tag === "Started" && (typeof child === "string" || (
+    entry.descriptor !== undefined &&
+    entry.descriptor.id === child.id &&
+    entry.descriptor.machine === child.machine
+  ))
+
+const selectRegistryChild = (
+  registry: ChildRegistry,
+  id: string,
+  child: ChildSelector
+): ChildObservation => {
+  if (registry.closed) return Option.none()
+  const entry = registry.children.get(id)
+  return entry !== undefined && matchesChild(entry, child) ? Option.some(entry.ref) : Option.none()
+}
+
+const publishRegistryChange = (registry: ChildRegistry): void => {
+  if (registry.observers === undefined) return
+  for (const observer of registry.observers) {
+    offerChildObservation(observer, selectRegistryChild(registry, observer.id, observer.child))
+  }
+}
+
+const unregisterChild = (registry: ChildRegistry, key: ChildKey, token: symbol): void => {
+  const entry = registry.children.get(key)
+  if (entry === undefined || entry.token !== token) return
+  registry.children.delete(key)
+  if (typeof key === "string") publishRegistryChange(registry)
+}
+
+const registerChild = (
+  registry: ChildRegistry,
+  key: ChildKey,
+  token: symbol,
+  ref: MachineRef<any, any, any, any>,
+  descriptor: ChildDescriptor | undefined
+): boolean => {
+  const entry = registry.children.get(key)
+  if (registry.closed || entry === undefined || entry._tag !== "Starting" || entry.token !== token) {
+    return false
+  }
+  registry.children.delete(key)
+  const started: ChildEntry = entry.ownerKey === undefined
+    ? { _tag: "Started", token, descriptor, ref }
+    : {
+      _tag: "Started",
+      token,
+      descriptor,
+      ref,
+      ownerKey: entry.ownerKey,
+      ownerPath: entry.ownerPath!,
+      ownerActive: entry.ownerActive === true
+    }
+  registry.children.set(key, started)
+  if (typeof key === "string") publishRegistryChange(registry)
+  return true
 }
 
 export type RuntimeSnapshot<State, Error = never, Output = never> =
@@ -229,6 +297,7 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
  */
 export interface CompiledProcessContext<State, Event> {
   readonly scope: ProcessScope<Event>
+  readonly ownedChildren: OwnedChildRuntime
   readonly poll: () => Option.Option<Event>
   readonly state: () => State
   readonly commit: (state: State) => Effect.Effect<void> | undefined
@@ -284,7 +353,13 @@ export interface ProcessLogic<
     scope: ProcessScope<Event>
   ) => Effect.Effect<
     | { readonly state: State; readonly done: false; readonly output: undefined }
-    | { readonly state: State; readonly done: true; readonly output: Output },
+    | { readonly state: State; readonly done: true; readonly output: Output }
+    | {
+      readonly state: State
+      readonly done: boolean
+      readonly output: Output | undefined
+      readonly executionState: unknown
+    },
     InitialError,
     Requirements
   >
@@ -435,10 +510,42 @@ interface StartInternalOptions {
     ref: MachineRef<any, any, any, any>,
     requestStop: Effect.Effect<void>
   ) => Effect.Effect<void>
+  readonly onReadySync?: (ref: MachineRef<any, any, any, any>) => boolean
   readonly onStop?: Effect.Effect<void>
+  readonly onStopSync?: () => void
+  readonly skipStoppedOutcome?: boolean
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime
   readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
+}
+
+interface OwnedChildSpawnOptions {
+  readonly key: string
+  readonly path: string
+  readonly id: string
+  readonly duplicateId: string
+  readonly descriptor?: ChildDescriptor
+  readonly onOutcome: (
+    isCurrent: () => boolean,
+    outcome: RuntimeOutcome<any, any, any>
+  ) => Effect.Effect<void>
+  readonly onSnapshot?: (
+    isCurrent: () => boolean,
+    snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
+  ) => Effect.Effect<void>
+  readonly sendParent: (
+    isCurrent: () => boolean,
+    event: unknown
+  ) => Effect.Effect<void, StoppedError>
+}
+
+interface OwnedChildRuntime {
+  readonly spawn: (
+    logic: ProcessLogic<any, any, any, any, any, any>,
+    options: OwnedChildSpawnOptions
+  ) => Effect.Effect<void, any, any>
+  readonly stopAll: () => Effect.Effect<void>
+  readonly stopPaths: (paths: ReadonlyArray<string>) => Effect.Effect<void> | undefined
 }
 
 interface ChildRuntime {
@@ -452,6 +559,108 @@ interface ChildRuntime {
   ) => Stream.Stream<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>>
   readonly sendTo: (child: ChildSelector, event: unknown) => Effect.Effect<void, StoppedError>
   readonly stop: (child: ChildSelector) => Effect.Effect<void>
+  readonly owned: OwnedChildRuntime
+}
+
+class OwnedChildRuntimeImpl implements OwnedChildRuntime {
+  constructor(
+    private readonly registry: ChildRegistry,
+    private readonly self: ProcessAddress<any>,
+    private readonly runtime: ProcessRuntime
+  ) {}
+
+  private has(key: string): boolean {
+    for (const entry of this.registry.children.values()) {
+      if (entry.ownerActive && entry.ownerKey === key) return true
+    }
+    return false
+  }
+
+  private stopEntry(entry: ChildEntry): Effect.Effect<void> {
+    entry.ownerActive = false
+    return entry._tag === "Started" ? entry.ref.stop : Effect.void
+  }
+
+  spawn(
+    logic: ProcessLogic<any, any, any, any, any, any>,
+    options: OwnedChildSpawnOptions
+  ): Effect.Effect<void, any, any> {
+    const token = Symbol()
+    let startedChild: MachineRef<any, any, any, any> | undefined
+    const isCurrent = (): boolean => {
+      const entry = this.registry.children.get(options.id)
+      return entry?.token === token && entry.ownerKey === options.key && entry.ownerActive === true
+    }
+    return Effect.suspend(() => {
+      if (this.registry.closed) return Effect.interrupt
+      if (this.has(options.key) || this.registry.children.has(options.id)) {
+        return Effect.fail(new ChildAlreadyExistsError({ id: options.duplicateId }))
+      }
+      this.registry.scope ??= Scope.makeUnsafe("parallel")
+      this.registry.children.set(options.id, {
+        _tag: "Starting",
+        token,
+        ownerKey: options.key,
+        ownerPath: options.path,
+        ownerActive: true
+      })
+      return startLogicInternal(logic, {
+        detached: true,
+        id: options.id,
+        sendParent: (event) => options.sendParent(isCurrent, event),
+        onOutcome: (outcome) => options.onOutcome(isCurrent, outcome),
+        ...(options.onSnapshot === undefined
+          ? undefined
+          : { onSnapshot: (snapshot) => options.onSnapshot!(isCurrent, snapshot) }),
+        onReadySync: (child) => {
+          startedChild = child
+          return registerChild(this.registry, options.id, token, child, options.descriptor)
+        },
+        onStopSync: () => unregisterChild(this.registry, options.id, token),
+        skipStoppedOutcome: true,
+        parent: this.self,
+        runtime: this.runtime
+      }).pipe(
+        Effect.onExit((exit) => {
+          if (Exit.isSuccess(exit)) return Effect.void
+          unregisterChild(this.registry, options.id, token)
+          return startedChild === undefined ? Effect.void : startedChild.stop
+        }),
+        Scope.provide(this.registry.scope),
+        Effect.asVoid
+      )
+    })
+  }
+
+  stopAll(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const effects: Array<Effect.Effect<void>> = []
+      for (const entry of this.registry.children.values()) {
+        if (entry.ownerActive) effects.push(this.stopEntry(entry))
+      }
+      return effects.length === 0
+        ? Effect.void
+        : effects.length === 1
+        ? effects[0]!
+        : Effect.all(effects, { concurrency: "unbounded", discard: true })
+    })
+  }
+
+  stopPaths(paths: ReadonlyArray<string>): Effect.Effect<void> | undefined {
+    if (paths.length === 0) return undefined
+    const pathSet = new Set(paths)
+    const effects: Array<Effect.Effect<void>> = []
+    for (const entry of this.registry.children.values()) {
+      if (entry.ownerActive && entry.ownerPath !== undefined && pathSet.has(entry.ownerPath)) {
+        effects.push(this.stopEntry(entry))
+      }
+    }
+    return effects.length === 0
+      ? undefined
+      : effects.length === 1
+      ? effects[0]!
+      : Effect.all(effects, { concurrency: "unbounded", discard: true })
+  }
 }
 
 const noChildChanges = Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never))
@@ -463,7 +672,12 @@ const childlessRuntime: ChildRuntime = {
   get: () => Effect.succeed(Option.none()),
   changes: () => noChildChanges,
   sendTo: () => Effect.void,
-  stop: () => Effect.void
+  stop: () => Effect.void,
+  owned: {
+    spawn: () => Effect.die(new Error("Childless machine logic cannot spawn an owned process")),
+    stopAll: () => Effect.void,
+    stopPaths: () => undefined
+  }
 }
 
 const makeChildRuntime = (
@@ -480,38 +694,6 @@ const makeChildRuntime = (
       children: new Map(),
       observers: undefined,
       scope: undefined
-    }
-
-    const matches = (
-      entry: ChildEntry,
-      child: ChildSelector
-    ): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
-      entry._tag === "Started" && (typeof child === "string" || (
-        entry.descriptor !== undefined &&
-        entry.descriptor.id === child.id &&
-        entry.descriptor.machine === child.machine
-      ))
-
-    const selectChild = (
-      id: string,
-      child: ChildSelector
-    ): ChildObservation => {
-      if (registry.closed) {
-        return Option.none()
-      }
-      const entry = registry.children.get(id)
-      return entry !== undefined && matches(entry, child)
-        ? Option.some(entry.ref)
-        : Option.none()
-    }
-
-    const publishRegistryChange = (): void => {
-      if (registry.observers === undefined) {
-        return
-      }
-      for (const observer of registry.observers) {
-        offerChildObservation(observer, selectChild(observer.id, observer.child))
-      }
     }
 
     const close = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
@@ -556,43 +738,14 @@ const makeChildRuntime = (
     const unregister = (
       key: ChildKey,
       token: symbol
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
-        const entry = registry.children.get(key)
-        if (entry === undefined || entry.token !== token) {
-          return
-        }
-        const observable = typeof key === "string"
-        registry.children.delete(key)
-        if (observable) {
-          publishRegistryChange()
-        }
-      })
+    ): Effect.Effect<void> => Effect.sync(() => unregisterChild(registry, key, token))
 
     const register = (
       key: ChildKey,
       token: symbol,
       ref: MachineRef<any, any, any, any>,
       descriptor: ChildDescriptor | undefined
-    ): Effect.Effect<boolean> =>
-      Effect.sync(() => {
-        const entry = registry.children.get(key)
-        if (
-          registry.closed ||
-          entry === undefined ||
-          entry._tag !== "Starting" ||
-          entry.token !== token
-        ) {
-          return false
-        }
-        const observable = typeof key === "string"
-        registry.children.delete(key)
-        registry.children.set(key, { _tag: "Started", token, descriptor, ref })
-        if (observable) {
-          publishRegistryChange()
-        }
-        return true
-      })
+    ): Effect.Effect<boolean> => Effect.sync(() => registerChild(registry, key, token, ref, descriptor))
 
     const get: ChildRuntime["get"] = (child) => {
       const id = typeof child === "string" ? child : child.id
@@ -601,7 +754,7 @@ const makeChildRuntime = (
           return Option.none()
         }
         const entry = registry.children.get(id)
-        return entry !== undefined && matches(entry, child)
+        return entry !== undefined && matchesChild(entry, child)
           ? Option.some(entry.ref)
           : Option.none()
       })
@@ -630,7 +783,7 @@ const makeChildRuntime = (
                       registry.observers ??= new Set()
                       registry.observers.add(observer)
                     }
-                    offerChildObservation(observer, selectChild(id, child))
+                    offerChildObservation(observer, selectRegistryChild(registry, id, child))
                   })
                 ),
                 Effect.as(takeChildObservations(observer))
@@ -648,7 +801,7 @@ const makeChildRuntime = (
           return Effect.void
         }
         const entry = registry.children.get(id)
-        return entry !== undefined && matches(entry, child)
+        return entry !== undefined && matchesChild(entry, child)
           ? entry.ref.send(event)
           : Effect.void
       })
@@ -661,7 +814,7 @@ const makeChildRuntime = (
           return Effect.void
         }
         const entry = registry.children.get(id)
-        return entry !== undefined && matches(entry, child)
+        return entry !== undefined && matchesChild(entry, child)
           ? entry.ref.stop
           : Effect.void
       })
@@ -763,7 +916,15 @@ const makeChildRuntime = (
       >
     }
 
-    return { close, spawn, get, changes, sendTo, stop }
+    return {
+      close,
+      spawn,
+      get,
+      changes,
+      sendTo,
+      stop,
+      owned: new OwnedChildRuntimeImpl(registry, self, runtime)
+    }
   })
 
 // `Machine.logic` permits an arbitrary Effect program, including programs that
@@ -792,8 +953,10 @@ const startGenericInternal: <
     id: requestedId,
     onOutcome,
     onReady,
+    onReadySync,
     onSnapshot,
     onStop,
+    onStopSync,
     parent,
     runtime,
     sendParent: overrideSendParent
@@ -852,7 +1015,7 @@ const startGenericInternal: <
     Exit.isFailure(exit)
       ? closeChildren(exit)
       : Effect.void
-  const cleanup = onStop ?? Effect.void
+  const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(onStopSync)
   const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
 
   const scope: ProcessScope<Event> = {
@@ -1019,12 +1182,13 @@ const startGenericInternal: <
     exit: Exit.Exit<unknown, unknown>,
     completeDone: Effect.Effect<void>
   ): Effect.Effect<void> => {
-    const notifyOutcome = onOutcome === undefined
-      ? Effect.void
-      : Effect.suspend(() => onOutcome(classifyOutcome(snapshot)!)).pipe(
-        Effect.exit,
-        Effect.asVoid
-      )
+    const notifyOutcome =
+      onOutcome === undefined || (snapshot.status === "stopped" && options.skipStoppedOutcome === true)
+        ? Effect.void
+        : Effect.suspend(() => onOutcome(classifyOutcome(snapshot)!)).pipe(
+          Effect.exit,
+          Effect.asVoid
+        )
     return Effect.uninterruptible(
       Queue.shutdown(queue).pipe(
         Effect.andThen(closeChildren(exit)),
@@ -1155,7 +1319,9 @@ const startGenericInternal: <
     childChanges
   }
 
-  if (onReady !== undefined) {
+  if (onReadySync !== undefined && !onReadySync(ref)) {
+    yield* requestStop
+  } else if (onReady !== undefined) {
     yield* onReady(ref, requestStop)
   }
   if (onSnapshot !== undefined) {
@@ -1357,10 +1523,15 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           updateState: (f) => self.updateState(f)
         }
       } else {
-        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self)
+        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self.childRuntime.owned, self)
+        if ("executionState" in initialized) {
+          self.compiledContext.executionState = initialized.executionState
+        }
       }
 
-      if (self.options.onReady !== undefined) {
+      if (self.options.onReadySync !== undefined && !self.options.onReadySync(self)) {
+        yield* self.requestTermination({ _tag: "Stopped" })
+      } else if (self.options.onReady !== undefined) {
         yield* self.options.onReady(self, self.requestTermination({ _tag: "Stopped" }).pipe(Effect.asVoid))
       }
       if (self.options.onSnapshot !== undefined) {
@@ -1525,7 +1696,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     if (
       this.logic[childlessProcess] !== true || this.draining || this.worker !== undefined ||
       this.requestedTermination !== undefined || this.options.onOutcome !== undefined ||
-      this.options.onStop !== undefined || this.current.changes !== undefined ||
+      this.options.onStop !== undefined || this.options.onStopSync !== undefined ||
+      this.current.changes !== undefined ||
       this.current.terminalizing || this.current.snapshot.status !== "active"
     ) {
       return false
@@ -1659,7 +1831,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         : requested._tag === "Done"
         ? Effect.succeed(requested.output)
         : Effect.failCause(requested.cause)
-      const notifyOutcome = this.options.onOutcome === undefined
+      const notifyOutcome = this.options.onOutcome === undefined ||
+          (requested._tag === "Stopped" && this.options.skipStoppedOutcome === true)
         ? Effect.void
         : Effect.suspend(() => this.options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
           Effect.exit,
@@ -1672,6 +1845,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           Effect.andThen(notifyOutcome),
           Effect.andThen(this.options.onStop ?? Effect.void),
           Effect.andThen(Effect.sync(() => {
+            this.options.onStopSync?.()
             this.draining = false
             this.worker = undefined
             this.interruptRequested = false
@@ -1871,6 +2045,7 @@ class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unkn
 
   constructor(
     readonly scope: ProcessScope<unknown>,
+    readonly ownedChildren: OwnedChildRuntime,
     private readonly process: CompiledProcess
   ) {}
 
