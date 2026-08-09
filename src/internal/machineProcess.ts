@@ -782,6 +782,11 @@ const makeProcessLogic: <
   >
 }
 
+const initialProcessLogicCache = new WeakMap<
+  Machine.Any,
+  internalRuntime.ProcessLogic<any, any, any, any, any, any>
+>()
+
 export const toProcessLogic: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -814,7 +819,23 @@ export const toProcessLogic: <
   | MachineSchemaDecodeError
   | StartupError
   | StoppedError
-> = (machine, ...args) => makeProcessLogic(machine, { _tag: "Initial", args })
+> = (machine, ...args) => {
+  if (args.length > 0) {
+    return makeProcessLogic(machine, { _tag: "Initial", args })
+  }
+  // The execution descriptor stores process-local invoke sessions by each
+  // runtime address and evaluates initialization/services on every start. A
+  // zero-argument descriptor is therefore safe to share for the lifetime of
+  // its immutable machine definition. Input-bearing and resumed starts retain
+  // their instance-specific entry values below.
+  const cached = initialProcessLogicCache.get(machine)
+  if (cached !== undefined) {
+    return cached as any
+  }
+  const logic = makeProcessLogic(machine, { _tag: "Initial", args })
+  initialProcessLogicCache.set(machine, logic as any)
+  return logic
+}
 
 const toResumedProcessLogic = (
   machine: Machine.Any,
