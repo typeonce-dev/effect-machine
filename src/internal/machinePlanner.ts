@@ -1991,7 +1991,7 @@ const compileIndexedExecutionDescriptor = (
     const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
     if (
       config?.entry !== undefined || config?.exit !== undefined || config?.always !== undefined ||
-      config?.onDone !== undefined || config?.invoke !== undefined || (config as any)?.choice !== undefined ||
+      config?.onDone !== undefined || (config as any)?.choice !== undefined ||
       (config as any)?.history !== undefined
     ) {
       return undefined
@@ -2710,6 +2710,16 @@ export interface CompiledExecutionPlan {
     state: unknown,
     event: unknown
   ) => MacrostepPlan<any, any, any, any, any>
+  readonly initial?: (
+    args: ReadonlyArray<unknown>
+  ) => {
+    readonly state: Machine.Snapshot<any>
+    readonly configuration: unknown
+    readonly activeConfiguration: ActiveConfiguration
+    readonly initialEntryPaths: ReadonlyArray<string>
+    readonly done: boolean
+    readonly output: unknown
+  }
 }
 
 const executionPlanCache = new WeakMap<Machine.Any, CompiledExecutionPlan>()
@@ -2733,7 +2743,43 @@ export const compileExecutionPlan = (machine: Machine.Any): CompiledExecutionPla
       fromConfiguration: (configuration) => indexedConfigurationFromActive(indexed, configuration),
       toConfiguration: (state) => activeConfigurationFromIndexed(indexed, state as IndexedConfiguration),
       snapshot: (state) => snapshotFromIndexed(indexed, state as IndexedConfiguration),
-      plan: (state, event) => planIndexedConfiguration(machine, indexed, state as IndexedConfiguration, event)
+      plan: (state, event) => planIndexedConfiguration(machine, indexed, state as IndexedConfiguration, event),
+      initial: (args) => {
+        const inputArgs = machine.input === undefined
+          ? args
+          : args.length === 0
+          ? (decodeInputSync(machine, machine.input, undefined), args)
+          : [decodeInputSync(machine, machine.input, args[0])]
+        const initial = machine.initial(...inputArgs as any)
+        const active = normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
+        validateInitialConfiguration(machine, active)
+        const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
+        const configuration = indexedConfigurationFromActive(indexed, completed)
+        const state = snapshotFromIndexed(indexed, configuration)
+        const done = isActiveFinalConfiguration(machine, completed)
+        if (!done) {
+          return {
+            state,
+            configuration,
+            activeConfiguration: completed,
+            initialEntryPaths: getInitialEntryPaths(machine, completed),
+            done: false,
+            output: undefined
+          }
+        }
+        const root = getRootPath(machine, completed)
+        if (!completed.outputs.has(root)) {
+          throw new Error("Machine reached a terminal configuration without a completed root output")
+        }
+        return {
+          state,
+          configuration,
+          activeConfiguration: completed,
+          initialEntryPaths: getInitialEntryPaths(machine, completed),
+          done: true,
+          output: completed.outputs.get(root)
+        }
+      }
     }
     : activePlan((configuration, event) => planConfiguration(machine as any, configuration, event as any))
   executionPlanCache.set(machine, compiled)

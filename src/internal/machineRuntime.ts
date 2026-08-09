@@ -284,7 +284,13 @@ export interface ProcessLogic<
     scope: ProcessScope<Event>
   ) => Effect.Effect<
     | { readonly state: State; readonly done: false; readonly output: undefined }
-    | { readonly state: State; readonly done: true; readonly output: Output },
+    | { readonly state: State; readonly done: true; readonly output: Output }
+    | {
+      readonly state: State
+      readonly done: boolean
+      readonly output: Output | undefined
+      readonly executionState: unknown
+    },
     InitialError,
     Requirements
   >
@@ -1358,6 +1364,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         }
       } else {
         self.compiledContext = new CompiledProcessContextImpl(self.processScope, self)
+        if ("executionState" in initialized) {
+          self.compiledContext.executionState = initialized.executionState
+        }
       }
 
       if (self.options.onReady !== undefined) {

@@ -4,14 +4,20 @@
  * @since 4.0.0
  */
 
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../Machine.js"
-import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError } from "./machineErrors.js"
-import type { StartupError, StoppedError } from "./machineErrors.js"
+import {
+  ChildAlreadyExistsError,
+  InfiniteTransitionError,
+  MachineSchemaDecodeError,
+  StartupError
+} from "./machineErrors.js"
+import type { StoppedError } from "./machineErrors.js"
 import * as Model from "./machineModel.js"
 import * as internalPlanner from "./machinePlanner.js"
 import * as internalRuntime from "./machineRuntime.js"
@@ -247,9 +253,21 @@ const makeChildlessCompiledDrain = (
 class InvokeExecutionKernel {
   readonly sessions: Map<string, InvokeSession>
   initialized = false
+  initial:
+    | {
+      readonly configuration: unknown
+      readonly activeConfiguration: Model.ActiveConfiguration
+      readonly entryPaths: ReadonlyArray<string>
+    }
+    | undefined
 
-  constructor() {
+  constructor(initial?: {
+    readonly configuration: unknown
+    readonly activeConfiguration: Model.ActiveConfiguration
+    readonly entryPaths: ReadonlyArray<string>
+  }) {
     this.sessions = new Map()
+    this.initial = initial
   }
 
   private makeSessionKey(path: string, id: string): string {
@@ -499,15 +517,17 @@ const makeInvokingCompiledDrain = (
       if (execution.initialized) {
         return loop
       }
-      const initialConfiguration = Model.normalizeConfigurationSync(machine, current)
-      configuration = executionPlan.fromConfiguration(initialConfiguration)
+      const seeded = execution.initial
+      const initialConfiguration = seeded?.activeConfiguration ?? Model.normalizeConfigurationSync(machine, current)
+      configuration = seeded?.configuration ?? executionPlan.fromConfiguration(initialConfiguration)
       const starting = execution.startAll(
         machine,
         context,
         initialConfiguration,
-        Model.getInitialEntryPaths(machine, initialConfiguration),
+        seeded?.entryPaths ?? Model.getInitialEntryPaths(machine, initialConfiguration),
         internalPlanner.InitialEvent
       )
+      execution.initial = undefined
       execution.initialized = true
       return starting === undefined ? loop : starting.pipe(Effect.andThen(loop))
     }
@@ -564,36 +584,63 @@ const makeProcessLogic: <
   entry: ProcessEntry<States, Input>
 ) => {
   const hasInvokes = hasInvokeCapability(machine)
+  const executionPlan = internalPlanner.compileExecutionPlan(machine)
   const initialArgs = entry._tag === "Initial" ? entry.args : []
+  const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
   const makeInitial = (
     scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
   ) =>
-    internalRuntime.provideMachineRuntime(
-      internalPlanner.planInitial(machine, ...initialArgs).pipe(
-        Effect.flatMap((planned) => {
-          const commands = planned.commands.length === 0
-            ? undefined
-            : internalPlanner.runCommands(planned.commands, scope)
-          const emitted = planned.emittedEvents.length === 0
-            ? undefined
-            : internalPlanner.runEmittedEvents(
-              planned.emittedEvents,
-              internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
-            )
-          const result = Effect.succeed({
-            state: planned.state,
-            done: planned.done,
-            output: planned.output
+    compiledInitial === undefined
+      ? internalRuntime.provideMachineRuntime(
+        internalPlanner.planInitial(machine, ...initialArgs).pipe(
+          Effect.flatMap((planned) => {
+            const commands = planned.commands.length === 0
+              ? undefined
+              : internalPlanner.runCommands(planned.commands, scope)
+            const emitted = planned.emittedEvents.length === 0
+              ? undefined
+              : internalPlanner.runEmittedEvents(
+                planned.emittedEvents,
+                internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
+              )
+            const result = Effect.succeed({
+              state: planned.state,
+              done: planned.done,
+              output: planned.output
+            })
+            return commands === undefined
+              ? emitted === undefined ? result : emitted.pipe(Effect.andThen(result))
+              : emitted === undefined
+              ? commands.pipe(Effect.andThen(result))
+              : commands.pipe(Effect.andThen(emitted), Effect.andThen(result))
           })
-          return commands === undefined
-            ? emitted === undefined ? result : emitted.pipe(Effect.andThen(result))
-            : emitted === undefined
-            ? commands.pipe(Effect.andThen(result))
-            : commands.pipe(Effect.andThen(emitted), Effect.andThen(result))
-        })
-      ),
-      scope
-    )
+        ),
+        scope
+      )
+      : Effect.try({
+        try: () => {
+          const planned = compiledInitial(initialArgs)
+          const result = {
+            state: planned.state as Machine.Snapshot<States>,
+            done: planned.done,
+            output: planned.output as Output | undefined
+          }
+          return hasInvokes
+            ? {
+              ...result,
+              executionState: new InvokeExecutionKernel({
+                configuration: planned.configuration,
+                activeConfiguration: planned.activeConfiguration,
+                entryPaths: planned.initialEntryPaths
+              })
+            }
+            : result
+        },
+        catch: (error) =>
+          error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
+            ? error
+            : new StartupError({ cause: Cause.die(error) })
+      })
   return ({
     [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
     [internalRuntime.compiledProcess]: true,
