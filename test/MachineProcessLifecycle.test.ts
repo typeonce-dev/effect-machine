@@ -230,6 +230,38 @@ describe("machine process lifecycle", () => {
       )
     }))
 
+  it.effect("interrupts an active compiled drain when the process is stopped", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const cleanupCount = yield* Ref.make(0)
+      const ref = yield* MachineRuntime.startProcess<number, void>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        initial: () => Effect.succeed(1),
+        run: () => Effect.never,
+        drain: (context) =>
+          Effect.gen(function*() {
+            const event = yield* context.poll!
+            if (Option.isNone(event)) {
+              return Option.none()
+            }
+            return yield* Effect.acquireUseRelease(
+              Deferred.succeed(started, undefined),
+              () => Effect.never,
+              () => Ref.update(cleanupCount, (count) => count + 1)
+            )
+          })
+      })
+
+      yield* ref.send(undefined)
+      yield* Deferred.await(started)
+      yield* ref.stop
+
+      assert.strictEqual(yield* Ref.get(cleanupCount), 1)
+      assert.deepStrictEqual(yield* ref.snapshot, { status: "stopped", state: 1 })
+      assert.instanceOf(yield* Effect.flip(ref.join), Machine.StoppedError)
+    }))
+
   it.effect("terminalizes once when concurrent callers stop the same process", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)
