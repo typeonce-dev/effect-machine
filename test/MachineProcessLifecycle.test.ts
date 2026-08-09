@@ -510,12 +510,15 @@ describe("machine process lifecycle", () => {
         run: () => Effect.never
       })
       const scope = yield* Deferred.await(parentScope)
-      const observed = yield* parent.childChanges("worker").pipe(
+      const observeReplacements = parent.childChanges("worker").pipe(
         Stream.map(Option.map((child) => child.sessionId)),
         Stream.take(5),
-        Stream.runCollect,
-        Effect.forkChild
+        Stream.runCollect
       )
+      const observers = [
+        yield* observeReplacements.pipe(Effect.forkChild),
+        yield* observeReplacements.pipe(Effect.forkChild)
+      ]
       yield* Effect.yieldNow
 
       const first = yield* scope.spawn(Machine.logic({ initial: 1, run: () => Effect.never }), { id: "worker" })
@@ -523,10 +526,86 @@ describe("machine process lifecycle", () => {
       const second = yield* scope.spawn(Machine.logic({ initial: 2, run: () => Effect.never }), { id: "worker" })
       yield* second.stop
 
-      assert.deepStrictEqual(
-        Array.from(yield* Fiber.join(observed)).map(Option.getOrElse(() => "none")),
-        ["none", first.sessionId, "none", second.sessionId, "none"]
+      for (const observer of observers) {
+        assert.deepStrictEqual(
+          Array.from(yield* Fiber.join(observer)).map(Option.getOrElse(() => "none")),
+          ["none", first.sessionId, "none", second.sessionId, "none"]
+        )
+      }
+      yield* parent.stop
+    }))
+
+  it.effect("preserves registry-wide childChanges emission ticks", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const scope = yield* Deferred.await(parentScope)
+      const observed = yield* parent.childChanges("worker").pipe(
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild
       )
+      yield* Effect.yieldNow
+
+      const unrelated = yield* scope.spawn(
+        Machine.logic({ initial: 0, run: () => Effect.never }),
+        { id: "unrelated" }
+      )
+      yield* unrelated.stop
+
+      assert.deepStrictEqual(
+        Array.from(yield* Fiber.join(observed)).map(Option.isNone),
+        [true, true, true]
+      )
+      yield* parent.stop
+    }))
+
+  it.effect("buffers ordered childChanges while a subscriber is stalled", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const scope = yield* Deferred.await(parentScope)
+      const initialObserved = yield* Deferred.make<void>()
+      const releaseObserver = yield* Deferred.make<void>()
+      const observationCount = yield* Ref.make(0)
+      const replacements = 20
+      const observed = yield* parent.childChanges("worker").pipe(
+        Stream.mapEffect((child) =>
+          Ref.getAndUpdate(observationCount, (count) => count + 1).pipe(
+            Effect.flatMap((index) =>
+              index === 0
+                ? Deferred.succeed(initialObserved, void 0).pipe(Effect.as(child))
+                : Deferred.await(releaseObserver).pipe(Effect.as(child))
+            )
+          )
+        ),
+        Stream.take(1 + replacements * 2),
+        Stream.runCollect,
+        Effect.forkChild
+      )
+      yield* Deferred.await(initialObserved)
+
+      for (let index = 0; index < replacements; index += 1) {
+        const child = yield* scope.spawn(
+          Machine.logic({ initial: index, run: () => Effect.never }),
+          { id: "worker" }
+        )
+        yield* child.stop
+      }
+      yield* Deferred.succeed(releaseObserver, void 0)
+
+      const values = Array.from(yield* Fiber.join(observed))
+      assert.strictEqual(values.length, 1 + replacements * 2)
+      assert(Option.isNone(values[0]!))
+      for (let index = 1; index < values.length; index += 1) {
+        assert.strictEqual(Option.isSome(values[index]!), index % 2 === 1)
+      }
       yield* parent.stop
     }))
 
