@@ -3953,6 +3953,87 @@ describe("Machine", () => {
       })
     }))
 
+  it.effect("isolates invoked children across concurrent zero-input starts", () =>
+    Effect.gen(function*() {
+      const childStates = Machine.defineStates({ Idle })
+      const childMachine = Machine.make({
+        states: childStates.states,
+        events: [],
+        initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+      })
+      const Child = Machine.child("shared-child", childMachine)
+      const parentStates = Machine.defineStates({ Loading })
+      const parentMachine = Machine.make({
+        states: parentStates.states,
+        events: [],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeMachine({ child: Child })
+        }
+      })
+
+      const [first, second] = yield* Effect.all(
+        [Machine.start(parentMachine), Machine.start(parentMachine)],
+        { concurrency: "unbounded" }
+      )
+      const firstChild = yield* first.childChanges(Child).pipe(
+        Stream.filter(Option.isSome),
+        Stream.runHead,
+        Effect.map(Option.flatten)
+      )
+      const secondChild = yield* second.childChanges(Child).pipe(
+        Stream.filter(Option.isSome),
+        Stream.runHead,
+        Effect.map(Option.flatten)
+      )
+
+      assert(Option.isSome(firstChild))
+      assert(Option.isSome(secondChild))
+      assert.notStrictEqual(firstChild.value, secondChild.value)
+
+      yield* first.stop
+      assert.deepStrictEqual(yield* second.snapshot, {
+        status: "active",
+        state: { path: "Loading", value: new Loading({ requestId: "parent" }) }
+      })
+      assert.deepStrictEqual(yield* secondChild.value.snapshot, {
+        status: "active",
+        state: { path: "Idle", value: new Idle({ userId: "child" }) }
+      })
+      yield* second.stop
+    }))
+
+  it.effect("keeps input-bearing process descriptors instance-specific", () =>
+    Effect.gen(function*() {
+      const states = Machine.defineStates({ Idle })
+      const machine = Machine.make({
+        states: states.states,
+        events: [],
+        input: Input,
+        initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
+      }).handle({
+        Idle: {}
+      })
+      const [first, second] = yield* Effect.all(
+        [
+          Machine.start(machine, { userId: "first" }),
+          Machine.start(machine, { userId: "second" })
+        ],
+        { concurrency: "unbounded" }
+      )
+
+      assert.deepStrictEqual(yield* first.state, {
+        path: "Idle",
+        value: new Idle({ userId: "first" })
+      })
+      assert.deepStrictEqual(yield* second.state, {
+        path: "Idle",
+        value: new Idle({ userId: "second" })
+      })
+      yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
+    }))
+
   it.effect("invokeMachine rejects duplicate active child addresses", () =>
     Effect.gen(function*() {
       const childStates = Machine.defineStates({ Idle })
