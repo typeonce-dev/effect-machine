@@ -54,6 +54,9 @@ export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compile
 export const compiledProcessDrain: unique symbol = Symbol.for("effect/Machine/compiledProcessDrain")
 
 /** @internal */
+export const compiledProcessInitial: unique symbol = Symbol.for("effect/Machine/compiledProcessInitial")
+
+/** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
@@ -276,6 +279,15 @@ export interface ProcessLogic<
   readonly [childlessProcess]?: true
   readonly [compiledProcess]?: true
   initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
+  /** @internal */
+  readonly [compiledProcessInitial]?: (
+    scope: ProcessScope<Event>
+  ) => Effect.Effect<
+    | { readonly state: State; readonly done: false; readonly output: undefined }
+    | { readonly state: State; readonly done: true; readonly output: Output },
+    InitialError,
+    Requirements
+  >
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
   /** @internal */
   readonly drain?: (
@@ -1308,12 +1320,23 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
-      const initial = yield* self.logic.initial(self.processScope).pipe(
+      const compiledInitial = self.logic[compiledProcessInitial]
+      const initializeEffect: Effect.Effect<{
+        readonly state: unknown
+        readonly done: boolean | undefined
+        readonly output: unknown
+      }, unknown, any> = compiledInitial === undefined
+        ? self.logic.initial(self.processScope).pipe(
+          Effect.map((state) => ({ state, done: undefined, output: undefined } as const))
+        )
+        : compiledInitial(self.processScope)
+      const initialized = yield* initializeEffect.pipe(
         Effect.onExit(cleanupStartupFailure),
         Effect.ensuring(Effect.sync(() => {
           self.initializing = false
         }))
       )
+      const initial = initialized.state
       self.current = {
         revision: 0,
         terminalizing: false,
@@ -1338,6 +1361,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       }
       if (self.options.onSnapshot !== undefined) {
         yield* notifyActiveSnapshot(self.options.onSnapshot, { status: "active", state: initial })
+      }
+      if (initialized.done === true && self.requestedTermination === undefined) {
+        yield* self.requestTermination({ _tag: "Done", output: initialized.output })
       }
 
       self.draining = true

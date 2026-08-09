@@ -161,14 +161,15 @@ const makeInvokeSnapshotHandler = (
 }
 
 const makeChildlessCompiledDrain = (
-  machine: Machine.Any
+  machine: Machine.Any,
+  checkInitialFinal: boolean
 ): (
   context: internalRuntime.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
   const executionPlan = internalPlanner.compileExecutionPlan(machine)
   return (context) => {
     let current = context.state()
-    if (internalPlanner.isFinalState(machine, current)) {
+    if (checkInitialFinal && internalPlanner.isFinalState(machine, current)) {
       return internalPlanner.getFinalOutputEffect(
         machine,
         current,
@@ -250,14 +251,15 @@ interface InvokeExecutionState {
 }
 
 const makeInvokingCompiledDrain = (
-  machine: Machine.Any
+  machine: Machine.Any,
+  checkInitialFinal: boolean
 ): (
   context: internalRuntime.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
   const executionPlan = internalPlanner.compileExecutionPlan(machine)
   return (context) => {
     let current = context.state()
-    if (internalPlanner.isFinalState(machine, current)) {
+    if (checkInitialFinal && internalPlanner.isFinalState(machine, current)) {
       return internalPlanner.getFinalOutputEffect(
         machine,
         current,
@@ -529,35 +531,47 @@ const makeProcessLogic: <
   entry: ProcessEntry<States, Input>
 ) => {
   const hasInvokes = hasInvokeCapability(machine)
+  const initialArgs = entry._tag === "Initial" ? entry.args : []
+  const makeInitial = (
+    scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
+  ) =>
+    internalRuntime.provideMachineRuntime(
+      internalPlanner.planInitial(machine, ...initialArgs).pipe(
+        Effect.flatMap((planned) => {
+          const commands = planned.commands.length === 0
+            ? undefined
+            : internalPlanner.runCommands(planned.commands, scope)
+          const emitted = planned.emittedEvents.length === 0
+            ? undefined
+            : internalPlanner.runEmittedEvents(
+              planned.emittedEvents,
+              internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
+            )
+          const result = Effect.succeed({
+            state: planned.state,
+            done: planned.done,
+            output: planned.output
+          })
+          return commands === undefined
+            ? emitted === undefined ? result : emitted.pipe(Effect.andThen(result))
+            : emitted === undefined
+            ? commands.pipe(Effect.andThen(result))
+            : commands.pipe(Effect.andThen(emitted), Effect.andThen(result))
+        })
+      ),
+      scope
+    )
   return ({
     [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
     [internalRuntime.compiledProcess]: true,
+    [internalRuntime.compiledProcessInitial]: entry._tag === "Initial" ? makeInitial : undefined,
     [internalRuntime.compiledProcessDrain]: hasInvokes
-      ? makeInvokingCompiledDrain(machine)
-      : makeChildlessCompiledDrain(machine),
+      ? makeInvokingCompiledDrain(machine, entry._tag === "Resume")
+      : makeChildlessCompiledDrain(machine, entry._tag === "Resume"),
     initial: (scope) =>
-      internalRuntime.provideMachineRuntime(
-        entry._tag === "Resume"
-          ? Model.normalizeSnapshotEffect(machine, entry.snapshot)
-          : internalPlanner.planInitial(machine, ...entry.args).pipe(Effect.flatMap((planned) => {
-            const commands = planned.commands.length === 0
-              ? undefined
-              : internalPlanner.runCommands(planned.commands, scope)
-            const emitted = planned.emittedEvents.length === 0
-              ? undefined
-              : internalPlanner.runEmittedEvents(
-                planned.emittedEvents,
-                internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
-              )
-            const result = Effect.succeed(planned.state)
-            return commands === undefined
-              ? emitted === undefined ? result : emitted.pipe(Effect.andThen(result))
-              : emitted === undefined
-              ? commands.pipe(Effect.andThen(result))
-              : commands.pipe(Effect.andThen(emitted), Effect.andThen(result))
-          })),
-        scope
-      ),
+      entry._tag === "Resume"
+        ? internalRuntime.provideMachineRuntime(Model.normalizeSnapshotEffect(machine, entry.snapshot), scope)
+        : makeInitial(scope).pipe(Effect.map((initialized) => initialized.state)),
     run: (context) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
