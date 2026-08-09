@@ -51,6 +51,9 @@ export const childlessProcess: unique symbol = Symbol.for("effect/Machine/childl
 export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compiledProcess")
 
 /** @internal */
+export const compiledProcessDrain: unique symbol = Symbol.for("effect/Machine/compiledProcessDrain")
+
+/** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
@@ -204,6 +207,24 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
   ) => Effect.Effect<void, E, R>
 }
 
+/**
+ * Owner-local execution context for compiled statecharts.
+ *
+ * Unlike `ProcessContext`, synchronous mailbox and state operations do not
+ * introduce an Effect boundary. The compiled drain still returns an Effect so
+ * actor commands, invokes, observation callbacks, interruption, and the Effect
+ * scheduler remain explicit at their actual boundaries.
+ *
+ * @internal
+ */
+export interface CompiledProcessContext<State, Event> {
+  readonly scope: ProcessScope<Event>
+  readonly poll: () => Option.Option<Event>
+  readonly state: () => State
+  readonly commit: (state: State) => Effect.Effect<void> | undefined
+  executionState: unknown
+}
+
 interface CompactProcessMailbox<Event> {
   items: Array<Event> | undefined
   index: number
@@ -250,6 +271,10 @@ export interface ProcessLogic<
   /** @internal */
   readonly drain?: (
     context: ProcessContext<State, Event>
+  ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
+  /** @internal */
+  readonly [compiledProcessDrain]?: (
+    context: CompiledProcessContext<State, Event>
   ) => Effect.Effect<Option.Option<Output>, Error, Requirements>
 }
 
@@ -1216,7 +1241,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private readonly address: ProcessAddress<unknown>
   private childRuntime: ChildRuntime = childlessRuntime
   private processScope!: ProcessScope<unknown>
-  private processContext!: ProcessContext<unknown, unknown>
+  private processContext: ProcessContext<unknown, unknown> | undefined
+  private compiledContext: CompiledProcessContext<unknown, unknown> | undefined
   private current!: VersionedSnapshot<unknown, unknown, unknown>
   private completion: Effect.Effect<unknown, unknown> | undefined
   private waiter: Deferred.Deferred<unknown, unknown> | undefined
@@ -1277,13 +1303,23 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         changes: undefined,
         snapshot: { status: "active", state: initial }
       }
-      self.processContext = {
-        ...self.processScope,
-        receive: Effect.never,
-        poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
-        state: Effect.sync(() => self.current.snapshot.state),
-        setState: (state: unknown) => self.setActiveState(state),
-        updateState: (f) => self.updateState(f)
+      if (self.logic[compiledProcessDrain] === undefined) {
+        self.processContext = {
+          ...self.processScope,
+          receive: Effect.never,
+          poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
+          state: Effect.sync(() => self.current.snapshot.state),
+          setState: (state: unknown) => self.setActiveState(state),
+          updateState: (f) => self.updateState(f)
+        }
+      } else {
+        self.compiledContext = {
+          scope: self.processScope,
+          poll: () => pollCompactMailbox(self.mailbox),
+          state: () => self.current.snapshot.state,
+          commit: (state: unknown) => self.commitActiveState(state),
+          executionState: undefined
+        }
       }
 
       if (self.options.onReady !== undefined) {
@@ -1470,7 +1506,14 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
             return yield* self.finishRequestedTermination()
           }
 
-          const exit = yield* restore(Effect.suspend(() => self.logic.drain!(self.processContext))).pipe(Effect.exit)
+          const exit = yield* restore(
+            Effect.suspend(() => {
+              const compiledDrain = self.logic[compiledProcessDrain]
+              return compiledDrain === undefined
+                ? self.logic.drain!(self.processContext!)
+                : compiledDrain(self.compiledContext!)
+            })
+          ).pipe(Effect.exit)
           if (Exit.isFailure(exit)) {
             if (self.requestedTermination === undefined) {
               yield* self.requestTermination({ _tag: "Failure", cause: exit.cause })
@@ -1533,6 +1576,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
             this.draining = false
             this.worker = undefined
             this.interruptRequested = false
+            if (this.compiledContext !== undefined) {
+              this.compiledContext.executionState = undefined
+            }
             this.completion = completion
             if (this.waiter !== undefined) {
               Deferred.doneUnsafe(this.waiter, completion)
@@ -1579,20 +1625,27 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private setActiveState(state: unknown): Effect.Effect<void> {
-    return Effect.suspend(() => {
-      const latest = this.current
-      if (latest.terminalizing || latest.snapshot.status !== "active") {
-        return Effect.void
-      }
-      const versioned = {
-        revision: latest.revision + 1,
-        snapshot: { status: "active" as const, state },
-        terminalizing: false,
-        changes: latest.changes
-      }
-      this.current = versioned
-      return this.publishSnapshot(versioned).pipe(Effect.asVoid)
-    })
+    return Effect.suspend(() => this.commitActiveState(state) ?? Effect.void)
+  }
+
+  private commitActiveState(state: unknown): Effect.Effect<void> | undefined {
+    const latest = this.current
+    if (latest.terminalizing || latest.snapshot.status !== "active") {
+      return undefined
+    }
+    const versioned = {
+      revision: latest.revision + 1,
+      snapshot: { status: "active" as const, state },
+      terminalizing: false,
+      changes: latest.changes
+    }
+    this.current = versioned
+    if (versioned.changes !== undefined) {
+      PubSub.publishUnsafe(versioned.changes, [versioned] as const)
+    }
+    return this.options.onSnapshot === undefined
+      ? undefined
+      : notifyActiveSnapshot(this.options.onSnapshot, versioned.snapshot)
   }
 
   private updateState<E, R>(
@@ -1687,7 +1740,7 @@ const startLogicInternal: typeof startGenericInternal = ((
   logic: ProcessLogic<any, any, any, any, any, any>,
   options: StartInternalOptions
 ) =>
-  logic[compiledProcess] === true && logic.drain !== undefined
+  logic[compiledProcess] === true && (logic.drain !== undefined || logic[compiledProcessDrain] !== undefined)
     ? startCompactCompiledInternal(logic, options)
     : startGenericInternal(logic, options)) as typeof startGenericInternal
 

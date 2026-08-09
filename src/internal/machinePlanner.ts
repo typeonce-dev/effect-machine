@@ -67,6 +67,22 @@ interface Collected<Event> {
   readonly emittedEvents: Array<unknown>
 }
 
+const targetBuilderCache = new WeakMap<object, Map<string, unknown>>()
+
+const getTargetBuilder = (machine: Machine.Any, path: string): any => {
+  let byPath = targetBuilderCache.get(machine)
+  if (byPath === undefined) {
+    byPath = new Map()
+    targetBuilderCache.set(machine, byPath)
+  }
+  if (byPath.has(path)) {
+    return byPath.get(path)
+  }
+  const builder = machine.makeTargetBuilder(path as any)
+  byPath.set(path, builder)
+  return builder
+}
+
 const makeCollector = <Event>(machine: Machine.Any): Collected<Event> => {
   const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<Event> = []
@@ -389,7 +405,7 @@ const resolveHistoryTarget = (
   }
   const collected = collectTransition(machine, fallback, {
     event,
-    target: machine.makeTargetBuilder(target.parent).full,
+    target: getTargetBuilder(machine, target.parent).full,
     parent: target.parent
   })
   if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
@@ -591,7 +607,7 @@ const makeTransitionContext = <
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   snapshot,
-  target: machine.makeTargetBuilder(path as StateId)
+  target: getTargetBuilder(machine, path)
 })
 
 const makeDoneContext = <
@@ -613,7 +629,7 @@ const makeDoneContext = <
   event,
   output: output as Machine.CompletionOutputByIdentifier<States, StateId>,
   snapshot,
-  target: machine.makeTargetBuilder(path as StateId)
+  target: getTargetBuilder(machine, path)
 })
 
 const collectStateActions = <
@@ -715,7 +731,7 @@ const selectAlwaysTransitions = <
               >,
               event,
               snapshot: capturedSnapshot(),
-              target: machine.makeTargetBuilder(path as Machine.StateIdentifier<States>)
+              target: getTargetBuilder(machine, path)
             }
           })
         }
@@ -1081,7 +1097,7 @@ const resolveChoiceTarget = (
         parent: getParentValue(machine, provisional, node.path),
         parents: getParentValues(machine, provisional, node.path),
         event,
-        target: machine.makeTargetBuilder(node.path as any)
+        target: getTargetBuilder(machine, node.path)
       })
       if (collected.state === undefined) {
         throw new Error(`Machine choice resolver for "${node.path}" must return a target`)
@@ -1928,6 +1944,180 @@ const macrostepConfiguration = <
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
   return settle(machine, step.next, decodedEvent, commands, raisedEvents, emittedEvents, microsteps)
+}
+
+interface FlatExecutionDescriptor {
+  readonly paths: ReadonlySet<string>
+}
+
+const compileFlatExecutionDescriptor = (machine: Machine.Any): FlatExecutionDescriptor | undefined => {
+  const paths = new Set<string>()
+  for (const node of machine.stateNodes.byPath.values() as Iterable<Machine.StateNode>) {
+    if (node.parent !== undefined || (node.type !== "atomic" && node.type !== "final")) {
+      return undefined
+    }
+    const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
+    if (
+      config?.entry !== undefined || config?.exit !== undefined || config?.always !== undefined ||
+      config?.onDone !== undefined || config?.invoke !== undefined
+    ) {
+      return undefined
+    }
+    paths.add(node.path)
+  }
+  return paths.size === 0 ? undefined : { paths }
+}
+
+const planFlatConfiguration = (
+  machine: Machine.Any,
+  descriptor: FlatExecutionDescriptor,
+  configuration: ActiveConfiguration,
+  input: unknown
+): MacrostepPlan<ActiveConfiguration, any, any, any, any> => {
+  const decoded = decodeEventSync(machine, input) as { readonly _tag: PropertyKey }
+  if (isActiveFinalConfiguration(machine, configuration)) {
+    const completed = completeConfigurationSync(machine, configuration, decoded)
+    const root = getRootPath(machine, completed.configuration)
+    if (!completed.configuration.outputs.has(root)) {
+      throw new Error("Machine reached a terminal configuration without a completed root output")
+    }
+    return {
+      next: completed.configuration,
+      commands: [],
+      emittedEvents: [],
+      microsteps: [],
+      done: true,
+      output: completed.configuration.outputs.get(root)
+    }
+  }
+
+  let current = configuration
+  let event: any = decoded
+  const pending: Array<any> = []
+  let pendingIndex = 0
+  const commands: Array<RuntimeCommand> = []
+  const emittedEvents: Array<unknown> = []
+  const microsteps: Array<MicrostepPlan<ActiveConfiguration, any, any, any>> = []
+  let iterations = 0
+
+  while (true) {
+    iterations += 1
+    if (iterations > MaxMacrostepIterations) {
+      throw new InfiniteTransitionError({
+        machineId: machine.id,
+        state: String(getLeafPath(machine, current)),
+        maxIterations: MaxMacrostepIterations
+      })
+    }
+
+    const source = getRootPath(machine, current)
+    const transition = normalizeTransition(machine.handlers[source]?.on?.[event._tag])
+    if (transition !== undefined) {
+      const snapshot = snapshotFromConfiguration(machine, current)
+      const collected = collectTransition(machine, transition.transition, {
+        state: getActiveValue(current, source),
+        parent: undefined,
+        parents: {},
+        event,
+        snapshot,
+        target: getTargetBuilder(machine, source)
+      })
+      validateDeclaredTransitionTarget(
+        source,
+        { type: "event", event: event._tag },
+        transition.targets,
+        collected.state
+      )
+
+      let next = current
+      let targetPath: string | undefined
+      if (collected.state !== undefined) {
+        if (!isTarget(collected.state) && !isSnapshot(collected.state)) {
+          throw new Error("Machine expected transition target to be a snapshot or target builder result")
+        }
+        targetPath = getTargetNodePath(collected.state)
+        if (!descriptor.paths.has(targetPath)) {
+          throw new Error(`Machine expected flat transition target "${targetPath}" to be a root state`)
+        }
+        next = normalizeTargetConfigurationSync(machine, current, collected.state as any)
+      }
+      const changed = transition.reenter || source !== targetPath && targetPath !== undefined
+      const exitPaths = changed ? [source] : []
+      const entryPaths = changed ? [getRootPath(machine, next)] : []
+      const step = {
+        next,
+        event,
+        transitions: [{
+          source,
+          trigger: { type: "event" as const, event: event._tag },
+          reenter: transition.reenter,
+          target: targetPath,
+          resolvedTarget: targetPath
+        }],
+        commands: collected.commands,
+        raisedEvents: collected.raisedEvents,
+        emittedEvents: collected.emittedEvents,
+        exitPaths,
+        entryPaths,
+        changed
+      }
+      current = next
+      commands.push(...collected.commands)
+      pending.push(...collected.raisedEvents)
+      emittedEvents.push(...collected.emittedEvents)
+      microsteps.push(step)
+
+      if (isActiveFinalConfiguration(machine, current)) {
+        const completed = completeConfigurationSync(machine, current, event)
+        const root = getRootPath(machine, completed.configuration)
+        if (!completed.configuration.outputs.has(root)) {
+          throw new Error("Machine reached a terminal configuration without a completed root output")
+        }
+        return {
+          next: completed.configuration,
+          commands,
+          emittedEvents,
+          microsteps,
+          done: true,
+          output: completed.configuration.outputs.get(root)
+        }
+      }
+    }
+
+    if (pendingIndex >= pending.length) {
+      return {
+        next: current,
+        commands,
+        emittedEvents,
+        microsteps,
+        done: false,
+        output: undefined
+      }
+    }
+    event = pending[pendingIndex++]
+  }
+}
+
+export interface CompiledExecutionPlan {
+  readonly plan: (
+    configuration: ActiveConfiguration,
+    event: unknown
+  ) => MacrostepPlan<ActiveConfiguration, any, any, any, any>
+}
+
+const executionPlanCache = new WeakMap<Machine.Any, CompiledExecutionPlan>()
+
+export const compileExecutionPlan = (machine: Machine.Any): CompiledExecutionPlan => {
+  const cached = executionPlanCache.get(machine)
+  if (cached !== undefined) {
+    return cached
+  }
+  const flat = compileFlatExecutionDescriptor(machine)
+  const compiled: CompiledExecutionPlan = flat === undefined
+    ? { plan: (configuration, event) => planConfiguration(machine as any, configuration, event as any) }
+    : { plan: (configuration, event) => planFlatConfiguration(machine, flat, configuration, event) }
+  executionPlanCache.set(machine, compiled)
+  return compiled
 }
 
 const snapshotMacrostep = <

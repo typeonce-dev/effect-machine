@@ -3,6 +3,7 @@ import { Cause, Data, Effect, Fiber, Ref, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../src/index.js"
 import { MachineTest } from "../src/testing.js"
+import type { DifferentialStep } from "./support/machineRuntimeDifferential.js"
 import { traceBoundary, traceSteps, verifyManagedExecution } from "./support/machineRuntimeDifferential.js"
 
 const event = (_tag: string): { readonly _tag: string } => ({ _tag })
@@ -32,6 +33,62 @@ const generated = MachineTest.finiteModels({
 })
 
 describe("pure planning and managed runtime differential", () => {
+  it.effect("matches the compiled flat-state executor across raised and terminal transitions", () =>
+    Effect.gen(function*() {
+      class Count extends Schema.TaggedClass<Count>("FlatDifferentialCount")("Count", {
+        value: Schema.Number
+      }) {}
+      class Done extends Schema.TaggedClass<Done>("FlatDifferentialDone")("Done", {
+        value: Schema.Number
+      }) {}
+      class Cascade extends Schema.TaggedClass<Cascade>("FlatDifferentialCascade")("Cascade", {}) {}
+      class Increment extends Schema.TaggedClass<Increment>("FlatDifferentialIncrement")("Increment", {}) {}
+      class Ignore extends Schema.TaggedClass<Ignore>("FlatDifferentialIgnore")("Ignore", {}) {}
+      class Finish extends Schema.TaggedClass<Finish>("FlatDifferentialFinish")("Finish", {}) {}
+
+      const states = Machine.defineStates({
+        Count,
+        Done: { schema: Done, type: "final", output: Schema.Number }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: [Cascade, Ignore, Finish],
+        internalEvents: [Increment],
+        initial: () => states.initial.Count(new Count({ value: 0 }))
+      }).handle({
+        Count: {
+          on: {
+            Cascade: (_, enqueue) => {
+              enqueue.raise(new Increment({}))
+            },
+            Increment: ({ state, target }) => target.full.Count(new Count({ value: state.value + 1 })),
+            Finish: ({ state, target }) => target.full.Done(new Done({ value: state.value }))
+          }
+        },
+        Done: { output: ({ state }) => state.value }
+      })
+
+      const initial = yield* Machine.planInitial(machine) as Effect.Effect<any, unknown, never>
+      const requested = [new Ignore({}), new Cascade({}), new Cascade({}), new Finish({})]
+      const steps: Array<DifferentialStep> = []
+      let state = initial.state
+      for (const nextEvent of requested) {
+        const plan = yield* Machine.plan(machine, state, nextEvent) as Effect.Effect<any, unknown, never>
+        steps.push({ event: nextEvent, plan })
+        state = plan.next
+      }
+
+      assert.deepStrictEqual(steps.map(({ plan }) => plan.microsteps.length), [0, 2, 2, 1])
+      assert.strictEqual(steps.at(-1)?.plan.output, 2)
+      yield* verifyManagedExecution({
+        machine,
+        open: Machine.start(machine) as Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown, never>,
+        initial: { state: initial.state, done: initial.done, output: initial.output },
+        steps,
+        label: "compiled flat state"
+      })
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("matches deterministic generated start and resumed executions", () =>
     Effect.gen(function*() {
       const samples = FastCheck.sample(generated.arbitrary, { numRuns: 36, seed: 93_701 })
