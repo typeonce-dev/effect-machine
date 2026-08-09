@@ -262,6 +262,34 @@ describe("machine process lifecycle", () => {
       assert.instanceOf(yield* Effect.flip(ref.join), Machine.StoppedError)
     }))
 
+  it.effect("materializes and reuses the stopped completion when a compiled process is joined", () =>
+    Effect.gen(function*() {
+      const start = () =>
+        MachineRuntime.startProcess<number, void>({
+          [MachineRuntime.childlessProcess]: true,
+          [MachineRuntime.compiledProcess]: true,
+          initial: () => Effect.succeed(1),
+          run: () => Effect.never,
+          drain: () => Effect.succeed(Option.none())
+        })
+
+      const stoppedBeforeJoin = yield* start()
+      yield* stoppedBeforeJoin.stop
+      yield* stoppedBeforeJoin.stop
+      const first = yield* Effect.flip(stoppedBeforeJoin.join)
+      const second = yield* Effect.flip(stoppedBeforeJoin.join)
+      assert.instanceOf(first, Machine.StoppedError)
+      assert.strictEqual(second, first)
+
+      const joinedBeforeStop = yield* start()
+      const pending = yield* Effect.flip(joinedBeforeStop.join).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* joinedBeforeStop.stop
+      const pendingError = yield* Fiber.join(pending)
+      assert.instanceOf(pendingError, Machine.StoppedError)
+      assert.strictEqual(yield* Effect.flip(joinedBeforeStop.join), pendingError)
+    }))
+
   it.effect("terminalizes once when concurrent callers stop the same process", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)

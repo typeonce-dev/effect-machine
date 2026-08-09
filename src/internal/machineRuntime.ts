@@ -1220,6 +1220,14 @@ type CompiledTermination =
   | { readonly _tag: "Done"; readonly output: unknown }
   | { readonly _tag: "Failure"; readonly cause: Cause.Cause<unknown> }
 
+// Stopping is commonly used only for resource cleanup. Keep that path free of
+// Error stack capture and materialize the typed join failure only if observed.
+const CompiledStoppedCompletion: unique symbol = Symbol("effect/Machine/CompiledStoppedCompletion")
+
+type CompiledCompletion =
+  | Effect.Effect<unknown, unknown>
+  | typeof CompiledStoppedCompletion
+
 /**
  * Compact runtime for compiled statecharts.
  *
@@ -1244,7 +1252,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private processContext: ProcessContext<unknown, unknown> | undefined
   private compiledContext: CompiledProcessContext<unknown, unknown> | undefined
   private current!: VersionedSnapshot<unknown, unknown, unknown>
-  private completion: Effect.Effect<unknown, unknown> | undefined
+  private completion: CompiledCompletion | undefined
   private waiter: Deferred.Deferred<unknown, unknown> | undefined
   private requestedTermination: CompiledTermination | undefined
   private reservedTerminationSnapshot: RuntimeSnapshot<unknown, unknown, unknown> | undefined
@@ -1350,7 +1358,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   get join(): Effect.Effect<unknown, unknown> {
     return Effect.suspend(() => {
       if (this.completion !== undefined) {
-        return this.completion
+        return this.resolveCompletion(this.completion)
       }
       this.waiter ??= Deferred.makeUnsafe<unknown, unknown>()
       return Deferred.await(this.waiter)
@@ -1452,7 +1460,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private stopEffect(): Effect.Effect<void> {
     return Effect.suspend(() => {
       if (this.completion !== undefined) {
-        return this.awaitCompletion()
+        return Effect.void
       }
       const requested = { _tag: "Stopped" } as const
       return this.requestTermination(requested).pipe(
@@ -1493,7 +1501,18 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private awaitCompletion(): Effect.Effect<void> {
-    return this.join.pipe(Effect.exit, Effect.asVoid)
+    return this.completion === undefined
+      ? this.join.pipe(Effect.exit, Effect.asVoid)
+      : Effect.void
+  }
+
+  private resolveCompletion(completion: CompiledCompletion): Effect.Effect<unknown, unknown> {
+    if (completion !== CompiledStoppedCompletion) {
+      return completion
+    }
+    const stopped = Effect.fail(new StoppedError())
+    this.completion = stopped
+    return stopped
   }
 
   private drainRuntime(): Effect.Effect<void, never, any> {
@@ -1555,8 +1574,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         : requested._tag === "Done"
         ? Exit.succeed(requested.output)
         : Exit.failCause(requested.cause)
-      const completion = requested._tag === "Stopped"
-        ? Effect.fail(new StoppedError())
+      const completion: CompiledCompletion = requested._tag === "Stopped"
+        ? CompiledStoppedCompletion
         : requested._tag === "Done"
         ? Effect.succeed(requested.output)
         : Effect.failCause(requested.cause)
@@ -1581,7 +1600,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
             }
             this.completion = completion
             if (this.waiter !== undefined) {
-              Deferred.doneUnsafe(this.waiter, completion)
+              Deferred.doneUnsafe(this.waiter, this.resolveCompletion(completion))
               this.waiter = undefined
             }
           }))
