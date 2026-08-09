@@ -176,7 +176,7 @@ const makeChildlessCompiledDrain = (
       ).pipe(Effect.map(Option.some))
     }
 
-    let configuration = context.executionState as Model.ActiveConfiguration | undefined
+    let configuration = context.executionState
     let liveRuntime: Runtime<unknown, unknown> | undefined
     let loop: Effect.Effect<Option.Option<any>, any, any>
     loop = Effect.suspend(() => {
@@ -189,7 +189,7 @@ const makeChildlessCompiledDrain = (
       let planned
       try {
         planned = executionPlan.plan(
-          configuration ?? Model.normalizeConfigurationSync(machine, current),
+          configuration ?? executionPlan.fromConfiguration(Model.normalizeConfigurationSync(machine, current)),
           pending.value
         )
       } catch (error) {
@@ -203,7 +203,7 @@ const makeChildlessCompiledDrain = (
         return loop
       }
 
-      const next = Model.snapshotFromConfiguration(machine, planned.next)
+      const next = executionPlan.snapshot(planned.next)
       const beforeCommit = planned.commands.length === 0
         ? undefined
         : internalPlanner.runCommands(planned.commands, context.scope)
@@ -239,7 +239,7 @@ const makeChildlessCompiledDrain = (
 
 interface InvokeExecutionState {
   readonly sessions: Map<string, InvokeSession>
-  configuration: Model.ActiveConfiguration | undefined
+  configuration: unknown
   initialized: boolean
 }
 
@@ -373,7 +373,8 @@ const makeInvokingCompiledDrain = (
       let planned
       try {
         planned = executionPlan.plan(
-          execution.configuration ?? Model.normalizeConfigurationSync(machine, current),
+          execution.configuration ??
+            executionPlan.fromConfiguration(Model.normalizeConfigurationSync(machine, current)),
           pending.value
         )
       } catch (error) {
@@ -399,7 +400,8 @@ const makeInvokingCompiledDrain = (
         }
       }
 
-      const next = Model.snapshotFromConfiguration(machine, planned.next)
+      const activeConfiguration = executionPlan.toConfiguration(planned.next)
+      const next = executionPlan.snapshot(planned.next)
       const beforeCommit: Array<Effect.Effect<void, any, any>> = []
       if (planned.commands.length > 0) {
         beforeCommit.push(internalPlanner.runCommands(planned.commands, scope))
@@ -421,7 +423,7 @@ const makeInvokingCompiledDrain = (
         afterCommit.push(stopAllInvokes())
       } else if (changed) {
         for (const [path, entryEvent] of entryEvents) {
-          const starting = startInvokes(planned.next, [path], entryEvent)
+          const starting = startInvokes(activeConfiguration, [path], entryEvent)
           if (starting !== undefined) afterCommit.push(starting)
         }
       }
@@ -452,10 +454,11 @@ const makeInvokingCompiledDrain = (
       if (execution.initialized) {
         return loop
       }
-      execution.configuration = Model.normalizeConfigurationSync(machine, current)
+      const initialConfiguration = Model.normalizeConfigurationSync(machine, current)
+      execution.configuration = executionPlan.fromConfiguration(initialConfiguration)
       const starting = startInvokes(
-        execution.configuration,
-        Model.getInitialEntryPaths(machine, execution.configuration),
+        initialConfiguration,
+        Model.getInitialEntryPaths(machine, initialConfiguration),
         internalPlanner.InitialEvent
       )
       execution.initialized = true

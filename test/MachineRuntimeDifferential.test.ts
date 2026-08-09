@@ -207,6 +207,24 @@ describe("pure planning and managed runtime differential", () => {
         left: 1,
         right: 110
       }])
+
+      observations.length = 0
+      const resumed = steps[0]!.plan
+      const resumedState = resumed.next as typeof initial.state
+      yield* verifyManagedExecution({
+        machine,
+        open: Machine.resume(machine, resumedState),
+        initial: { state: resumedState, done: resumed.done, output: resumed.output },
+        steps: steps.slice(1),
+        label: "resumed compiled hierarchical state"
+      })
+      assert.deepStrictEqual(observations, [{
+        state: 110,
+        parent: "Running",
+        parents: "Running",
+        left: 1,
+        right: 110
+      }])
     }) as Effect.Effect<void, unknown, any>)
 
   it.effect("matches deterministic generated start and resumed executions", () =>
