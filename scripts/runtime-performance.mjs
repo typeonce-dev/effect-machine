@@ -89,6 +89,7 @@ const benchmarkDefinitions = new Map()
 const activeBurstRefs = new Map()
 const activeChildRefs = new Map()
 const activeObservedRefs = new Map()
+const activeAdditionalRefs = new Map()
 
 for (const implementation of implementations) {
   const metadata = {
@@ -263,6 +264,43 @@ for (const implementation of implementations) {
       }
       : () => implementation.runChildLifecycle()
   )
+
+  for (const additional of implementation.additionalMachineBenchmarks ?? []) {
+    const task = `${implementation.implementation}:${additional.id}`
+    const operations = additional.operations(configuration)
+    benchmarkDefinitions.set(task, {
+      ...metadata,
+      id: additional.id,
+      label: additional.label,
+      unit: additional.unit,
+      operationsPerIteration: operations,
+      fenceEventsPerIteration: 1
+    })
+    const validate = (completed) => {
+      const expected = additional.expected(operations)
+      if (completed !== expected) {
+        throw new Error(
+          `${implementation.label} ${additional.label} produced ${completed}, expected ${expected}`
+        )
+      }
+    }
+    bench.add(
+      task,
+      implementation.async
+        ? async () => validate(await additional.run(activeAdditionalRefs.get(task), operations))
+        : () => validate(additional.run(activeAdditionalRefs.get(task), operations)),
+      {
+        beforeEach: async () => {
+          activeAdditionalRefs.set(task, await additional.start())
+        },
+        afterEach: async () => {
+          const ref = activeAdditionalRefs.get(task)
+          await additional.stop(ref)
+          activeAdditionalRefs.delete(task)
+        }
+      }
+    )
+  }
 }
 
 for (const implementation of runtimeReferenceImplementations) {
@@ -314,6 +352,14 @@ try {
     if (observedRef !== undefined) {
       await implementation.stopObservedCounter(observedRef)
       activeObservedRefs.delete(implementation.implementation)
+    }
+    for (const additional of implementation.additionalMachineBenchmarks ?? []) {
+      const task = `${implementation.implementation}:${additional.id}`
+      const ref = activeAdditionalRefs.get(task)
+      if (ref !== undefined) {
+        await additional.stop(ref)
+        activeAdditionalRefs.delete(task)
+      }
     }
   }
 }

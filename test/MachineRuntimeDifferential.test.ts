@@ -89,6 +89,126 @@ describe("pure planning and managed runtime differential", () => {
       })
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("matches the compiled hierarchical executor across parallel and raised transitions", () =>
+    Effect.gen(function*() {
+      class Running extends Schema.TaggedClass<Running>("HierarchicalDifferentialRunning")("Running", {}) {}
+      class Left extends Schema.TaggedClass<Left>("HierarchicalDifferentialLeft")("Left", {
+        value: Schema.Number
+      }) {}
+      class Right extends Schema.TaggedClass<Right>("HierarchicalDifferentialRight")("Right", {
+        value: Schema.Number
+      }) {}
+      class Done extends Schema.TaggedClass<Done>("HierarchicalDifferentialDone")("Done", {
+        value: Schema.Number
+      }) {}
+      class Advance extends Schema.TaggedClass<Advance>("HierarchicalDifferentialAdvance")("Advance", {}) {}
+      class Inspect extends Schema.TaggedClass<Inspect>("HierarchicalDifferentialInspect")("Inspect", {}) {}
+      class Finish extends Schema.TaggedClass<Finish>("HierarchicalDifferentialFinish")("Finish", {}) {}
+      class Bump extends Schema.TaggedClass<Bump>("HierarchicalDifferentialBump")("Bump", {}) {}
+
+      const states = Machine.defineStates({
+        Running: {
+          schema: Running,
+          type: "parallel",
+          states: { Left, Right }
+        },
+        Done: { schema: Done, type: "final", output: Schema.Number }
+      })
+      const observations: Array<{
+        readonly state: number
+        readonly parent: string
+        readonly parents: string
+        readonly left: number
+        readonly right: number
+      }> = []
+      const machine = Machine.make({
+        states: states.states,
+        events: [Advance, Inspect, Finish],
+        internalEvents: [Bump],
+        initial: () =>
+          states.initial.Running(
+            new Running({}),
+            (running) => running.Left(new Left({ value: 0 })).Right(new Right({ value: 0 }))
+          )
+      }).handle({
+        Running: {
+          on: {
+            Finish: ({ snapshot, target }) => {
+              if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
+              return target.full.Done(
+                new Done({
+                  value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+                })
+              )
+            }
+          },
+          states: {
+            Left: {
+              on: {
+                Advance: ({ state, target }, enqueue) => {
+                  enqueue.raise(new Bump({}))
+                  return target.branch.Running.Left(new Left({ value: state.value + 1 }))
+                }
+              }
+            },
+            Right: {
+              on: {
+                Advance: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 10 })),
+                Bump: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 100 })),
+                Inspect: ({ state, parent, parents, snapshot }) => {
+                  if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
+                  observations.push({
+                    state: state.value,
+                    parent: parent._tag,
+                    parents: parents.Running._tag,
+                    left: snapshot.states.Left.value.value,
+                    right: snapshot.states.Right.value.value
+                  })
+                }
+              }
+            }
+          }
+        },
+        Done: { output: ({ state }) => state.value }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const requested = [new Advance({}), new Inspect({}), new Finish({})]
+      const steps: Array<DifferentialStep> = []
+      let state = initial.state
+      for (const nextEvent of requested) {
+        const plan = yield* Machine.plan(machine, state, nextEvent)
+        steps.push({ event: nextEvent, plan })
+        state = plan.next
+      }
+
+      assert.deepStrictEqual(steps.map(({ plan }) => plan.microsteps.length), [2, 1, 1])
+      assert.strictEqual(steps.at(-1)?.plan.output, 111)
+      assert.deepStrictEqual(observations, [{
+        state: 110,
+        parent: "Running",
+        parents: "Running",
+        left: 1,
+        right: 110
+      }])
+      observations.length = 0
+
+      yield* verifyManagedExecution({
+        machine,
+        open: Machine.start(machine),
+        initial: { state: initial.state, done: initial.done, output: initial.output },
+        steps,
+        label: "compiled hierarchical state"
+      })
+      assert.deepStrictEqual(observations, [{
+        state: 110,
+        parent: "Running",
+        parents: "Running",
+        left: 1,
+        right: 110
+      }])
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("matches deterministic generated start and resumed executions", () =>
     Effect.gen(function*() {
       const samples = FastCheck.sample(generated.arbitrary, { numRuns: 36, seed: 93_701 })
