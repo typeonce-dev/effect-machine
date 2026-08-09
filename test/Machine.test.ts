@@ -548,6 +548,106 @@ describe("Machine", () => {
       })
     }))
 
+  describe("event constructor", () => {
+    it.effect("validates once and shares trust only with derived machine definitions", () =>
+      Effect.gen(function*() {
+        let validations = 0
+        const Tick = Schema.TaggedStruct("ConstructedTick", { value: Schema.Number }).pipe(
+          Schema.refine((event): event is typeof event => {
+            validations += 1
+            return true
+          })
+        )
+        const AlternateTick = Schema.TaggedStruct("ConstructedTick", { value: Schema.Number })
+        const Counter = Schema.TaggedStruct("ConstructedCounter", { value: Schema.Number })
+        const states = Machine.defineStates({ Counter })
+        const definition = Machine.make({
+          states: states.states,
+          events: [Tick],
+          initial: () => states.initial.Counter.from({ value: 0 })
+        })
+
+        const tick = Machine.event(definition, Tick, { value: 1 })
+        assert.deepStrictEqual(tick, { _tag: "ConstructedTick", value: 1 })
+        assert.strictEqual(validations, 1)
+
+        const machine = definition.handle({
+          Counter: {
+            on: {
+              ConstructedTick: () => undefined
+            }
+          }
+        })
+        const initial = yield* Machine.planInitial(machine)
+        for (let index = 0; index < 5; index++) {
+          yield* Machine.plan(machine, initial.state, tick)
+        }
+        assert.strictEqual(validations, 1)
+
+        const raw = Tick.make({ value: 2 })
+        assert.strictEqual(validations, 2)
+        yield* Machine.plan(machine, initial.state, raw)
+        assert.strictEqual(validations, 3)
+
+        const unrelated = Machine.make({
+          states: states.states,
+          events: [Tick],
+          initial: () => states.initial.Counter.from({ value: 0 })
+        }).handle({
+          Counter: {
+            on: {
+              ConstructedTick: () => undefined
+            }
+          }
+        })
+        yield* Machine.plan(unrelated, (yield* Machine.planInitial(unrelated)).state, tick)
+        assert.strictEqual(validations, 4)
+
+        assert.throws(
+          () => Machine.event(machine, AlternateTick, { value: 1 }),
+          "Machine.event expected a schema from the machine event protocol"
+        )
+
+        let invalid: unknown
+        try {
+          Machine.event(definition, Tick, { value: "invalid" } as never)
+        } catch (cause) {
+          invalid = cause
+        }
+        assertMachineSchemaDecodeError(invalid, "event")
+      }))
+
+    it("constructs configured TaggedUnion cases", () => {
+      const Event = Schema.TaggedUnion({
+        Ping: { message: Schema.String },
+        Stop: {}
+      })
+      class Defaulted extends Schema.TaggedClass<Defaulted>("ConstructedDefaulted")("Defaulted", {
+        id: Schema.String,
+        label: Schema.String.pipe(
+          Schema.optionalKey,
+          Schema.withConstructorDefault(Effect.succeed("default-label"))
+        )
+      }) {}
+      const State = Schema.TaggedStruct("EventConstructorIdle", {})
+      const states = Machine.defineStates({ Idle: State })
+      const machine = Machine.make({
+        states: states.states,
+        events: [Event, Defaulted],
+        initial: () => states.initial.Idle.from()
+      })
+
+      assert.deepStrictEqual(
+        Machine.event(machine, Event.cases.Ping, { message: "hello" }),
+        { _tag: "Ping", message: "hello" }
+      )
+      assert.deepStrictEqual(Machine.event(machine, Event.cases.Stop), { _tag: "Stop" })
+      const defaulted = Machine.event(machine, Defaulted, { id: "event-1" })
+      assert.instanceOf(defaulted, Defaulted)
+      assert.deepStrictEqual(defaulted, new Defaulted({ id: "event-1", label: "default-label" }))
+    })
+  })
+
   describe("state builder from", () => {
     it.effect("constructs TaggedClass initial state and applies constructor defaults", () =>
       Effect.gen(function*() {

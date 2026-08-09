@@ -5384,7 +5384,7 @@ const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) =
       const omitted = args.length === 0 || (kind === "nested" && args.length === 1 && typeof args[0] === "function")
       const input = omitted ? {} : args[0]
       const rest = omitted ? args : args.slice(1)
-      return Model.markStateConstruction(method(Model.makeStateInput(input), ...rest))
+      return method(Model.makeStateInput(input), ...rest)
     },
     enumerable: false
   })
@@ -5426,10 +5426,6 @@ const makeParallelSnapshotBuilder = (
     value: regions,
     enumerable: false
   })
-  Object.defineProperty(builder, SnapshotBuilderConstructionTypeId, {
-    value: Model.isStateConstruction(builder),
-    enumerable: false
-  })
   for (const key of Object.keys(states)) {
     const pseudoType = (states[key] as { readonly type?: unknown }).type
     if (pseudoType === "history" || pseudoType === "choice") {
@@ -5446,8 +5442,7 @@ const makeParallelSnapshotBuilder = (
         nextRegions[regionKey] = regions[regionKey]
       }
       nextRegions[key] = makeSnapshotForNode(states[key], key, value, selector, options)
-      const next = makeParallelSnapshotBuilder(states, options, nextRegions)
-      return Model.isStateConstruction(builder) ? Model.markStateConstruction(next) : next
+      return makeParallelSnapshotBuilder(states, options, nextRegions)
     }, node.states === undefined ? "leaf" : "nested")
   }
   return builder
@@ -5499,14 +5494,14 @@ const makeSnapshotForNode = (
     const builder = makeParallelSnapshotBuilder(node.states, { ...options, prefix: path }, {})
     const selected = selector(builder)
     snapshot.states = getParallelSnapshotBuilderRegions(path, node.states, selected)
-    return Model.isStateConstruction(selected) ? Model.markStateConstruction(snapshot) : snapshot
+    return snapshot
   }
   const childStates = options.mode === "initial" && node.initial !== undefined
     ? { [node.initial]: node.states[node.initial] }
     : node.states
   const selected = selector(makeSnapshotBuilder(childStates, { ...options, prefix: path }))
   snapshot.state = selected
-  return Model.isStateConstruction(selected) ? Model.markStateConstruction(snapshot) : snapshot
+  return snapshot
 }
 
 const getTargetBuilderNode = (
@@ -6024,6 +6019,44 @@ export const make: Make = (<
   Model.setProtocol(self)
   return self
 }) as Make
+
+type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends EventSchema["~type.make.in"] ?
+  [input?: EventSchema["~type.make.in"]]
+  : [input: EventSchema["~type.make.in"]]
+
+/**
+ * Constructs an event from a schema owned by a machine's protocol.
+ *
+ * **Details**
+ *
+ * The schema constructor runs exactly once. The resulting decoded event is
+ * trusted by this machine and definitions derived from it with `handle`, so
+ * repeated delivery does not decode the same already-constructed value again.
+ * Events supplied through ordinary `send` and `plan` calls remain untrusted
+ * and continue through full runtime schema validation.
+ * Treat the returned event as immutable after construction.
+ *
+ * The schema must be one of the machine's configured public or internal event
+ * schemas, or a case schema belonging to a configured `Schema.TaggedUnion`.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const increment = Machine.event(counter, Increment, { by: 1 })
+ * yield* ref.send(increment)
+ * ```
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const event = <
+  const M extends Machine.Any,
+  const EventSchema extends Machine.TaggedSchema
+>(
+  machine: M,
+  schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
+  ...args: EventConstructorArgs<EventSchema>
+): EventSchema["Type"] => Model.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.

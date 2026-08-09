@@ -130,6 +130,27 @@ const machine = Machine.make({
 })
 ```
 
+Construct reusable events with `Machine.event` when the schema is owned by the
+machine protocol:
+
+```ts
+const save = Machine.event(machine, Command.cases.Save)
+yield * ref.send(save)
+```
+
+The schema constructor runs once and the decoded value is trusted by that
+machine and definitions derived from it with `handle`. This avoids decoding a
+known event again on every delivery. A configured `Schema.TaggedUnion` can use
+either the union schema itself or one of its `cases`. Treat the returned event
+as immutable; sending it to an unrelated machine goes through that machine's
+normal decoder.
+
+Ordinary values remain valid and are decoded at every boundary:
+
+```ts
+yield * ref.send({ _tag: "Save" })
+```
+
 Handlers and machine logic see the complete union. Local public APIs such as
 `MachineRef.send`, `machineAtom.send`, and `Machine.plan` expose only `events`
 in TypeScript. The local planner and runtime still share the complete event
