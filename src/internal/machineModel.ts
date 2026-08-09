@@ -628,18 +628,6 @@ export const makeStateInput = (input: unknown): StateInput => ({
 
 const isStateInput = (u: unknown): u is StateInput => hasProperty(u, StateInputTypeId)
 
-export const markStateConstruction = <A>(value: A): A => {
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.defineProperty(value, StateConstructionTypeId, {
-      value: StateConstructionTypeId,
-      enumerable: false
-    })
-  }
-  return value
-}
-
-export const isStateConstruction = (u: unknown): boolean => hasProperty(u, StateConstructionTypeId)
-
 export const isSnapshot = (u: unknown): u is Machine.AtomicSnapshot<string, unknown> =>
   hasProperty(u, "path") && hasProperty(u, "value")
 
@@ -698,6 +686,8 @@ interface CompletionResult extends FinalCompletion {
 interface MachineProtocolSchemas {
   readonly event: Schema.Top
   readonly emit: Schema.Top
+  readonly eventConstructors: ReadonlySet<object>
+  readonly trustedEvents: WeakSet<object>
 }
 
 type BoundaryDecoder = (value: unknown) => Effect.Effect<unknown, Schema.SchemaError, unknown>
@@ -746,10 +736,35 @@ const setProtocolSchemas = (machine: Machine.Any, protocol: MachineProtocolSchem
   })
 }
 
+const collectEventConstructors = (
+  schemas: ReadonlyArray<Machine.TaggedSchema>
+): ReadonlySet<object> => {
+  const constructors = new Set<object>()
+  const add = (schema: Machine.TaggedSchema): void => {
+    const key = schema as object
+    if (constructors.has(key)) return
+    constructors.add(key)
+    if (!hasProperty(schema, "cases") || typeof schema.cases !== "object" || schema.cases === null) return
+    for (const candidate of Object.values(schema.cases)) {
+      if (
+        ((typeof candidate === "object" && candidate !== null) || typeof candidate === "function") &&
+        hasProperty(candidate, "make")
+      ) {
+        add(candidate as Machine.TaggedSchema)
+      }
+    }
+  }
+  for (const schema of schemas) add(schema)
+  return constructors
+}
+
 export const setProtocol = (machine: Machine.Any): void => {
+  const events = [...machine.events, ...machine.internalEvents]
   setProtocolSchemas(machine, {
-    event: Schema.Union([...machine.events, ...machine.internalEvents]),
-    emit: Schema.Union(machine.emits)
+    event: Schema.Union(events),
+    emit: Schema.Union(machine.emits),
+    eventConstructors: collectEventConstructors(events),
+    trustedEvents: new WeakSet()
   })
 }
 
@@ -796,6 +811,56 @@ export const decodeBoundarySync = <A>(
   return decoded.success as A
 }
 
+const makeBoundarySync = <A>(
+  machine: Machine.Any,
+  schema: Schema.Top,
+  input: unknown,
+  options: DecodeBoundaryOptions
+): A => {
+  try {
+    return schema.make(input as never) as A
+  } catch (cause) {
+    const issue = cause instanceof Error ? cause.cause : undefined
+    throw new MachineSchemaDecodeError({
+      machineId: machine.id,
+      boundary: options.boundary,
+      cause: Schema.isSchemaError(cause)
+        ? cause
+        : hasProperty(issue, "~effect/SchemaIssue/Issue")
+        ? new Schema.SchemaError(issue as any)
+        : Cause.die(cause),
+      ...(options.state === undefined ? {} : { state: options.state }),
+      ...(options.event === undefined ? {} : { event: options.event })
+    })
+  }
+}
+
+/** Constructs an event through one of the machine protocol's own schemas and
+ * records the decoded value as trusted by that protocol. Machine clones share
+ * the protocol record, while unrelated machines retain independent trust. */
+export const makeEvent = <Schema extends Machine.TaggedSchema>(
+  machine: Machine.Any,
+  schema: Schema,
+  input: unknown
+): Schema["Type"] => {
+  const protocol = getProtocolSchemas(machine)
+  if (!protocol.eventConstructors.has(schema as object)) {
+    throw new Error("Machine.event expected a schema from the machine event protocol")
+  }
+  const inputName = getEventName(input)
+  const event = makeBoundarySync<Schema["Type"]>(
+    machine,
+    schema,
+    input,
+    inputName === undefined ? { boundary: "event" } : { boundary: "event", event: inputName }
+  )
+  protocol.trustedEvents.add(event as object)
+  return event
+}
+
+const isTrustedEvent = (protocol: MachineProtocolSchemas, event: unknown): boolean =>
+  typeof event === "object" && event !== null && protocol.trustedEvents.has(event)
+
 export const decodeInput = <Input extends Schema.Top>(
   machine: Machine.Any,
   schema: Input,
@@ -807,10 +872,14 @@ export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSch
   machine: Machine.Any,
   event: unknown
 ): Effect.Effect<Machine.EventOf<Events>, MachineSchemaDecodeError> => {
+  const protocol = getProtocolSchemas(machine)
+  if (isTrustedEvent(protocol, event)) {
+    return Effect.succeed(event as Machine.EventOf<Events>)
+  }
   const eventName = getEventName(event)
   return decodeBoundary<Machine.EventOf<Events>>(
     machine,
-    getProtocolSchemas(machine).event,
+    protocol.event,
     event,
     eventName === undefined ? { boundary: "event" } : { boundary: "event", event: eventName }
   )
@@ -820,10 +889,14 @@ export const decodeEventSync = <const Events extends ReadonlyArray<Machine.Tagge
   machine: Machine.Any,
   event: unknown
 ): Machine.EventOf<Events> => {
+  const protocol = getProtocolSchemas(machine)
+  if (isTrustedEvent(protocol, event)) {
+    return event as Machine.EventOf<Events>
+  }
   const eventName = getEventName(event)
   return decodeBoundarySync<Machine.EventOf<Events>>(
     machine,
-    getProtocolSchemas(machine).event,
+    protocol.event,
     event,
     eventName === undefined ? { boundary: "event" } : { boundary: "event", event: eventName }
   )
@@ -887,21 +960,10 @@ export const decodeStateValueSync = (
   if (!isStateInput(value)) {
     return decodeBoundarySync(machine, getStateNodeSchema(node), value, { boundary: "state", state: node.path })
   }
-  try {
-    return getStateNodeSchema(node).make(value.input as never)
-  } catch (cause) {
-    const issue = cause instanceof Error ? cause.cause : undefined
-    throw new MachineSchemaDecodeError({
-      machineId: machine.id,
-      boundary: "state",
-      state: node.path,
-      cause: Schema.isSchemaError(cause)
-        ? cause
-        : hasProperty(issue, "~effect/SchemaIssue/Issue")
-        ? new Schema.SchemaError(issue as any)
-        : Cause.die(cause)
-    })
-  }
+  return makeBoundarySync(machine, getStateNodeSchema(node), value.input, {
+    boundary: "state",
+    state: node.path
+  })
 }
 
 export const decodeOutputValue = (

@@ -195,6 +195,40 @@ describe("Machine", () => {
     >()
   })
 
+  it("constructs exact public and internal event values from machine-owned schemas", () => {
+    const Event = Schema.TaggedUnion({
+      Tick: { amount: Schema.Number },
+      Stop: {}
+    })
+    class Internal extends Schema.TaggedClass<Internal>("ConstructedInternal")("ConstructedInternal", {
+      id: Schema.String
+    }) {}
+    class Unknown extends Schema.TaggedClass<Unknown>("ConstructedUnknown")("ConstructedUnknown", {}) {}
+    class InvalidTick extends Schema.TaggedClass<InvalidTick>("InvalidTick")("Tick", {
+      amount: Schema.String
+    }) {}
+    const State = Schema.TaggedStruct("ConstructedEventState", {})
+    const States = Machine.defineStates({ State })
+    const machine = Machine.make({
+      states: States.states,
+      events: [Event],
+      internalEvents: [Internal],
+      initial: () => States.initial.State.from()
+    })
+
+    expect(Machine.event(machine, Event.cases.Tick, { amount: 1 })).type.toBe<{
+      readonly _tag: "Tick"
+      readonly amount: number
+    }>()
+    expect(Machine.event(machine, Event.cases.Stop)).type.toBe<{ readonly _tag: "Stop" }>()
+    expect(Machine.event(machine, Internal, { id: "internal-1" })).type.toBe<Internal>()
+    expect(Machine.event).type.not.toBeCallableWith(machine, Event.cases.Tick)
+    expect(Machine.event).type.not.toBeCallableWith(machine, Event.cases.Tick, { amount: "1" })
+    expect(Machine.event).type.not.toBeCallableWith(machine, Internal, {})
+    expect(Machine.event).type.not.toBeCallableWith(machine, Unknown, {})
+    expect(Machine.event).type.not.toBeCallableWith(machine, InvalidTick, { amount: "1" })
+  })
+
   it("machine contexts expose type-safe parent state values", () => {
     const nested = null as unknown as SignedOutContext
     expect(nested.parent).type.toBe<Auth>()

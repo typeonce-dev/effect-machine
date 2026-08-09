@@ -471,9 +471,24 @@ const machine = Machine.make({
   states: States.states,
   events: [Event.cases.Save],
   internalEvents: [InternalEvent.cases.Saved, InternalEvent.cases.SaveFailed],
-  initial: () => States.initial.Idle(State.cases.Idle.make({}))
+  initial: () => States.initial.Idle.from()
 })
 ```
+
+When the same already-constructed event may be delivered repeatedly, construct
+it once through its owning machine protocol:
+
+```ts
+const save = Machine.event(machine, Event.cases.Save)
+yield* ref.send(save)
+```
+
+`Machine.event` runs the configured schema constructor once. That machine and
+definitions derived from it with `handle` then recognize the decoded event as
+trusted and do not decode it again. Tagged-union case schemas are recognized
+when their union is configured. Treat the returned event as immutable. Raw
+objects and values constructed for another machine continue through normal
+runtime validation on every delivery.
 
 Use the exported utility types when another API must preserve the boundary:
 
