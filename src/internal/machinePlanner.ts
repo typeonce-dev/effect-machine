@@ -610,29 +610,6 @@ const makeTransitionContext = <
   target: getTargetBuilder(machine, path)
 })
 
-const makeCompiledTransitionContext = (
-  machine: Machine.Any,
-  configuration: ActiveConfiguration,
-  path: string,
-  event: any
-): any => {
-  let snapshot: Machine.Snapshot<any> | undefined
-  return {
-    state: getActiveValue(configuration, path),
-    get parent() {
-      return getParentValue(machine, configuration, path)
-    },
-    get parents() {
-      return getParentValues(machine, configuration, path)
-    },
-    event,
-    get snapshot() {
-      return snapshot ??= snapshotFromConfiguration(machine, configuration)
-    },
-    target: getTargetBuilder(machine, path)
-  }
-}
-
 const makeDoneContext = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -2122,19 +2099,27 @@ const planFlatConfiguration = (
 }
 
 interface HierarchicalExecutionDescriptor {
-  readonly leafPaths: ReadonlyArray<string>
-  readonly finalPaths: ReadonlyArray<string>
-  readonly candidatesByLeaf: ReadonlyMap<string, ReadonlyArray<string>>
-  readonly transitionsByPath: ReadonlyMap<
-    PropertyKey,
-    ReadonlyMap<PropertyKey, MicrostepTransition<any, any, any, any>>
+  readonly nodes: ReadonlyArray<Machine.StateNode>
+  readonly indexByPath: ReadonlyMap<string, number>
+  readonly parentIndices: ReadonlyArray<number>
+  readonly childIndices: ReadonlyArray<ReadonlyArray<number>>
+  readonly ancestorIndices: ReadonlyArray<ReadonlyArray<number>>
+  readonly rootIndices: ReadonlyArray<number>
+  readonly leafIndices: ReadonlyArray<number>
+  readonly finalIndices: ReadonlyArray<number>
+  readonly dispatchByLeaf: ReadonlyMap<
+    number,
+    ReadonlyMap<PropertyKey, {
+      readonly sourceIndex: number
+      readonly transition: MicrostepTransition<any, any, any, any>
+    }>
   >
 }
 
 const compileHierarchicalExecutionDescriptor = (
   machine: Machine.Any
 ): HierarchicalExecutionDescriptor | undefined => {
-  const candidatesByLeaf = new Map<string, ReadonlyArray<string>>()
+  const nodes: Array<Machine.StateNode> = []
   const leafPaths: Array<string> = []
   const finalPaths: Array<string> = []
   const transitionsByPath = new Map<
@@ -2143,12 +2128,12 @@ const compileHierarchicalExecutionDescriptor = (
   >()
 
   for (const node of machine.stateNodes.byPath.values() as Iterable<Machine.StateNode>) {
+    nodes.push(node)
     if (node.type === "choice" || node.type === "history") {
       return undefined
     }
     if (node.type === "atomic" || node.type === "final") {
       leafPaths.push(node.path)
-      candidatesByLeaf.set(node.path, [...getPathToRoot(machine, node.path)].reverse())
     }
     if (node.type === "final") {
       finalPaths.push(node.path)
@@ -2179,89 +2164,316 @@ const compileHierarchicalExecutionDescriptor = (
 
   leafPaths.sort((left, right) => compareDocumentOrder(machine, left, right))
   finalPaths.sort((left, right) => compareDocumentOrder(machine, left, right))
+  nodes.sort((left, right) => left.order - right.order)
+  const indexByPath = new Map(nodes.map((node, index) => [node.path, index]))
+  const indexOf = (path: string): number => {
+    const index = indexByPath.get(path)
+    if (index === undefined) {
+      throw new Error(`Machine expected compiled state path "${path}"`)
+    }
+    return index
+  }
+  const leafIndices = leafPaths.map(indexOf)
+  const parentIndices = nodes.map((node) => node.parent === undefined ? -1 : indexOf(node.parent))
+  const childIndices = nodes.map((node) => node.children.map(indexOf))
+  const ancestorIndices = nodes.map((node) => getPathToRoot(machine, node.path).slice(0, -1).map(indexOf))
+  const transitionsByIndex = nodes.map((node) => transitionsByPath.get(node.path))
+  const dispatchByLeaf = new Map<
+    number,
+    ReadonlyMap<PropertyKey, {
+      readonly sourceIndex: number
+      readonly transition: MicrostepTransition<any, any, any, any>
+    }>
+  >()
+  for (const leafIndex of leafIndices) {
+    const dispatch = new Map<PropertyKey, {
+      readonly sourceIndex: number
+      readonly transition: MicrostepTransition<any, any, any, any>
+    }>()
+    const candidates = [leafIndex, ...ancestorIndices[leafIndex]!.slice().reverse()]
+    for (const sourceIndex of candidates) {
+      for (const [tag, transition] of transitionsByIndex[sourceIndex] ?? []) {
+        if (!dispatch.has(tag)) dispatch.set(tag, { sourceIndex, transition })
+      }
+    }
+    dispatchByLeaf.set(leafIndex, dispatch)
+  }
   return {
-    leafPaths,
-    finalPaths,
-    candidatesByLeaf,
-    transitionsByPath
+    nodes,
+    indexByPath,
+    parentIndices,
+    childIndices,
+    ancestorIndices,
+    rootIndices: nodes.flatMap((node, index) => node.parent === undefined ? [index] : []),
+    leafIndices,
+    finalIndices: finalPaths.map(indexOf),
+    dispatchByLeaf
   }
 }
 
-const selectCompiledEventTransitions = (
+interface IndexedConfiguration {
+  readonly active: Uint8Array
+  readonly values: ReadonlyArray<unknown>
+  readonly completed: Uint8Array
+  readonly outputs: ReadonlyArray<unknown>
+  readonly completedOrder: ReadonlyArray<number>
+}
+
+const indexedConfigurationFromActive = (
+  descriptor: HierarchicalExecutionDescriptor,
+  configuration: ActiveConfiguration
+): IndexedConfiguration => {
+  const active = new Uint8Array(descriptor.nodes.length)
+  const values: Array<unknown> = new Array(descriptor.nodes.length)
+  const completed = new Uint8Array(descriptor.nodes.length)
+  const outputs: Array<unknown> = new Array(descriptor.nodes.length)
+  const completedOrder: Array<number> = []
+  for (const path of configuration.active) {
+    const index = descriptor.indexByPath.get(path)
+    if (index === undefined) throw new Error(`Machine expected indexed active path "${path}"`)
+    active[index] = 1
+    values[index] = configuration.values.get(path)
+  }
+  for (const [path, output] of configuration.outputs) {
+    const index = descriptor.indexByPath.get(path)
+    if (index === undefined) throw new Error(`Machine expected indexed completed path "${path}"`)
+    completed[index] = 1
+    outputs[index] = output
+    completedOrder.push(index)
+  }
+  return { active, values, completed, outputs, completedOrder }
+}
+
+const activeConfigurationFromIndexed = (
+  descriptor: HierarchicalExecutionDescriptor,
+  configuration: IndexedConfiguration
+): ActiveConfiguration => {
+  const active = new Set<string>()
+  const values = new Map<string, unknown>()
+  const outputs = new Map<string, unknown>()
+  for (let index = 0; index < descriptor.nodes.length; index++) {
+    if (configuration.active[index] !== 1) continue
+    const path = descriptor.nodes[index]!.path
+    active.add(path)
+    values.set(path, configuration.values[index])
+  }
+  for (const index of configuration.completedOrder) {
+    if (configuration.completed[index] === 1) {
+      outputs.set(descriptor.nodes[index]!.path, configuration.outputs[index])
+    }
+  }
+  return { active, values, outputs, history: new Map() }
+}
+
+const snapshotFromIndexedPath = (
+  descriptor: HierarchicalExecutionDescriptor,
+  configuration: IndexedConfiguration,
+  index: number
+): Machine.AtomicSnapshot<string, unknown> => {
+  const node = descriptor.nodes[index]!
+  const snapshot: Record<string, unknown> = {
+    path: node.path,
+    value: configuration.values[index]
+  }
+  if (node.type === "compound") {
+    const childIndex = descriptor.childIndices[index]!.find((childIndex) => configuration.active[childIndex] === 1)
+    if (childIndex === undefined) {
+      throw new Error(`Machine expected indexed compound state "${node.path}" to have an active child`)
+    }
+    snapshot.state = snapshotFromIndexedPath(descriptor, configuration, childIndex)
+  } else if (node.type === "parallel") {
+    const states: Record<string, unknown> = {}
+    for (const childIndex of descriptor.childIndices[index]!) {
+      if (configuration.active[childIndex] !== 1) {
+        throw new Error(
+          `Machine expected indexed parallel state "${node.path}" to have active region "${
+            descriptor.nodes[childIndex]!.path
+          }"`
+        )
+      }
+      states[descriptor.nodes[childIndex]!.key] = snapshotFromIndexedPath(descriptor, configuration, childIndex)
+    }
+    snapshot.states = states
+  }
+  return snapshot as unknown as Machine.AtomicSnapshot<string, unknown>
+}
+
+const snapshotFromIndexed = (
+  descriptor: HierarchicalExecutionDescriptor,
+  configuration: IndexedConfiguration
+): Machine.Snapshot<any> => {
+  const rootIndex = descriptor.rootIndices.find((index) => configuration.active[index] === 1)
+  if (rootIndex === undefined) throw new Error("Machine expected an active indexed root state")
+  const snapshot = snapshotFromIndexedPath(descriptor, configuration, rootIndex) as Machine.Snapshot<any>
+  if (configuration.completedOrder.length > 0) {
+    ;(snapshot as Machine.AtomicSnapshot<string, unknown> & {
+      completed: ReadonlyArray<Machine.SnapshotCompletion>
+    }).completed = configuration.completedOrder.map((index) => ({
+      path: descriptor.nodes[index]!.path,
+      output: configuration.outputs[index]
+    }))
+  }
+  return snapshot
+}
+
+const makeIndexedTransitionContext = (
   machine: Machine.Any,
   descriptor: HierarchicalExecutionDescriptor,
-  configuration: ActiveConfiguration,
+  configuration: IndexedConfiguration,
+  sourceIndex: number,
   event: any
-): ReadonlyArray<SelectedTransition<any, any, any, any>> => {
-  const selected: Array<SelectedTransition<any, any, any, any>> = []
-  const selectedSources = new Set<string>()
-
-  for (const leaf of descriptor.leafPaths) {
-    if (!configuration.active.has(leaf)) {
-      continue
-    }
-    const candidates = descriptor.candidatesByLeaf.get(leaf)
-    if (candidates === undefined) {
-      throw new Error(`Machine expected compiled candidates for active leaf "${leaf}"`)
-    }
-    for (const path of candidates) {
-      const transition = descriptor.transitionsByPath.get(path)?.get(event._tag)
-      if (transition === undefined) {
-        continue
+): any => {
+  const source = descriptor.nodes[sourceIndex]!
+  let snapshot: Machine.Snapshot<any> | undefined
+  return {
+    state: configuration.values[sourceIndex],
+    get parent() {
+      const parentIndex = descriptor.parentIndices[sourceIndex]!
+      return parentIndex < 0 ? undefined : configuration.values[parentIndex]
+    },
+    get parents() {
+      const parents: Record<string, unknown> = {}
+      for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
+        parents[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
       }
-      if (!selectedSources.has(path)) {
-        selectedSources.add(path)
+      return parents
+    },
+    event,
+    get snapshot() {
+      return snapshot ??= snapshotFromIndexed(descriptor, configuration)
+    },
+    target: getTargetBuilder(machine, source.path)
+  }
+}
+
+type IndexedSelectedTransition = SelectedTransition<any, any, any, any> & {
+  readonly sourceIndex: number
+  readonly leafIndex: number
+}
+
+type IndexedEvaluatedTransition =
+  & Omit<
+    EvaluatedTransition<any, any, any, any, any>,
+    "selection"
+  >
+  & {
+    readonly selection: IndexedSelectedTransition
+    readonly next: IndexedConfiguration
+  }
+
+const emptyCompiledValues: ReadonlyArray<never> = []
+
+const collectIndexedTransition = (
+  machine: Machine.Any,
+  transition: TransitionHandler<any, any, any, any>,
+  context: any
+) => {
+  let commands: Array<RuntimeCommand> | undefined
+  let raisedEvents: Array<any> | undefined
+  let emittedEvents: Array<unknown> | undefined
+  const state = transition(context, {
+    raise: (event: unknown) => {
+      ;(raisedEvents ??= []).push(decodeEventSync(machine, event))
+    },
+    emit: (event: unknown) => {
+      ;(emittedEvents ??= []).push(decodeEmitSync(machine, event))
+    },
+    sendTo: (child: unknown, event: unknown) => {
+      ;(commands ??= []).push({ _tag: "SendTo", child: child as any, event })
+    },
+    stop: (child: unknown) => {
+      ;(commands ??= []).push({ _tag: "Stop", child: child as any })
+    }
+  })
+  return {
+    state,
+    commands: commands ?? emptyCompiledValues,
+    raisedEvents: raisedEvents ?? emptyCompiledValues,
+    emittedEvents: emittedEvents ?? emptyCompiledValues
+  }
+}
+
+const selectIndexedEventTransitions = (
+  machine: Machine.Any,
+  descriptor: HierarchicalExecutionDescriptor,
+  configuration: IndexedConfiguration,
+  event: any
+): ReadonlyArray<IndexedSelectedTransition> => {
+  const selected: Array<IndexedSelectedTransition> = []
+  for (const leafIndex of descriptor.leafIndices) {
+    if (configuration.active[leafIndex] !== 1) continue
+    const dispatched = descriptor.dispatchByLeaf.get(leafIndex)!.get(event._tag)
+    if (dispatched !== undefined) {
+      const { sourceIndex, transition } = dispatched
+      if (!selected.some((selection) => selection.sourceIndex === sourceIndex)) {
+        const sourcePath = descriptor.nodes[sourceIndex]!.path
         selected.push({
-          sourcePath: path,
-          leafPath: leaf,
+          sourceIndex,
+          leafIndex,
+          sourcePath,
+          leafPath: descriptor.nodes[leafIndex]!.path,
           trigger: { type: "event", event: event._tag },
           transition,
-          context: makeCompiledTransitionContext(machine, configuration, path, event)
+          context: makeIndexedTransitionContext(
+            machine,
+            descriptor,
+            configuration,
+            sourceIndex,
+            event
+          )
         })
       }
-      break
     }
   }
   return selected
 }
 
-type CompiledEvaluatedTransition = EvaluatedTransition<any, any, any, any, any> & {
-  readonly next: ActiveConfiguration
-}
-
-const normalizeCompiledTargetConfigurationSync = (
-  machine: Machine.Any,
-  current: ActiveConfiguration,
-  target: Machine.Target<any, any> | Machine.Snapshot<any>,
-  activeLeaf: string
-): ActiveConfiguration => {
-  if (
-    isTarget(target) && String(target.path) === activeLeaf && current.active.has(activeLeaf) &&
-    target[TargetSnapshotTypeId] === undefined && target.values === undefined && current.outputs.size === 0
-  ) {
-    const values = new Map(current.values)
-    values.set(activeLeaf, decodeStateValueSync(machine, getNode(machine, activeLeaf), target.value))
-    return {
-      active: current.active,
-      values,
-      outputs: current.outputs,
-      history: current.history
-    }
+const hasSameIndexedActive = (left: IndexedConfiguration, right: IndexedConfiguration): boolean => {
+  if (left.active === right.active) return true
+  for (let index = 0; index < left.active.length; index++) {
+    if (left.active[index] !== right.active[index]) return false
   }
-  return normalizeTargetConfigurationSync(machine, current, target)
+  return true
 }
 
-const collectCompiledEvaluatedTransition = (
+const normalizeIndexedTargetConfigurationSync = (
   machine: Machine.Any,
-  state: ActiveConfiguration,
-  selection: SelectedTransition<any, any, any, any>
-): CompiledEvaluatedTransition => {
-  const transitionResult = collectTransition(
-    machine,
-    selection.transition.transition,
-    selection.context
+  descriptor: HierarchicalExecutionDescriptor,
+  current: IndexedConfiguration,
+  target: Machine.Target<any, any> | Machine.Snapshot<any>,
+  activeLeafIndex: number
+): IndexedConfiguration => {
+  const targetIndex = isTarget(target) ? descriptor.indexByPath.get(String(target.path)) : undefined
+  if (
+    targetIndex === activeLeafIndex && current.active[activeLeafIndex] === 1 && isTarget(target) &&
+    target[TargetSnapshotTypeId] === undefined && target.values === undefined && current.completedOrder.length === 0
+  ) {
+    const values = current.values.slice()
+    values[activeLeafIndex] = decodeStateValueSync(
+      machine,
+      descriptor.nodes[activeLeafIndex]!,
+      target.value
+    )
+    return { ...current, values }
+  }
+  return indexedConfigurationFromActive(
+    descriptor,
+    normalizeTargetConfigurationSync(
+      machine,
+      activeConfigurationFromIndexed(descriptor, current),
+      target
+    )
   )
-  const target = transitionResult.state === undefined ? undefined : transitionResult.state
+}
+
+const collectIndexedEvaluatedTransition = (
+  machine: Machine.Any,
+  descriptor: HierarchicalExecutionDescriptor,
+  state: IndexedConfiguration,
+  selection: IndexedSelectedTransition
+): IndexedEvaluatedTransition => {
+  const transitionResult = collectIndexedTransition(machine, selection.transition.transition, selection.context)
+  const target = transitionResult.state
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
@@ -2269,13 +2481,12 @@ const collectCompiledEvaluatedTransition = (
     target
   )
   if (target !== undefined && !isTarget(target) && !isSnapshot(target)) {
-    throw new Error("Machine expected compiled transition target to be a snapshot or target builder result")
+    throw new Error("Machine expected indexed transition target to be a snapshot or target builder result")
   }
-
   const next = target === undefined
     ? state
-    : normalizeCompiledTargetConfigurationSync(machine, state, target as any, selection.leafPath)
-  const changed = selection.transition.reenter || !hasSameActivePaths(state, next)
+    : normalizeIndexedTargetConfigurationSync(machine, descriptor, state, target as any, selection.leafIndex)
+  const changed = selection.transition.reenter || !hasSameIndexedActive(state, next)
   if (!changed) {
     return {
       selection,
@@ -2294,9 +2505,9 @@ const collectCompiledEvaluatedTransition = (
 
   const targetPath = target === undefined ? undefined : getTargetNodePath(target as any)
   const naturalBoundary = targetPath === undefined
-    ? getNode(machine, selection.sourcePath).parent
+    ? descriptor.nodes[selection.sourceIndex]!.parent
     : getLeastCommonAncestor(machine, selection.leafPath, targetPath)
-  const reentryBoundary = getNode(machine, selection.sourcePath).parent
+  const reentryBoundary = descriptor.nodes[selection.sourceIndex]!.parent
   const boundary = selection.transition.reenter
     ? broadenTransitionBoundary(naturalBoundary, reentryBoundary)
     : naturalBoundary
@@ -2309,20 +2520,21 @@ const collectCompiledEvaluatedTransition = (
     raisedEvents: transitionResult.raisedEvents,
     emittedEvents: transitionResult.emittedEvents,
     changed: true,
-    exitPaths: getExitPaths(machine, state, boundary),
-    entryPaths: getEntryPaths(machine, next, boundary),
+    exitPaths: getExitPaths(machine, activeConfigurationFromIndexed(descriptor, state), boundary),
+    entryPaths: getEntryPaths(machine, activeConfigurationFromIndexed(descriptor, next), boundary),
     choiceTransitions: []
   }
 }
 
-const compiledMicrostep = (
+const indexedMicrostep = (
   machine: Machine.Any,
-  state: ActiveConfiguration,
+  descriptor: HierarchicalExecutionDescriptor,
+  state: IndexedConfiguration,
   event: any,
-  selections: ReadonlyArray<SelectedTransition<any, any, any, any>>
-): MicrostepPlan<ActiveConfiguration, any, any, any> => {
+  selections: ReadonlyArray<IndexedSelectedTransition>
+): MicrostepPlan<IndexedConfiguration, any, any, any> => {
   if (selections.length === 1) {
-    const transition = collectCompiledEvaluatedTransition(machine, state, selections[0]!)
+    const transition = collectIndexedEvaluatedTransition(machine, descriptor, state, selections[0]!)
     return {
       next: transition.next,
       event,
@@ -2335,12 +2547,19 @@ const compiledMicrostep = (
       changed: transition.changed
     }
   }
-  const activeSelections = removePreemptedAncestorSelections(selections)
-  const evaluated = activeSelections.map((selection) => collectCompiledEvaluatedTransition(machine, state, selection))
+  const activeSelections = selections.filter((selection) =>
+    !selections.some((other) =>
+      other.sourceIndex !== selection.sourceIndex &&
+      isDescendantOf(other.sourcePath, selection.sourcePath)
+    )
+  )
+  const evaluated = activeSelections.map((selection) =>
+    collectIndexedEvaluatedTransition(machine, descriptor, state, selection)
+  )
   const transitions = sortEvaluatedTransitions(
     machine,
-    removeConflictingTransitions(machine, evaluated)
-  ) as ReadonlyArray<CompiledEvaluatedTransition>
+    removeConflictingTransitions(machine, evaluated as any)
+  ) as ReadonlyArray<IndexedEvaluatedTransition>
 
   let next = state
   if (transitions.length === 1) {
@@ -2352,7 +2571,13 @@ const compiledMicrostep = (
     ]
     for (const transition of applicationOrder) {
       if (transition.target !== undefined) {
-        next = normalizeTargetConfigurationSync(machine, next, transition.target)
+        next = normalizeIndexedTargetConfigurationSync(
+          machine,
+          descriptor,
+          next,
+          transition.target,
+          transition.selection.leafIndex
+        )
       }
     }
   }
@@ -2374,33 +2599,33 @@ const compiledMicrostep = (
   }
 }
 
-const planHierarchicalConfiguration = (
+const planIndexedHierarchicalConfiguration = (
   machine: Machine.Any,
   descriptor: HierarchicalExecutionDescriptor,
-  configuration: ActiveConfiguration,
+  configuration: IndexedConfiguration,
   input: unknown
-): MacrostepPlan<ActiveConfiguration, any, any, any, any> => {
+): MacrostepPlan<IndexedConfiguration, any, any, any, any> => {
   const decoded = decodeEventSync(machine, input) as { readonly _tag: PropertyKey }
-  if (
-    descriptor.finalPaths.some((path) => configuration.active.has(path)) &&
-    isActiveFinalConfiguration(machine, configuration)
-  ) {
-    const completed = completeConfigurationSync(machine, configuration, decoded)
-    const root = getRootPath(machine, completed.configuration)
-    if (!completed.configuration.outputs.has(root)) {
-      throw new Error("Machine reached a terminal configuration without a completed root output")
-    }
-    return {
-      next: completed.configuration,
-      commands: [],
-      emittedEvents: [],
-      microsteps: [],
-      done: true,
-      output: completed.configuration.outputs.get(root)
+  if (descriptor.finalIndices.some((index) => configuration.active[index] === 1)) {
+    const active = activeConfigurationFromIndexed(descriptor, configuration)
+    if (isActiveFinalConfiguration(machine, active)) {
+      const completed = completeConfigurationSync(machine, active, decoded).configuration
+      const root = getRootPath(machine, completed)
+      if (!completed.outputs.has(root)) {
+        throw new Error("Machine reached a terminal indexed configuration without a completed root output")
+      }
+      return {
+        next: indexedConfigurationFromActive(descriptor, completed),
+        commands: [],
+        emittedEvents: [],
+        microsteps: [],
+        done: true,
+        output: completed.outputs.get(root)
+      }
     }
   }
 
-  const selections = selectCompiledEventTransitions(machine, descriptor, configuration, decoded)
+  const selections = selectIndexedEventTransitions(machine, descriptor, configuration, decoded)
   if (selections.length === 0) {
     return {
       next: configuration,
@@ -2412,7 +2637,7 @@ const planHierarchicalConfiguration = (
     }
   }
 
-  const first = compiledMicrostep(machine, configuration, decoded, selections)
+  const first = indexedMicrostep(machine, descriptor, configuration, decoded, selections)
   let current = first.next
   let currentEvent: any = decoded
   const commands = [...first.commands]
@@ -2427,17 +2652,22 @@ const planHierarchicalConfiguration = (
     if (iterations > MaxMacrostepIterations) {
       throw new InfiniteTransitionError({
         machineId: machine.id,
-        state: String(getLeafPath(machine, current)),
+        state: descriptor.nodes[descriptor.leafIndices.find((index) => current.active[index] === 1)!]!.path,
         maxIterations: MaxMacrostepIterations
       })
     }
 
-    if (descriptor.finalPaths.some((path) => current.active.has(path))) {
-      current = completeConfigurationSync(machine, current, currentEvent).configuration
-      if (isActiveFinalConfiguration(machine, current)) {
-        const root = getRootPath(machine, current)
-        if (!current.outputs.has(root)) {
-          throw new Error("Machine reached a terminal configuration without a completed root output")
+    if (descriptor.finalIndices.some((index) => current.active[index] === 1)) {
+      const completed = completeConfigurationSync(
+        machine,
+        activeConfigurationFromIndexed(descriptor, current),
+        currentEvent
+      ).configuration
+      current = indexedConfigurationFromActive(descriptor, completed)
+      if (isActiveFinalConfiguration(machine, completed)) {
+        const root = getRootPath(machine, completed)
+        if (!completed.outputs.has(root)) {
+          throw new Error("Machine reached a terminal indexed configuration without a completed root output")
         }
         return {
           next: current,
@@ -2445,7 +2675,7 @@ const planHierarchicalConfiguration = (
           emittedEvents,
           microsteps,
           done: true,
-          output: current.outputs.get(root)
+          output: completed.outputs.get(root)
         }
       }
     }
@@ -2463,11 +2693,9 @@ const planHierarchicalConfiguration = (
     }
     raisedIndex += 1
     currentEvent = raised
-    const raisedSelections = selectCompiledEventTransitions(machine, descriptor, current, raised)
-    if (raisedSelections.length === 0) {
-      continue
-    }
-    const step = compiledMicrostep(machine, current, raised, raisedSelections)
+    const raisedSelections = selectIndexedEventTransitions(machine, descriptor, current, raised)
+    if (raisedSelections.length === 0) continue
+    const step = indexedMicrostep(machine, descriptor, current, raised, raisedSelections)
     current = step.next
     commands.push(...step.commands)
     raisedEvents.push(...step.raisedEvents)
@@ -2477,10 +2705,13 @@ const planHierarchicalConfiguration = (
 }
 
 export interface CompiledExecutionPlan {
+  readonly fromConfiguration: (configuration: ActiveConfiguration) => unknown
+  readonly toConfiguration: (state: unknown) => ActiveConfiguration
+  readonly snapshot: (state: unknown) => Machine.Snapshot<any>
   readonly plan: (
-    configuration: ActiveConfiguration,
+    state: unknown,
     event: unknown
-  ) => MacrostepPlan<ActiveConfiguration, any, any, any, any>
+  ) => MacrostepPlan<any, any, any, any, any>
 }
 
 const executionPlanCache = new WeakMap<Machine.Any, CompiledExecutionPlan>()
@@ -2492,11 +2723,25 @@ export const compileExecutionPlan = (machine: Machine.Any): CompiledExecutionPla
   }
   const flat = compileFlatExecutionDescriptor(machine)
   const hierarchical = flat === undefined ? compileHierarchicalExecutionDescriptor(machine) : undefined
+  const activePlan = (
+    plan: (configuration: ActiveConfiguration, event: unknown) => MacrostepPlan<ActiveConfiguration, any, any, any, any>
+  ): CompiledExecutionPlan => ({
+    fromConfiguration: (configuration) => configuration,
+    toConfiguration: (state) => state as ActiveConfiguration,
+    snapshot: (state) => snapshotFromConfiguration(machine, state as ActiveConfiguration),
+    plan: (state, event) => plan(state as ActiveConfiguration, event)
+  })
   const compiled: CompiledExecutionPlan = flat !== undefined
-    ? { plan: (configuration, event) => planFlatConfiguration(machine, flat, configuration, event) }
+    ? activePlan((configuration, event) => planFlatConfiguration(machine, flat, configuration, event))
     : hierarchical !== undefined
-    ? { plan: (configuration, event) => planHierarchicalConfiguration(machine, hierarchical, configuration, event) }
-    : { plan: (configuration, event) => planConfiguration(machine as any, configuration, event as any) }
+    ? {
+      fromConfiguration: (configuration) => indexedConfigurationFromActive(hierarchical, configuration),
+      toConfiguration: (state) => activeConfigurationFromIndexed(hierarchical, state as IndexedConfiguration),
+      snapshot: (state) => snapshotFromIndexed(hierarchical, state as IndexedConfiguration),
+      plan: (state, event) =>
+        planIndexedHierarchicalConfiguration(machine, hierarchical, state as IndexedConfiguration, event)
+    }
+    : activePlan((configuration, event) => planConfiguration(machine as any, configuration, event as any))
   executionPlanCache.set(machine, compiled)
   return compiled
 }
