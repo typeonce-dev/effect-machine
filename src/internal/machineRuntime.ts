@@ -11,7 +11,6 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import * as MutableRef from "effect/MutableRef"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
 import * as Queue from "effect/Queue"
@@ -1191,274 +1190,399 @@ const startGenericInternal: <
   return ref
 })
 
-// Compiled statecharts have a bounded runtime shape. Their optional `drain`
-// protocol lets a fiber own event processing and terminal publication only
-// while work exists; custom process logic keeps the persistent `run` contract.
-const startCompiledInternal: <
-  State,
-  Event,
-  Error = never,
-  Requirements = never,
-  Output = never,
-  InitialError = never
->(
-  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
-  options: StartInternalOptions
-) => Effect.Effect<
-  MachineRef<State, Event, Error, Output>,
-  InitialError,
-  Requirements
-> = Effect.fnUntraced(function*<State, Event, Error, Requirements, Output, InitialError>(
-  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
-  options: StartInternalOptions
-) {
-  const {
-    detached,
-    id: requestedId,
-    onOutcome,
-    onReady,
-    onSnapshot,
-    onStop,
-    parent,
-    runtime,
-    sendParent: overrideSendParent
-  } = options
-  type ProcessTermination =
-    | { readonly _tag: "Stopped" }
-    | { readonly _tag: "Done"; readonly output: Output }
-    | { readonly _tag: "Failure"; readonly cause: Cause.Cause<Error> }
+type CompiledTermination =
+  | { readonly _tag: "Stopped" }
+  | { readonly _tag: "Done"; readonly output: unknown }
+  | { readonly _tag: "Failure"; readonly cause: Cause.Cause<unknown> }
 
-  const sessionId = yield* runtime.nextSessionId
-  const id = requestedId ?? sessionId
-  const onDemand = logic.drain !== undefined
-  const queue = onDemand ? undefined : yield* Queue.unbounded<Event>()
-  // An on-demand drain never blocks on mailbox input: send schedules its owner
-  // whenever the FIFO becomes non-empty. Keep persistent custom processes on
-  // Queue, but avoid retaining Queue's waiting/backpressure machinery for the
-  // compiled protocol that only needs synchronous offer and poll operations.
-  const compactMailbox: CompactProcessMailbox<Event> | undefined = onDemand
-    ? { items: undefined, index: 0, closed: false }
-    : undefined
-  const poll = compactMailbox === undefined
-    ? Queue.poll(queue!)
-    : Effect.sync(() => pollCompactMailbox(compactMailbox))
-  const shutdownMailbox = compactMailbox === undefined
-    ? Queue.shutdown(queue!)
-    : Effect.sync(() => closeCompactMailbox(compactMailbox))
-  const done = yield* Deferred.make<Output, Error | StoppedError>()
-  const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
-  const drainServices = onDemand ? yield* Effect.context<Requirements>() : undefined
-  let worker: Fiber.Fiber<any, never> | undefined
-  let draining = false
-  let offerRevision = 0
-  let interruptRequested = false
-  let requestedTermination: ProcessTermination | undefined
-  let reservedTerminationSnapshot: RuntimeSnapshot<State, Error, Output> | undefined
-  let reserveRequestedTermination:
-    | ((requested: ProcessTermination) => RuntimeSnapshot<State, Error, Output> | undefined)
-    | undefined
-  // A compiled process never suspends waiting for a terminal request: its
-  // active drain owns completion, while stop/failure either interrupts that
-  // owner or terminalizes an idle drain directly. An owner-local cell can
-  // therefore arbitrate the first request atomically without retaining a
-  // second Deferred in every compiled machine.
-  const requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
-    Effect.sync(() => {
-      if (requestedTermination !== undefined) {
+/**
+ * Compact runtime for compiled statecharts.
+ *
+ * All long-lived state is stored directly on this object. Operations are
+ * implemented by shared prototype methods, and public Effect / Stream values
+ * are materialized only when accessed. Arbitrary process logic continues to
+ * use the general runtime above.
+ */
+class CompiledProcess implements MachineRef<any, any, any, any> {
+  readonly id: string
+  readonly sessionId: string
+  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>
+
+  private readonly mailbox: CompactProcessMailbox<unknown> = {
+    items: undefined,
+    index: 0,
+    closed: false
+  }
+  private readonly address: ProcessAddress<unknown>
+  private childRuntime: ChildRuntime = childlessRuntime
+  private processScope!: ProcessScope<unknown>
+  private processContext!: ProcessContext<unknown, unknown>
+  private current!: VersionedSnapshot<unknown, unknown, unknown>
+  private completion: Effect.Effect<unknown, unknown> | undefined
+  private waiter: Deferred.Deferred<unknown, unknown> | undefined
+  private requestedTermination: CompiledTermination | undefined
+  private reservedTerminationSnapshot: RuntimeSnapshot<unknown, unknown, unknown> | undefined
+  private worker: Fiber.Fiber<any, never> | undefined
+  private draining = false
+  private interruptRequested = false
+  private offerRevision = 0
+  private initializing = true
+
+  constructor(
+    private readonly logic: ProcessLogic<any, any, any, any, any, any>,
+    private readonly options: StartInternalOptions,
+    private readonly services: Context.Context<any>,
+    sessionId: string
+  ) {
+    this.sessionId = sessionId
+    this.id = options.id ?? sessionId
+    this.send = (event) => this.sendEffect(event)
+    this.address = {
+      id: this.id,
+      sessionId,
+      stop: Effect.suspend(() => this.stopFromProcess()),
+      send: this.send
+    }
+  }
+
+  initialize(): Effect.Effect<MachineRef<any, any, any, any>, unknown, any> {
+    const self = this
+    return Effect.gen(function*() {
+      if (self.logic[childlessProcess] !== true) {
+        self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime)
+      }
+      const parent = self.options.parent
+      const sendParent = self.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
+      self.processScope = {
+        self: self.address,
+        parent,
+        spawn: self.childRuntime.spawn,
+        sendParent,
+        sendTo: self.childRuntime.sendTo,
+        stopChild: self.childRuntime.stop,
+        failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause)
+      }
+
+      const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
+        Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
+      const initial = yield* self.logic.initial(self.processScope).pipe(
+        Effect.onExit(cleanupStartupFailure),
+        Effect.ensuring(Effect.sync(() => {
+          self.initializing = false
+        }))
+      )
+      self.current = {
+        revision: 0,
+        terminalizing: false,
+        changes: undefined,
+        snapshot: { status: "active", state: initial }
+      }
+      self.processContext = {
+        ...self.processScope,
+        receive: Effect.never,
+        poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
+        state: Effect.sync(() => self.current.snapshot.state),
+        setState: (state: unknown) => self.setActiveState(state),
+        updateState: (f) => self.updateState(f)
+      }
+
+      if (self.options.onReady !== undefined) {
+        yield* self.options.onReady(self, self.requestTermination({ _tag: "Stopped" }).pipe(Effect.asVoid))
+      }
+      if (self.options.onSnapshot !== undefined) {
+        yield* notifyActiveSnapshot(self.options.onSnapshot, { status: "active", state: initial })
+      }
+
+      self.draining = true
+      yield* self.drainRuntime()
+      return self
+    })
+  }
+
+  get state(): Effect.Effect<unknown> {
+    return Effect.sync(() => this.current.snapshot.state)
+  }
+
+  get snapshot(): Effect.Effect<RuntimeSnapshot<unknown, unknown, unknown>> {
+    return Effect.sync(() => this.current.snapshot)
+  }
+
+  get changes(): Stream.Stream<RuntimeSnapshot<unknown, unknown, unknown>> {
+    return this.changesStream()
+  }
+
+  get join(): Effect.Effect<unknown, unknown> {
+    return Effect.suspend(() => {
+      if (this.completion !== undefined) {
+        return this.completion
+      }
+      this.waiter ??= Deferred.makeUnsafe<unknown, unknown>()
+      return Deferred.await(this.waiter)
+    })
+  }
+
+  get stop(): Effect.Effect<void> {
+    return Effect.uninterruptible(this.stopEffect())
+  }
+
+  child(child: ChildSelector): Effect.Effect<Option.Option<any>> {
+    return this.childRuntime.get(child)
+  }
+
+  childChanges(child: ChildSelector): Stream.Stream<Option.Option<any>> {
+    return this.childRuntime.changes(child)
+  }
+
+  private requestTermination(requested: CompiledTermination): Effect.Effect<boolean> {
+    return Effect.sync(() => {
+      if (this.requestedTermination !== undefined) {
         return false
       }
-      requestedTermination = requested
-      reservedTerminationSnapshot = reserveRequestedTermination?.(requested)
+      this.requestedTermination = requested
+      this.reservedTerminationSnapshot = this.reserveTermination(requested)
       return true
     })
-  let sendEvent = compactMailbox !== undefined
-    ? (event: Event): Effect.Effect<void, StoppedError> => Effect.sync(() => offerCompactMailbox(compactMailbox, event))
-    : (event: Event): Effect.Effect<void, StoppedError> =>
-      Queue.offer(queue!, event).pipe(
-        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+  }
+
+  private reserveTermination(
+    requested: CompiledTermination
+  ): RuntimeSnapshot<unknown, unknown, unknown> | undefined {
+    const latest = this.current
+    if (latest === undefined || latest.terminalizing || latest.snapshot.status !== "active") {
+      return undefined
+    }
+    const snapshot: RuntimeSnapshot<unknown, unknown, unknown> = requested._tag === "Stopped"
+      ? { status: "stopped", state: latest.snapshot.state }
+      : requested._tag === "Done"
+      ? { status: "done", state: latest.snapshot.state, output: requested.output }
+      : { status: "error", state: latest.snapshot.state, cause: requested.cause }
+    this.current = { ...latest, terminalizing: true }
+    return snapshot
+  }
+
+  private stopFromProcess(): Effect.Effect<void> {
+    const request = this.requestTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
+    return this.initializing ? request : request.pipe(Effect.andThen(Effect.interrupt))
+  }
+
+  private failCause(cause: Cause.Cause<unknown>): Effect.Effect<void> {
+    const requested = { _tag: "Failure", cause } as const
+    return this.requestTermination(requested).pipe(
+      Effect.flatMap((accepted) =>
+        accepted
+          ? Effect.forkDetach(this.settleRequestedTermination()).pipe(Effect.asVoid)
+          : Effect.void
       )
-  let settleRequestedTermination = (_requested: ProcessTermination): Effect.Effect<void> => Effect.void
-  const interruptWorker: Effect.Effect<void> = Effect.suspend(() =>
-    worker === undefined
-      ? onDemand
-        ? Effect.sync(() => {
-          interruptRequested = true
-        })
-        : Effect.void
-      : Fiber.interrupt(worker)
-  )
-  let initializing = true
-  const requestStop = requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.asVoid)
-  const self: ProcessAddress<Event> = {
-    id,
-    sessionId,
-    // Initialization must finish constructing a state before a stopped
-    // snapshot can be published. A stop requested there is therefore recorded
-    // and returns so initialization can finish. Once running, a compiled
-    // process owns terminalization in this fiber, so self-stop interrupts it
-    // directly after atomically freezing the active snapshot.
-    stop: Effect.suspend(() => {
-      if (initializing) {
-        return requestStop
+    )
+  }
+
+  private sendEffect(event: unknown): Effect.Effect<void, StoppedError> {
+    return Effect.uninterruptible(
+      Effect.suspend(() => {
+        if (this.mailbox.closed || this.requestedTermination !== undefined) {
+          return Effect.fail(new StoppedError())
+        }
+        offerCompactMailbox(this.mailbox, event)
+        this.offerRevision += 1
+        if (this.draining) {
+          return Effect.void
+        }
+        this.draining = true
+        const scheduled = Effect.yieldNow.pipe(
+          Effect.andThen(Effect.provideContext(this.drainRuntime(), this.services))
+        )
+        const fork = this.options.detached === true
+          ? Effect.forkDetach(scheduled, { startImmediately: true })
+          : Effect.forkChild(scheduled, { startImmediately: true })
+        return fork.pipe(
+          Effect.flatMap((fiber) =>
+            Effect.sync(() => {
+              this.worker = fiber
+              if (!this.interruptRequested) {
+                return false
+              }
+              this.interruptRequested = false
+              return true
+            }).pipe(
+              Effect.flatMap((interrupt) => interrupt ? this.interruptAndFinish(fiber) : Effect.void)
+            )
+          ),
+          Effect.asVoid
+        )
+      })
+    )
+  }
+
+  private stopEffect(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      if (this.completion !== undefined) {
+        return this.awaitCompletion()
       }
-      return requestRuntimeTermination({ _tag: "Stopped" }).pipe(Effect.andThen(Effect.interrupt))
-    }),
-    send: (event: Event) => Effect.suspend(() => sendEvent(event))
-  }
-
-  let {
-    changes: childChanges,
-    close: closeChildren,
-    get: getChild,
-    sendTo,
-    spawn,
-    stop: stopChild
-  } = childlessRuntime
-  if (logic[childlessProcess] !== true) {
-    ;({
-      changes: childChanges,
-      close: closeChildren,
-      get: getChild,
-      sendTo,
-      spawn,
-      stop: stopChild
-    } = yield* makeChildRuntime(self, runtime))
-  }
-  const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
-    Exit.isFailure(exit)
-      ? closeChildren(exit)
-      : Effect.void
-  const cleanup = onStop ?? Effect.void
-  const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
-
-  const scope: ProcessScope<Event> = {
-    self,
-    parent,
-    spawn,
-    sendParent,
-    sendTo,
-    stopChild,
-    failCause: (cause) => {
-      const requested = {
-        _tag: "Failure",
-        cause: cause as Cause.Cause<Error>
-      } as const
-      return requestRuntimeTermination(requested).pipe(
+      const requested = { _tag: "Stopped" } as const
+      return this.requestTermination(requested).pipe(
         Effect.flatMap((accepted) =>
           accepted
-            ? Effect.forkDetach(settleRequestedTermination(requested)).pipe(Effect.asVoid)
+            ? this.settleRequestedTermination()
+            : this.awaitCompletion()
+        )
+      )
+    })
+  }
+
+  private settleRequestedTermination(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      if (!this.draining) {
+        return this.finishRequestedTermination()
+      }
+      if (this.worker === undefined) {
+        this.interruptRequested = true
+        return this.awaitCompletion()
+      }
+      return this.interruptAndFinish(this.worker).pipe(
+        Effect.andThen(this.awaitCompletion())
+      )
+    })
+  }
+
+  private interruptAndFinish(worker: Fiber.Fiber<any, never>): Effect.Effect<void> {
+    return Fiber.interrupt(worker).pipe(
+      Effect.andThen(
+        Effect.suspend(() =>
+          this.completion === undefined
+            ? this.finishRequestedTermination()
             : Effect.void
         )
       )
-    }
-  }
-
-  const initial = yield* logic.initial(scope).pipe(
-    Effect.onExit(cleanupStartupFailure),
-    Effect.ensuring(Effect.sync(() => {
-      initializing = false
-    }))
-  )
-  // Compiled drains have one active-state writer. MutableRef operations run in
-  // synchronous Effect steps, so external terminal reservation and lazy
-  // observer installation still arbitrate atomically without retaining a
-  // semaphore per process. Effectful custom updates validate the revision
-  // again before committing across their asynchronous boundary.
-  const current = MutableRef.make<VersionedSnapshot<State, Error, Output>>({
-    revision: 0,
-    terminalizing: false,
-    changes: undefined,
-    snapshot: {
-      status: "active",
-      state: initial
-    }
-  })
-  const getCurrent = Effect.sync(() => MutableRef.get(current))
-  const publishSnapshot: (
-    snapshot: VersionedSnapshot<State, Error, Output>
-  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = onSnapshot === undefined
-    ? (snapshot) =>
-      snapshot.changes === undefined
-        ? Effect.succeed(snapshot)
-        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
-    : (snapshot) => {
-      const publish = snapshot.changes === undefined
-        ? Effect.succeed(snapshot)
-        : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
-      const runtimeSnapshot = snapshot.snapshot
-      return runtimeSnapshot.status !== "active"
-        ? publish
-        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(onSnapshot, runtimeSnapshot)))
-    }
-
-  const completeChanges = (
-    snapshot: VersionedSnapshot<State, Error, Output>
-  ): Effect.Effect<void> =>
-    snapshot.changes === undefined
-      ? Effect.void
-      : PubSub.publish(snapshot.changes, Exit.succeed<void>(undefined)).pipe(Effect.asVoid)
-
-  const completeIfTerminal = (
-    snapshot: VersionedSnapshot<State, Error, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error, Output>> => {
-    if (snapshot.snapshot.status === "active") {
-      return Effect.succeed(snapshot)
-    }
-    return completeChanges(snapshot).pipe(Effect.as(snapshot))
-  }
-
-  const publishIfCurrent = (
-    snapshot: VersionedSnapshot<State, Error, Output>
-  ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
-    getCurrent.pipe(
-      Effect.flatMap((
-        currentSnapshot
-      ): Effect.Effect<VersionedSnapshot<State, Error, Output> | undefined> =>
-        currentSnapshot.revision === snapshot.revision
-          ? publishSnapshot(snapshot).pipe(Effect.flatMap(completeIfTerminal))
-          : Effect.succeed(undefined)
-      )
     )
+  }
 
-  const updateSnapshot = <E2, R2>(
-    f: (
-      snapshot: RuntimeSnapshot<State, Error, Output>
-    ) => Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2>
-  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined, E2, R2> =>
-    Effect.suspend(() => {
-      const observed = MutableRef.get(current)
-      if (observed.terminalizing) {
-        return Effect.succeed(undefined)
+  private awaitCompletion(): Effect.Effect<void> {
+    return this.join.pipe(Effect.exit, Effect.asVoid)
+  }
+
+  private drainRuntime(): Effect.Effect<void, never, any> {
+    const self = this
+    return Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function*() {
+        let observedRevision = self.offerRevision
+        while (true) {
+          if (self.requestedTermination !== undefined) {
+            return yield* self.finishRequestedTermination()
+          }
+
+          const exit = yield* restore(Effect.suspend(() => self.logic.drain!(self.processContext))).pipe(Effect.exit)
+          if (Exit.isFailure(exit)) {
+            if (self.requestedTermination === undefined) {
+              yield* self.requestTermination({ _tag: "Failure", cause: exit.cause })
+            }
+            return yield* self.finishRequestedTermination()
+          }
+          if (Option.isSome(exit.value)) {
+            yield* self.requestTermination({ _tag: "Done", output: exit.value.value })
+            return yield* self.finishRequestedTermination()
+          }
+          if (self.requestedTermination !== undefined) {
+            return yield* self.finishRequestedTermination()
+          }
+
+          if (self.offerRevision !== observedRevision) {
+            observedRevision = self.offerRevision
+            continue
+          }
+          self.draining = false
+          self.worker = undefined
+          return
+        }
+      })
+    )
+  }
+
+  private finishRequestedTermination(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const requested = this.requestedTermination
+      if (requested === undefined) {
+        return Effect.void
       }
-      return f(observed.snapshot).pipe(
-        Effect.flatMap((next) =>
-          Effect.sync(() => {
-            const latest = MutableRef.get(current)
-            if (next === undefined || latest.terminalizing || latest.revision !== observed.revision) {
-              return undefined
+      const snapshot = this.reservedTerminationSnapshot ?? this.reserveTermination(requested)
+      if (snapshot === undefined) {
+        return this.awaitCompletion()
+      }
+      const exit = requested._tag === "Stopped"
+        ? Exit.void
+        : requested._tag === "Done"
+        ? Exit.succeed(requested.output)
+        : Exit.failCause(requested.cause)
+      const completion = requested._tag === "Stopped"
+        ? Effect.fail(new StoppedError())
+        : requested._tag === "Done"
+        ? Effect.succeed(requested.output)
+        : Effect.failCause(requested.cause)
+      const notifyOutcome = this.options.onOutcome === undefined
+        ? Effect.void
+        : Effect.suspend(() => this.options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
+          Effect.exit,
+          Effect.asVoid
+        )
+      return Effect.uninterruptible(
+        Effect.sync(() => closeCompactMailbox(this.mailbox)).pipe(
+          Effect.andThen(this.childRuntime.close(exit)),
+          Effect.andThen(this.setAndPublishSnapshot(snapshot)),
+          Effect.andThen(notifyOutcome),
+          Effect.andThen(this.options.onStop ?? Effect.void),
+          Effect.andThen(Effect.sync(() => {
+            this.draining = false
+            this.worker = undefined
+            this.interruptRequested = false
+            this.completion = completion
+            if (this.waiter !== undefined) {
+              Deferred.doneUnsafe(this.waiter, completion)
+              this.waiter = undefined
             }
-            const versioned = {
-              revision: latest.revision + 1,
-              snapshot: next,
-              terminalizing: false,
-              changes: latest.changes
-            }
-            MutableRef.set(current, versioned)
-            return versioned
-          })
-        ),
-        Effect.flatMap((versioned) =>
-          versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)
-        ),
-        Effect.map((published) => published?.snapshot)
+          }))
+        )
       )
     })
+  }
 
-  const setActiveState = (state: State) =>
-    Effect.sync(() => {
-      const latest = MutableRef.get(current)
+  private publishSnapshot(
+    snapshot: VersionedSnapshot<unknown, unknown, unknown>
+  ): Effect.Effect<VersionedSnapshot<unknown, unknown, unknown>> {
+    const publish = snapshot.changes === undefined
+      ? Effect.succeed(snapshot)
+      : PubSub.publish(snapshot.changes, [snapshot] as const).pipe(Effect.as(snapshot))
+    const current = snapshot.snapshot
+    return this.options.onSnapshot === undefined || current.status !== "active"
+      ? publish
+      : publish.pipe(Effect.tap(() => notifyActiveSnapshot(this.options.onSnapshot!, current)))
+  }
+
+  private completeChanges(snapshot: VersionedSnapshot<unknown, unknown, unknown>): Effect.Effect<void> {
+    return snapshot.changes === undefined
+      ? Effect.void
+      : PubSub.publish(snapshot.changes, Exit.succeed<void>(undefined)).pipe(Effect.asVoid)
+  }
+
+  private setAndPublishSnapshot(snapshot: RuntimeSnapshot<unknown, unknown, unknown>): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const versioned = {
+        revision: this.current.revision + 1,
+        snapshot,
+        terminalizing: true,
+        changes: this.current.changes
+      }
+      this.current = versioned
+      return this.publishSnapshot(versioned).pipe(
+        Effect.flatMap((published) => this.completeChanges(published)),
+        Effect.asVoid
+      )
+    })
+  }
+
+  private setActiveState(state: unknown): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const latest = this.current
       if (latest.terminalizing || latest.snapshot.status !== "active") {
-        return undefined
+        return Effect.void
       }
       const versioned = {
         revision: latest.revision + 1,
@@ -1466,350 +1590,105 @@ const startCompiledInternal: <
         terminalizing: false,
         changes: latest.changes
       }
-      MutableRef.set(current, versioned)
-      return versioned
-    }).pipe(
-      Effect.flatMap((versioned) => versioned === undefined ? Effect.succeed(undefined) : publishIfCurrent(versioned)),
-      Effect.asVoid
-    )
-
-  const setAndPublishSnapshot = (
-    snapshot: RuntimeSnapshot<State, Error, Output>
-  ): Effect.Effect<void> =>
-    Effect.sync(() => {
-      const latest = MutableRef.get(current)
-      const versioned = {
-        revision: latest.revision + 1,
-        snapshot,
-        terminalizing: true,
-        changes: latest.changes
-      }
-      MutableRef.set(current, versioned)
-      return versioned
-    }).pipe(
-      Effect.flatMap(publishSnapshot),
-      Effect.flatMap(completeIfTerminal),
-      Effect.asVoid
-    )
-
-  const terminalizeWith = (
-    snapshot: RuntimeSnapshot<State, Error, Output>,
-    exit: Exit.Exit<unknown, unknown>,
-    completeDone: Effect.Effect<void>
-  ): Effect.Effect<void> => {
-    const notifyOutcome = onOutcome === undefined
-      ? Effect.void
-      : Effect.suspend(() => onOutcome(classifyOutcome(snapshot)!)).pipe(
-        Effect.exit,
-        Effect.asVoid
-      )
-    return Effect.uninterruptible(
-      shutdownMailbox.pipe(
-        Effect.andThen(closeChildren(exit)),
-        Effect.andThen(setAndPublishSnapshot(snapshot)),
-        Effect.andThen(notifyOutcome),
-        Effect.andThen(cleanup),
-        Effect.andThen(completeDone)
-      )
-    )
-  }
-
-  reserveRequestedTermination = (termination) => {
-    const latest = MutableRef.get(current)
-    if (latest.terminalizing || latest.snapshot.status !== "active") {
-      return undefined
-    }
-    const snapshot: RuntimeSnapshot<State, Error, Output> = termination._tag === "Stopped"
-      ? { status: "stopped", state: latest.snapshot.state }
-      : termination._tag === "Done"
-      ? { status: "done", state: latest.snapshot.state, output: termination.output }
-      : { status: "error", state: latest.snapshot.state, cause: termination.cause }
-    MutableRef.set(current, { ...latest, terminalizing: true })
-    return snapshot
-  }
-
-  const terminalizeReservedStop = (
-    snapshot: RuntimeSnapshot<State, Error, Output>
-  ): Effect.Effect<void> => {
-    const exit = Exit.void
-    return terminalizeWith(
-      snapshot,
-      exit,
-      Deferred.fail(done, new StoppedError())
-    )
-  }
-
-  const terminalizeReservedFailure = (
-    snapshot: RuntimeSnapshot<State, Error, Output>,
-    cause: Cause.Cause<Error>
-  ): Effect.Effect<void> => {
-    const exit = Exit.failCause(cause)
-    return terminalizeWith(snapshot, exit, Deferred.failCause(done, cause))
-  }
-
-  const terminalizeReservedSuccess = (
-    snapshot: RuntimeSnapshot<State, Error, Output>,
-    output: Output
-  ): Effect.Effect<void> => {
-    const exit = Exit.succeed(output)
-    return terminalizeWith(snapshot, exit, Deferred.succeed(done, output))
-  }
-
-  const reserveTermination = (termination: ProcessTermination) =>
-    Effect.sync(() => reserveRequestedTermination!(termination))
-
-  const completeTermination = (
-    termination: ProcessTermination,
-    snapshot: RuntimeSnapshot<State, Error, Output>
-  ) => {
-    switch (termination._tag) {
-      case "Stopped":
-        return terminalizeReservedStop(snapshot)
-      case "Done":
-        return terminalizeReservedSuccess(snapshot, termination.output)
-      case "Failure":
-        return terminalizeReservedFailure(snapshot, termination.cause)
-    }
-  }
-
-  const finishRequestedTermination = (requested: ProcessTermination): Effect.Effect<void> =>
-    Effect.gen(function*() {
-      const snapshot = reservedTerminationSnapshot ?? (yield* reserveTermination(requested))
-      if (snapshot === undefined) {
-        return yield* awaitCompletion
-      }
-      return yield* completeTermination(requested, snapshot)
+      this.current = versioned
+      return this.publishSnapshot(versioned).pipe(Effect.asVoid)
     })
-
-  settleRequestedTermination = (requested) =>
-    Effect.suspend(() =>
-      onDemand && !draining
-        ? finishRequestedTermination(requested)
-        : interruptWorker.pipe(Effect.andThen(awaitCompletion))
-    )
-
-  const stop: Effect.Effect<void> = Effect.uninterruptible(
-    Effect.suspend(() => {
-      const requested = { _tag: "Stopped" } as const
-      return requestRuntimeTermination(requested).pipe(
-        Effect.flatMap((accepted) => accepted ? settleRequestedTermination(requested) : awaitCompletion)
-      )
-    })
-  )
-
-  const context: ProcessContext<State, Event> = {
-    ...scope,
-    receive: queue === undefined ? Effect.never : Queue.take(queue),
-    poll,
-    state: getCurrent.pipe(Effect.map((current) => current.snapshot.state)),
-    setState: setActiveState,
-    updateState: (f) =>
-      updateSnapshot((snapshot) =>
-        snapshot.status === "active"
-          ? f(snapshot.state).pipe(
-            Effect.map((state) => ({
-              status: "active" as const,
-              state
-            }))
-          )
-          : Effect.succeed(undefined)
-      ).pipe(Effect.asVoid)
   }
 
-  const getOrCreateChanges = Effect.suspend(() => {
-    const observed = MutableRef.get(current)
-    if (observed.snapshot.status !== "active") {
-      return Effect.succeed(undefined)
-    }
-    if (observed.changes !== undefined) {
-      return Effect.succeed(observed.changes)
-    }
-    return PubSub.unbounded<Take.Take<VersionedSnapshot<State, Error, Output>>>({ replay: 1 }).pipe(
-      Effect.flatMap((candidate) =>
-        Effect.sync(() => {
-          const latest = MutableRef.get(current)
-          if (latest.snapshot.status !== "active") {
-            return [undefined, true] as const
-          }
-          if (latest.changes !== undefined) {
-            return [latest.changes, true] as const
-          }
-          MutableRef.set(current, { ...latest, changes: candidate })
-          return [candidate, false] as const
-        }).pipe(
-          Effect.flatMap(([changes, discardCandidate]) =>
-            discardCandidate
-              ? PubSub.shutdown(candidate).pipe(Effect.as(changes))
-              : Effect.succeed(changes)
-          )
-        )
-      )
-    )
-  })
-
-  const changesStream: Stream.Stream<RuntimeSnapshot<State, Error, Output>> = Stream.unwrap(
-    Effect.gen(function*() {
-      const changes = yield* getOrCreateChanges
-      if (changes === undefined) {
-        return Stream.succeed((yield* getCurrent).snapshot)
+  private updateState<E, R>(
+    f: (state: unknown) => Effect.Effect<unknown, E, R>
+  ): Effect.Effect<void, E, R> {
+    return Effect.suspend(() => {
+      const observed = this.current
+      if (observed.terminalizing || observed.snapshot.status !== "active") {
+        return Effect.void
       }
-      const subscription = yield* PubSub.subscribe(changes)
-      const captured = yield* getCurrent
-      if (captured.snapshot.status !== "active") {
-        return Stream.succeed(captured.snapshot)
-      }
-      return Stream.succeed(captured.snapshot).pipe(
-        Stream.concat(
-          Stream.fromChannel(Channel.fromEffectTake(PubSub.take(subscription))).pipe(
-            Stream.filter((next) => next.revision > captured.revision),
-            Stream.map((next) => next.snapshot)
-          )
-        )
-      )
-    })
-  )
-
-  const ref: MachineRef<State, Event, Error, Output> = {
-    id,
-    sessionId,
-    state: getCurrent.pipe(Effect.map((current) => current.snapshot.state)),
-    snapshot: getCurrent.pipe(Effect.map((current) => current.snapshot)),
-    changes: changesStream,
-    join: Deferred.await(done),
-    stop,
-    send: self.send,
-    child: getChild,
-    childChanges
-  }
-
-  if (onReady !== undefined) {
-    yield* onReady(ref, requestStop)
-  }
-  if (onSnapshot !== undefined) {
-    yield* notifyActiveSnapshot(onSnapshot, { status: "active", state: initial })
-  }
-
-  if (onDemand) {
-    const drainRuntime: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
-      Effect.gen(function*() {
-        let observedRevision = offerRevision
-        while (true) {
-          if (requestedTermination !== undefined) {
-            return yield* finishRequestedTermination(requestedTermination)
-          }
-
-          const exit = yield* restore(Effect.suspend(() => logic.drain!(context))).pipe(Effect.exit)
-          if (Exit.isFailure(exit)) {
-            const completed: ProcessTermination = { _tag: "Failure", cause: exit.cause }
-            yield* requestRuntimeTermination(completed)
-            return yield* finishRequestedTermination(requestedTermination!)
-          }
-          if (Option.isSome(exit.value)) {
-            const completed: ProcessTermination = { _tag: "Done", output: exit.value.value }
-            yield* requestRuntimeTermination(completed)
-            return yield* finishRequestedTermination(requestedTermination!)
-          }
-
-          if (requestedTermination !== undefined) {
-            return yield* finishRequestedTermination(requestedTermination)
-          }
-
-          const continueDraining = yield* Effect.sync(() => {
-            if (offerRevision !== observedRevision) {
-              observedRevision = offerRevision
-              return true
-            }
-            draining = false
-            worker = undefined
-            return false
-          })
-          if (!continueDraining) {
-            return
-          }
-        }
-      })
-    )
-
-    const providedDrainRuntime = Effect.provideContext(drainRuntime, drainServices!)
-    // Claim ownership before yielding so a concurrent stop can always find or
-    // request interruption of this worker. The yield also keeps `send` as a
-    // mailbox operation: user transition work never runs inline in the sender.
-    const scheduledDrainRuntime = Effect.uninterruptible(
-      Effect.yieldNow.pipe(Effect.andThen(providedDrainRuntime))
-    )
-    const forkDrain = detached === true
-      ? Effect.forkDetach(scheduledDrainRuntime, { startImmediately: true })
-      : Effect.forkChild(scheduledDrainRuntime, { startImmediately: true })
-
-    sendEvent = (event) =>
-      Effect.uninterruptible(
-        Effect.suspend(() => {
-          if (compactMailbox!.closed || requestedTermination !== undefined) {
-            return Effect.fail(new StoppedError())
-          }
-          offerCompactMailbox(compactMailbox!, event)
-          offerRevision += 1
-          if (draining) {
-            return Effect.void
-          }
-          draining = true
-          return forkDrain.pipe(
-            Effect.flatMap((fiber) =>
-              Effect.sync(() => {
-                worker = fiber
-                if (!interruptRequested) {
-                  return false
-                }
-                interruptRequested = false
-                return true
-              }).pipe(
-                Effect.flatMap((interrupt) => interrupt ? Fiber.interrupt(fiber) : Effect.void)
-              )
-            )
-          )
+      return f(observed.snapshot.state).pipe(
+        Effect.flatMap((state) => {
+          const latest = this.current
+          return latest.terminalizing || latest.revision !== observed.revision
+            ? Effect.void
+            : this.setActiveState(state)
         })
       )
-
-    draining = true
-    yield* providedDrainRuntime
-    return ref
+    })
   }
 
-  const pendingTermination = requestedTermination
-  const compiledRuntime: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
-    Effect.gen(function*() {
-      let requested: ProcessTermination
-      if (pendingTermination !== undefined) {
-        requested = pendingTermination
-      } else {
-        const exit = yield* restore(Effect.suspend(() => logic.run(context))).pipe(Effect.exit)
-        const completed: ProcessTermination = Exit.isFailure(exit)
-          ? { _tag: "Failure", cause: exit.cause }
-          : { _tag: "Done", output: exit.value }
-        yield* requestRuntimeTermination(completed)
-        requested = requestedTermination!
+  private getOrCreateChanges(): Effect.Effect<
+    PubSub.PubSub<Take.Take<VersionedSnapshot<unknown, unknown, unknown>>> | undefined
+  > {
+    return Effect.suspend(() => {
+      const observed = this.current
+      if (observed.snapshot.status !== "active") {
+        return Effect.succeed(undefined)
       }
-
-      const snapshot = reservedTerminationSnapshot ?? (yield* reserveTermination(requested))
-      if (snapshot === undefined) {
-        return yield* awaitCompletion
+      if (observed.changes !== undefined) {
+        return Effect.succeed(observed.changes)
       }
-      return yield* completeTermination(requested, snapshot)
+      return PubSub.unbounded<Take.Take<VersionedSnapshot<unknown, unknown, unknown>>>({ replay: 1 }).pipe(
+        Effect.flatMap((candidate) =>
+          Effect.sync(() => {
+            const latest = this.current
+            if (latest.snapshot.status !== "active") {
+              return [undefined, true] as const
+            }
+            if (latest.changes !== undefined) {
+              return [latest.changes, true] as const
+            }
+            this.current = { ...latest, changes: candidate }
+            return [candidate, false] as const
+          }).pipe(
+            Effect.flatMap(([changes, discard]) =>
+              discard ? PubSub.shutdown(candidate).pipe(Effect.as(changes)) : Effect.succeed(changes)
+            )
+          )
+        )
+      )
     })
-  )
+  }
 
-  worker = yield* (detached === true
-    ? Effect.forkDetach(compiledRuntime, { startImmediately: true })
-    : Effect.forkChild(compiledRuntime, { startImmediately: true }))
-  return ref
-})
+  private changesStream(): Stream.Stream<RuntimeSnapshot<unknown, unknown, unknown>> {
+    const self = this
+    return Stream.unwrap(
+      Effect.gen(function*() {
+        const changes = yield* self.getOrCreateChanges()
+        if (changes === undefined) {
+          return Stream.succeed(self.current.snapshot)
+        }
+        const subscription = yield* PubSub.subscribe(changes)
+        const captured = self.current
+        if (captured.snapshot.status !== "active") {
+          return Stream.succeed(captured.snapshot)
+        }
+        return Stream.succeed(captured.snapshot).pipe(
+          Stream.concat(
+            Stream.fromChannel(Channel.fromEffectTake(PubSub.take(subscription))).pipe(
+              Stream.filter((next) => next.revision > captured.revision),
+              Stream.map((next) => next.snapshot)
+            )
+          )
+        )
+      })
+    )
+  }
+}
+
+const startCompactCompiledInternal: typeof startGenericInternal = Effect.fnUntraced(function*(
+  logic: ProcessLogic<any, any, any, any, any, any>,
+  options: StartInternalOptions
+) {
+  const sessionId = yield* options.runtime.nextSessionId
+  const services = yield* Effect.context<any>()
+  const process = new CompiledProcess(logic, options, services, sessionId)
+  return yield* process.initialize()
+}) as typeof startGenericInternal
 
 const startLogicInternal: typeof startGenericInternal = ((
   logic: ProcessLogic<any, any, any, any, any, any>,
   options: StartInternalOptions
 ) =>
-  logic[compiledProcess] === true
-    ? startCompiledInternal(logic, options)
+  logic[compiledProcess] === true && logic.drain !== undefined
+    ? startCompactCompiledInternal(logic, options)
     : startGenericInternal(logic, options)) as typeof startGenericInternal
 
 export const startProcess: <
