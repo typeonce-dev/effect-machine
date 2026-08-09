@@ -56,6 +56,24 @@ const getInvokes = (
   return Array.isArray(invokes) ? invokes as ReadonlyArray<AnyInvokeConfig> : [invokes as AnyInvokeConfig]
 }
 
+const runSequentialDiscard = <E, R>(
+  effects: ReadonlyArray<Effect.Effect<void, E, R>>
+): Effect.Effect<void, E, R> =>
+  effects.length === 0
+    ? Effect.void
+    : effects.length === 1
+    ? effects[0]!
+    : Effect.all(effects, { discard: true })
+
+const runParallelDiscard = <E, R>(
+  effects: ReadonlyArray<Effect.Effect<void, E, R>>
+): Effect.Effect<void, E, R> =>
+  effects.length === 0
+    ? Effect.void
+    : effects.length === 1
+    ? effects[0]!
+    : Effect.all(effects, { discard: true, concurrency: "unbounded" })
+
 const invokeCapabilityCache = new WeakMap<Machine.Any, boolean>()
 
 const hasInvokeCapability = (machine: Machine.Any): boolean => {
@@ -282,18 +300,11 @@ const makeProcessLogic: <
                 )
               )
             const stopInvoke = (key: string): Effect.Effect<void> => removeInvoke(key, undefined)
-            stopAllInvokes = Effect.sync(() => {
-              const sessions = Array.from(invokeSessions.values())
+            stopAllInvokes = Effect.suspend(() => {
+              const effects = Array.from(invokeSessions.values(), stopInvokeSession)
               invokeSessions.clear()
-              return sessions
-            }).pipe(
-              Effect.flatMap((sessions) =>
-                Effect.all(
-                  sessions.map((session) => stopInvokeSession(session)),
-                  { discard: true, concurrency: "unbounded" }
-                )
-              )
-            )
+              return runParallelDiscard(effects)
+            })
             const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
               path: StateId,
               config: AnyInvokeConfig
@@ -347,12 +358,12 @@ const makeProcessLogic: <
                 )
               )
             })
-            startInvokes = Effect.fnUntraced(function*(
+            startInvokes = (
               configuration: Model.ActiveConfiguration,
               paths: ReadonlyArray<string>,
               event: Machine.LifecycleEvent<Events>
-            ) {
-              yield* Effect.all(
+            ) =>
+              runSequentialDiscard(
                 internalPlanner.sortEntryPaths(machine, paths)
                   .filter((path) => configuration.active.has(path))
                   .flatMap((path) =>
@@ -367,22 +378,15 @@ const makeProcessLogic: <
                         config
                       ) as Effect.Effect<void, E | MachineSchemaDecodeError, R>
                     )
-                  ),
-                { discard: true }
+                  )
               )
-            })
             stopInvokes = (paths) =>
-              Effect.sync(() =>
-                internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
-                  Array.from(invokeSessions.entries())
-                    .filter(([, session]) => session.path === path)
-                    .map(([key]) => key)
-                )
-              ).pipe(
-                Effect.flatMap((keys) =>
-                  Effect.all(
-                    keys.map(stopInvoke),
-                    { discard: true, concurrency: "unbounded" }
+              Effect.suspend(() =>
+                runParallelDiscard(
+                  internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
+                    Array.from(invokeSessions.entries())
+                      .filter(([, session]) => session.path === path)
+                      .map(([key]) => stopInvoke(key))
                   )
                 )
               )
@@ -569,18 +573,11 @@ const makeProcessLogic: <
               )
             )
           const stopInvoke = (key: string): Effect.Effect<void> => removeInvoke(key, undefined)
-          const stopAllInvokes: Effect.Effect<void> = Effect.sync(() => {
-            const sessions = Array.from(invokeSessions.values())
+          const stopAllInvokes: Effect.Effect<void> = Effect.suspend(() => {
+            const effects = Array.from(invokeSessions.values(), stopInvokeSession)
             invokeSessions.clear()
-            return sessions
-          }).pipe(
-            Effect.flatMap((sessions) =>
-              Effect.all(
-                sessions.map((session) => stopInvokeSession(session)),
-                { discard: true, concurrency: "unbounded" }
-              )
-            )
-          )
+            return runParallelDiscard(effects)
+          })
           const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
             path: StateId,
             config: AnyInvokeConfig
@@ -643,7 +640,7 @@ const makeProcessLogic: <
             paths: ReadonlyArray<string>,
             event: Machine.LifecycleEvent<Events>
           ) {
-            yield* Effect.all(
+            yield* runSequentialDiscard(
               internalPlanner.sortEntryPaths(machine, paths)
                 .filter((path) => configuration.active.has(path))
                 .flatMap((path) =>
@@ -658,22 +655,16 @@ const makeProcessLogic: <
                       config
                     ) as Effect.Effect<void, E | MachineSchemaDecodeError, R>
                   )
-                ),
-              { discard: true }
+                )
             )
           })
           const stopInvokes = (paths: ReadonlyArray<string>): Effect.Effect<void> =>
-            Effect.sync(() =>
-              internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
-                Array.from(invokeSessions.entries())
-                  .filter(([, session]) => session.path === path)
-                  .map(([key]) => key)
-              )
-            ).pipe(
-              Effect.flatMap((keys) =>
-                Effect.all(
-                  keys.map(stopInvoke),
-                  { discard: true, concurrency: "unbounded" }
+            Effect.suspend(() =>
+              runParallelDiscard(
+                internalPlanner.sortExitPaths(machine, paths).flatMap((path) =>
+                  Array.from(invokeSessions.entries())
+                    .filter(([, session]) => session.path === path)
+                    .map(([key]) => stopInvoke(key))
                 )
               )
             )
