@@ -244,10 +244,135 @@ const makeChildlessCompiledDrain = (
   }
 }
 
-interface InvokeExecutionState {
+class InvokeExecutionKernel {
   readonly sessions: Map<string, InvokeSession>
-  configuration: unknown
-  initialized: boolean
+  initialized = false
+
+  constructor() {
+    this.sessions = new Map()
+  }
+
+  private makeSessionKey(path: string, id: string): string {
+    return `${path.length}:${path}${id}`
+  }
+
+  private makeChildId(path: string, id: string): string {
+    return `Machine.invoke:${this.makeSessionKey(path, id)}`
+  }
+
+  private stopSession(
+    scope: internalRuntime.ProcessScope<any>,
+    session: InvokeSession
+  ): Effect.Effect<void> {
+    return scope.stopChild(session.childId)
+  }
+
+  private remove(
+    scope: internalRuntime.ProcessScope<any>,
+    key: string,
+    token: symbol | undefined
+  ): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const current = this.sessions.get(key)
+      if (current === undefined || (token !== undefined && current.token !== token)) {
+        return Effect.void
+      }
+      this.sessions.delete(key)
+      return this.stopSession(scope, current)
+    })
+  }
+
+  stop(scope: internalRuntime.ProcessScope<any>, key: string): Effect.Effect<void> {
+    return this.remove(scope, key, undefined)
+  }
+
+  stopAll(scope: internalRuntime.ProcessScope<any>): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const effects = Array.from(this.sessions.values(), (session) => this.stopSession(scope, session))
+      this.sessions.clear()
+      return runParallelDiscard(effects)
+    })
+  }
+
+  start(
+    context: internalRuntime.CompiledProcessContext<any, any>,
+    path: string,
+    config: AnyInvokeConfig
+  ): Effect.Effect<void, any, any> {
+    return Effect.suspend(() => {
+      const token = Symbol()
+      const invokeId = String(config.id)
+      const key = this.makeSessionKey(path, invokeId)
+      const childId = config.address === undefined ? this.makeChildId(path, invokeId) : String(config.address)
+      if (this.sessions.has(key)) {
+        return Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
+      }
+      this.sessions.set(key, { token, childId, path })
+      const logic = config.src() as internalRuntime.ProcessLogic<any, any, any, any, any, any>
+      const scope = context.scope
+      const sendParent = makeInvokeSendParent(this.sessions, scope.self, key, token)
+      return scope.spawn(
+        logic,
+        {
+          id: childId,
+          ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
+          [internalRuntime.sendParentOverride]: sendParent,
+          onOutcome: makeInvokeOutcomeHandler(
+            this.sessions,
+            scope.self,
+            scope.failCause,
+            config,
+            key,
+            token
+          ),
+          ...(config.snapshot === undefined ? undefined : {
+            [internalRuntime.activeSnapshotObserver]: makeInvokeSnapshotHandler(
+              this.sessions,
+              scope.self,
+              config,
+              key,
+              token
+            )
+          })
+        }
+      ).pipe(
+        Effect.onExit((exit) => Exit.isFailure(exit) ? this.remove(scope, key, token) : Effect.void),
+        Effect.asVoid
+      )
+    })
+  }
+
+  startAll(
+    machine: Machine.Any,
+    context: internalRuntime.CompiledProcessContext<any, any>,
+    configuration: Model.ActiveConfiguration,
+    paths: ReadonlyArray<string>,
+    event: Machine.LifecycleEvent<any>
+  ): Effect.Effect<void, any, any> | undefined {
+    const effects = internalPlanner.sortEntryPaths(machine, paths)
+      .filter((path) => configuration.active.has(path))
+      .flatMap((path) =>
+        getInvokes(Model.getStateConfigByPath(machine, path), {
+          state: Model.getActiveValue(configuration, path),
+          parent: Model.getParentValue(machine, configuration, path),
+          parents: Model.getParentValues(machine, configuration, path),
+          event
+        }).map((config) => this.start(context, path, config))
+      )
+    return effects.length === 0 ? undefined : runSequentialDiscard(effects)
+  }
+
+  stopPaths(
+    machine: Machine.Any,
+    scope: internalRuntime.ProcessScope<any>,
+    paths: ReadonlyArray<string>
+  ): Effect.Effect<void> | undefined {
+    const keys = new Set(internalPlanner.sortExitPaths(machine, paths))
+    const effects = Array.from(this.sessions.entries())
+      .filter(([, session]) => keys.has(session.path))
+      .map(([key]) => this.stop(scope, key))
+    return effects.length === 0 ? undefined : runParallelDiscard(effects)
+  }
 }
 
 const makeInvokingCompiledDrain = (
@@ -268,120 +393,26 @@ const makeInvokingCompiledDrain = (
     }
 
     const scope = context.scope
-    const execution = (context.executionState ??= {
-      sessions: new Map(),
-      configuration: undefined,
-      initialized: false
-    }) as InvokeExecutionState
-    const invokeSessions = execution.sessions
+    const stored = context.executionState
+    const execution = stored instanceof InvokeExecutionKernel
+      ? stored
+      : new InvokeExecutionKernel()
+    context.executionState = execution
     let liveRuntime: Runtime<any, any> | undefined
-
-    const makeInvokeSessionKey = (path: string, id: string): string => `${path.length}:${path}${id}`
-    const makeInvokeChildId = (path: string, id: string): string => `Machine.invoke:${makeInvokeSessionKey(path, id)}`
-    const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> => scope.stopChild(session.childId)
-    const removeInvoke = (
-      key: string,
-      token: symbol | undefined
-    ): Effect.Effect<void> =>
-      Effect.sync(() => {
-        const current = invokeSessions.get(key)
-        if (current === undefined || (token !== undefined && current.token !== token)) {
-          return undefined
-        }
-        invokeSessions.delete(key)
-        return current
-      }).pipe(
-        Effect.flatMap((session) => session === undefined ? Effect.void : stopInvokeSession(session))
-      )
-    const stopInvoke = (key: string): Effect.Effect<void> => removeInvoke(key, undefined)
-    const stopAllInvokes = (): Effect.Effect<void> =>
-      Effect.suspend(() => {
-        const effects = Array.from(invokeSessions.values(), stopInvokeSession)
-        invokeSessions.clear()
-        return runParallelDiscard(effects)
-      })
-    const startInvoke = Effect.fnUntraced(function*(path: string, config: AnyInvokeConfig) {
-      const token = Symbol()
-      const invokeId = String(config.id)
-      const key = makeInvokeSessionKey(path, invokeId)
-      const childId = config.address === undefined ? makeInvokeChildId(path, invokeId) : String(config.address)
-      const reserved = yield* Effect.sync(() => {
-        if (invokeSessions.has(key)) {
-          return false
-        }
-        invokeSessions.set(key, { token, childId, path })
-        return true
-      })
-      if (!reserved) {
-        return yield* Effect.fail(new ChildAlreadyExistsError({ id: invokeId }))
-      }
-      const logic = config.src() as internalRuntime.ProcessLogic<any, any, any, any, any, any>
-      const sendParent = makeInvokeSendParent(invokeSessions, scope.self, key, token)
-      yield* scope.spawn(
-        logic,
-        {
-          id: childId,
-          ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
-          [internalRuntime.sendParentOverride]: sendParent,
-          onOutcome: makeInvokeOutcomeHandler(
-            invokeSessions,
-            scope.self,
-            scope.failCause,
-            config,
-            key,
-            token
-          ),
-          ...(config.snapshot === undefined ? undefined : {
-            [internalRuntime.activeSnapshotObserver]: makeInvokeSnapshotHandler(
-              invokeSessions,
-              scope.self,
-              config,
-              key,
-              token
-            )
-          })
-        }
-      ).pipe(
-        Effect.onExit((exit) => Exit.isFailure(exit) ? removeInvoke(key, token) : Effect.void)
-      )
-    })
-    const startInvokes = (
-      configuration: Model.ActiveConfiguration,
-      paths: ReadonlyArray<string>,
-      event: Machine.LifecycleEvent<any>
-    ): Effect.Effect<void, any, any> | undefined => {
-      const effects = internalPlanner.sortEntryPaths(machine, paths)
-        .filter((path) => configuration.active.has(path))
-        .flatMap((path) =>
-          getInvokes(Model.getStateConfigByPath(machine, path), {
-            state: Model.getActiveValue(configuration, path),
-            parent: Model.getParentValue(machine, configuration, path),
-            parents: Model.getParentValues(machine, configuration, path),
-            event
-          }).map((config) => startInvoke(path, config))
-        )
-      return effects.length === 0 ? undefined : runSequentialDiscard(effects)
-    }
-    const stopInvokes = (paths: ReadonlyArray<string>): Effect.Effect<void> | undefined => {
-      const keys = new Set(internalPlanner.sortExitPaths(machine, paths))
-      const effects = Array.from(invokeSessions.entries())
-        .filter(([, session]) => keys.has(session.path))
-        .map(([key]) => stopInvoke(key))
-      return effects.length === 0 ? undefined : runParallelDiscard(effects)
-    }
+    let configuration: unknown
 
     let loop: Effect.Effect<Option.Option<any>, any, any>
     loop = Effect.suspend(() => {
       const pending = context.poll()
       if (Option.isNone(pending)) {
-        execution.configuration = undefined
+        configuration = undefined
         return Effect.succeed(Option.none())
       }
 
       let planned
       try {
         planned = executionPlan.plan(
-          execution.configuration ??
+          configuration ??
             executionPlan.fromConfiguration(Model.normalizeConfigurationSync(machine, current)),
           pending.value
         )
@@ -390,7 +421,7 @@ const makeInvokingCompiledDrain = (
           ? Effect.fail(error)
           : Effect.die(error)
       }
-      execution.configuration = planned.next
+      configuration = planned.next
       if (planned.microsteps.length === 0) {
         return loop
       }
@@ -415,7 +446,7 @@ const makeInvokingCompiledDrain = (
         beforeCommit.push(internalPlanner.runCommands(planned.commands, scope))
       }
       if (changed) {
-        const stopping = stopInvokes(exitPaths)
+        const stopping = execution.stopPaths(machine, scope, exitPaths)
         if (stopping !== undefined) beforeCommit.push(stopping)
       }
       const afterCommit: Array<Effect.Effect<void, any, any>> = []
@@ -428,10 +459,10 @@ const makeInvokingCompiledDrain = (
         )
       }
       if (planned.done) {
-        afterCommit.push(stopAllInvokes())
+        afterCommit.push(execution.stopAll(scope))
       } else if (changed) {
         for (const [path, entryEvent] of entryEvents) {
-          const starting = startInvokes(activeConfiguration, [path], entryEvent)
+          const starting = execution.startAll(machine, context, activeConfiguration, [path], entryEvent)
           if (starting !== undefined) afterCommit.push(starting)
         }
       }
@@ -469,8 +500,10 @@ const makeInvokingCompiledDrain = (
         return loop
       }
       const initialConfiguration = Model.normalizeConfigurationSync(machine, current)
-      execution.configuration = executionPlan.fromConfiguration(initialConfiguration)
-      const starting = startInvokes(
+      configuration = executionPlan.fromConfiguration(initialConfiguration)
+      const starting = execution.startAll(
+        machine,
+        context,
         initialConfiguration,
         Model.getInitialEntryPaths(machine, initialConfiguration),
         internalPlanner.InitialEvent

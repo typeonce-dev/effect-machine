@@ -11,9 +11,8 @@ describe("machine process lifecycle", () => {
       const ref = yield* MachineRuntime.startProcess<number, void>({
         [MachineRuntime.childlessProcess]: true,
         [MachineRuntime.compiledProcess]: true,
-        [MachineRuntime.compiledProcessInitial]: () =>
-          Effect.succeed({ state: 1, done: false, output: undefined }),
-        initial: () => Effect.dieMessage("compiled startup unexpectedly used the general initial effect"),
+        [MachineRuntime.compiledProcessInitial]: () => Effect.succeed({ state: 1, done: false, output: undefined }),
+        initial: () => Effect.die(new Error("compiled startup unexpectedly used the general initial effect")),
         run: () => Effect.never,
         drain: (context) =>
           Ref.update(drainCount, (count) => count + 1).pipe(
@@ -35,9 +34,8 @@ describe("machine process lifecycle", () => {
       const ref = yield* MachineRuntime.startProcess<number, never, never, never, string>({
         [MachineRuntime.childlessProcess]: true,
         [MachineRuntime.compiledProcess]: true,
-        [MachineRuntime.compiledProcessInitial]: () =>
-          Effect.succeed({ state: 1, done: true, output: "complete" }),
-        initial: () => Effect.dieMessage("compiled startup unexpectedly used the general initial effect"),
+        [MachineRuntime.compiledProcessInitial]: () => Effect.succeed({ state: 1, done: true, output: "complete" }),
+        initial: () => Effect.die(new Error("compiled startup unexpectedly used the general initial effect")),
         run: () => Effect.never,
         drain: () => Ref.update(drainCount, (count) => count + 1).pipe(Effect.as(Option.none()))
       })

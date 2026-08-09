@@ -1321,11 +1321,15 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
       const compiledInitial = self.logic[compiledProcessInitial]
-      const initializeEffect: Effect.Effect<{
-        readonly state: unknown
-        readonly done: boolean | undefined
-        readonly output: unknown
-      }, unknown, any> = compiledInitial === undefined
+      const initializeEffect: Effect.Effect<
+        {
+          readonly state: unknown
+          readonly done: boolean | undefined
+          readonly output: unknown
+        },
+        unknown,
+        any
+      > = compiledInitial === undefined
         ? self.logic.initial(self.processScope).pipe(
           Effect.map((state) => ({ state, done: undefined, output: undefined } as const))
         )
