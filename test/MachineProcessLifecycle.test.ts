@@ -465,6 +465,71 @@ describe("machine process lifecycle", () => {
       assert.deepStrictEqual(yield* replacement.snapshot, { status: "stopped", state: 2 })
     }))
 
+  it.effect("reserves a named child atomically across concurrent spawns", () =>
+    Effect.gen(function*() {
+      yield* Effect.forEach(
+        Array.from({ length: 50 }),
+        () =>
+          Effect.gen(function*() {
+            const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+            const parent = yield* MachineRuntime.startProcess({
+              initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+              run: () => Effect.never
+            })
+            const scope = yield* Deferred.await(parentScope)
+            const childLogic = Machine.logic({ initial: 0, run: () => Effect.never })
+
+            const exits = yield* Effect.all([
+              Effect.exit(scope.spawn(childLogic, { id: "worker" })),
+              Effect.exit(scope.spawn(childLogic, { id: "worker" }))
+            ], { concurrency: "unbounded" })
+
+            assert.strictEqual(exits.filter(Exit.isSuccess).length, 1)
+            assert.strictEqual(exits.filter(Exit.isFailure).length, 1)
+            const failure = exits.find(Exit.isFailure)
+            if (failure === undefined) {
+              throw new Error("concurrent child reservation produced no failure")
+            }
+            assert.instanceOf(
+              failure.cause.reasons.find(Cause.isFailReason)?.error,
+              Machine.ChildAlreadyExistsError
+            )
+            const child = yield* parent.child("worker")
+            assert(Option.isSome(child))
+            yield* parent.stop
+          }),
+        { concurrency: 10 }
+      )
+    }))
+
+  it.effect("publishes every named child replacement in order", () =>
+    Effect.gen(function*() {
+      const parentScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
+      const parent = yield* MachineRuntime.startProcess({
+        initial: (scope) => Deferred.succeed(parentScope, scope).pipe(Effect.as(undefined)),
+        run: () => Effect.never
+      })
+      const scope = yield* Deferred.await(parentScope)
+      const observed = yield* parent.childChanges("worker").pipe(
+        Stream.map(Option.map((child) => child.sessionId)),
+        Stream.take(5),
+        Stream.runCollect,
+        Effect.forkChild
+      )
+      yield* Effect.yieldNow
+
+      const first = yield* scope.spawn(Machine.logic({ initial: 1, run: () => Effect.never }), { id: "worker" })
+      yield* first.stop
+      const second = yield* scope.spawn(Machine.logic({ initial: 2, run: () => Effect.never }), { id: "worker" })
+      yield* second.stop
+
+      assert.deepStrictEqual(
+        Array.from(yield* Fiber.join(observed)).map(Option.getOrElse(() => "none")),
+        ["none", first.sessionId, "none", second.sessionId, "none"]
+      )
+      yield* parent.stop
+    }))
+
   it.effect("stops named and anonymous children exactly once with their parent", () =>
     Effect.gen(function*() {
       const namedCleanup = yield* Ref.make(0)
