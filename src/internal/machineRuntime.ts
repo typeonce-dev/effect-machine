@@ -128,7 +128,14 @@ interface VersionedSnapshot<State, Error, Output> {
   readonly snapshot: RuntimeSnapshot<State, Error, Output>
   readonly terminalizing: boolean
   readonly changes: PubSub.PubSub<Take.Take<VersionedSnapshot<State, Error, Output>>> | undefined
+  /** Compiled drains retain one non-empty publication chunk until their next Effect boundary. */
+  pendingChanges?: VersionedSnapshotBatch<State, Error, Output> | undefined
 }
+
+type VersionedSnapshotBatch<State, Error, Output> = [
+  VersionedSnapshot<State, Error, Output>,
+  ...Array<VersionedSnapshot<State, Error, Output>>
+]
 
 export type RuntimeOutcome<State, Error = never, Output = never> =
   | {
@@ -222,6 +229,8 @@ export interface CompiledProcessContext<State, Event> {
   readonly poll: () => Option.Option<Event>
   readonly state: () => State
   readonly commit: (state: State) => Effect.Effect<void> | undefined
+  /** Publishes every committed snapshot accumulated by the current synchronous segment. */
+  readonly flush: () => void
   executionState: unknown
 }
 
@@ -1321,13 +1330,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           updateState: (f) => self.updateState(f)
         }
       } else {
-        self.compiledContext = {
-          scope: self.processScope,
-          poll: () => pollCompactMailbox(self.mailbox),
-          state: () => self.current.snapshot.state,
-          commit: (state: unknown) => self.commitActiveState(state),
-          executionState: undefined
-        }
+        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self)
       }
 
       if (self.options.onReady !== undefined) {
@@ -1533,6 +1536,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
                 : compiledDrain(self.compiledContext!)
             })
           ).pipe(Effect.exit)
+          self.flushPendingChanges()
           if (Exit.isFailure(exit)) {
             if (self.requestedTermination === undefined) {
               yield* self.requestTermination({ _tag: "Failure", cause: exit.cause })
@@ -1629,6 +1633,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
   private setAndPublishSnapshot(snapshot: RuntimeSnapshot<unknown, unknown, unknown>): Effect.Effect<void> {
     return Effect.suspend(() => {
+      this.flushPendingChanges()
       const versioned = {
         revision: this.current.revision + 1,
         snapshot,
@@ -1647,24 +1652,64 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return Effect.suspend(() => this.commitActiveState(state) ?? Effect.void)
   }
 
-  private commitActiveState(state: unknown): Effect.Effect<void> | undefined {
+  pollCompiledEvent(): Option.Option<unknown> {
+    return pollCompactMailbox(this.mailbox)
+  }
+
+  compiledState(): unknown {
+    return this.current.snapshot.state
+  }
+
+  commitCompiledState(state: unknown): Effect.Effect<void> | undefined {
+    return this.commitActiveState(state, true)
+  }
+
+  private commitActiveState(state: unknown, batchChanges = false): Effect.Effect<void> | undefined {
     const latest = this.current
     if (latest.terminalizing || latest.snapshot.status !== "active") {
       return undefined
     }
+    const pendingChanges = latest.pendingChanges
+    if (pendingChanges !== undefined) {
+      latest.pendingChanges = undefined
+    }
+    const activeSnapshot = { status: "active" as const, state }
     const versioned = {
       revision: latest.revision + 1,
-      snapshot: { status: "active" as const, state },
+      snapshot: activeSnapshot,
       terminalizing: false,
       changes: latest.changes
-    }
+    } as VersionedSnapshot<unknown, unknown, unknown>
     this.current = versioned
     if (versioned.changes !== undefined) {
-      PubSub.publishUnsafe(versioned.changes, [versioned] as const)
+      if (pendingChanges === undefined) {
+        if (batchChanges) {
+          versioned.pendingChanges = [versioned]
+        } else {
+          PubSub.publishUnsafe(versioned.changes, [versioned] as const)
+        }
+      } else {
+        pendingChanges.push(versioned)
+        if (batchChanges) {
+          versioned.pendingChanges = pendingChanges
+        } else {
+          PubSub.publishUnsafe(versioned.changes, pendingChanges)
+        }
+      }
     }
     return this.options.onSnapshot === undefined
       ? undefined
-      : notifyActiveSnapshot(this.options.onSnapshot, versioned.snapshot)
+      : notifyActiveSnapshot(this.options.onSnapshot, activeSnapshot)
+  }
+
+  flushPendingChanges(): void {
+    const current = this.current
+    const pendingChanges = current?.pendingChanges
+    if (pendingChanges === undefined || current.changes === undefined) {
+      return
+    }
+    current.pendingChanges = undefined
+    PubSub.publishUnsafe(current.changes, pendingChanges)
   }
 
   private updateState<E, R>(
@@ -1742,6 +1787,31 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         )
       })
     )
+  }
+}
+
+class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unknown> {
+  executionState: unknown
+
+  constructor(
+    readonly scope: ProcessScope<unknown>,
+    private readonly process: CompiledProcess
+  ) {}
+
+  poll(): Option.Option<unknown> {
+    return this.process.pollCompiledEvent()
+  }
+
+  state(): unknown {
+    return this.process.compiledState()
+  }
+
+  commit(state: unknown): Effect.Effect<void> | undefined {
+    return this.process.commitCompiledState(state)
+  }
+
+  flush(): void {
+    this.process.flushPendingChanges()
   }
 }
 
