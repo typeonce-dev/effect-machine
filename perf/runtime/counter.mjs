@@ -205,13 +205,18 @@ const parallelCounterMachine = Machine.make({
   }
 })
 
-export const incrementEvent = Machine.event(counterMachine, CounterEvent.cases.Increment)
-const finishEvent = Machine.event(counterMachine, CounterEvent.cases.Finish)
-const hierarchicalIncrementEvent = Machine.event(hierarchicalCounterMachine, HierarchicalEvent.cases.Increment)
-const hierarchicalFinishEvent = Machine.event(hierarchicalCounterMachine, HierarchicalEvent.cases.Finish)
-const parallelIncrementLeftEvent = Machine.event(parallelCounterMachine, HierarchicalEvent.cases.IncrementLeft)
-const parallelIncrementRightEvent = Machine.event(parallelCounterMachine, HierarchicalEvent.cases.IncrementRight)
-const parallelFinishEvent = Machine.event(parallelCounterMachine, HierarchicalEvent.cases.Finish)
+// The pull-request harness evaluates this fixture against both the base and
+// candidate builds. Older base builds do not expose Machine.event yet.
+const makeEvent = (machine, schema) =>
+  typeof Machine.event === "function" ? Machine.event(machine, schema) : schema.make({})
+
+export const incrementEvent = makeEvent(counterMachine, CounterEvent.cases.Increment)
+const finishEvent = makeEvent(counterMachine, CounterEvent.cases.Finish)
+const hierarchicalIncrementEvent = makeEvent(hierarchicalCounterMachine, HierarchicalEvent.cases.Increment)
+const hierarchicalFinishEvent = makeEvent(hierarchicalCounterMachine, HierarchicalEvent.cases.Finish)
+const parallelIncrementLeftEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.IncrementLeft)
+const parallelIncrementRightEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.IncrementRight)
+const parallelFinishEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.Finish)
 
 export const initialCounterSnapshot = Effect.runSync(
   Machine.planInitial(counterMachine).pipe(Effect.map((planned) => planned.state))
