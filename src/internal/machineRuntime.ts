@@ -1194,7 +1194,6 @@ const startCompiledInternal: <
   const shutdownMailbox = compactMailbox === undefined
     ? Queue.shutdown(queue!)
     : Effect.sync(() => closeCompactMailbox(compactMailbox))
-  const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
   const drainServices = onDemand ? yield* Effect.context<Requirements>() : undefined
@@ -1202,9 +1201,25 @@ const startCompiledInternal: <
   let draining = false
   let offerRevision = 0
   let interruptRequested = false
-  let terminationRequested = false
-  let requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
-    Deferred.succeed(termination, requested)
+  let requestedTermination: ProcessTermination | undefined
+  let reservedTerminationSnapshot: RuntimeSnapshot<State, Error, Output> | undefined
+  let reserveRequestedTermination:
+    | ((requested: ProcessTermination) => RuntimeSnapshot<State, Error, Output> | undefined)
+    | undefined
+  // A compiled process never suspends waiting for a terminal request: its
+  // active drain owns completion, while stop/failure either interrupts that
+  // owner or terminalizes an idle drain directly. An owner-local cell can
+  // therefore arbitrate the first request atomically without retaining a
+  // second Deferred in every compiled machine.
+  const requestRuntimeTermination = (requested: ProcessTermination): Effect.Effect<boolean> =>
+    Effect.sync(() => {
+      if (requestedTermination !== undefined) {
+        return false
+      }
+      requestedTermination = requested
+      reservedTerminationSnapshot = reserveRequestedTermination?.(requested)
+      return true
+    })
   let sendEvent = compactMailbox !== undefined
     ? (event: Event): Effect.Effect<void, StoppedError> => Effect.sync(() => offerCompactMailbox(compactMailbox, event))
     : (event: Event): Effect.Effect<void, StoppedError> =>
@@ -1408,26 +1423,6 @@ const startCompiledInternal: <
       Effect.asVoid
     )
 
-  const reserveTerminalSnapshot = (
-    f: (
-      snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
-    ) => RuntimeSnapshot<State, Error, Output>
-  ): Effect.Effect<RuntimeSnapshot<State, Error, Output> | undefined> =>
-    Effect.sync(() => {
-      const latest = MutableRef.get(current)
-      if (latest.terminalizing || latest.snapshot.status !== "active") {
-        return undefined
-      }
-      const reserved = {
-        revision: latest.revision + 1,
-        snapshot: f(latest.snapshot),
-        terminalizing: true,
-        changes: latest.changes
-      }
-      MutableRef.set(current, { ...latest, terminalizing: true })
-      return reserved.snapshot
-    })
-
   const setAndPublishSnapshot = (
     snapshot: RuntimeSnapshot<State, Error, Output>
   ): Effect.Effect<void> =>
@@ -1469,24 +1464,19 @@ const startCompiledInternal: <
     )
   }
 
-  const reserveStoppedSnapshot = reserveTerminalSnapshot((snapshot) => ({
-    status: "stopped",
-    state: snapshot.state
-  }))
-
-  const reserveFailureSnapshot = (cause: Cause.Cause<Error>) =>
-    reserveTerminalSnapshot((snapshot) => ({
-      status: "error",
-      state: snapshot.state,
-      cause
-    }))
-
-  const reserveSuccessSnapshot = (output: Output) =>
-    reserveTerminalSnapshot((snapshot) => ({
-      status: "done",
-      state: snapshot.state,
-      output
-    }))
+  reserveRequestedTermination = (termination) => {
+    const latest = MutableRef.get(current)
+    if (latest.terminalizing || latest.snapshot.status !== "active") {
+      return undefined
+    }
+    const snapshot: RuntimeSnapshot<State, Error, Output> = termination._tag === "Stopped"
+      ? { status: "stopped", state: latest.snapshot.state }
+      : termination._tag === "Done"
+      ? { status: "done", state: latest.snapshot.state, output: termination.output }
+      : { status: "error", state: latest.snapshot.state, cause: termination.cause }
+    MutableRef.set(current, { ...latest, terminalizing: true })
+    return snapshot
+  }
 
   const terminalizeReservedStop = (
     snapshot: RuntimeSnapshot<State, Error, Output>
@@ -1515,16 +1505,8 @@ const startCompiledInternal: <
     return terminalizeWith(snapshot, exit, Deferred.succeed(done, output))
   }
 
-  const reserveTermination = (termination: ProcessTermination) => {
-    switch (termination._tag) {
-      case "Stopped":
-        return reserveStoppedSnapshot
-      case "Done":
-        return reserveSuccessSnapshot(termination.output)
-      case "Failure":
-        return reserveFailureSnapshot(termination.cause)
-    }
-  }
+  const reserveTermination = (termination: ProcessTermination) =>
+    Effect.sync(() => reserveRequestedTermination!(termination))
 
   const completeTermination = (
     termination: ProcessTermination,
@@ -1539,24 +1521,6 @@ const startCompiledInternal: <
         return terminalizeReservedFailure(snapshot, termination.cause)
     }
   }
-
-  let reservedTerminationSnapshot: RuntimeSnapshot<State, Error, Output> | undefined
-  requestRuntimeTermination = (requested) =>
-    Deferred.succeed(termination, requested).pipe(
-      Effect.flatMap((accepted) =>
-        accepted
-          ? reserveTermination(requested).pipe(
-            Effect.tap((snapshot) =>
-              Effect.sync(() => {
-                terminationRequested = true
-                reservedTerminationSnapshot = snapshot
-              })
-            ),
-            Effect.as(true)
-          )
-          : Effect.succeed(false)
-      )
-    )
 
   const finishRequestedTermination = (requested: ProcessTermination): Effect.Effect<void> =>
     Effect.gen(function*() {
@@ -1680,26 +1644,24 @@ const startCompiledInternal: <
       Effect.gen(function*() {
         let observedRevision = offerRevision
         while (true) {
-          const pending = yield* Deferred.poll(termination)
-          if (Option.isSome(pending)) {
-            return yield* finishRequestedTermination(yield* pending.value)
+          if (requestedTermination !== undefined) {
+            return yield* finishRequestedTermination(requestedTermination)
           }
 
           const exit = yield* restore(Effect.suspend(() => logic.drain!(context))).pipe(Effect.exit)
           if (Exit.isFailure(exit)) {
             const completed: ProcessTermination = { _tag: "Failure", cause: exit.cause }
-            yield* Deferred.succeed(termination, completed)
-            return yield* finishRequestedTermination(yield* Deferred.await(termination))
+            yield* requestRuntimeTermination(completed)
+            return yield* finishRequestedTermination(requestedTermination!)
           }
           if (Option.isSome(exit.value)) {
             const completed: ProcessTermination = { _tag: "Done", output: exit.value.value }
-            yield* Deferred.succeed(termination, completed)
-            return yield* finishRequestedTermination(yield* Deferred.await(termination))
+            yield* requestRuntimeTermination(completed)
+            return yield* finishRequestedTermination(requestedTermination!)
           }
 
-          const requested = yield* Deferred.poll(termination)
-          if (Option.isSome(requested)) {
-            return yield* finishRequestedTermination(yield* requested.value)
+          if (requestedTermination !== undefined) {
+            return yield* finishRequestedTermination(requestedTermination)
           }
 
           const continueDraining = yield* Effect.sync(() => {
@@ -1732,7 +1694,7 @@ const startCompiledInternal: <
     sendEvent = (event) =>
       Effect.uninterruptible(
         Effect.suspend(() => {
-          if (compactMailbox!.closed || terminationRequested) {
+          if (compactMailbox!.closed || requestedTermination !== undefined) {
             return Effect.fail(new StoppedError())
           }
           offerCompactMailbox(compactMailbox!, event)
@@ -1763,19 +1725,19 @@ const startCompiledInternal: <
     return ref
   }
 
-  const pendingTermination = yield* Deferred.poll(termination)
+  const pendingTermination = requestedTermination
   const compiledRuntime: Effect.Effect<void, never, Requirements> = Effect.uninterruptibleMask((restore) =>
     Effect.gen(function*() {
       let requested: ProcessTermination
-      if (Option.isSome(pendingTermination)) {
-        requested = yield* pendingTermination.value
+      if (pendingTermination !== undefined) {
+        requested = pendingTermination
       } else {
         const exit = yield* restore(Effect.suspend(() => logic.run(context))).pipe(Effect.exit)
         const completed: ProcessTermination = Exit.isFailure(exit)
           ? { _tag: "Failure", cause: exit.cause }
           : { _tag: "Done", output: exit.value }
-        yield* Deferred.succeed(termination, completed)
-        requested = yield* Deferred.await(termination)
+        yield* requestRuntimeTermination(completed)
+        requested = requestedTermination!
       }
 
       const snapshot = reservedTerminationSnapshot ?? (yield* reserveTermination(requested))

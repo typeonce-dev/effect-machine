@@ -169,6 +169,67 @@ describe("machine process lifecycle", () => {
       assert.instanceOf(yield* Effect.flip(ref.join), Machine.StoppedError)
     }))
 
+  it.effect("arbitrates on-demand completion and stop exactly once", () =>
+    Effect.gen(function*() {
+      yield* Effect.forEach(
+        Array.from({ length: 100 }, (_, index) => index),
+        (index) =>
+          Effect.gen(function*() {
+            const started = yield* Deferred.make<void>()
+            const release = yield* Deferred.make<void>()
+            const race = yield* Deferred.make<void>()
+            const cleanupCount = yield* Ref.make(0)
+            const ref = yield* MachineRuntime.startProcess<number, void, never, never, number>({
+              [MachineRuntime.childlessProcess]: true,
+              [MachineRuntime.compiledProcess]: true,
+              initial: () => Effect.succeed(index),
+              run: () => Effect.never,
+              drain: (context) =>
+                Effect.gen(function*() {
+                  const event = yield* context.poll!
+                  if (Option.isNone(event)) {
+                    return Option.none()
+                  }
+                  yield* Deferred.succeed(started, undefined)
+                  return yield* Deferred.await(release).pipe(
+                    Effect.as(Option.some(index)),
+                    Effect.ensuring(Ref.update(cleanupCount, (count) => count + 1))
+                  )
+                })
+            })
+
+            yield* ref.send(undefined)
+            yield* Deferred.await(started)
+            const stopFiber = yield* Deferred.await(race).pipe(
+              Effect.andThen(ref.stop),
+              Effect.forkChild
+            )
+            const completionFiber = yield* Deferred.await(race).pipe(
+              Effect.andThen(Deferred.succeed(release, undefined)),
+              Effect.forkChild
+            )
+
+            yield* Deferred.succeed(race, undefined)
+            yield* Fiber.join(stopFiber)
+            yield* Fiber.join(completionFiber)
+
+            const snapshot = yield* ref.snapshot
+            const joined = yield* Effect.exit(ref.join)
+            assert.strictEqual(yield* Ref.get(cleanupCount), 1)
+            assert(snapshot.status === "done" || snapshot.status === "stopped")
+            if (snapshot.status === "done") {
+              assert.deepStrictEqual(joined, Exit.succeed(index))
+            } else {
+              assert(Exit.isFailure(joined))
+              if (Exit.isFailure(joined)) {
+                assert.instanceOf(joined.cause.reasons.find(Cause.isFailReason)?.error, Machine.StoppedError)
+              }
+            }
+          }),
+        { concurrency: "unbounded" }
+      )
+    }))
+
   it.effect("terminalizes once when concurrent callers stop the same process", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)
