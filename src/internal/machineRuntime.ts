@@ -54,17 +54,50 @@ export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compile
 /** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
-interface ChildRegistrySnapshot {
-  readonly closed: boolean
-  readonly revision: number
-  readonly children: ReadonlyMap<ChildKey, ChildEntry>
+type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
+type ChildObservationBatch = [ChildObservation, ...Array<ChildObservation>]
+
+interface ChildObserver {
+  readonly child: ChildSelector
+  readonly id: string
+  values: ChildObservationBatch | undefined
+  waiter: Deferred.Deferred<void> | undefined
 }
+
+const offerChildObservation = (
+  observer: ChildObserver,
+  value: ChildObservation
+): void => {
+  if (observer.values === undefined) {
+    observer.values = [value]
+  } else {
+    observer.values.push(value)
+  }
+  if (observer.waiter !== undefined) {
+    const waiter = observer.waiter
+    observer.waiter = undefined
+    Deferred.doneUnsafe(waiter, Effect.void)
+  }
+}
+
+const takeChildObservations = (
+  observer: ChildObserver
+): Effect.Effect<ChildObservationBatch> =>
+  Effect.suspend(() => {
+    if (observer.values !== undefined) {
+      const values = observer.values
+      observer.values = undefined
+      return Effect.succeed(values)
+    }
+    const waiter = Deferred.makeUnsafe<void>()
+    observer.waiter = waiter
+    return Deferred.await(waiter).pipe(Effect.andThen(takeChildObservations(observer)))
+  })
 
 interface ChildRegistry {
   closed: boolean
-  revision: number
   readonly children: Map<ChildKey, ChildEntry>
-  changes: PubSub.PubSub<ChildRegistrySnapshot> | undefined
+  observers: Set<ChildObserver> | undefined
   scope: Scope.Closeable | undefined
 }
 
@@ -395,24 +428,44 @@ const makeChildRuntime = (
   Effect.sync(() => {
     // Child-registry decisions are synchronous and every access below runs in
     // one Effect.sync / Effect.suspend step. Keep the unobserved representation
-    // compact; a replay PubSub is installed only when childChanges is used.
+    // compact; selector-specific handoffs are installed only while
+    // childChanges streams are running.
     const registry: ChildRegistry = {
       closed: false,
-      revision: 0,
       children: new Map(),
-      changes: undefined,
+      observers: undefined,
       scope: undefined
     }
 
-    const snapshot = (registry: ChildRegistry): ChildRegistrySnapshot => ({
-      closed: registry.closed,
-      revision: registry.revision,
-      children: new Map(registry.children)
-    })
+    const matches = (
+      entry: ChildEntry,
+      child: ChildSelector
+    ): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
+      entry._tag === "Started" && (typeof child === "string" || (
+        entry.descriptor !== undefined &&
+        entry.descriptor.id === child.id &&
+        entry.descriptor.machine === child.machine
+      ))
+
+    const selectChild = (
+      id: string,
+      child: ChildSelector
+    ): ChildObservation => {
+      if (registry.closed) {
+        return Option.none()
+      }
+      const entry = registry.children.get(id)
+      return entry !== undefined && matches(entry, child)
+        ? Option.some(entry.ref)
+        : Option.none()
+    }
 
     const publishRegistryChange = (): void => {
-      if (registry.changes !== undefined) {
-        PubSub.publishUnsafe(registry.changes, snapshot(registry))
+      if (registry.observers === undefined) {
+        return
+      }
+      for (const observer of registry.observers) {
+        offerChildObservation(observer, selectChild(observer.id, observer.child))
       }
     }
 
@@ -478,9 +531,6 @@ const makeChildRuntime = (
           return
         }
         const observable = typeof key === "string"
-        if (observable) {
-          registry.revision += 1
-        }
         registry.children.delete(key)
         if (observable) {
           publishRegistryChange()
@@ -504,9 +554,6 @@ const makeChildRuntime = (
           return false
         }
         const observable = typeof key === "string"
-        if (observable) {
-          registry.revision += 1
-        }
         registry.children.delete(key)
         registry.children.set(key, { _tag: "Started", token, descriptor, ref })
         if (observable) {
@@ -514,16 +561,6 @@ const makeChildRuntime = (
         }
         return true
       })
-
-    const matches = (
-      entry: ChildEntry,
-      child: ChildSelector
-    ): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
-      entry._tag === "Started" && (typeof child === "string" || (
-        entry.descriptor !== undefined &&
-        entry.descriptor.id === child.id &&
-        entry.descriptor.machine === child.machine
-      ))
 
     const get: ChildRuntime["get"] = (child) => {
       const id = typeof child === "string" ? child : child.id
@@ -540,51 +577,34 @@ const makeChildRuntime = (
 
     const changes: ChildRuntime["changes"] = (child) => {
       const id = typeof child === "string" ? child : child.id
-      return Stream.unwrap(
-        Effect.suspend(() => {
-          if (registry.closed) {
-            return Effect.succeed(undefined)
-          }
-          if (registry.changes !== undefined) {
-            return Effect.succeed(registry.changes)
-          }
-          return PubSub.unbounded<ChildRegistrySnapshot>({ replay: 1 }).pipe(
-            Effect.flatMap((candidate) =>
-              Effect.sync(() => {
-                if (registry.closed) {
-                  return [undefined, true] as const
+      return Stream.fromChannel(
+        Channel.fromTransform((_, streamScope) =>
+          Effect.sync((): ChildObserver => ({ child, id, values: undefined, waiter: undefined })).pipe(
+            Effect.flatMap((observer) => {
+              const removeObserver = Effect.sync(() => {
+                if (registry.observers !== undefined) {
+                  registry.observers.delete(observer)
+                  if (registry.observers.size === 0) {
+                    registry.observers = undefined
+                  }
                 }
-                if (registry.changes !== undefined) {
-                  return [registry.changes, true] as const
-                }
-                registry.changes = candidate
-                PubSub.publishUnsafe(candidate, snapshot(registry))
-                return [candidate, false] as const
-              }).pipe(
-                Effect.flatMap(([changes, discardCandidate]) =>
-                  discardCandidate
-                    ? PubSub.shutdown(candidate).pipe(Effect.as(changes))
-                    : Effect.succeed(changes)
-                )
+                observer.values = undefined
+                observer.waiter = undefined
+              })
+              return Scope.addFinalizer(streamScope, removeObserver).pipe(
+                Effect.andThen(
+                  Effect.sync(() => {
+                    if (!registry.closed && streamScope.state._tag !== "Closed") {
+                      registry.observers ??= new Set()
+                      registry.observers.add(observer)
+                    }
+                    offerChildObservation(observer, selectChild(id, child))
+                  })
+                ),
+                Effect.as(takeChildObservations(observer))
               )
-            )
+            })
           )
-        }).pipe(
-          Effect.flatMap((changes) => {
-            if (changes === undefined) {
-              return Effect.succeed(noChildChanges)
-            }
-            const select = (registry: ChildRegistrySnapshot) => {
-              if (registry.closed) {
-                return Option.none()
-              }
-              const entry = registry.children.get(id)
-              return entry !== undefined && matches(entry, child)
-                ? Option.some(entry.ref)
-                : Option.none()
-            }
-            return Effect.succeed(Stream.fromPubSub(changes).pipe(Stream.map(select)))
-          })
         )
       )
     }
