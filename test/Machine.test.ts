@@ -4097,6 +4097,93 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "loaded")
     }))
 
+  it.effect("routes sendParent from an active invoked machine", () =>
+    Effect.gen(function*() {
+      const childStarted = yield* Deferred.make<void>()
+      const machine = Machine.make({
+        states: { Loading, Success: SuccessOutput },
+        events: [RequestSucceeded],
+        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invoke({
+            id: "request",
+            src: () =>
+              Machine.logic({
+                initial: undefined,
+                run: ({ sendParent }) =>
+                  Deferred.succeed(childStarted, void 0).pipe(
+                    Effect.andThen(sendParent(new RequestSucceeded({ value: "child" }))),
+                    Effect.andThen(Effect.never)
+                  )
+              })
+          }),
+          on: {
+            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+          }
+        },
+        Success: {
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine)
+      yield* Deferred.await(childStarted)
+
+      assert.strictEqual(yield* actor.join, "child")
+    }))
+
+  it.effect("drops sendParent from a stale invoked machine finalizer", () =>
+    Effect.gen(function*() {
+      const childStarted = yield* Deferred.make<void>()
+      const machine = Machine.make({
+        states: { Idle, Loading, Success: SuccessOutput },
+        events: [Resolve, RequestSucceeded],
+        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Idle: {
+          on: {
+            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+          }
+        },
+        Loading: {
+          invoke: Machine.invoke({
+            id: "request",
+            src: () =>
+              Machine.logic({
+                initial: undefined,
+                run: ({ sendParent }) =>
+                  Deferred.succeed(childStarted, void 0).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.onInterrupt(() => sendParent(new RequestSucceeded({ value: "stale" })))
+                  )
+              })
+          }),
+          on: {
+            Resolve: () => FlatInitial.Idle(new Idle({ userId: "resolved" }))
+          }
+        },
+        Success: {
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine)
+      yield* Deferred.await(childStarted)
+      yield* sendAndWaitForSnapshot(
+        actor,
+        new Resolve({}),
+        (snapshot) => snapshot.status === "active" && snapshot.state.path === "Idle"
+      )
+      yield* Effect.yieldNow
+
+      assert.deepStrictEqual(yield* actor.snapshot, {
+        status: "active",
+        state: { path: "Idle", value: new Idle({ userId: "resolved" }) }
+      })
+      yield* actor.stop
+    }))
+
   it.effect("invokeEffect maps typed failures without manual Effect recovery", () =>
     Effect.gen(function*() {
       const failure = new InvokeError({ message: "unavailable" })

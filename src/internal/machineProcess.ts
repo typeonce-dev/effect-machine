@@ -70,6 +70,78 @@ const hasInvokeCapability = (machine: Machine.Any): boolean => {
   return hasInvokes
 }
 
+const isCurrentInvoke = (
+  sessions: Map<string, InvokeSession>,
+  key: string,
+  token: symbol
+): Effect.Effect<boolean> => Effect.sync(() => sessions.get(key)?.token === token)
+
+const makeInvokeSendParent = (
+  sessions: Map<string, InvokeSession>,
+  self: internalRuntime.ProcessScope<any>["self"],
+  key: string,
+  token: symbol
+): (event: unknown) => Effect.Effect<void, StoppedError> => {
+  return (event) =>
+    isCurrentInvoke(sessions, key, token).pipe(
+      Effect.flatMap((isCurrent) => isCurrent ? self.send(event) : Effect.void)
+    )
+}
+
+const makeInvokeOutcomeHandler = (
+  sessions: Map<string, InvokeSession>,
+  self: internalRuntime.ProcessScope<any>["self"],
+  failCause: internalRuntime.ProcessScope<any>["failCause"],
+  config: AnyInvokeConfig,
+  key: string,
+  token: symbol
+): (outcome: internalRuntime.RuntimeOutcome<any, any, any>) => Effect.Effect<void> => {
+  return (outcome) => {
+    if (outcome._tag === "Stopped") {
+      return Effect.void
+    }
+    return isCurrentInvoke(sessions, key, token).pipe(
+      Effect.flatMap((isCurrent) => {
+        if (!isCurrent) {
+          return Effect.void
+        }
+        if (outcome._tag === "Done") {
+          const mappedEvent = config.onDone === undefined
+            ? outcome.output
+            : config.onDone({ id: config.id, output: outcome.output })
+          return mappedEvent === undefined
+            ? Effect.void
+            : self.send(mappedEvent).pipe(Effect.catchTag("StoppedError", () => Effect.void))
+        }
+        return failCause(outcome.cause)
+      })
+    )
+  }
+}
+
+const makeInvokeSnapshotHandler = (
+  sessions: Map<string, InvokeSession>,
+  self: internalRuntime.ProcessScope<any>["self"],
+  config: AnyInvokeConfig,
+  key: string,
+  token: symbol
+): (
+  snapshot: Extract<internalRuntime.RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
+) => Effect.Effect<void> => {
+  return (snapshot) =>
+    isCurrentInvoke(sessions, key, token).pipe(
+      Effect.flatMap((isCurrent) => {
+        if (!isCurrent || config.snapshot === undefined) {
+          return Effect.void
+        }
+        const mappedEvent = config.snapshot({ id: config.id, snapshot })
+        return mappedEvent === undefined
+          ? Effect.void
+          : self.send(mappedEvent).pipe(Effect.catchTag("StoppedError", () => Effect.void))
+      })
+    )
+}
+
 const makeProcessLogic: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -189,8 +261,6 @@ const makeProcessLogic: <
             const makeInvokeSessionKey = (path: string, id: string): string => `${path.length}:${path}${id}`
             const makeInvokeChildId = (path: string, id: string): string =>
               `Machine.invoke:${makeInvokeSessionKey(path, id)}`
-            const isCurrentInvoke = (key: string, token: symbol): Effect.Effect<boolean> =>
-              Effect.sync(() => invokeSessions.get(key)?.token === token)
             const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> =>
               context.stopChild(session.childId)
             const removeInvoke = (
@@ -224,53 +294,6 @@ const makeProcessLogic: <
                 )
               )
             )
-            const handleInvokeOutcome = (
-              config: AnyInvokeConfig,
-              key: string,
-              token: symbol,
-              outcome: internalRuntime.RuntimeOutcome<any, any, any>
-            ): Effect.Effect<void> => {
-              if (outcome._tag === "Stopped") {
-                return Effect.void
-              }
-              return isCurrentInvoke(key, token).pipe(
-                Effect.flatMap((isCurrent) => {
-                  if (!isCurrent) {
-                    return Effect.void
-                  }
-                  if (outcome._tag === "Done") {
-                    const mappedEvent = config.onDone === undefined
-                      ? outcome.output
-                      : config.onDone({ id: config.id, output: outcome.output })
-                    return mappedEvent === undefined
-                      ? Effect.void
-                      : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                        Effect.catchTag("StoppedError", () => Effect.void)
-                      )
-                  }
-                  return context.failCause(outcome.cause)
-                })
-              )
-            }
-            const handleInvokeSnapshot = (
-              config: AnyInvokeConfig,
-              key: string,
-              token: symbol,
-              snapshot: Extract<internalRuntime.RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
-            ): Effect.Effect<void> =>
-              isCurrentInvoke(key, token).pipe(
-                Effect.flatMap((isCurrent) => {
-                  if (!isCurrent || config.snapshot === undefined) {
-                    return Effect.void
-                  }
-                  const mappedEvent = config.snapshot({ id: config.id, snapshot })
-                  return mappedEvent === undefined
-                    ? Effect.void
-                    : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                      Effect.catchTag("StoppedError", () => Effect.void)
-                    )
-                })
-              )
             const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
               path: StateId,
               config: AnyInvokeConfig
@@ -291,34 +314,29 @@ const makeProcessLogic: <
               }
               const logic = config.src()
               const processLogic = logic as internalRuntime.ProcessLogic<any, any, any, any, any, any>
-              const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
-                isCurrentInvoke(key, token).pipe(
-                  Effect.flatMap((isCurrent) =>
-                    isCurrent ? context.self.send(event as Machine.EventOf<Events>) : Effect.void
-                  )
-                )
+              const sendParent = makeInvokeSendParent(invokeSessions, context.self, key, token)
               yield* context.spawn(
-                {
-                  ...(processLogic[internalRuntime.childlessProcess] === true
-                    ? { [internalRuntime.childlessProcess]: true as const }
-                    : undefined),
-                  ...(processLogic[internalRuntime.compiledProcess] === true
-                    ? { [internalRuntime.compiledProcess]: true as const }
-                    : undefined),
-                  initial: (childScope) => logic.initial({ ...childScope, sendParent }),
-                  run: (childContext) => logic.run({ ...childContext, sendParent }),
-                  ...(processLogic.drain === undefined ? undefined : {
-                    drain: (childContext: internalRuntime.ProcessContext<any, any>) =>
-                      processLogic.drain!({ ...childContext, sendParent })
-                  })
-                },
+                processLogic,
                 {
                   id: childId,
                   ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
-                  onOutcome: (outcome) => handleInvokeOutcome(config, key, token, outcome),
+                  [internalRuntime.sendParentOverride]: sendParent,
+                  onOutcome: makeInvokeOutcomeHandler(
+                    invokeSessions,
+                    context.self,
+                    context.failCause,
+                    config,
+                    key,
+                    token
+                  ),
                   ...(config.snapshot === undefined ? undefined : {
-                    [internalRuntime.activeSnapshotObserver]: (snapshot) =>
-                      handleInvokeSnapshot(config, key, token, snapshot)
+                    [internalRuntime.activeSnapshotObserver]: makeInvokeSnapshotHandler(
+                      invokeSessions,
+                      context.self,
+                      config,
+                      key,
+                      token
+                    )
                   })
                 }
               ).pipe(
@@ -531,8 +549,6 @@ const makeProcessLogic: <
           const makeInvokeSessionKey = (path: string, id: string): string => `${path.length}:${path}${id}`
           const makeInvokeChildId = (path: string, id: string): string =>
             `Machine.invoke:${makeInvokeSessionKey(path, id)}`
-          const isCurrentInvoke = (key: string, token: symbol): Effect.Effect<boolean> =>
-            Effect.sync(() => invokeSessions.get(key)?.token === token)
           const stopInvokeSession = (session: InvokeSession): Effect.Effect<void> => context.stopChild(session.childId)
           const removeInvoke = (
             key: string,
@@ -565,53 +581,6 @@ const makeProcessLogic: <
               )
             )
           )
-          const handleInvokeOutcome = (
-            config: AnyInvokeConfig,
-            key: string,
-            token: symbol,
-            outcome: internalRuntime.RuntimeOutcome<any, any, any>
-          ): Effect.Effect<void> => {
-            if (outcome._tag === "Stopped") {
-              return Effect.void
-            }
-            return isCurrentInvoke(key, token).pipe(
-              Effect.flatMap((isCurrent) => {
-                if (!isCurrent) {
-                  return Effect.void
-                }
-                if (outcome._tag === "Done") {
-                  const mappedEvent = config.onDone === undefined
-                    ? outcome.output
-                    : config.onDone({ id: config.id, output: outcome.output })
-                  return mappedEvent === undefined
-                    ? Effect.void
-                    : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                      Effect.catchTag("StoppedError", () => Effect.void)
-                    )
-                }
-                return context.failCause(outcome.cause)
-              })
-            )
-          }
-          const handleInvokeSnapshot = (
-            config: AnyInvokeConfig,
-            key: string,
-            token: symbol,
-            snapshot: Extract<internalRuntime.RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
-          ): Effect.Effect<void> =>
-            isCurrentInvoke(key, token).pipe(
-              Effect.flatMap((isCurrent) => {
-                if (!isCurrent || config.snapshot === undefined) {
-                  return Effect.void
-                }
-                const mappedEvent = config.snapshot({ id: config.id, snapshot })
-                return mappedEvent === undefined
-                  ? Effect.void
-                  : context.self.send(mappedEvent as Machine.EventOf<Events>).pipe(
-                    Effect.catchTag("StoppedError", () => Effect.void)
-                  )
-              })
-            )
           const startInvoke = Effect.fnUntraced(function*<StateId extends Machine.StateIdentifier<States>>(
             path: StateId,
             config: AnyInvokeConfig
@@ -632,34 +601,29 @@ const makeProcessLogic: <
             }
             const logic = config.src()
             const processLogic = logic as internalRuntime.ProcessLogic<any, any, any, any, any, any>
-            const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
-              isCurrentInvoke(key, token).pipe(
-                Effect.flatMap((isCurrent) =>
-                  isCurrent ? context.self.send(event as Machine.EventOf<Events>) : Effect.void
-                )
-              )
+            const sendParent = makeInvokeSendParent(invokeSessions, context.self, key, token)
             yield* context.spawn(
-              {
-                ...(processLogic[internalRuntime.childlessProcess] === true
-                  ? { [internalRuntime.childlessProcess]: true as const }
-                  : undefined),
-                ...(processLogic[internalRuntime.compiledProcess] === true
-                  ? { [internalRuntime.compiledProcess]: true as const }
-                  : undefined),
-                initial: (childScope) => logic.initial({ ...childScope, sendParent }),
-                run: (childContext) => logic.run({ ...childContext, sendParent }),
-                ...(processLogic.drain === undefined ? undefined : {
-                  drain: (childContext: internalRuntime.ProcessContext<any, any>) =>
-                    processLogic.drain!({ ...childContext, sendParent })
-                })
-              },
+              processLogic,
               {
                 id: childId,
                 ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
-                onOutcome: (outcome) => handleInvokeOutcome(config, key, token, outcome),
+                [internalRuntime.sendParentOverride]: sendParent,
+                onOutcome: makeInvokeOutcomeHandler(
+                  invokeSessions,
+                  context.self,
+                  context.failCause,
+                  config,
+                  key,
+                  token
+                ),
                 ...(config.snapshot === undefined ? undefined : {
-                  [internalRuntime.activeSnapshotObserver]: (snapshot) =>
-                    handleInvokeSnapshot(config, key, token, snapshot)
+                  [internalRuntime.activeSnapshotObserver]: makeInvokeSnapshotHandler(
+                    invokeSessions,
+                    context.self,
+                    config,
+                    key,
+                    token
+                  )
                 })
               }
             ).pipe(

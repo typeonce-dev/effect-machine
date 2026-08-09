@@ -51,6 +51,9 @@ export const childlessProcess: unique symbol = Symbol.for("effect/Machine/childl
 /** @internal */
 export const compiledProcess: unique symbol = Symbol.for("effect/Machine/compiledProcess")
 
+/** @internal */
+export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
+
 interface ChildRegistrySnapshot {
   readonly closed: boolean
   readonly revision: number
@@ -237,6 +240,7 @@ export interface ProcessSpawn {
       readonly [activeSnapshotObserver]?: (
         snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
       ) => Effect.Effect<void>
+      readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
     }
   ): Effect.Effect<
     MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -356,6 +360,7 @@ interface StartInternalOptions {
   readonly onStop?: Effect.Effect<void>
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime
+  readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
 }
 
 interface ChildRuntime {
@@ -372,6 +377,7 @@ interface ChildRuntime {
 }
 
 const noChildChanges = Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never))
+const noParentSend = (_event: unknown): Effect.Effect<void, StoppedError> => Effect.void
 
 const childlessRuntime: ChildRuntime = {
   close: () => Effect.void,
@@ -384,7 +390,7 @@ const childlessRuntime: ChildRuntime = {
 
 const makeChildRuntime = (
   self: ProcessAddress<any>,
-  options: StartInternalOptions
+  runtime: ProcessRuntime
 ): Effect.Effect<ChildRuntime> =>
   Effect.sync(() => {
     // Child-registry decisions are synchronous and every access below runs in
@@ -627,6 +633,7 @@ const makeChildRuntime = (
         readonly [activeSnapshotObserver]?: (
           snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
         ) => Effect.Effect<void>
+        readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
       }
     ): Effect.Effect<
       MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -644,6 +651,7 @@ const makeChildRuntime = (
         readonly [activeSnapshotObserver]?: (
           snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
         ) => Effect.Effect<void>
+        readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
       }
     ): Effect.Effect<
       MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
@@ -669,6 +677,9 @@ const makeChildRuntime = (
                 ...(spawnOptions?.[activeSnapshotObserver] === undefined
                   ? undefined
                   : { onSnapshot: spawnOptions[activeSnapshotObserver] }),
+                ...(spawnOptions?.[sendParentOverride] === undefined
+                  ? undefined
+                  : { sendParent: spawnOptions[sendParentOverride] }),
                 onReady: (child, requestChildStop) =>
                   Effect.sync(() => {
                     startedChild = child
@@ -678,7 +689,7 @@ const makeChildRuntime = (
                   ),
                 onStop: unregister(key, token),
                 parent: self,
-                runtime: options.runtime
+                runtime
               }).pipe(
                 Effect.onExit((exit) =>
                   Exit.isFailure(exit)
@@ -721,13 +732,24 @@ const startGenericInternal: <
   logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
   options: StartInternalOptions
 ) {
+  const {
+    detached,
+    id: requestedId,
+    onOutcome,
+    onReady,
+    onSnapshot,
+    onStop,
+    parent,
+    runtime,
+    sendParent: overrideSendParent
+  } = options
   type ProcessTermination =
     | { readonly _tag: "Stopped" }
     | { readonly _tag: "Done"; readonly output: Output }
     | { readonly _tag: "Failure"; readonly cause: Cause.Cause<Error> }
 
-  const sessionId = yield* options.runtime.nextSessionId
-  const id = options.id ?? sessionId
+  const sessionId = yield* runtime.nextSessionId
+  const id = requestedId ?? sessionId
   const queue = yield* Queue.unbounded<Event>()
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
@@ -769,19 +791,18 @@ const startGenericInternal: <
       sendTo,
       spawn,
       stop: stopChild
-    } = yield* makeChildRuntime(self, options))
+    } = yield* makeChildRuntime(self, runtime))
   }
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
       ? closeChildren(exit)
       : Effect.void
-  const cleanup = options.onStop ?? Effect.void
-  const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
-    options.parent === undefined ? Effect.void : options.parent.send(event)
+  const cleanup = onStop ?? Effect.void
+  const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
 
   const scope: ProcessScope<Event> = {
     self,
-    parent: options.parent,
+    parent,
     spawn,
     sendParent,
     sendTo,
@@ -810,7 +831,7 @@ const startGenericInternal: <
   })
   const publishSnapshot: (
     snapshot: VersionedSnapshot<State, Error, Output>
-  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = options.onSnapshot === undefined
+  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = onSnapshot === undefined
     ? (snapshot) =>
       snapshot.changes === undefined
         ? Effect.succeed(snapshot)
@@ -822,7 +843,7 @@ const startGenericInternal: <
       const runtimeSnapshot = snapshot.snapshot
       return runtimeSnapshot.status !== "active"
         ? publish
-        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(options.onSnapshot!, runtimeSnapshot)))
+        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(onSnapshot, runtimeSnapshot)))
     }
 
   const completeChanges = (
@@ -943,9 +964,9 @@ const startGenericInternal: <
     exit: Exit.Exit<unknown, unknown>,
     completeDone: Effect.Effect<void>
   ): Effect.Effect<void> => {
-    const notifyOutcome = options.onOutcome === undefined
+    const notifyOutcome = onOutcome === undefined
       ? Effect.void
-      : Effect.suspend(() => options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
+      : Effect.suspend(() => onOutcome(classifyOutcome(snapshot)!)).pipe(
         Effect.exit,
         Effect.asVoid
       )
@@ -1079,11 +1100,11 @@ const startGenericInternal: <
     childChanges
   }
 
-  if (options.onReady !== undefined) {
-    yield* options.onReady(ref, requestStop)
+  if (onReady !== undefined) {
+    yield* onReady(ref, requestStop)
   }
-  if (options.onSnapshot !== undefined) {
-    yield* notifyActiveSnapshot(options.onSnapshot, { status: "active", state: initial })
+  if (onSnapshot !== undefined) {
+    yield* notifyActiveSnapshot(onSnapshot, { status: "active", state: initial })
   }
 
   const reserveTermination = (termination: ProcessTermination) => {
@@ -1112,7 +1133,7 @@ const startGenericInternal: <
   }
 
   const forkRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    options.detached === true
+    detached === true
       ? Effect.forkDetach(effect)
       : Effect.forkChild(effect)
 
@@ -1181,13 +1202,24 @@ const startCompiledInternal: <
   logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
   options: StartInternalOptions
 ) {
+  const {
+    detached,
+    id: requestedId,
+    onOutcome,
+    onReady,
+    onSnapshot,
+    onStop,
+    parent,
+    runtime,
+    sendParent: overrideSendParent
+  } = options
   type ProcessTermination =
     | { readonly _tag: "Stopped" }
     | { readonly _tag: "Done"; readonly output: Output }
     | { readonly _tag: "Failure"; readonly cause: Cause.Cause<Error> }
 
-  const sessionId = yield* options.runtime.nextSessionId
-  const id = options.id ?? sessionId
+  const sessionId = yield* runtime.nextSessionId
+  const id = requestedId ?? sessionId
   const onDemand = logic.drain !== undefined
   const queue = onDemand ? undefined : yield* Queue.unbounded<Event>()
   // An on-demand drain never blocks on mailbox input: send schedules its owner
@@ -1280,19 +1312,18 @@ const startCompiledInternal: <
       sendTo,
       spawn,
       stop: stopChild
-    } = yield* makeChildRuntime(self, options))
+    } = yield* makeChildRuntime(self, runtime))
   }
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
       ? closeChildren(exit)
       : Effect.void
-  const cleanup = options.onStop ?? Effect.void
-  const sendParent = (event: unknown): Effect.Effect<void, StoppedError> =>
-    options.parent === undefined ? Effect.void : options.parent.send(event)
+  const cleanup = onStop ?? Effect.void
+  const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
 
   const scope: ProcessScope<Event> = {
     self,
-    parent: options.parent,
+    parent,
     spawn,
     sendParent,
     sendTo,
@@ -1335,7 +1366,7 @@ const startCompiledInternal: <
   const getCurrent = Effect.sync(() => MutableRef.get(current))
   const publishSnapshot: (
     snapshot: VersionedSnapshot<State, Error, Output>
-  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = options.onSnapshot === undefined
+  ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = onSnapshot === undefined
     ? (snapshot) =>
       snapshot.changes === undefined
         ? Effect.succeed(snapshot)
@@ -1347,7 +1378,7 @@ const startCompiledInternal: <
       const runtimeSnapshot = snapshot.snapshot
       return runtimeSnapshot.status !== "active"
         ? publish
-        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(options.onSnapshot!, runtimeSnapshot)))
+        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(onSnapshot, runtimeSnapshot)))
     }
 
   const completeChanges = (
@@ -1456,9 +1487,9 @@ const startCompiledInternal: <
     exit: Exit.Exit<unknown, unknown>,
     completeDone: Effect.Effect<void>
   ): Effect.Effect<void> => {
-    const notifyOutcome = options.onOutcome === undefined
+    const notifyOutcome = onOutcome === undefined
       ? Effect.void
-      : Effect.suspend(() => options.onOutcome!(classifyOutcome(snapshot)!)).pipe(
+      : Effect.suspend(() => onOutcome(classifyOutcome(snapshot)!)).pipe(
         Effect.exit,
         Effect.asVoid
       )
@@ -1641,11 +1672,11 @@ const startCompiledInternal: <
     childChanges
   }
 
-  if (options.onReady !== undefined) {
-    yield* options.onReady(ref, requestStop)
+  if (onReady !== undefined) {
+    yield* onReady(ref, requestStop)
   }
-  if (options.onSnapshot !== undefined) {
-    yield* notifyActiveSnapshot(options.onSnapshot, { status: "active", state: initial })
+  if (onSnapshot !== undefined) {
+    yield* notifyActiveSnapshot(onSnapshot, { status: "active", state: initial })
   }
 
   if (onDemand) {
@@ -1696,7 +1727,7 @@ const startCompiledInternal: <
     const scheduledDrainRuntime = Effect.uninterruptible(
       Effect.yieldNow.pipe(Effect.andThen(providedDrainRuntime))
     )
-    const forkDrain = options.detached === true
+    const forkDrain = detached === true
       ? Effect.forkDetach(scheduledDrainRuntime, { startImmediately: true })
       : Effect.forkChild(scheduledDrainRuntime, { startImmediately: true })
 
@@ -1757,7 +1788,7 @@ const startCompiledInternal: <
     })
   )
 
-  worker = yield* (options.detached === true
+  worker = yield* (detached === true
     ? Effect.forkDetach(compiledRuntime, { startImmediately: true })
     : Effect.forkChild(compiledRuntime, { startImmediately: true }))
   return ref
