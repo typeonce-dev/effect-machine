@@ -87,6 +87,20 @@ describe("pure planning and managed runtime differential", () => {
         steps,
         label: "compiled flat state"
       })
+
+      const resumed = steps[1]!.plan
+      const resumedState = resumed.next as typeof initial.state
+      yield* verifyManagedExecution({
+        machine,
+        open: Machine.resume(machine, resumedState) as Effect.Effect<
+          Machine.MachineRef<any, any, any, any>,
+          unknown,
+          never
+        >,
+        initial: { state: resumedState, done: resumed.done, output: resumed.output },
+        steps: steps.slice(2),
+        label: "resumed compiled flat state"
+      })
     }) as Effect.Effect<void, unknown, any>)
 
   it.effect("matches the compiled hierarchical executor across parallel and raised transitions", () =>
