@@ -222,15 +222,21 @@ const makeChildlessCompiledDrain = (
         const continued = planned.done ? Effect.succeed(Option.some(planned.output)) : loop
         return afterCommit === undefined ? continued : afterCommit.pipe(Effect.andThen(continued))
       }
-
-      if (beforeCommit === undefined) {
+      const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
         const notification = commit()
+        if (notification !== undefined || afterCommit !== undefined) {
+          context.flush()
+        }
         const continued = continueAfterCommit()
         return notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
       }
+
+      if (beforeCommit === undefined) {
+        return commitAndContinue()
+      }
+      context.flush()
       return beforeCommit.pipe(
-        Effect.andThen(Effect.suspend(() => commit() ?? Effect.void)),
-        Effect.andThen(continueAfterCommit())
+        Effect.andThen(Effect.suspend(commitAndContinue))
       )
     })
     return internalRuntime.provideMachineRuntime(loop, context.scope)
@@ -439,14 +445,20 @@ const makeInvokingCompiledDrain = (
           ? continued
           : runSequentialDiscard(afterCommit).pipe(Effect.andThen(continued))
       }
-      if (beforeCommit.length === 0) {
+      const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
         const notification = commit()
+        if (notification !== undefined || afterCommit.length > 0) {
+          context.flush()
+        }
         const continued = continueAfterCommit()
         return notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
       }
+      if (beforeCommit.length === 0) {
+        return commitAndContinue()
+      }
+      context.flush()
       return runSequentialDiscard(beforeCommit).pipe(
-        Effect.andThen(Effect.suspend(() => commit() ?? Effect.void)),
-        Effect.andThen(continueAfterCommit())
+        Effect.andThen(Effect.suspend(commitAndContinue))
       )
     })
 

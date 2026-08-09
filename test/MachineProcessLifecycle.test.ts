@@ -39,6 +39,43 @@ describe("machine process lifecycle", () => {
       assert.instanceOf(yield* Effect.flip(ref.send({ _tag: "Done" })), Machine.StoppedError)
     }))
 
+  it.effect("publishes a compiled transition burst as one lossless ordered chunk", () =>
+    Effect.gen(function*() {
+      const ref = yield* MachineRuntime.startProcess<number, { readonly count: number }, never, never, number>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        initial: () => Effect.succeed(0),
+        run: () => Effect.never,
+        [MachineRuntime.compiledProcessDrain]: (context) =>
+          Effect.sync(() => {
+            const pending = context.poll()
+            if (Option.isNone(pending)) {
+              return Option.none()
+            }
+            for (let state = 1; state <= pending.value.count; state += 1) {
+              context.commit(state)
+            }
+            return Option.some(pending.value.count)
+          })
+      })
+      const publications = yield* ref.changes.pipe(
+        Stream.chunks,
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* ref.send({ count: 100 })
+      assert.strictEqual(yield* ref.join, 100)
+
+      const chunks = Array.from(yield* Fiber.join(publications), (chunk) => Array.from(chunk))
+      assert.deepStrictEqual(chunks.map((chunk) => chunk.length), [1, 100, 1])
+      assert.deepStrictEqual(
+        chunks.flatMap((chunk) => chunk).map((snapshot) => snapshot.state),
+        Array.from({ length: 101 }, (_, state) => state).concat(100)
+      )
+      assert.deepStrictEqual(chunks.at(-1)?.[0], { status: "done", state: 100, output: 100 })
+    }))
+
   it.effect("wakes an on-demand compiled process across consecutive idle periods", () =>
     Effect.gen(function*() {
       type Event = {
