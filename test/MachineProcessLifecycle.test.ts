@@ -4,6 +4,49 @@ import { Machine } from "../src/index.js"
 import * as MachineRuntime from "../src/internal/machineRuntime.js"
 
 describe("machine process lifecycle", () => {
+  it.effect("reuses a settled active startup without running an empty compiled drain", () =>
+    Effect.gen(function*() {
+      const drained = yield* Deferred.make<void>()
+      const drainCount = yield* Ref.make(0)
+      const ref = yield* MachineRuntime.startProcess<number, void>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        [MachineRuntime.compiledProcessInitial]: () =>
+          Effect.succeed({ state: 1, done: false, output: undefined }),
+        initial: () => Effect.dieMessage("compiled startup unexpectedly used the general initial effect"),
+        run: () => Effect.never,
+        drain: (context) =>
+          Ref.update(drainCount, (count) => count + 1).pipe(
+            Effect.andThen(Deferred.succeed(drained, undefined)),
+            Effect.as(Option.none())
+          )
+      })
+
+      assert.strictEqual(yield* Ref.get(drainCount), 0)
+      yield* ref.send(undefined)
+      yield* Deferred.await(drained)
+      assert.strictEqual(yield* Ref.get(drainCount), 1)
+      yield* ref.stop
+    }))
+
+  it.effect("terminalizes a settled compiled startup without re-planning its output", () =>
+    Effect.gen(function*() {
+      const drainCount = yield* Ref.make(0)
+      const ref = yield* MachineRuntime.startProcess<number, never, never, never, string>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        [MachineRuntime.compiledProcessInitial]: () =>
+          Effect.succeed({ state: 1, done: true, output: "complete" }),
+        initial: () => Effect.dieMessage("compiled startup unexpectedly used the general initial effect"),
+        run: () => Effect.never,
+        drain: () => Ref.update(drainCount, (count) => count + 1).pipe(Effect.as(Option.none()))
+      })
+
+      assert.strictEqual(yield* ref.join, "complete")
+      assert.strictEqual(yield* Ref.get(drainCount), 0)
+      assert.deepStrictEqual(yield* ref.snapshot, { status: "done", state: 1, output: "complete" })
+    }))
+
   it.effect("preserves FIFO order while draining a compact compiled mailbox", () =>
     Effect.gen(function*() {
       type Event =

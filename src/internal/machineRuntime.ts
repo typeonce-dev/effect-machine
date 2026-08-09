@@ -1366,6 +1366,18 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         yield* self.requestTermination({ _tag: "Done", output: initialized.output })
       }
 
+      // A compiled machine startup plan has already settled entry actions,
+      // raised events, and eventless transitions. If it is known active and
+      // neither startup hooks nor emitted work queued an event, there is no
+      // first drain to perform. Future sends observe `draining === false` and
+      // schedule the ordinary compiled worker.
+      if (
+        initialized.done === false && self.logic[childlessProcess] === true &&
+        self.requestedTermination === undefined && self.mailbox.items === undefined
+      ) {
+        return self
+      }
+
       self.draining = true
       yield* self.drainRuntime()
       return self
@@ -1491,6 +1503,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       if (this.completion !== undefined) {
         return Effect.void
       }
+      if (this.finishIdleChildlessStop()) {
+        return Effect.void
+      }
       const requested = { _tag: "Stopped" } as const
       return this.requestTermination(requested).pipe(
         Effect.flatMap((accepted) =>
@@ -1500,6 +1515,37 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         )
       )
     })
+  }
+
+  private finishIdleChildlessStop(): boolean {
+    if (
+      this.logic[childlessProcess] !== true || this.draining || this.worker !== undefined ||
+      this.requestedTermination !== undefined || this.options.onOutcome !== undefined ||
+      this.options.onStop !== undefined || this.current.changes !== undefined ||
+      this.current.terminalizing || this.current.snapshot.status !== "active"
+    ) {
+      return false
+    }
+    const snapshot = { status: "stopped" as const, state: this.current.snapshot.state }
+    this.requestedTermination = { _tag: "Stopped" }
+    this.reservedTerminationSnapshot = snapshot
+    closeCompactMailbox(this.mailbox)
+    this.current = {
+      revision: this.current.revision + 1,
+      terminalizing: true,
+      changes: undefined,
+      snapshot
+    }
+    this.interruptRequested = false
+    if (this.compiledContext !== undefined) {
+      this.compiledContext.executionState = undefined
+    }
+    this.completion = CompiledStoppedCompletion
+    if (this.waiter !== undefined) {
+      Deferred.doneUnsafe(this.waiter, this.resolveCompletion(CompiledStoppedCompletion))
+      this.waiter = undefined
+    }
+    return true
   }
 
   private settleRequestedTermination(): Effect.Effect<void> {
