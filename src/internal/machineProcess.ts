@@ -153,7 +153,8 @@ const makeProcessLogic: <
     drain: (context: internalRuntime.ProcessContext<Machine.Snapshot<States>, Machine.EventOf<Events>>) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
-          const { mailbox, state, setState } = context
+          const poll = context.poll ?? Queue.poll(context.mailbox!)
+          const { state, setState } = context
           let current = yield* state
           if (internalPlanner.isFinalState(machine, current)) {
             return Option.some(
@@ -380,7 +381,7 @@ const makeProcessLogic: <
           }
 
           while (true) {
-            const pending = yield* Queue.poll(mailbox)
+            const pending = yield* poll
             if (Option.isNone(pending)) {
               return Option.none<Output>()
             }
@@ -447,7 +448,8 @@ const makeProcessLogic: <
     run: (context) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
-          const { mailbox, receive, state, setState } = context
+          const poll = context.poll ?? Queue.poll(context.mailbox!)
+          const { receive, state, setState } = context
           let terminal: { readonly output: Output } | undefined
 
           let current = yield* state
@@ -506,7 +508,7 @@ const makeProcessLogic: <
               }
 
               if (terminal === undefined) {
-                pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                pendingEvent = yield* (pollEvent ??= poll)
                 if (Option.isNone(pendingEvent)) {
                   configuration = undefined
                   pollEvent = undefined
@@ -785,7 +787,7 @@ const makeProcessLogic: <
               }
 
               if (terminal === undefined) {
-                pendingEvent = yield* (pollEvent ??= Queue.poll(mailbox))
+                pendingEvent = yield* (pollEvent ??= poll)
                 if (Option.isNone(pendingEvent)) {
                   configuration = undefined
                   pollEvent = undefined

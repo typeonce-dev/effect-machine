@@ -1,9 +1,44 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Stream } from "effect"
 import { Machine } from "../src/index.js"
 import * as MachineRuntime from "../src/internal/machineRuntime.js"
 
 describe("machine process lifecycle", () => {
+  it.effect("preserves FIFO order while draining a compact compiled mailbox", () =>
+    Effect.gen(function*() {
+      type Event =
+        | { readonly _tag: "Value"; readonly value: number }
+        | { readonly _tag: "Done" }
+      const observed: Array<number> = []
+      const ref = yield* MachineRuntime.startProcess<undefined, Event, never, never, ReadonlyArray<number>>({
+        [MachineRuntime.childlessProcess]: true,
+        [MachineRuntime.compiledProcess]: true,
+        initial: () => Effect.succeed(undefined),
+        run: () => Effect.never,
+        drain: (context) =>
+          Effect.gen(function*() {
+            while (true) {
+              const event = yield* context.poll!
+              if (Option.isNone(event)) {
+                return Option.none()
+              }
+              if (event.value._tag === "Done") {
+                return Option.some(observed)
+              }
+              observed.push(event.value.value)
+            }
+          })
+      })
+
+      for (let value = 0; value < 1_000; value += 1) {
+        yield* ref.send({ _tag: "Value", value })
+      }
+      yield* ref.send({ _tag: "Done" })
+
+      assert.deepStrictEqual(yield* ref.join, Array.from({ length: 1_000 }, (_, value) => value))
+      assert.instanceOf(yield* Effect.flip(ref.send({ _tag: "Done" })), Machine.StoppedError)
+    }))
+
   it.effect("wakes an on-demand compiled process across consecutive idle periods", () =>
     Effect.gen(function*() {
       type Event = {
@@ -18,7 +53,7 @@ describe("machine process lifecycle", () => {
         drain: (context) =>
           Effect.gen(function*() {
             while (true) {
-              const event = yield* Queue.poll(context.mailbox)
+              const event = yield* context.poll!
               if (Option.isNone(event)) {
                 return Option.none()
               }
@@ -296,7 +331,7 @@ describe("machine process lifecycle", () => {
               run: () => Effect.never,
               drain: (context) =>
                 Effect.gen(function*() {
-                  const event = yield* Queue.poll(context.mailbox)
+                  const event = yield* context.poll!
                   if (Option.isNone(event)) {
                     return Option.none()
                   }
