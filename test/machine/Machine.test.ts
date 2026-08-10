@@ -4311,6 +4311,11 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const First = Machine.childAddress("first")
       const Second = Machine.childAddress("second")
+      let sourceEvaluations = 0
+      const source = () => {
+        sourceEvaluations += 1
+        return Machine.effect(Effect.never)
+      }
       const parentStates = Machine.defineStates({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
@@ -4322,12 +4327,12 @@ describe("Machine", () => {
             Machine.invoke({
               id: "worker",
               address: First,
-              src: () => Machine.effect(Effect.never)
+              src: source
             }),
             Machine.invoke({
               id: "worker",
               address: Second,
-              src: () => Machine.effect(Effect.never)
+              src: source
             })
           ]
         }
@@ -4338,6 +4343,7 @@ describe("Machine", () => {
 
       assert.instanceOf(error, Machine.ChildAlreadyExistsError)
       assert.strictEqual(error.id, "worker")
+      assert.strictEqual(sourceEvaluations, 1)
     }))
 
   it.effect("start maps invoked child failures to machine events", () =>

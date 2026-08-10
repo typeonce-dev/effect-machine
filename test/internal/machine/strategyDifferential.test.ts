@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Fiber, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
@@ -324,6 +324,81 @@ describe("machine planner and runtime strategies", () => {
         })
       }
       assert.deepStrictEqual(results[1], results[0])
+    }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("drops stale invoke messages and snapshots after reentry in both runtime strategies", () =>
+    Effect.gen(function*() {
+      class Loading extends Schema.TaggedClass<Loading>("StrategyStaleInvokeLoading")("Loading", {
+        epoch: Schema.Number
+      }) {}
+      class Failed extends Schema.TaggedClass<Failed>("StrategyStaleInvokeFailed")("Failed", {}) {}
+      class Reenter extends Schema.TaggedClass<Reenter>("StrategyStaleInvokeReenter")("Reenter", {}) {}
+      class Stale extends Schema.TaggedClass<Stale>("StrategyStaleInvokeEvent")("Stale", {}) {}
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        const firstStarted = yield* Deferred.make<void>()
+        let generation = 0
+        const states = Machine.defineStates({ Loading, Failed })
+        const machine = Machine.make({
+          states: states.states,
+          events: [Reenter, Stale],
+          initial: () => states.initial.Loading(new Loading({ epoch: 0 }))
+        }).handle({
+          Loading: {
+            invoke: Machine.invoke({
+              id: "worker",
+              src: () => {
+                generation += 1
+                const current = generation
+                return Machine.logic({
+                  initial: "active",
+                  run: ({ sendParent, setState }) =>
+                    (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
+                      Effect.andThen(Effect.never),
+                      Effect.onInterrupt(() =>
+                        setState("stale").pipe(
+                          Effect.andThen(sendParent(new Stale({})))
+                        )
+                      )
+                    )
+                })
+              },
+              snapshot: ({ snapshot }) => snapshot.state === "stale" ? new Stale({}) : undefined
+            }),
+            on: {
+              Reenter: {
+                reenter: true,
+                transition: ({ state, target }) => target.full.Loading(new Loading({ epoch: state.epoch + 1 }))
+              },
+              Stale: () => states.initial.Failed(new Failed({}))
+            }
+          },
+          Failed: {}
+        })
+
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* Deferred.await(firstStarted)
+        const reentered = yield* ref.changes.pipe(
+          Stream.filter((snapshot) =>
+            snapshot.status === "active" &&
+            snapshot.state.path === "Loading" &&
+            snapshot.state.value.epoch === 1
+          ),
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* ref.send(new Reenter({}))
+        yield* Fiber.join(reentered)
+        yield* Effect.yieldNow
+
+        const snapshot = yield* ref.snapshot
+        assert.strictEqual(snapshot.status, "active", `${strategy} accepted a stale invoke callback`)
+        assert.strictEqual(snapshot.state.path, "Loading")
+        assert.strictEqual(snapshot.state.value.epoch, 1)
+        assert.strictEqual(generation, 2)
+        yield* ref.stop
+      }
     }) as Effect.Effect<void, unknown, any>)
 
   it.effect("compares generated eligible models across canonical and indexed planners", () =>
