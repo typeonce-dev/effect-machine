@@ -978,6 +978,30 @@ const toResumedProcessLogic = (
 ): internalRuntime.ProcessLogic<any, any, any, any, any, any> =>
   (makeProcessLogic as any)(machine, { _tag: "Resume", snapshot })
 
+/** @internal Test-only runtime strategy selection for a fresh machine. */
+export const startWithRuntimeStrategyForTesting = (
+  machine: Machine.Any,
+  strategy: internalRuntime.ProcessRuntimeStrategy,
+  ...args: ReadonlyArray<unknown>
+): Effect.Effect<internalRuntime.MachineRef<any, any, any, any>, any, any> =>
+  internalRuntime.startProcessWithStrategyForTesting(
+    (toProcessLogic as any)(machine, ...args),
+    strategy,
+    machine.id === undefined ? undefined : { id: machine.id }
+  )
+
+/** @internal Test-only runtime strategy selection for a resumed machine. */
+export const resumeWithRuntimeStrategyForTesting = (
+  machine: Machine.Any,
+  snapshot: Machine.Snapshot<any>,
+  strategy: internalRuntime.ProcessRuntimeStrategy
+): Effect.Effect<internalRuntime.MachineRef<any, any, any, any>, any, any> =>
+  internalRuntime.startProcessWithStrategyForTesting(
+    toResumedProcessLogic(machine, snapshot),
+    strategy,
+    machine.id === undefined ? undefined : { id: machine.id }
+  )
+
 export const start: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,

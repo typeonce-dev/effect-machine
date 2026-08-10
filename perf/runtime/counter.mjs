@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -11,9 +11,14 @@ const effectPackagePath = implementationRequire.resolve("effect/package.json")
 const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"))
 const effect = await import(pathToFileURL(resolve(dirname(effectPackagePath), effectPackage.exports["."])).href)
 const { Machine } = await import(pathToFileURL(join(implementationRoot, "dist/index.js")).href)
-const machineRuntime = await import(
-  pathToFileURL(join(implementationRoot, "dist/internal/machineRuntime.js")).href
-)
+const machineRuntimePath = [
+  join(implementationRoot, "dist/internal/machine/runtime.js"),
+  join(implementationRoot, "dist/internal/machineRuntime.js")
+].find(existsSync)
+if (machineRuntimePath === undefined) {
+  throw new Error("Effect Machine benchmark could not locate the internal runtime module")
+}
+const machineRuntime = await import(pathToFileURL(machineRuntimePath).href)
 const { Effect, Fiber, Option, Schema, Stream } = effect
 
 const CounterState = Schema.TaggedUnion({
@@ -221,6 +226,12 @@ const parallelFinishEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.
 export const initialCounterSnapshot = Effect.runSync(
   Machine.planInitial(counterMachine).pipe(Effect.map((planned) => planned.state))
 )
+const initialHierarchicalSnapshot = Effect.runSync(
+  Machine.planInitial(hierarchicalCounterMachine).pipe(Effect.map((planned) => planned.state))
+)
+const initialParallelSnapshot = Effect.runSync(
+  Machine.planInitial(parallelCounterMachine).pipe(Effect.map((planned) => planned.state))
+)
 
 export const counterValue = (snapshot) => snapshot.value.value
 
@@ -235,6 +246,32 @@ export const planCounterBatch = (size) => {
     })
   )
 }
+
+const planHierarchicalCounterBatch = (size) =>
+  Effect.runSync(
+    Effect.gen(function*() {
+      let snapshot = initialHierarchicalSnapshot
+      for (let index = 0; index < size; index += 1) {
+        snapshot = (yield* Machine.plan(hierarchicalCounterMachine, snapshot, hierarchicalIncrementEvent)).next
+      }
+      return snapshot.state.value.value
+    })
+  )
+
+const planParallelCounterBatch = (size) =>
+  Effect.runSync(
+    Effect.gen(function*() {
+      let snapshot = initialParallelSnapshot
+      for (let index = 0; index < size; index += 1) {
+        snapshot = (yield* Machine.plan(
+          parallelCounterMachine,
+          snapshot,
+          index % 2 === 0 ? parallelIncrementLeftEvent : parallelIncrementRightEvent
+        )).next
+      }
+      return snapshot.states.Left.value.value + snapshot.states.Right.value.value
+    })
+  )
 
 export const startCounter = () => Effect.runPromise(Machine.start(counterMachine))
 
@@ -324,6 +361,16 @@ export const runCounterBurst = (ref, size) =>
 const startHierarchicalCounter = () => Effect.runPromise(Machine.start(hierarchicalCounterMachine))
 const startParallelCounter = () => Effect.runPromise(Machine.start(parallelCounterMachine))
 
+const startObservedHierarchicalCounter = () =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(hierarchicalCounterMachine)
+      const observer = yield* ref.changes.pipe(Stream.runDrain, Effect.forkDetach)
+      yield* Effect.yieldNow
+      return { ref, observer }
+    })
+  )
+
 const runHierarchicalCounterBurst = (ref, size) =>
   Effect.runPromise(
     Effect.gen(function*() {
@@ -343,6 +390,19 @@ const runParallelCounterBurst = (ref, size) =>
       }
       yield* ref.send(parallelFinishEvent)
       return yield* ref.join
+    })
+  )
+
+const runObservedHierarchicalCounterBurst = ({ ref, observer }, size) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      for (let index = 0; index < size; index += 1) {
+        yield* ref.send(hierarchicalIncrementEvent)
+      }
+      yield* ref.send(hierarchicalFinishEvent)
+      const value = yield* ref.join
+      yield* Fiber.join(observer)
+      return value
     })
   )
 
@@ -503,6 +563,26 @@ export const effectMachineAdapter = {
   stopCounters,
   additionalMachineBenchmarks: [
     {
+      id: "hierarchical-plan-counter",
+      label: "Plan transitions through a compound state",
+      unit: "transitions/s",
+      operations: ({ planningBatchSize }) => planningBatchSize,
+      expected: (operations) => operations,
+      start: () => undefined,
+      run: (_, operations) => planHierarchicalCounterBatch(operations),
+      stop: () => undefined
+    },
+    {
+      id: "parallel-plan-counter",
+      label: "Plan transitions through parallel regions",
+      unit: "transitions/s",
+      operations: ({ planningBatchSize }) => planningBatchSize,
+      expected: (operations) => operations,
+      start: () => undefined,
+      run: (_, operations) => planParallelCounterBatch(operations),
+      stop: () => undefined
+    },
+    {
       id: "hierarchical-runtime-burst",
       label: "Drain burst through a compound state",
       unit: "events/s",
@@ -521,9 +601,34 @@ export const effectMachineAdapter = {
       start: startParallelCounter,
       run: runParallelCounterBurst,
       stop: stopCounter
+    },
+    {
+      id: "observed-hierarchical-runtime-burst",
+      label: "Drain a compound-state burst with a change observer",
+      unit: "events/s",
+      operations: ({ burstBatchSize }) => burstBatchSize,
+      expected: (operations) => operations,
+      start: startObservedHierarchicalCounter,
+      run: runObservedHierarchicalCounterBurst,
+      stop: stopObservedCounter
     }
   ],
   runtimeBenchmarks: [
+    {
+      id: "generic-process-start-stop",
+      label: "Start and stop a raw generic process",
+      unit: "processes/s",
+      async: true,
+      operations: () => 1,
+      run: async () => {
+        const refs = await startRawProcesses(1)
+        try {
+          return refs.length
+        } finally {
+          await stopCounters(refs)
+        }
+      }
+    },
     {
       id: "compiled-process-start-stop",
       label: "Start and stop a raw compiled process",
