@@ -21,12 +21,12 @@ try {
   const required = [
     "package/dist/index.js",
     "package/dist/index.d.ts",
-    "package/dist/reactivity.js",
-    "package/dist/reactivity.d.ts",
-    "package/dist/cluster.js",
-    "package/dist/cluster.d.ts",
-    "package/dist/testing.js",
-    "package/dist/testing.d.ts",
+    "package/dist/unstable/reactivity/index.js",
+    "package/dist/unstable/reactivity/index.d.ts",
+    "package/dist/unstable/cluster/index.js",
+    "package/dist/unstable/cluster/index.d.ts",
+    "package/dist/testing/index.js",
+    "package/dist/testing/index.d.ts",
     "package/package.json",
     "package/README.md",
     "package/docs/agent-guide.md",
@@ -35,6 +35,17 @@ try {
   ]
   for (const file of required) {
     if (!files.includes(file)) throw new Error(`tarball is missing ${file}`)
+  }
+  const legacyBuildFiles = [
+    "package/dist/reactivity.js",
+    "package/dist/reactivity.d.ts",
+    "package/dist/cluster.js",
+    "package/dist/cluster.d.ts",
+    "package/dist/testing.js",
+    "package/dist/testing.d.ts"
+  ].filter((file) => files.includes(file))
+  if (legacyBuildFiles.length > 0) {
+    throw new Error(`tarball contains legacy entrypoint artifacts:\n${legacyBuildFiles.join("\n")}`)
   }
   const forbidden = files.filter((file) => /^package\/(?:src|test|typetest|scripts|\.github|\.changeset)\//.test(file))
   if (forbidden.length > 0) throw new Error(`tarball contains repository files:\n${forbidden.join("\n")}`)
