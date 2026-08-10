@@ -724,6 +724,52 @@ This is not durable runtime restoration. `ClusterMachine` has a separate
 checkpoint/planning contract and process-local restrictions; do not substitute
 `Machine.resume` for cluster recovery.
 
+## Testing machine semantics
+
+Import planner testing tools from the dedicated entrypoint:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+```
+
+Use three distinct layers:
+
+1. `MachineTest.verify(machine, trace)` checks structural statechart and
+   planner lifecycle laws.
+2. `MachineTest.assertInvariants(machine, trace, laws)` checks application
+   semantics such as conservation, authorization, and exact state updates.
+3. Runtime command models check executed actions, invokes, timing, process
+   publication, and cancellation. Planner traces do not execute this work.
+
+Define semantic laws with a machine-bound builder so the callback receives the
+exact state and event types:
+
+```ts
+const invariant = MachineTest.invariants(machine)
+
+const laws = [
+  invariant.state("balance is never negative", ({ snapshot }) =>
+    snapshot.value.balance >= 0 || "negative balance"),
+  invariant.step("withdrawal is exact", ({ before, event, after }) =>
+    event._tag !== "Withdraw" ||
+    after.value.balance === before.value.balance - event.amount),
+  invariant.trace("all inputs were planned", ({ trace }) =>
+    trace.steps.length === trace.scenario.events.length)
+]
+```
+
+State laws observe settled states by default. Select `"microsteps"`, `"all"`,
+or `"final"` only when the law requires that evidence. A `when` condition with
+no matches is explicitly `untested`; use
+`require: { minObservations: 1 }` when the current trace must exercise it.
+Prefer `assertInvariants` inside FastCheck properties because it succeeds with
+`void`. Use `checkInvariants` when the test needs the per-law report.
+
+Do not encode application invariants as guards merely to make them testable.
+Keep ordinary TypeScript branching in transition handlers unless a choice is
+part of the statechart topology. Invariants independently verify the resulting
+trace without changing production transition selection.
+
 ## Common compiler errors
 
 ### `initial` is not callable

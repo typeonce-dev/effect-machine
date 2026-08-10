@@ -109,6 +109,8 @@ export {
   type ReferenceTransition
 } from "./referenceModel.js"
 
+export { assertInvariants, checkInvariants, Invariant, InvariantError, invariants } from "./invariant.js"
+
 export const interpretModel = ReferenceModel.interpretModel
 
 type AnyMachine = Machine.Machine.Any

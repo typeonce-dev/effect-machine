@@ -21,10 +21,11 @@ require upgrading Effect in lockstep; do not override the peer to another beta.
 import { Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { MachineTest } from "@typeonce/effect-machine/testing"
 ```
 
 Each ESM entrypoint is independent and tree-shakeable. Importing the root does
-not load the reactivity or cluster adapters.
+not load the reactivity, cluster, or testing modules.
 
 ## First machine
 
@@ -654,6 +655,60 @@ registry ownership and disposal behavior as `AtomMachine.make`.
 restrictions, checkpoint planning, and delivery guarantees are documented on
 that API. `Machine.resume` is logical resumption, not durable process or cluster
 restoration.
+
+## Property-based semantic invariants
+
+`MachineTest.verify` checks statechart structure and planner lifecycle laws.
+Application semantics belong in invariants that can be reused across generated
+scenarios and, in future, bounded exploration:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+import { Effect } from "effect"
+
+const invariant = MachineTest.invariants(accountMachine)
+const laws = [
+  invariant.state(
+    "balance is never negative",
+    ({ snapshot }) =>
+      snapshot.value.balance >= 0 ||
+      `negative balance: ${snapshot.value.balance}`
+  ),
+  invariant.step(
+    "withdrawal removes exactly its amount",
+    ({ before, event, after }) =>
+      event._tag !== "Withdraw" ||
+      after.value.balance === before.value.balance - event.amount
+  )
+]
+
+const generated = MachineTest.scenarios(accountMachine, {
+  minEvents: 0,
+  maxEvents: 30
+})
+
+it.effect.prop(
+  "preserves account laws",
+  { scenario: generated.arbitrary },
+  ({ scenario }) =>
+    MachineTest.run(accountMachine, scenario).pipe(
+      Effect.tap((trace) => MachineTest.verify(accountMachine, trace)),
+      Effect.flatMap((trace) => MachineTest.assertInvariants(accountMachine, trace, laws))
+    )
+)
+```
+
+State invariants observe settled startup and public-event states by default.
+Set `observe` to `"microsteps"`, `"all"`, or `"final"` for a different scope.
+Use `when` for conditional laws. A condition with no matches is reported as
+`untested`; add `require: { minObservations: 1 }` when a particular trace must
+exercise it. `checkInvariants` returns this report, while `assertInvariants`
+returns `void` for direct use in property tests. Failures retain the complete
+shrunk trace and precise event, microstep, configuration, and observation
+location.
+
+These APIs inspect planner evidence. Staged action effects, invokes, timing,
+and process scheduling require the runtime command-model APIs instead.
 
 ## Current limits
 

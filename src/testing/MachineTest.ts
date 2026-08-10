@@ -321,6 +321,319 @@ export interface Trace<M extends AnyMachine> {
 }
 
 /**
+ * The result of evaluating one semantic invariant.
+ *
+ * `true` passes, `false` produces a default failure message, and a string
+ * fails with that string as its counterexample explanation.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantOutcome = boolean | string
+
+/**
+ * The portions of a trace that a state invariant may observe.
+ *
+ * - `settled` observes startup and the state after every public event.
+ * - `microsteps` observes every internal microstep.
+ * - `all` observes both settled states and microsteps.
+ * - `final` observes only the final state.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type StateObservationMode = "settled" | "microsteps" | "all" | "final"
+
+/**
+ * The semantic location of one state observation.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type StateObservation = "initial" | "event" | "microstep" | "final"
+
+/**
+ * Evidence passed to a state invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+  readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly configuration: ReadonlyArray<StatePath<M>>
+  readonly observationIndex: number
+  readonly phase: StateObservation
+  readonly eventIndex: number | undefined
+  readonly microstepIndex: number | undefined
+  readonly event: Machine.Machine.Event<M> | Machine.InitialEvent | undefined
+}
+
+/**
+ * Evidence passed to an invariant for one public event step.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StepInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+  readonly step: TraceStep<M>
+  readonly index: number
+  readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly beforeConfiguration: ReadonlyArray<StatePath<M>>
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly plan: EventPlan<M>
+  readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly afterConfiguration: ReadonlyArray<StatePath<M>>
+}
+
+/**
+ * Evidence passed to a whole-trace invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface TraceInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+}
+
+/**
+ * Controls conditional invariant evaluation and optional non-vacuity checks.
+ *
+ * A condition that never matches is reported as `untested`. Set
+ * `require.minObservations` when that must fail the check instead.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantOptions<Context> {
+  readonly when?: (context: Context) => boolean
+  readonly require?: {
+    readonly minObservations: number
+  }
+}
+
+/**
+ * Options for a state invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariantOptions<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
+  readonly observe?: StateObservationMode
+}
+
+/**
+ * A semantic property checked against selected state observations.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariant<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
+  readonly _tag: "StateInvariant"
+  readonly name: string
+  readonly observe: StateObservationMode
+  readonly check: (context: StateInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A semantic property checked after every public event.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StepInvariant<M extends AnyMachine> extends InvariantOptions<StepInvariantContext<M>> {
+  readonly _tag: "StepInvariant"
+  readonly name: string
+  readonly check: (context: StepInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A semantic property checked once against a complete trace.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface TraceInvariant<M extends AnyMachine> extends InvariantOptions<TraceInvariantContext<M>> {
+  readonly _tag: "TraceInvariant"
+  readonly name: string
+  readonly check: (context: TraceInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A user-defined semantic property over a planner trace.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type Invariant<M extends AnyMachine> = StateInvariant<M> | StepInvariant<M> | TraceInvariant<M>
+
+/**
+ * Machine-bound invariant constructors with complete contextual inference.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantBuilder<M extends AnyMachine> {
+  readonly state: (
+    name: string,
+    check: (context: StateInvariantContext<M>) => InvariantOutcome,
+    options?: StateInvariantOptions<M>
+  ) => StateInvariant<M>
+  readonly step: (
+    name: string,
+    check: (context: StepInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<StepInvariantContext<M>>
+  ) => StepInvariant<M>
+  readonly trace: (
+    name: string,
+    check: (context: TraceInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<TraceInvariantContext<M>>
+  ) => TraceInvariant<M>
+}
+
+/**
+ * Direct invariant constructors. Prefer `invariants(machine)` when contextual
+ * machine types should be inferred without an explicit type argument.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const Invariant: {
+  readonly state: <M extends AnyMachine>(
+    name: string,
+    check: (context: StateInvariantContext<M>) => InvariantOutcome,
+    options?: StateInvariantOptions<M>
+  ) => StateInvariant<M>
+  readonly step: <M extends AnyMachine>(
+    name: string,
+    check: (context: StepInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<StepInvariantContext<M>>
+  ) => StepInvariant<M>
+  readonly trace: <M extends AnyMachine>(
+    name: string,
+    check: (context: TraceInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<TraceInvariantContext<M>>
+  ) => TraceInvariant<M>
+} = internal.Invariant
+
+/**
+ * Creates invariant constructors bound to a machine's exact state and event
+ * types. The machine is used only for inference; invariant evaluation remains
+ * pure and reusable across traces from that machine.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<M> = internal.invariants
+
+/**
+ * The scope of a semantic invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantScope = "state" | "step" | "trace"
+
+/**
+ * Result status for one invariant.
+ *
+ * `untested` is non-failing unless the invariant declares a minimum number of
+ * observations, in which case it becomes `insufficient`.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantStatus = "passed" | "failed" | "untested" | "insufficient"
+
+/**
+ * Aggregate result for one invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantCheckResult {
+  readonly invariant: string
+  readonly scope: InvariantScope
+  readonly status: InvariantStatus
+  readonly observations: number
+  readonly failures: number
+}
+
+/**
+ * Aggregate result for all checked invariants.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantReport {
+  readonly checks: ReadonlyArray<InvariantCheckResult>
+}
+
+/**
+ * One semantic invariant violation with its precise trace location.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantViolation<M extends AnyMachine = AnyMachine> {
+  readonly invariant: string
+  readonly scope: InvariantScope
+  readonly kind: "predicate" | "observations"
+  readonly observationIndex?: number
+  readonly eventIndex: number | undefined
+  readonly microstepIndex?: number
+  readonly phase?: StateObservation
+  readonly configuration?: ReadonlyArray<StatePath<M>>
+  readonly event?: Machine.Machine.Event<M> | Machine.InitialEvent
+  readonly message: string
+}
+
+/**
+ * All semantic violations found in one trace, together with the complete
+ * counterexample and aggregate report.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { InvariantError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Checks user-defined semantic invariants against an existing planner trace.
+ *
+ * Every invariant and matching observation is evaluated so one failure
+ * contains all relevant evidence. Combine this with `scenarios` and `run` in
+ * an Effect property test to retain FastCheck shrinking.
+ *
+ * @category verification
+ * @since 4.0.0
+ */
+export const checkInvariants: <M extends AnyMachine>(
+  machine: M,
+  trace: Trace<M>,
+  invariants: ReadonlyArray<Invariant<M>>
+) => Effect.Effect<InvariantReport, internal.InvariantError<M>> = internal.checkInvariants
+
+/**
+ * Asserts user-defined semantic invariants and discards the success report.
+ *
+ * This is the property-test-oriented form of `checkInvariants`: its `void`
+ * success works directly with `it.effect.prop`, while failures retain the
+ * same complete report and trace evidence.
+ *
+ * @category verification
+ * @since 4.0.0
+ */
+export const assertInvariants: <M extends AnyMachine>(
+  machine: M,
+  trace: Trace<M>,
+  invariants: ReadonlyArray<Invariant<M>>
+) => Effect.Effect<void, internal.InvariantError<M>> = internal.assertInvariants
+
+/**
  * Checks a real planner trace against the independent finite statechart model
  * interpreter.
  *
