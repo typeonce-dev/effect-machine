@@ -7,6 +7,7 @@ const ruleDescriptions = {
   ARCH002: "Public modules may only reach internals through their designated implementation seam",
   ARCH003: "Core internals may only refer back to Machine through type-only imports",
   ARCH004: "The planner may not depend on process or runtime execution",
+  ARCH005: "Machine semantic layers may only depend inward",
   ARCH006: "The runtime may not depend on machine semantics or process orchestration",
   ARCH007: "Production modules may not depend on testing internals",
   ARCH008: "Black-box tests may not depend on implementation internals",
@@ -219,6 +220,65 @@ export const checkArchitecture = ({
     ["src/unstable/reactivity/AtomMachine.ts", "src/internal/machine/atom.ts"],
     ["src/unstable/cluster/ClusterMachine.ts", "src/internal/machine/cluster.ts"]
   ])
+  const forbiddenSemanticDependencies = new Map([
+    ["src/internal/machine/topology.ts", new Set([
+      "src/internal/machine/protocol.ts",
+      "src/internal/machine/configuration.ts",
+      "src/internal/machine/serialization.ts",
+      "src/internal/machine/planner.ts",
+      "src/internal/machine/command.ts",
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/protocol.ts", new Set([
+      "src/internal/machine/configuration.ts",
+      "src/internal/machine/serialization.ts",
+      "src/internal/machine/planner.ts",
+      "src/internal/machine/command.ts",
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/configuration.ts", new Set([
+      "src/internal/machine/serialization.ts",
+      "src/internal/machine/planner.ts",
+      "src/internal/machine/command.ts",
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/serialization.ts", new Set([
+      "src/internal/machine/planner.ts",
+      "src/internal/machine/command.ts",
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/command.ts", new Set([
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/planner.ts", new Set([
+      "src/internal/machine/serialization.ts",
+      "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])],
+    ["src/internal/machine/executionPlan.ts", new Set([
+      "src/internal/machine/serialization.ts",
+      "src/internal/machine/commandRuntime.ts",
+      "src/internal/machine/process.ts",
+      "src/internal/machine/runtime.ts"
+    ])]
+  ])
 
   for (const edge of edges) {
     if (entrypoints.has(edge.source) && edge.target.includes("/internal/")) {
@@ -261,7 +321,12 @@ export const checkArchitecture = ({
     if (
       edge.source === "src/internal/machine/planner.ts" &&
       !edge.typeOnly &&
-      (edge.target === "src/internal/machine/process.ts" || edge.target === "src/internal/machine/runtime.ts")
+      [
+        "src/internal/machine/commandRuntime.ts",
+        "src/internal/machine/executionPlan.ts",
+        "src/internal/machine/process.ts",
+        "src/internal/machine/runtime.ts"
+      ].includes(edge.target)
     ) {
       diagnostics.push(diagnostic(
         "ARCH004",
@@ -271,10 +336,20 @@ export const checkArchitecture = ({
         `Planner has a runtime dependency on ${edge.target}`
       ))
     }
+    if (forbiddenSemanticDependencies.get(edge.source)?.has(edge.target)) {
+      diagnostics.push(diagnostic(
+        "ARCH005",
+        edge.sourceFile,
+        edge.node,
+        edge.source,
+        `Semantic layer depends outward on ${edge.target}`
+      ))
+    }
     if (
       edge.source === "src/internal/machine/runtime.ts" &&
       [
-        "src/internal/machine/model.ts",
+        "src/internal/machine/configuration.ts",
+        "src/internal/machine/executionPlan.ts",
         "src/internal/machine/planner.ts",
         "src/internal/machine/process.ts"
       ].includes(edge.target)

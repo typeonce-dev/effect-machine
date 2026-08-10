@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
-import { decodeEvent } from "../../../src/internal/machine/model.js"
+import { decodeEvent } from "../../../src/internal/machine/protocol.js"
 
 class ProtocolIdle extends Schema.TaggedClass<ProtocolIdle>("ProtocolIdle")("ProtocolIdle", {}) {}
 

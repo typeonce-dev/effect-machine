@@ -26,10 +26,10 @@ import type {
 } from "./internal/machine/machine.js"
 import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
-import type * as Model from "./internal/machine/model.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type * as internalRuntime from "./internal/machine/runtime.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
+import type * as Topology from "./internal/machine/topology.js"
 
 /**
  * String literal type used as the runtime type identifier for `Machine`
@@ -3394,7 +3394,7 @@ export declare namespace Machine {
    * @since 4.0.0
    */
   export interface StateConstruction<Result> {
-    readonly [Model.StateConstructionTypeId]: Result
+    readonly [Topology.StateConstructionTypeId]: Result
   }
 
   /**
@@ -3407,8 +3407,8 @@ export declare namespace Machine {
     States extends StateSchemas,
     StateId extends StateIdentifier<States>
   > {
-    readonly [Model.TargetTypeId]: typeof Model.TargetTypeId
-    readonly [Model.TargetSnapshotTypeId]?: SnapshotByIdentifier<States, StateId>
+    readonly [Topology.TargetTypeId]: typeof Topology.TargetTypeId
+    readonly [Topology.TargetSnapshotTypeId]?: SnapshotByIdentifier<States, StateId>
     readonly path: StateId
     readonly value: StateByIdentifier<States, StateId>
     readonly values?: Partial<
@@ -3432,14 +3432,14 @@ export declare namespace Machine {
     States extends StateSchemas,
     HistoryId extends HistoryIdentifier<States>
   > {
-    readonly [Model.HistoryTargetTypeId]: typeof Model.HistoryTargetTypeId
+    readonly [Topology.HistoryTargetTypeId]: typeof Topology.HistoryTargetTypeId
     readonly path: HistoryId
     readonly parent: Extract<ParentPath<HistoryId>, StateIdentifier<States>>
   }
 
   /** Branded transient target instruction used while constructing initial states. */
   export interface ChoiceTargetInstruction<ChoiceId extends string = string> {
-    readonly [Model.ChoiceTargetTypeId]: typeof Model.ChoiceTargetTypeId
+    readonly [Topology.ChoiceTargetTypeId]: typeof Topology.ChoiceTargetTypeId
     readonly path: ChoiceId
     readonly parent: ParentPath<ChoiceId>
     readonly values?: Readonly<Record<string, unknown>>

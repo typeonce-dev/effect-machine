@@ -12,7 +12,6 @@ import type * as Stream from "effect/Stream"
 import type { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"
-import type * as Model from "../../internal/machine/model.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type * as Machine from "../../Machine.js"
 

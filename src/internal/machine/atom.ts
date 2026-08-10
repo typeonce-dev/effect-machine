@@ -15,8 +15,8 @@ import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity
 import type * as Machine from "../../Machine.js"
 import type { Bound, ChildMachineAtom, ChildOf, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
-import * as Model from "./model.js"
 import type { EnsureExecutable } from "./readiness.js"
+import * as Topology from "./topology.js"
 
 export class NotReadyError extends Data.TaggedError("NotReadyError") {}
 
@@ -448,7 +448,7 @@ const selectSnapshot = <
   snapshot: State,
   path: Path
 ): Option.Option<SnapshotValueByIdentifier<State, Path>> =>
-  Model.getSnapshotByPath(snapshot, path).pipe(
+  Topology.getSnapshotByPath(snapshot, path).pipe(
     Option.map((snapshot) => snapshot.value)
   ) as Option.Option<SnapshotValueByIdentifier<State, Path>>
 
@@ -498,7 +498,7 @@ export const matches = <
   self: MachineAtom<State, Event, Error, Output, StartError>,
   path: Path
 ): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> =>
-  Atom.mapResult(self.result, (snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path))).pipe(
+  Atom.mapResult(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))).pipe(
     Atom.withEquality(Equal.equals)
   )
 
@@ -514,7 +514,7 @@ export const matchesChild = <
 > =>
   Atom.mapResult(
     self.result,
-    Option.exists((snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path)))
+    Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
   ).pipe(Atom.withEquality(Equal.equals))
 
 const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
