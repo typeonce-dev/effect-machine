@@ -229,19 +229,18 @@ const makeChildlessCompiledDrain = (
       }
       const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
         const notification = commit()
-        if (notification !== undefined || afterCommit !== undefined) {
-          context.flush()
-        }
         const continued = continueAfterCommit()
-        return notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
+        const effect = notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
+        return notification === undefined && afterCommit === undefined
+          ? effect
+          : context.runAfterChanges(effect)
       }
 
       if (beforeCommit === undefined) {
         return commitAndContinue()
       }
-      context.flush()
-      return beforeCommit.pipe(
-        Effect.andThen(Effect.suspend(commitAndContinue))
+      return context.runAfterChanges(
+        beforeCommit.pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
       )
     })
     return internalRuntime.provideMachineRuntime(loop, context.scope)
@@ -444,18 +443,17 @@ const makeInvokingCompiledDrain = (
       }
       const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
         const notification = commit()
-        if (notification !== undefined || afterCommit.length > 0) {
-          context.flush()
-        }
         const continued = continueAfterCommit()
-        return notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
+        const effect = notification === undefined ? continued : notification.pipe(Effect.andThen(continued))
+        return notification === undefined && afterCommit.length === 0
+          ? effect
+          : context.runAfterChanges(effect)
       }
       if (beforeCommit.length === 0) {
         return commitAndContinue()
       }
-      context.flush()
-      return runSequentialDiscard(beforeCommit).pipe(
-        Effect.andThen(Effect.suspend(commitAndContinue))
+      return context.runAfterChanges(
+        runSequentialDiscard(beforeCommit).pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
       )
     })
 
@@ -590,13 +588,18 @@ const makeProcessLogic: <
       )
       : Effect.try({ try: makeCompiledInitial!, catch: (error) => error as any })
   return ({
-    [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
-    [internalRuntime.compiledProcess]: true,
-    [internalRuntime.compiledProcessInitial]: entry._tag === "Initial" ? makeInitial : undefined,
-    [internalRuntime.compiledProcessInitialSync]: makeCompiledInitial,
-    [internalRuntime.compiledProcessDrain]: hasInvokes
-      ? makeInvokingCompiledDrain(machine, entry._tag === "Resume")
-      : makeChildlessCompiledDrain(machine, entry._tag === "Resume"),
+    execution: {
+      _tag: "Compiled",
+      childless: !hasInvokes,
+      initial: entry._tag === "Initial" ? makeInitial : undefined,
+      initialSync: makeCompiledInitial,
+      drain: {
+        _tag: "Owned",
+        run: hasInvokes
+          ? makeInvokingCompiledDrain(machine, entry._tag === "Resume")
+          : makeChildlessCompiledDrain(machine, entry._tag === "Resume")
+      }
+    },
     initial: (scope) =>
       entry._tag === "Resume"
         ? internalRuntime.provideMachineRuntime(Serialization.normalizeSnapshotEffect(machine, entry.snapshot), scope)

@@ -444,12 +444,28 @@ const rawProcessLogic = {
   run: () => Effect.never
 }
 
-const rawCompiledProcessLogic = {
-  [machineRuntime.compiledProcess]: true,
-  initial: () => Effect.succeed(0),
-  run: () => Effect.never,
-  drain: () => Effect.succeed(Option.none())
-}
+// The head harness benchmarks both the base and head builds. Keep the fixture
+// bilingual across the protocol migration so both sides are forced through
+// their compact runtime rather than silently comparing different strategies.
+const rawCompiledProcessLogic = machineRuntime.compiledProcess === undefined
+  ? {
+    execution: {
+      _tag: "Compiled",
+      childless: false,
+      drain: {
+        _tag: "Process",
+        run: () => Effect.succeed(Option.none())
+      }
+    },
+    initial: () => Effect.succeed(0),
+    run: () => Effect.never
+  }
+  : {
+    [machineRuntime.compiledProcess]: true,
+    initial: () => Effect.succeed(0),
+    run: () => Effect.never,
+    drain: () => Effect.succeed(Option.none())
+  }
 
 const startRawProcesses = (count) =>
   Effect.runPromise(
@@ -464,7 +480,7 @@ const startCompiledRawProcesses = (count) =>
   Effect.runPromise(
     Effect.forEach(
       Array.from({ length: count }),
-      () => machineRuntime.startProcess(rawCompiledProcessLogic),
+      () => machineRuntime.startProcessWithStrategyForTesting(rawCompiledProcessLogic, "compiled"),
       { concurrency: 1 }
     )
   )
