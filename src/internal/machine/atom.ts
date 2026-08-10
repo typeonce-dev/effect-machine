@@ -1,0 +1,694 @@
+/**
+ * Atom bridge for running machines.
+ *
+ * @since 4.0.0
+ */
+
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
+import * as Option from "effect/Option"
+import type * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
+import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
+import type * as Machine from "../../Machine.js"
+import type { Bound, ChildMachineAtom, ChildOf, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
+import * as internalMachine from "./machine.js"
+import * as Model from "./model.js"
+import type { EnsureExecutable } from "./readiness.js"
+
+export class NotReadyError extends Data.TaggedError("NotReadyError") {}
+
+export class ChildNotActiveError extends Data.TaggedError("ChildNotActiveError")<{
+  readonly id: string
+}> {}
+
+type AtomSupportedRequirements = Scope.Scope | AtomRegistry.AtomRegistry
+
+type ExternalRequirements<Requirements> = Exclude<Requirements, AtomSupportedRequirements>
+
+const ExternalRequirementsTypeId = "~effect/reactivity/AtomMachine/ExternalRequirements"
+
+type EnsureNoExternalRequirements<Requirements> = [ExternalRequirements<Requirements>] extends [never] ? unknown : {
+  readonly [ExternalRequirementsTypeId]: ExternalRequirements<Requirements>
+}
+
+type IsAny<A> = 0 extends (1 & A) ? true : false
+
+type ExcludeCompatibleMachineRuntime<Requirements, Events, Emits> = Requirements extends
+  Machine.Runtime.Requirement<infer RequiredEvents, infer RequiredEmits> ?
+  IsAny<Requirements> extends true ? Requirements
+  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
+  : Requirements
+  : Requirements
+
+type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineRuntime<
+  Machine.ExecutionServices<InitialR | R>,
+  Events,
+  Emits
+>
+
+type MachineResumeRequirements<R, Events, Emits> = ExcludeCompatibleMachineRuntime<
+  Machine.ExecutionServices<R>,
+  Events,
+  Emits
+>
+
+type MachineRuntimeError<E, R> =
+  | E
+  | Machine.ActionError<R>
+  | Machine.InfiniteTransitionError
+  | Machine.MachineSchemaDecodeError
+  | Machine.StoppedError
+
+type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
+  | InitialE
+  | E
+  | Machine.ActionError<InitialR | R>
+  | Machine.InfiniteTransitionError
+  | Machine.MachineSchemaDecodeError
+  | Machine.StartupError
+  | Machine.StoppedError
+  | RuntimeError
+
+const runMachineAtomEffect = <State, Event, Error, Output, StartError, Requirements>(
+  get: Atom.AtomContext,
+  start: Effect.Effect<Machine.MachineRef<State, Event, Error, Output>, StartError, Requirements>
+): Effect.Effect<never, StartError, Requirements> =>
+  Effect.scoped(
+    Effect.acquireRelease(start, (ref) => ref.stop).pipe(
+      Effect.tap((ref) => Effect.sync(() => get.setSelf(AsyncResult.success(ref)))),
+      Effect.flatMap(() => Effect.never)
+    )
+  )
+
+const startMachineAtomEffect = <
+  const States extends Machine.Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.Machine.TaggedSchema> = any,
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.Machine.StateIdentifier<States> = Machine.Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.Machine.StateIdentifier<States> = never,
+  Output = never,
+  OutputStates extends Machine.Machine.StateIdentifier<States> = never,
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
+>(
+  get: Atom.AtomContext,
+  machine:
+    & Machine.Machine<
+      States,
+      Events,
+      Input,
+      UnhandledStates,
+      E,
+      R,
+      InitialE,
+      InitialR,
+      FinalStates,
+      Output,
+      Emits,
+      OutputStates,
+      InputEvents
+    >
+    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+  args: [...Machine.Machine.InputArgs<Input>]
+): Effect.Effect<
+  Machine.MachineRef<
+    Machine.Machine.Snapshot<States>,
+    Machine.Machine.EventOf<InputEvents>,
+    MachineRuntimeError<E, R>,
+    Output
+  >,
+  MachineStartError<InitialE, E, InitialR, R>,
+  MachineRequirements<InitialR, R, Machine.Machine.EventOf<Events>, Machine.Machine.EmitOf<Emits>>
+> => runMachineAtomEffect(get, internalMachine.start(machine, ...args))
+
+const resumeMachineAtomEffect = (
+  get: Atom.AtomContext,
+  machine: Machine.Machine.Any,
+  snapshot: Machine.Machine.Snapshot<any>
+) => runMachineAtomEffect(get, internalMachine.resume(machine as any, snapshot as any))
+
+type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any> ? State : never
+type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any> ? Error : never
+type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output> ? Output : never
+
+type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, infer StartError> ? StartError
+  : Bridge extends ChildMachineAtom<any, infer StartError> ? StartError
+  : never
+
+const makeRuntimeResultAtom = <State, Error, Output, StartError>(
+  snapshot: Atom.Atom<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>
+): Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>> =>
+  Atom.readable((get): AsyncResult.AsyncResult<State, StartError | Error> => {
+    const current = get(snapshot)
+    if (AsyncResult.isInitial(current)) {
+      return AsyncResult.initial(current.waiting)
+    } else if (AsyncResult.isFailure(current)) {
+      return AsyncResult.failureWithPrevious(current.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    } else if (current.value.status === "error") {
+      return AsyncResult.failureWithPrevious(current.value.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    }
+    return AsyncResult.success(current.value.state, {
+      waiting: current.waiting
+    })
+  }).pipe(Atom.withEquality(Equal.equals))
+
+const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
+  snapshot: Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<Machine.RuntimeSnapshot<State, Error, Output>>, StartError>
+  >
+): Atom.Atom<AsyncResult.AsyncResult<Option.Option<State>, StartError | Error>> =>
+  Atom.readable((get): AsyncResult.AsyncResult<Option.Option<State>, StartError | Error> => {
+    const current = get(snapshot)
+    if (AsyncResult.isInitial(current)) {
+      return AsyncResult.initial(current.waiting)
+    } else if (AsyncResult.isFailure(current)) {
+      return AsyncResult.failureWithPrevious(current.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    } else if (Option.isNone(current.value)) {
+      const previous = get.self<AsyncResult.AsyncResult<Option.Option<State>, StartError | Error>>()
+      if (Option.isSome(previous) && AsyncResult.isFailure(previous.value)) {
+        return previous.value
+      }
+      return AsyncResult.success(Option.none(), {
+        waiting: current.waiting
+      })
+    } else if (current.value.value.status === "error") {
+      return AsyncResult.failureWithPrevious(current.value.value.cause, {
+        previous: get.self(),
+        waiting: current.waiting
+      })
+    }
+    return AsyncResult.success(Option.some(current.value.value.state), {
+      waiting: current.waiting
+    })
+  }).pipe(Atom.withEquality(Equal.equals))
+
+const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
+  parentRef: Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<Machine.MachineRef<any, any, any, any>>, StartError>
+  >,
+  child: Child
+): Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>> =>
+  Atom.readable((get) => {
+    const parent = get(parentRef)
+    if (AsyncResult.isInitial(parent)) {
+      return AsyncResult.initial(parent.waiting)
+    } else if (AsyncResult.isFailure(parent)) {
+      return AsyncResult.failureWithPrevious(parent.cause, {
+        previous: get.self(),
+        waiting: parent.waiting
+      })
+    } else if (Option.isNone(parent.value)) {
+      return AsyncResult.success(Option.none())
+    }
+
+    const handle = parent.value.value
+    const current = Effect.runSync(handle.child(child))
+    const cancel = Effect.runCallback(
+      Effect.yieldNow.pipe(
+        Effect.andThen(
+          handle.childChanges(child).pipe(
+            Stream.runForEach((ref) => Effect.sync(() => get.setSelf(AsyncResult.success(ref))))
+          )
+        )
+      )
+    )
+    get.addFinalizer(cancel)
+    return AsyncResult.success(current)
+  })
+
+const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
+  ref: Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>>,
+  descriptor: Child
+): ChildMachineAtom<Child, StartError> => {
+  type Ref = Machine.ChildMachine.Ref<Child>
+  type State = RefState<Ref>
+  type Error = RefError<Ref>
+  type Output = RefOutput<Ref>
+
+  const snapshot = Atom.readable((get): AsyncResult.AsyncResult<
+    Option.Option<Machine.RuntimeSnapshot<State, Error, Output>>,
+    StartError
+  > => {
+    const result = get(ref)
+    if (AsyncResult.isInitial(result)) {
+      return AsyncResult.initial(result.waiting)
+    } else if (AsyncResult.isFailure(result)) {
+      return AsyncResult.failureWithPrevious(result.cause, {
+        previous: get.self(),
+        waiting: result.waiting
+      })
+    } else if (Option.isNone(result.value)) {
+      return AsyncResult.success(Option.none())
+    }
+
+    const handle = result.value.value as unknown as Machine.MachineRef<State, any, Error, Output>
+    const cancel = Effect.runCallback(
+      handle.changes.pipe(
+        Stream.runForEach((snapshot) => Effect.sync(() => get.setSelf(AsyncResult.success(Option.some(snapshot)))))
+      )
+    )
+    get.addFinalizer(cancel)
+    return AsyncResult.success(Option.some(Effect.runSync(handle.snapshot)))
+  })
+
+  const send = Atom.writable<
+    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
+    Machine.ChildMachine.Event<Child>
+  >(
+    (get) => AsyncResult.map(get(ref), () => undefined),
+    (ctx, event) => {
+      const result = ctx.get(ref)
+      if (AsyncResult.isInitial(result)) {
+        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
+      } else if (AsyncResult.isFailure(result)) {
+        ctx.setSelf(AsyncResult.map(result, () => undefined))
+      } else if (Option.isNone(result.value)) {
+        ctx.setSelf(AsyncResult.fail(new ChildNotActiveError({ id: descriptor.id })))
+      } else {
+        Effect.runCallback(result.value.value.send(event as never), {
+          onExit: (exit) => ctx.setSelf(AsyncResult.fromExit(exit))
+        })
+      }
+    }
+  )
+
+  const stop = Atom.writable<
+    AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
+    void
+  >(
+    (get) => AsyncResult.map(get(ref), () => undefined),
+    (ctx) => {
+      const result = ctx.get(ref)
+      if (AsyncResult.isInitial(result)) {
+        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
+      } else if (AsyncResult.isFailure(result)) {
+        ctx.setSelf(AsyncResult.map(result, () => undefined))
+      } else if (Option.isNone(result.value)) {
+        ctx.setSelf(AsyncResult.fail(new ChildNotActiveError({ id: descriptor.id })))
+      } else {
+        Effect.runCallback(result.value.value.stop)
+      }
+    }
+  )
+
+  const childFamily = Atom.family((nested: Machine.ChildMachine.Any) =>
+    makeChildFromRefAtom(
+      makeChildRefAtom(ref as any, nested),
+      nested
+    )
+  )
+  const child = <Nested extends Machine.ChildMachine.Any>(
+    nested: Nested
+  ): ChildMachineAtom<Nested, StartError> => childFamily(nested) as ChildMachineAtom<Nested, StartError>
+
+  return {
+    ref,
+    snapshot,
+    state: Atom.mapResult(snapshot, Option.map((snapshot) => snapshot.state)),
+    result: makeChildRuntimeResultAtom(snapshot),
+    send,
+    stop,
+    child
+  }
+}
+
+const makeFromRefAtom = <State, Event, Error, Output, StartError>(
+  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output>, StartError>>
+): MachineAtom<State, Event, Error, Output, StartError> => {
+  const snapshot = Atom.readable((
+    get
+  ): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
+    const result = get(ref)
+    if (AsyncResult.isInitial(result)) {
+      return AsyncResult.initial(result.waiting)
+    } else if (AsyncResult.isFailure(result)) {
+      return AsyncResult.failureWithPrevious(result.cause, {
+        previous: get.self<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>(),
+        waiting: result.waiting
+      })
+    }
+
+    const handle = result.value
+    const cancel = Effect.runCallback(
+      handle.changes.pipe(
+        Stream.runForEach((snapshot) =>
+          Effect.sync(() =>
+            get.setSelf(
+              AsyncResult.success(snapshot, {
+                waiting: snapshot.status === "active"
+              })
+            )
+          )
+        )
+      )
+    )
+    get.addFinalizer(cancel)
+
+    const current = Effect.runSync(handle.snapshot)
+    return AsyncResult.success(current, {
+      waiting: current.status === "active"
+    })
+  })
+
+  const send = Atom.writable<
+    AsyncResult.AsyncResult<void, StartError | NotReadyError | Machine.StoppedError>,
+    Event
+  >(
+    (get) => AsyncResult.map(get(ref), () => undefined),
+    (ctx, event: Event) => {
+      const result = ctx.get(ref)
+      if (AsyncResult.isInitial(result)) {
+        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
+      } else if (AsyncResult.isFailure(result)) {
+        ctx.setSelf(AsyncResult.map(result, () => undefined))
+      } else {
+        Effect.runCallback(result.value.send(event), {
+          onExit: (exit) =>
+            ctx.setSelf(
+              AsyncResult.fromExit(exit)
+            )
+        })
+      }
+    }
+  )
+
+  const stop = Atom.writable<AsyncResult.AsyncResult<void, StartError | NotReadyError>, void>(
+    (get) => AsyncResult.map(get(ref), () => undefined),
+    (ctx) => {
+      const result = ctx.get(ref)
+      if (AsyncResult.isInitial(result)) {
+        ctx.setSelf(AsyncResult.fail(new NotReadyError()))
+      } else if (AsyncResult.isFailure(result)) {
+        ctx.setSelf(AsyncResult.map(result, () => undefined))
+      } else {
+        Effect.runCallback(result.value.stop)
+      }
+    }
+  )
+
+  const optionalRef = Atom.mapResult(ref, Option.some)
+  const childFamily = Atom.family((descriptor: Machine.ChildMachine.Any) =>
+    makeChildFromRefAtom(
+      makeChildRefAtom(optionalRef as any, descriptor),
+      descriptor
+    )
+  )
+  const child = <Child extends Machine.ChildMachine.Any>(
+    descriptor: Child
+  ): ChildMachineAtom<Child, StartError> => childFamily(descriptor) as ChildMachineAtom<Child, StartError>
+
+  return {
+    ref,
+    snapshot,
+    state: Atom.mapResult(snapshot, (snapshot) => snapshot.state),
+    result: makeRuntimeResultAtom(snapshot),
+    send,
+    stop,
+    child
+  }
+}
+
+type SnapshotNode<State> = State extends Machine.Machine.AtomicSnapshot<string, unknown> ?
+    | State
+    | (State extends { readonly state: infer Child } ? SnapshotNode<Child>
+      : State extends { readonly states: infer Regions } ? SnapshotNode<Regions[keyof Regions]>
+      : never)
+  : never
+
+type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: infer Path extends string } ? Path : never
+  : never
+
+type SnapshotValueByIdentifier<State, Path extends SnapshotIdentifier<State>> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: Path; readonly value: infer Value } ? Value : never
+  : never
+
+type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.ChildMachine.Ref<Child>>
+
+const selectSnapshot = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Path extends SnapshotIdentifier<State>
+>(
+  snapshot: State,
+  path: Path
+): Option.Option<SnapshotValueByIdentifier<State, Path>> =>
+  Model.getSnapshotByPath(snapshot, path).pipe(
+    Option.map((snapshot) => snapshot.value)
+  ) as Option.Option<SnapshotValueByIdentifier<State, Path>>
+
+export const select = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Event,
+  Error,
+  Output,
+  StartError,
+  const Path extends SnapshotIdentifier<State>
+>(
+  self: MachineAtom<State, Event, Error, Output, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
+> =>
+  Atom.mapResult(self.result, (snapshot) => selectSnapshot(snapshot, path)).pipe(
+    Atom.withEquality(Equal.equals)
+  )
+
+export const selectChild = <
+  Child extends Machine.ChildMachine.Any,
+  StartError,
+  const Path extends SnapshotIdentifier<ChildState<Child>>
+>(
+  self: ChildMachineAtom<Child, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<
+    Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
+    StartError | RefError<Machine.ChildMachine.Ref<Child>>
+  >
+> =>
+  Atom.mapResult(
+    self.result,
+    Option.flatMap((snapshot) => selectSnapshot(snapshot, path))
+  ).pipe(Atom.withEquality(Equal.equals))
+
+export const matches = <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Event,
+  Error,
+  Output,
+  StartError,
+  const Path extends SnapshotIdentifier<State>
+>(
+  self: MachineAtom<State, Event, Error, Output, StartError>,
+  path: Path
+): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> =>
+  Atom.mapResult(self.result, (snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path))).pipe(
+    Atom.withEquality(Equal.equals)
+  )
+
+export const matchesChild = <
+  Child extends Machine.ChildMachine.Any,
+  StartError,
+  const Path extends SnapshotIdentifier<ChildState<Child>>
+>(
+  self: ChildMachineAtom<Child, StartError>,
+  path: Path
+): Atom.Atom<
+  AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+> =>
+  Atom.mapResult(
+    self.result,
+    Option.exists((snapshot) => Option.isSome(Model.getSnapshotByPath(snapshot, path)))
+  ).pipe(Atom.withEquality(Equal.equals))
+
+const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
+
+type MachineRequirementsOf<M extends Machine.Machine.Any> = MachineRequirements<
+  Machine.Machine.InitialServices<M>,
+  Machine.Machine.Services<M>,
+  Machine.Machine.Event<M>,
+  Machine.Machine.Emit<M>
+>
+
+type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
+  ExternalRequirements<MachineRequirementsOf<M>>,
+  Services
+>
+
+type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> = IsAny<MachineRequirementsOf<M>> extends true ? {
+    readonly [BoundRequirementsTypeId]: MachineRequirementsOf<M>
+  }
+  : [MissingBoundRequirements<Services, M>] extends [never] ? unknown
+  : {
+    readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
+  }
+
+type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
+  Machine.Machine.Services<M>,
+  Machine.Machine.Event<M>,
+  Machine.Machine.Emit<M>
+>
+
+type MissingBoundResumeRequirements<Services, M extends Machine.Machine.Any> = Exclude<
+  ExternalRequirements<MachineResumeRequirementsOf<M>>,
+  Services
+>
+
+type EnsureBoundResumeRequirements<Services, M extends Machine.Machine.Any> =
+  IsAny<MachineResumeRequirementsOf<M>> extends true ? {
+      readonly [BoundRequirementsTypeId]: MachineResumeRequirementsOf<M>
+    }
+    : [MissingBoundResumeRequirements<Services, M>] extends [never] ? unknown
+    : {
+      readonly [BoundRequirementsTypeId]: MissingBoundResumeRequirements<Services, M>
+    }
+
+type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ? {
+    readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
+  }
+  : EnsureExecutable<
+    Machine.Machine.States<M>,
+    Machine.Machine.UnhandledStates<M>,
+    Machine.Machine.OutputStates<M>
+  >
+
+type MachineInputArgsOf<M extends Machine.Machine.Any> = [
+  ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
+]
+
+type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
+  Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+  Machine.Machine.InputEvent<M>,
+  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+  Machine.Machine.Output<M>,
+  MachineStartError<
+    Machine.Machine.InitialError<M>,
+    Machine.Machine.Error<M>,
+    Machine.Machine.InitialServices<M>,
+    Machine.Machine.Services<M>,
+    RuntimeError
+  >
+>
+
+type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
+  Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+  Machine.Machine.InputEvent<M>,
+  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
+  Machine.Machine.Output<M>,
+  Machine.MachineSchemaDecodeError | RuntimeError
+>
+
+export const make: {
+  <
+    const States extends Machine.Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.Machine.TaggedSchema> = any,
+    const Input extends Schema.Top = typeof Schema.Void,
+    UnhandledStates extends Machine.Machine.StateIdentifier<States> = Machine.Machine.StateIdentifier<States>,
+    E = never,
+    R = never,
+    InitialE = never,
+    InitialR = never,
+    FinalStates extends Machine.Machine.StateIdentifier<States> = never,
+    Output = never,
+    OutputStates extends Machine.Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
+  >(
+    machine:
+      & Machine.Machine<
+        States,
+        Events,
+        Input,
+        UnhandledStates,
+        E,
+        R,
+        InitialE,
+        InitialR,
+        FinalStates,
+        Output,
+        Emits,
+        OutputStates,
+        InputEvents
+      >
+      & EnsureNoExternalRequirements<
+        MachineRequirements<
+          InitialR,
+          R,
+          Machine.Machine.EventOf<Events>,
+          Machine.Machine.EmitOf<Emits>
+        >
+      >
+      & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    ...args: [...Machine.Machine.InputArgs<Input>]
+  ): MachineAtom<
+    Machine.Machine.Snapshot<States>,
+    Machine.Machine.EventOf<InputEvents>,
+    MachineRuntimeError<E, R>,
+    Output,
+    MachineStartError<InitialE, E, InitialR, R>
+  >
+} = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
+  const ref = Atom.make((get) => startMachineAtomEffect(get, machine as any, args as []))
+  return makeFromRefAtom(ref as any)
+}) as any
+
+export const resume: {
+  <M extends Machine.Machine.Any>(
+    machine:
+      & M
+      & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
+      & EnsureMachineExecutable<NoInfer<M>>,
+    snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  ): ResumedMachineAtomOf<M, never>
+} = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {
+  const ref = Atom.make((get) => resumeMachineAtomEffect(get, machine, snapshot))
+  return makeFromRefAtom(ref as any)
+}) as any
+
+const makeWithRuntime = (
+  runtime: Atom.AtomRuntime<any, any>,
+  machine: Machine.Machine.Any,
+  args: ReadonlyArray<unknown>
+): MachineAtom<any, any, any, any, any> => {
+  const ref = runtime.atom((get) => startMachineAtomEffect(get, machine as any, args as []))
+  return makeFromRefAtom(ref as any)
+}
+
+const resumeWithRuntime = (
+  runtime: Atom.AtomRuntime<any, any>,
+  machine: Machine.Machine.Any,
+  snapshot: Machine.Machine.Snapshot<any>
+): MachineAtom<any, any, any, any, any> => {
+  const ref = runtime.atom((get) => resumeMachineAtomEffect(get, machine, snapshot))
+  return makeFromRefAtom(ref as any)
+}
+
+export const bind = <Services, RuntimeError>(
+  runtime: Atom.AtomRuntime<Services, RuntimeError>
+): Bound<Services, RuntimeError> => ({
+  make:
+    ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) =>
+      makeWithRuntime(runtime, machine, args)) as Bound<
+        Services,
+        RuntimeError
+      >["make"],
+  resume:
+    ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) =>
+      resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"]
+})
