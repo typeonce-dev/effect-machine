@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import { FastCheck, TestClock } from "effect/testing"
 import * as Machine from "../Machine.js"
+import { type SchemaArbitraryReport, toArbitraryWithReport } from "./machineTestArbitrary.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -707,7 +708,7 @@ export interface RuntimeCommandsOptions<M extends AnyMachine> {
  */
 export interface RuntimeCommandsDiagnostics {
   readonly events: "none" | "schema" | "override"
-  readonly schemaReports: ReadonlyArray<Schema.Annotations.ToArbitrary.Report>
+  readonly schemaReports: ReadonlyArray<SchemaArbitraryReport>
   readonly includesAdvance: boolean
   readonly includesStop: boolean
   readonly includesCheckpoint: boolean
@@ -753,10 +754,10 @@ export const runtimeCommands = <M extends AnyMachine>(
     throw new Error("MachineTest.runtimeCommands expected minCommands to be less than or equal to maxCommands")
   }
 
-  const reports: Array<Schema.Annotations.ToArbitrary.Report> = []
+  const reports: Array<SchemaArbitraryReport> = []
   const eventArbitraries = options.eventArbitrary === undefined
     ? machine.events.map((schema) => {
-      const derived = Schema.toArbitrary(schema, { report: true })
+      const derived = toArbitraryWithReport(schema)
       reports.push(derived.report)
       return derived.value as FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>
     })

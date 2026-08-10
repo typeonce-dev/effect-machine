@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  effect: 4.0.0-beta.105
+  effect: 4.0.0-beta.107
 
 importers:
 
@@ -13,10 +13,10 @@ importers:
     dependencies:
       '@typeonce/effect-machine':
         specifier: file:../..
-        version: file:../..(effect@4.0.0-beta.105)
+        version: file:../..(effect@4.0.0-beta.107)
       effect:
-        specifier: 4.0.0-beta.105
-        version: 4.0.0-beta.105
+        specifier: 4.0.0-beta.107
+        version: 4.0.0-beta.107
     devDependencies:
       typescript:
         specifier: 6.0.3
@@ -190,7 +190,7 @@ packages:
     resolution: {directory: ../.., type: directory}
     engines: {node: '>=20'}
     peerDependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-beta.107
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -245,8 +245,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  effect@4.0.0-beta.105:
-    resolution: {integrity: sha512-7U5OzWVNlpnZFvXiZfOeu8V+dCQUa3Om569HnYG2Dx8C8V6uoKS920kFJkIDEYVhlSGhzkRqaGKmYY9bPkBMMQ==}
+  effect@4.0.0-beta.107:
+    resolution: {integrity: sha512-OoBAv8eF+yanc+C6xhgEUnWeXUSHA6ynnscYqpkAY9GSnzZWystsIjBowVqCkLpHGlnRtdIqYT3wHwpOY6JDnQ==}
 
   es-module-lexer@2.3.1:
     resolution: {integrity: sha512-shc1dbU90Yl/xq1QrC7QRtfcwURZuVRfPhZbDoldJ1cn1gzDvBaBWlv0eFolj5+0znnPJz5TXLxsN77X/12KTA==}
@@ -637,9 +637,9 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.105)':
+  '@typeonce/effect-machine@file:../..(effect@4.0.0-beta.107)':
     dependencies:
-      effect: 4.0.0-beta.105
+      effect: 4.0.0-beta.107
 
   '@types/chai@5.2.3':
     dependencies:
@@ -699,7 +699,7 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  effect@4.0.0-beta.105:
+  effect@4.0.0-beta.107:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0

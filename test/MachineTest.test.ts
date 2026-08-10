@@ -96,6 +96,30 @@ describe("MachineTest", () => {
     assert.strictEqual(generated.diagnostics.events, "override")
   })
 
+  it("preserves opaque-filter diagnostics from schema-derived arbitraries", () => {
+    const PositiveInput = Schema.Struct({
+      value: Schema.Number.check(
+        Schema.makeFilter((value) => value > 0 || "value must be positive", { identifier: "Positive" })
+      )
+    })
+    const machine = Machine.make({
+      states: States.states,
+      events: [],
+      input: PositiveInput,
+      initial: () => States.initial.Idle(new Idle({ userId: "user-1" }))
+    })
+
+    const generated = MachineTest.scenarios(machine)
+
+    assert.deepStrictEqual(generated.diagnostics.schemas, [{
+      boundary: "input",
+      index: undefined,
+      report: {
+        warnings: [{ _tag: "OpaqueFilter", path: ["value"], description: "Positive" }]
+      }
+    }])
+  })
+
   it("rejects a non-empty minimum for machines without public events", () => {
     const machine = Machine.make({
       states: States.states,

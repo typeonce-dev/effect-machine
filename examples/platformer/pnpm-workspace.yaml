@@ -2,9 +2,9 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-beta.105
+  effect: 4.0.0-beta.107
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - effect@4.0.0-beta.105
+  - effect
   - vite@8.1.5

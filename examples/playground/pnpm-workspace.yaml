@@ -2,12 +2,12 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-beta.105
-  "@effect/atom-react": 4.0.0-beta.105
-  "@effect/vitest": 4.0.0-beta.105
+  effect: 4.0.0-beta.107
+  "@effect/atom-react": 4.0.0-beta.107
+  "@effect/vitest": 4.0.0-beta.107
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
-  - effect@4.0.0-beta.105
-  - "@effect/atom-react@4.0.0-beta.105"
-  - "@effect/vitest@4.0.0-beta.105"
+  - effect
+  - "@effect/atom-react"
+  - "@effect/vitest"

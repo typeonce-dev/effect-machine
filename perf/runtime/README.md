@@ -32,7 +32,7 @@ The comparison dependencies use package aliases, so XState 5 and 6 can be
 loaded by the same process:
 
 - `xstate-v5`: `xstate@5.32.5`, the stable v5 baseline;
-- `xstate-v6`: `xstate@6.0.0-alpha.27`, the latest published v6 alpha available
+- `xstate-v6`: `xstate@6.0.0-alpha.31`, the latest published v6 alpha available
   when the harness was added.
 
 All implementations use the same flat counter topology, immutable events, and
