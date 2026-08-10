@@ -1,6 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Data, Effect, Stream } from "effect"
-import { type LoudnessSample, MediaPlayerInternalEvent } from "./schemas.ts"
+import { type LoudnessSample, MediaPlayerInternalEvent, type SoundSettings, toAudioSettings } from "./schemas.ts"
 import { MediaPlayer, MediaPlayerError } from "./service.ts"
 
 export const loadAudio = (url: string) =>
@@ -43,6 +43,16 @@ export const restartAudio = Machine.invokeEffect({
   onSuccess: () => MediaPlayerInternalEvent.cases.RestartSucceeded.make({}),
   onFailure: (failure) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
 })
+
+export const applyAudioSettings = (settings: SoundSettings, muted: boolean) =>
+  Machine.invokeEffect({
+    id: "apply-audio-settings",
+    effect: Effect.gen(function*() {
+      const mediaPlayer = yield* MediaPlayer
+      yield* mediaPlayer.applySettings(toAudioSettings(settings, muted))
+    }),
+    onSuccess: () => undefined
+  })
 
 type LoudnessProcessState = Data.TaggedEnum<{
   Waiting: {}

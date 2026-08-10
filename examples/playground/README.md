@@ -35,7 +35,9 @@ React-to-machine adapter is left for the exercise.
 The media player is a complete browser integration. `schemas.ts` owns its typed
 protocol, `service.ts` exposes the audio element and Web Audio graph as an
 Effect service, `invocations.ts` defines its state-scoped processes, and the
-React page translates DOM events into machine events. Its compound
+React adapter registers the audio element through the shared service runtime
+before translating playback events into machine events. `view.ts` exhaustively
+projects the typed parallel snapshot into the React-facing view model. Its compound
 `Ready` state models the loaded playback lifecycle inside a parallel `Player`:
 the transport region owns loading, playback, buffering, and failures while the
 settings region independently owns `Audible` and `Muted`.

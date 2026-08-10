@@ -1,6 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
-import { analyzeAudio, loadAudio, pauseAudio, playAudio, restartAudio } from "./invocations.ts"
+import { analyzeAudio, applyAudioSettings, loadAudio, pauseAudio, playAudio, restartAudio } from "./invocations.ts"
 import {
   initialAudioSettings,
   initialPlaybackData,
@@ -8,7 +8,6 @@ import {
   MediaPlayerInternalEvent,
   MediaPlayerState,
   MediaPlayerStates,
-  toAudioSettings,
   updatePlaybackData
 } from "./schemas.ts"
 import { MediaPlayer } from "./service.ts"
@@ -37,15 +36,6 @@ export const MediaPlayerMachine = Machine.make({
   initial: initialPlayer
 }).handle({
   Player: {
-    on: {
-      AudioElementMounted: ({ event }) =>
-        Machine.action(
-          Effect.gen(function*() {
-            const mediaPlayer = yield* MediaPlayer
-            yield* mediaPlayer.register(event.audioRef)
-          })
-        )
-    },
     states: {
       transport: {
         on: {
@@ -230,78 +220,60 @@ export const MediaPlayerMachine = Machine.make({
       settings: {
         states: {
           Audible: {
+            invoke: ({ state }) => applyAudioSettings(state, false),
             on: {
-              VolumeChanged: ({ event, state, target }) => {
-                const next = { volume: event.volume, playbackRate: state.playbackRate }
-                return Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(next, false))
-                  }),
-                  target.local.Audible(MediaPlayerState.cases.Audible.make(next))
-                )
+              VolumeChanged: {
+                reenter: true,
+                transition: ({ event, state, target }) =>
+                  target.local.Audible(MediaPlayerState.cases.Audible.make({
+                    volume: event.volume,
+                    playbackRate: state.playbackRate
+                  }))
               },
 
-              PlaybackRateChanged: ({ event, state, target }) => {
-                const next = { volume: state.volume, playbackRate: event.playbackRate }
-                return Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(next, false))
-                  }),
-                  target.local.Audible(MediaPlayerState.cases.Audible.make(next))
-                )
+              PlaybackRateChanged: {
+                reenter: true,
+                transition: ({ event, state, target }) =>
+                  target.local.Audible(MediaPlayerState.cases.Audible.make({
+                    volume: state.volume,
+                    playbackRate: event.playbackRate
+                  }))
               },
 
               MuteRequested: ({ state, target }) =>
-                Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(state, true))
-                  }),
-                  target.local.Muted(MediaPlayerState.cases.Muted.make({
-                    volume: state.volume,
-                    playbackRate: state.playbackRate
-                  }))
-                )
+                target.local.Muted(MediaPlayerState.cases.Muted.make({
+                  volume: state.volume,
+                  playbackRate: state.playbackRate
+                }))
             }
           },
 
           Muted: {
+            invoke: ({ state }) => applyAudioSettings(state, true),
             on: {
-              VolumeChanged: ({ event, state, target }) => {
-                const next = { volume: event.volume, playbackRate: state.playbackRate }
-                return Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(next, true))
-                  }),
-                  target.local.Muted(MediaPlayerState.cases.Muted.make(next))
-                )
+              VolumeChanged: {
+                reenter: true,
+                transition: ({ event, state, target }) =>
+                  target.local.Muted(MediaPlayerState.cases.Muted.make({
+                    volume: event.volume,
+                    playbackRate: state.playbackRate
+                  }))
               },
 
-              PlaybackRateChanged: ({ event, state, target }) => {
-                const next = { volume: state.volume, playbackRate: event.playbackRate }
-                return Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(next, true))
-                  }),
-                  target.local.Muted(MediaPlayerState.cases.Muted.make(next))
-                )
+              PlaybackRateChanged: {
+                reenter: true,
+                transition: ({ event, state, target }) =>
+                  target.local.Muted(MediaPlayerState.cases.Muted.make({
+                    volume: state.volume,
+                    playbackRate: event.playbackRate
+                  }))
               },
 
               UnmuteRequested: ({ state, target }) =>
-                Machine.action(
-                  Effect.gen(function*() {
-                    const mediaPlayer = yield* MediaPlayer
-                    yield* mediaPlayer.applySettings(toAudioSettings(state, false))
-                  }),
-                  target.local.Audible(MediaPlayerState.cases.Audible.make({
-                    volume: state.volume,
-                    playbackRate: state.playbackRate
-                  }))
-                )
+                target.local.Audible(MediaPlayerState.cases.Audible.make({
+                  volume: state.volume,
+                  playbackRate: state.playbackRate
+                }))
             }
           }
         }

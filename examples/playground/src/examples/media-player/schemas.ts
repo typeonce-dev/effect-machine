@@ -72,10 +72,7 @@ export const MediaPlayerState = Schema.TaggedUnion({
   Muted: soundSettingsFields
 })
 
-const AudioElement = Schema.instanceOf(HTMLAudioElement)
-
 export const MediaPlayerEvent = Schema.TaggedUnion({
-  AudioElementMounted: { audioRef: AudioElement },
   SourceSelected: { url: Schema.String },
   PlayRequested: {},
   PauseRequested: {},
