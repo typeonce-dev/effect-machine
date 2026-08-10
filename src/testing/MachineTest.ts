@@ -18,10 +18,31 @@ import type * as Machine from "../Machine.js"
 
 export {
   advanceCommand,
+  type CausalRuntimeAssertionContext,
+  type CausalRuntimeCommandActual,
+  CausalRuntimeCommandFailure,
+  type CausalRuntimeCommandRecord,
+  type CausalRuntimeCommandResult,
+  type CausalRuntimeInspectionContext,
+  type CausalRuntimeModelOptions,
+  type CausalRuntimeModelStep,
+  type CausalRuntimeTranscript,
   checkpointCommand,
+  type EnqueuedRuntimeAssertionContext,
+  type EnqueuedRuntimeCommandActual,
+  type EnqueuedRuntimeCommandRecord,
+  type EnqueuedRuntimeInspectionContext,
+  type EnqueuedRuntimeModelOptions,
+  type EnqueuedRuntimeModelStep,
+  type EnqueuedRuntimeTranscript,
+  formatCausalTranscript,
+  formatEnqueuedTranscript,
   formatRuntimeTranscript,
+  runCausalCommands,
+  runEnqueuedCommands,
   runRuntimeCommands,
   type RuntimeAssertionContext,
+  type RuntimeAwait,
   type RuntimeCommand,
   type RuntimeCommandActual,
   RuntimeCommandFailure,
@@ -389,6 +410,23 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
   readonly sendAndAwait: (
     event: Machine.Machine.InputEvent<M>
   ) => Effect.Effect<ProbeStep<M>, Error | Machine.StoppedError>
+  /** Constructors for asynchronous observation after a causal command. */
+  readonly await: {
+    readonly none: internal.RuntimeAwait<
+      Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+      Error,
+      Output
+    >
+    readonly until: (
+      predicate: (
+        snapshot: Machine.RuntimeSnapshot<
+          Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+          Error,
+          Output
+        >
+      ) => boolean
+    ) => internal.RuntimeAwait<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  }
 }
 
 /**
