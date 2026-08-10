@@ -9,16 +9,21 @@ describe("machine process lifecycle", () => {
       const drained = yield* Deferred.make<void>()
       const drainCount = yield* Ref.make(0)
       const ref = yield* MachineRuntime.startProcess<number, void>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
-        [MachineRuntime.compiledProcessInitial]: () => Effect.succeed({ state: 1, done: false, output: undefined }),
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          initial: () => Effect.succeed({ state: 1, done: false, output: undefined }),
+          drain: {
+            _tag: "Process",
+            run: (context) =>
+              Ref.update(drainCount, (count) => count + 1).pipe(
+                Effect.andThen(Deferred.succeed(drained, undefined)),
+                Effect.as(Option.none())
+              )
+          }
+        },
         initial: () => Effect.die(new Error("compiled startup unexpectedly used the general initial effect")),
-        run: () => Effect.never,
-        drain: (context) =>
-          Ref.update(drainCount, (count) => count + 1).pipe(
-            Effect.andThen(Deferred.succeed(drained, undefined)),
-            Effect.as(Option.none())
-          )
+        run: () => Effect.never
       })
 
       assert.strictEqual(yield* Ref.get(drainCount), 0)
@@ -32,12 +37,17 @@ describe("machine process lifecycle", () => {
     Effect.gen(function*() {
       const drainCount = yield* Ref.make(0)
       const ref = yield* MachineRuntime.startProcess<number, never, never, never, string>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
-        [MachineRuntime.compiledProcessInitial]: () => Effect.succeed({ state: 1, done: true, output: "complete" }),
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          initial: () => Effect.succeed({ state: 1, done: true, output: "complete" }),
+          drain: {
+            _tag: "Process",
+            run: () => Ref.update(drainCount, (count) => count + 1).pipe(Effect.as(Option.none()))
+          }
+        },
         initial: () => Effect.die(new Error("compiled startup unexpectedly used the general initial effect")),
-        run: () => Effect.never,
-        drain: () => Ref.update(drainCount, (count) => count + 1).pipe(Effect.as(Option.none()))
+        run: () => Effect.never
       })
 
       assert.strictEqual(yield* ref.join, "complete")
@@ -52,23 +62,28 @@ describe("machine process lifecycle", () => {
         | { readonly _tag: "Done" }
       const observed: Array<number> = []
       const ref = yield* MachineRuntime.startProcess<undefined, Event, never, never, ReadonlyArray<number>>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          drain: {
+            _tag: "Process",
+            run: (context) =>
+              Effect.gen(function*() {
+                while (true) {
+                  const event = yield* context.poll!
+                  if (Option.isNone(event)) {
+                    return Option.none()
+                  }
+                  if (event.value._tag === "Done") {
+                    return Option.some(observed)
+                  }
+                  observed.push(event.value.value)
+                }
+              })
+          }
+        },
         initial: () => Effect.succeed(undefined),
-        run: () => Effect.never,
-        drain: (context) =>
-          Effect.gen(function*() {
-            while (true) {
-              const event = yield* context.poll!
-              if (Option.isNone(event)) {
-                return Option.none()
-              }
-              if (event.value._tag === "Done") {
-                return Option.some(observed)
-              }
-              observed.push(event.value.value)
-            }
-          })
+        run: () => Effect.never
       })
 
       for (let value = 0; value < 1_000; value += 1) {
@@ -83,21 +98,26 @@ describe("machine process lifecycle", () => {
   it.effect("publishes a compiled transition burst as one lossless ordered chunk", () =>
     Effect.gen(function*() {
       const ref = yield* MachineRuntime.startProcess<number, { readonly count: number }, never, never, number>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          drain: {
+            _tag: "Owned",
+            run: (context) =>
+              Effect.sync(() => {
+                const pending = context.poll()
+                if (Option.isNone(pending)) {
+                  return Option.none()
+                }
+                for (let state = 1; state <= pending.value.count; state += 1) {
+                  context.commit(state)
+                }
+                return Option.some(pending.value.count)
+              })
+          }
+        },
         initial: () => Effect.succeed(0),
-        run: () => Effect.never,
-        [MachineRuntime.compiledProcessDrain]: (context) =>
-          Effect.sync(() => {
-            const pending = context.poll()
-            if (Option.isNone(pending)) {
-              return Option.none()
-            }
-            for (let state = 1; state <= pending.value.count; state += 1) {
-              context.commit(state)
-            }
-            return Option.some(pending.value.count)
-          })
+        run: () => Effect.never
       })
       const publications = yield* ref.changes.pipe(
         Stream.chunks,
@@ -117,6 +137,46 @@ describe("machine process lifecycle", () => {
       assert.deepStrictEqual(chunks.at(-1)?.[0], { status: "done", state: 100, output: 100 })
     }))
 
+  it.effect("publishes owned changes before crossing an explicit Effect boundary", () =>
+    Effect.gen(function*() {
+      const ref = yield* MachineRuntime.startProcess<number, void, never, never, number>({
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          drain: {
+            _tag: "Owned",
+            run: (context) => {
+              const pending = context.poll()
+              if (Option.isNone(pending)) {
+                return Effect.succeed(Option.none())
+              }
+              context.commit(1)
+              return context.runAfterChanges(
+                Effect.sync(() => {
+                  context.commit(2)
+                  return Option.some(2)
+                })
+              )
+            }
+          }
+        },
+        initial: () => Effect.succeed(0),
+        run: () => Effect.never
+      })
+      const publications = yield* ref.changes.pipe(
+        Stream.chunks,
+        Stream.runCollect,
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* ref.send(undefined)
+      assert.strictEqual(yield* ref.join, 2)
+
+      const chunks = Array.from(yield* Fiber.join(publications), (chunk) => Array.from(chunk))
+      assert.deepStrictEqual(chunks.map((chunk) => chunk.length), [1, 1, 1, 1])
+      assert.deepStrictEqual(chunks.flatMap((chunk) => chunk).map((snapshot) => snapshot.state), [0, 1, 2, 2])
+    }))
+
   it.effect("wakes an on-demand compiled process across consecutive idle periods", () =>
     Effect.gen(function*() {
       type Event = {
@@ -124,21 +184,26 @@ describe("machine process lifecycle", () => {
         readonly processed: Deferred.Deferred<void>
       }
       const ref = yield* MachineRuntime.startProcess<number, Event>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          drain: {
+            _tag: "Process",
+            run: (context) =>
+              Effect.gen(function*() {
+                while (true) {
+                  const event = yield* context.poll!
+                  if (Option.isNone(event)) {
+                    return Option.none()
+                  }
+                  yield* context.setState(event.value.value)
+                  yield* Deferred.succeed(event.value.processed, undefined)
+                }
+              })
+          }
+        },
         initial: () => Effect.succeed(0),
-        run: () => Effect.never,
-        drain: (context) =>
-          Effect.gen(function*() {
-            while (true) {
-              const event = yield* context.poll!
-              if (Option.isNone(event)) {
-                return Option.none()
-              }
-              yield* context.setState(event.value.value)
-              yield* Deferred.succeed(event.value.processed, undefined)
-            }
-          })
+        run: () => Effect.never
       })
 
       for (let value = 1; value <= 100; value += 1) {
@@ -159,7 +224,7 @@ describe("machine process lifecycle", () => {
     Effect.gen(function*() {
       const processScope = yield* Deferred.make<MachineRuntime.ProcessScope<never>>()
       const ref = yield* MachineRuntime.startProcess({
-        [MachineRuntime.childlessProcess]: true,
+        execution: { _tag: "Childless" },
         initial: (scope) => Deferred.succeed(processScope, scope).pipe(Effect.as(0)),
         run: () => Effect.never
       })
@@ -224,11 +289,10 @@ describe("machine process lifecycle", () => {
       }
     }))
 
-  it.effect("preserves single-owner stop arbitration for compiled processes", () =>
+  it.effect("preserves single-owner stop arbitration for process logic", () =>
     Effect.gen(function*() {
       const cleanupCount = yield* Ref.make(0)
       const ref = yield* MachineRuntime.startProcess({
-        [MachineRuntime.compiledProcess]: true,
         initial: () => Effect.succeed(1),
         run: (context) =>
           Effect.never.pipe(
@@ -258,22 +322,27 @@ describe("machine process lifecycle", () => {
             const race = yield* Deferred.make<void>()
             const cleanupCount = yield* Ref.make(0)
             const ref = yield* MachineRuntime.startProcess<number, void, never, never, number>({
-              [MachineRuntime.childlessProcess]: true,
-              [MachineRuntime.compiledProcess]: true,
+              execution: {
+                _tag: "Compiled",
+                childless: true,
+                drain: {
+                  _tag: "Process",
+                  run: (context) =>
+                    Effect.gen(function*() {
+                      const event = yield* context.poll!
+                      if (Option.isNone(event)) {
+                        return Option.none()
+                      }
+                      yield* Deferred.succeed(started, undefined)
+                      return yield* Deferred.await(release).pipe(
+                        Effect.as(Option.some(index)),
+                        Effect.ensuring(Ref.update(cleanupCount, (count) => count + 1))
+                      )
+                    })
+                }
+              },
               initial: () => Effect.succeed(index),
-              run: () => Effect.never,
-              drain: (context) =>
-                Effect.gen(function*() {
-                  const event = yield* context.poll!
-                  if (Option.isNone(event)) {
-                    return Option.none()
-                  }
-                  yield* Deferred.succeed(started, undefined)
-                  return yield* Deferred.await(release).pipe(
-                    Effect.as(Option.some(index)),
-                    Effect.ensuring(Ref.update(cleanupCount, (count) => count + 1))
-                  )
-                })
+              run: () => Effect.never
             })
 
             yield* ref.send(undefined)
@@ -313,22 +382,27 @@ describe("machine process lifecycle", () => {
       const started = yield* Deferred.make<void>()
       const cleanupCount = yield* Ref.make(0)
       const ref = yield* MachineRuntime.startProcess<number, void>({
-        [MachineRuntime.childlessProcess]: true,
-        [MachineRuntime.compiledProcess]: true,
+        execution: {
+          _tag: "Compiled",
+          childless: true,
+          drain: {
+            _tag: "Process",
+            run: (context) =>
+              Effect.gen(function*() {
+                const event = yield* context.poll!
+                if (Option.isNone(event)) {
+                  return Option.none()
+                }
+                return yield* Effect.acquireUseRelease(
+                  Deferred.succeed(started, undefined),
+                  () => Effect.never,
+                  () => Ref.update(cleanupCount, (count) => count + 1)
+                )
+              })
+          }
+        },
         initial: () => Effect.succeed(1),
-        run: () => Effect.never,
-        drain: (context) =>
-          Effect.gen(function*() {
-            const event = yield* context.poll!
-            if (Option.isNone(event)) {
-              return Option.none()
-            }
-            return yield* Effect.acquireUseRelease(
-              Deferred.succeed(started, undefined),
-              () => Effect.never,
-              () => Ref.update(cleanupCount, (count) => count + 1)
-            )
-          })
+        run: () => Effect.never
       })
 
       yield* ref.send(undefined)
@@ -344,11 +418,13 @@ describe("machine process lifecycle", () => {
     Effect.gen(function*() {
       const start = () =>
         MachineRuntime.startProcess<number, void>({
-          [MachineRuntime.childlessProcess]: true,
-          [MachineRuntime.compiledProcess]: true,
+          execution: {
+            _tag: "Compiled",
+            childless: true,
+            drain: { _tag: "Process", run: () => Effect.succeed(Option.none()) }
+          },
           initial: () => Effect.succeed(1),
-          run: () => Effect.never,
-          drain: () => Effect.succeed(Option.none())
+          run: () => Effect.never
         })
 
       const stoppedBeforeJoin = yield* start()
@@ -524,19 +600,24 @@ describe("machine process lifecycle", () => {
           Effect.gen(function*() {
             const race = yield* Deferred.make<void>()
             const ref = yield* MachineRuntime.startProcess<number, void, never, never, string>({
-              [MachineRuntime.childlessProcess]: true,
-              [MachineRuntime.compiledProcess]: true,
+              execution: {
+                _tag: "Compiled",
+                childless: true,
+                drain: {
+                  _tag: "Process",
+                  run: (context) =>
+                    Effect.gen(function*() {
+                      const event = yield* context.poll!
+                      if (Option.isNone(event)) {
+                        return Option.none()
+                      }
+                      yield* context.setState(1)
+                      return Option.some("done")
+                    })
+                }
+              },
               initial: () => Effect.succeed(0),
-              run: () => Effect.never,
-              drain: (context) =>
-                Effect.gen(function*() {
-                  const event = yield* context.poll!
-                  if (Option.isNone(event)) {
-                    return Option.none()
-                  }
-                  yield* context.setState(1)
-                  return Option.some("done")
-                })
+              run: () => Effect.never
             })
             const changes = yield* Deferred.await(race).pipe(
               Effect.andThen(Stream.runCollect(ref.changes)),
