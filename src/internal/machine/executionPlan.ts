@@ -63,6 +63,27 @@ interface IndexedExecutionDescriptor {
   >
 }
 
+const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
+  "initial",
+  "invoke",
+  "on",
+  "output"
+])
+
+// Fail closed so a newly introduced semantic field must explicitly opt into
+// indexed execution instead of being accepted before the kernel supports it.
+const supportsIndexedStateConfig = (config: Machine.AnyStateConfig | undefined): boolean => {
+  if (config === undefined) {
+    return true
+  }
+  for (const key of Reflect.ownKeys(config)) {
+    if (!indexedStateConfigKeys.has(key)) {
+      return false
+    }
+  }
+  return true
+}
+
 const compileIndexedExecutionDescriptor = (
   machine: Machine.Any
 ): IndexedExecutionDescriptor | undefined => {
@@ -87,11 +108,7 @@ const compileIndexedExecutionDescriptor = (
     }
 
     const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
-    if (
-      config?.entry !== undefined || config?.exit !== undefined || config?.always !== undefined ||
-      config?.onDone !== undefined || (config as any)?.choice !== undefined ||
-      (config as any)?.history !== undefined
-    ) {
+    if (!supportsIndexedStateConfig(config)) {
       return undefined
     }
     if (config?.on === undefined) {

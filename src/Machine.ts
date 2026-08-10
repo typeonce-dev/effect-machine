@@ -200,6 +200,9 @@ export interface Machine<
    * Adds typed state handlers and returns the refined machine definition.
    * Successive calls implement the remaining unhandled states while retaining
    * accumulated errors, services, final states, and output evidence.
+   * Event dispatch maps and transition descriptors are captured by value, so
+   * later mutation of the objects supplied to this call cannot alter the
+   * resulting machine.
    *
    * @since 4.0.0
    */

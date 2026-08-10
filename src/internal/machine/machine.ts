@@ -147,6 +147,28 @@ const validateTransitionTargets = (
   }
 }
 
+const captureTransition = (transition: unknown): unknown => {
+  if (typeof transition !== "object" || transition === null) {
+    return transition
+  }
+  const captured = { ...(transition as Record<PropertyKey, unknown>) }
+  if (Array.isArray(captured.targets)) {
+    captured.targets = captured.targets.slice()
+  }
+  return captured
+}
+
+const captureEventHandlers = (on: object): Record<PropertyKey, unknown> => {
+  // The machine owns its dispatch table. Compiled plans may snapshot these
+  // definitions, so retaining caller-owned containers would let strategies
+  // observe different handlers after an unsafe external mutation.
+  const captured: Record<PropertyKey, unknown> = Object.create(null)
+  for (const event of Reflect.ownKeys(on)) {
+    captured[event] = captureTransition((on as Record<PropertyKey, unknown>)[event])
+  }
+  return captured
+}
+
 const flattenHandlers = (
   handlers: Record<PropertyKey, Machine.AnyStateConfig>,
   stateNodes: Machine.StateNodes,
@@ -166,8 +188,10 @@ const flattenHandlers = (
     const { states: childConfig, ...stateConfig } = nodeConfig as Record<string, unknown>
     const on = stateConfig.on
     if (typeof on === "object" && on !== null) {
-      for (const event of Reflect.ownKeys(on)) {
-        validateTransitionTargets(stateNodes, path, event, (on as Record<PropertyKey, unknown>)[event])
+      const capturedOn = captureEventHandlers(on)
+      stateConfig.on = capturedOn
+      for (const event of Reflect.ownKeys(capturedOn)) {
+        validateTransitionTargets(stateNodes, path, event, capturedOn[event])
       }
     }
     validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
