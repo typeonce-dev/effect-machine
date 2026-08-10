@@ -101,6 +101,43 @@ const assertMachineSchemaEncodeError = (
 const unsafeTagged = <A extends { readonly _tag: PropertyKey }>(value: A): A => value
 
 describe("Machine", () => {
+  it.effect("captures event dispatch definitions supplied to handle", () =>
+    Effect.gen(function*() {
+      class Stable extends Schema.TaggedClass<Stable>("Stable")("Stable", {}) {}
+      class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
+      const states = Machine.defineStates({ Stable })
+      const transition = {
+        reenter: false,
+        targets: [] as Array<"Stable">,
+        transition: () => undefined
+      }
+      const on: { Ping?: typeof transition } = { Ping: transition }
+      const machine = Machine.make({
+        states: states.states,
+        events: [Ping],
+        initial: () => states.initial.Stable(new Stable({}))
+      }).handle({ Stable: { on } })
+
+      delete on.Ping
+      transition.reenter = true
+      transition.targets.push("Stable")
+
+      assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
+        source: "Stable",
+        trigger: { type: "event", event: "Ping" },
+        reenter: false,
+        targets: { type: "declared", paths: [] }
+      }])
+
+      const initial = yield* Machine.planInitial(machine)
+      const planned = yield* Machine.plan(machine, initial.state, new Ping({}))
+      assert.strictEqual(planned.microsteps.length, 1)
+      const step = planned.microsteps[0]!
+      assert.isFalse(step.changed)
+      assert.deepStrictEqual(step.exitPaths, [])
+      assert.deepStrictEqual(step.entryPaths, [])
+    }))
+
   const Input = Schema.Struct({
     userId: Schema.String
   })
