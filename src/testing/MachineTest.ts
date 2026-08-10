@@ -634,6 +634,272 @@ export const assertInvariants: <M extends AnyMachine>(
 ) => Effect.Effect<void, internal.InvariantError<M>> = internal.assertInvariants
 
 /**
+ * User-defined identity for a logical exploration state.
+ *
+ * Equal keys deliberately collapse snapshots into one explored state. The key
+ * therefore defines both finiteness and the semantic precision of an
+ * exploration.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationKey = PropertyKey
+
+/**
+ * Hard bounds for one exploration.
+ *
+ * Defaults are 20 public events, 1,000 states, and 10,000 planned
+ * transitions. A limit never makes an incomplete result appear exhaustive.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationLimits {
+  readonly maxDepth?: number
+  readonly maxStates?: number
+  readonly maxTransitions?: number
+}
+
+/**
+ * Resolved bounds retained by an exploration result.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ResolvedExplorationLimits {
+  readonly maxDepth: number
+  readonly maxStates: number
+  readonly maxTransitions: number
+}
+
+/**
+ * Evidence available while assigning a state key.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationStateContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly configuration: ReadonlyArray<StatePath<M>>
+  readonly depth: number
+  readonly trace: Trace<M>
+}
+
+/**
+ * One logical state discovered by breadth-first exploration.
+ *
+ * `trace` is the first, and therefore shortest, trace that reached `key`.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationNode<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey>
+  extends ExplorationStateContext<M>
+{
+  readonly key: Key
+}
+
+/**
+ * One concretely planned public event in the exploration graph.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationEdge<M extends AnyMachine> {
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly step: TraceStep<M>
+  readonly discovered: boolean
+}
+
+/**
+ * One boundary that could not be explored because a hard limit was reached.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  | {
+    readonly _tag: "DepthLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+  }
+  | {
+    readonly _tag: "StateLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+    readonly target: Key
+    readonly targetTrace: Trace<M>
+  }
+  | {
+    readonly _tag: "TransitionLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+  }
+
+/**
+ * Honest completeness status for the supplied event representatives and state
+ * key abstraction.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationCompleteness<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  | {
+    readonly _tag: "Complete"
+  }
+  | {
+    readonly _tag: "Truncated"
+    readonly reasons: ReadonlyArray<"depth" | "states" | "transitions">
+    readonly frontier: ReadonlyArray<ExplorationFrontier<M, Key>>
+  }
+
+/**
+ * Deterministic breadth-first exploration counts.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationStats {
+  readonly states: number
+  readonly plannedTransitions: number
+  readonly retainedEdges: number
+  readonly maxDepth: number
+}
+
+/**
+ * A bounded logical state graph and its shortest-path evidence.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> {
+  readonly graph: Graph.DirectedGraph<ExplorationNode<M, Key>, ExplorationEdge<M>>
+  readonly nodes: ReadonlyArray<ExplorationNode<M, Key>>
+  readonly nodesByKey: ReadonlyMap<Key, Graph.NodeIndex>
+  readonly start: Graph.NodeIndex
+  readonly limits: ResolvedExplorationLimits
+  readonly stats: ExplorationStats
+  readonly completeness: ExplorationCompleteness<M, Key>
+}
+
+interface ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> {
+  readonly events: (context: ExplorationStateContext<M>) => ReadonlyArray<Machine.Machine.InputEvent<M>>
+  readonly stateKey: (context: ExplorationStateContext<M>) => Key
+  readonly limits?: ExplorationLimits
+  readonly invariants?: ReadonlyArray<Invariant<M>>
+}
+
+/**
+ * Configuration for bounded planner exploration.
+ *
+ * Event representatives may depend on the current state. Exploration is
+ * exhaustive only relative to those representatives and the equivalence
+ * relation defined by `stateKey`.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  & ExploreOptionsBase<M, Key>
+  & (Machine.Machine.Input<M> extends typeof Schema.Void ? {
+      readonly input?: never
+    }
+    : {
+      readonly input: InputValue<M>
+    })
+
+/**
+ * Explores the bounded logical state graph in breadth-first order.
+ *
+ * Invariants are checked against startup and every concretely planned edge,
+ * so a failure retains a shortest discovered counterexample. Staged actions
+ * and runtime activities are not executed.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
+  machine: ReadyMachine<M>,
+  options: ExploreOptions<M, Key>
+) => Effect.Effect<
+  Exploration<M, Key>,
+  RunFailure<RunError<M>, M> | internal.InvariantError<M>,
+  RunServices<M>
+> = internal.explore
+
+/**
+ * A predicate over one explored logical state.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationPredicate<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> = (
+  node: ExplorationNode<M, Key>
+) => boolean
+
+/**
+ * Why a reachability assertion failed.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ReachabilityFailure = "NotFound" | "UnexpectedMatch" | "Inconclusive"
+
+/**
+ * A failed or inconclusive reachability assertion.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { ReachabilityError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Finds the first, and therefore shortest, explored state matching a
+ * predicate.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const findShortest: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  predicate: ExplorationPredicate<M, Key>
+) => ExplorationNode<M, Key> | undefined = internal.findShortest
+
+/**
+ * Requires a matching state and returns its shortest witness.
+ *
+ * A truncated exploration without a witness fails as inconclusive rather than
+ * claiming the state is unreachable.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const assertReachable: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  name: string,
+  predicate: ExplorationPredicate<M, Key>
+) => Effect.Effect<ExplorationNode<M, Key>, internal.ReachabilityError<M, Key>> = internal.assertReachable
+
+/**
+ * Requires that no explored state matches a predicate.
+ *
+ * This assertion succeeds only for a complete exploration. A truncated
+ * result without a witness fails as inconclusive.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  name: string,
+  predicate: ExplorationPredicate<M, Key>
+) => Effect.Effect<void, internal.ReachabilityError<M, Key>> = internal.assertUnreachable
+
+/**
  * Checks a real planner trace against the independent finite statechart model
  * interpreter.
  *

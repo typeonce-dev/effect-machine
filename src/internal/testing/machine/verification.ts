@@ -15,17 +15,13 @@ import type {
   Coverage,
   CoverageSummary,
   EventCoverageItem,
-  EventPlan,
-  InitialPlan,
   InitialTrace,
   Microstep,
   ObservedGraph,
   ObservedGraphEdge,
   ObservedGraphNode,
   PlanCompletion,
-  RunError,
   RunFailure,
-  RunServices,
   Scenario,
   ScenarioOptions,
   Scenarios,
@@ -39,10 +35,10 @@ import type {
   VerificationViolation,
   VerifyOptions
 } from "../../../testing/MachineTest.js"
-import type { EnsureExecutable } from "../../machine/readiness.js"
 import { toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
+import { rawConfigurationPaths, run } from "./trace.js"
 
 export {
   advanceCommand,
@@ -111,6 +107,10 @@ export {
 
 export { assertInvariants, checkInvariants, Invariant, InvariantError, invariants } from "./invariant.js"
 
+export { assertReachable, assertUnreachable, explore, findShortest, ReachabilityError } from "./exploration.js"
+
+export { run }
+
 export const interpretModel = ReferenceModel.interpretModel
 
 type AnyMachine = Machine.Machine.Any
@@ -120,14 +120,6 @@ type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>["Type"]
 type StatePath<M extends AnyMachine> = Machine.Machine.StateIdentifier<Machine.Machine.States<M>>
 
 type StateNodePath<M extends AnyMachine> = Machine.Machine.StateNodeIdentifier<Machine.Machine.States<M>>
-
-type ReadyMachine<M extends AnyMachine> =
-  & M
-  & EnsureExecutable<
-    Machine.Machine.States<M>,
-    Machine.Machine.UnhandledStates<M>,
-    Machine.Machine.OutputStates<M>
-  >
 
 const validateLength = (name: "minEvents" | "maxEvents", value: number): void => {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -225,106 +217,6 @@ export const verifyModel = <M extends AnyMachine>(
   model: FiniteModel,
   actualTrace: Trace<M>
 ): Effect.Effect<void, ReferenceModel.ModelVerificationError> => ReferenceModel.verifyModelTrace(model, actualTrace)
-
-const rawConfigurationPaths = <M extends AnyMachine>(
-  machine: M,
-  snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-): ReadonlyArray<StatePath<M>> => {
-  const active = new Set<string>()
-  const visit = (current: unknown): void => {
-    if (typeof current !== "object" || current === null) return
-    const value = current as Record<string, unknown>
-    if (typeof value.path === "string") active.add(value.path)
-    if (value.state !== undefined) visit(value.state)
-    if (typeof value.states === "object" && value.states !== null) {
-      for (const child of Object.values(value.states)) visit(child)
-    }
-  }
-  visit(snapshot)
-  return Machine.stateNodes(machine)
-    .filter((node) => node.type !== "history" && node.type !== "choice" && active.has(node.path))
-    .map((node) => node.path) as ReadonlyArray<StatePath<M>>
-}
-
-export const run: <M extends AnyMachine>(
-  machine: ReadyMachine<M>,
-  scenario: Scenario<M>
-) => Effect.Effect<Trace<M>, RunFailure<RunError<M>, M>, RunServices<M>> = Effect.fnUntraced(function*<
-  M extends AnyMachine
->(
-  machine: ReadyMachine<M>,
-  scenario: Scenario<M>
-) {
-  const initialEffect = (machine.input === undefined || machine.input === Schema.Void
-    ? (Machine.planInitial as any)(machine)
-    : (Machine.planInitial as any)(machine, (scenario as { readonly input: InputValue<M> }).input)) as Effect.Effect<
-      InitialPlan<M>,
-      RunError<M>,
-      RunServices<M>
-    >
-  const initial = yield* initialEffect.pipe(
-    Effect.mapError((cause): RunFailure<RunError<M>, M> => ({
-      _tag: "MachineTestRunFailure",
-      scenario,
-      phase: "initial",
-      eventIndex: undefined,
-      event: undefined,
-      initial: undefined,
-      steps: [],
-      cause
-    }))
-  )
-  const initialConfiguration = rawConfigurationPaths(machine, initial.state)
-  const initialTrace: InitialTrace<M> = {
-    plan: initial,
-    startingState: initial.startingState,
-    startingConfiguration: rawConfigurationPaths(machine, initial.startingState),
-    initialEntryPaths: initial.initialEntryPaths,
-    configuration: initialConfiguration
-  }
-  const steps: Array<TraceStep<M>> = []
-  let current = initial.state
-
-  for (let index = 0; index < scenario.events.length; index++) {
-    const event = scenario.events[index]
-    const before = current
-    const beforeConfiguration = rawConfigurationPaths(machine, before)
-    const plan = yield* ((Machine.plan as any)(machine, before, event) as Effect.Effect<
-      EventPlan<M>,
-      RunError<M>,
-      RunServices<M>
-    >).pipe(
-      Effect.mapError((cause): RunFailure<RunError<M>, M> => ({
-        _tag: "MachineTestRunFailure",
-        scenario,
-        phase: "event",
-        eventIndex: index,
-        event,
-        initial: initialTrace,
-        steps: steps.slice(),
-        cause
-      }))
-    )
-    current = plan.next
-    steps.push({
-      index,
-      before,
-      beforeConfiguration,
-      event,
-      plan,
-      after: current,
-      afterConfiguration: rawConfigurationPaths(machine, current)
-    } as TraceStep<M>)
-  }
-
-  return {
-    scenario,
-    initial: initialTrace,
-    steps,
-    final: current,
-    finalConfiguration: rawConfigurationPaths(machine, current)
-  } as Trace<M>
-}) as any
 
 const canonicalize = (value: unknown, active: WeakSet<object>): unknown => {
   if (value === undefined) return { $undefined: true }

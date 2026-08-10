@@ -765,6 +765,30 @@ no matches is explicitly `untested`; use
 Prefer `assertInvariants` inside FastCheck properties because it succeeds with
 `void`. Use `checkInvariants` when the test needs the per-law report.
 
+For systematic planner exploration, provide a finite abstraction explicitly:
+
+```ts
+const explored = yield * MachineTest.explore(machine, {
+  events: ({ snapshot }) => eventRepresentatives(snapshot),
+  stateKey: ({ snapshot }) => logicalStateKey(snapshot),
+  limits: { maxDepth: 20, maxStates: 1_000 },
+  invariants: laws
+})
+```
+
+The event callback returns concrete representatives, not schemas or
+arbitraries. Include meaningful boundary values based on the current snapshot.
+The key defines which snapshots are treated as equivalent; it must retain every
+piece of data that can change the future behavior being tested. A coarse key
+can make exploration finite but under-approximate behavior.
+
+`assertReachable` returns the shortest witness. `assertUnreachable` succeeds
+only when `explored.completeness` is `Complete`. Never interpret a truncated
+depth, state, or transition frontier as an unreachability proof. The explorer
+retains cycles as graph edges but does not enumerate every path around them;
+use a separate temporal/path model when a law depends on repeated traversal
+rather than logical-state reachability.
+
 Do not encode application invariants as guards merely to make them testable.
 Keep ordinary TypeScript branching in transition handlers unless a choice is
 part of the statechart topology. Invariants independently verify the resulting

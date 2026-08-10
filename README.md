@@ -710,6 +710,44 @@ location.
 These APIs inspect planner evidence. Staged action effects, invokes, timing,
 and process scheduling require the runtime command-model APIs instead.
 
+Use bounded exploration when random scenarios should be complemented by a
+systematic search over concrete event representatives:
+
+```ts
+const explored = yield * MachineTest.explore(accountMachine, {
+  events: ({ snapshot }) => [
+    new Deposit({ amount: 1 }),
+    new Withdraw({ amount: snapshot.value.balance }),
+    new Withdraw({ amount: snapshot.value.balance + 1 })
+  ],
+  stateKey: ({ snapshot }) => `${snapshot.value._tag}:${snapshot.value.balance}`,
+  limits: {
+    maxDepth: 20,
+    maxStates: 1_000,
+    maxTransitions: 10_000
+  },
+  invariants: laws
+})
+
+const rejected = yield * MachineTest.assertReachable(
+  explored,
+  "insufficient funds rejection",
+  ({ configuration }) => configuration.includes("Rejected")
+)
+
+console.log(rejected.trace.scenario.events) // shortest witness
+```
+
+Exploration is breadth-first, so each retained node owns its shortest trace.
+It is exhaustive only for the concrete events returned by `events` and the
+equivalence relation defined by `stateKey`. Equal keys intentionally collapse
+snapshots and only the first representative is expanded. Results distinguish
+`Complete` from `Truncated` and retain the depth, state, or transition frontier
+that hit a limit. An unreachability assertion succeeds only for a complete
+result; otherwise it fails as inconclusive. Cycles are retained as graph edges,
+but exploration does not enumerate every cyclic path. Invariants are checked
+on startup and on each planned edge extending a node's shortest trace.
+
 ## Current limits
 
 Declarative first-class guards are not part of the current API. Ordinary
