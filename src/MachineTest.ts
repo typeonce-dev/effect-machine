@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 import { FastCheck } from "effect/testing"
 import type { EnsureExecutable } from "./internal/machineReadiness.js"
+import { type SchemaArbitraryReport, toArbitraryWithReport } from "./internal/machineTestArbitrary.js"
 import type { FiniteModel } from "./internal/machineTestFiniteModel.js"
 import * as ReferenceModel from "./internal/machineTestReferenceModel.js"
 import * as Machine from "./Machine.js"
@@ -39,6 +40,12 @@ export {
   sendCommand,
   stopCommand
 } from "./internal/machineTestRuntime.js"
+
+export type {
+  SchemaArbitraryOpaqueFilterWarning,
+  SchemaArbitraryReport,
+  SchemaArbitraryWarning
+} from "./internal/machineTestArbitrary.js"
 
 export {
   compileModel,
@@ -161,7 +168,7 @@ export type ScenarioOptions<M extends AnyMachine> =
 export interface SchemaArbitraryDiagnostic {
   readonly boundary: "input" | "event"
   readonly index: number | undefined
-  readonly report: Schema.Annotations.ToArbitrary.Report
+  readonly report: SchemaArbitraryReport
 }
 
 /**
@@ -224,7 +231,7 @@ export const scenarios = <M extends AnyMachine>(
   const diagnostics: Array<SchemaArbitraryDiagnostic> = []
   const eventArbitraries = options.eventsArbitrary === undefined
     ? machine.events.map((schema, index) => {
-      const derived = Schema.toArbitrary(schema, { report: true })
+      const derived = toArbitraryWithReport(schema)
       diagnostics.push({
         boundary: "event",
         index,
@@ -264,7 +271,7 @@ export const scenarios = <M extends AnyMachine>(
   if (options.inputArbitrary !== undefined) {
     inputArbitrary = options.inputArbitrary
   } else {
-    const derived = Schema.toArbitrary(machine.input, { report: true })
+    const derived = toArbitraryWithReport(machine.input)
     diagnostics.unshift({
       boundary: "input",
       index: undefined,

@@ -61,20 +61,20 @@
     "release": "pnpm build && changeset publish"
   },
   "peerDependencies": {
-    "effect": "4.0.0-beta.105"
+    "effect": "4.0.0-beta.107"
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
-    "@effect/vitest": "4.0.0-beta.105",
+    "@effect/vitest": "4.0.0-beta.107",
     "@types/node": "25.7.0",
     "dprint": "0.55.2",
-    "effect": "4.0.0-beta.105",
+    "effect": "4.0.0-beta.107",
     "tinybench": "2.9.0",
     "tstyche": "7.2.1",
     "typescript": "6.0.3",
     "vitest": "4.1.10",
     "xstate-v5": "npm:xstate@5.32.5",
-    "xstate-v6": "npm:xstate@6.0.0-alpha.27"
+    "xstate-v6": "npm:xstate@6.0.0-alpha.31"
   },
   "packageManager": "pnpm@10.17.1",
   "engines": {
