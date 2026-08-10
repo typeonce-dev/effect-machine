@@ -505,15 +505,12 @@ export const watch = <State, Event, Error = never, Output = never>(
 
 interface ProcessRuntime {
   readonly nextSessionId: Effect.Effect<string>
-  readonly nextSessionIdUnsafe: () => string
 }
 
 const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
   let sessionIdCounter = 0
-  const nextSessionIdUnsafe = (): string => `machine:${sessionIdCounter++}`
   return {
-    nextSessionId: Effect.sync(nextSessionIdUnsafe),
-    nextSessionIdUnsafe
+    nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`)
   }
 })
 
@@ -646,12 +643,16 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         logic[childlessProcess] === true && logic[compiledProcessDrain] !== undefined &&
         logic[compiledProcessInitialSync] !== undefined
       const start = synchronous
-        ? new CompiledProcess(
-          logic,
-          startOptions,
-          this.scopedServices ??= Context.add(this.services!, Scope.Scope, scope),
-          this.runtime.nextSessionIdUnsafe()
-        ).initializeOwnedSync()
+        ? Effect.flatMap(
+          this.runtime.nextSessionId,
+          (sessionId) =>
+            new CompiledProcess(
+              logic,
+              startOptions,
+              this.scopedServices ??= Context.add(this.services!, Scope.Scope, scope),
+              sessionId
+            ).initializeOwnedSync()
+        )
         : startLogicInternal(logic, startOptions)
       const guarded = start.pipe(
         Effect.onExit((exit) => {
@@ -1506,7 +1507,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     }
   }
 
-  private initializeScope(): void {
+  initializeOwnedSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
     const parent = this.options.parent
     const sendParent = this.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
     this.processScope = {
@@ -1518,34 +1519,6 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       stopChild: this.childRuntime.stop,
       failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause)
     }
-  }
-
-  private activate(initialized: CompiledInitialized): void {
-    this.current = {
-      revision: 0,
-      terminalizing: false,
-      changes: undefined,
-      snapshot: { status: "active", state: initialized.state }
-    }
-    if (this.logic[compiledProcessDrain] === undefined) {
-      this.processContext = {
-        ...this.processScope,
-        receive: Effect.never,
-        poll: Effect.sync(() => pollCompactMailbox(this.mailbox)),
-        state: Effect.sync(() => this.current.snapshot.state),
-        setState: (state: unknown) => this.setActiveState(state),
-        updateState: (f) => this.updateState(f)
-      }
-    } else {
-      this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
-      if ("executionState" in initialized) {
-        this.compiledContext.executionState = initialized.executionState
-      }
-    }
-  }
-
-  initializeOwnedSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
-    this.initializeScope()
     const compiledInitial = this.logic[compiledProcessInitialSync]!
     let initialized: CompiledInitialized
     try {
@@ -1555,7 +1528,16 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       return Effect.fail(error)
     }
     this.initializing = false
-    this.activate(initialized)
+    this.current = {
+      revision: 0,
+      terminalizing: false,
+      changes: undefined,
+      snapshot: { status: "active", state: initialized.state }
+    }
+    this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
+    if ("executionState" in initialized) {
+      this.compiledContext.executionState = initialized.executionState
+    }
     if (this.options.onReadySync !== undefined && !this.options.onReadySync(this)) {
       this.requestTerminationSync({ _tag: "Stopped" })
     }
@@ -1578,7 +1560,17 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       if (self.logic[childlessProcess] !== true) {
         self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime, self.services)
       }
-      self.initializeScope()
+      const parent = self.options.parent
+      const sendParent = self.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
+      self.processScope = {
+        self: self.address,
+        parent,
+        spawn: self.childRuntime.spawn,
+        sendParent,
+        sendTo: self.childRuntime.sendTo,
+        stopChild: self.childRuntime.stop,
+        failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause)
+      }
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
@@ -1603,7 +1595,27 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         }))
       )
       const initial = initialized.state
-      self.activate(initialized)
+      self.current = {
+        revision: 0,
+        terminalizing: false,
+        changes: undefined,
+        snapshot: { status: "active", state: initial }
+      }
+      if (self.logic[compiledProcessDrain] === undefined) {
+        self.processContext = {
+          ...self.processScope,
+          receive: Effect.never,
+          poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
+          state: Effect.sync(() => self.current.snapshot.state),
+          setState: (state: unknown) => self.setActiveState(state),
+          updateState: (f) => self.updateState(f)
+        }
+      } else {
+        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self.childRuntime.owned, self)
+        if ("executionState" in initialized) {
+          self.compiledContext.executionState = initialized.executionState
+        }
+      }
 
       if (self.options.onReadySync !== undefined && !self.options.onReadySync(self)) {
         yield* self.requestTermination({ _tag: "Stopped" })
