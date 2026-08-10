@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
+import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
 import { MachineTest } from "../../../src/testing/index.js"
 import type { DifferentialStep } from "../../machine/support/runtimeDifferential.js"
@@ -53,6 +54,25 @@ describe("machine planner and runtime strategies", () => {
       label: "flat strategy"
     }))
 
+  it.effect("keeps indexed execution microsteps narrower than diagnostic planner microsteps", () =>
+    Effect.gen(function*() {
+      const machine = makeFlatMachine()
+      const initial = yield* Machine.planInitial(machine)
+      const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
+      const active = Configuration.normalizeConfigurationSync(machine, initial.state)
+      const planned = selected.plan(selected.fromConfiguration(active), new Noop({}))
+      const step: ExecutionPlan.ExecutionMicrostep = planned.microsteps[0]!
+
+      assert.ok(!("transitions" in step))
+      assert.ok(Object.isFrozen(planned.commands))
+      assert.ok(Object.isFrozen(planned.emittedEvents))
+      assert.ok(Object.isFrozen(step.commands))
+      assert.ok(Object.isFrozen(step.raisedEvents))
+      assert.ok(Object.isFrozen(step.emittedEvents))
+      assert.ok(Object.isFrozen(step.exitPaths))
+      assert.ok(Object.isFrozen(step.entryPaths))
+    }))
+
   it.effect("matches generic and indexed-hierarchical planning across simultaneous parallel transitions", () =>
     Effect.gen(function*() {
       class Root extends Schema.TaggedClass<Root>("StrategyRoot")("Root", {}) {}
@@ -96,6 +116,58 @@ describe("machine planner and runtime strategies", () => {
         events: [new Advance({}), new Advance({})],
         expected: "indexed-hierarchical",
         label: "hierarchical strategy"
+      })
+    }))
+
+  it.effect("preserves value-only updates beside control-changing simultaneous transitions", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Parallel",
+          key: "workflow",
+          value: 0,
+          output: "workflow:done",
+          states: [
+            {
+              _tag: "Compound",
+              key: "left",
+              value: 1,
+              initial: "idle",
+              states: [
+                { _tag: "Atomic", key: "idle", value: 2 },
+                { _tag: "Atomic", key: "ready", value: 3 }
+              ]
+            },
+            { _tag: "Atomic", key: "right", value: 4 }
+          ]
+        }],
+        initial: "workflow",
+        events: ["Advance"],
+        transitions: [
+          {
+            source: "workflow.left.idle",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.left.ready",
+            reenter: false
+          },
+          {
+            source: "workflow.right",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.right",
+            targetValue: 9,
+            reenter: false
+          }
+        ]
+      }
+      const reference = MachineTest.interpretModel(model, ["Advance"])
+      assert.strictEqual(reference.steps[0]!.microsteps[0]!.transitions.length, 2)
+      assert.strictEqual(reference.steps[0]!.after.values["workflow.right"]!.value, 9)
+
+      yield* verifyPlannerStrategies({
+        machine: MachineTest.compileModel(model),
+        events: [{ _tag: "Advance" }],
+        expected: "indexed-hierarchical",
+        label: "mixed simultaneous strategy"
       })
     }))
 
