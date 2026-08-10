@@ -774,6 +774,43 @@ It does not wait for timers or invoked processes to finish. Production code
 continues to use enqueue-only `ref.send`; probes are exported only from the
 separate testing entry point.
 
+For command-model and property tests, choose the delivery semantics explicitly.
+`runCausalCommands` requires a probe and completes every accepted send before
+checking it or starting the next command:
+
+```ts
+const transcript = yield * MachineTest.runCausalCommands(
+  probe,
+  commands,
+  {
+    initialModel,
+    transition: (model, command) =>
+      Effect.succeed({
+        model: updateModel(model, command),
+        expected: expectedResult(model, command)
+      }),
+    assert: ({ actual, expected }) =>
+      Effect.sync(() => {
+        if (actual.result._tag === "SendProcessed") {
+          assert.deepStrictEqual(actual.result.step.after, expected.snapshot)
+          assert.strictEqual(actual.result.step.handled, expected.handled)
+        }
+      })
+  }
+)
+```
+
+A causal model step needs no synchronization policy. Use the probe-bound
+`probe.await.until(...)` only for later asynchronous work such as a timer,
+invoke result, or child delivery. The predicate sees the exact runtime snapshot
+type. `actual.awaited` retains every snapshot tested by that explicit wait.
+
+Use `runEnqueuedCommands(ref, ...)` when the property intentionally submits
+bursts or retains outstanding mailbox work. Its model steps continue to use
+`RuntimeSynchronization`. The old `runRuntimeCommands` and
+`formatRuntimeTranscript` names are deprecated aliases for the enqueue-oriented
+runner and formatter because their delivery semantics were not visible.
+
 ## Current limits
 
 Declarative first-class guards are not part of the current API. Ordinary

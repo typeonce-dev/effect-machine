@@ -49,6 +49,18 @@ export const probe = <M extends AnyMachine, Error, Output>(
   return Effect.succeed(Object.freeze({
     machine,
     ref,
+    await: Object.freeze({
+      none: { _tag: "None" } as const,
+      until: (
+        predicate: (
+          snapshot: Machine.RuntimeSnapshot<
+            Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+            Error,
+            Output
+          >
+        ) => boolean
+      ) => ({ _tag: "Until", predicate } as const)
+    }),
     sendAndAwait: (event: Machine.Machine.InputEvent<M>) =>
       acknowledged.call(ref, event).pipe(
         Effect.map(({ after, before, plan }) => {

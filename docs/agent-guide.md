@@ -815,6 +815,31 @@ acknowledgement covers the submitted event's synchronous macrostep, state
 commit, emissions, and invoke startup; it does not wait for an invoke or timer
 to complete. Application code should continue to use `MachineRef.send`.
 
+For generated runtime command sequences, select delivery behavior by name:
+
+```ts
+yield* MachineTest.runCausalCommands(probe, commands, causalModel)
+yield* MachineTest.runEnqueuedCommands(ref, commands, enqueueModel)
+```
+
+Prefer `runCausalCommands` for semantic and reference-model properties. Every
+accepted send produces a `SendProcessed` result containing its exact
+`ProbeStep`, including ignored and targetless events. A machine processing
+error fails that exact command and retains its checked prefix for shrinking.
+The next command does not begin until the submitted send's managed macrostep
+has completed.
+
+Use `probe.await.until(predicate)` in a causal model step only when the
+assertion also requires later timer, invoke, or child activity. It observes the
+current runtime snapshot before waiting for subsequent publications, so it
+does not miss work that completed immediately after the causal boundary.
+
+Use `runEnqueuedCommands` only when outstanding mailbox work is intentional,
+such as burst ordering and queue behavior. Its `RuntimeSynchronization`
+policies observe public snapshots but do not turn send acceptance into causal
+completion. Do not use the deprecated `runRuntimeCommands` name in new code;
+it is an alias for enqueue behavior and hides that important distinction.
+
 ## Common compiler errors
 
 ### `initial` is not callable

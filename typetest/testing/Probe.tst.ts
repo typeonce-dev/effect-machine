@@ -41,4 +41,45 @@ describe("MachineTest probe", () => {
     expect<Machine.StoppedError>().type.toBeAssignableTo<Effect.Error<typeof sent>>()
     expect<MachineTest.ProbeUnavailableError>().type.toBeAssignableTo<Effect.Error<typeof attached>>()
   })
+
+  it("infers causal command evidence and probe-bound asynchronous observations", () => {
+    const started = Machine.start(machine)
+    const executed = Effect.flatMap(
+      started,
+      (ref) =>
+        Effect.flatMap(MachineTest.probe(machine, ref), (probe) =>
+          MachineTest.runCausalCommands(probe, [
+            MachineTest.sendCommand(new PublicEvent({}))
+          ], {
+            initialModel: 0,
+            transition: (model) =>
+              Effect.succeed({
+                model: model + 1,
+                expected: model + 1,
+                await: probe.await.until((snapshot) => {
+                  expect(snapshot.state.value).type.toBe<State>()
+                  return snapshot.state.value.count >= 0
+                })
+              }),
+            assert: ({ actual }) => {
+              expect(actual.result).type.toBe<MachineTest.CausalRuntimeCommandResult<typeof machine>>()
+              if (actual.result._tag === "SendProcessed") {
+                expect(actual.result.step).type.toBe<MachineTest.ProbeStep<typeof machine>>()
+                expect(actual.result.step.event).type.toBe<PublicEvent>()
+              }
+              return Effect.void
+            }
+          }))
+    )
+
+    expect<Effect.Success<typeof executed>["finalModel"]>().type.toBe<number>()
+    expect<Effect.Success<typeof executed>["records"][number]["actual"]["result"]>().type.toBe<
+      MachineTest.CausalRuntimeCommandResult<typeof machine>
+    >()
+    type CausalFailure = Extract<
+      Effect.Error<typeof executed>,
+      { readonly _tag: "MachineTestCausalRuntimeCommandFailure" }
+    >
+    expect<CausalFailure>().type.not.toBe<never>()
+  })
 })

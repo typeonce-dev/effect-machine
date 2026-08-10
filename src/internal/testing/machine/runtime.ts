@@ -14,6 +14,7 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import { FastCheck, TestClock } from "effect/testing"
 import * as Machine from "../../../Machine.js"
+import type { Probe, ProbeStep } from "../../../testing/MachineTest.js"
 import { type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
 
 type AnyMachine = Machine.Machine.Any
@@ -145,6 +146,170 @@ export interface RuntimeModelStep<Model, Expected, State, Error, Output> {
 }
 
 /**
+ * Explicit name for the model step used by the enqueue-oriented command
+ * runner. The `RuntimeModelStep` name remains as a compatibility alias.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output> = RuntimeModelStep<
+  Model,
+  Expected,
+  State,
+  Error,
+  Output
+>
+
+/**
+ * Additional asynchronous observation requested after a causal command has
+ * completed. `None` never guesses that later invoke, timer, or child work is
+ * finished. `Until` observes the current runtime snapshot and subsequent
+ * publications until its predicate matches.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type RuntimeAwait<State, Error, Output> =
+  | { readonly _tag: "None" }
+  | {
+    readonly _tag: "Until"
+    readonly predicate: (snapshot: Machine.RuntimeSnapshot<State, Error, Output>) => boolean
+  }
+
+/**
+ * The pure/reference-model result for one causally executed command.
+ *
+ * `await` is only for asynchronous behavior after the command boundary. A
+ * submitted `Send` always completes its exact managed macrostep first.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeModelStep<Model, Expected, State, Error, Output> {
+  readonly model: Model
+  readonly expected: Expected
+  readonly await?: RuntimeAwait<State, Error, Output>
+}
+
+/**
+ * Exact execution result for one causal runtime command.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type CausalRuntimeCommandResult<M extends AnyMachine> =
+  | { readonly _tag: "SendProcessed"; readonly step: ProbeStep<M> }
+  | { readonly _tag: "SendRejected"; readonly error: Machine.StoppedError }
+  | { readonly _tag: "ClockAdvanced" }
+  | { readonly _tag: "Stopped" }
+  | { readonly _tag: "Checkpoint" }
+
+/**
+ * Actual causal evidence made available to inspection and assertions.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeCommandActual<
+  M extends AnyMachine,
+  Error,
+  Output,
+  Observed
+> {
+  readonly result: CausalRuntimeCommandResult<M>
+  readonly snapshot: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  /** Snapshots tested by an explicit `RuntimeAwait.until`, including its current snapshot. */
+  readonly awaited: ReadonlyArray<
+    Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  >
+  readonly inspected: Observed | undefined
+}
+
+/**
+ * Context supplied to a custom causal runtime inspection effect.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeInspectionContext<M extends AnyMachine, Error, Output> {
+  readonly index: number
+  readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly result: CausalRuntimeCommandResult<M>
+  readonly probe: Probe<M, Error, Output>
+  readonly ref: Probe<M, Error, Output>["ref"]
+  readonly snapshot: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  readonly awaited: ReadonlyArray<
+    Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  >
+}
+
+/**
+ * Context supplied to a causal reference-model assertion.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeAssertionContext<
+  M extends AnyMachine,
+  Model,
+  Expected,
+  Error,
+  Output,
+  Observed
+> extends CausalRuntimeInspectionContext<M, Error, Output> {
+  readonly model: Model
+  readonly expected: Expected
+  readonly actual: CausalRuntimeCommandActual<M, Error, Output, Observed>
+}
+
+/**
+ * Configuration for causally checking runtime commands against a reference
+ * model.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeModelOptions<
+  M extends AnyMachine,
+  Model,
+  Expected,
+  Error,
+  Output,
+  Observed = never,
+  ModelError = never,
+  ModelServices = never,
+  InspectionError = never,
+  InspectionServices = never,
+  AssertionError = never,
+  AssertionServices = never
+> {
+  readonly initialModel: Model
+  /** Live-clock bound for an explicit `RuntimeAwait.until`. Defaults to one second. */
+  readonly observationTimeout?: Duration.Input
+  readonly transition: (
+    model: Model,
+    command: RuntimeCommand<Machine.Machine.InputEvent<M>>,
+    index: number
+  ) => Effect.Effect<
+    CausalRuntimeModelStep<
+      Model,
+      Expected,
+      Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+      Error,
+      Output
+    >,
+    ModelError,
+    ModelServices
+  >
+  readonly inspect?: (
+    context: CausalRuntimeInspectionContext<M, Error, Output>
+  ) => Effect.Effect<Observed, InspectionError, InspectionServices>
+  readonly assert: (
+    context: CausalRuntimeAssertionContext<M, Model, Expected, Error, Output, Observed>
+  ) => Effect.Effect<void, AssertionError, AssertionServices>
+}
+
+/**
  * Actual evidence made available to a runtime command assertion.
  *
  * @category models
@@ -264,6 +429,144 @@ export interface RuntimeTranscript<Model, Expected, State, Event, Error, Output,
   readonly synchronized: boolean
 }
 
+/** Explicit enqueue-oriented names for the compatibility runtime model types. */
+export type EnqueuedRuntimeCommandActual<State, Error, Output, Observed> = RuntimeCommandActual<
+  State,
+  Error,
+  Output,
+  Observed
+>
+export type EnqueuedRuntimeInspectionContext<State, Event, Error, Output> = RuntimeInspectionContext<
+  State,
+  Event,
+  Error,
+  Output
+>
+export type EnqueuedRuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed> =
+  RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
+export type EnqueuedRuntimeModelOptions<
+  Model,
+  Expected,
+  State,
+  Event,
+  Error,
+  Output,
+  Observed = never,
+  ModelError = never,
+  ModelServices = never,
+  InspectionError = never,
+  InspectionServices = never,
+  AssertionError = never,
+  AssertionServices = never
+> = RuntimeModelOptions<
+  Model,
+  Expected,
+  State,
+  Event,
+  Error,
+  Output,
+  Observed,
+  ModelError,
+  ModelServices,
+  InspectionError,
+  InspectionServices,
+  AssertionError,
+  AssertionServices
+>
+export type EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> = RuntimeCommandRecord<
+  Model,
+  Expected,
+  State,
+  Event,
+  Error,
+  Output,
+  Observed
+>
+export type EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> = RuntimeTranscript<
+  Model,
+  Expected,
+  State,
+  Event,
+  Error,
+  Output,
+  Observed
+>
+
+/**
+ * One successfully checked causal command.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeCommandRecord<
+  M extends AnyMachine,
+  Model,
+  Expected,
+  Error,
+  Output,
+  Observed
+> {
+  readonly index: number
+  readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly model: Model
+  readonly expected: Expected
+  readonly actual: CausalRuntimeCommandActual<M, Error, Output, Observed>
+}
+
+/**
+ * A complete causally executed command-model transcript.
+ *
+ * Every accepted send in `records` completed its managed macrostep. This does
+ * not claim that later timer, invoke, or child work has completed unless the
+ * corresponding model step requested `probe.await.until`.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeTranscript<
+  M extends AnyMachine,
+  Model,
+  Expected,
+  Error,
+  Output,
+  Observed
+> {
+  readonly commands: ReadonlyArray<RuntimeCommand<Machine.Machine.InputEvent<M>>>
+  readonly initial: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  readonly records: ReadonlyArray<CausalRuntimeCommandRecord<M, Model, Expected, Error, Output, Observed>>
+  readonly finalModel: Model
+  readonly final: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+}
+
+/**
+ * Partial evidence retained when a causal command fails after execution has
+ * begun but before a complete checked record exists.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface CausalRuntimeCommandAttempt<
+  M extends AnyMachine,
+  Model,
+  Expected,
+  Error,
+  Output,
+  Observed
+> {
+  readonly index: number
+  readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly model: Model
+  readonly expected: Expected
+  readonly result: CausalRuntimeCommandResult<M> | undefined
+  readonly snapshot:
+    | Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+    | undefined
+  readonly awaited: ReadonlyArray<
+    Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  >
+  readonly inspected: Observed | undefined
+}
+
 /**
  * Failure raised when an expected public change stream observation is absent.
  *
@@ -299,6 +602,30 @@ export class RuntimeCommandFailure<
   readonly cause: Cause.Cause<Failure>
   readonly prefix: ReadonlyArray<RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed>>
   readonly attempted: RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> | undefined
+}> {}
+
+/**
+ * A typed causal command-model failure retaining the successfully checked
+ * prefix and exact attempted command.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class CausalRuntimeCommandFailure<
+  Failure = unknown,
+  M extends AnyMachine = AnyMachine,
+  Model = unknown,
+  Expected = unknown,
+  Error = unknown,
+  Output = unknown,
+  Observed = unknown
+> extends Data.TaggedError("MachineTestCausalRuntimeCommandFailure")<{
+  readonly phase: "model" | "execution" | "observation" | "inspection" | "assertion"
+  readonly index: number
+  readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly cause: Cause.Cause<Failure>
+  readonly prefix: ReadonlyArray<CausalRuntimeCommandRecord<M, Model, Expected, Error, Output, Observed>>
+  readonly attempted: CausalRuntimeCommandAttempt<M, Model, Expected, Error, Output, Observed> | undefined
 }> {}
 
 type ChangeEntry<State, Error, Output> =
@@ -416,6 +743,88 @@ const synchronize = <State, Event, Error, Output>(
   }
 }
 
+const executeCausalCommand = <M extends AnyMachine, Error, Output>(
+  probe: Probe<M, Error, Output>,
+  command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+): Effect.Effect<CausalRuntimeCommandResult<M>, Error> => {
+  switch (command._tag) {
+    case "Send":
+      return Effect.matchEffect(probe.sendAndAwait(command.event), {
+        onFailure: (error) =>
+          error instanceof Machine.StoppedError
+            ? probe.ref.snapshot.pipe(
+              Effect.flatMap((snapshot) =>
+                snapshot.status === "stopped"
+                  ? Effect.succeed({ _tag: "SendRejected", error } as const)
+                  : Effect.fail(error as Error)
+              )
+            )
+            : Effect.fail(error as Error),
+        onSuccess: (step) => Effect.succeed({ _tag: "SendProcessed", step } as const)
+      })
+    case "Advance":
+      return TestClock.adjust(command.duration).pipe(Effect.as({ _tag: "ClockAdvanced" } as const))
+    case "Stop":
+      return probe.ref.stop.pipe(Effect.as({ _tag: "Stopped" } as const))
+    case "Checkpoint":
+      return Effect.succeed({ _tag: "Checkpoint" } as const)
+  }
+}
+
+const awaitCausal = <State, Event, Error, Output>(
+  ref: Machine.MachineRef<State, Event, Error, Output>,
+  policy: RuntimeAwait<State, Error, Output>,
+  index: number,
+  timeout: Duration.Input
+): Effect.Effect<{
+  readonly snapshot: Machine.RuntimeSnapshot<State, Error, Output>
+  readonly awaited: ReadonlyArray<Machine.RuntimeSnapshot<State, Error, Output>>
+}, RuntimeObservationError> => {
+  if (policy._tag === "None") {
+    return ref.snapshot.pipe(Effect.map((snapshot) => ({ snapshot, awaited: [] })))
+  }
+
+  const observation = Effect.scoped(
+    Effect.gen(function*() {
+      const changes = yield* Queue.unbounded<ChangeEntry<State, Error, Output>>()
+      yield* ref.changes.pipe(
+        Stream.runForEach((snapshot) => Queue.offer(changes, { _tag: "Snapshot", snapshot })),
+        Effect.ensuring(Queue.offer(changes, { _tag: "End" })),
+        Effect.forkScoped({ startImmediately: true })
+      )
+      const awaited: Array<Machine.RuntimeSnapshot<State, Error, Output>> = []
+      while (true) {
+        const entry = yield* Queue.take(changes)
+        if (entry._tag === "End") {
+          return yield* Effect.fail(
+            new RuntimeObservationError({
+              index,
+              synchronization: "Until",
+              reason: "ended",
+              message: "the machine changes stream ended before an awaited snapshot matched the predicate"
+            })
+          )
+        }
+        awaited.push(entry.snapshot)
+        if (policy.predicate(entry.snapshot)) return { snapshot: entry.snapshot, awaited }
+      }
+    })
+  )
+
+  return TestClock.withLive(observation.pipe(Effect.timeout(timeout))).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof RuntimeObservationError
+        ? cause
+        : new RuntimeObservationError({
+          index,
+          synchronization: "Until",
+          reason: "timeout",
+          message: `timed out after ${Duration.toMillis(timeout)}ms waiting for an awaited runtime snapshot`
+        })
+    )
+  )
+}
+
 /**
  * Runs typed commands against a live `MachineRef` and checks them against a
  * supplied Effect-native reference model.
@@ -435,7 +844,7 @@ const synchronize = <State, Event, Error, Output>(
  * @category constructors
  * @since 4.0.0
  */
-export const runRuntimeCommands = <
+export const runEnqueuedCommands = <
   Model,
   Expected,
   State,
@@ -488,7 +897,7 @@ export const runRuntimeCommands = <
       const observationTimeoutMillis = Duration.toMillis(observationTimeout)
       if (!Number.isFinite(observationTimeoutMillis) || observationTimeoutMillis < 0) {
         return yield* Effect.die(
-          new Error("MachineTest.runRuntimeCommands expected observationTimeout to be a finite non-negative duration")
+          new Error("MachineTest.runEnqueuedCommands expected observationTimeout to be a finite non-negative duration")
         )
       }
       const changes = yield* Queue.unbounded<ChangeEntry<State, Error, Output>>()
@@ -683,6 +1092,239 @@ export const runRuntimeCommands = <
   )
 
 /**
+ * @deprecated Use `runEnqueuedCommands`. This compatibility name does not
+ * expose whether sends are merely enqueued or causally processed.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const runRuntimeCommands: typeof runEnqueuedCommands = runEnqueuedCommands
+
+/**
+ * Runs typed commands against a probe and checks them against an Effect-native
+ * reference model.
+ *
+ * Every accepted `Send` completes its exact managed runtime macrostep before
+ * inspection, assertion, and the next command. Use `probe.await.until` only
+ * for later asynchronous work such as timer, invoke, or child delivery.
+ * Processing failures are attributed to the exact submitted command and retain
+ * the successfully checked prefix for FastCheck shrinking and replay.
+ *
+ * Use `runEnqueuedCommands` instead when the behavior under test intentionally
+ * depends on burst enqueueing or outstanding mailbox work.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const runCausalCommands = <
+  M extends AnyMachine,
+  Error,
+  Output,
+  Model,
+  Expected,
+  Observed = never,
+  ModelError = never,
+  ModelServices = never,
+  InspectionError = never,
+  InspectionServices = never,
+  AssertionError = never,
+  AssertionServices = never
+>(
+  probe: Probe<M, Error, Output>,
+  commands: Iterable<RuntimeCommand<Machine.Machine.InputEvent<M>>>,
+  options: CausalRuntimeModelOptions<
+    M,
+    Model,
+    Expected,
+    Error,
+    Output,
+    Observed,
+    ModelError,
+    ModelServices,
+    InspectionError,
+    InspectionServices,
+    AssertionError,
+    AssertionServices
+  >
+): Effect.Effect<
+  CausalRuntimeTranscript<M, Model, Expected, Error, Output, Observed>,
+  CausalRuntimeCommandFailure<
+    Error | ModelError | InspectionError | AssertionError | RuntimeObservationError,
+    M,
+    Model,
+    Expected,
+    Error,
+    Output,
+    Observed
+  >,
+  ModelServices | InspectionServices | AssertionServices
+> =>
+  Effect.gen(function*() {
+    const sequence = Array.from(commands)
+    const observationTimeout = options.observationTimeout ?? "1 second"
+    const observationTimeoutMillis = Duration.toMillis(observationTimeout)
+    if (!Number.isFinite(observationTimeoutMillis) || observationTimeoutMillis < 0) {
+      return yield* Effect.die(
+        new Error("MachineTest.runCausalCommands expected observationTimeout to be a finite non-negative duration")
+      )
+    }
+
+    const initial = yield* probe.ref.snapshot
+    const records: Array<CausalRuntimeCommandRecord<M, Model, Expected, Error, Output, Observed>> = []
+    let model = options.initialModel
+    let final = initial
+
+    const capture = <A, Failure, R>(captureOptions: {
+      readonly phase: "model" | "observation" | "inspection" | "assertion" | "execution"
+      readonly index: number
+      readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+      readonly effect: () => Effect.Effect<A, Failure, R>
+      readonly attempted?: CausalRuntimeCommandAttempt<M, Model, Expected, Error, Output, Observed>
+    }): Effect.Effect<
+      A,
+      CausalRuntimeCommandFailure<Failure, M, Model, Expected, Error, Output, Observed>,
+      R
+    > =>
+      Effect.catchCause(Effect.suspend(captureOptions.effect), (cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause as Cause.Cause<never>)
+          : Effect.fail(
+            new CausalRuntimeCommandFailure({
+              phase: captureOptions.phase,
+              index: captureOptions.index,
+              command: captureOptions.command,
+              cause,
+              prefix: records.slice(),
+              attempted: captureOptions.attempted
+            })
+          ))
+
+    for (let index = 0; index < sequence.length; index++) {
+      const command = sequence[index]!
+      const step = yield* capture({
+        phase: "model",
+        index,
+        command,
+        effect: () => options.transition(model, command, index)
+      })
+      model = step.model
+
+      const attemptedBeforeExecution: CausalRuntimeCommandAttempt<
+        M,
+        Model,
+        Expected,
+        Error,
+        Output,
+        Observed
+      > = {
+        index,
+        command,
+        model,
+        expected: step.expected,
+        result: undefined,
+        snapshot: undefined,
+        awaited: [],
+        inspected: undefined
+      }
+      const result = yield* capture({
+        phase: "execution",
+        index,
+        command,
+        effect: () => executeCausalCommand(probe, command),
+        attempted: attemptedBeforeExecution
+      })
+      const attemptedAfterExecution: CausalRuntimeCommandAttempt<
+        M,
+        Model,
+        Expected,
+        Error,
+        Output,
+        Observed
+      > = {
+        ...attemptedBeforeExecution,
+        result
+      }
+
+      const observation = yield* capture({
+        phase: "observation",
+        index,
+        command,
+        effect: () => awaitCausal(probe.ref, step.await ?? { _tag: "None" }, index, observationTimeout),
+        attempted: attemptedAfterExecution
+      })
+      final = observation.snapshot
+      const inspectionContext: CausalRuntimeInspectionContext<M, Error, Output> = {
+        index,
+        command,
+        result,
+        probe,
+        ref: probe.ref,
+        snapshot: observation.snapshot,
+        awaited: observation.awaited
+      }
+      const attemptedAfterObservation: CausalRuntimeCommandAttempt<
+        M,
+        Model,
+        Expected,
+        Error,
+        Output,
+        Observed
+      > = {
+        ...attemptedAfterExecution,
+        snapshot: observation.snapshot,
+        awaited: observation.awaited
+      }
+      const inspected = options.inspect === undefined
+        ? undefined
+        : yield* capture({
+          phase: "inspection",
+          index,
+          command,
+          effect: () => options.inspect!(inspectionContext),
+          attempted: attemptedAfterObservation
+        })
+      const actual: CausalRuntimeCommandActual<M, Error, Output, Observed> = {
+        result,
+        snapshot: observation.snapshot,
+        awaited: observation.awaited,
+        inspected
+      }
+      const record: CausalRuntimeCommandRecord<M, Model, Expected, Error, Output, Observed> = {
+        index,
+        command,
+        model,
+        expected: step.expected,
+        actual
+      }
+      yield* capture({
+        phase: "assertion",
+        index,
+        command,
+        effect: () =>
+          options.assert({
+            ...inspectionContext,
+            model,
+            expected: step.expected,
+            actual
+          }),
+        attempted: {
+          ...attemptedAfterObservation,
+          inspected
+        }
+      })
+      records.push(record)
+    }
+
+    return {
+      commands: sequence,
+      initial,
+      records,
+      finalModel: model,
+      final
+    }
+  })
+
+/**
  * Options controlling schema-derived runtime command generation.
  *
  * @category models
@@ -816,7 +1458,7 @@ export const runtimeCommands = <M extends AnyMachine>(
  * @category formatting
  * @since 4.0.0
  */
-export const formatRuntimeTranscript = (
+export const formatEnqueuedTranscript = (
   value:
     | RuntimeTranscript<any, any, any, any, any, any, any>
     | RuntimeCommandFailure<any, any, any, any, any, any, any, any>
@@ -867,6 +1509,74 @@ export const formatRuntimeTranscript = (
     lines.push(
       `final: synchronized=${String(value.synchronized)} snapshot=${Inspectable.toStringUnknown(value.final, 0)}`
     )
+  }
+  return lines.join("\n")
+}
+
+/**
+ * @deprecated Use `formatEnqueuedTranscript`.
+ *
+ * @category formatting
+ * @since 4.0.0
+ */
+export const formatRuntimeTranscript: typeof formatEnqueuedTranscript = formatEnqueuedTranscript
+
+/**
+ * Formats a causal runtime transcript or failure as replayable line-oriented
+ * evidence, including exact probe steps and explicit asynchronous observations.
+ *
+ * @category formatting
+ * @since 4.0.0
+ */
+export const formatCausalTranscript = (
+  value:
+    | CausalRuntimeTranscript<any, any, any, any, any, any>
+    | CausalRuntimeCommandFailure<any, any, any, any, any, any, any>
+): string => {
+  const failure = value instanceof CausalRuntimeCommandFailure
+  const records = failure ? value.prefix : value.records
+  const lines = [
+    `commands: ${
+      Inspectable.toStringUnknown(
+        failure
+          ? [
+            ...value.prefix.map((record) => record.command),
+            value.command
+          ]
+          : value.commands,
+        0
+      )
+    }`
+  ]
+  for (const record of records) {
+    lines.push(
+      `command ${record.index}: command=${Inspectable.toStringUnknown(record.command, 0)} ` +
+        `model=${Inspectable.toStringUnknown(record.model, 0)} ` +
+        `expected=${Inspectable.toStringUnknown(record.expected, 0)} ` +
+        `result=${Inspectable.toStringUnknown(record.actual.result, 0)} ` +
+        `snapshot=${Inspectable.toStringUnknown(record.actual.snapshot, 0)} ` +
+        `awaited=${Inspectable.toStringUnknown(record.actual.awaited, 0)} ` +
+        `inspected=${Inspectable.toStringUnknown(record.actual.inspected, 0)}`
+    )
+  }
+  if (failure) {
+    if (value.attempted !== undefined) {
+      lines.push(
+        `attempted ${value.attempted.index}: command=${Inspectable.toStringUnknown(value.attempted.command, 0)} ` +
+          `model=${Inspectable.toStringUnknown(value.attempted.model, 0)} ` +
+          `expected=${Inspectable.toStringUnknown(value.attempted.expected, 0)} ` +
+          `result=${Inspectable.toStringUnknown(value.attempted.result, 0)} ` +
+          `snapshot=${Inspectable.toStringUnknown(value.attempted.snapshot, 0)} ` +
+          `awaited=${Inspectable.toStringUnknown(value.attempted.awaited, 0)} ` +
+          `inspected=${Inspectable.toStringUnknown(value.attempted.inspected, 0)}`
+      )
+    }
+    lines.push(
+      `failure: phase=${value.phase} index=${value.index} command=${Inspectable.toStringUnknown(value.command, 0)} ` +
+        `cause=${Inspectable.toStringUnknown(value.cause, 0)}`
+    )
+  } else {
+    lines.push(`final: snapshot=${Inspectable.toStringUnknown(value.final, 0)}`)
   }
   return lines.join("\n")
 }

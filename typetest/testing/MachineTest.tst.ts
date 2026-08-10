@@ -144,7 +144,7 @@ describe("MachineTest", () => {
     const started = Machine.start(machine, new Input({ id: "test" }))
     type Ref = Effect.Success<typeof started>
     const ref = null as unknown as Ref
-    const executed = MachineTest.runRuntimeCommands(ref, [
+    const executed = MachineTest.runEnqueuedCommands(ref, [
       MachineTest.sendCommand(new PublicEvent({ value: 1 }))
     ], {
       initialModel: 0,
