@@ -29,9 +29,7 @@ import {
   getLeastCommonAncestor,
   getTargetNodePath,
   InitialEvent,
-  type MacrostepPlan,
   MaxMacrostepIterations,
-  type MicrostepPlan,
   type MicrostepTransition,
   normalizeTransition,
   planConfiguration,
@@ -161,23 +159,36 @@ const compileIndexedExecutionDescriptor = (
   }
 }
 
-interface IndexedConfiguration {
+/**
+ * The compact execution state owned by a single compiled process drain.
+ *
+ * This representation never crosses the public snapshot boundary. The flat
+ * kernel may update `values` in place only after constructing the handler
+ * context, whose snapshot is detached from this storage. Hierarchical plans
+ * copy the table whenever simultaneous transitions need their common source
+ * state to remain stable.
+ */
+interface OwnedIndexedState {
   readonly active: Uint8Array
   readonly activeLeaves: ReadonlyArray<number>
-  // The compiled process fiber owns this slot table. Flat same-state updates
-  // may replace one value in place after eagerly detaching the handler's
-  // public snapshot; hierarchical microsteps retain immutable copies so
-  // simultaneous transition contexts continue to share their starting state.
   readonly values: Array<unknown>
   readonly completed: Uint8Array
   readonly outputs: ReadonlyArray<unknown>
   readonly completedOrder: ReadonlyArray<number>
 }
 
-const indexedConfigurationFromActive = (
+const updateOwnedIndexedValue = (
+  state: OwnedIndexedState,
+  index: number,
+  value: unknown
+): void => {
+  state.values[index] = value
+}
+
+const ownedIndexedStateFromActive = (
   descriptor: IndexedExecutionDescriptor,
   configuration: ActiveConfiguration
-): IndexedConfiguration => {
+): OwnedIndexedState => {
   const active = new Uint8Array(descriptor.nodes.length)
   const values: Array<unknown> = new Array(descriptor.nodes.length)
   const completed = new Uint8Array(descriptor.nodes.length)
@@ -206,9 +217,9 @@ const indexedConfigurationFromActive = (
   }
 }
 
-const activeConfigurationFromIndexed = (
+const activeConfigurationFromIndexedState = (
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration
+  configuration: OwnedIndexedState
 ): ActiveConfiguration => {
   const active = new Set<string>()
   const values = new Map<string, unknown>()
@@ -227,9 +238,9 @@ const activeConfigurationFromIndexed = (
   return { active, values, outputs, history: new Map() }
 }
 
-const snapshotFromIndexedPath = (
+const snapshotFromIndexedStateStatePath = (
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration,
+  configuration: OwnedIndexedState,
   index: number
 ): Machine.AtomicSnapshot<string, unknown> => {
   const node = descriptor.nodes[index]!
@@ -242,7 +253,7 @@ const snapshotFromIndexedPath = (
     if (childIndex === undefined) {
       throw new Error(`Machine expected indexed compound state "${node.path}" to have an active child`)
     }
-    snapshot.state = snapshotFromIndexedPath(descriptor, configuration, childIndex)
+    snapshot.state = snapshotFromIndexedStateStatePath(descriptor, configuration, childIndex)
   } else if (node.type === "parallel") {
     const states: Record<string, unknown> = {}
     for (const childIndex of descriptor.childIndices[index]!) {
@@ -253,20 +264,24 @@ const snapshotFromIndexedPath = (
           }"`
         )
       }
-      states[descriptor.nodes[childIndex]!.key] = snapshotFromIndexedPath(descriptor, configuration, childIndex)
+      states[descriptor.nodes[childIndex]!.key] = snapshotFromIndexedStateStatePath(
+        descriptor,
+        configuration,
+        childIndex
+      )
     }
     snapshot.states = states
   }
   return snapshot as unknown as Machine.AtomicSnapshot<string, unknown>
 }
 
-const snapshotFromIndexed = (
+const snapshotFromIndexedState = (
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration
+  configuration: OwnedIndexedState
 ): Machine.Snapshot<any> => {
   const rootIndex = descriptor.rootIndices.find((index) => configuration.active[index] === 1)
   if (rootIndex === undefined) throw new Error("Machine expected an active indexed root state")
-  const snapshot = snapshotFromIndexedPath(descriptor, configuration, rootIndex) as Machine.Snapshot<any>
+  const snapshot = snapshotFromIndexedStateStatePath(descriptor, configuration, rootIndex) as Machine.Snapshot<any>
   if (configuration.completedOrder.length > 0) {
     ;(snapshot as Machine.AtomicSnapshot<string, unknown> & {
       completed: ReadonlyArray<Machine.SnapshotCompletion>
@@ -281,7 +296,7 @@ const snapshotFromIndexed = (
 const makeIndexedTransitionContext = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration,
+  configuration: OwnedIndexedState,
   sourceIndex: number,
   event: any
 ): any => {
@@ -296,7 +311,7 @@ const makeIndexedTransitionContext = (
     parent: parentIndex < 0 ? undefined : configuration.values[parentIndex],
     parents,
     event,
-    snapshot: snapshotFromIndexed(descriptor, configuration),
+    snapshot: snapshotFromIndexedState(descriptor, configuration),
     target: getTargetBuilder(machine, source.path)
   }
 }
@@ -313,10 +328,30 @@ type IndexedEvaluatedTransition =
   >
   & {
     readonly selection: IndexedSelectedTransition
-    readonly next: IndexedConfiguration
+    readonly next: OwnedIndexedState
   }
 
-const emptyCompiledValues: ReadonlyArray<never> = []
+const emptyExecutionValues: ReadonlyArray<never> = Object.freeze([])
+
+export interface ExecutionMicrostep<State = unknown> {
+  readonly next: State
+  readonly event: unknown
+  readonly commands: ReadonlyArray<RuntimeCommand>
+  readonly raisedEvents: ReadonlyArray<unknown>
+  readonly emittedEvents: ReadonlyArray<unknown>
+  readonly exitPaths: ReadonlyArray<string>
+  readonly entryPaths: ReadonlyArray<string>
+  readonly changed: boolean
+}
+
+export interface ExecutionMacrostep<State = unknown> {
+  readonly next: State
+  readonly commands: ReadonlyArray<RuntimeCommand>
+  readonly emittedEvents: ReadonlyArray<unknown>
+  readonly microsteps: ReadonlyArray<ExecutionMicrostep<State>>
+  readonly done: boolean
+  readonly output: unknown
+}
 
 const collectIndexedTransition = (
   machine: Machine.Any,
@@ -342,16 +377,16 @@ const collectIndexedTransition = (
   })
   return {
     state,
-    commands: commands ?? emptyCompiledValues,
-    raisedEvents: raisedEvents ?? emptyCompiledValues,
-    emittedEvents: emittedEvents ?? emptyCompiledValues
+    commands: commands ?? emptyExecutionValues,
+    raisedEvents: raisedEvents ?? emptyExecutionValues,
+    emittedEvents: emittedEvents ?? emptyExecutionValues
   }
 }
 
 const selectIndexedEventTransitions = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration,
+  configuration: OwnedIndexedState,
   event: any
 ): ReadonlyArray<IndexedSelectedTransition> => {
   const selected: Array<IndexedSelectedTransition> = []
@@ -382,7 +417,7 @@ const selectIndexedEventTransitions = (
   return selected
 }
 
-const hasSameIndexedActive = (left: IndexedConfiguration, right: IndexedConfiguration): boolean => {
+const hasSameIndexedActive = (left: OwnedIndexedState, right: OwnedIndexedState): boolean => {
   if (left.active === right.active) return true
   for (let index = 0; index < left.active.length; index++) {
     if (left.active[index] !== right.active[index]) return false
@@ -390,13 +425,13 @@ const hasSameIndexedActive = (left: IndexedConfiguration, right: IndexedConfigur
   return true
 }
 
-const normalizeIndexedTargetConfigurationSync = (
+const normalizeIndexedTargetStateSync = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  current: IndexedConfiguration,
+  current: OwnedIndexedState,
   target: Machine.Target<any, any> | Machine.Snapshot<any>,
   activeLeafIndex: number
-): IndexedConfiguration => {
+): OwnedIndexedState => {
   const targetIndex = isTarget(target) ? descriptor.indexByPath.get(String(target.path)) : undefined
   if (
     targetIndex === activeLeafIndex && current.active[activeLeafIndex] === 1 && isTarget(target) &&
@@ -410,11 +445,11 @@ const normalizeIndexedTargetConfigurationSync = (
     )
     return { ...current, values }
   }
-  return indexedConfigurationFromActive(
+  return ownedIndexedStateFromActive(
     descriptor,
     normalizeTargetConfigurationSync(
       machine,
-      activeConfigurationFromIndexed(descriptor, current),
+      activeConfigurationFromIndexedState(descriptor, current),
       target
     )
   )
@@ -423,7 +458,7 @@ const normalizeIndexedTargetConfigurationSync = (
 const collectIndexedEvaluatedTransition = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  state: IndexedConfiguration,
+  state: OwnedIndexedState,
   selection: IndexedSelectedTransition
 ): IndexedEvaluatedTransition => {
   const transitionResult = collectIndexedTransition(machine, selection.transition.transition, selection.context)
@@ -439,7 +474,7 @@ const collectIndexedEvaluatedTransition = (
   }
   const next = target === undefined
     ? state
-    : normalizeIndexedTargetConfigurationSync(machine, descriptor, state, target as any, selection.leafIndex)
+    : normalizeIndexedTargetStateSync(machine, descriptor, state, target as any, selection.leafIndex)
   const changed = selection.transition.reenter || !hasSameIndexedActive(state, next)
   if (!changed) {
     return {
@@ -474,8 +509,8 @@ const collectIndexedEvaluatedTransition = (
     raisedEvents: transitionResult.raisedEvents,
     emittedEvents: transitionResult.emittedEvents,
     changed: true,
-    exitPaths: getExitPaths(machine, activeConfigurationFromIndexed(descriptor, state), boundary),
-    entryPaths: getEntryPaths(machine, activeConfigurationFromIndexed(descriptor, next), boundary),
+    exitPaths: getExitPaths(machine, activeConfigurationFromIndexedState(descriptor, state), boundary),
+    entryPaths: getEntryPaths(machine, activeConfigurationFromIndexedState(descriptor, next), boundary),
     choiceTransitions: []
   }
 }
@@ -483,16 +518,15 @@ const collectIndexedEvaluatedTransition = (
 const indexedMicrostep = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  state: IndexedConfiguration,
+  state: OwnedIndexedState,
   event: any,
   selections: ReadonlyArray<IndexedSelectedTransition>
-): MicrostepPlan<IndexedConfiguration, any, any, any> => {
+): ExecutionMicrostep<OwnedIndexedState> => {
   if (selections.length === 1) {
     const transition = collectIndexedEvaluatedTransition(machine, descriptor, state, selections[0]!)
     return {
       next: transition.next,
       event,
-      transitions: [],
       commands: transition.commands,
       raisedEvents: transition.raisedEvents,
       emittedEvents: transition.emittedEvents,
@@ -525,7 +559,7 @@ const indexedMicrostep = (
     ]
     for (const transition of applicationOrder) {
       if (transition.target !== undefined) {
-        next = normalizeIndexedTargetConfigurationSync(
+        next = normalizeIndexedTargetStateSync(
           machine,
           descriptor,
           next,
@@ -543,7 +577,6 @@ const indexedMicrostep = (
   return {
     next,
     event,
-    transitions: [],
     commands,
     raisedEvents,
     emittedEvents,
@@ -553,18 +586,18 @@ const indexedMicrostep = (
   }
 }
 
-const planIndexedFlatConfiguration = (
+const planIndexedFlatState = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration,
+  configuration: OwnedIndexedState,
   decoded: { readonly _tag: PropertyKey }
-): MacrostepPlan<IndexedConfiguration, any, any, any, any> => {
+): ExecutionMacrostep<OwnedIndexedState> => {
   let current = configuration
   let event: any = decoded
   let commands: Array<RuntimeCommand> | undefined
   let raisedEvents: Array<any> | undefined
   let emittedEvents: Array<unknown> | undefined
-  let microsteps: Array<MicrostepPlan<IndexedConfiguration, any, any, any>> | undefined
+  let microsteps: Array<ExecutionMicrostep<OwnedIndexedState>> | undefined
   let raisedIndex = 0
   let iterations = 0
 
@@ -585,7 +618,7 @@ const planIndexedFlatConfiguration = (
     if (descriptor.nodes[sourceIndex]!.type === "final") {
       const completed = completeConfigurationSync(
         machine,
-        activeConfigurationFromIndexed(descriptor, current),
+        activeConfigurationFromIndexedState(descriptor, current),
         event
       ).configuration
       const root = getRootPath(machine, completed)
@@ -593,10 +626,10 @@ const planIndexedFlatConfiguration = (
         throw new Error("Machine reached a terminal indexed configuration without a completed root output")
       }
       return {
-        next: indexedConfigurationFromActive(descriptor, completed),
-        commands: commands ?? emptyCompiledValues,
-        emittedEvents: emittedEvents ?? emptyCompiledValues,
-        microsteps: microsteps ?? emptyCompiledValues,
+        next: ownedIndexedStateFromActive(descriptor, completed),
+        commands: commands ?? emptyExecutionValues,
+        emittedEvents: emittedEvents ?? emptyExecutionValues,
+        microsteps: microsteps ?? emptyExecutionValues,
         done: true,
         output: completed.outputs.get(root)
       }
@@ -613,7 +646,7 @@ const planIndexedFlatConfiguration = (
           parent: undefined,
           parents: {},
           event,
-          snapshot: snapshotFromIndexed(descriptor, current),
+          snapshot: snapshotFromIndexedState(descriptor, current),
           target: getTargetBuilder(machine, sourcePath)
         }
       )
@@ -637,13 +670,17 @@ const planIndexedFlatConfiguration = (
         if (
           targetIndex === sourceIndex && isSimpleTarget && current.completedOrder.length === 0
         ) {
-          current.values[sourceIndex] = decodeStateValueSync(
-            machine,
-            descriptor.nodes[sourceIndex]!,
-            target.value
+          updateOwnedIndexedValue(
+            current,
+            sourceIndex,
+            decodeStateValueSync(
+              machine,
+              descriptor.nodes[sourceIndex]!,
+              target.value
+            )
           )
         } else {
-          next = normalizeIndexedTargetConfigurationSync(machine, descriptor, current, target as any, sourceIndex)
+          next = normalizeIndexedTargetStateSync(machine, descriptor, current, target as any, sourceIndex)
         }
       }
       const changed = transition.reenter || !hasSameIndexedActive(current, next)
@@ -651,15 +688,14 @@ const planIndexedFlatConfiguration = (
       if (nextIndex === undefined) {
         throw new Error("Machine expected an active indexed transition target")
       }
-      const step: MicrostepPlan<IndexedConfiguration, any, any, any> = {
+      const step: ExecutionMicrostep<OwnedIndexedState> = {
         next,
         event,
-        transitions: emptyCompiledValues,
         commands: transitionResult.commands,
         raisedEvents: transitionResult.raisedEvents,
         emittedEvents: transitionResult.emittedEvents,
-        exitPaths: changed ? [sourcePath] : emptyCompiledValues,
-        entryPaths: changed ? [descriptor.nodes[nextIndex]!.path] : emptyCompiledValues,
+        exitPaths: changed ? [sourcePath] : emptyExecutionValues,
+        entryPaths: changed ? [descriptor.nodes[nextIndex]!.path] : emptyExecutionValues,
         changed
       }
       current = next
@@ -682,9 +718,9 @@ const planIndexedFlatConfiguration = (
     if (raised === undefined) {
       return {
         next: current,
-        commands: commands ?? emptyCompiledValues,
-        emittedEvents: emittedEvents ?? emptyCompiledValues,
-        microsteps: microsteps ?? emptyCompiledValues,
+        commands: commands ?? emptyExecutionValues,
+        emittedEvents: emittedEvents ?? emptyExecutionValues,
+        microsteps: microsteps ?? emptyExecutionValues,
         done: false,
         output: undefined
       }
@@ -694,18 +730,18 @@ const planIndexedFlatConfiguration = (
   }
 }
 
-const planIndexedConfiguration = (
+const planIndexedState = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
-  configuration: IndexedConfiguration,
+  configuration: OwnedIndexedState,
   input: unknown
-): MacrostepPlan<IndexedConfiguration, any, any, any, any> => {
+): ExecutionMacrostep<OwnedIndexedState> => {
   const decoded = decodeEventSync(machine, input) as { readonly _tag: PropertyKey }
   if (descriptor.flat) {
-    return planIndexedFlatConfiguration(machine, descriptor, configuration, decoded)
+    return planIndexedFlatState(machine, descriptor, configuration, decoded)
   }
   if (descriptor.finalIndices.some((index) => configuration.active[index] === 1)) {
-    const active = activeConfigurationFromIndexed(descriptor, configuration)
+    const active = activeConfigurationFromIndexedState(descriptor, configuration)
     if (isActiveFinalConfiguration(machine, active)) {
       const completed = completeConfigurationSync(machine, active, decoded).configuration
       const root = getRootPath(machine, completed)
@@ -713,7 +749,7 @@ const planIndexedConfiguration = (
         throw new Error("Machine reached a terminal indexed configuration without a completed root output")
       }
       return {
-        next: indexedConfigurationFromActive(descriptor, completed),
+        next: ownedIndexedStateFromActive(descriptor, completed),
         commands: [],
         emittedEvents: [],
         microsteps: [],
@@ -758,10 +794,10 @@ const planIndexedConfiguration = (
     if (descriptor.finalIndices.some((index) => current.active[index] === 1)) {
       const completed = completeConfigurationSync(
         machine,
-        activeConfigurationFromIndexed(descriptor, current),
+        activeConfigurationFromIndexedState(descriptor, current),
         currentEvent
       ).configuration
-      current = indexedConfigurationFromActive(descriptor, completed)
+      current = ownedIndexedStateFromActive(descriptor, completed)
       if (isActiveFinalConfiguration(machine, completed)) {
         const root = getRootPath(machine, completed)
         if (!completed.outputs.has(root)) {
@@ -809,7 +845,7 @@ export interface CompiledExecutionPlan {
   readonly plan: (
     state: unknown,
     event: unknown
-  ) => MacrostepPlan<any, any, any, any, any>
+  ) => ExecutionMacrostep
   readonly initial?: (
     args: ReadonlyArray<unknown>
   ) => {
@@ -835,10 +871,10 @@ const makeIndexedExecutionPlan = (
   machine: Machine.Any,
   indexed: IndexedExecutionDescriptor
 ): CompiledExecutionPlan => ({
-  fromConfiguration: (configuration) => indexedConfigurationFromActive(indexed, configuration),
-  toConfiguration: (state) => activeConfigurationFromIndexed(indexed, state as IndexedConfiguration),
-  snapshot: (state) => snapshotFromIndexed(indexed, state as IndexedConfiguration),
-  plan: (state, event) => planIndexedConfiguration(machine, indexed, state as IndexedConfiguration, event),
+  fromConfiguration: (configuration) => ownedIndexedStateFromActive(indexed, configuration),
+  toConfiguration: (state) => activeConfigurationFromIndexedState(indexed, state as OwnedIndexedState),
+  snapshot: (state) => snapshotFromIndexedState(indexed, state as OwnedIndexedState),
+  plan: (state, event) => planIndexedState(machine, indexed, state as OwnedIndexedState, event),
   initial: (args) => {
     const inputArgs = machine.input === undefined
       ? args
@@ -849,8 +885,8 @@ const makeIndexedExecutionPlan = (
     const active = normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
     validateInitialConfiguration(machine, active)
     const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
-    const configuration = indexedConfigurationFromActive(indexed, completed)
-    const state = snapshotFromIndexed(indexed, configuration)
+    const configuration = ownedIndexedStateFromActive(indexed, completed)
+    const state = snapshotFromIndexedState(indexed, configuration)
     const done = isActiveFinalConfiguration(machine, completed)
     if (!done) {
       return {

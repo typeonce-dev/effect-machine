@@ -82,12 +82,19 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
   let selectedState = selected.plan.fromConfiguration(active)
   for (let index = 0; index < options.events.length; index++) {
     const event = options.events[index]!
+    const retainedSelectedSnapshot = selected.plan.snapshot(selectedState)
+    const retainedSelectedEncoding = yield* encodeState(options.machine, retainedSelectedSnapshot)
     const genericPlan = generic.plan.plan(genericState, event)
     const selectedPlan = selected.plan.plan(selectedState, event)
     assert.deepStrictEqual(
       yield* canonicalMacrostep(options.machine, selected.plan, selectedPlan),
       yield* canonicalMacrostep(options.machine, generic.plan, genericPlan),
       `${options.label} event ${index}:${String(event._tag)}`
+    )
+    assert.deepStrictEqual(
+      yield* encodeState(options.machine, retainedSelectedSnapshot),
+      retainedSelectedEncoding,
+      `${options.label} retained snapshot ${index}:${String(event._tag)}`
     )
     genericState = genericPlan.next
     selectedState = selectedPlan.next
