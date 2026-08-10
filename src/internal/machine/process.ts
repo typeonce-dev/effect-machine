@@ -48,6 +48,38 @@ const runSequentialDiscard = <E, R>(
     ? effects[0]!
     : Effect.all(effects, { discard: true })
 
+const acknowledgedPlan = (
+  planned: {
+    readonly next: unknown
+    readonly commands: ReadonlyArray<unknown>
+    readonly emittedEvents: ReadonlyArray<unknown>
+    readonly microsteps: ReadonlyArray<{
+      readonly next: unknown
+      readonly event: unknown
+      readonly transitions?: ReadonlyArray<unknown>
+      readonly commands: ReadonlyArray<unknown>
+      readonly raisedEvents: ReadonlyArray<unknown>
+      readonly emittedEvents: ReadonlyArray<unknown>
+      readonly exitPaths: ReadonlyArray<string>
+      readonly entryPaths: ReadonlyArray<string>
+      readonly changed: boolean
+    }>
+    readonly done: boolean
+    readonly output: unknown
+  },
+  snapshot: (state: unknown) => unknown
+): unknown => ({
+  next: snapshot(planned.next),
+  commands: planned.commands,
+  emittedEvents: planned.emittedEvents,
+  microsteps: planned.microsteps.map((microstep) => {
+    const { transitions: _, ...evidence } = microstep
+    return { ...evidence, next: snapshot(microstep.next) }
+  }),
+  done: planned.done,
+  output: planned.output
+})
+
 const invokeCapabilityCache = new WeakMap<Machine.Any, boolean>()
 
 const hasInvokeCapability = (machine: Machine.Any): boolean => {
@@ -98,7 +130,8 @@ const makeChildlessCompiledDrain = (
       try {
         planned = executionPlan.plan(
           configuration ?? executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
-          event
+          event,
+          acknowledged
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -108,7 +141,9 @@ const makeChildlessCompiledDrain = (
       configuration = planned.next
       context.executionState = configuration
       if (planned.microsteps.length === 0) {
-        if (acknowledged) context.completeMessage({ before, plan: planned, after: current })
+        if (acknowledged) {
+          context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: current })
+        }
         return loop
       }
 
@@ -129,7 +164,9 @@ const makeChildlessCompiledDrain = (
       }
       const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
         const continued = Effect.suspend(() => {
-          if (acknowledged) context.completeMessage({ before, plan: planned, after: next })
+          if (acknowledged) {
+            context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: next })
+          }
           return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
         })
         return afterCommit === undefined ? continued : afterCommit.pipe(Effect.andThen(continued))
@@ -217,7 +254,8 @@ const makeInvokingCompiledDrain = (
         planned = executionPlan.plan(
           configuration ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
-          event
+          event,
+          acknowledged
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -226,7 +264,9 @@ const makeInvokingCompiledDrain = (
       }
       configuration = planned.next
       if (planned.microsteps.length === 0) {
-        if (acknowledged) context.completeMessage({ before, plan: planned, after: current })
+        if (acknowledged) {
+          context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: current })
+        }
         return loop
       }
 
@@ -285,7 +325,9 @@ const makeInvokingCompiledDrain = (
       }
       const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
         const continued = Effect.suspend(() => {
-          if (acknowledged) context.completeMessage({ before, plan: planned, after: next })
+          if (acknowledged) {
+            context.completeMessage({ before, plan: acknowledgedPlan(planned, executionPlan.snapshot), after: next })
+          }
           return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
         })
         return afterCommit.length === 0
@@ -522,7 +564,17 @@ const makeProcessLogic: <
                 }
               }
 
-              if (acknowledged) completeMessage({ before, plan: planned, after: current })
+              if (acknowledged) {
+                completeMessage({
+                  before,
+                  plan: acknowledgedPlan(
+                    planned,
+                    (state) =>
+                      Configuration.snapshotFromConfiguration(machine, state as Configuration.ActiveConfiguration)
+                  ),
+                  after: current
+                })
+              }
 
               if (terminal === undefined) {
                 pendingMessage = yield* pollMessage
@@ -638,7 +690,17 @@ const makeProcessLogic: <
                 }
               }
 
-              if (acknowledged) completeMessage({ before, plan: planned, after: current })
+              if (acknowledged) {
+                completeMessage({
+                  before,
+                  plan: acknowledgedPlan(
+                    planned,
+                    (state) =>
+                      Configuration.snapshotFromConfiguration(machine, state as Configuration.ActiveConfiguration)
+                  ),
+                  after: current
+                })
+              }
 
               if (terminal === undefined) {
                 pendingMessage = yield* pollMessage

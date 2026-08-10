@@ -27,6 +27,9 @@ export {
   type CausalRuntimeModelOptions,
   type CausalRuntimeModelStep,
   type CausalRuntimeTranscript,
+  type CausalVerificationAwaitContext,
+  type CausalVerificationOptions,
+  type CausalVerificationTranscript,
   checkpointCommand,
   type EnqueuedRuntimeAssertionContext,
   type EnqueuedRuntimeCommandActual,
@@ -59,7 +62,8 @@ export {
   RuntimeSynchronization,
   type RuntimeTranscript,
   sendCommand,
-  stopCommand
+  stopCommand,
+  verifyCausalCommands
 } from "../internal/testing/machine/verification.js"
 
 export type {
@@ -457,6 +461,240 @@ export const probe: <M extends AnyMachine, Error, Output>(
     Output
   >
 ) => Effect.Effect<Probe<M, Error, Output>, internal.ProbeUnavailableError> = internal.probe
+
+/** The runtime error channel exposed by a managed reference for a machine. */
+export type RuntimeInvariantErrorChannel<M extends AnyMachine> =
+  | Machine.Machine.Error<M>
+  | Machine.ActionError<Machine.Machine.Services<M>>
+  | Machine.InfiniteTransitionError
+  | Machine.MachineSchemaDecodeError
+  | Machine.StoppedError
+
+/** A causal command record projected independently of a reference model. */
+export interface CausalRuntimeEvidenceRecord<M extends AnyMachine, Error, Output> {
+  readonly index: number
+  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly actual: internal.CausalRuntimeCommandActual<M, Error, Output, unknown>
+}
+
+/** The model-independent evidence shared by causal command transcripts. */
+export interface CausalRuntimeEvidence<M extends AnyMachine, Error, Output> {
+  readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
+  readonly initial: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+  readonly records: ReadonlyArray<CausalRuntimeEvidenceRecord<M, Error, Output>>
+  readonly final: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+}
+
+/** The runtime snapshots selected by one snapshot invariant. */
+export type RuntimeSnapshotObservationMode = "settled" | "awaited" | "all" | "final"
+
+/** The semantic location of one retained runtime snapshot. */
+export type RuntimeSnapshotObservation = "initial" | "command" | "awaited" | "final"
+
+/** A model-independent command record supplied to runtime laws. */
+export interface RuntimeInvariantRecord<M extends AnyMachine> {
+  readonly index: number
+  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly result: internal.CausalRuntimeCommandResult<M>
+  readonly snapshot: Machine.RuntimeSnapshot<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    RuntimeInvariantErrorChannel<M>,
+    Machine.Machine.Output<M>
+  >
+  readonly awaited: ReadonlyArray<
+    Machine.RuntimeSnapshot<
+      Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+      RuntimeInvariantErrorChannel<M>,
+      Machine.Machine.Output<M>
+    >
+  >
+}
+
+/** A model-independent causal transcript supplied to runtime laws. */
+export interface RuntimeInvariantTranscript<M extends AnyMachine> {
+  readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
+  readonly initial: Machine.RuntimeSnapshot<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    RuntimeInvariantErrorChannel<M>,
+    Machine.Machine.Output<M>
+  >
+  readonly records: ReadonlyArray<RuntimeInvariantRecord<M>>
+  readonly final: Machine.RuntimeSnapshot<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    RuntimeInvariantErrorChannel<M>,
+    Machine.Machine.Output<M>
+  >
+}
+
+/** Evidence passed to a runtime snapshot invariant. */
+export interface RuntimeSnapshotInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly transcript: RuntimeInvariantTranscript<M>
+  readonly snapshot: RuntimeInvariantTranscript<M>["initial"]
+  readonly observationIndex: number
+  readonly phase: RuntimeSnapshotObservation
+  readonly commandIndex: number | undefined
+  readonly awaitedIndex: number | undefined
+  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>> | undefined
+  readonly result: internal.CausalRuntimeCommandResult<M> | undefined
+}
+
+/** Evidence passed to an invariant for one completed causal command. */
+export interface RuntimeCommandInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly transcript: RuntimeInvariantTranscript<M>
+  readonly record: RuntimeInvariantRecord<M>
+  readonly previous: RuntimeInvariantRecord<M> | undefined
+  readonly index: number
+  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly result: internal.CausalRuntimeCommandResult<M>
+  readonly snapshot: RuntimeInvariantRecord<M>["snapshot"]
+  readonly awaited: RuntimeInvariantRecord<M>["awaited"]
+}
+
+/** Evidence passed to a whole-runtime-transcript invariant. */
+export interface RuntimeTranscriptInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly transcript: RuntimeInvariantTranscript<M>
+}
+
+/** Options for a runtime snapshot invariant. */
+export interface RuntimeSnapshotInvariantOptions<M extends AnyMachine>
+  extends InvariantOptions<RuntimeSnapshotInvariantContext<M>>
+{
+  readonly observe?: RuntimeSnapshotObservationMode
+}
+
+/** A semantic property checked against selected live runtime snapshots. */
+export interface RuntimeSnapshotInvariant<M extends AnyMachine>
+  extends InvariantOptions<RuntimeSnapshotInvariantContext<M>>
+{
+  readonly _tag: "RuntimeSnapshotInvariant"
+  readonly name: string
+  readonly observe: RuntimeSnapshotObservationMode
+  readonly check: (context: RuntimeSnapshotInvariantContext<M>) => InvariantOutcome
+}
+
+/** A semantic property checked after every completed causal command. */
+export interface RuntimeCommandInvariant<M extends AnyMachine>
+  extends InvariantOptions<RuntimeCommandInvariantContext<M>>
+{
+  readonly _tag: "RuntimeCommandInvariant"
+  readonly name: string
+  readonly check: (context: RuntimeCommandInvariantContext<M>) => InvariantOutcome
+}
+
+/** A semantic property checked once against a complete causal transcript. */
+export interface RuntimeTranscriptInvariant<M extends AnyMachine>
+  extends InvariantOptions<RuntimeTranscriptInvariantContext<M>>
+{
+  readonly _tag: "RuntimeTranscriptInvariant"
+  readonly name: string
+  readonly check: (context: RuntimeTranscriptInvariantContext<M>) => InvariantOutcome
+}
+
+/** A user-defined semantic property over retained live runtime evidence. */
+export type RuntimeInvariant<M extends AnyMachine> =
+  | RuntimeSnapshotInvariant<M>
+  | RuntimeCommandInvariant<M>
+  | RuntimeTranscriptInvariant<M>
+
+/** Machine-bound runtime invariant constructors with exact event inference. */
+export interface RuntimeInvariantBuilder<M extends AnyMachine> {
+  readonly snapshot: (
+    name: string,
+    check: (context: RuntimeSnapshotInvariantContext<M>) => InvariantOutcome,
+    options?: RuntimeSnapshotInvariantOptions<M>
+  ) => RuntimeSnapshotInvariant<M>
+  readonly command: (
+    name: string,
+    check: (context: RuntimeCommandInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<RuntimeCommandInvariantContext<M>>
+  ) => RuntimeCommandInvariant<M>
+  readonly transcript: (
+    name: string,
+    check: (context: RuntimeTranscriptInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<RuntimeTranscriptInvariantContext<M>>
+  ) => RuntimeTranscriptInvariant<M>
+}
+
+/** Creates reusable semantic laws for causal runtime evidence. */
+export const runtimeInvariants: <M extends AnyMachine>(machine: M) => RuntimeInvariantBuilder<M> =
+  internal.runtimeInvariants
+
+/** Scope of a runtime invariant. */
+export type RuntimeInvariantScope = "snapshot" | "command" | "transcript"
+
+/** Aggregate result for one runtime invariant. */
+export interface RuntimeInvariantCheckResult {
+  readonly invariant: string
+  readonly scope: RuntimeInvariantScope
+  readonly status: InvariantStatus
+  readonly observations: number
+  readonly failures: number
+}
+
+/** Aggregate result for all checked runtime invariants. */
+export interface RuntimeInvariantReport {
+  readonly checks: ReadonlyArray<RuntimeInvariantCheckResult>
+}
+
+/** One runtime invariant violation and its exact retained location. */
+export interface RuntimeInvariantViolation<M extends AnyMachine = AnyMachine> {
+  readonly invariant: string
+  readonly scope: RuntimeInvariantScope
+  readonly kind: "predicate" | "observations"
+  readonly observationIndex?: number
+  readonly commandIndex: number | undefined
+  readonly awaitedIndex?: number
+  readonly phase?: RuntimeSnapshotObservation
+  readonly command?: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly message: string
+}
+
+/** All violations found in one causal runtime transcript. */
+export { RuntimeInvariantError } from "../internal/testing/machine/verification.js"
+
+/** Checks runtime invariants and returns their complete non-vacuity report. */
+export const checkRuntimeInvariants: <M extends AnyMachine, Error, Output>(
+  machine: M,
+  transcript: CausalRuntimeEvidence<M, Error, Output>,
+  invariants: ReadonlyArray<RuntimeInvariant<M>>
+) => Effect.Effect<RuntimeInvariantReport, internal.RuntimeInvariantError<M>> = internal.checkRuntimeInvariants
+
+/** Asserts runtime invariants against an existing causal transcript. */
+export const assertRuntimeInvariants: <M extends AnyMachine, Error, Output>(
+  machine: M,
+  transcript: CausalRuntimeEvidence<M, Error, Output>,
+  invariants: ReadonlyArray<RuntimeInvariant<M>>
+) => Effect.Effect<void, internal.RuntimeInvariantError<M>> = internal.assertRuntimeInvariants
+
+/** One disagreement between pure planning and a causally processed send. */
+export interface PlannerRuntimeAgreementViolation<M extends AnyMachine = AnyMachine> {
+  readonly commandIndex: number
+  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly field:
+    | "planning"
+    | "handled"
+    | "configurationChanged"
+    | "planNext"
+    | "after"
+    | "completion"
+    | "commands"
+    | "emittedEvents"
+    | "microsteps"
+  readonly message: string
+}
+
+/** Raised when live causal evidence disagrees with a fresh pure plan. */
+export { PlannerRuntimeAgreementError } from "../internal/testing/machine/verification.js"
+
+/** Checks that every processed public send agrees with a fresh pure plan. */
+export const assertPlannerRuntimeAgreement: <M extends AnyMachine, Error, Output>(
+  machine: ReadyMachine<M>,
+  transcript: CausalRuntimeEvidence<M, Error, Output>
+) => Effect.Effect<void, internal.PlannerRuntimeAgreementError<M>, RunServices<M>> =
+  internal.assertPlannerRuntimeAgreement
 
 /**
  * The result of evaluating one semantic invariant.

@@ -283,6 +283,7 @@ describe("machine planner and runtime strategies", () => {
             done: step.plan.done,
             microsteps: step.plan.microsteps.map((microstep) => ({
               event: microstep.event._tag,
+              next: microstep.next.value.value,
               changed: microstep.changed,
               exitPaths: microstep.exitPaths,
               entryPaths: microstep.entryPaths

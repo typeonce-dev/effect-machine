@@ -14,8 +14,9 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import { FastCheck, TestClock } from "effect/testing"
 import * as Machine from "../../../Machine.js"
-import type { Probe, ProbeStep } from "../../../testing/MachineTest.js"
+import type { CausalRuntimeEvidence, Probe, ProbeStep, RuntimeInvariant } from "../../../testing/MachineTest.js"
 import { type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
+import { assertRuntimeInvariants, type RuntimeInvariantError } from "./runtimeInvariant.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -308,6 +309,27 @@ export interface CausalRuntimeModelOptions<
     context: CausalRuntimeAssertionContext<M, Model, Expected, Error, Output, Observed>
   ) => Effect.Effect<void, AssertionError, AssertionServices>
 }
+
+/** Context used to select additional asynchronous observation for a law-oriented command run. */
+export interface CausalVerificationAwaitContext<M extends AnyMachine, Error, Output> {
+  readonly index: number
+  readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly probe: Probe<M, Error, Output>
+}
+
+/** Configuration for causal verification without a separate reference model. */
+export interface CausalVerificationOptions<M extends AnyMachine, Error, Output> {
+  readonly invariants: ReadonlyArray<RuntimeInvariant<M>>
+  readonly observationTimeout?: Duration.Input
+  readonly await?: (
+    context: CausalVerificationAwaitContext<M, Error, Output>
+  ) => RuntimeAwait<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+}
+
+/** A law-oriented causal transcript without dummy model or expected fields. */
+export interface CausalVerificationTranscript<M extends AnyMachine, Error, Output>
+  extends CausalRuntimeEvidence<M, Error, Output>
+{}
 
 /**
  * Actual evidence made available to a runtime command assertion.
@@ -1322,6 +1344,53 @@ export const runCausalCommands = <
       finalModel: model,
       final
     }
+  })
+
+/**
+ * Causally executes commands and checks reusable runtime invariants without
+ * requiring a dummy reference model. Use `runCausalCommands` when exact
+ * expected results come from an application model.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const verifyCausalCommands = <M extends AnyMachine, Error, Output>(
+  probe: Probe<M, Error, Output>,
+  commands: Iterable<RuntimeCommand<Machine.Machine.InputEvent<M>>>,
+  options: CausalVerificationOptions<M, Error, Output>
+): Effect.Effect<
+  CausalVerificationTranscript<M, Error, Output>,
+  | CausalRuntimeCommandFailure<
+    Error | RuntimeObservationError,
+    M,
+    undefined,
+    undefined,
+    Error,
+    Output,
+    never
+  >
+  | RuntimeInvariantError<M>
+> =>
+  Effect.gen(function*() {
+    const transcript = yield* runCausalCommands(probe, commands, {
+      initialModel: undefined,
+      ...(options.observationTimeout === undefined ? {} : { observationTimeout: options.observationTimeout }),
+      transition: (_model, command, index) =>
+        Effect.sync(() => ({
+          model: undefined,
+          expected: undefined,
+          ...(options.await === undefined ? {} : { await: options.await({ index, command, probe }) })
+        })),
+      assert: () => Effect.void
+    })
+    const evidence: CausalVerificationTranscript<M, Error, Output> = {
+      commands: transcript.commands,
+      initial: transcript.initial,
+      records: transcript.records.map(({ actual, command, index }) => ({ index, command, actual })),
+      final: transcript.final
+    }
+    yield* assertRuntimeInvariants(probe.machine, evidence, options.invariants)
+    return evidence
   })
 
 /**

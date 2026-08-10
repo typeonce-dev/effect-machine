@@ -811,6 +811,56 @@ bursts or retains outstanding mailbox work. Its model steps continue to use
 `formatRuntimeTranscript` names are deprecated aliases for the enqueue-oriented
 runner and formatter because their delivery semantics were not visible.
 
+### Runtime invariants and planner agreement
+
+Planner invariants and runtime invariants are deliberately separate. Runtime
+laws inspect causal command evidence, explicit asynchronous observations, and
+runtime status without requiring a duplicate reference model:
+
+```ts
+const invariant = MachineTest.runtimeInvariants(machine)
+const laws = [
+  invariant.snapshot("count never becomes negative", ({ snapshot }) => snapshot.state.value.count >= 0),
+  invariant.command(
+    "every accepted add is processed",
+    ({ command, result }) =>
+      command._tag !== "Send" || command.event._tag !== "Add" ||
+      result._tag === "SendProcessed"
+  )
+]
+
+const transcript = yield * MachineTest.verifyCausalCommands(
+  probe,
+  commands,
+  { invariants: laws }
+)
+```
+
+Use the existing `runCausalCommands` when a simplified application model
+provides exact expected results. Its returned transcript implements the same
+model-independent evidence interface, so reusable runtime laws compose with
+it directly:
+
+```ts
+const transcript = yield * MachineTest.runCausalCommands(probe, commands, model)
+
+yield * MachineTest.assertRuntimeInvariants(machine, transcript, laws)
+yield * MachineTest.assertPlannerRuntimeAgreement(machine, transcript)
+```
+
+`checkRuntimeInvariants` returns an aggregate report; `assertRuntimeInvariants`
+fails with every predicate and non-vacuity violation. Snapshot laws observe the
+initial and post-command snapshots by default. Select `"awaited"`, `"all"`, or
+`"final"` explicitly when a law targets observations retained by
+`probe.await.until` or only the final runtime snapshot.
+
+`assertPlannerRuntimeAgreement` is an explicit consistency check, not an
+application oracle. For each processed send it freshly plans from the receipt's
+`before` snapshot and compares handled/change flags, the public next snapshots,
+completion, command counts, emitted events, and public microstep evidence. It
+does not prove that the planner implements the intended business rules; use a
+reference model and runtime invariants for that.
+
 ## Current limits
 
 Declarative first-class guards are not part of the current API. Ordinary

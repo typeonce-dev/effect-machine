@@ -95,8 +95,12 @@ describe("MachineTest probe", () => {
 
       const burst = yield* probe.sendAndAwait(new Burst({}))
       assert.deepStrictEqual(burst.plan.microsteps.map(({ event }) => event._tag), ["Burst", "RaisedIncrement"])
+      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.value.count), [3, 13])
       assert.strictEqual(burst.before.value.count, 2)
       assert.strictEqual(burst.after.value.count, 13)
+
+      yield* probe.sendAndAwait(new Increment({ amount: 5 }))
+      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.value.count), [3, 13])
 
       yield* ref.stop
     }))
