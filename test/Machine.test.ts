@@ -4132,6 +4132,38 @@ describe("Machine", () => {
       yield* second.stop
     }))
 
+  it.effect("stops an idle compiled invoked child with its parent", () =>
+    Effect.gen(function*() {
+      const childStates = Machine.defineStates({ Idle })
+      const childMachine = Machine.make({
+        states: childStates.states,
+        events: [],
+        initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+      }).handle({ Idle: {} })
+      const Child = Machine.child("owned-child", childMachine)
+      const parentStates = Machine.defineStates({ Loading })
+      const parentMachine = Machine.make({
+        states: parentStates.states,
+        events: [],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+      }).handle({
+        Loading: { invoke: Machine.invokeMachine({ child: Child }) }
+      })
+
+      const parent = yield* Machine.start(parentMachine)
+      const child = yield* parent.child(Child)
+      assert(Option.isSome(child))
+
+      yield* parent.stop
+
+      assert.deepStrictEqual(yield* child.value.snapshot, {
+        status: "stopped",
+        state: { path: "Idle", value: new Idle({ userId: "child" }) }
+      })
+      assert.instanceOf(yield* Effect.flip(child.value.join), Machine.StoppedError)
+      assert(Option.isNone(yield* parent.child(Child)))
+    }))
+
   it.effect("evaluates precompiled input-bearing invoked children for every start", () =>
     Effect.gen(function*() {
       let starts = 0

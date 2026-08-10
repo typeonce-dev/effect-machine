@@ -1785,8 +1785,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private finishIdleChildlessStop(): boolean {
     if (
       this.logic[childlessProcess] !== true || this.draining || this.worker !== undefined ||
-      this.requestedTermination !== undefined || this.options.onOutcome !== undefined ||
-      this.options.onStop !== undefined || this.options.onStopSync !== undefined ||
+      this.requestedTermination !== undefined ||
+      (this.options.onOutcome !== undefined && this.options.skipStoppedOutcome !== true) ||
+      this.options.onStop !== undefined ||
       this.current.changes !== undefined ||
       this.current.terminalizing || this.current.snapshot.status !== "active"
     ) {
@@ -1806,6 +1807,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     if (this.compiledContext !== undefined) {
       this.compiledContext.executionState = undefined
     }
+    this.options.onStopSync?.()
     this.completion = CompiledStoppedCompletion
     if (this.waiter !== undefined) {
       Deferred.doneUnsafe(this.waiter, this.resolveCompletion(CompiledStoppedCompletion))
