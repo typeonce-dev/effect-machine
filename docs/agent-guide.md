@@ -840,6 +840,37 @@ policies observe public snapshots but do not turn send acceptance into causal
 completion. Do not use the deprecated `runRuntimeCommands` name in new code;
 it is an alias for enqueue behavior and hides that important distinction.
 
+For semantic laws over live execution, bind runtime invariant constructors to
+the machine and use the law-oriented causal verifier:
+
+```ts
+const invariant = MachineTest.runtimeInvariants(machine)
+
+const laws = [
+  invariant.snapshot("balance never becomes negative", ({ snapshot }) =>
+    snapshot.state.value.balance >= 0
+  ),
+  invariant.command("stopped sends are rejected", ({ previous, result }) =>
+    previous?.result._tag !== "Stopped" || result._tag === "SendRejected"
+  )
+]
+
+yield* MachineTest.verifyCausalCommands(probe, commands, { invariants: laws })
+```
+
+Do not create a dummy model merely to run runtime laws. Continue to use
+`runCausalCommands` when an independent simplified model supplies exact
+expected results, then apply the same laws to its returned transcript with
+`assertRuntimeInvariants`. Conditional laws that must execute should declare
+`require.minObservations` so irrelevant generated commands cannot pass them
+vacuously.
+
+Use `assertPlannerRuntimeAgreement(machine, transcript)` only to check the
+managed runtime boundary against a fresh pure plan. It is not an independent
+business oracle and is intentionally an explicit operation rather than a
+generic conformance mode. Combine it with application runtime laws or a
+reference model when correctness of the expected behavior matters.
+
 ## Common compiler errors
 
 ### `initial` is not callable

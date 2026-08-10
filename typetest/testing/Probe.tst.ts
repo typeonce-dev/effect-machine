@@ -82,4 +82,55 @@ describe("MachineTest probe", () => {
     >
     expect<CausalFailure>().type.not.toBe<never>()
   })
+
+  it("infers reusable runtime laws and law-oriented causal verification", () => {
+    const invariant = MachineTest.runtimeInvariants(machine)
+    const laws = [
+      invariant.snapshot("state is typed", ({ snapshot, command }) => {
+        expect(snapshot.state.value).type.toBe<State>()
+        expect(command).type.toBe<MachineTest.RuntimeCommand<PublicEvent> | undefined>()
+        return snapshot.state.value.count >= 0
+      }),
+      invariant.command("public commands are typed", ({ command, result }) => {
+        expect(command).type.toBe<MachineTest.RuntimeCommand<PublicEvent>>()
+        expect(result).type.toBe<MachineTest.CausalRuntimeCommandResult<typeof machine>>()
+        return true
+      }),
+      invariant.transcript("transcript is typed", ({ transcript }) => {
+        expect(transcript.records[0]!.command).type.toBe<MachineTest.RuntimeCommand<PublicEvent>>()
+        return true
+      })
+    ]
+    const verified = Effect.flatMap(
+      Machine.start(machine),
+      (ref) =>
+        Effect.flatMap(MachineTest.probe(machine, ref), (probe) =>
+          MachineTest.verifyCausalCommands(probe, [
+            MachineTest.sendCommand(new PublicEvent({}))
+          ], { invariants: laws }))
+    )
+
+    expect<Effect.Success<typeof verified>>().type.toBe<
+      MachineTest.CausalVerificationTranscript<
+        typeof machine,
+        MachineTest.RuntimeInvariantErrorChannel<typeof machine>,
+        never
+      >
+    >()
+    expect<Effect.Success<typeof verified>["records"][number]["actual"]["result"]>().type.toBe<
+      MachineTest.CausalRuntimeCommandResult<typeof machine>
+    >()
+    type InvariantFailure = Extract<Effect.Error<typeof verified>, MachineTest.RuntimeInvariantError<typeof machine>>
+    expect<InvariantFailure>().type.not.toBe<never>()
+
+    const agreement = Effect.flatMap(
+      verified,
+      (transcript) => MachineTest.assertPlannerRuntimeAgreement(machine, transcript)
+    )
+    type AgreementFailure = Extract<
+      Effect.Error<typeof agreement>,
+      MachineTest.PlannerRuntimeAgreementError<typeof machine>
+    >
+    expect<AgreementFailure>().type.not.toBe<never>()
+  })
 })

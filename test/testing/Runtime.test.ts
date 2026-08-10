@@ -565,6 +565,18 @@ describe("MachineTest runtime commands", () => {
 })
 
 describe("MachineTest causal runtime commands", () => {
+  it("validates runtime invariant names and non-vacuity requirements", () => {
+    const invariant = MachineTest.runtimeInvariants(causalMachine)
+    assert.throws(
+      () => invariant.snapshot(" ", () => true),
+      /name to be a non-empty string/
+    )
+    assert.throws(
+      () => invariant.command("invalid minimum", () => true, { require: { minObservations: -1 } }),
+      /minObservations to be a non-negative safe integer/
+    )
+  })
+
   it.effect("attributes ignored, targetless, raised, and changing macrosteps to their exact sends", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -727,6 +739,30 @@ describe("MachineTest causal runtime commands", () => {
 
       assert.strictEqual(transcript.final.state.path, "TimedOut")
       yield* ref.stop
+
+      const verifiedRef = yield* Machine.start(timerMachine)
+      const verifiedProbe = yield* MachineTest.probe(timerMachine, verifiedRef)
+      const invariant = MachineTest.runtimeInvariants(timerMachine)
+      const verified = yield* MachineTest.verifyCausalCommands(
+        verifiedProbe,
+        [MachineTest.advanceCommand(1_000)],
+        {
+          await: () => verifiedProbe.await.until((snapshot) => snapshot.state.path === "TimedOut"),
+          invariants: [
+            invariant.snapshot(
+              "awaited timer observations remain active",
+              ({ snapshot }) => snapshot.status === "active",
+              { observe: "awaited", require: { minObservations: 1 } }
+            ),
+            invariant.transcript(
+              "the awaited timer reaches TimedOut",
+              ({ transcript }) => transcript.final.state.path === "TimedOut"
+            )
+          ]
+        }
+      )
+      assert.isAtLeast(verified.records[0]?.actual.awaited.length ?? 0, 1)
+      yield* verifiedRef.stop
     }))
 
   it.effect("attributes processing failures to the exact causal command and prefix", () =>
@@ -790,6 +826,204 @@ describe("MachineTest causal runtime commands", () => {
 
       assert.strictEqual(failure.phase, "execution")
       assert.instanceOf(Cause.squash(failure.cause), Machine.StoppedError)
+      yield* ref.stop
+    }))
+
+  it.effect("checks reusable snapshot, command, and transcript laws over causal evidence", () =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const transcript = yield* MachineTest.runCausalCommands(probe, [
+        MachineTest.sendCommand(new Add({ amount: 2 })),
+        MachineTest.sendCommand(new Noop({}))
+      ], {
+        initialModel: undefined,
+        transition: (model) => Effect.succeed({ model, expected: undefined }),
+        assert: () => Effect.void
+      })
+      const invariant = MachineTest.runtimeInvariants(causalMachine)
+      const report = yield* MachineTest.checkRuntimeInvariants(causalMachine, transcript, [
+        invariant.snapshot(
+          "count is non-negative",
+          ({ snapshot }) => snapshot.state.value.count >= 0
+        ),
+        invariant.command(
+          "add is processed",
+          ({ command, result }) =>
+            command._tag !== "Send" || command.event._tag !== "Add" ||
+            result._tag === "SendProcessed",
+          {
+            when: ({ command }) => command._tag === "Send" && command.event._tag === "Add",
+            require: { minObservations: 1 }
+          }
+        ),
+        invariant.transcript(
+          "a targetless command was retained",
+          ({ transcript }) =>
+            transcript.records.some(({ result }) =>
+              result._tag === "SendProcessed" && result.step.handled && !result.step.configurationChanged
+            )
+        ),
+        invariant.snapshot(
+          "an optional await law remains explicitly untested",
+          () => true,
+          { observe: "awaited" }
+        ),
+        invariant.snapshot(
+          "the final retained snapshot is available",
+          ({ snapshot }) => snapshot.state.value.count === 2,
+          { observe: "final" }
+        )
+      ])
+
+      assert.deepStrictEqual(
+        report.checks.map(({ observations, scope, status }) => ({
+          observations,
+          scope,
+          status
+        })),
+        [
+          { observations: 3, scope: "snapshot", status: "passed" },
+          { observations: 1, scope: "command", status: "passed" },
+          { observations: 1, scope: "transcript", status: "passed" },
+          { observations: 0, scope: "snapshot", status: "untested" },
+          { observations: 1, scope: "snapshot", status: "passed" }
+        ]
+      )
+      yield* ref.stop
+    }))
+
+  it.effect("retains every runtime law violation and detects vacuous conditional laws", () =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const transcript = yield* MachineTest.verifyCausalCommands(probe, [
+        MachineTest.sendCommand(new Add({ amount: -2 }))
+      ], {
+        invariants: []
+      })
+      const invariant = MachineTest.runtimeInvariants(causalMachine)
+      const failure = yield* MachineTest.assertRuntimeInvariants(causalMachine, transcript, [
+        invariant.snapshot(
+          "count stays non-negative",
+          ({ snapshot }) => snapshot.state.value.count >= 0 || `negative count: ${snapshot.state.value.count}`
+        ),
+        invariant.command(
+          "burst is exercised",
+          () => true,
+          {
+            when: ({ command }) => command._tag === "Send" && command.event._tag === "Burst",
+            require: { minObservations: 1 }
+          }
+        )
+      ]).pipe(Effect.flip)
+
+      assert.deepStrictEqual(failure.report.checks.map(({ status }) => status), ["failed", "insufficient"])
+      assert.strictEqual(failure.violations.length, 2)
+      assert.deepStrictEqual(failure.violations[0], {
+        invariant: "count stays non-negative",
+        scope: "snapshot",
+        kind: "predicate",
+        observationIndex: 1,
+        commandIndex: 0,
+        phase: "command",
+        command: MachineTest.sendCommand(new Add({ amount: -2 })),
+        message: "negative count: -2"
+      })
+      assert.strictEqual(failure.violations[1]?.kind, "observations")
+      assert.strictEqual(failure.transcript.records.length, 1)
+      yield* ref.stop
+    }))
+
+  it.effect("verifies causal laws without requiring dummy model callbacks", () =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const invariant = MachineTest.runtimeInvariants(causalMachine)
+      const transcript = yield* MachineTest.verifyCausalCommands(probe, [
+        MachineTest.sendCommand(new Ignored({})),
+        MachineTest.sendCommand(new Add({ amount: 3 })),
+        MachineTest.sendCommand(new Burst({}))
+      ], {
+        invariants: [
+          invariant.snapshot("count stays non-negative", ({ snapshot }) => snapshot.state.value.count >= 0),
+          invariant.command("every send is acknowledged", ({ command, result }) =>
+            command._tag !== "Send" || result._tag === "SendProcessed")
+        ]
+      })
+
+      assert.strictEqual(transcript.records.length, 3)
+      assert.strictEqual(transcript.final.state.value.count, 14)
+      assert.strictEqual("finalModel" in transcript, false)
+      yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
+      yield* ref.stop
+    }))
+
+  it.effect.prop(
+    "checks generated causal commands with reusable runtime laws and planner agreement",
+    {
+      commands: MachineTest.runtimeCommands(causalMachine, {
+        maxCommands: 20,
+        eventArbitrary: FastCheck.oneof(
+          FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
+          FastCheck.constant(new Ignored({})),
+          FastCheck.constant(new Noop({}))
+        ),
+        includeAdvance: false,
+        includeStop: false,
+        includeCheckpoint: false
+      }).arbitrary
+    },
+    ({ commands }) =>
+      Effect.gen(function*() {
+        const ref = yield* Machine.start(causalMachine)
+        const probe = yield* MachineTest.probe(causalMachine, ref)
+        const invariant = MachineTest.runtimeInvariants(causalMachine)
+        const transcript = yield* MachineTest.verifyCausalCommands(probe, commands, {
+          invariants: [
+            invariant.command("add applies exactly once", ({ command, result }) => {
+              if (
+                command._tag !== "Send" || command.event._tag !== "Add" ||
+                result._tag !== "SendProcessed"
+              ) return true
+              return result.step.after.value.count === result.step.before.value.count + command.event.amount
+            })
+          ]
+        })
+        yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
+        yield* ref.stop
+      }),
+    { fastCheck: { numRuns: 100, seed: 81_440 } }
+  )
+
+  it.effect("reports the exact field when causal evidence disagrees with fresh planning", () =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const transcript = yield* MachineTest.verifyCausalCommands(probe, [
+        MachineTest.sendCommand(new Ignored({}))
+      ], { invariants: [] })
+      const record = transcript.records[0]!
+      assert.strictEqual(record.actual.result._tag, "SendProcessed")
+      if (record.actual.result._tag !== "SendProcessed") return
+      const corrupted = {
+        ...transcript,
+        records: [{
+          ...record,
+          actual: {
+            ...record.actual,
+            result: {
+              ...record.actual.result,
+              step: { ...record.actual.result.step, handled: true }
+            }
+          }
+        }]
+      }
+      const failure = yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, corrupted).pipe(Effect.flip)
+
+      assert.deepStrictEqual(failure.violations.map(({ commandIndex, field }) => ({ commandIndex, field })), [
+        { commandIndex: 0, field: "handled" }
+      ])
       yield* ref.stop
     }))
 })

@@ -51,6 +51,9 @@ export {
   type CausalRuntimeModelOptions,
   type CausalRuntimeModelStep,
   type CausalRuntimeTranscript,
+  type CausalVerificationAwaitContext,
+  type CausalVerificationOptions,
+  type CausalVerificationTranscript,
   checkpointCommand,
   type EnqueuedRuntimeAssertionContext,
   type EnqueuedRuntimeCommandActual,
@@ -83,7 +86,8 @@ export {
   RuntimeSynchronization,
   type RuntimeTranscript,
   sendCommand,
-  stopCommand
+  stopCommand,
+  verifyCausalCommands
 } from "./runtime.js"
 
 export type { SchemaArbitraryOpaqueFilterWarning, SchemaArbitraryReport, SchemaArbitraryWarning } from "./arbitrary.js"
@@ -127,6 +131,15 @@ export {
 } from "./referenceModel.js"
 
 export { assertInvariants, checkInvariants, Invariant, InvariantError, invariants } from "./invariant.js"
+
+export {
+  assertPlannerRuntimeAgreement,
+  assertRuntimeInvariants,
+  checkRuntimeInvariants,
+  PlannerRuntimeAgreementError,
+  RuntimeInvariantError,
+  runtimeInvariants
+} from "./runtimeInvariant.js"
 
 export { assertReachable, assertUnreachable, explore, findShortest, ReachabilityError } from "./exploration.js"
 

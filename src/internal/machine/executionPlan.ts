@@ -194,6 +194,20 @@ interface OwnedIndexedState {
   readonly completedOrder: ReadonlyArray<number>
 }
 
+const copyOwnedIndexedState = (state: OwnedIndexedState): OwnedIndexedState => ({
+  active: state.active.slice(),
+  activeLeaves: state.activeLeaves.slice(),
+  values: state.values.slice(),
+  completed: state.completed.slice(),
+  outputs: state.outputs.slice(),
+  completedOrder: state.completedOrder.slice()
+})
+
+const retainIndexedMicrostep = (
+  step: ExecutionMicrostep<OwnedIndexedState>,
+  retain: boolean
+): ExecutionMicrostep<OwnedIndexedState> => retain ? { ...step, next: copyOwnedIndexedState(step.next) } : step
+
 const updateOwnedIndexedValue = (
   state: OwnedIndexedState,
   index: number,
@@ -607,7 +621,8 @@ const planIndexedFlatState = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
-  decoded: { readonly _tag: PropertyKey }
+  decoded: { readonly _tag: PropertyKey },
+  retainMicrosteps: boolean
 ): ExecutionMacrostep<OwnedIndexedState> => {
   let current = configuration
   let event: any = decoded
@@ -716,7 +731,7 @@ const planIndexedFlatState = (
         changed
       }
       current = next
-      ;(microsteps ??= []).push(step)
+      ;(microsteps ??= []).push(retainIndexedMicrostep(step, retainMicrosteps))
       if (transitionResult.commands.length > 0) {
         ;(commands ??= []).push(...transitionResult.commands)
       }
@@ -751,11 +766,12 @@ const planIndexedState = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
-  input: unknown
+  input: unknown,
+  retainMicrosteps: boolean
 ): ExecutionMacrostep<OwnedIndexedState> => {
   const decoded = decodeEventSync(machine, input)
   if (descriptor.flat) {
-    return planIndexedFlatState(machine, descriptor, configuration, decoded)
+    return planIndexedFlatState(machine, descriptor, configuration, decoded, retainMicrosteps)
   }
   if (descriptor.finalIndices.some((index) => configuration.active[index] === 1)) {
     const active = activeConfigurationFromIndexedState(descriptor, configuration)
@@ -794,7 +810,7 @@ const planIndexedState = (
   const commands = [...first.commands]
   const raisedEvents = [...first.raisedEvents]
   const emittedEvents = [...first.emittedEvents]
-  const microsteps = [first]
+  const microsteps = [retainIndexedMicrostep(first, retainMicrosteps)]
   let raisedIndex = 0
   let iterations = 0
 
@@ -851,7 +867,7 @@ const planIndexedState = (
     commands.push(...step.commands)
     raisedEvents.push(...step.raisedEvents)
     emittedEvents.push(...step.emittedEvents)
-    microsteps.push(step)
+    microsteps.push(retainIndexedMicrostep(step, retainMicrosteps))
   }
 }
 
@@ -861,7 +877,8 @@ export interface CompiledExecutionPlan {
   readonly snapshot: (state: unknown) => Machine.Snapshot<any>
   readonly plan: (
     state: unknown,
-    event: unknown
+    event: unknown,
+    retainMicrosteps?: boolean
   ) => ExecutionMacrostep
   readonly initial?: (
     args: ReadonlyArray<unknown>
@@ -891,7 +908,8 @@ const makeIndexedExecutionPlan = (
   fromConfiguration: (configuration) => ownedIndexedStateFromActive(indexed, configuration),
   toConfiguration: (state) => activeConfigurationFromIndexedState(indexed, state as OwnedIndexedState),
   snapshot: (state) => snapshotFromIndexedState(indexed, state as OwnedIndexedState),
-  plan: (state, event) => planIndexedState(machine, indexed, state as OwnedIndexedState, event),
+  plan: (state, event, retainMicrosteps = false) =>
+    planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps),
   initial: (args) => {
     const inputArgs = machine.input === undefined
       ? args
