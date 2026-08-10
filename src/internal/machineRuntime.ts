@@ -2191,6 +2191,58 @@ const startLogicInternal: typeof startGenericInternal = ((
     ? startCompactCompiledInternal(logic, options)
     : startGenericInternal(logic, options)) as typeof startGenericInternal
 
+export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
+
+const startProcessWithStrategy = Effect.fnUntraced(function*(
+  logic: ProcessLogic<any, any, any, any, any, any>,
+  strategy: ProcessRuntimeStrategy,
+  options?: {
+    readonly id?: string
+  }
+) {
+  const runtime = yield* makeProcessRuntime
+  const internalOptions: StartInternalOptions = options === undefined
+    ? {
+      detached: true,
+      runtime
+    }
+    : {
+      ...options,
+      detached: true,
+      runtime
+    }
+  if (strategy === "generic") {
+    return yield* startGenericInternal(logic, internalOptions)
+  }
+  if (strategy === "compiled") {
+    if (logic[compiledProcess] !== true || (logic.drain === undefined && logic[compiledProcessDrain] === undefined)) {
+      return yield* Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
+    }
+    return yield* startCompactCompiledInternal(logic, internalOptions)
+  }
+  return yield* startLogicInternal(logic, internalOptions)
+})
+
+/** @internal Test-only startup strategy selection. */
+export const startProcessWithStrategyForTesting = <
+  State,
+  Event,
+  Error = never,
+  Requirements = never,
+  Output = never,
+  InitialError = never
+>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  strategy: ProcessRuntimeStrategy,
+  options?: {
+    readonly id?: string
+  }
+): Effect.Effect<
+  MachineRef<State, Event, Error, Output>,
+  InitialError,
+  Requirements
+> => startProcessWithStrategy(logic, strategy, options) as any
+
 export const startProcess: <
   State,
   Event,
