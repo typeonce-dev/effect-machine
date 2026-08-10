@@ -6643,14 +6643,16 @@ export const invokeMachine: {
   readonly onDone?: (context: Machine.InvokeDoneContext<any>) => unknown
 }) => {
   const machine = config.child.machine
+  // An invoke descriptor fixes both its machine and input. Compile its process
+  // logic once; all mutable execution state belongs to the process instance.
+  const logic = machine.input === undefined
+    ? (internalProcess.toProcessLogic as any)(machine)
+    : (internalProcess.toProcessLogic as any)(machine, config.input)
   return {
     id: config.child.id,
     address: config.child.id,
     descriptor: config.child,
-    src: () =>
-      machine.input === undefined
-        ? (internalProcess.toProcessLogic as any)(machine)
-        : (internalProcess.toProcessLogic as any)(machine, config.input),
+    src: () => logic,
     snapshot: config.snapshot,
     onDone: config.onDone,
     [Activities.ActivityMetadataTypeId]: {
