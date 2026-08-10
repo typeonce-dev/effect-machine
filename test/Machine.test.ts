@@ -4132,6 +4132,90 @@ describe("Machine", () => {
       yield* second.stop
     }))
 
+  it.effect("evaluates precompiled input-bearing invoked children for every start", () =>
+    Effect.gen(function*() {
+      let starts = 0
+      const childStates = Machine.defineStates({ Idle })
+      const childMachine = Machine.make({
+        states: childStates.states,
+        events: [],
+        input: Input,
+        initial: (input) => {
+          starts += 1
+          return childStates.initial.Idle(new Idle({ userId: input.userId }))
+        }
+      }).handle({ Idle: {} })
+      const Child = Machine.child("input-child", childMachine)
+      const parentStates = Machine.defineStates({ Loading })
+      const parentMachine = Machine.make({
+        states: parentStates.states,
+        events: [],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeMachine({ child: Child, input: { userId: "configured" } })
+        }
+      })
+
+      const [first, second] = yield* Effect.all(
+        [Machine.start(parentMachine), Machine.start(parentMachine)],
+        { concurrency: "unbounded" }
+      )
+      const [firstChild, secondChild] = yield* Effect.all([first.child(Child), second.child(Child)])
+
+      assert.strictEqual(starts, 2)
+      assert(Option.isSome(firstChild))
+      assert(Option.isSome(secondChild))
+      assert.notStrictEqual(firstChild.value, secondChild.value)
+      assert.deepStrictEqual(yield* firstChild.value.state, {
+        path: "Idle",
+        value: new Idle({ userId: "configured" })
+      })
+      yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
+    }))
+
+  it.effect("delivers completion from an initially final compiled child", () =>
+    Effect.gen(function*() {
+      class ChildFinished extends Schema.TaggedClass<ChildFinished>("ChildFinished")("ChildFinished", {
+        output: Schema.String
+      }) {}
+      const childStates = Machine.defineStates({
+        Success: { schema: Success, type: "final", output: Schema.String }
+      })
+      const childMachine = Machine.make({
+        states: childStates.states,
+        events: [],
+        initial: () => childStates.initial.Success(new Success({ requestId: "child-output" }))
+      }).handle({
+        Success: { output: ({ state }) => state.requestId }
+      })
+      const Child = Machine.child("final-child", childMachine)
+      const parentStates = Machine.defineStates({
+        Loading,
+        Success: { schema: Success, type: "final", output: Schema.String }
+      })
+      const parentMachine = Machine.make({
+        states: parentStates.states,
+        events: [ChildFinished],
+        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeMachine({
+            child: Child,
+            onDone: ({ output }) => new ChildFinished({ output })
+          }),
+          on: {
+            ChildFinished: ({ event, target }) => target.full.Success(new Success({ requestId: event.output }))
+          }
+        },
+        Success: { output: ({ state }) => state.requestId }
+      })
+
+      const parent = yield* Machine.start(parentMachine)
+
+      assert.strictEqual(yield* parent.join, "child-output")
+    }))
+
   it.effect("keeps input-bearing process descriptors instance-specific", () =>
     Effect.gen(function*() {
       const states = Machine.defineStates({ Idle })

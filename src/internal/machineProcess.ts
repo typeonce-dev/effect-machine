@@ -535,6 +535,30 @@ const makeProcessLogic: <
   const executionPlan = internalPlanner.compileExecutionPlan(machine)
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
+  const makeCompiledInitial = compiledInitial === undefined ? undefined : () => {
+    try {
+      const planned = compiledInitial(initialArgs)
+      const result = {
+        state: planned.state as Machine.Snapshot<States>,
+        done: planned.done,
+        output: planned.output as Output | undefined
+      }
+      return hasInvokes
+        ? {
+          ...result,
+          executionState: new InvokeExecutionKernel({
+            configuration: planned.configuration,
+            activeConfiguration: planned.activeConfiguration,
+            entryPaths: planned.initialEntryPaths
+          })
+        }
+        : result
+    } catch (error) {
+      throw error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
+        ? error
+        : new StartupError({ cause: Cause.die(error) })
+    }
+  }
   const makeInitial = (
     scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
   ) =>
@@ -565,34 +589,12 @@ const makeProcessLogic: <
         ),
         scope
       )
-      : Effect.try({
-        try: () => {
-          const planned = compiledInitial(initialArgs)
-          const result = {
-            state: planned.state as Machine.Snapshot<States>,
-            done: planned.done,
-            output: planned.output as Output | undefined
-          }
-          return hasInvokes
-            ? {
-              ...result,
-              executionState: new InvokeExecutionKernel({
-                configuration: planned.configuration,
-                activeConfiguration: planned.activeConfiguration,
-                entryPaths: planned.initialEntryPaths
-              })
-            }
-            : result
-        },
-        catch: (error) =>
-          error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-            ? error
-            : new StartupError({ cause: Cause.die(error) })
-      })
+      : Effect.try({ try: makeCompiledInitial!, catch: (error) => error as any })
   return ({
     [internalRuntime.childlessProcess]: hasInvokes ? undefined : true,
     [internalRuntime.compiledProcess]: true,
     [internalRuntime.compiledProcessInitial]: entry._tag === "Initial" ? makeInitial : undefined,
+    [internalRuntime.compiledProcessInitialSync]: makeCompiledInitial,
     [internalRuntime.compiledProcessDrain]: hasInvokes
       ? makeInvokingCompiledDrain(machine, entry._tag === "Resume")
       : makeChildlessCompiledDrain(machine, entry._tag === "Resume"),

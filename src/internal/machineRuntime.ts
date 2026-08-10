@@ -63,6 +63,9 @@ export const compiledProcessDrain: unique symbol = Symbol.for("effect/Machine/co
 export const compiledProcessInitial: unique symbol = Symbol.for("effect/Machine/compiledProcessInitial")
 
 /** @internal */
+export const compiledProcessInitialSync: unique symbol = Symbol.for("effect/Machine/compiledProcessInitialSync")
+
+/** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
@@ -363,6 +366,18 @@ export interface ProcessLogic<
     InitialError,
     Requirements
   >
+  /** @internal */
+  readonly [compiledProcessInitialSync]?: (
+    scope: ProcessScope<Event>
+  ) =>
+    | { readonly state: State; readonly done: false; readonly output: undefined }
+    | { readonly state: State; readonly done: true; readonly output: Output }
+    | {
+      readonly state: State
+      readonly done: boolean
+      readonly output: Output | undefined
+      readonly executionState: unknown
+    }
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
   /** @internal */
   readonly drain?: (
@@ -490,12 +505,15 @@ export const watch = <State, Event, Error = never, Output = never>(
 
 interface ProcessRuntime {
   readonly nextSessionId: Effect.Effect<string>
+  readonly nextSessionIdUnsafe: () => string
 }
 
 const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
   let sessionIdCounter = 0
+  const nextSessionIdUnsafe = (): string => `machine:${sessionIdCounter++}`
   return {
-    nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`)
+    nextSessionId: Effect.sync(nextSessionIdUnsafe),
+    nextSessionIdUnsafe
   }
 })
 
@@ -563,10 +581,13 @@ interface ChildRuntime {
 }
 
 class OwnedChildRuntimeImpl implements OwnedChildRuntime {
+  private scopedServices: Context.Context<any> | undefined
+
   constructor(
     private readonly registry: ChildRegistry,
     private readonly self: ProcessAddress<any>,
-    private readonly runtime: ProcessRuntime
+    private readonly runtime: ProcessRuntime,
+    private readonly services?: Context.Context<any>
   ) {}
 
   private has(key: string): boolean {
@@ -596,7 +617,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
       if (this.has(options.key) || this.registry.children.has(options.id)) {
         return Effect.fail(new ChildAlreadyExistsError({ id: options.duplicateId }))
       }
-      this.registry.scope ??= Scope.makeUnsafe("parallel")
+      const scope = this.registry.scope ??= Scope.makeUnsafe("parallel")
       this.registry.children.set(options.id, {
         _tag: "Starting",
         token,
@@ -604,7 +625,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         ownerPath: options.path,
         ownerActive: true
       })
-      return startLogicInternal(logic, {
+      const startOptions: StartInternalOptions = {
         detached: true,
         id: options.id,
         sendParent: (event) => options.sendParent(isCurrent, event),
@@ -620,15 +641,26 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         skipStoppedOutcome: true,
         parent: this.self,
         runtime: this.runtime
-      }).pipe(
+      }
+      const synchronous = this.services !== undefined && options.onSnapshot === undefined &&
+        logic[childlessProcess] === true && logic[compiledProcessDrain] !== undefined &&
+        logic[compiledProcessInitialSync] !== undefined
+      const start = synchronous
+        ? new CompiledProcess(
+          logic,
+          startOptions,
+          this.scopedServices ??= Context.add(this.services!, Scope.Scope, scope),
+          this.runtime.nextSessionIdUnsafe()
+        ).initializeOwnedSync()
+        : startLogicInternal(logic, startOptions)
+      const guarded = start.pipe(
         Effect.onExit((exit) => {
           if (Exit.isSuccess(exit)) return Effect.void
           unregisterChild(this.registry, options.id, token)
           return startedChild === undefined ? Effect.void : startedChild.stop
-        }),
-        Scope.provide(this.registry.scope),
-        Effect.asVoid
+        })
       )
+      return (synchronous ? guarded : Scope.provide(guarded, scope)).pipe(Effect.asVoid)
     })
   }
 
@@ -682,7 +714,8 @@ const childlessRuntime: ChildRuntime = {
 
 const makeChildRuntime = (
   self: ProcessAddress<any>,
-  runtime: ProcessRuntime
+  runtime: ProcessRuntime,
+  services?: Context.Context<any>
 ): Effect.Effect<ChildRuntime> =>
   Effect.sync(() => {
     // Child-registry decisions are synchronous and every access below runs in
@@ -923,7 +956,7 @@ const makeChildRuntime = (
       changes,
       sendTo,
       stop,
-      owned: new OwnedChildRuntimeImpl(registry, self, runtime)
+      owned: new OwnedChildRuntimeImpl(registry, self, runtime, services)
     }
   })
 
@@ -1407,6 +1440,13 @@ type CompiledTermination =
   | { readonly _tag: "Done"; readonly output: unknown }
   | { readonly _tag: "Failure"; readonly cause: Cause.Cause<unknown> }
 
+type CompiledInitialized = {
+  readonly state: unknown
+  readonly done: boolean | undefined
+  readonly output: unknown
+  readonly executionState?: unknown
+}
+
 // Stopping is commonly used only for resource cleanup. Keep that path free of
 // Error stack capture and materialize the typed join failure only if observed.
 const CompiledStoppedCompletion: unique symbol = Symbol("effect/Machine/CompiledStoppedCompletion")
@@ -1466,23 +1506,79 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     }
   }
 
+  private initializeScope(): void {
+    const parent = this.options.parent
+    const sendParent = this.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
+    this.processScope = {
+      self: this.address,
+      parent,
+      spawn: this.childRuntime.spawn,
+      sendParent,
+      sendTo: this.childRuntime.sendTo,
+      stopChild: this.childRuntime.stop,
+      failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause)
+    }
+  }
+
+  private activate(initialized: CompiledInitialized): void {
+    this.current = {
+      revision: 0,
+      terminalizing: false,
+      changes: undefined,
+      snapshot: { status: "active", state: initialized.state }
+    }
+    if (this.logic[compiledProcessDrain] === undefined) {
+      this.processContext = {
+        ...this.processScope,
+        receive: Effect.never,
+        poll: Effect.sync(() => pollCompactMailbox(this.mailbox)),
+        state: Effect.sync(() => this.current.snapshot.state),
+        setState: (state: unknown) => this.setActiveState(state),
+        updateState: (f) => this.updateState(f)
+      }
+    } else {
+      this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
+      if ("executionState" in initialized) {
+        this.compiledContext.executionState = initialized.executionState
+      }
+    }
+  }
+
+  initializeOwnedSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
+    this.initializeScope()
+    const compiledInitial = this.logic[compiledProcessInitialSync]!
+    let initialized: CompiledInitialized
+    try {
+      initialized = compiledInitial(this.processScope)
+    } catch (error) {
+      this.initializing = false
+      return Effect.fail(error)
+    }
+    this.initializing = false
+    this.activate(initialized)
+    if (this.options.onReadySync !== undefined && !this.options.onReadySync(this)) {
+      this.requestTerminationSync({ _tag: "Stopped" })
+    }
+    if (initialized.done === true && this.requestedTermination === undefined) {
+      this.requestTerminationSync({ _tag: "Done", output: initialized.output })
+    }
+    if (
+      initialized.done === false && this.requestedTermination === undefined &&
+      this.mailbox.items === undefined
+    ) {
+      return Effect.succeed(this)
+    }
+    this.draining = true
+    return Effect.provideContext(this.drainRuntime(), this.services).pipe(Effect.as(this))
+  }
+
   initialize(): Effect.Effect<MachineRef<any, any, any, any>, unknown, any> {
     const self = this
     return Effect.gen(function*() {
       if (self.logic[childlessProcess] !== true) {
-        self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime)
+        self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime, self.services)
       }
-      const parent = self.options.parent
-      const sendParent = self.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
-      self.processScope = {
-        self: self.address,
-        parent,
-        spawn: self.childRuntime.spawn,
-        sendParent,
-        sendTo: self.childRuntime.sendTo,
-        stopChild: self.childRuntime.stop,
-        failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause)
-      }
+      self.initializeScope()
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
         Exit.isFailure(exit) ? self.childRuntime.close(exit) : Effect.void
@@ -1507,27 +1603,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         }))
       )
       const initial = initialized.state
-      self.current = {
-        revision: 0,
-        terminalizing: false,
-        changes: undefined,
-        snapshot: { status: "active", state: initial }
-      }
-      if (self.logic[compiledProcessDrain] === undefined) {
-        self.processContext = {
-          ...self.processScope,
-          receive: Effect.never,
-          poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
-          state: Effect.sync(() => self.current.snapshot.state),
-          setState: (state: unknown) => self.setActiveState(state),
-          updateState: (f) => self.updateState(f)
-        }
-      } else {
-        self.compiledContext = new CompiledProcessContextImpl(self.processScope, self.childRuntime.owned, self)
-        if ("executionState" in initialized) {
-          self.compiledContext.executionState = initialized.executionState
-        }
-      }
+      self.activate(initialized)
 
       if (self.options.onReadySync !== undefined && !self.options.onReadySync(self)) {
         yield* self.requestTermination({ _tag: "Stopped" })
@@ -1594,14 +1670,16 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private requestTermination(requested: CompiledTermination): Effect.Effect<boolean> {
-    return Effect.sync(() => {
-      if (this.requestedTermination !== undefined) {
-        return false
-      }
-      this.requestedTermination = requested
-      this.reservedTerminationSnapshot = this.reserveTermination(requested)
-      return true
-    })
+    return Effect.sync(() => this.requestTerminationSync(requested))
+  }
+
+  private requestTerminationSync(requested: CompiledTermination): boolean {
+    if (this.requestedTermination !== undefined) {
+      return false
+    }
+    this.requestedTermination = requested
+    this.reservedTerminationSnapshot = this.reserveTermination(requested)
+    return true
   }
 
   private reserveTermination(
