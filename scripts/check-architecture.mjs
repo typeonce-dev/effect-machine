@@ -228,6 +228,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -238,6 +239,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -247,6 +249,7 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -255,12 +258,14 @@ export const checkArchitecture = ({
       "src/internal/machine/planner.ts",
       "src/internal/machine/command.ts",
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
     ])],
     ["src/internal/machine/command.ts", new Set([
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -268,12 +273,14 @@ export const checkArchitecture = ({
     ["src/internal/machine/planner.ts", new Set([
       "src/internal/machine/serialization.ts",
       "src/internal/machine/executionPlan.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
     ])],
     ["src/internal/machine/executionPlan.ts", new Set([
       "src/internal/machine/serialization.ts",
+      "src/internal/machine/invocation.ts",
       "src/internal/machine/commandRuntime.ts",
       "src/internal/machine/process.ts",
       "src/internal/machine/runtime.ts"
@@ -324,6 +331,7 @@ export const checkArchitecture = ({
       [
         "src/internal/machine/commandRuntime.ts",
         "src/internal/machine/executionPlan.ts",
+        "src/internal/machine/invocation.ts",
         "src/internal/machine/process.ts",
         "src/internal/machine/runtime.ts"
       ].includes(edge.target)
@@ -350,6 +358,7 @@ export const checkArchitecture = ({
       [
         "src/internal/machine/configuration.ts",
         "src/internal/machine/executionPlan.ts",
+        "src/internal/machine/invocation.ts",
         "src/internal/machine/planner.ts",
         "src/internal/machine/process.ts"
       ].includes(edge.target)

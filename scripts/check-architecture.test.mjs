@@ -85,10 +85,11 @@ test("rejects value back-edges and execution-layer inversions", () => {
 
 test("rejects outward machine semantic dependencies", () => {
   const root = makeProject({
-    "src/internal/machine/topology.ts": 'import { decode } from "./protocol.js"\nexport const topology = decode',
-    "src/internal/machine/protocol.ts": "export const decode = 1"
+    "src/internal/machine/topology.ts": 'import { decode } from "./protocol.js"\nimport { invoke } from "./invocation.js"\nexport const topology = decode + invoke',
+    "src/internal/machine/protocol.ts": "export const decode = 1",
+    "src/internal/machine/invocation.ts": "export const invoke = 1"
   })
-  assert.deepEqual(rules(root), ["ARCH005"])
+  assert.deepEqual(rules(root), ["ARCH005", "ARCH005"])
 })
 
 test("detects runtime cycles while permitting type-only cycles", () => {

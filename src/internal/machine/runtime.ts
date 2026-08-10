@@ -271,6 +271,8 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
   readonly updateState: <E, R>(
     f: (state: State) => Effect.Effect<State, E, R>
   ) => Effect.Effect<void, E, R>
+  /** Present only when a compiled statechart is forced through the generic runtime. @internal */
+  readonly ownedChildren?: OwnedChildRuntime
 }
 
 /**
@@ -546,7 +548,8 @@ interface StartInternalOptions {
   readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
 }
 
-interface OwnedChildSpawnOptions {
+/** @internal */
+export interface OwnedChildSpawnOptions {
   readonly key: string
   readonly path: string
   readonly id: string
@@ -566,9 +569,10 @@ interface OwnedChildSpawnOptions {
   ) => Effect.Effect<void, StoppedError>
 }
 
-interface OwnedChildRuntime {
+/** @internal */
+export interface OwnedChildRuntime {
   readonly spawn: (
-    logic: ProcessLogic<any, any, any, any, any, any>,
+    makeLogic: () => ProcessLogic<any, any, any, any, any, any>,
     options: OwnedChildSpawnOptions
   ) => Effect.Effect<void, any, any>
   readonly stopAll: () => Effect.Effect<void>
@@ -612,7 +616,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
   }
 
   spawn(
-    logic: ProcessLogic<any, any, any, any, any, any>,
+    makeLogic: () => ProcessLogic<any, any, any, any, any, any>,
     options: OwnedChildSpawnOptions
   ): Effect.Effect<void, any, any> {
     const token = Symbol()
@@ -626,6 +630,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
       if (this.has(options.key) || this.registry.children.has(options.id)) {
         return Effect.fail(new ChildAlreadyExistsError({ id: options.duplicateId }))
       }
+      const logic = makeLogic()
       const scope = this.registry.scope ??= Scope.makeUnsafe("parallel")
       this.registry.children.set(options.id, {
         _tag: "Starting",
@@ -1049,6 +1054,7 @@ const startGenericInternal: <
     changes: childChanges,
     close: closeChildren,
     get: getChild,
+    owned: ownedChildren,
     sendTo,
     spawn,
     stop: stopChild
@@ -1058,6 +1064,7 @@ const startGenericInternal: <
       changes: childChanges,
       close: closeChildren,
       get: getChild,
+      owned: ownedChildren,
       sendTo,
       spawn,
       stop: stopChild
@@ -1304,6 +1311,7 @@ const startGenericInternal: <
 
   const context: ProcessContext<State, Event> = {
     ...scope,
+    ...(logic.execution?._tag === "Compiled" && !logic.execution.childless ? { ownedChildren } : undefined),
     receive: Queue.take(queue),
     mailbox: queue,
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
