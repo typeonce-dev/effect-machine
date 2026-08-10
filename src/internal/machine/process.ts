@@ -11,11 +11,14 @@ import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../../Machine.js"
+import * as CommandRuntime from "./commandRuntime.js"
+import * as Configuration from "./configuration.js"
 import { ChildAlreadyExistsError, InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
 import type { StoppedError } from "./errors.js"
-import * as Model from "./model.js"
+import * as ExecutionPlan from "./executionPlan.js"
 import * as internalPlanner from "./planner.js"
 import * as internalRuntime from "./runtime.js"
+import * as Serialization from "./serialization.js"
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
@@ -167,7 +170,7 @@ const makeChildlessCompiledDrain = (
 ): (
   context: internalRuntime.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
-  const executionPlan = internalPlanner.compileExecutionPlan(machine)
+  const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   return (context) => {
     let current = context.state()
     if (checkInitialFinal && internalPlanner.isFinalState(machine, current)) {
@@ -191,7 +194,7 @@ const makeChildlessCompiledDrain = (
       let planned
       try {
         planned = executionPlan.plan(
-          configuration ?? executionPlan.fromConfiguration(Model.normalizeConfigurationSync(machine, current)),
+          configuration ?? executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           pending.value
         )
       } catch (error) {
@@ -208,12 +211,12 @@ const makeChildlessCompiledDrain = (
       const next = executionPlan.snapshot(planned.next)
       const beforeCommit = planned.commands.length === 0
         ? undefined
-        : internalPlanner.runCommands(planned.commands, context.scope)
+        : CommandRuntime.runCommands(planned.commands, context.scope)
       const afterCommit = planned.emittedEvents.length === 0
         ? undefined
-        : internalPlanner.runEmittedEvents(
+        : CommandRuntime.runEmittedEvents(
           planned.emittedEvents,
-          liveRuntime ??= internalPlanner.makeLiveRuntime(machine, context.scope)
+          liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context.scope)
         )
       const commit = (): Effect.Effect<void> | undefined => {
         const notification = context.commit(next)
@@ -250,14 +253,14 @@ class InvokeExecutionKernel {
   initial:
     | {
       readonly configuration: unknown
-      readonly activeConfiguration: Model.ActiveConfiguration
+      readonly activeConfiguration: Configuration.ActiveConfiguration
       readonly entryPaths: ReadonlyArray<string>
     }
     | undefined
 
   constructor(initial?: {
     readonly configuration: unknown
-    readonly activeConfiguration: Model.ActiveConfiguration
+    readonly activeConfiguration: Configuration.ActiveConfiguration
     readonly entryPaths: ReadonlyArray<string>
   }) {
     this.initial = initial
@@ -318,17 +321,17 @@ class InvokeExecutionKernel {
   startAll(
     machine: Machine.Any,
     context: internalRuntime.CompiledProcessContext<any, any>,
-    configuration: Model.ActiveConfiguration,
+    configuration: Configuration.ActiveConfiguration,
     paths: ReadonlyArray<string>,
     event: Machine.LifecycleEvent<any>
   ): Effect.Effect<void, any, any> | undefined {
     const effects = internalPlanner.sortEntryPaths(machine, paths)
       .filter((path) => configuration.active.has(path))
       .flatMap((path) =>
-        getInvokes(Model.getStateConfigByPath(machine, path), {
-          state: Model.getActiveValue(configuration, path),
-          parent: Model.getParentValue(machine, configuration, path),
-          parents: Model.getParentValues(machine, configuration, path),
+        getInvokes(Configuration.getStateConfigByPath(machine, path), {
+          state: Configuration.getActiveValue(configuration, path),
+          parent: Configuration.getParentValue(machine, configuration, path),
+          parents: Configuration.getParentValues(machine, configuration, path),
           event
         }).map((config) => this.start(context, path, config))
       )
@@ -342,7 +345,7 @@ const makeInvokingCompiledDrain = (
 ): (
   context: internalRuntime.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
-  const executionPlan = internalPlanner.compileExecutionPlan(machine)
+  const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   return (context) => {
     let current = context.state()
     if (checkInitialFinal && internalPlanner.isFinalState(machine, current)) {
@@ -374,7 +377,7 @@ const makeInvokingCompiledDrain = (
       try {
         planned = executionPlan.plan(
           configuration ??
-            executionPlan.fromConfiguration(Model.normalizeConfigurationSync(machine, current)),
+            executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           pending.value
         )
       } catch (error) {
@@ -404,7 +407,7 @@ const makeInvokingCompiledDrain = (
       const next = executionPlan.snapshot(planned.next)
       const beforeCommit: Array<Effect.Effect<void, any, any>> = []
       if (planned.commands.length > 0) {
-        beforeCommit.push(internalPlanner.runCommands(planned.commands, scope))
+        beforeCommit.push(CommandRuntime.runCommands(planned.commands, scope))
       }
       if (changed) {
         const stopping = context.ownedChildren.stopPaths(exitPaths)
@@ -413,9 +416,9 @@ const makeInvokingCompiledDrain = (
       const afterCommit: Array<Effect.Effect<void, any, any>> = []
       if (planned.emittedEvents.length > 0) {
         afterCommit.push(
-          internalPlanner.runEmittedEvents(
+          CommandRuntime.runEmittedEvents(
             planned.emittedEvents,
-            liveRuntime ??= internalPlanner.makeLiveRuntime(machine, scope)
+            liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, scope)
           )
         )
       }
@@ -461,13 +464,14 @@ const makeInvokingCompiledDrain = (
         return loop
       }
       const seeded = execution.initial
-      const initialConfiguration = seeded?.activeConfiguration ?? Model.normalizeConfigurationSync(machine, current)
+      const initialConfiguration = seeded?.activeConfiguration ??
+        Configuration.normalizeConfigurationSync(machine, current)
       configuration = seeded?.configuration ?? executionPlan.fromConfiguration(initialConfiguration)
       const starting = execution.startAll(
         machine,
         context,
         initialConfiguration,
-        seeded?.entryPaths ?? Model.getInitialEntryPaths(machine, initialConfiguration),
+        seeded?.entryPaths ?? Configuration.getInitialEntryPaths(machine, initialConfiguration),
         internalPlanner.InitialEvent
       )
       execution.initial = undefined
@@ -527,7 +531,7 @@ const makeProcessLogic: <
   entry: ProcessEntry<States, Input>
 ) => {
   const hasInvokes = hasInvokeCapability(machine)
-  const executionPlan = internalPlanner.compileExecutionPlan(machine)
+  const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
   const makeCompiledInitial = compiledInitial === undefined ? undefined : () => {
@@ -563,12 +567,12 @@ const makeProcessLogic: <
           Effect.flatMap((planned) => {
             const commands = planned.commands.length === 0
               ? undefined
-              : internalPlanner.runCommands(planned.commands, scope)
+              : CommandRuntime.runCommands(planned.commands, scope)
             const emitted = planned.emittedEvents.length === 0
               ? undefined
-              : internalPlanner.runEmittedEvents(
+              : CommandRuntime.runEmittedEvents(
                 planned.emittedEvents,
-                internalPlanner.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
+                CommandRuntime.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
               )
             const result = Effect.succeed({
               state: planned.state,
@@ -595,7 +599,7 @@ const makeProcessLogic: <
       : makeChildlessCompiledDrain(machine, entry._tag === "Resume"),
     initial: (scope) =>
       entry._tag === "Resume"
-        ? internalRuntime.provideMachineRuntime(Model.normalizeSnapshotEffect(machine, entry.snapshot), scope)
+        ? internalRuntime.provideMachineRuntime(Serialization.normalizeSnapshotEffect(machine, entry.snapshot), scope)
         : makeInitial(scope).pipe(Effect.map((initialized) => initialized.state)),
     run: (context) =>
       internalRuntime.provideMachineRuntime(
@@ -620,7 +624,7 @@ const makeProcessLogic: <
             // Keeping the loop in this generator avoids a suspended generator
             // per iteration; every iteration still crosses Effect boundaries,
             // so the Effect scheduler remains responsible for cooperative yield.
-            let configuration: Model.ActiveConfiguration | undefined
+            let configuration: Configuration.ActiveConfiguration | undefined
             let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
             let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
             let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
@@ -631,7 +635,7 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  configuration ?? Model.normalizeConfigurationSync(machine, current),
+                  configuration ?? Configuration.normalizeConfigurationSync(machine, current),
                   event
                 )
               } catch (error) {
@@ -643,14 +647,14 @@ const makeProcessLogic: <
               configuration = planned.next
 
               if (planned.microsteps.length > 0) {
-                const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                yield* internalPlanner.runCommands(planned.commands, context)
+                const next = Configuration.snapshotFromConfiguration<States>(machine, planned.next)
+                yield* CommandRuntime.runCommands(planned.commands, context)
                 yield* setState(next)
                 current = next
                 if (planned.emittedEvents.length > 0) {
-                  yield* internalPlanner.runEmittedEvents(
+                  yield* CommandRuntime.runEmittedEvents(
                     planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                    liveRuntime ??= internalPlanner.makeLiveRuntime(machine, context)
+                    liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
 
@@ -762,11 +766,11 @@ const makeProcessLogic: <
             )
           })
           const startInvokes: (
-            configuration: Model.ActiveConfiguration,
+            configuration: Configuration.ActiveConfiguration,
             paths: ReadonlyArray<string>,
             event: Machine.LifecycleEvent<Events>
           ) => Effect.Effect<void, E | MachineSchemaDecodeError, R> = Effect.fnUntraced(function*(
-            configuration: Model.ActiveConfiguration,
+            configuration: Configuration.ActiveConfiguration,
             paths: ReadonlyArray<string>,
             event: Machine.LifecycleEvent<Events>
           ) {
@@ -774,10 +778,10 @@ const makeProcessLogic: <
               internalPlanner.sortEntryPaths(machine, paths)
                 .filter((path) => configuration.active.has(path))
                 .flatMap((path) =>
-                  getInvokes(Model.getStateConfigByPath(machine, path), {
-                    state: Model.getActiveValue(configuration, path),
-                    parent: Model.getParentValue(machine, configuration, path),
-                    parents: Model.getParentValues(machine, configuration, path),
+                  getInvokes(Configuration.getStateConfigByPath(machine, path), {
+                    state: Configuration.getActiveValue(configuration, path),
+                    parent: Configuration.getParentValue(machine, configuration, path),
+                    parents: Configuration.getParentValues(machine, configuration, path),
                     event
                   }).map((config) =>
                     startInvoke(
@@ -800,13 +804,14 @@ const makeProcessLogic: <
             )
 
           return yield* Effect.gen(function*() {
-            let configuration: Model.ActiveConfiguration | undefined = yield* Model.normalizeConfigurationEffect(
-              machine,
-              current
-            )
+            let configuration: Configuration.ActiveConfiguration | undefined = yield* Configuration
+              .normalizeConfigurationEffect(
+                machine,
+                current
+              )
             yield* startInvokes(
               configuration,
-              Model.getInitialEntryPaths(machine, configuration),
+              Configuration.getInitialEntryPaths(machine, configuration),
               internalPlanner.InitialEvent
             )
             // As above, keep the normalized configuration only while this
@@ -825,7 +830,7 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  configuration ?? Model.normalizeConfigurationSync(machine, current),
+                  configuration ?? Configuration.normalizeConfigurationSync(machine, current),
                   event
                 )
               } catch (error) {
@@ -847,17 +852,17 @@ const makeProcessLogic: <
                   }
                 }
 
-                const next = Model.snapshotFromConfiguration<States>(machine, planned.next)
-                yield* internalPlanner.runCommands(planned.commands, context)
+                const next = Configuration.snapshotFromConfiguration<States>(machine, planned.next)
+                yield* CommandRuntime.runCommands(planned.commands, context)
                 if (changed) {
                   yield* stopInvokes(exitPaths)
                 }
                 yield* setState(next)
                 current = next
                 if (planned.emittedEvents.length > 0) {
-                  yield* internalPlanner.runEmittedEvents(
+                  yield* CommandRuntime.runEmittedEvents(
                     planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
-                    liveRuntime ??= internalPlanner.makeLiveRuntime(machine, context)
+                    liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
 

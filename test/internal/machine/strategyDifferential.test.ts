@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
-import * as Planner from "../../../src/internal/machine/planner.js"
+import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
 import { MachineTest } from "../../../src/testing/index.js"
 import type { DifferentialStep } from "../../machine/support/runtimeDifferential.js"
 import { verifyManagedExecution } from "../../machine/support/runtimeDifferential.js"
@@ -113,7 +113,7 @@ describe("machine planner and runtime strategies", () => {
         Ready: {}
       })
 
-      assert.strictEqual(Planner.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
       yield* verifyPlannerStrategies({
         machine,
         events: [],
@@ -148,7 +148,7 @@ describe("machine planner and runtime strategies", () => {
         label: "initially final startup"
       })
 
-      const compiledInitial = Planner.selectExecutionPlanForTesting(machine, "indexed-flat").plan.initial!
+      const compiledInitial = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan.initial!
       assert.throws(
         () => compiledInitial([{ value: "invalid" }]),
         Machine.MachineSchemaDecodeError
@@ -271,7 +271,7 @@ describe("machine planner and runtime strategies", () => {
       for (let index = 0; index < samples.length && compared < 24; index++) {
         const model = samples[index]!
         const machine = MachineTest.compileModel(model)
-        const selected = Planner.selectExecutionPlanForTesting(machine, "auto").strategy
+        const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy
         if (selected === "generic") continue
         const events = Array.from({ length: 6 }, (_, eventIndex) => ({
           _tag: model.events[(index + eventIndex) % model.events.length]!

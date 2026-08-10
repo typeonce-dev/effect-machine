@@ -25,13 +25,16 @@ import type {
   StoppedError
 } from "../../Machine.js"
 import * as Activities from "./activities.js"
+import * as Configuration from "./configuration.js"
 import type { ChildAlreadyExistsError, InfiniteTransitionError, StartupError } from "./errors.js"
-import * as Model from "./model.js"
 import * as internalPlanner from "./planner.js"
 import * as internalProcess from "./process.js"
+import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 import * as internalRuntime from "./runtime.js"
+import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
+import * as Topology from "./topology.js"
 
 export {
   ChildAlreadyExistsError,
@@ -117,7 +120,7 @@ const cloneWithHandlers = (
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
   machine.handle = makeHandle(machine)
-  Model.copyProtocol(self, machine)
+  Protocol.copyProtocol(self, machine)
   return machine
 }
 
@@ -183,7 +186,7 @@ const flattenHandlers = (
     }
     handlers[path] = stateConfig as Machine.AnyStateConfig
     if (childConfig !== undefined) {
-      const node = Model.getStateNodeDefinition(path, states[key])
+      const node = Topology.getStateNodeDefinition(path, states[key])
       if (node.states === undefined) {
         throw new Error(`Machine expected state "${path}" to declare child states`)
       }
@@ -258,7 +261,7 @@ const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) =
       const omitted = args.length === 0 || (kind === "nested" && args.length === 1 && typeof args[0] === "function")
       const input = omitted ? {} : args[0]
       const rest = omitted ? args : args.slice(1)
-      return method(Model.makeStateInput(input), ...rest)
+      return method(Topology.makeStateInput(input), ...rest)
     },
     enumerable: false
   })
@@ -277,10 +280,10 @@ const makeSnapshotBuilder = (
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
     if (pseudoType === "choice") {
-      builder[key] = () => Model.makeChoiceTarget(path, getParentPathRuntime(path))
+      builder[key] = () => Topology.makeChoiceTarget(path, getParentPathRuntime(path))
       continue
     }
-    const node = Model.getStateNodeDefinition(path, states[key])
+    const node = Topology.getStateNodeDefinition(path, states[key])
     builder[key] = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) =>
         makeSnapshotForNode(states[key], key, value, selector, options),
@@ -309,7 +312,7 @@ const makeParallelSnapshotBuilder = (
       continue
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-    const node = Model.getStateNodeDefinition(path, states[key])
+    const node = Topology.getStateNodeDefinition(path, states[key])
     builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
       const nextRegions: Record<string, unknown> = {}
       for (const regionKey of Object.keys(regions)) {
@@ -353,7 +356,7 @@ const makeSnapshotForNode = (
   options: SnapshotBuilderOptions
 ): Record<string, unknown> => {
   const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-  const node = Model.getStateNodeDefinition(path, definition)
+  const node = Topology.getStateNodeDefinition(path, definition)
   const snapshot: Record<string, unknown> = {
     path,
     value
@@ -417,8 +420,8 @@ const makeTargetWithValues = (
   values: Readonly<Record<string, unknown>> | undefined
 ): Machine.Target<any, any> =>
   hasTargetValues(values)
-    ? Model.makeTarget(path as any, value as any, { values: values as any })
-    : Model.makeTarget(path as any, value as any)
+    ? Topology.makeTarget(path as any, value as any, { values: values as any })
+    : Topology.makeTarget(path as any, value as any)
 
 const getTargetBuilderDefinition = (
   states: Machine.StateTree,
@@ -433,7 +436,7 @@ const getTargetBuilderDefinition = (
     }
     definition = children[key]
     path = path === "" ? key : `${path}.${key}`
-    const node = Model.getStateNodeDefinition(path, definition)
+    const node = Topology.getStateNodeDefinition(path, definition)
     children = node.states ?? {}
   }
   return definition!
@@ -456,7 +459,7 @@ const makeParallelTarget = (
     selector,
     { mode: "full", prefix: node.parent ?? "" }
   )
-  return Model.makeTarget(node.path as any, value as any, {
+  return Topology.makeTarget(node.path as any, value as any, {
     snapshot: snapshot as any,
     values: values as any
   })
@@ -493,7 +496,7 @@ const makeLocalTargetChildBuilder = (
   ) {
     const child = getTargetBuilderNode(stateNodes, childPath)
     if (child.type === "choice") {
-      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
+      builder[child.key] = () => Topology.makeChoiceTarget(child.path, parent.path, values)
       continue
     }
     builder[child.key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
@@ -565,7 +568,7 @@ const addBranchTargetChildren = (
   ) {
     const child = getTargetBuilderNode(stateNodes, childPath)
     if (child.type === "choice") {
-      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
+      builder[child.key] = () => Topology.makeChoiceTarget(child.path, parent.path, values)
       continue
     }
     builder[child.key] = makeBranchTargetNodeBuilder(states, stateNodes, child.path, values, source)
@@ -644,7 +647,7 @@ const makeHistoryTargetBuilder = (
     const definition = states[key]
     if ((definition as { readonly type?: unknown }).type === "history") {
       const parent = getParentPathRuntime(path)
-      builder[key] = () => Model.makeHistoryTarget(path, parent)
+      builder[key] = () => Topology.makeHistoryTarget(path, parent)
       continue
     }
     if (typeof definition === "object" && definition !== null && hasProperty(definition, "states")) {
@@ -685,17 +688,17 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
     states: states as States,
     initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
     get: ((snapshot, path) =>
-      Model.getSnapshotByPath(snapshot, path).pipe(
+      Topology.getSnapshotByPath(snapshot, path).pipe(
         Option.map((snapshot) => snapshot.value)
       )) as Machine.DefinedStates<States>["get"],
     getWithParents: ((snapshot, path) => {
       const parents: Record<string, unknown> = {}
-      return Model.getSnapshotByPath(snapshot, path, parents).pipe(
+      return Topology.getSnapshotByPath(snapshot, path, parents).pipe(
         Option.map((snapshot) => ({ value: snapshot.value, parents }))
       )
     }) as Machine.DefinedStates<States>["getWithParents"],
-    getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
-    matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
+    getSnapshot: Topology.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
+    matches: (snapshot, path) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))
   }
 }) as DefineStates
 
@@ -802,11 +805,11 @@ export const make: Make = (<
   self.input = config.input
   self.id = config.id
   self.initial = config.initial
-  self.stateNodes = Model.compileStateNodes(config.states)
+  self.stateNodes = Topology.compileStateNodes(config.states)
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)
-  Model.setProtocol(self)
+  Protocol.setProtocol(self)
   return self
 }) as Make
 
@@ -821,7 +824,7 @@ export const event = <
   machine: M,
   schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
   ...args: EventConstructorArgs<EventSchema>
-): EventSchema["Type"] => Model.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
+): EventSchema["Type"] => Protocol.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
 
 export const encodeSnapshot: <
   const States extends Machine.StateSchemas,
@@ -858,7 +861,7 @@ export const encodeSnapshot: <
   Machine.EncodedSnapshot,
   MachineSchemaEncodeError,
   Machine.SnapshotEncodingServices<States>
-> = Model.encodeSnapshot as any
+> = Serialization.encodeSnapshot as any
 
 export const decodeSnapshot: <
   const States extends Machine.StateSchemas,
@@ -895,7 +898,7 @@ export const decodeSnapshot: <
   Machine.Snapshot<States>,
   MachineSchemaDecodeError,
   Machine.SnapshotDecodingServices<States>
-> = Model.decodeSnapshot as any
+> = Serialization.decodeSnapshot as any
 
 export const invoke = <
   ChildState,
@@ -1367,7 +1370,7 @@ export const transitionDefinitions = <M extends Machine.Any>(
     Machine.StateNodeIdentifier<Machine.States<M>>
   >
 > =>
-  Model.transitionDefinitions(machine) as ReadonlyArray<
+  Topology.transitionDefinitions(machine) as ReadonlyArray<
     Machine.TransitionDefinition<
       Machine.StateNodeIdentifier<Machine.States<M>>,
       Machine.TagOf<Machine.Events<M>[number]>,
@@ -1391,7 +1394,7 @@ export const configuration = <M extends Machine.Any>(
     Machine.ChoiceIdentifier<Machine.States<M>>
   >
 > => {
-  const active = Model.normalizeConfiguration(machine, state).active
+  const active = Configuration.normalizeConfiguration(machine, state).active
   return stateNodes(machine).filter(
     (node): node is Machine.ActiveStateNode<
       Machine.StateIdentifier<Machine.States<M>>,

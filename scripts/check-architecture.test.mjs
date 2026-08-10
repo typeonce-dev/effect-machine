@@ -80,7 +80,15 @@ test("rejects value back-edges and execution-layer inversions", () => {
     "src/internal/testing/machine/arbitrary.ts": "export const arbitrary = 1",
     "src/consumer.ts": 'import { arbitrary } from "./internal/testing/machine/arbitrary.js"\nvoid arbitrary'
   })
-  assert.deepEqual(rules(root), ["ARCH007", "ARCH003", "ARCH004", "ARCH006"])
+  assert.deepEqual(rules(root), ["ARCH007", "ARCH003", "ARCH004", "ARCH005", "ARCH006"])
+})
+
+test("rejects outward machine semantic dependencies", () => {
+  const root = makeProject({
+    "src/internal/machine/topology.ts": 'import { decode } from "./protocol.js"\nexport const topology = decode',
+    "src/internal/machine/protocol.ts": "export const decode = 1"
+  })
+  assert.deepEqual(rules(root), ["ARCH005"])
 })
 
 test("detects runtime cycles while permitting type-only cycles", () => {

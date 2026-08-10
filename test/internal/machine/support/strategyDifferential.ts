@@ -1,8 +1,8 @@
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
 import { Machine } from "../../../../src/index.js"
-import * as Model from "../../../../src/internal/machine/model.js"
-import * as Planner from "../../../../src/internal/machine/planner.js"
+import * as Configuration from "../../../../src/internal/machine/configuration.js"
+import * as ExecutionPlan from "../../../../src/internal/machine/executionPlan.js"
 import * as Process from "../../../../src/internal/machine/process.js"
 
 const eventTag = (event: unknown): PropertyKey | undefined =>
@@ -20,8 +20,8 @@ const encodeState = (
 
 const canonicalMacrostep = Effect.fn(function*(
   machine: Machine.Machine.Any,
-  executionPlan: Planner.CompiledExecutionPlan,
-  planned: ReturnType<Planner.CompiledExecutionPlan["plan"]>
+  executionPlan: ExecutionPlan.CompiledExecutionPlan,
+  planned: ReturnType<ExecutionPlan.CompiledExecutionPlan["plan"]>
 ) {
   return {
     next: yield* encodeState(machine, executionPlan.snapshot(planned.next)),
@@ -59,8 +59,8 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
     unknown,
     never
   >
-  const generic = Planner.selectExecutionPlanForTesting(options.machine, "generic")
-  const selected = Planner.selectExecutionPlanForTesting(options.machine, "auto")
+  const generic = ExecutionPlan.selectExecutionPlanForTesting(options.machine, "generic")
+  const selected = ExecutionPlan.selectExecutionPlanForTesting(options.machine, "auto")
   if (options.expected !== undefined) {
     assert.strictEqual(selected.strategy, options.expected, `${options.label} selected strategy`)
   }
@@ -77,7 +77,7 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
     assert.deepStrictEqual(compiledInitial.output, initial.output)
   }
 
-  const active = Model.normalizeConfigurationSync(options.machine, initial.state)
+  const active = Configuration.normalizeConfigurationSync(options.machine, initial.state)
   let genericState = generic.plan.fromConfiguration(active)
   let selectedState = selected.plan.fromConfiguration(active)
   for (let index = 0; index < options.events.length; index++) {
