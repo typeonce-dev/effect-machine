@@ -4540,6 +4540,42 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "unavailable")
     }))
 
+  it.effect("preserves services for an invoke started by compiled initialization", () =>
+    Effect.gen(function*() {
+      const requiredMessage: Effect.Effect<string, never, InitialRequirement> = Effect.gen(function*() {
+        return (yield* InitialRequirement).initialMessage
+      })
+      const machine = Machine.make({
+        states: { Loading, Success: SuccessOutput },
+        events: [],
+        internalEvents: [RequestSucceeded],
+        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+      }).handle({
+        Loading: {
+          invoke: Machine.invokeEffect({
+            id: "request",
+            effect: requiredMessage,
+            onSuccess: (value: string) => new RequestSucceeded({ value })
+          }),
+          on: {
+            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+          }
+        },
+        Success: {
+          output: ({ state }) => state.requestId
+        }
+      })
+
+      const actor = yield* Machine.start(machine).pipe(
+        Effect.provideService(
+          InitialRequirement,
+          InitialRequirement.of({ initialMessage: "from-service" })
+        )
+      )
+
+      assert.strictEqual(yield* actor.join, "from-service")
+    }))
+
   it.effect("after emits a state-scoped internal event", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
