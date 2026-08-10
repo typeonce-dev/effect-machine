@@ -355,7 +355,7 @@ describe("ClusterMachine", () => {
         const makeClient = yield* bridge.entity.client
         const client = makeClient("counter-1")
         assertAccepted(yield* client.send(new Increment({ by: 1, block: false })))
-        const requestId = Snowflake.Snowflake(driver.journal[0].requestId)
+        const requestId = Snowflake.Snowflake(driver.journal[0]!.requestId)
         const key = storageKey("DeduplicatedCounter", "counter-1")
         storage.entries.set(key, {
           ...storage.entries.get(key)!,
@@ -376,7 +376,7 @@ describe("ClusterMachine", () => {
           path: "Count",
           value: { _tag: "Count", value: "1" }
         }])
-        const reply = driver.requests.get(String(requestId))!.replies[0]
+        const reply = driver.requests.get(String(requestId))!.replies[0]!
         assert(
           reply._tag === "WithExit" && reply.exit._tag === "Success" &&
             (reply.exit.value as { readonly _tag: string })._tag === "Accepted"

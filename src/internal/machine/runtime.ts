@@ -14,7 +14,6 @@ import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
 import * as Queue from "effect/Queue"
-import * as Ref from "effect/Ref"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
@@ -960,11 +959,7 @@ const makeChildRuntimeSync = (
         ),
         Scope.provide(registry.scope)
       )
-    }) as Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
-      ChildAlreadyExistsError | ChildInitialError,
-      Exclude<ChildRequirements, Scope.Scope>
-    >
+    })
   }
 
   return {

@@ -121,23 +121,22 @@ export const getStateNodeDefinition = (
   path: string,
   definition: Machine.TaggedSchema | Machine.StateNodeConfig
 ): NormalizedStateNodeDefinition => {
-  if (!Schema.isSchema(definition) && (definition as any).type === "history") {
-    const history = definition as Machine.HistoryStateNodeConfig
+  if (!Schema.isSchema(definition) && definition.type === "history") {
     return {
       schema: undefined,
       output: undefined,
-      annotations: history.annotations,
+      annotations: definition.annotations,
       type: "history",
-      history: history.history === "deep" ? "deep" : "shallow",
+      history: definition.history === "deep" ? "deep" : "shallow",
       initial: undefined,
       states: undefined
     }
   }
-  if (!Schema.isSchema(definition) && (definition as any).type === "choice") {
+  if (!Schema.isSchema(definition) && definition.type === "choice") {
     return {
       schema: undefined,
       output: undefined,
-      annotations: (definition as Machine.ChoiceStateNodeConfig).annotations,
+      annotations: definition.annotations,
       type: "choice",
       history: undefined,
       initial: undefined,
@@ -146,7 +145,7 @@ export const getStateNodeDefinition = (
   }
   if (Schema.isSchema(definition)) {
     return {
-      schema: definition as Machine.TaggedSchema,
+      schema: definition,
       output: undefined,
       annotations: Schema.resolveAnnotations(definition),
       type: "atomic",
@@ -158,41 +157,42 @@ export const getStateNodeDefinition = (
   if (!hasProperty(definition, "schema") || !Schema.isSchema(definition.schema)) {
     throw new Error(`Machine.make expected state "${path}" to be a tagged schema or state node config`)
   }
-  if ((definition as any).type === "parallel" && !hasProperty(definition, "states")) {
+  if (definition.type === "parallel" && !hasProperty(definition, "states")) {
     throw new Error(`Machine.make expected parallel state "${path}" to declare child regions`)
   }
   if (hasProperty(definition, "states")) {
-    if ((definition as any).type === "final") {
+    const type: unknown = definition.type
+    if (type === "final") {
       throw new Error(`Machine.make expected compound state "${path}" to be active`)
     }
-    if ((definition as any).type === "parallel") {
+    if (definition.type === "parallel") {
       return {
-        schema: definition.schema as Machine.TaggedSchema,
-        output: Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined,
+        schema: definition.schema,
+        output: Schema.isSchema(definition.output) ? definition.output : undefined,
         annotations: Schema.resolveAnnotations(definition.schema),
         type: "parallel",
         history: undefined,
         initial: undefined,
-        states: (definition as any).states as Machine.StateTree
+        states: definition.states
       }
     }
-    if (typeof (definition as any).initial !== "string") {
+    if (typeof definition.initial !== "string") {
       throw new Error(`Machine.make expected compound state "${path}" to declare an initial child`)
     }
     return {
-      schema: definition.schema as Machine.TaggedSchema,
+      schema: definition.schema,
       output: undefined,
       annotations: Schema.resolveAnnotations(definition.schema),
       type: "compound",
       history: undefined,
-      initial: (definition as any).initial,
-      states: (definition as any).states as Machine.StateTree
+      initial: definition.initial,
+      states: definition.states
     }
   }
-  const output = Schema.isSchema((definition as any).output) ? (definition as any).output as Schema.Top : undefined
+  const output = Schema.isSchema(definition.output) ? definition.output : undefined
   return definition.type === "final"
     ? {
-      schema: definition.schema as Machine.TaggedSchema,
+      schema: definition.schema,
       output,
       annotations: Schema.resolveAnnotations(definition.schema),
       type: "final",
@@ -201,7 +201,7 @@ export const getStateNodeDefinition = (
       states: undefined
     }
     : {
-      schema: definition.schema as Machine.TaggedSchema,
+      schema: definition.schema,
       output: undefined,
       annotations: Schema.resolveAnnotations(definition.schema),
       type: "atomic",
@@ -222,7 +222,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
         throw new Error(`Machine state keys cannot contain ".": "${key}"`)
       }
       const path = parent === undefined ? key : `${parent}.${key}`
-      const definition = getStateNodeDefinition(path, tree[key])
+      const definition = getStateNodeDefinition(path, tree[key]!)
       let node: Machine.StateNode
       let childStates: Machine.StateTree | undefined
       const base = { path, key, annotations: definition.annotations, order }

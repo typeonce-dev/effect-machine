@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
+import { Cause, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { Machine } from "../../src/index.js"
 
@@ -408,7 +408,7 @@ describe("Machine.resume", () => {
         Stream.filter(Option.isSome),
         Stream.take(1),
         Stream.runCollect,
-        Effect.map((values) => values[0].value)
+        Effect.map((values) => values[0]!.value)
       )
       assert.deepStrictEqual(yield* active.state, childStates.initial.ChildIdle(new ChildIdle({ value: 1 })))
       yield* active.send(new ChildFinish({}))
@@ -499,7 +499,7 @@ describe("Machine.resume", () => {
           const expected = 5 + suffix.slice(0, index + 1).reduce<number>((sum, value) => sum + value, 0)
           yield* sendAndWait(
             uninterrupted,
-            new Add({ value: suffix[index] }),
+            new Add({ value: suffix[index]! }),
             (snapshot) => snapshot.state.value.value === expected
           )
         }
@@ -512,7 +512,7 @@ describe("Machine.resume", () => {
           const next = 5 + suffix.slice(0, index + 1).reduce<number>((sum, value) => sum + value, 0)
           yield* sendAndWait(
             resumed,
-            new Add({ value: suffix[index] }),
+            new Add({ value: suffix[index]! }),
             (snapshot) => snapshot.state.value.value === next
           )
         }

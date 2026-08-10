@@ -9,15 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import {
-  ClusterError,
-  ClusterSchema,
-  Entity,
-  EntityAddress,
-  MessageStorage,
-  type Sharding,
-  Snowflake
-} from "effect/unstable/cluster"
+import { ClusterError, ClusterSchema, Entity, EntityAddress, MessageStorage, Snowflake } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint, ClusterMachine, LoadResult } from "../../unstable/cluster/ClusterMachine.js"
@@ -104,15 +96,6 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
 type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
-
-type MachineServices<M extends Machine.Machine.Any> =
-  | ExcludeCompatibleRuntime<
-    Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
-    Machine.Machine.Event<M>,
-    Machine.Machine.Emit<M>
-  >
-  | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
-  | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 

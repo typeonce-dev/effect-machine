@@ -186,7 +186,7 @@ const flattenHandlers = (
     }
     handlers[path] = stateConfig as Machine.AnyStateConfig
     if (childConfig !== undefined) {
-      const node = Topology.getStateNodeDefinition(path, states[key])
+      const node = Topology.getStateNodeDefinition(path, states[key]!)
       if (node.states === undefined) {
         throw new Error(`Machine expected state "${path}" to declare child states`)
       }
@@ -274,7 +274,8 @@ const makeSnapshotBuilder = (
 ): unknown => {
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
-    const pseudoType = (states[key] as { readonly type?: unknown }).type
+    const definition = states[key]!
+    const pseudoType = (definition as { readonly type?: unknown }).type
     if (pseudoType === "history") {
       continue
     }
@@ -283,10 +284,10 @@ const makeSnapshotBuilder = (
       builder[key] = () => Topology.makeChoiceTarget(path, getParentPathRuntime(path))
       continue
     }
-    const node = Topology.getStateNodeDefinition(path, states[key])
+    const node = Topology.getStateNodeDefinition(path, definition)
     builder[key] = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) =>
-        makeSnapshotForNode(states[key], key, value, selector, options),
+        makeSnapshotForNode(definition, key, value, selector, options),
       node.states === undefined ? "leaf" : "nested"
     )
   }
@@ -304,7 +305,8 @@ const makeParallelSnapshotBuilder = (
     enumerable: false
   })
   for (const key of Object.keys(states)) {
-    const pseudoType = (states[key] as { readonly type?: unknown }).type
+    const definition = states[key]!
+    const pseudoType = (definition as { readonly type?: unknown }).type
     if (pseudoType === "history" || pseudoType === "choice") {
       continue
     }
@@ -312,13 +314,13 @@ const makeParallelSnapshotBuilder = (
       continue
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-    const node = Topology.getStateNodeDefinition(path, states[key])
+    const node = Topology.getStateNodeDefinition(path, definition)
     builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
       const nextRegions: Record<string, unknown> = {}
       for (const regionKey of Object.keys(regions)) {
         nextRegions[regionKey] = regions[regionKey]
       }
-      nextRegions[key] = makeSnapshotForNode(states[key], key, value, selector, options)
+      nextRegions[key] = makeSnapshotForNode(definition, key, value, selector, options)
       return makeParallelSnapshotBuilder(states, options, nextRegions)
     }, node.states === undefined ? "leaf" : "nested")
   }
@@ -374,7 +376,7 @@ const makeSnapshotForNode = (
     return snapshot
   }
   const childStates = options.mode === "initial" && node.initial !== undefined
-    ? { [node.initial]: node.states[node.initial] }
+    ? { [node.initial]: node.states[node.initial]! }
     : node.states
   const selected = selector(makeSnapshotBuilder(childStates, { ...options, prefix: path }))
   snapshot.state = selected
@@ -434,7 +436,7 @@ const getTargetBuilderDefinition = (
     if (!hasProperty(children, key)) {
       throw new Error(`Machine expected state path "${targetPath}" to exist`)
     }
-    definition = children[key]
+    definition = children[key]!
     path = path === "" ? key : `${path}.${key}`
     const node = Topology.getStateNodeDefinition(path, definition)
     children = node.states ?? {}
@@ -644,14 +646,14 @@ const makeHistoryTargetBuilder = (
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
     const path = prefix === "" ? key : `${prefix}.${key}`
-    const definition = states[key]
-    if ((definition as { readonly type?: unknown }).type === "history") {
+    const definition = Topology.getStateNodeDefinition(path, states[key]!)
+    if (definition.type === "history") {
       const parent = getParentPathRuntime(path)
       builder[key] = () => Topology.makeHistoryTarget(path, parent)
       continue
     }
-    if (typeof definition === "object" && definition !== null && hasProperty(definition, "states")) {
-      builder[key] = makeHistoryTargetBuilder(definition.states as Machine.StateTree, path)
+    if (definition.states !== undefined) {
+      builder[key] = makeHistoryTargetBuilder(definition.states, path)
     }
   }
   return builder
@@ -685,8 +687,8 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
 ): Machine.DefinedStates<States> => {
   StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
   return {
-    states: states as States,
-    initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
+    states,
+    initial: makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
     get: ((snapshot, path) =>
       Topology.getSnapshotByPath(snapshot, path).pipe(
         Option.map((snapshot) => snapshot.value)
@@ -1038,38 +1040,6 @@ export const after = <Event extends { readonly _tag: PropertyKey }>(
     event: String(event._tag)
   }
 })
-
-type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
-
-type RetagTargetCompatibility<Target extends Machine.TaggedSchema> = Target extends {
-  readonly fields: Schema.Struct.Fields
-} ? "_tag" extends keyof Target["~type.make.in"] ? {} extends Pick<Target["~type.make.in"], "_tag"> ? unknown : {
-      readonly "~effect/Machine/RetagTargetError": "Target schema must supply its discriminator when make is called"
-    }
-  : unknown
-  : {
-    readonly "~effect/Machine/RetagTargetError": "Target schema must be one tagged struct or tagged class"
-  }
-
-type RequiredKeys<A> = {
-  readonly [Key in keyof A]-?: {} extends Pick<A, Key> ? never : Key
-}[keyof A]
-
-type CompatibleSourceKeys<Fields, Source> = {
-  readonly [Key in Extract<keyof Fields, keyof Source>]: Source[Key] extends Fields[Key] ? Key : never
-}[Extract<keyof Fields, keyof Source>]
-
-type RetagPatch<Target extends Machine.TaggedSchema, Source> =
-  & Partial<RetagFields<Target>>
-  & Pick<
-    RetagFields<Target>,
-    Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
-  >
-
-type RetagArgs<Target extends Machine.TaggedSchema, Source> = [
-  Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
-] extends [never] ? [patch?: RetagPatch<Target, Source>]
-  : [patch: RetagPatch<Target, Source>]
 
 export const retag = (
   target: Machine.TaggedSchema,

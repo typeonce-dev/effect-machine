@@ -17,18 +17,7 @@ import {
   decodeStateValue,
   decodeStateValueSync
 } from "./protocol.js"
-import {
-  ChoiceTargetTypeId,
-  getNode,
-  getStateNodeDefinition,
-  getStateNodeSchema,
-  HistoryTargetTypeId,
-  isChoiceTarget,
-  isHistoryTarget,
-  isSnapshot,
-  isTarget,
-  TargetSnapshotTypeId
-} from "./topology.js"
+import { getNode, getStateNodeSchema, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 export interface HistoryRecord {
   readonly mode: "shallow" | "deep"
@@ -46,7 +35,7 @@ export const validateHistoryRecordControl = (machine: Machine.Any, record: Histo
       if (children.length !== 1) {
         throw new Error(`Machine history expected compound state "${path}" to retain one active child`)
       }
-      if (record.mode === "deep") visit(children[0])
+      if (record.mode === "deep") visit(children[0]!)
       return
     }
     if (node.type === "parallel") {
@@ -296,7 +285,7 @@ export const getLeafPath = (machine: Machine.Any, configuration: ActiveConfigura
   getActiveLeafPaths(
     machine,
     configuration
-  )[0]
+  )[0]!
 
 export const getActiveLeafPathFrom = (
   machine: Machine.Any,
@@ -308,7 +297,7 @@ export const getActiveLeafPathFrom = (
   if (leaves.length === 0) {
     throw new Error(`Machine expected state "${path}" to have an active leaf state`)
   }
-  return leaves[0]
+  return leaves[0]!
 }
 
 export const getRootPath = (machine: Machine.Any, configuration: ActiveConfiguration): string => {
@@ -339,7 +328,7 @@ export const getParentValues = (
   const parents: Record<string, unknown> = {}
   const paths = getPathToRoot(machine, path)
   for (let index = 0; index < paths.length - 1; index++) {
-    const parent = paths[index]
+    const parent = paths[index]!
     parents[parent] = getActiveValue(configuration, parent)
   }
   return parents

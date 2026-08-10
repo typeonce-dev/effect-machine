@@ -497,7 +497,7 @@ const makeProcessLogic: <
                 }
 
                 if (planned.done) {
-                  terminal = { output: planned.output as Output }
+                  terminal = { output: planned.output }
                 }
               }
 
@@ -605,7 +605,7 @@ const makeProcessLogic: <
                 }
 
                 if (planned.done) {
-                  terminal = { output: planned.output as Output }
+                  terminal = { output: planned.output }
                   yield* ownedChildren.stopAll()
                 } else if (changed) {
                   for (const [path, entryEvent] of entryEvents) {

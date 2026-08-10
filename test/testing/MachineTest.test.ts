@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Data, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
@@ -21,14 +21,6 @@ class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 class Add extends Schema.TaggedClass<Add>("Add")("Add", {
   amount: Schema.Int
 }) {}
-
-class InitialPlanFailure extends Data.TaggedError("InitialPlanFailure")<{
-  readonly reason: string
-}> {}
-
-class EventPlanFailure extends Data.TaggedError("EventPlanFailure")<{
-  readonly amount: number
-}> {}
 
 const States = Machine.defineStates({ Idle, Ready })
 

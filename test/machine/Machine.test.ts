@@ -3,42 +3,9 @@ import { Cause, Context, Data, Deferred, Effect, Fiber, Option, Ref, Schema, Str
 import { TestClock } from "effect/testing"
 import { Machine } from "../../src/index.js"
 
-class DeferredLog extends Context.Service<DeferredLog, {
-  readonly push: (message: string) => Effect.Effect<void>
-  readonly read: Effect.Effect<ReadonlyArray<string>>
-}>()("test/Machine/DeferredLog") {}
-
-class EntryRequirement extends Context.Service<EntryRequirement, {
-  readonly entryMessage: string
-}>()("test/Machine/EntryRequirement") {}
-
 class InitialRequirement extends Context.Service<InitialRequirement, {
   readonly initialMessage: string
 }>()("test/Machine/InitialRequirement") {}
-
-class ExitRequirement extends Context.Service<ExitRequirement, {
-  readonly exitMessage: string
-}>()("test/Machine/ExitRequirement") {}
-
-const makeDeferredLog = Effect.gen(function*() {
-  const ref = yield* Ref.make<ReadonlyArray<string>>([])
-  return DeferredLog.of({
-    push: (message) => Ref.update(ref, (messages) => [...messages, message]),
-    read: Ref.get(ref)
-  })
-})
-
-class EntryError extends Data.TaggedError("EntryError")<{
-  readonly state: string
-}> {}
-
-class InitialError extends Data.TaggedError("InitialError")<{
-  readonly state: string
-}> {}
-
-class ExitError extends Data.TaggedError("ExitError")<{
-  readonly state: string
-}> {}
 
 class InvokeError extends Data.TaggedError("InvokeError")<{
   readonly message: string
@@ -236,14 +203,6 @@ describe("Machine", () => {
     value: Schema.String
   }) {}
 
-  class NonEmptyResolve extends Schema.TaggedClass<NonEmptyResolve>("NonEmptyResolve")("NonEmptyResolve", {
-    value: Schema.NonEmptyString
-  }) {}
-
-  class NonEmptyEmit extends Schema.TaggedClass<NonEmptyEmit>("NonEmptyEmit")("NonEmptyEmit", {
-    value: Schema.NonEmptyString
-  }) {}
-
   class ParallelRoot extends Schema.TaggedClass<ParallelRoot>("ParallelRoot")("ParallelRoot", {
     id: Schema.String
   }) {}
@@ -261,14 +220,6 @@ describe("Machine", () => {
     childState: Schema.String
   }) {}
 
-  class ParentRequestProgress extends Schema.TaggedClass<ParentRequestProgress>("ParentRequestProgress")(
-    "ParentRequestProgress",
-    {
-      id: Schema.String,
-      loaded: Schema.Number
-    }
-  ) {}
-
   class RequestFailed extends Schema.TaggedClass<RequestFailed>("RequestFailed")("RequestFailed", {
     error: Schema.Any,
     cause: Schema.Any
@@ -282,10 +233,6 @@ describe("Machine", () => {
   class ReserveInventory extends Schema.TaggedClass<ReserveInventory>("ReserveInventory")("ReserveInventory", {
     reservationId: Schema.String
   }) {}
-  class ChildPing extends Data.TaggedClass("ChildPing")<{
-    readonly reply: Deferred.Deferred<void>
-  }> {}
-
   const FlatInitial = Machine.defineStates({ Idle, Loading, Success, Failed }).initial
   const SuccessOutput = {
     schema: Success,

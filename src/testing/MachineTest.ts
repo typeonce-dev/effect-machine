@@ -704,31 +704,6 @@ export interface ObservedGraph<M extends AnyMachine> {
   readonly startupSources: ReadonlyArray<Graph.NodeIndex>
 }
 
-type SnapshotObservationRole = "startup" | "event" | "microstep"
-
-interface SnapshotOccurrence<M extends AnyMachine> {
-  readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-  readonly role: SnapshotObservationRole
-}
-
-interface GraphMicrostepDraft<M extends AnyMachine> {
-  readonly nextOccurrence: number
-  readonly microstep: Microstep<M, any>
-}
-
-type GraphEdgeDraftData<M extends AnyMachine> = ObservedGraphEdge<M> extends infer Edge
-  ? Edge extends ObservedGraphEdge<M> ? Omit<Edge, "microsteps"> & {
-      readonly microsteps: ReadonlyArray<GraphMicrostepDraft<M>>
-    }
-  : never
-  : never
-
-interface GraphEdgeDraft<M extends AnyMachine> {
-  readonly sourceOccurrence: number
-  readonly targetOccurrence: number
-  readonly edge: GraphEdgeDraftData<M>
-}
-
 /**
  * Converts concrete planner traces into an observed logical-state graph.
  * Nodes are deduplicated by the public snapshot encoding and every edge is a
@@ -826,20 +801,6 @@ export { VerificationError } from "../internal/testing/machine/verification.js"
 export interface VerifyOptions {
   readonly laws?: ReadonlyArray<VerificationLawGroup>
 }
-
-interface VerificationLocation {
-  readonly eventIndex: number | undefined
-  readonly microstepIndex?: number
-}
-
-interface SnapshotInspection {
-  readonly active: ReadonlySet<string>
-  readonly paths: ReadonlyArray<string>
-  readonly values: ReadonlyMap<string, unknown>
-  readonly root: Record<string, unknown> | undefined
-}
-
-type PublicStateNode = Machine.Machine.StateNode<string>
 
 /**
  * Verifies an executed trace using only public machine inspection and raw

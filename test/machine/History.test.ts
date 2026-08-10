@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Context, Data, Effect, Fiber, Schema, Stream } from "effect"
+import { Cause, Effect, Fiber, Schema, Stream } from "effect"
 import { Machine } from "../../src/index.js"
 
 class Checkout extends Schema.TaggedClass<Checkout>("Checkout")("Checkout", {
@@ -29,14 +29,6 @@ class GoShipping extends Schema.TaggedClass<GoShipping>("GoShipping")("GoShippin
 }) {}
 class EnterVerifying extends Schema.TaggedClass<EnterVerifying>("EnterVerifying")("EnterVerifying", {}) {}
 class ReenterHistory extends Schema.TaggedClass<ReenterHistory>("ReenterHistory")("ReenterHistory", {}) {}
-
-class CardDefaults extends Context.Service<CardDefaults, {
-  readonly cardNumber: string
-}>()("test/MachineHistory/CardDefaults") {}
-
-class InitializerFailure extends Data.TaggedError("InitializerFailure")<{
-  readonly attempt: number
-}> {}
 
 class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {
   id: Schema.String

@@ -20,7 +20,6 @@ import type {
   InfiniteTransitionError,
   MachineSchemaDecodeError,
   MachineSchemaEncodeError,
-  ProcessLocalError,
   StartupError,
   StoppedError
 } from "./internal/machine/machine.js"
@@ -461,13 +460,7 @@ type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Run
   : Requirements
   : never
 
-const RuntimeCompatibilityErrorTypeId = "~effect/Machine/RuntimeCompatibilityError"
 const InvokeTypeId: typeof internal.InvokeTypeId = internal.InvokeTypeId
-
-type EnsureCompatibleRuntime<Requirements, Events, Emits> = [IncompatibleRuntime<Requirements, Events, Emits>] extends
-  [never] ? unknown : {
-  readonly [RuntimeCompatibilityErrorTypeId]: IncompatibleRuntime<Requirements, Events, Emits>
-}
 
 type StateDefinitionError<
   Message extends string,
@@ -5248,13 +5241,6 @@ export const isFinal: <
   >,
   state: Machine.Snapshot<States>
 ) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal
-
-type SnapshotBuilderOptions = {
-  readonly mode: "initial" | "full"
-  readonly prefix: string
-}
-
-type FromMethodKind = "leaf" | "nested"
 
 /**
  * Defines a state tree while preserving literal state paths.

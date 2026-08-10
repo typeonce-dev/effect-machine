@@ -6,9 +6,8 @@
 
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
-import type { Command, Enqueue, InitialEvent as MachineInitialEvent, Machine, Runtime } from "../../Machine.js"
+import type { Enqueue, InitialEvent as MachineInitialEvent, Machine } from "../../Machine.js"
 import { getTargetBuilder, makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -33,7 +32,6 @@ import {
   normalizeConfiguration,
   normalizeConfigurationEffect,
   normalizeConfigurationSync,
-  normalizeTargetConfigurationEffect,
   normalizeTargetConfigurationSync,
   pathDepth,
   snapshotFromConfiguration,
@@ -41,16 +39,7 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
-import {
-  decodeEmit,
-  decodeEmitSync,
-  decodeEvent,
-  decodeEventSync,
-  decodeInput,
-  decodeInputSync,
-  decodeStateValue,
-  decodeStateValueSync
-} from "./protocol.js"
+import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
 import {
   getNode,
@@ -953,9 +942,10 @@ const withChoiceValues = (target: unknown, values: Readonly<Record<string, unkno
     return makeChoiceTarget(target.path, target.parent, { ...values, ...(target.values ?? {}) })
   }
   if (!isTarget(target) || Object.keys(values).length === 0) return target
-  return makeTarget(target.path as any, target.value, {
-    snapshot: (target as any)[TargetSnapshotTypeId],
-    values: { ...values, ...(target.values ?? {}) } as any
+  const snapshot = target[TargetSnapshotTypeId]
+  return makeTarget(target.path, target.value, {
+    ...(snapshot === undefined ? {} : { snapshot }),
+    values: { ...values, ...(target.values ?? {}) }
   })
 }
 
@@ -1000,7 +990,7 @@ const resolveChoiceTarget = (
       if (node.type !== "choice" || node.parent !== extracted.target.parent) {
         throw new Error(`Machine expected choice target "${extracted.target.path}" to resolve to its declared parent`)
       }
-      const choice = (machine.handlers[node.path] as any)?.choice
+      const choice = machine.handlers[node.path]?.choice
       if (choice === undefined || typeof choice.transition !== "function") {
         throw new Error(`Machine choice state "${node.path}" requires an implementation`)
       }
@@ -1103,8 +1093,10 @@ const collectEvaluatedTransition = <
     readonly emittedEvents: ReadonlyArray<unknown>
     readonly transitions: ReadonlyArray<ResolvedChoiceTransition>
   } | undefined
-  const reenteredHistoryParent = choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget) &&
-    selection.transition.reenter && state.active.has(choiceResolvedTarget.parent)
+  const reenteredHistoryTarget = isHistoryTarget(choiceResolvedTarget) && selection.transition.reenter &&
+      state.active.has(choiceResolvedTarget.parent)
+    ? choiceResolvedTarget
+    : undefined
   if (choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget)) {
     // A reentering transition may exit the history node's own parent. SCXML
     // history observes that same exit, so resolve against a provisional
@@ -1112,7 +1104,7 @@ const collectEvaluatedTransition = <
     const provisionalBoundary = selection.transition.reenter
       ? getNode(machine, selection.sourcePath).parent
       : getLeastCommonAncestor(machine, stateIdentifier, choiceResolvedTarget.parent)
-    const provisionalExitPaths = reenteredHistoryParent
+    const provisionalExitPaths = reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
         Array.from(state.active).filter((path) => isPathInSubtree(path, choiceResolvedTarget.parent))
@@ -1243,18 +1235,16 @@ const collectEvaluatedTransition = <
       ...additionalHistoryEmittedEvents
     ],
     changed,
-    exitPaths: reenteredHistoryParent
+    exitPaths: reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
-        Array.from(state.active).filter((path) => isPathInSubtree(path, (choiceResolvedTarget as any).parent))
+        Array.from(state.active).filter((path) => isPathInSubtree(path, reenteredHistoryTarget.parent))
       )
       : getExitPaths(machine, state, boundary),
-    entryPaths: reenteredHistoryParent
+    entryPaths: reenteredHistoryTarget !== undefined
       ? sortEntryPaths(
         machine,
-        Array.from(stateAfterTransition.active).filter((path) =>
-          isPathInSubtree(path, (choiceResolvedTarget as any).parent)
-        )
+        Array.from(stateAfterTransition.active).filter((path) => isPathInSubtree(path, reenteredHistoryTarget.parent))
       )
       : getEntryPaths(machine, stateAfterTransition, boundary),
     choiceTransitions: [
@@ -1267,16 +1257,6 @@ const collectEvaluatedTransition = <
 
 export const MaxMacrostepIterations = 1000
 export const InitialEvent: MachineInitialEvent = { _tag: InitialEventTypeId }
-
-const catchStartup = <A, E, R>(
-  effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, E | StartupError, R> =>
-  Effect.catchCause(effect, (cause): Effect.Effect<never, E | StartupError> => {
-    if (Cause.hasDies(cause)) {
-      return Effect.fail(new StartupError({ cause }))
-    }
-    return Effect.failCause(cause)
-  })
 
 export const isFinalState = (
   machine: Machine.Any,
@@ -1709,7 +1689,7 @@ const settle = <
     pendingCompletions.push(
       ...completed.completions.filter((completion) => machine.handlers[completion.path]?.onDone !== undefined)
     )
-    while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0].path)) {
+    while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0]!.path)) {
       pendingCompletions.shift()
     }
     const done = selectDoneTransitions<States, Events, Emits, E, R>(
