@@ -15,7 +15,7 @@ import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
-import * as Activities from "./internal/machineActivities.js"
+import * as Activities from "./internal/machine/activities.js"
 import type {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -24,14 +24,14 @@ import type {
   ProcessLocalError,
   StartupError,
   StoppedError
-} from "./internal/machineErrors.js"
-import { ProcessLocalError as ProcessLocalErrorValue } from "./internal/machineErrors.js"
-import * as Model from "./internal/machineModel.js"
-import * as internalPlanner from "./internal/machinePlanner.js"
-import * as internalProcess from "./internal/machineProcess.js"
-import type { EnsureExecutable } from "./internal/machineReadiness.js"
-import * as internalRuntime from "./internal/machineRuntime.js"
-import * as StateDefinition from "./internal/machineStateDefinition.js"
+} from "./internal/machine/errors.js"
+import { ProcessLocalError as ProcessLocalErrorValue } from "./internal/machine/errors.js"
+import * as Model from "./internal/machine/model.js"
+import * as internalPlanner from "./internal/machine/planner.js"
+import * as internalProcess from "./internal/machine/process.js"
+import type { EnsureExecutable } from "./internal/machine/readiness.js"
+import * as internalRuntime from "./internal/machine/runtime.js"
+import * as StateDefinition from "./internal/machine/stateDefinition.js"
 
 /**
  * String literal type used as the runtime type identifier for `Machine`
@@ -283,7 +283,7 @@ export {
    * @since 4.0.0
    */
   StoppedError
-} from "./internal/machineErrors.js"
+} from "./internal/machine/errors.js"
 
 const RuntimeRequirementTypeId = "~effect/Machine/RuntimeRequirement"
 const ActionRequirementTypeId = "~effect/Machine/ActionRequirement"

@@ -27,16 +27,16 @@
       "import": "./dist/index.js"
     },
     "./reactivity": {
-      "types": "./dist/reactivity.d.ts",
-      "import": "./dist/reactivity.js"
+      "types": "./dist/unstable/reactivity/index.d.ts",
+      "import": "./dist/unstable/reactivity/index.js"
     },
     "./cluster": {
-      "types": "./dist/cluster.d.ts",
-      "import": "./dist/cluster.js"
+      "types": "./dist/unstable/cluster/index.d.ts",
+      "import": "./dist/unstable/cluster/index.js"
     },
     "./testing": {
-      "types": "./dist/testing.d.ts",
-      "import": "./dist/testing.js"
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -48,6 +48,7 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "test:types": "tstyche",
+    "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "perf:types": "pnpm build && node scripts/type-performance.mjs",
     "perf:runtime": "pnpm build && node --expose-gc scripts/runtime-performance.mjs",
@@ -55,7 +56,7 @@
     "format:check": "dprint check",
     "test:consumer": "node scripts/test-consumer.mjs",
     "pack:check": "node scripts/pack-check.mjs",
-    "check": "pnpm format:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check",
+    "check": "pnpm format:check && pnpm check:architecture && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "pnpm build && changeset publish"

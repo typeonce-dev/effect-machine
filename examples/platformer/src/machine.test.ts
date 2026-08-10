@@ -1,7 +1,7 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { makeTextRenderer } from "../../../test/visualization/text.ts"
+import { makeTextRenderer } from "../../../test/machine/visualization/text.ts"
 import { CharacterMachine, type CharacterSnapshot, Event } from "./machine.ts"
 
 const renderMachine = makeTextRenderer<typeof CharacterMachine, CharacterSnapshot>(Machine)
