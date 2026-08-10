@@ -259,6 +259,41 @@ describe("machine planner and runtime strategies", () => {
       }
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("matches acknowledged probe delivery in generic and compiled managed runtimes", () =>
+    Effect.gen(function*() {
+      const machine = makeFlatMachine()
+      const results: Array<unknown> = []
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        const probe = yield* MachineTest.probe(machine, ref)
+        const steps = []
+        for (const event of [new Noop({}), new Increment({}), new Reenter({}), new Finish({})]) {
+          steps.push(yield* probe.sendAndAwait(event))
+        }
+        const output = yield* ref.join
+        results.push({
+          output,
+          steps: steps.map((step) => ({
+            event: step.event._tag,
+            before: step.before.value.value,
+            after: step.after.value.value,
+            handled: step.handled,
+            configurationChanged: step.configurationChanged,
+            done: step.plan.done,
+            microsteps: step.plan.microsteps.map((microstep) => ({
+              event: microstep.event._tag,
+              changed: microstep.changed,
+              exitPaths: microstep.exitPaths,
+              entryPaths: microstep.entryPaths
+            }))
+          }))
+        })
+      }
+
+      assert.deepStrictEqual(results[1], results[0])
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("does not mutate retained public snapshots in either runtime strategy", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()

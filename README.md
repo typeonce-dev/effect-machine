@@ -21,10 +21,11 @@ require upgrading Effect in lockstep; do not override the peer to another beta.
 import { Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { MachineTest } from "@typeonce/effect-machine/testing"
 ```
 
 Each ESM entrypoint is independent and tree-shakeable. Importing the root does
-not load the reactivity or cluster adapters.
+not load the reactivity, cluster, or testing modules.
 
 ## First machine
 
@@ -654,6 +655,124 @@ registry ownership and disposal behavior as `AtomMachine.make`.
 restrictions, checkpoint planning, and delivery guarantees are documented on
 that API. `Machine.resume` is logical resumption, not durable process or cluster
 restoration.
+
+## Property-based semantic invariants
+
+`MachineTest.verify` checks statechart structure and planner lifecycle laws.
+Application semantics belong in invariants that can be reused across generated
+scenarios and, in future, bounded exploration:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+import { Effect } from "effect"
+
+const invariant = MachineTest.invariants(accountMachine)
+const laws = [
+  invariant.state(
+    "balance is never negative",
+    ({ snapshot }) =>
+      snapshot.value.balance >= 0 ||
+      `negative balance: ${snapshot.value.balance}`
+  ),
+  invariant.step(
+    "withdrawal removes exactly its amount",
+    ({ before, event, after }) =>
+      event._tag !== "Withdraw" ||
+      after.value.balance === before.value.balance - event.amount
+  )
+]
+
+const generated = MachineTest.scenarios(accountMachine, {
+  minEvents: 0,
+  maxEvents: 30
+})
+
+it.effect.prop(
+  "preserves account laws",
+  { scenario: generated.arbitrary },
+  ({ scenario }) =>
+    MachineTest.run(accountMachine, scenario).pipe(
+      Effect.tap((trace) => MachineTest.verify(accountMachine, trace)),
+      Effect.flatMap((trace) => MachineTest.assertInvariants(accountMachine, trace, laws))
+    )
+)
+```
+
+State invariants observe settled startup and public-event states by default.
+Set `observe` to `"microsteps"`, `"all"`, or `"final"` for a different scope.
+Use `when` for conditional laws. A condition with no matches is reported as
+`untested`; add `require: { minObservations: 1 }` when a particular trace must
+exercise it. `checkInvariants` returns this report, while `assertInvariants`
+returns `void` for direct use in property tests. Failures retain the complete
+shrunk trace and precise event, microstep, configuration, and observation
+location.
+
+These APIs inspect planner evidence. Staged action effects, invokes, timing,
+and process scheduling require the runtime command-model APIs instead.
+
+Use bounded exploration when random scenarios should be complemented by a
+systematic search over concrete event representatives:
+
+```ts
+const explored = yield * MachineTest.explore(accountMachine, {
+  events: ({ snapshot }) => [
+    new Deposit({ amount: 1 }),
+    new Withdraw({ amount: snapshot.value.balance }),
+    new Withdraw({ amount: snapshot.value.balance + 1 })
+  ],
+  stateKey: ({ snapshot }) => `${snapshot.value._tag}:${snapshot.value.balance}`,
+  limits: {
+    maxDepth: 20,
+    maxStates: 1_000,
+    maxTransitions: 10_000
+  },
+  invariants: laws
+})
+
+const rejected = yield * MachineTest.assertReachable(
+  explored,
+  "insufficient funds rejection",
+  ({ configuration }) => configuration.includes("Rejected")
+)
+
+console.log(rejected.trace.scenario.events) // shortest witness
+```
+
+Exploration is breadth-first, so each retained node owns its shortest trace.
+It is exhaustive only for the concrete events returned by `events` and the
+equivalence relation defined by `stateKey`. Equal keys intentionally collapse
+snapshots and only the first representative is expanded. Results distinguish
+`Complete` from `Truncated` and retain the depth, state, or transition frontier
+that hit a limit. An unreachability assertion succeeds only for a complete
+result; otherwise it fails as inconclusive. Cycles are retained as graph edges,
+but exploration does not enumerate every cyclic path. Invariants are checked
+on startup and on each planned edge extending a node's shortest trace.
+
+## Causal runtime probes
+
+Pure traces do not execute invokes or the managed runtime. When a test needs to
+prove that one live event has actually left the mailbox, attach a testing-only
+probe to a statechart reference:
+
+```ts
+const ref = yield * Machine.start(machine)
+const probe = yield * MachineTest.probe(machine, ref)
+
+const step = yield * probe.sendAndAwait(new CancelRequested({}))
+
+assert.strictEqual(step.handled, false)
+assert.deepStrictEqual(step.before, step.after)
+```
+
+`sendAndAwait` completes after that event's synchronous macrostep and managed
+commit work. It also completes for ignored events, which publish no snapshot
+and therefore cannot be synchronized by waiting for `ref.changes`.
+
+The step retains the exact runtime plan, before/after logical snapshots, and
+whether the event was handled or changed/reentered the active configuration.
+It does not wait for timers or invoked processes to finish. Production code
+continues to use enqueue-only `ref.send`; probes are exported only from the
+separate testing entry point.
 
 ## Current limits
 

@@ -7,7 +7,6 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import * as Queue from "effect/Queue"
 import type * as Schema from "effect/Schema"
 import type { ActionError, ExecutionServices, Machine, Runtime } from "../../Machine.js"
 import * as CommandRuntime from "./commandRuntime.js"
@@ -84,17 +83,22 @@ const makeChildlessCompiledDrain = (
     let liveRuntime: Runtime<unknown, unknown> | undefined
     let loop: Effect.Effect<Option.Option<any>, any, any>
     loop = Effect.suspend(() => {
-      const pending = context.poll()
+      const pending = context.pollMessage()
       if (Option.isNone(pending)) {
         context.executionState = undefined
         return Effect.succeed(Option.none())
       }
 
+      const message = pending.value
+      const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+      const event = acknowledged ? message.event : message
+      const before = current
+
       let planned
       try {
         planned = executionPlan.plan(
           configuration ?? executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
-          pending.value
+          event
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -104,6 +108,7 @@ const makeChildlessCompiledDrain = (
       configuration = planned.next
       context.executionState = configuration
       if (planned.microsteps.length === 0) {
+        if (acknowledged) context.completeMessage({ before, plan: planned, after: current })
         return loop
       }
 
@@ -123,7 +128,10 @@ const makeChildlessCompiledDrain = (
         return notification
       }
       const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
-        const continued = planned.done ? Effect.succeed(Option.some(planned.output)) : loop
+        const continued = Effect.suspend(() => {
+          if (acknowledged) context.completeMessage({ before, plan: planned, after: next })
+          return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
+        })
         return afterCommit === undefined ? continued : afterCommit.pipe(Effect.andThen(continued))
       }
       const commitAndContinue = (): Effect.Effect<Option.Option<any>, any, any> => {
@@ -193,18 +201,23 @@ const makeInvokingCompiledDrain = (
 
     let loop: Effect.Effect<Option.Option<any>, any, any>
     loop = Effect.suspend(() => {
-      const pending = context.poll()
+      const pending = context.pollMessage()
       if (Option.isNone(pending)) {
         configuration = undefined
         return Effect.succeed(Option.none())
       }
+
+      const message = pending.value
+      const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+      const event = acknowledged ? message.event : message
+      const before = current
 
       let planned
       try {
         planned = executionPlan.plan(
           configuration ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
-          pending.value
+          event
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -213,6 +226,7 @@ const makeInvokingCompiledDrain = (
       }
       configuration = planned.next
       if (planned.microsteps.length === 0) {
+        if (acknowledged) context.completeMessage({ before, plan: planned, after: current })
         return loop
       }
 
@@ -270,7 +284,10 @@ const makeInvokingCompiledDrain = (
         return notification
       }
       const continueAfterCommit = (): Effect.Effect<Option.Option<any>, any, any> => {
-        const continued = planned.done ? Effect.succeed(Option.some(planned.output)) : loop
+        const continued = Effect.suspend(() => {
+          if (acknowledged) context.completeMessage({ before, plan: planned, after: next })
+          return planned.done ? Effect.succeed(Option.some(planned.output)) : loop
+        })
         return afterCommit.length === 0
           ? continued
           : runSequentialDiscard(afterCommit).pipe(Effect.andThen(continued))
@@ -442,8 +459,10 @@ const makeProcessLogic: <
     run: (context) =>
       internalRuntime.provideMachineRuntime(
         Effect.gen(function*() {
-          const poll = context.poll ?? Queue.poll(context.mailbox!)
-          const { receive, state, setState } = context
+          const { completeMessage, pollMessage, receiveMessage, state, setState } = context
+          if (completeMessage === undefined || pollMessage === undefined || receiveMessage === undefined) {
+            return yield* Effect.die(new Error("Machine statechart started without acknowledged mailbox access"))
+          }
           let terminal: { readonly output: Output } | undefined
 
           let current = yield* state
@@ -463,12 +482,14 @@ const makeProcessLogic: <
             // per iteration; every iteration still crosses Effect boundaries,
             // so the Effect scheduler remains responsible for cooperative yield.
             let configuration: Configuration.ActiveConfiguration | undefined
-            let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
-            let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
+            let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
             let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
             while (terminal === undefined) {
-              const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
-              pendingEvent = Option.none()
+              const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
+              pendingMessage = Option.none()
+              const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+              const event = acknowledged ? message.event : message
+              const before = current
               let planned
               try {
                 planned = internalPlanner.planConfiguration(
@@ -501,11 +522,12 @@ const makeProcessLogic: <
                 }
               }
 
+              if (acknowledged) completeMessage({ before, plan: planned, after: current })
+
               if (terminal === undefined) {
-                pendingEvent = yield* (pollEvent ??= poll)
-                if (Option.isNone(pendingEvent)) {
+                pendingMessage = yield* pollMessage
+                if (Option.isNone(pendingMessage)) {
                   configuration = undefined
-                  pollEvent = undefined
                 }
               }
             }
@@ -555,15 +577,17 @@ const makeProcessLogic: <
             // As above, keep the normalized configuration only while this
             // worker can continue draining an already queued batch.
             configuration = undefined
-            let pendingEvent: Option.Option<Machine.EventOf<Events>> = Option.none()
-            let pollEvent: Effect.Effect<Option.Option<Machine.EventOf<Events>>> | undefined
+            let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
             let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
 
             // Match the compact non-invoke loop while retaining state-scoped
             // child lifecycle work at the same ordered Effect boundaries.
             while (terminal === undefined) {
-              const event = Option.isSome(pendingEvent) ? pendingEvent.value : yield* receive
-              pendingEvent = Option.none()
+              const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
+              pendingMessage = Option.none()
+              const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+              const event = acknowledged ? message.event : message
+              const before = current
               let planned
               try {
                 planned = internalPlanner.planConfiguration(
@@ -614,11 +638,12 @@ const makeProcessLogic: <
                 }
               }
 
+              if (acknowledged) completeMessage({ before, plan: planned, after: current })
+
               if (terminal === undefined) {
-                pendingEvent = yield* (pollEvent ??= poll)
-                if (Option.isNone(pendingEvent)) {
+                pendingMessage = yield* pollMessage
+                if (Option.isNone(pendingMessage)) {
                   configuration = undefined
-                  pollEvent = undefined
                 }
               }
             }

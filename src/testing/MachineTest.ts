@@ -321,6 +321,685 @@ export interface Trace<M extends AnyMachine> {
 }
 
 /**
+ * One runtime microstep retained by the execution strategy used by a probe.
+ *
+ * Transition-definition metadata is intentionally not reconstructed here:
+ * optimized runtimes retain execution evidence, while `run` and `plan` remain
+ * the APIs for complete diagnostic transition metadata.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export type ProbeMicrostep<M extends AnyMachine> = Omit<Microstep<M>, "transitions">
+
+/**
+ * Runtime plan evidence associated with one acknowledged public event.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export type ProbePlan<M extends AnyMachine> =
+  & {
+    readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+    readonly commands: ReadonlyArray<Machine.Command>
+    readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+    readonly microsteps: ReadonlyArray<ProbeMicrostep<M>>
+  }
+  & PlanCompletion<M>
+
+/**
+ * Causal evidence produced after one event has completed its managed runtime
+ * macrostep.
+ *
+ * `handled` distinguishes an ignored event from a retained transition that
+ * deliberately leaves the logical state unchanged. `configurationChanged`
+ * reports whether any microstep changed or reentered the active statechart
+ * configuration; compare `before` and `after` for state-value assertions.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export interface ProbeStep<M extends AnyMachine> {
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly plan: ProbePlan<M>
+  readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly handled: boolean
+  readonly configurationChanged: boolean
+}
+
+/**
+ * Testing-only causal access to a managed statechart reference.
+ *
+ * A probe does not change ordinary machine scheduling. `sendAndAwait` uses an
+ * acknowledged mailbox delivery so an ignored event can be proven processed
+ * without waiting for a snapshot that will never be published.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export interface Probe<M extends AnyMachine, Error = never, Output = never> {
+  readonly machine: M
+  readonly ref: Machine.MachineRef<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    Machine.Machine.InputEvent<M>,
+    Error,
+    Output
+  >
+  readonly sendAndAwait: (
+    event: Machine.Machine.InputEvent<M>
+  ) => Effect.Effect<ProbeStep<M>, Error | Machine.StoppedError>
+}
+
+/**
+ * Raised when `probe` receives a reference that is not backed by the managed
+ * statechart runtime.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { ProbeUnavailableError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Attaches testing-only causal event delivery to a running statechart.
+ *
+ * The returned probe exposes `sendAndAwait`; ordinary production sends remain
+ * available exclusively through `MachineRef.send` and retain their
+ * asynchronous enqueue-only semantics.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export const probe: <M extends AnyMachine, Error, Output>(
+  machine: ReadyMachine<M>,
+  ref: Machine.MachineRef<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    Machine.Machine.InputEvent<M>,
+    Error,
+    Output
+  >
+) => Effect.Effect<Probe<M, Error, Output>, internal.ProbeUnavailableError> = internal.probe
+
+/**
+ * The result of evaluating one semantic invariant.
+ *
+ * `true` passes, `false` produces a default failure message, and a string
+ * fails with that string as its counterexample explanation.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantOutcome = boolean | string
+
+/**
+ * The portions of a trace that a state invariant may observe.
+ *
+ * - `settled` observes startup and the state after every public event.
+ * - `microsteps` observes every internal microstep.
+ * - `all` observes both settled states and microsteps.
+ * - `final` observes only the final state.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type StateObservationMode = "settled" | "microsteps" | "all" | "final"
+
+/**
+ * The semantic location of one state observation.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type StateObservation = "initial" | "event" | "microstep" | "final"
+
+/**
+ * Evidence passed to a state invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+  readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly configuration: ReadonlyArray<StatePath<M>>
+  readonly observationIndex: number
+  readonly phase: StateObservation
+  readonly eventIndex: number | undefined
+  readonly microstepIndex: number | undefined
+  readonly event: Machine.Machine.Event<M> | Machine.InitialEvent | undefined
+}
+
+/**
+ * Evidence passed to an invariant for one public event step.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StepInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+  readonly step: TraceStep<M>
+  readonly index: number
+  readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly beforeConfiguration: ReadonlyArray<StatePath<M>>
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly plan: EventPlan<M>
+  readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly afterConfiguration: ReadonlyArray<StatePath<M>>
+}
+
+/**
+ * Evidence passed to a whole-trace invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface TraceInvariantContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly trace: Trace<M>
+}
+
+/**
+ * Controls conditional invariant evaluation and optional non-vacuity checks.
+ *
+ * A condition that never matches is reported as `untested`. Set
+ * `require.minObservations` when that must fail the check instead.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantOptions<Context> {
+  readonly when?: (context: Context) => boolean
+  readonly require?: {
+    readonly minObservations: number
+  }
+}
+
+/**
+ * Options for a state invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariantOptions<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
+  readonly observe?: StateObservationMode
+}
+
+/**
+ * A semantic property checked against selected state observations.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StateInvariant<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
+  readonly _tag: "StateInvariant"
+  readonly name: string
+  readonly observe: StateObservationMode
+  readonly check: (context: StateInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A semantic property checked after every public event.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface StepInvariant<M extends AnyMachine> extends InvariantOptions<StepInvariantContext<M>> {
+  readonly _tag: "StepInvariant"
+  readonly name: string
+  readonly check: (context: StepInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A semantic property checked once against a complete trace.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface TraceInvariant<M extends AnyMachine> extends InvariantOptions<TraceInvariantContext<M>> {
+  readonly _tag: "TraceInvariant"
+  readonly name: string
+  readonly check: (context: TraceInvariantContext<M>) => InvariantOutcome
+}
+
+/**
+ * A user-defined semantic property over a planner trace.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type Invariant<M extends AnyMachine> = StateInvariant<M> | StepInvariant<M> | TraceInvariant<M>
+
+/**
+ * Machine-bound invariant constructors with complete contextual inference.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantBuilder<M extends AnyMachine> {
+  readonly state: (
+    name: string,
+    check: (context: StateInvariantContext<M>) => InvariantOutcome,
+    options?: StateInvariantOptions<M>
+  ) => StateInvariant<M>
+  readonly step: (
+    name: string,
+    check: (context: StepInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<StepInvariantContext<M>>
+  ) => StepInvariant<M>
+  readonly trace: (
+    name: string,
+    check: (context: TraceInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<TraceInvariantContext<M>>
+  ) => TraceInvariant<M>
+}
+
+/**
+ * Direct invariant constructors. Prefer `invariants(machine)` when contextual
+ * machine types should be inferred without an explicit type argument.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const Invariant: {
+  readonly state: <M extends AnyMachine>(
+    name: string,
+    check: (context: StateInvariantContext<M>) => InvariantOutcome,
+    options?: StateInvariantOptions<M>
+  ) => StateInvariant<M>
+  readonly step: <M extends AnyMachine>(
+    name: string,
+    check: (context: StepInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<StepInvariantContext<M>>
+  ) => StepInvariant<M>
+  readonly trace: <M extends AnyMachine>(
+    name: string,
+    check: (context: TraceInvariantContext<M>) => InvariantOutcome,
+    options?: InvariantOptions<TraceInvariantContext<M>>
+  ) => TraceInvariant<M>
+} = internal.Invariant
+
+/**
+ * Creates invariant constructors bound to a machine's exact state and event
+ * types. The machine is used only for inference; invariant evaluation remains
+ * pure and reusable across traces from that machine.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<M> = internal.invariants
+
+/**
+ * The scope of a semantic invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantScope = "state" | "step" | "trace"
+
+/**
+ * Result status for one invariant.
+ *
+ * `untested` is non-failing unless the invariant declares a minimum number of
+ * observations, in which case it becomes `insufficient`.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export type InvariantStatus = "passed" | "failed" | "untested" | "insufficient"
+
+/**
+ * Aggregate result for one invariant.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantCheckResult {
+  readonly invariant: string
+  readonly scope: InvariantScope
+  readonly status: InvariantStatus
+  readonly observations: number
+  readonly failures: number
+}
+
+/**
+ * Aggregate result for all checked invariants.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantReport {
+  readonly checks: ReadonlyArray<InvariantCheckResult>
+}
+
+/**
+ * One semantic invariant violation with its precise trace location.
+ *
+ * @category invariants
+ * @since 4.0.0
+ */
+export interface InvariantViolation<M extends AnyMachine = AnyMachine> {
+  readonly invariant: string
+  readonly scope: InvariantScope
+  readonly kind: "predicate" | "observations"
+  readonly observationIndex?: number
+  readonly eventIndex: number | undefined
+  readonly microstepIndex?: number
+  readonly phase?: StateObservation
+  readonly configuration?: ReadonlyArray<StatePath<M>>
+  readonly event?: Machine.Machine.Event<M> | Machine.InitialEvent
+  readonly message: string
+}
+
+/**
+ * All semantic violations found in one trace, together with the complete
+ * counterexample and aggregate report.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { InvariantError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Checks user-defined semantic invariants against an existing planner trace.
+ *
+ * Every invariant and matching observation is evaluated so one failure
+ * contains all relevant evidence. Combine this with `scenarios` and `run` in
+ * an Effect property test to retain FastCheck shrinking.
+ *
+ * @category verification
+ * @since 4.0.0
+ */
+export const checkInvariants: <M extends AnyMachine>(
+  machine: M,
+  trace: Trace<M>,
+  invariants: ReadonlyArray<Invariant<M>>
+) => Effect.Effect<InvariantReport, internal.InvariantError<M>> = internal.checkInvariants
+
+/**
+ * Asserts user-defined semantic invariants and discards the success report.
+ *
+ * This is the property-test-oriented form of `checkInvariants`: its `void`
+ * success works directly with `it.effect.prop`, while failures retain the
+ * same complete report and trace evidence.
+ *
+ * @category verification
+ * @since 4.0.0
+ */
+export const assertInvariants: <M extends AnyMachine>(
+  machine: M,
+  trace: Trace<M>,
+  invariants: ReadonlyArray<Invariant<M>>
+) => Effect.Effect<void, internal.InvariantError<M>> = internal.assertInvariants
+
+/**
+ * User-defined identity for a logical exploration state.
+ *
+ * Equal keys deliberately collapse snapshots into one explored state. The key
+ * therefore defines both finiteness and the semantic precision of an
+ * exploration.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationKey = PropertyKey
+
+/**
+ * Hard bounds for one exploration.
+ *
+ * Defaults are 20 public events, 1,000 states, and 10,000 planned
+ * transitions. A limit never makes an incomplete result appear exhaustive.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationLimits {
+  readonly maxDepth?: number
+  readonly maxStates?: number
+  readonly maxTransitions?: number
+}
+
+/**
+ * Resolved bounds retained by an exploration result.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ResolvedExplorationLimits {
+  readonly maxDepth: number
+  readonly maxStates: number
+  readonly maxTransitions: number
+}
+
+/**
+ * Evidence available while assigning a state key.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationStateContext<M extends AnyMachine> {
+  readonly machine: M
+  readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly configuration: ReadonlyArray<StatePath<M>>
+  readonly depth: number
+  readonly trace: Trace<M>
+}
+
+/**
+ * One logical state discovered by breadth-first exploration.
+ *
+ * `trace` is the first, and therefore shortest, trace that reached `key`.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationNode<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey>
+  extends ExplorationStateContext<M>
+{
+  readonly key: Key
+}
+
+/**
+ * One concretely planned public event in the exploration graph.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationEdge<M extends AnyMachine> {
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly step: TraceStep<M>
+  readonly discovered: boolean
+}
+
+/**
+ * One boundary that could not be explored because a hard limit was reached.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  | {
+    readonly _tag: "DepthLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+  }
+  | {
+    readonly _tag: "StateLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+    readonly target: Key
+    readonly targetTrace: Trace<M>
+  }
+  | {
+    readonly _tag: "TransitionLimit"
+    readonly source: Key
+    readonly trace: Trace<M>
+    readonly event: Machine.Machine.InputEvent<M>
+  }
+
+/**
+ * Honest completeness status for the supplied event representatives and state
+ * key abstraction.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationCompleteness<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  | {
+    readonly _tag: "Complete"
+  }
+  | {
+    readonly _tag: "Truncated"
+    readonly reasons: ReadonlyArray<"depth" | "states" | "transitions">
+    readonly frontier: ReadonlyArray<ExplorationFrontier<M, Key>>
+  }
+
+/**
+ * Deterministic breadth-first exploration counts.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface ExplorationStats {
+  readonly states: number
+  readonly plannedTransitions: number
+  readonly retainedEdges: number
+  readonly maxDepth: number
+}
+
+/**
+ * A bounded logical state graph and its shortest-path evidence.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> {
+  readonly graph: Graph.DirectedGraph<ExplorationNode<M, Key>, ExplorationEdge<M>>
+  readonly nodes: ReadonlyArray<ExplorationNode<M, Key>>
+  readonly nodesByKey: ReadonlyMap<Key, Graph.NodeIndex>
+  readonly start: Graph.NodeIndex
+  readonly limits: ResolvedExplorationLimits
+  readonly stats: ExplorationStats
+  readonly completeness: ExplorationCompleteness<M, Key>
+}
+
+interface ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> {
+  readonly events: (context: ExplorationStateContext<M>) => ReadonlyArray<Machine.Machine.InputEvent<M>>
+  readonly stateKey: (context: ExplorationStateContext<M>) => Key
+  readonly limits?: ExplorationLimits
+  readonly invariants?: ReadonlyArray<Invariant<M>>
+}
+
+/**
+ * Configuration for bounded planner exploration.
+ *
+ * Event representatives may depend on the current state. Exploration is
+ * exhaustive only relative to those representatives and the equivalence
+ * relation defined by `stateKey`.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
+  & ExploreOptionsBase<M, Key>
+  & (Machine.Machine.Input<M> extends typeof Schema.Void ? {
+      readonly input?: never
+    }
+    : {
+      readonly input: InputValue<M>
+    })
+
+/**
+ * Explores the bounded logical state graph in breadth-first order.
+ *
+ * Invariants are checked against startup and every concretely planned edge,
+ * so a failure retains a shortest discovered counterexample. Staged actions
+ * and runtime activities are not executed.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
+  machine: ReadyMachine<M>,
+  options: ExploreOptions<M, Key>
+) => Effect.Effect<
+  Exploration<M, Key>,
+  RunFailure<RunError<M>, M> | internal.InvariantError<M>,
+  RunServices<M>
+> = internal.explore
+
+/**
+ * A predicate over one explored logical state.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ExplorationPredicate<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> = (
+  node: ExplorationNode<M, Key>
+) => boolean
+
+/**
+ * Why a reachability assertion failed.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export type ReachabilityFailure = "NotFound" | "UnexpectedMatch" | "Inconclusive"
+
+/**
+ * A failed or inconclusive reachability assertion.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { ReachabilityError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Finds the first, and therefore shortest, explored state matching a
+ * predicate.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const findShortest: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  predicate: ExplorationPredicate<M, Key>
+) => ExplorationNode<M, Key> | undefined = internal.findShortest
+
+/**
+ * Requires a matching state and returns its shortest witness.
+ *
+ * A truncated exploration without a witness fails as inconclusive rather than
+ * claiming the state is unreachable.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const assertReachable: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  name: string,
+  predicate: ExplorationPredicate<M, Key>
+) => Effect.Effect<ExplorationNode<M, Key>, internal.ReachabilityError<M, Key>> = internal.assertReachable
+
+/**
+ * Requires that no explored state matches a predicate.
+ *
+ * This assertion succeeds only for a complete exploration. A truncated
+ * result without a witness fails as inconclusive.
+ *
+ * @category exploration
+ * @since 4.0.0
+ */
+export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKey>(
+  exploration: Exploration<M, Key>,
+  name: string,
+  predicate: ExplorationPredicate<M, Key>
+) => Effect.Effect<void, internal.ReachabilityError<M, Key>> = internal.assertUnreachable
+
+/**
  * Checks a real planner trace against the independent finite statechart model
  * interpreter.
  *

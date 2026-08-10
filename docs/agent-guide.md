@@ -724,6 +724,97 @@ This is not durable runtime restoration. `ClusterMachine` has a separate
 checkpoint/planning contract and process-local restrictions; do not substitute
 `Machine.resume` for cluster recovery.
 
+## Testing machine semantics
+
+Import planner testing tools from the dedicated entrypoint:
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+```
+
+Use three distinct layers:
+
+1. `MachineTest.verify(machine, trace)` checks structural statechart and
+   planner lifecycle laws.
+2. `MachineTest.assertInvariants(machine, trace, laws)` checks application
+   semantics such as conservation, authorization, and exact state updates.
+3. Runtime command models check executed actions, invokes, timing, process
+   publication, and cancellation. Planner traces do not execute this work.
+
+Define semantic laws with a machine-bound builder so the callback receives the
+exact state and event types:
+
+```ts
+const invariant = MachineTest.invariants(machine)
+
+const laws = [
+  invariant.state("balance is never negative", ({ snapshot }) =>
+    snapshot.value.balance >= 0 || "negative balance"),
+  invariant.step("withdrawal is exact", ({ before, event, after }) =>
+    event._tag !== "Withdraw" ||
+    after.value.balance === before.value.balance - event.amount),
+  invariant.trace("all inputs were planned", ({ trace }) =>
+    trace.steps.length === trace.scenario.events.length)
+]
+```
+
+State laws observe settled states by default. Select `"microsteps"`, `"all"`,
+or `"final"` only when the law requires that evidence. A `when` condition with
+no matches is explicitly `untested`; use
+`require: { minObservations: 1 }` when the current trace must exercise it.
+Prefer `assertInvariants` inside FastCheck properties because it succeeds with
+`void`. Use `checkInvariants` when the test needs the per-law report.
+
+For systematic planner exploration, provide a finite abstraction explicitly:
+
+```ts
+const explored = yield * MachineTest.explore(machine, {
+  events: ({ snapshot }) => eventRepresentatives(snapshot),
+  stateKey: ({ snapshot }) => logicalStateKey(snapshot),
+  limits: { maxDepth: 20, maxStates: 1_000 },
+  invariants: laws
+})
+```
+
+The event callback returns concrete representatives, not schemas or
+arbitraries. Include meaningful boundary values based on the current snapshot.
+The key defines which snapshots are treated as equivalent; it must retain every
+piece of data that can change the future behavior being tested. A coarse key
+can make exploration finite but under-approximate behavior.
+
+`assertReachable` returns the shortest witness. `assertUnreachable` succeeds
+only when `explored.completeness` is `Complete`. Never interpret a truncated
+depth, state, or transition frontier as an unreachability proof. The explorer
+retains cycles as graph edges but does not enumerate every path around them;
+use a separate temporal/path model when a law depends on repeated traversal
+rather than logical-state reachability.
+
+Do not encode application invariants as guards merely to make them testable.
+Keep ordinary TypeScript branching in transition handlers unless a choice is
+part of the statechart topology. Invariants independently verify the resulting
+trace without changing production transition selection.
+
+### Live event causality
+
+Use a probe when a test must establish that one event was processed by a
+running statechart rather than merely accepted by its mailbox:
+
+```ts
+const ref = yield * Machine.start(machine)
+const probe = yield * MachineTest.probe(machine, ref)
+const step = yield * probe.sendAndAwait(event)
+```
+
+Inspect `step.before`, `step.after`, `step.plan`, `step.handled`, and
+`step.configurationChanged`. An ignored event has `handled: false` and an
+empty microstep list, but still completes its acknowledgement. A targetless
+handler has `handled: true` even if its before and after snapshots are equal.
+
+Do not use a probe as a substitute for a domain completion event. The
+acknowledgement covers the submitted event's synchronous macrostep, state
+commit, emissions, and invoke startup; it does not wait for an invoke or timer
+to complete. Application code should continue to use `MachineRef.send`.
+
 ## Common compiler errors
 
 ### `initial` is not callable

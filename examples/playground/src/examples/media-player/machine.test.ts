@@ -25,6 +25,55 @@ const generated = MachineTest.scenarios(MediaPlayerMachine, {
   maxEvents: 30
 })
 
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+
+const settingsEvents = new Set(["VolumeChanged", "PlaybackRateChanged", "MuteRequested", "UnmuteRequested"])
+
+const invariant = MachineTest.invariants(MediaPlayerMachine)
+
+const parallelRegionsAreIndependent = invariant.step(
+  "transport and settings commands stay in their own parallel region",
+  ({ after, before, event }) => {
+    const transportUnchanged = same(before.states.transport.state, after.states.transport.state)
+    const settingsUnchanged = same(before.states.settings.state, after.states.settings.state)
+    return settingsEvents.has(event._tag)
+      ? transportUnchanged || `settings event ${event._tag} changed transport`
+      : settingsUnchanged || `transport event ${event._tag} changed settings`
+  }
+)
+
+const settingsUpdatesAreExact = invariant.step(
+  "settings commands preserve unrelated values",
+  ({ after, before, event }) => {
+    const previous = before.states.settings.state
+    const next = after.states.settings.state
+    switch (event._tag) {
+      case "VolumeChanged":
+        return Object.is(next.value.volume, event.volume) &&
+            Object.is(next.value.playbackRate, previous.value.playbackRate) ||
+          "volume update changed playback rate or stored the wrong volume"
+      case "PlaybackRateChanged":
+        return Object.is(next.value.playbackRate, event.playbackRate) &&
+            Object.is(next.value.volume, previous.value.volume) ||
+          "playback-rate update changed volume or stored the wrong rate"
+      case "MuteRequested":
+        return next.path === "Player.settings.Muted" &&
+            Object.is(next.value.volume, previous.value.volume) &&
+            Object.is(next.value.playbackRate, previous.value.playbackRate) ||
+          "mute did not preserve sound settings"
+      case "UnmuteRequested":
+        return next.path === "Player.settings.Audible" &&
+            Object.is(next.value.volume, previous.value.volume) &&
+            Object.is(next.value.playbackRate, previous.value.playbackRate) ||
+          "unmute did not preserve sound settings"
+      default:
+        return true
+    }
+  }
+)
+
+const laws = [parallelRegionsAreIndependent, settingsUpdatesAreExact]
+
 describe("media-player statechart model", () => {
   it.effect.prop(
     "keeps every schema-generated scenario structurally valid",
@@ -32,6 +81,7 @@ describe("media-player statechart model", () => {
     ({ scenario }) =>
       MachineTest.run(MediaPlayerMachine, scenario).pipe(
         Effect.tap((trace) => MachineTest.verify(MediaPlayerMachine, trace)),
+        Effect.tap((trace) => MachineTest.assertInvariants(MediaPlayerMachine, trace, laws)),
         Effect.tap((trace) =>
           Effect.sync(() => {
             assert.strictEqual(trace.final.path, "Player")
@@ -75,5 +125,38 @@ describe("media-player statechart model", () => {
       assert.strictEqual(Graph.edgeCount(observed.graph), everyPublicEvent.length + 1)
       assert.strictEqual(eventEdges.length, everyPublicEvent.length)
       assert.strictEqual(observed.starts.length, 1)
+    }))
+
+  it.effect("explores public behavior and preserves the internal completion boundary", () =>
+    Effect.gen(function*() {
+      const explored = yield* MachineTest.explore(MediaPlayerMachine, {
+        events: () => everyPublicEvent,
+        stateKey: ({ snapshot }) =>
+          JSON.stringify({
+            transport: snapshot.states.transport.state,
+            settings: snapshot.states.settings.state
+          }),
+        invariants: laws
+      })
+
+      assert.deepStrictEqual(explored.completeness, { _tag: "Complete" })
+
+      const loadingAndMuted = yield* MachineTest.assertReachable(
+        explored,
+        "loading media while muted",
+        ({ configuration }) =>
+          configuration.includes("Player.transport.Loading") &&
+          configuration.includes("Player.settings.Muted")
+      )
+      assert.deepStrictEqual(loadingAndMuted.trace.scenario.events, [
+        MediaPlayerEvent.cases.SourceSelected.make({ url: "https://example.com/audio.mp3" }),
+        MediaPlayerEvent.cases.MuteRequested.make({})
+      ])
+
+      yield* MachineTest.assertUnreachable(
+        explored,
+        "Ready without an internal LoadSucceeded event",
+        ({ configuration }) => configuration.includes("Player.transport.Ready")
+      )
     }))
 })
