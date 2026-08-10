@@ -646,14 +646,14 @@ const makeHistoryTargetBuilder = (
   const builder: Record<string, unknown> = {}
   for (const key of Object.keys(states)) {
     const path = prefix === "" ? key : `${prefix}.${key}`
-    const definition = states[key]
-    if ((definition as { readonly type?: unknown }).type === "history") {
+    const definition = Topology.getStateNodeDefinition(path, states[key]!)
+    if (definition.type === "history") {
       const parent = getParentPathRuntime(path)
       builder[key] = () => Topology.makeHistoryTarget(path, parent)
       continue
     }
-    if (typeof definition === "object" && definition !== null && hasProperty(definition, "states")) {
-      builder[key] = makeHistoryTargetBuilder(definition.states as Machine.StateTree, path)
+    if (definition.states !== undefined) {
+      builder[key] = makeHistoryTargetBuilder(definition.states, path)
     }
   }
   return builder
@@ -687,8 +687,8 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
 ): Machine.DefinedStates<States> => {
   StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
   return {
-    states: states as States,
-    initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
+    states,
+    initial: makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
     get: ((snapshot, path) =>
       Topology.getSnapshotByPath(snapshot, path).pipe(
         Option.map((snapshot) => snapshot.value)

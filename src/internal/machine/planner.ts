@@ -942,9 +942,10 @@ const withChoiceValues = (target: unknown, values: Readonly<Record<string, unkno
     return makeChoiceTarget(target.path, target.parent, { ...values, ...(target.values ?? {}) })
   }
   if (!isTarget(target) || Object.keys(values).length === 0) return target
-  return makeTarget(target.path as any, target.value, {
-    snapshot: (target as any)[TargetSnapshotTypeId],
-    values: { ...values, ...(target.values ?? {}) } as any
+  const snapshot = target[TargetSnapshotTypeId]
+  return makeTarget(target.path, target.value, {
+    ...(snapshot === undefined ? {} : { snapshot }),
+    values: { ...values, ...(target.values ?? {}) }
   })
 }
 
@@ -989,7 +990,7 @@ const resolveChoiceTarget = (
       if (node.type !== "choice" || node.parent !== extracted.target.parent) {
         throw new Error(`Machine expected choice target "${extracted.target.path}" to resolve to its declared parent`)
       }
-      const choice = (machine.handlers[node.path] as any)?.choice
+      const choice = machine.handlers[node.path]?.choice
       if (choice === undefined || typeof choice.transition !== "function") {
         throw new Error(`Machine choice state "${node.path}" requires an implementation`)
       }
@@ -1092,8 +1093,10 @@ const collectEvaluatedTransition = <
     readonly emittedEvents: ReadonlyArray<unknown>
     readonly transitions: ReadonlyArray<ResolvedChoiceTransition>
   } | undefined
-  const reenteredHistoryParent = choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget) &&
-    selection.transition.reenter && state.active.has(choiceResolvedTarget.parent)
+  const reenteredHistoryTarget = isHistoryTarget(choiceResolvedTarget) && selection.transition.reenter &&
+      state.active.has(choiceResolvedTarget.parent)
+    ? choiceResolvedTarget
+    : undefined
   if (choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget)) {
     // A reentering transition may exit the history node's own parent. SCXML
     // history observes that same exit, so resolve against a provisional
@@ -1101,7 +1104,7 @@ const collectEvaluatedTransition = <
     const provisionalBoundary = selection.transition.reenter
       ? getNode(machine, selection.sourcePath).parent
       : getLeastCommonAncestor(machine, stateIdentifier, choiceResolvedTarget.parent)
-    const provisionalExitPaths = reenteredHistoryParent
+    const provisionalExitPaths = reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
         Array.from(state.active).filter((path) => isPathInSubtree(path, choiceResolvedTarget.parent))
@@ -1232,18 +1235,16 @@ const collectEvaluatedTransition = <
       ...additionalHistoryEmittedEvents
     ],
     changed,
-    exitPaths: reenteredHistoryParent
+    exitPaths: reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
-        Array.from(state.active).filter((path) => isPathInSubtree(path, (choiceResolvedTarget as any).parent))
+        Array.from(state.active).filter((path) => isPathInSubtree(path, reenteredHistoryTarget.parent))
       )
       : getExitPaths(machine, state, boundary),
-    entryPaths: reenteredHistoryParent
+    entryPaths: reenteredHistoryTarget !== undefined
       ? sortEntryPaths(
         machine,
-        Array.from(stateAfterTransition.active).filter((path) =>
-          isPathInSubtree(path, (choiceResolvedTarget as any).parent)
-        )
+        Array.from(stateAfterTransition.active).filter((path) => isPathInSubtree(path, reenteredHistoryTarget.parent))
       )
       : getEntryPaths(machine, stateAfterTransition, boundary),
     choiceTransitions: [

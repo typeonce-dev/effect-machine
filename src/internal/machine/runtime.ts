@@ -959,11 +959,7 @@ const makeChildRuntimeSync = (
         ),
         Scope.provide(registry.scope)
       )
-    }) as Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
-      ChildAlreadyExistsError | ChildInitialError,
-      Exclude<ChildRequirements, Scope.Scope>
-    >
+    })
   }
 
   return {

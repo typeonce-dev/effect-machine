@@ -736,7 +736,7 @@ const planIndexedState = (
   configuration: OwnedIndexedState,
   input: unknown
 ): ExecutionMacrostep<OwnedIndexedState> => {
-  const decoded = decodeEventSync(machine, input) as { readonly _tag: PropertyKey }
+  const decoded = decodeEventSync(machine, input)
   if (descriptor.flat) {
     return planIndexedFlatState(machine, descriptor, configuration, decoded)
   }
