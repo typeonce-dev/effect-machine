@@ -105,14 +105,6 @@ type StateNodePath<M extends AnyMachine> = Machine.Machine.StateNodeIdentifier<M
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Machine.Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
-
 type ReadyMachine<M extends AnyMachine> =
   & M
   & EnsureExecutable<
@@ -389,14 +381,16 @@ export type RunError<M extends AnyMachine> =
 /**
  * Services required while planning a complete scenario.
  *
+ * Scenario execution delegates exclusively to the service-free `planInitial`
+ * and `plan` APIs. Invoke services and managed runtime capabilities belong to
+ * later execution, not synchronous planning.
+ *
  * @category models
  * @since 4.0.0
  */
-export type RunServices<M extends AnyMachine> = ExcludeCompatibleRuntime<
-  Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>,
-  Machine.Machine.Event<M>,
-  Machine.Machine.Emit<M>
->
+export type RunServices<M extends AnyMachine> = IsAny<
+  Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
+> extends true ? Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>> : never
 
 /**
  * Executes a generated scenario exclusively through `planInitial` and `plan`.

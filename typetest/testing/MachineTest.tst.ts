@@ -92,6 +92,30 @@ describe("MachineTest", () => {
     >()
   })
 
+  it("does not require invoke services while planning scenarios", () => {
+    class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {}
+    const invokedMachine = Machine.make({
+      states: States.states,
+      events: [PublicEvent],
+      initial: () => States.initial.idle(new Idle({}))
+    }).handle({
+      idle: {
+        invoke: Machine.invokeEffect({
+          id: "service-backed-invoke",
+          effect: Effect.gen(function*() {
+            yield* InvokeRequirement
+          }),
+          onSuccess: () => undefined
+        })
+      }
+    })
+
+    const executed = MachineTest.run(invokedMachine, { events: [] })
+
+    expect<Effect.Services<typeof executed>>().type.toBe<never>()
+    expect<MachineTest.RunServices<typeof invokedMachine>>().type.toBe<never>()
+  })
+
   it("keeps runtime commands on the public event protocol", () => {
     const generated = MachineTest.runtimeCommands(machine)
     expect(generated.arbitrary).type.toBe<

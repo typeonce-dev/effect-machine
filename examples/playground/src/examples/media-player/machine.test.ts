@@ -1,20 +1,23 @@
 import { assert, describe, it } from "@effect/vitest"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect, Graph } from "effect"
-import { MediaPlayerEvent, MediaPlayerMachine } from "./machine.ts"
+import { MediaPlayerMachine } from "./machine.ts"
+import { MediaPlayerEvent } from "./schemas.ts"
 
 const everyPublicEvent = [
   MediaPlayerEvent.cases.SourceSelected.make({ url: "https://example.com/audio.mp3" }),
   MediaPlayerEvent.cases.PlayRequested.make({}),
   MediaPlayerEvent.cases.PauseRequested.make({}),
-  MediaPlayerEvent.cases.MediaPlaying.make({}),
-  MediaPlayerEvent.cases.MediaPaused.make({}),
+  MediaPlayerEvent.cases.RestartRequested.make({}),
   MediaPlayerEvent.cases.MediaWaiting.make({}),
   MediaPlayerEvent.cases.MediaCanPlay.make({}),
-  MediaPlayerEvent.cases.MediaEnded.make({}),
+  MediaPlayerEvent.cases.PlaybackEnded.make({ currentTime: 42 }),
+  MediaPlayerEvent.cases.TimeUpdated.make({ currentTime: 21 }),
   MediaPlayerEvent.cases.MediaFailed.make({ message: "unsupported codec" }),
   MediaPlayerEvent.cases.VolumeChanged.make({ volume: 0.4 }),
-  MediaPlayerEvent.cases.MuteToggled.make({})
+  MediaPlayerEvent.cases.PlaybackRateChanged.make({ playbackRate: 1.5 }),
+  MediaPlayerEvent.cases.MuteRequested.make({}),
+  MediaPlayerEvent.cases.UnmuteRequested.make({})
 ]
 
 const generated = MachineTest.scenarios(MediaPlayerMachine, {
@@ -32,12 +35,8 @@ describe("media-player statechart model", () => {
         Effect.tap((trace) =>
           Effect.sync(() => {
             assert.strictEqual(trace.final.path, "Player")
-            assert.strictEqual(trace.final.states.playback.state.path, "Player.playback.Empty")
-            const volume = trace.final.states.volume.state
-            if (volume.path !== "Player.volume.Audible") {
-              throw new Error(`Expected Audible, received ${volume.path}`)
-            }
-            assert.strictEqual(volume.value.volume, 1)
+            assert.strictEqual(trace.final.states.transport.state.path.startsWith("Player.transport."), true)
+            assert.strictEqual(trace.final.states.settings.state.path.startsWith("Player.settings."), true)
           })
         ),
         Effect.asVoid
@@ -45,36 +44,26 @@ describe("media-player statechart model", () => {
     { fastCheck: { numRuns: 100, seed: 24_061 } }
   )
 
-  it.effect("makes the current behavior gaps explicit through coverage", () =>
+  it.effect("covers the public protocol and its reachable states", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(MediaPlayerMachine, { events: everyPublicEvent })
       yield* MachineTest.verify(MediaPlayerMachine, trace)
 
       const coverage = MachineTest.coverage(MediaPlayerMachine, trace)
 
-      assert.strictEqual(coverage.events.missing, 0)
       assert.strictEqual(coverage.events.hit, everyPublicEvent.length)
-      assert.strictEqual(coverage.transitions.total, 0)
-      assert.strictEqual(coverage.logicalConfigurations.hit, 1)
-      assert.deepStrictEqual(coverage.states.activation.hits.map(({ path }) => path), [
-        "Player",
-        "Player.playback",
-        "Player.playback.Empty",
-        "Player.volume",
-        "Player.volume.Audible"
-      ])
-      assert.deepStrictEqual(coverage.states.activation.misses.map(({ path }) => path), [
-        "Player.playback.Loading",
-        "Player.playback.Paused",
-        "Player.playback.Playing",
-        "Player.playback.Buffering",
-        "Player.playback.Ended",
-        "Player.playback.Failed",
-        "Player.volume.Muted"
-      ])
+      assert.strictEqual(coverage.events.missing, 0)
+      assert.strictEqual(coverage.transitions.hit > 0, true)
+
+      const activated = new Set(coverage.states.activation.hits.map(({ path }) => path))
+      assert.strictEqual(activated.has("Player.transport.Empty"), true)
+      assert.strictEqual(activated.has("Player.transport.Loading"), true)
+      assert.strictEqual(activated.has("Player.transport.Failed"), true)
+      assert.strictEqual(activated.has("Player.settings.Audible"), true)
+      assert.strictEqual(activated.has("Player.settings.Muted"), true)
     }))
 
-  it.effect("records ignored events without inventing new logical configurations", () =>
+  it.effect("records every planned event in the observed graph", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(MediaPlayerMachine, { events: everyPublicEvent })
       const observed = yield* MachineTest.observedGraph(MediaPlayerMachine, trace)
@@ -82,19 +71,9 @@ describe("media-player statechart model", () => {
         ({ data }) => data._tag === "Event"
       )
 
-      assert.strictEqual(Graph.nodeCount(observed.graph), 1)
+      assert.strictEqual(Graph.nodeCount(observed.graph) > 1, true)
       assert.strictEqual(Graph.edgeCount(observed.graph), everyPublicEvent.length + 1)
       assert.strictEqual(eventEdges.length, everyPublicEvent.length)
-      assert.strictEqual(eventEdges.every(({ source, target }) => source === target), true)
       assert.strictEqual(observed.starts.length, 1)
-
-      const node = Array.from(observed.graph)[0]![1]
-      assert.deepStrictEqual(node.configuration, [
-        "Player",
-        "Player.playback",
-        "Player.playback.Empty",
-        "Player.volume",
-        "Player.volume.Audible"
-      ])
     }))
 })
