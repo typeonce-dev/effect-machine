@@ -57,6 +57,7 @@ import {
   validateInitialConfiguration
 } from "./model.js"
 import type { ProcessScope } from "./runtime.js"
+import { InitialEventTypeId } from "./symbols.js"
 
 export type RuntimeCommand = Command
 
@@ -1343,7 +1344,6 @@ const collectEvaluatedTransition = <
 }
 
 const MaxMacrostepIterations = 1000
-export const InitialEventTypeId: unique symbol = Symbol("effect/Machine/InitialEvent")
 export const InitialEvent: MachineInitialEvent = { _tag: InitialEventTypeId }
 
 const catchStartup = <A, E, R>(

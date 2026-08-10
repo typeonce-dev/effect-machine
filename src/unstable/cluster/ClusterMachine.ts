@@ -3,27 +3,29 @@
  *
  * @since 4.0.0
  */
-import * as Cause from "effect/Cause"
-import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
+import type * as Effect from "effect/Effect"
+import type * as Layer from "effect/Layer"
+import type * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import {
+import type {
   ClusterError,
   ClusterSchema,
   Entity,
   EntityAddress,
   MessageStorage,
-  type Sharding,
+  Sharding,
   Snowflake
 } from "effect/unstable/cluster"
-import { Rpc } from "effect/unstable/rpc"
+import type { Rpc } from "effect/unstable/rpc"
+import * as internal from "../../internal/machine/cluster.js"
+import { Accepted, Rejected, Storage } from "../../internal/machine/cluster.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
-import * as Machine from "../../Machine.js"
+import type * as Machine from "../../Machine.js"
 
 type EntityAddress = EntityAddress.EntityAddress
+
 type PersistenceError = ClusterError.PersistenceError
+
 type Snowflake = Snowflake.Snowflake
 
 /**
@@ -138,16 +140,7 @@ export declare namespace CommitResult {
  * @category services
  * @since 4.0.0
  */
-export class Storage extends Context.Service<Storage, {
-  readonly load: (
-    address: EntityAddress,
-    requestId: Snowflake
-  ) => Effect.Effect<LoadResult, PersistenceError>
-  readonly commit: (
-    address: EntityAddress,
-    checkpoint: Checkpoint
-  ) => Effect.Effect<CommitResult, PersistenceError>
-}>()("effect/cluster/ClusterMachine/Storage") {}
+export { Storage }
 
 /**
  * Successful result returned after a Cluster machine request is committed or
@@ -156,10 +149,7 @@ export class Storage extends Context.Service<Storage, {
  * @category models
  * @since 4.0.0
  */
-export class Accepted extends Schema.TaggedClass<Accepted>("effect/cluster/ClusterMachine/Accepted")(
-  "Accepted",
-  {}
-) {}
+export { Accepted }
 
 /**
  * Schema for reasons a Cluster machine request can be rejected without
@@ -193,13 +183,7 @@ export type RejectionReason = typeof RejectionReason.Type
  * @category models
  * @since 4.0.0
  */
-export class Rejected extends Schema.TaggedClass<Rejected>("effect/cluster/ClusterMachine/Rejected")(
-  "Rejected",
-  {
-    reason: RejectionReason,
-    message: Schema.String
-  }
-) {}
+export { Rejected }
 
 /**
  * Schema for Cluster machine request outcomes.
@@ -281,32 +265,6 @@ type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extend
   : Requirements
   : Requirements
 
-const hasInvokes = (machine: Machine.Machine.Any): boolean =>
-  Reflect.ownKeys(machine.handlers).some((key) => machine.handlers[key as string]?.invoke !== undefined)
-
-const reject = (reason: RejectionReason, message: string): Rejected => new Rejected({ reason, message })
-
-const fail = (reason: RejectionReason, message: string): Effect.Effect<never, Rejected> =>
-  Effect.fail(reject(reason, message))
-
-const messageFromCause = (cause: Cause.Cause<unknown>): string => {
-  const squashed = Cause.squash(cause)
-  return squashed instanceof globalThis.Error ? squashed.message : String(squashed)
-}
-
-const rejectionFromCause = (cause: Cause.Cause<unknown>): Rejected => {
-  const error = Cause.findErrorOption(cause)
-  if (Option.isSome(error) && error.value instanceof Rejected) {
-    return error.value
-  }
-  if (Option.isSome(error) && error.value instanceof Machine.ProcessLocalError) {
-    return reject("UnsupportedProcessLocal", `${error.value.operation} is process-local and is not supported`)
-  }
-  return reject("TransitionFailure", messageFromCause(cause))
-}
-
-const addressKey = (address: EntityAddress): string => `${address.entityType}\u0000${address.entityId}`
-
 /**
  * Creates an in-memory Cluster machine checkpoint store.
  *
@@ -323,40 +281,7 @@ const addressKey = (address: EntityAddress): string => `${address.entityType}\u0
  * @category constructors
  * @since 4.0.0
  */
-export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
-  const entries = new Map<string, {
-    checkpoint: Checkpoint
-    readonly requests: Set<Snowflake>
-  }>()
-  return Storage.of({
-    load: (address, requestId) =>
-      Effect.sync(() => {
-        const entry = entries.get(addressKey(address))
-        return {
-          checkpoint: Option.fromNullishOr(entry?.checkpoint),
-          processed: entry?.requests.has(requestId) ?? false
-        }
-      }),
-    commit: (address, checkpoint) =>
-      Effect.sync(() => {
-        const key = addressKey(address)
-        const entry = entries.get(key)
-        if (entry?.requests.has(checkpoint.requestId)) {
-          return CommitResult.Duplicate()
-        }
-        if (entry === undefined) {
-          entries.set(key, {
-            checkpoint,
-            requests: new Set([checkpoint.requestId])
-          })
-        } else {
-          entry.checkpoint = checkpoint
-          entry.requests.add(checkpoint.requestId)
-        }
-        return CommitResult.Committed()
-      })
-  })
-})
+export const makeMemory: Effect.Effect<Storage["Service"]> = internal.makeMemory
 
 /**
  * Layer providing the in-memory Cluster machine checkpoint store.
@@ -364,7 +289,7 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = Effect.sync(() => {
  * @category layers
  * @since 4.0.0
  */
-export const layerMemory: Layer.Layer<Storage> = Layer.effect(Storage, makeMemory)
+export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
 
 /**
  * Creates a persisted Cluster entity adapter for a machine.
@@ -393,7 +318,7 @@ export const layerMemory: Layer.Layer<Storage> = Layer.effect(Storage, makeMemor
  * @category constructors
  * @since 4.0.0
  */
-export const make = <
+export const make: <
   const Type extends string,
   States extends Machine.Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
@@ -431,7 +356,7 @@ export const make = <
     readonly version: string
   },
   ...input: [...Machine.Machine.InputArgs<Input>]
-): ClusterMachine<
+) => ClusterMachine<
   Type,
   Machine.Machine<
     States,
@@ -455,163 +380,4 @@ export const make = <
   >
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
-> => {
-  type M = Machine.Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >
-  const eventSchema = Schema.Union(machine.events as MachineEvents<M>)
-  const rpc = Rpc.make("send", {
-    payload: eventSchema,
-    success: SendResult
-  })
-    .annotate(ClusterSchema.Persisted, true) as SendRpc<MachineEvents<M>>
-  const entity = Entity.make(type, [rpc])
-  const machineId = machine.id ?? type
-
-  const toLayer: ClusterMachine<
-    Type,
-    M,
-    | ExcludeCompatibleRuntime<
-      Machine.ExecutionServices<R | InitialR>,
-      Machine.Machine.EventOf<Events>,
-      Machine.Machine.EmitOf<Emits>
-    >
-    | Machine.Machine.SnapshotDecodingServices<States>
-    | Machine.Machine.SnapshotEncodingServices<States>
-  >["toLayer"] = (layerOptions) =>
-    entity.toLayer(
-      Effect.gen(function*() {
-        const storage = yield* Storage
-        const messageStorage = yield* MessageStorage.MessageStorage
-
-        const handle = Effect.fnUntraced(function*(request: Entity.Request<SendRpc<MachineEvents<M>>>) {
-          if (hasInvokes(machine)) {
-            return yield* fail(
-              "UnsupportedProcessLocal",
-              "Machine invoke configurations are process-local and cannot be restored"
-            )
-          }
-
-          const loaded = yield* storage.load(request.address, request.requestId).pipe(
-            Effect.mapError((error) => reject("PersistenceFailure", String(error.cause)))
-          )
-          let current: Machine.Machine.Snapshot<States> | undefined
-          const emitted: Array<Machine.Machine.EmitOf<MachineEmits<M>>> = []
-
-          if (Option.isSome(loaded.checkpoint)) {
-            const checkpoint = loaded.checkpoint.value
-            if (loaded.processed) {
-              return new Accepted({})
-            }
-            if (checkpoint.machineId !== machineId) {
-              return yield* fail(
-                "MachineIdMismatch",
-                `Expected machine id ${machineId}, received ${checkpoint.machineId}`
-              )
-            }
-            if (checkpoint.version !== options.version) {
-              return yield* fail(
-                "VersionMismatch",
-                `Expected version ${options.version}, received ${checkpoint.version}`
-              )
-            }
-            current = yield* Machine.decodeSnapshot(machine, checkpoint.snapshot).pipe(
-              Effect.mapError((error) => reject("InvalidCheckpoint", String(error.cause)))
-            )
-          } else if (loaded.processed) {
-            return yield* fail("InvalidCheckpoint", "The request was recorded without a checkpoint")
-          }
-
-          if (current === undefined) {
-            const initial = yield* Machine.planInitial(machine, ...input as any)
-            if (initial.commands.length > 0) {
-              return yield* fail(
-                "UnsupportedProcessLocal",
-                "Machine actor commands require a managed local process"
-              )
-            }
-            current = initial.state
-            emitted.push(...initial.emittedEvents as any)
-          }
-
-          if (!Machine.isFinal(machine, current)) {
-            const planned = yield* Machine.plan(machine, current, request.payload)
-            if (planned.commands.length > 0) {
-              return yield* fail(
-                "UnsupportedProcessLocal",
-                "Machine actor commands require a managed local process"
-              )
-            }
-            current = planned.next
-            emitted.push(...planned.emittedEvents as any)
-          }
-
-          const encoded = yield* Machine.encodeSnapshot(machine, current)
-          if (emitted.length > 0 && layerOptions?.enqueue === undefined) {
-            return yield* fail("EmissionFailure", "No durable enqueue handler was configured")
-          }
-          const committed = yield* storage.commit(request.address, {
-            machineId,
-            version: options.version,
-            requestId: request.requestId,
-            snapshot: encoded
-          }).pipe(
-            Effect.mapError((error) => reject("PersistenceFailure", String(error.cause)))
-          )
-          if (committed._tag === "Duplicate") {
-            return new Accepted({})
-          }
-
-          if (layerOptions?.enqueue !== undefined) {
-            yield* Effect.forEach(emitted, layerOptions.enqueue, { discard: true }).pipe(
-              Effect.mapError((error) => reject("EmissionFailure", String(error)))
-            )
-          }
-          return new Accepted({})
-        })
-
-        return entity.of({
-          send: (request) =>
-            messageStorage.withTransaction(
-              handle(request).pipe(
-                Effect.catchCause((cause) =>
-                  Cause.hasInterrupts(cause)
-                    ? Effect.failCause(cause)
-                    : Effect.fail(rejectionFromCause(cause))
-                )
-              )
-            ).pipe(
-              Effect.catchCause((cause) => {
-                if (Cause.hasInterrupts(cause)) {
-                  return Effect.failCause(cause)
-                }
-                const error = Cause.findErrorOption(cause)
-                return Effect.succeed(
-                  Option.isSome(error) && error.value instanceof Rejected
-                    ? error.value
-                    : reject("PersistenceFailure", messageFromCause(cause))
-                )
-              })
-            ) as any
-        })
-      }) as any
-    ) as any
-
-  return {
-    machine,
-    entity,
-    toLayer
-  }
-}
+> = internal.make

@@ -4,6 +4,7 @@ import ts from "typescript"
 
 const ruleDescriptions = {
   ARCH001: "Public entrypoints may only expose public modules",
+  ARCH002: "Public modules may only reach internals through their designated implementation seam",
   ARCH003: "Core internals may only refer back to Machine through type-only imports",
   ARCH004: "The planner may not depend on process or runtime execution",
   ARCH006: "The runtime may not depend on machine semantics or process orchestration",
@@ -11,7 +12,8 @@ const ruleDescriptions = {
   ARCH008: "Black-box tests may not depend on implementation internals",
   ARCH009: "Production runtime imports must be acyclic",
   ARCH011: "Internal directories may not use barrel modules",
-  ARCH012: "Internal filenames must describe their responsibility without a machine prefix"
+  ARCH012: "Internal filenames must describe their responsibility without a machine prefix",
+  ARCH013: "Public implementation bindings must declare their API signature"
 }
 
 const normalizePath = (path) => path.split(sep).join("/")
@@ -211,6 +213,12 @@ export const checkArchitecture = ({
     "src/unstable/cluster/index.ts",
     "src/unstable/reactivity/index.ts"
   ])
+  const implementationSeams = new Map([
+    ["src/Machine.ts", "src/internal/machine/machine.ts"],
+    ["src/testing/MachineTest.ts", "src/internal/testing/machine/verification.ts"],
+    ["src/unstable/reactivity/AtomMachine.ts", "src/internal/machine/atom.ts"],
+    ["src/unstable/cluster/ClusterMachine.ts", "src/internal/machine/cluster.ts"]
+  ])
 
   for (const edge of edges) {
     if (entrypoints.has(edge.source) && edge.target.includes("/internal/")) {
@@ -220,6 +228,21 @@ export const checkArchitecture = ({
         edge.node,
         edge.source,
         `Public entrypoint imports internal module ${edge.target}`
+      ))
+    }
+    const implementationSeam = implementationSeams.get(edge.source)
+    if (
+      implementationSeam !== undefined &&
+      !edge.typeOnly &&
+      edge.target.includes("/internal/") &&
+      edge.target !== implementationSeam
+    ) {
+      diagnostics.push(diagnostic(
+        "ARCH002",
+        edge.sourceFile,
+        edge.node,
+        edge.source,
+        `Public module bypasses its implementation seam through ${edge.target}`
       ))
     }
     if (
@@ -295,6 +318,61 @@ export const checkArchitecture = ({
 
   for (const sourceFile of program.getSourceFiles()) {
     const path = projectPath(root, sourceFile.fileName)
+    const implementationSeam = implementationSeams.get(path)
+    if (implementationSeam !== undefined) {
+      const implementationNamespaces = new Set()
+      const implementationValues = new Set()
+      for (const statement of sourceFile.statements) {
+        if (
+          !ts.isImportDeclaration(statement) ||
+          statement.importClause === undefined ||
+          statement.importClause.isTypeOnly ||
+          !ts.isStringLiteral(statement.moduleSpecifier) ||
+          resolveProjectModule(
+              statement.moduleSpecifier.text,
+              sourceFile,
+              program.getCompilerOptions(),
+              root
+            ) !== implementationSeam
+        ) continue
+        if (statement.importClause.name !== undefined) {
+          implementationValues.add(statement.importClause.name.text)
+        }
+        const bindings = statement.importClause.namedBindings
+        if (bindings === undefined) continue
+        if (ts.isNamespaceImport(bindings)) {
+          implementationNamespaces.add(bindings.name.text)
+        } else {
+          for (const element of bindings.elements) {
+            if (!element.isTypeOnly) implementationValues.add(element.name.text)
+          }
+        }
+      }
+      for (const statement of sourceFile.statements) {
+        if (
+          !ts.isVariableStatement(statement) ||
+          !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+        ) continue
+        for (const declaration of statement.declarationList.declarations) {
+          if (declaration.initializer === undefined) continue
+          const bindsImplementation =
+            (ts.isPropertyAccessExpression(declaration.initializer) &&
+              ts.isIdentifier(declaration.initializer.expression) &&
+              implementationNamespaces.has(declaration.initializer.expression.text)) ||
+            (ts.isIdentifier(declaration.initializer) && implementationValues.has(declaration.initializer.text))
+          if (!bindsImplementation) continue
+          if (declaration.type === undefined) {
+            diagnostics.push(diagnostic(
+              "ARCH013",
+              sourceFile,
+              declaration,
+              path,
+              "Public implementation binding relies on an inferred internal signature"
+            ))
+          }
+        }
+      }
+    }
     if (!path.startsWith("src/internal/")) continue
     if (basename(path) === "index.ts") {
       diagnostics.push({

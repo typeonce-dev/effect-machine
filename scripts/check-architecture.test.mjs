@@ -43,12 +43,22 @@ const rules = (root) => checkArchitecture({ rootDirectory: root }).map((diagnost
 test("accepts Effect-shaped modules and ignores type-only back-edges", () => {
   const root = makeProject({
     "src/index.ts": 'export * as Machine from "./Machine.js"',
-    "src/Machine.ts": 'import * as Model from "./internal/machine/model.js"\nexport interface Machine {}\nexport const model = Model.value',
+    "src/Machine.ts": 'import * as internal from "./internal/machine/machine.js"\nimport type * as Model from "./internal/machine/model.js"\nexport interface Machine { readonly model: typeof Model.value }\nexport const make: () => Machine = internal.make',
+    "src/internal/machine/machine.ts": 'import type { Machine } from "../../Machine.js"\nexport const make = (): Machine => ({ model: 1 })',
     "src/internal/machine/model.ts": 'import type { Machine } from "../../Machine.js"\nexport const value = 1',
     "test/machine/Machine.test.ts": 'import { Machine } from "../../src/index.js"\nvoid Machine',
     "test/internal/machine/model.test.ts": 'import { value } from "../../../src/internal/machine/model.js"\nvoid value'
   })
   assert.deepEqual(rules(root), [])
+})
+
+test("rejects public implementation bypasses and inferred internal signatures", () => {
+  const root = makeProject({
+    "src/Machine.ts": 'import * as internal from "./internal/machine/machine.js"\nimport { value } from "./internal/machine/model.js"\nexport const make = internal.make\nexport const model = value',
+    "src/internal/machine/machine.ts": "export const make = () => 1",
+    "src/internal/machine/model.ts": "export const value = 1"
+  })
+  assert.deepEqual(rules(root), ["ARCH002", "ARCH013"])
 })
 
 test("rejects entrypoint leaks, black-box internal imports, barrels, and legacy filenames", () => {

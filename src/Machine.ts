@@ -5,17 +5,16 @@
  */
 
 import type * as Cause from "effect/Cause"
-import * as Duration from "effect/Duration"
-import * as Effect from "effect/Effect"
-import * as Inspectable from "effect/Inspectable"
-import * as Option from "effect/Option"
-import { type Pipeable, Prototype as PipeablePrototype } from "effect/Pipeable"
+import type * as Duration from "effect/Duration"
+import type * as Effect from "effect/Effect"
+import type * as Option from "effect/Option"
+import type { Pipeable } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type * as Types from "effect/Types"
-import * as Activities from "./internal/machine/activities.js"
+import type * as Activities from "./internal/machine/activities.js"
 import type {
   ChildAlreadyExistsError,
   InfiniteTransitionError,
@@ -24,14 +23,13 @@ import type {
   ProcessLocalError,
   StartupError,
   StoppedError
-} from "./internal/machine/errors.js"
-import { ProcessLocalError as ProcessLocalErrorValue } from "./internal/machine/errors.js"
-import * as Model from "./internal/machine/model.js"
-import * as internalPlanner from "./internal/machine/planner.js"
-import * as internalProcess from "./internal/machine/process.js"
+} from "./internal/machine/machine.js"
+import * as internal from "./internal/machine/machine.js"
+import { InitialEventTypeId } from "./internal/machine/machine.js"
+import type * as Model from "./internal/machine/model.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
-import * as internalRuntime from "./internal/machine/runtime.js"
-import * as StateDefinition from "./internal/machine/stateDefinition.js"
+import type * as internalRuntime from "./internal/machine/runtime.js"
+import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 
 /**
  * String literal type used as the runtime type identifier for `Machine`
@@ -60,7 +58,7 @@ declare const MachineTypeId: unique symbol
  * @category type IDs
  * @since 4.0.0
  */
-export const InitialEventTypeId: typeof internalPlanner.InitialEventTypeId = internalPlanner.InitialEventTypeId
+export { InitialEventTypeId }
 
 /**
  * Synthetic event passed to entry, exit, always, invoke, and output callbacks
@@ -79,7 +77,7 @@ export interface InitialEvent {
  * @category constructors
  * @since 4.0.0
  */
-export const InitialEvent: InitialEvent = internalPlanner.InitialEvent
+export const InitialEvent: InitialEvent = { _tag: InitialEventTypeId }
 
 /**
  * Returns `true` if a value is the synthetic machine initial event.
@@ -283,7 +281,7 @@ export {
    * @since 4.0.0
    */
   StoppedError
-} from "./internal/machine/errors.js"
+} from "./internal/machine/machine.js"
 
 const RuntimeRequirementTypeId = "~effect/Machine/RuntimeRequirement"
 const ActionRequirementTypeId = "~effect/Machine/ActionRequirement"
@@ -464,7 +462,7 @@ type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Run
   : never
 
 const RuntimeCompatibilityErrorTypeId = "~effect/Machine/RuntimeCompatibilityError"
-const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
+const InvokeTypeId: typeof internal.InvokeTypeId = internal.InvokeTypeId
 
 type EnsureCompatibleRuntime<Requirements, Events, Emits> = [IncompatibleRuntime<Requirements, Events, Emits>] extends
   [never] ? unknown : {
@@ -691,7 +689,7 @@ type ValidateInternalEventProtocol<
   : EventProtocolError<"Public and internal event tags must be disjoint", Overlap>
   : EventProtocolError<"Internal event tags must be unique", DuplicateInternal>
 
-const SnapshotBuilderStateTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderState")
+const SnapshotBuilderStateTypeId: typeof internal.SnapshotBuilderStateTypeId = internal.SnapshotBuilderStateTypeId
 const SnapshotBuilderConstructionTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderConstruction")
 
 type SnapshotBuilderComplete<Regions, Constructed extends boolean = false> = {
@@ -5204,130 +5202,13 @@ export declare namespace Machine {
   >
 }
 
-const Proto = {
-  ...Inspectable.BaseProto,
-  ...PipeablePrototype,
-  [TypeId]: TypeId,
-  toJSON() {
-    return {
-      _id: "Machine"
-    }
-  }
-}
-
-const cloneWithHandlers = (
-  self: Machine.Any,
-  handlers: Machine.StateConfigs<any, any, any, any, any, any, any>
-): Machine.Any => {
-  const machine = Object.create(Proto)
-  machine.states = self.states
-  machine.events = self.events
-  machine.internalEvents = self.internalEvents
-  machine.emits = self.emits
-  machine.input = self.input
-  machine.id = self.id
-  machine.initial = self.initial
-  machine.stateNodes = self.stateNodes
-  machine.makeTargetBuilder = self.makeTargetBuilder
-  machine.handlers = handlers
-  machine.handle = makeHandle(machine)
-  Model.copyProtocol(self, machine)
-  return machine
-}
-
-const validateTransitionTargets = (
-  stateNodes: Machine.StateNodes,
-  path: string,
-  trigger: PropertyKey,
-  transition: unknown
-): void => {
-  if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
-    return
-  }
-  if (!Array.isArray(transition.targets)) {
-    throw new Error(
-      `Machine expected transition targets for state "${path}" on "${String(trigger)}" to be an array`
-    )
-  }
-  for (const target of transition.targets) {
-    if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
-      throw new Error(
-        `Machine transition for state "${path}" on "${String(trigger)}" declares unknown target "${String(target)}"`
-      )
-    }
-  }
-}
-
-const flattenHandlers = (
-  handlers: Record<PropertyKey, Machine.AnyStateConfig>,
-  stateNodes: Machine.StateNodes,
-  states: Machine.StateTree,
-  prefix: string,
-  config: Record<string, unknown>
-): void => {
-  for (const key of Object.keys(config)) {
-    const path = prefix === "" ? key : `${prefix}.${key}`
-    if (!hasProperty(states, key)) {
-      throw new Error(`Machine received handler for unknown state "${path}"`)
-    }
-    const nodeConfig = config[key]
-    if (typeof nodeConfig !== "object" || nodeConfig === null) {
-      throw new Error(`Machine expected state "${path}" handler to be an object`)
-    }
-    const { states: childConfig, ...stateConfig } = nodeConfig as Record<string, unknown>
-    const on = stateConfig.on
-    if (typeof on === "object" && on !== null) {
-      for (const event of Reflect.ownKeys(on)) {
-        validateTransitionTargets(stateNodes, path, event, (on as Record<PropertyKey, unknown>)[event])
-      }
-    }
-    validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
-    validateTransitionTargets(stateNodes, path, "done", stateConfig.onDone)
-    validateTransitionTargets(stateNodes, path, "choice", stateConfig.choice)
-    const node = stateNodes.byPath.get(path)
-    if (node?.type === "choice") {
-      if (
-        typeof stateConfig.choice !== "object" || stateConfig.choice === null ||
-        !hasProperty(stateConfig.choice, "transition") || typeof stateConfig.choice.transition !== "function" ||
-        !hasProperty(stateConfig.choice, "targets") || !Array.isArray(stateConfig.choice.targets) ||
-        stateConfig.choice.targets.length === 0
-      ) {
-        throw new Error(`Machine choice state "${path}" requires a transition and at least one declared target`)
-      }
-    }
-    handlers[path] = stateConfig as Machine.AnyStateConfig
-    if (childConfig !== undefined) {
-      const node = Model.getStateNodeDefinition(path, states[key])
-      if (node.states === undefined) {
-        throw new Error(`Machine expected state "${path}" to declare child states`)
-      }
-      if (typeof childConfig !== "object" || childConfig === null) {
-        throw new Error(`Machine expected state "${path}" child handlers to be an object`)
-      }
-      flattenHandlers(handlers, stateNodes, node.states, path, childConfig as Record<string, unknown>)
-    }
-  }
-}
-
-const makeHandle = (self: Machine.Any): Machine.Any["handle"] =>
-  ((config: Record<string, unknown>) => {
-    const handlers: Record<PropertyKey, Machine.AnyStateConfig> = Object.assign(
-      Object.create(null),
-      self.handlers
-    )
-    flattenHandlers(handlers, self.stateNodes, self.states, "", config)
-    return cloneWithHandlers(self, handlers)
-  }) as Machine.Any["handle"]
-
 /**
  * Returns `true` if a value is a `Machine`.
  *
  * @category guards
  * @since 4.0.0
  */
-export const isMachine = (
-  u: unknown
-): u is Machine.Any => hasProperty(u, TypeId) && u[TypeId] === TypeId
+export const isMachine: (u: unknown) => u is Machine.Any = internal.isMachine
 
 /**
  * Returns `true` if a state snapshot is final for a machine.
@@ -5335,7 +5216,7 @@ export const isMachine = (
  * @category guards
  * @since 4.0.0
  */
-export const isFinal = <
+export const isFinal: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema>,
@@ -5366,7 +5247,7 @@ export const isFinal = <
     InputEvents
   >,
   state: Machine.Snapshot<States>
-): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine as any, state)
+) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal
 
 type SnapshotBuilderOptions = {
   readonly mode: "initial" | "full"
@@ -5374,434 +5255,6 @@ type SnapshotBuilderOptions = {
 }
 
 type FromMethodKind = "leaf" | "nested"
-
-const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) => unknown>(
-  method: Method,
-  kind: FromMethodKind
-): Method & { readonly from: (...args: ReadonlyArray<any>) => unknown } => {
-  Object.defineProperty(method, "from", {
-    value: (...args: ReadonlyArray<any>) => {
-      const omitted = args.length === 0 || (kind === "nested" && args.length === 1 && typeof args[0] === "function")
-      const input = omitted ? {} : args[0]
-      const rest = omitted ? args : args.slice(1)
-      return method(Model.makeStateInput(input), ...rest)
-    },
-    enumerable: false
-  })
-  return method as Method & { readonly from: (...args: ReadonlyArray<any>) => unknown }
-}
-
-const makeSnapshotBuilder = (
-  states: Machine.StateTree,
-  options: SnapshotBuilderOptions
-): unknown => {
-  const builder: Record<string, unknown> = {}
-  for (const key of Object.keys(states)) {
-    const pseudoType = (states[key] as { readonly type?: unknown }).type
-    if (pseudoType === "history") {
-      continue
-    }
-    const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-    if (pseudoType === "choice") {
-      builder[key] = () => Model.makeChoiceTarget(path, getParentPathRuntime(path))
-      continue
-    }
-    const node = Model.getStateNodeDefinition(path, states[key])
-    builder[key] = withFrom(
-      (value: unknown, selector?: (builder: unknown) => unknown) =>
-        makeSnapshotForNode(states[key], key, value, selector, options),
-      node.states === undefined ? "leaf" : "nested"
-    )
-  }
-  return builder
-}
-
-const makeParallelSnapshotBuilder = (
-  states: Machine.StateTree,
-  options: SnapshotBuilderOptions,
-  regions: Readonly<Record<string, unknown>>
-): unknown => {
-  const builder: Record<string, unknown> = {}
-  Object.defineProperty(builder, SnapshotBuilderStateTypeId, {
-    value: regions,
-    enumerable: false
-  })
-  for (const key of Object.keys(states)) {
-    const pseudoType = (states[key] as { readonly type?: unknown }).type
-    if (pseudoType === "history" || pseudoType === "choice") {
-      continue
-    }
-    if (hasProperty(regions, key)) {
-      continue
-    }
-    const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-    const node = Model.getStateNodeDefinition(path, states[key])
-    builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-      const nextRegions: Record<string, unknown> = {}
-      for (const regionKey of Object.keys(regions)) {
-        nextRegions[regionKey] = regions[regionKey]
-      }
-      nextRegions[key] = makeSnapshotForNode(states[key], key, value, selector, options)
-      return makeParallelSnapshotBuilder(states, options, nextRegions)
-    }, node.states === undefined ? "leaf" : "nested")
-  }
-  return builder
-}
-
-const getParallelSnapshotBuilderRegions = (
-  path: string,
-  states: Machine.StateTree,
-  builder: unknown
-): Readonly<Record<string, unknown>> => {
-  if (typeof builder !== "object" || builder === null || !hasProperty(builder, SnapshotBuilderStateTypeId)) {
-    throw new Error(`Machine expected parallel state "${path}" builder callback to return a builder`)
-  }
-  const regions = (builder as { readonly [SnapshotBuilderStateTypeId]: Readonly<Record<string, unknown>> })[
-    SnapshotBuilderStateTypeId
-  ]
-  for (const key of Object.keys(states)) {
-    const pseudoType = (states[key] as { readonly type?: unknown }).type
-    if (pseudoType === "history" || pseudoType === "choice") {
-      continue
-    }
-    if (!hasProperty(regions, key)) {
-      throw new Error(`Machine expected parallel state "${path}" builder callback to provide region "${key}"`)
-    }
-  }
-  return regions
-}
-
-const makeSnapshotForNode = (
-  definition: Machine.TaggedSchema | Machine.StateNodeConfig,
-  key: string,
-  value: unknown,
-  selector: ((builder: unknown) => unknown) | undefined,
-  options: SnapshotBuilderOptions
-): Record<string, unknown> => {
-  const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-  const node = Model.getStateNodeDefinition(path, definition)
-  const snapshot: Record<string, unknown> = {
-    path,
-    value
-  }
-  if (node.states === undefined) {
-    return snapshot
-  }
-  if (selector === undefined) {
-    throw new Error(`Machine expected state "${path}" builder to provide active child states`)
-  }
-  if (node.type === "parallel") {
-    const builder = makeParallelSnapshotBuilder(node.states, { ...options, prefix: path }, {})
-    const selected = selector(builder)
-    snapshot.states = getParallelSnapshotBuilderRegions(path, node.states, selected)
-    return snapshot
-  }
-  const childStates = options.mode === "initial" && node.initial !== undefined
-    ? { [node.initial]: node.states[node.initial] }
-    : node.states
-  const selected = selector(makeSnapshotBuilder(childStates, { ...options, prefix: path }))
-  snapshot.state = selected
-  return snapshot
-}
-
-const getTargetBuilderNode = (
-  stateNodes: Machine.StateNodes,
-  path: string
-): Machine.StateNode => {
-  const node = stateNodes.byPath.get(path)
-  if (node === undefined) {
-    throw new Error(`Machine expected state path "${path}" to exist`)
-  }
-  return node
-}
-
-const getLocalTargetScope = (
-  stateNodes: Machine.StateNodes,
-  source: string
-): string | undefined => {
-  let current: string | undefined = source
-  while (current !== undefined) {
-    const node = stateNodes.byPath.get(current)
-    if (node === undefined) {
-      return undefined
-    }
-    if (node.type === "compound") {
-      return node.path
-    }
-    current = node.parent
-  }
-  return undefined
-}
-
-const hasTargetValues = (
-  values: Readonly<Record<string, unknown>> | undefined
-): values is Readonly<Record<string, unknown>> => values !== undefined && Object.keys(values).length > 0
-
-const makeTargetWithValues = (
-  path: string,
-  value: unknown,
-  values: Readonly<Record<string, unknown>> | undefined
-): Machine.Target<any, any> =>
-  hasTargetValues(values)
-    ? Model.makeTarget(path as any, value as any, { values: values as any })
-    : Model.makeTarget(path as any, value as any)
-
-const getTargetBuilderDefinition = (
-  states: Machine.StateTree,
-  targetPath: string
-): Machine.TaggedSchema | Machine.StateNodeConfig => {
-  let children = states
-  let path = ""
-  let definition: Machine.TaggedSchema | Machine.StateNodeConfig | undefined
-  for (const key of targetPath.split(".")) {
-    if (!hasProperty(children, key)) {
-      throw new Error(`Machine expected state path "${targetPath}" to exist`)
-    }
-    definition = children[key]
-    path = path === "" ? key : `${path}.${key}`
-    const node = Model.getStateNodeDefinition(path, definition)
-    children = node.states ?? {}
-  }
-  return definition!
-}
-
-const makeParallelTarget = (
-  states: Machine.StateTree,
-  node: Machine.StateNode,
-  value: unknown,
-  selector: ((builder: unknown) => unknown) | undefined,
-  values: Readonly<Record<string, unknown>> | undefined
-): Machine.Target<any, any> => {
-  if (selector === undefined) {
-    throw new Error(`Machine expected parallel target "${node.path}" builder to provide every active region`)
-  }
-  const snapshot = makeSnapshotForNode(
-    getTargetBuilderDefinition(states, node.path),
-    node.key,
-    value,
-    selector,
-    { mode: "full", prefix: node.parent ?? "" }
-  )
-  return Model.makeTarget(node.path as any, value as any, {
-    snapshot: snapshot as any,
-    values: values as any
-  })
-}
-
-const extendTargetValues = (
-  values: Readonly<Record<string, unknown>> | undefined,
-  path: string,
-  value: unknown
-): Readonly<Record<string, unknown>> => {
-  const next: Record<string, unknown> = {}
-  if (values !== undefined) {
-    for (const key of Object.keys(values)) {
-      next[key] = values[key]
-    }
-  }
-  next[path] = value
-  return next
-}
-
-const makeLocalTargetChildBuilder = (
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  parentPath: string,
-  values: Readonly<Record<string, unknown>> | undefined,
-  source: string
-): unknown => {
-  const parent = getTargetBuilderNode(stateNodes, parentPath)
-  const builder: Record<string, unknown> = {}
-  for (
-    const childPath of Array.from(stateNodes.byPath.values())
-      .filter((node) => node.parent === parent.path && node.type !== "history")
-      .map((node) => node.path)
-  ) {
-    const child = getTargetBuilderNode(stateNodes, childPath)
-    if (child.type === "choice") {
-      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
-      continue
-    }
-    builder[child.key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-      if (child.type === "atomic" || child.type === "final") {
-        return makeTargetWithValues(child.path, value, values)
-      }
-      if (child.type === "parallel") {
-        if (source !== child.path && !source.startsWith(`${child.path}.`)) {
-          return makeParallelTarget(states, child, value, selector, values)
-        }
-        if (selector === undefined) {
-          throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
-        }
-        return selector(makeLocalTargetChildBuilder(
-          states,
-          stateNodes,
-          child.path,
-          extendTargetValues(values, child.path, value),
-          source
-        ))
-      }
-      if (selector === undefined) {
-        throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
-      }
-      return selector(makeLocalTargetChildBuilder(
-        states,
-        stateNodes,
-        child.path,
-        extendTargetValues(values, child.path, value),
-        source
-      ))
-    }, child.type === "atomic" || child.type === "final" ? "leaf" : "nested")
-  }
-  return builder
-}
-
-const makeLocalTargetBuilder = (
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  source: string
-): unknown => {
-  const scope = getLocalTargetScope(stateNodes, source)
-  if (scope === undefined) {
-    return {}
-  }
-  const builder = makeLocalTargetChildBuilder(states, stateNodes, scope, undefined, source) as Record<string, unknown>
-  builder.with = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-    if (selector === undefined) {
-      throw new Error(`Machine expected target "${scope}" builder to provide an active child state`)
-    }
-    return selector(makeLocalTargetChildBuilder(states, stateNodes, scope, { [scope]: value }, source))
-  }, "nested")
-  return builder
-}
-
-const addBranchTargetChildren = (
-  builder: Record<string, unknown>,
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  parentPath: string,
-  values: Readonly<Record<string, unknown>> | undefined,
-  source: string
-): void => {
-  const parent = getTargetBuilderNode(stateNodes, parentPath)
-  for (
-    const childPath of Array.from(stateNodes.byPath.values())
-      .filter((node) => node.parent === parent.path && node.type !== "history")
-      .map((node) => node.path)
-  ) {
-    const child = getTargetBuilderNode(stateNodes, childPath)
-    if (child.type === "choice") {
-      builder[child.key] = () => Model.makeChoiceTarget(child.path, parent.path, values)
-      continue
-    }
-    builder[child.key] = makeBranchTargetNodeBuilder(states, stateNodes, child.path, values, source)
-  }
-}
-
-const makeBranchTargetNodeBuilder = (
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  path: string,
-  values: Readonly<Record<string, unknown>> | undefined,
-  source: string
-): unknown => {
-  const node = getTargetBuilderNode(stateNodes, path)
-  if (node.type === "atomic" || node.type === "final") {
-    return withFrom((value: unknown) => makeTargetWithValues(node.path, value, values), "leaf")
-  }
-  const builder = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-    if (node.type === "parallel") {
-      if (source !== node.path && !source.startsWith(`${node.path}.`)) {
-        return makeParallelTarget(states, node, value, selector, values)
-      }
-      if (selector === undefined) {
-        throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
-      }
-      const nextBuilder: Record<string, unknown> = {}
-      addBranchTargetChildren(
-        nextBuilder,
-        states,
-        stateNodes,
-        node.path,
-        extendTargetValues(values, node.path, value),
-        source
-      )
-      return selector(nextBuilder)
-    }
-    if (selector === undefined) {
-      throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
-    }
-    const nextBuilder: Record<string, unknown> = {}
-    addBranchTargetChildren(
-      nextBuilder,
-      states,
-      stateNodes,
-      node.path,
-      extendTargetValues(values, node.path, value),
-      source
-    )
-    return selector(nextBuilder)
-  }, "nested") as unknown as Record<string, unknown>
-  if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
-    addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
-  }
-  return builder
-}
-
-const makeBranchTargetBuilder = (
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  source: string
-): unknown => {
-  const rootPath = source.split(".")[0]!
-  const root = getTargetBuilderNode(stateNodes, rootPath)
-  return {
-    [root.key]: makeBranchTargetNodeBuilder(states, stateNodes, root.path, undefined, source)
-  }
-}
-
-const makeHistoryTargetBuilder = (
-  states: Machine.StateTree,
-  prefix: string
-): unknown => {
-  const builder: Record<string, unknown> = {}
-  for (const key of Object.keys(states)) {
-    const path = prefix === "" ? key : `${prefix}.${key}`
-    const definition = states[key]
-    if ((definition as { readonly type?: unknown }).type === "history") {
-      const parent = getParentPathRuntime(path)
-      builder[key] = () => Model.makeHistoryTarget(path, parent)
-      continue
-    }
-    if (typeof definition === "object" && definition !== null && hasProperty(definition, "states")) {
-      builder[key] = makeHistoryTargetBuilder(definition.states as Machine.StateTree, path)
-    }
-  }
-  return builder
-}
-
-const getParentPathRuntime = (path: string): string => {
-  const separator = path.lastIndexOf(".")
-  if (separator < 0) {
-    throw new Error(`Machine expected history state "${path}" to have an active parent`)
-  }
-  return path.slice(0, separator)
-}
-
-const makeTargetBuilder = <const States extends Machine.StateSchemas>(
-  states: States,
-  stateNodes: Machine.StateNodes
-) => {
-  const full = makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Machine.FullTargetBuilder<States>
-  const history = makeHistoryTargetBuilder(states, "") as Machine.HistoryTargetBuilder<States>
-  return <Source extends Machine.StateNodeIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
-    ({
-      local: makeLocalTargetBuilder(states, stateNodes, source),
-      branch: makeBranchTargetBuilder(states, stateNodes, source),
-      full,
-      history
-    }) as Machine.TargetBuilder<States, Source>
-}
 
 /**
  * Defines a state tree while preserving literal state paths.
@@ -5837,27 +5290,7 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
  * @category constructors
  * @since 4.0.0
  */
-export const defineStates: DefineStates = (<const States extends Machine.StateSchemas>(
-  states: States
-): Machine.DefinedStates<States> => {
-  StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
-  return {
-    states: states as States,
-    initial: makeSnapshotBuilder(states as States, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
-    get: ((snapshot, path) =>
-      Model.getSnapshotByPath(snapshot, path).pipe(
-        Option.map((snapshot) => snapshot.value)
-      )) as Machine.DefinedStates<States>["get"],
-    getWithParents: ((snapshot, path) => {
-      const parents: Record<string, unknown> = {}
-      return Model.getSnapshotByPath(snapshot, path, parents).pipe(
-        Option.map((snapshot) => ({ value: snapshot.value, parents }))
-      )
-    }) as Machine.DefinedStates<States>["getWithParents"],
-    getSnapshot: Model.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
-    matches: (snapshot, path) => Option.isSome(Model.getSnapshotByPath(snapshot, path))
-  }
-}) as DefineStates
+export const defineStates: DefineStates = internal.defineStates
 
 type MakeConfig<
   States extends Machine.StateSchemas,
@@ -5984,41 +5417,7 @@ interface Make {
  * @category constructors
  * @since 4.0.0
  */
-export const make: Make = (<
-  const States extends Machine.StateSchemas,
-  const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  InitialE = never,
-  InitialR = never,
-  const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
->(
-  config: {
-    readonly id?: string
-    readonly states: States
-    readonly events: InputEvents
-    readonly internalEvents?: InternalEvents
-    readonly emits?: Emits
-    readonly input?: Input
-    readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
-  }
-): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents> => {
-  StateDefinition.validateStateDefinitions(config.states, "Machine.make")
-  const self = Object.create(Proto)
-  self.states = config.states
-  self.events = config.events
-  self.internalEvents = config.internalEvents ?? []
-  self.emits = config.emits ?? []
-  self.input = config.input
-  self.id = config.id
-  self.initial = config.initial
-  self.stateNodes = Model.compileStateNodes(config.states)
-  self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
-  self.handlers = Object.create(null)
-  self.handle = makeHandle(self)
-  Model.setProtocol(self)
-  return self
-}) as Make
+export const make: Make = internal.make
 
 type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends EventSchema["~type.make.in"] ?
   [input?: EventSchema["~type.make.in"]]
@@ -6049,14 +5448,11 @@ type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends
  * @category constructors
  * @since 4.0.0
  */
-export const event = <
-  const M extends Machine.Any,
-  const EventSchema extends Machine.TaggedSchema
->(
+export const event: <const M extends Machine.Any, const EventSchema extends Machine.TaggedSchema>(
   machine: M,
   schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
   ...args: EventConstructorArgs<EventSchema>
-): EventSchema["Type"] => Model.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
+) => EventSchema["Type"] = internal.event
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.
@@ -6120,7 +5516,7 @@ export const encodeSnapshot: <
   Machine.EncodedSnapshot,
   MachineSchemaEncodeError,
   Machine.SnapshotEncodingServices<States>
-> = Model.encodeSnapshot as any
+> = internal.encodeSnapshot
 
 /**
  * Decodes a normalized data representation into a validated machine snapshot.
@@ -6180,7 +5576,7 @@ export const decodeSnapshot: <
   Machine.Snapshot<States>,
   MachineSchemaDecodeError,
   Machine.SnapshotDecodingServices<States>
-> = Model.decodeSnapshot as any
+> = internal.decodeSnapshot
 
 /**
  * Creates an invoked child process configuration for an active state.
@@ -6225,7 +5621,7 @@ export const decodeSnapshot: <
  * @category constructors
  * @since 4.0.0
  */
-export const invoke = <
+export const invoke: <
   ChildState,
   ChildEvent,
   ChildError = never,
@@ -6256,7 +5652,7 @@ export const invoke = <
       : {
         readonly address: Exclude<Address, undefined>
       } & ChildAddress.Compatibility<Exclude<Address, undefined>, NoInfer<ChildEvent>>)
-): Machine.InvokeConfig<
+) => Machine.InvokeConfig<
   any,
   any,
   any,
@@ -6268,11 +5664,7 @@ export const invoke = <
   ChildRequirements,
   ChildOutput,
   ChildInitialError
-> => ({
-  ...config,
-  [InvokeTypeId]: undefined as any,
-  [Activities.ActivityMetadataTypeId]: { type: "process" }
-})
+> = internal.invoke
 
 type InvokeEffectResult<Requirements, Event> = Machine.InvokeConfig<
   any,
@@ -6329,42 +5721,12 @@ type InvokeEffectConfig<
  * @category constructors
  * @since 4.0.0
  */
-export const invokeEffect = <
-  const Fx extends Effect.Effect<any, any, any>,
-  SuccessEvent,
-  FailureEvent = never
->(
+export const invokeEffect: <const Fx extends Effect.Effect<any, any, any>, SuccessEvent, FailureEvent = never>(
   config: InvokeEffectConfig<Fx, SuccessEvent, FailureEvent>
-): InvokeEffectResult<
+) => InvokeEffectResult<
   Effect.Services<Fx>,
   SuccessEvent | (InvokeEffectIsInfallible<Fx> extends true ? never : FailureEvent)
-> =>
-  ((config: {
-    readonly id: string
-    readonly effect: Effect.Effect<unknown, unknown, unknown>
-    readonly onSuccess: (value: unknown) => unknown
-    readonly onFailure?: (error: unknown) => unknown
-  }) => ({
-    ...invoke({
-      id: config.id,
-      src: () =>
-        effect(
-          config.onFailure === undefined
-            ? Effect.map(config.effect, config.onSuccess)
-            : Effect.matchEffect(config.effect, {
-              onFailure: (error) => Effect.succeed(config.onFailure!(error)),
-              onSuccess: (value) => Effect.succeed(config.onSuccess(value))
-            })
-        )
-    }),
-    [Activities.ActivityMetadataTypeId]: {
-      type: "effect",
-      outcomes: {
-        success: "dynamic",
-        failure: config.onFailure === undefined ? "none" : "dynamic"
-      }
-    }
-  }))(config as any) as any
+> = internal.invokeEffect
 
 /**
  * Creates a cancellable state-scoped delayed event.
@@ -6376,21 +5738,11 @@ export const invokeEffect = <
  * @category constructors
  * @since 4.0.0
  */
-export const after = <Event extends { readonly _tag: PropertyKey }>(
+export const after: <Event extends { readonly _tag: PropertyKey }>(
   duration: Duration.Input,
   event: Event,
   options?: { readonly id?: InvokeLifecycleId }
-): InvokeEffectResult<never, Event> => ({
-  ...invoke({
-    id: options?.id ?? `Machine.after:${String(event._tag)}`,
-    src: () => effect(Effect.as(Effect.sleep(duration), event))
-  }),
-  [Activities.ActivityMetadataTypeId]: {
-    type: "timer",
-    duration: Duration.format(Duration.fromInputUnsafe(duration)),
-    event: String(event._tag)
-  }
-})
+) => InvokeEffectResult<never, Event> = internal.after
 
 type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
 
@@ -6437,17 +5789,11 @@ type RetagArgs<Target extends Machine.TaggedSchema, Source> = [
  * @category constructors
  * @since 4.0.0
  */
-export const retag = <
-  const Target extends Machine.TaggedSchema,
-  const Source extends { readonly _tag: PropertyKey }
->(
+export const retag: <const Target extends Machine.TaggedSchema, const Source extends { readonly _tag: PropertyKey }>(
   target: Target & RetagTargetCompatibility<Target>,
   source: Source,
   ...args: RetagArgs<Target, Source>
-): Target["Type"] => {
-  const { _tag: _, ...fields } = source
-  return target.make({ ...fields, ...(args[0] ?? {}) } as Target["~type.make.in"])
-}
+) => Target["Type"] = internal.retag
 
 type InvokeMachineInput<Input extends Schema.Top> = Input extends typeof Schema.Void ? {
     readonly input?: never
@@ -6636,35 +5982,7 @@ export const invokeMachine: {
     | StoppedError,
     Machine.EmitOf<Emits>
   >
-} = ((config: {
-  readonly child: ChildMachine.Any
-  readonly input?: unknown
-  readonly snapshot?: (context: Machine.InvokeSnapshotContext<any, any, any>) => unknown
-  readonly onDone?: (context: Machine.InvokeDoneContext<any>) => unknown
-}) => {
-  const machine = config.child.machine
-  // An invoke descriptor fixes both its machine and input. Compile its process
-  // logic once; all mutable execution state belongs to the process instance.
-  const logic = machine.input === undefined
-    ? (internalProcess.toProcessLogic as any)(machine)
-    : (internalProcess.toProcessLogic as any)(machine, config.input)
-  return {
-    id: config.child.id,
-    address: config.child.id,
-    descriptor: config.child,
-    src: () => logic,
-    snapshot: config.snapshot,
-    onDone: config.onDone,
-    [Activities.ActivityMetadataTypeId]: {
-      type: "machine",
-      child: {
-        id: config.child.id,
-        machineId: machine.id ?? null
-      }
-    },
-    [InvokeTypeId]: undefined as any
-  }
-}) as any
+} = internal.invokeMachine
 
 /**
  * Plans the initial state for a machine without executing actor commands.
@@ -6759,7 +6077,7 @@ export const planInitial: <
   ),
   InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   never
-> = internalPlanner.planInitial as any
+> = internal.planInitial
 
 /**
  * Returns every compiled state node in definition order.
@@ -6775,22 +6093,13 @@ export const planInitial: <
  * @category getters
  * @since 4.0.0
  */
-export const stateNodes = <M extends Machine.Any>(
-  machine: M
-): ReadonlyArray<
+export const stateNodes: <M extends Machine.Any>(machine: M) => ReadonlyArray<
   Machine.StateNode<
     Machine.StateIdentifier<Machine.States<M>>,
     Machine.HistoryIdentifier<Machine.States<M>>,
     Machine.ChoiceIdentifier<Machine.States<M>>
   >
-> =>
-  Array.from(machine.stateNodes.byPath.values()) as unknown as ReadonlyArray<
-    Machine.StateNode<
-      Machine.StateIdentifier<Machine.States<M>>,
-      Machine.HistoryIdentifier<Machine.States<M>>,
-      Machine.ChoiceIdentifier<Machine.States<M>>
-    >
-  >
+> = internal.stateNodes
 
 /**
  * Returns every registered transition handler in state definition order.
@@ -6806,22 +6115,13 @@ export const stateNodes = <M extends Machine.Any>(
  * @category getters
  * @since 4.0.0
  */
-export const transitionDefinitions = <M extends Machine.Any>(
-  machine: M
-): ReadonlyArray<
+export const transitionDefinitions: <M extends Machine.Any>(machine: M) => ReadonlyArray<
   Machine.TransitionDefinition<
     Machine.StateNodeIdentifier<Machine.States<M>>,
     Machine.TagOf<Machine.Events<M>[number]>,
     Machine.StateNodeIdentifier<Machine.States<M>>
   >
-> =>
-  Model.transitionDefinitions(machine) as ReadonlyArray<
-    Machine.TransitionDefinition<
-      Machine.StateNodeIdentifier<Machine.States<M>>,
-      Machine.TagOf<Machine.Events<M>[number]>,
-      Machine.StateNodeIdentifier<Machine.States<M>>
-    >
-  >
+> = internal.transitionDefinitions
 
 /**
  * Returns serializable descriptions of every state-owned activity.
@@ -6836,12 +6136,10 @@ export const transitionDefinitions = <M extends Machine.Any>(
  * @category getters
  * @since 4.0.0
  */
-export const activityDefinitions = <M extends Machine.Any>(
+export const activityDefinitions: <M extends Machine.Any>(
   machine: M
-): ReadonlyArray<Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>> =>
-  Activities.activityDefinitions(machine) as ReadonlyArray<
-    Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>
-  >
+) => ReadonlyArray<Machine.ActivityDefinition<Machine.StateIdentifier<Machine.States<M>>>> =
+  internal.activityDefinitions
 
 /**
  * Returns every state node active in a decoded snapshot, in definition order.
@@ -6855,23 +6153,15 @@ export const activityDefinitions = <M extends Machine.Any>(
  * @category getters
  * @since 4.0.0
  */
-export const configuration = <M extends Machine.Any>(
+export const configuration: <M extends Machine.Any>(
   machine: M,
   state: Machine.Snapshot<Machine.States<M>>
-): ReadonlyArray<
+) => ReadonlyArray<
   Machine.ActiveStateNode<
     Machine.StateIdentifier<Machine.States<M>>,
     Machine.ChoiceIdentifier<Machine.States<M>>
   >
-> => {
-  const active = Model.normalizeConfiguration(machine, state).active
-  return stateNodes(machine).filter(
-    (node): node is Machine.ActiveStateNode<
-      Machine.StateIdentifier<Machine.States<M>>,
-      Machine.ChoiceIdentifier<Machine.States<M>>
-    > => node.type !== "history" && node.type !== "choice" && active.has(node.path)
-  )
-}
+> = internal.configuration
 
 /**
  * Returns the event tags handled by the current state snapshot.
@@ -6879,7 +6169,7 @@ export const configuration = <M extends Machine.Any>(
  * @category getters
  * @since 4.0.0
  */
-export const enabled = <
+export const enabled: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema>,
@@ -6910,7 +6200,7 @@ export const enabled = <
     InputEvents
   >,
   state: Machine.Snapshot<States>
-): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine as any, state)
+) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled
 
 /**
  * Plans the next state snapshot synchronously.
@@ -7003,7 +6293,7 @@ export const plan: <
   ),
   E | InfiniteTransitionError | MachineSchemaDecodeError,
   never
-> = internalPlanner.plan as any
+> = internal.plan
 
 /**
  * Creates a one-shot child process from an Effect.
@@ -7047,12 +6337,9 @@ export const plan: <
  * @category constructors
  * @since 4.0.0
  */
-export const effect = <Output, Error = never, Requirements = never>(
+export const effect: <Output, Error = never, Requirements = never>(
   effect: Effect.Effect<Output, Error, Requirements>
-): Logic<void, never, Error, Requirements, Output> => ({
-  initial: () => Effect.void,
-  run: () => effect
-})
+) => Logic<void, never, Error, Requirements, Output> = internal.effect
 
 /**
  * Creates advanced stateful process logic from explicit initialization and
@@ -7082,7 +6369,7 @@ export const effect = <Output, Error = never, Requirements = never>(
  * @category constructors
  * @since 4.0.0
  */
-export const logic = <
+export const logic: <
   State,
   Event = never,
   Output = void,
@@ -7090,26 +6377,16 @@ export const logic = <
   Requirements = never,
   InitialError = never,
   InitialRequirements = never
->(
-  options: {
-    readonly initial:
-      | State
-      | ((
-        scope: Logic.Scope<Event>
-      ) => Effect.Effect<State, InitialError, InitialRequirements>)
-    readonly run: (
-      context: Logic.Context<State, Event>
-    ) => Effect.Effect<Output, Error, Requirements>
-  }
-): Logic<State, Event, Error, Requirements | InitialRequirements, Output, InitialError> => ({
-  initial: (scope) =>
-    typeof options.initial === "function"
-      ? (options.initial as (
-        scope: Logic.Scope<Event>
-      ) => Effect.Effect<State, InitialError, InitialRequirements>)(scope)
-      : Effect.succeed(options.initial),
-  run: options.run
-})
+>(options: {
+  readonly initial:
+    | State
+    | ((
+      scope: Logic.Scope<Event>
+    ) => Effect.Effect<State, InitialError, InitialRequirements>)
+  readonly run: (
+    context: Logic.Context<State, Event>
+  ) => Effect.Effect<Output, Error, Requirements>
+}) => Logic<State, Event, Error, Requirements | InitialRequirements, Output, InitialError> = internal.logic
 
 /**
  * Creates child process logic from an initial state and a transition function.
@@ -7129,18 +6406,10 @@ export const logic = <
  * @category constructors
  * @since 4.0.0
  */
-export const transition = <State, Event, Error = never, Requirements = never>(
+export const transition: <State, Event, Error = never, Requirements = never>(
   initial: State,
   transition: (state: State, event: Event) => Effect.Effect<State, Error, Requirements>
-): Logic<State, Event, Error, Requirements, never> =>
-  logic<State, Event, never, Error, Requirements>({
-    initial,
-    run: ({ receive, updateState }) =>
-      receive.pipe(
-        Effect.flatMap((event) => updateState((state) => transition(state, event))),
-        Effect.forever
-      )
-  })
+) => Logic<State, Event, Error, Requirements, never> = internal.transition
 
 /**
  * Creates a typed descriptor for a complete child machine.
@@ -7151,14 +6420,8 @@ export const transition = <State, Event, Error = never, Requirements = never>(
  * @category constructors
  * @since 4.0.0
  */
-export const child = <const Id extends string, M extends Machine.Any>(
-  id: Id,
-  machine: M
-): ChildMachine<Id, M> => ({
-  [ChildMachineTypeId]: ChildMachineTypeId,
-  id,
-  machine
-})
+export const child: <const Id extends string, M extends Machine.Any>(id: Id, machine: M) => ChildMachine<Id, M> =
+  internal.child
 
 /**
  * Creates a typed parent-local address for lower-level child process logic.
@@ -7169,7 +6432,7 @@ export const child = <const Id extends string, M extends Machine.Any>(
  * @category constructors
  * @since 4.0.0
  */
-export const childAddress = <Event = never>(id: string): ChildAddress<Event> => id as ChildAddress<Event>
+export const childAddress: <Event = never>(id: string) => ChildAddress<Event> = internal.childAddress
 
 /**
  * Spawns a child process owned by the currently running machine.
@@ -7228,14 +6491,7 @@ export const spawn: {
     SpawnError<Options>,
     ChildInitialError
   >
-} = ((
-  logic: Logic<any, any, any, any, any, any>,
-  options?: SpawnOptions
-) =>
-  Effect.flatMap(
-    internalRuntime.MachineRuntime,
-    (runtime) => options === undefined ? runtime.spawn(logic) : (runtime.spawn as any)(logic, options)
-  )) as any
+} = internal.spawn
 
 /**
  * Sends an event to a named child process of the running machine.
@@ -7252,11 +6508,7 @@ export const sendTo: {
     id: Address,
     event: ChildAddress.Event<Address>
   ): Effect.Effect<void, StoppedError, MachineRuntimeRequirement>
-} = ((child: string | ChildMachine.Any, event: unknown) =>
-  Effect.flatMap(
-    internalRuntime.MachineRuntime,
-    (runtime) => runtime.sendTo(child, event)
-  )) as any
+} = internal.sendTo
 
 /**
  * Stops a named child process of the running machine.
@@ -7267,11 +6519,7 @@ export const sendTo: {
 export const stopChild: {
   <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntimeRequirement>
   <Child extends ChildMachine.Any>(child: Child): Effect.Effect<void, never, MachineRuntimeRequirement>
-} = ((child: string | ChildMachine.Any) =>
-  Effect.flatMap(
-    internalRuntime.MachineRuntime,
-    (runtime) => runtime.stopChild(child)
-  )) as any
+} = internal.stopChild
 
 /**
  * Returns a stream of terminal lifecycle outcomes for a running machine.
@@ -7279,9 +6527,9 @@ export const stopChild: {
  * @category combinators
  * @since 4.0.0
  */
-export const watch = <State, Event, Error = never, Output = never>(
+export const watch: <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
-): Stream.Stream<RuntimeOutcome<State, Error, Output>> => internalRuntime.watch(ref)
+) => Stream.Stream<RuntimeOutcome<State, Error, Output>> = internal.watch
 
 /**
  * Starts a machine.
@@ -7366,7 +6614,7 @@ export const start: <
     Machine.EventOf<Events>,
     Machine.EmitOf<Emits>
   >
-> = internalProcess.start as any
+> = internal.start
 
 /**
  * Starts a fresh managed runtime from a decoded logical snapshot.
@@ -7447,4 +6695,4 @@ export const resume: <
     Machine.EventOf<Events>,
     Machine.EmitOf<Emits>
   >
-> = internalProcess.resume as any
+> = internal.resume
