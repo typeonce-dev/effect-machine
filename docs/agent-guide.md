@@ -794,6 +794,27 @@ Keep ordinary TypeScript branching in transition handlers unless a choice is
 part of the statechart topology. Invariants independently verify the resulting
 trace without changing production transition selection.
 
+### Live event causality
+
+Use a probe when a test must establish that one event was processed by a
+running statechart rather than merely accepted by its mailbox:
+
+```ts
+const ref = yield * Machine.start(machine)
+const probe = yield * MachineTest.probe(machine, ref)
+const step = yield * probe.sendAndAwait(event)
+```
+
+Inspect `step.before`, `step.after`, `step.plan`, `step.handled`, and
+`step.configurationChanged`. An ignored event has `handled: false` and an
+empty microstep list, but still completes its acknowledgement. A targetless
+handler has `handled: true` even if its before and after snapshots are equal.
+
+Do not use a probe as a substitute for a domain completion event. The
+acknowledgement covers the submitted event's synchronous macrostep, state
+commit, emissions, and invoke startup; it does not wait for an invoke or timer
+to complete. Application code should continue to use `MachineRef.send`.
+
 ## Common compiler errors
 
 ### `initial` is not callable

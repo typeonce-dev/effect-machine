@@ -52,6 +52,62 @@ export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/
 /** @internal */
 export const sendParentOverride: unique symbol = Symbol.for("effect/Machine/sendParentOverride")
 
+/** @internal */
+export const acknowledgedSend: unique symbol = Symbol.for("effect/Machine/acknowledgedSend")
+
+/** @internal */
+export interface AcknowledgedDelivery<State> {
+  readonly before: State
+  readonly plan: unknown
+  readonly after: State
+}
+
+const AcknowledgedMessageTypeId: unique symbol = Symbol("effect/Machine/AcknowledgedMessage")
+
+/** @internal */
+export interface AcknowledgedMessage<Event> {
+  readonly [AcknowledgedMessageTypeId]: true
+  readonly event: Event
+  readonly deferred: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+}
+
+/** @internal */
+export type ProcessMessage<Event> = Event | AcknowledgedMessage<Event>
+
+/** @internal */
+export const isAcknowledgedMessage = <Event>(
+  message: ProcessMessage<Event>
+): message is AcknowledgedMessage<Event> =>
+  typeof message === "object" && message !== null && AcknowledgedMessageTypeId in message
+
+/** @internal */
+export const messageEvent = <Event>(message: ProcessMessage<Event>): Event =>
+  isAcknowledgedMessage(message) ? message.event : message
+
+const succeedAcknowledgedMessage = <State>(
+  message: ProcessMessage<unknown> | undefined,
+  delivery: AcknowledgedDelivery<State>
+): void => {
+  if (message !== undefined && isAcknowledgedMessage(message)) {
+    Deferred.doneUnsafe(message.deferred, Effect.succeed(delivery as AcknowledgedDelivery<unknown>))
+  }
+}
+
+const failAcknowledgedMessage = (
+  message: ProcessMessage<unknown> | undefined,
+  cause: Cause.Cause<unknown>
+): void => {
+  if (message !== undefined && isAcknowledgedMessage(message)) {
+    Deferred.doneUnsafe(message.deferred, Effect.failCause(cause))
+  }
+}
+
+const stopAcknowledgedMessage = (message: ProcessMessage<unknown> | undefined): void => {
+  if (message !== undefined && isAcknowledgedMessage(message)) {
+    Deferred.doneUnsafe(message.deferred, Effect.fail(new StoppedError()))
+  }
+}
+
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
 type ChildObservationBatch = [ChildObservation, ...Array<ChildObservation>]
 
@@ -237,6 +293,9 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   readonly join: Effect.Effect<Output, Error | StoppedError>
   readonly stop: Effect.Effect<void>
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+  readonly [acknowledgedSend]?: (
+    event: Event
+  ) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
   readonly child: (child: any) => Effect.Effect<Option.Option<any>>
   readonly childChanges: (child: any) => Stream.Stream<Option.Option<any>>
 }
@@ -262,9 +321,13 @@ export interface ProcessScope<Event> {
 export interface ProcessContext<State, Event> extends ProcessScope<Event> {
   readonly receive: Effect.Effect<Event>
   /** @internal */
-  readonly mailbox?: Queue.Dequeue<Event>
-  /** @internal */
   readonly poll?: Effect.Effect<Option.Option<Event>>
+  /** @internal */
+  readonly receiveMessage?: Effect.Effect<ProcessMessage<Event>>
+  /** @internal */
+  readonly pollMessage?: Effect.Effect<Option.Option<ProcessMessage<Event>>>
+  /** @internal */
+  readonly completeMessage?: (delivery: AcknowledgedDelivery<State>) => void
   readonly state: Effect.Effect<State>
   readonly setState: (state: State) => Effect.Effect<void>
   readonly updateState: <E, R>(
@@ -288,7 +351,9 @@ export interface CompiledProcessContext<State, Event> {
   readonly scope: ProcessScope<Event>
   readonly ownedChildren: OwnedChildRuntime
   readonly poll: () => Option.Option<Event>
+  readonly pollMessage: () => Option.Option<ProcessMessage<Event>>
   readonly state: () => State
+  readonly completeMessage: (delivery: AcknowledgedDelivery<State>) => void
   readonly commit: (state: State) => Effect.Effect<void> | undefined
   /**
    * Publishes the current synchronous segment before continuing with work that
@@ -358,18 +423,18 @@ const executionIsChildless = (
 ): boolean => execution?._tag === "Childless" || execution?.childless === true
 
 interface CompactProcessMailbox<Event> {
-  items: Array<Event> | undefined
+  items: Array<ProcessMessage<Event>> | undefined
   index: number
   closed: boolean
 }
 
-const offerCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>, event: Event): void => {
+const offerCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>, event: ProcessMessage<Event>): void => {
   const items = mailbox.items ?? []
   mailbox.items = items
   items.push(event)
 }
 
-const pollCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>): Option.Option<Event> => {
+const pollCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>): Option.Option<ProcessMessage<Event>> => {
   if (mailbox.items === undefined) {
     return Option.none()
   }
@@ -383,6 +448,11 @@ const pollCompactMailbox = <Event>(mailbox: CompactProcessMailbox<Event>): Optio
 }
 
 const closeCompactMailbox = (mailbox: CompactProcessMailbox<unknown>): void => {
+  if (mailbox.items !== undefined) {
+    for (let index = mailbox.index; index < mailbox.items.length; index += 1) {
+      stopAcknowledgedMessage(mailbox.items[index])
+    }
+  }
   mailbox.closed = true
   mailbox.items = undefined
   mailbox.index = 0
@@ -1020,11 +1090,12 @@ const startGenericInternal: <
 
   const sessionId = yield* runtime.nextSessionId
   const id = requestedId ?? sessionId
-  const queue = yield* Queue.unbounded<Event>()
+  const queue = yield* Queue.unbounded<ProcessMessage<Event>>()
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
   let initializing = true
+  let inFlightMessage: ProcessMessage<Event> | undefined
   const requestStop = Deferred.succeed(termination, { _tag: "Stopped" }).pipe(Effect.asVoid)
   const self: ProcessAddress<Event> = {
     id,
@@ -1044,6 +1115,29 @@ const startGenericInternal: <
         Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
       )
   }
+  const sendAcknowledged:
+    | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
+    | undefined = logic.execution?._tag !== "Compiled"
+      ? undefined
+      : (event) =>
+        Effect.uninterruptibleMask((restore) =>
+          Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
+            Effect.flatMap((deferred) =>
+              Queue.offer(queue, {
+                [AcknowledgedMessageTypeId]: true as const,
+                event,
+                deferred
+              }).pipe(
+                Effect.flatMap((accepted) =>
+                  accepted
+                    ? restore(Deferred.await(deferred))
+                    : Effect.fail(new StoppedError())
+                )
+              )
+            ),
+            Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
+          )
+        ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
 
   let {
     changes: childChanges,
@@ -1244,9 +1338,24 @@ const startGenericInternal: <
           Effect.asVoid
         )
     return Effect.uninterruptible(
-      Queue.shutdown(queue).pipe(
+      Effect.sync(() => {
+        while (true) {
+          const pending = Queue.takeUnsafe(queue)
+          if (pending === undefined || Exit.isFailure(pending)) break
+          stopAcknowledgedMessage(pending.value)
+        }
+      }).pipe(
+        Effect.andThen(Queue.shutdown(queue)),
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
+        Effect.andThen(Effect.sync(() => {
+          if (Exit.isFailure(exit)) {
+            failAcknowledgedMessage(inFlightMessage, exit.cause)
+          } else {
+            stopAcknowledgedMessage(inFlightMessage)
+          }
+          inFlightMessage = undefined
+        })),
         Effect.andThen(notifyOutcome),
         Effect.andThen(cleanup),
         Effect.andThen(completeDone)
@@ -1304,11 +1413,39 @@ const startGenericInternal: <
     requestStop.pipe(Effect.andThen(awaitCompletion))
   )
 
+  const acknowledgedContext:
+    | Pick<
+      ProcessContext<State, Event>,
+      "receiveMessage" | "pollMessage" | "completeMessage"
+    >
+    | undefined = logic.execution?._tag !== "Compiled" ? undefined : {
+      receiveMessage: Queue.take(queue).pipe(
+        Effect.tap((message) =>
+          Effect.sync(() => {
+            inFlightMessage = isAcknowledgedMessage(message) ? message : undefined
+          })
+        )
+      ),
+      pollMessage: Queue.poll(queue).pipe(
+        Effect.tap((message) =>
+          Effect.sync(() => {
+            if (Option.isSome(message)) {
+              inFlightMessage = isAcknowledgedMessage(message.value) ? message.value : undefined
+            }
+          })
+        )
+      ),
+      completeMessage: (delivery) => {
+        succeedAcknowledgedMessage(inFlightMessage, delivery)
+        inFlightMessage = undefined
+      }
+    }
   const context: ProcessContext<State, Event> = {
     ...scope,
     ...(logic.execution?._tag === "Compiled" && !logic.execution.childless ? { ownedChildren } : undefined),
-    receive: Queue.take(queue),
-    mailbox: queue,
+    ...acknowledgedContext,
+    receive: Queue.take(queue).pipe(Effect.map(messageEvent)),
+    poll: Queue.poll(queue).pipe(Effect.map(Option.map(messageEvent))),
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     setState: setActiveState,
     updateState: (f) =>
@@ -1370,6 +1507,7 @@ const startGenericInternal: <
     join: Deferred.await(done),
     stop,
     send: self.send,
+    ...(sendAcknowledged === undefined ? undefined : { [acknowledgedSend]: sendAcknowledged }),
     child: getChild,
     childChanges
   }
@@ -1486,7 +1624,12 @@ type CompiledRunState = "Initializing" | "Idle" | "Draining"
 class CompiledProcess implements MachineRef<any, any, any, any> {
   readonly id: string
   readonly sessionId: string
-  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>
+  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>;
+  [acknowledgedSend](
+    event: unknown
+  ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
+    return this.sendAcknowledgedEffect(event)
+  }
 
   private readonly mailbox: CompactProcessMailbox<unknown> = {
     items: undefined,
@@ -1513,6 +1656,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private worker: Fiber.Fiber<any, never> | undefined
   private interruptRequested = false
   private offerRevision = 0
+  private inFlightMessage: ProcessMessage<unknown> | undefined
 
   constructor(
     private readonly logic: ProcessLogic<any, any, any, any, any, any>,
@@ -1522,7 +1666,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   ) {
     this.sessionId = sessionId
     this.id = options.id ?? sessionId
-    this.send = (event) => this.sendEffect(event)
+    this.send = (event) => this.offerMessage(event)
     this.address = {
       id: this.id,
       sessionId,
@@ -1637,7 +1781,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         self.processContext = {
           ...self.processScope,
           receive: Effect.never,
-          poll: Effect.sync(() => pollCompactMailbox(self.mailbox)),
+          poll: Effect.sync(() => Option.map(pollCompactMailbox(self.mailbox), messageEvent)),
+          receiveMessage: Effect.never,
+          pollMessage: Effect.sync(() => self.pollCompiledMessage()),
+          completeMessage: (delivery) => self.completeCompiledMessage(delivery),
           state: Effect.sync(() => self.current.snapshot.state),
           setState: (state: unknown) => self.setActiveState(state),
           updateState: (f) => self.updateState(f)
@@ -1763,13 +1910,31 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     )
   }
 
-  private sendEffect(event: unknown): Effect.Effect<void, StoppedError> {
+  private sendAcknowledgedEffect(
+    event: unknown
+  ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
+    return Effect.uninterruptibleMask((restore) =>
+      Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
+        Effect.flatMap((deferred) =>
+          this.offerMessage({
+            [AcknowledgedMessageTypeId]: true as const,
+            event,
+            deferred
+          }).pipe(
+            Effect.andThen(restore(Deferred.await(deferred)))
+          )
+        )
+      )
+    )
+  }
+
+  private offerMessage(message: ProcessMessage<unknown>): Effect.Effect<void, StoppedError> {
     return Effect.uninterruptible(
       Effect.suspend(() => {
         if (this.mailbox.closed || this.lifecycle !== "Active") {
           return Effect.fail(new StoppedError())
         }
-        offerCompactMailbox(this.mailbox, event)
+        offerCompactMailbox(this.mailbox, message)
         this.offerRevision += 1
         if (this.runState === "Draining") {
           return Effect.void
@@ -1841,6 +2006,8 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       changes: undefined,
       snapshot
     }
+    stopAcknowledgedMessage(this.inFlightMessage)
+    this.inFlightMessage = undefined
     this.interruptRequested = false
     if (this.compiledContext !== undefined) {
       this.compiledContext.executionState = undefined
@@ -1973,9 +2140,19 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           Effect.asVoid
         )
       return Effect.uninterruptible(
-        Effect.sync(() => closeCompactMailbox(this.mailbox)).pipe(
+        Effect.sync(() => {
+          closeCompactMailbox(this.mailbox)
+        }).pipe(
           Effect.andThen(this.childRuntime.close(exit)),
           Effect.andThen(this.setAndPublishSnapshot(snapshot)),
+          Effect.andThen(Effect.sync(() => {
+            if (requested._tag === "Failure") {
+              failAcknowledgedMessage(this.inFlightMessage, requested.cause)
+            } else {
+              stopAcknowledgedMessage(this.inFlightMessage)
+            }
+            this.inFlightMessage = undefined
+          })),
           Effect.andThen(notifyOutcome),
           Effect.andThen(this.options.onStop ?? Effect.void),
           Effect.andThen(Effect.sync(() => {
@@ -2037,8 +2214,17 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return Effect.suspend(() => this.commitActiveState(state) ?? Effect.void)
   }
 
-  pollCompiledEvent(): Option.Option<unknown> {
-    return pollCompactMailbox(this.mailbox)
+  pollCompiledMessage(): Option.Option<ProcessMessage<unknown>> {
+    const message = pollCompactMailbox(this.mailbox)
+    if (Option.isSome(message)) {
+      this.inFlightMessage = isAcknowledgedMessage(message.value) ? message.value : undefined
+    }
+    return message
+  }
+
+  completeCompiledMessage(delivery: AcknowledgedDelivery<unknown>): void {
+    succeedAcknowledgedMessage(this.inFlightMessage, delivery)
+    this.inFlightMessage = undefined
   }
 
   compiledState(): unknown {
@@ -2185,11 +2371,19 @@ class CompiledProcessContextImpl implements CompiledProcessContext<unknown, unkn
   ) {}
 
   poll(): Option.Option<unknown> {
-    return this.process.pollCompiledEvent()
+    return Option.map(this.process.pollCompiledMessage(), messageEvent)
+  }
+
+  pollMessage(): Option.Option<ProcessMessage<unknown>> {
+    return this.process.pollCompiledMessage()
   }
 
   state(): unknown {
     return this.process.compiledState()
+  }
+
+  completeMessage(delivery: AcknowledgedDelivery<unknown>): void {
+    this.process.completeCompiledMessage(delivery)
   }
 
   commit(state: unknown): Effect.Effect<void> | undefined {

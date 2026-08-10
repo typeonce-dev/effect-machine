@@ -321,6 +321,106 @@ export interface Trace<M extends AnyMachine> {
 }
 
 /**
+ * One runtime microstep retained by the execution strategy used by a probe.
+ *
+ * Transition-definition metadata is intentionally not reconstructed here:
+ * optimized runtimes retain execution evidence, while `run` and `plan` remain
+ * the APIs for complete diagnostic transition metadata.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export type ProbeMicrostep<M extends AnyMachine> = Omit<Microstep<M>, "transitions">
+
+/**
+ * Runtime plan evidence associated with one acknowledged public event.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export type ProbePlan<M extends AnyMachine> =
+  & {
+    readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+    readonly commands: ReadonlyArray<Machine.Command>
+    readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+    readonly microsteps: ReadonlyArray<ProbeMicrostep<M>>
+  }
+  & PlanCompletion<M>
+
+/**
+ * Causal evidence produced after one event has completed its managed runtime
+ * macrostep.
+ *
+ * `handled` distinguishes an ignored event from a retained transition that
+ * deliberately leaves the logical state unchanged. `configurationChanged`
+ * reports whether any microstep changed or reentered the active statechart
+ * configuration; compare `before` and `after` for state-value assertions.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export interface ProbeStep<M extends AnyMachine> {
+  readonly event: Machine.Machine.InputEvent<M>
+  readonly before: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly plan: ProbePlan<M>
+  readonly after: Machine.Machine.Snapshot<Machine.Machine.States<M>>
+  readonly handled: boolean
+  readonly configurationChanged: boolean
+}
+
+/**
+ * Testing-only causal access to a managed statechart reference.
+ *
+ * A probe does not change ordinary machine scheduling. `sendAndAwait` uses an
+ * acknowledged mailbox delivery so an ignored event can be proven processed
+ * without waiting for a snapshot that will never be published.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export interface Probe<M extends AnyMachine, Error = never, Output = never> {
+  readonly machine: M
+  readonly ref: Machine.MachineRef<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    Machine.Machine.InputEvent<M>,
+    Error,
+    Output
+  >
+  readonly sendAndAwait: (
+    event: Machine.Machine.InputEvent<M>
+  ) => Effect.Effect<ProbeStep<M>, Error | Machine.StoppedError>
+}
+
+/**
+ * Raised when `probe` receives a reference that is not backed by the managed
+ * statechart runtime.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export { ProbeUnavailableError } from "../internal/testing/machine/verification.js"
+
+/**
+ * Attaches testing-only causal event delivery to a running statechart.
+ *
+ * The returned probe exposes `sendAndAwait`; ordinary production sends remain
+ * available exclusively through `MachineRef.send` and retain their
+ * asynchronous enqueue-only semantics.
+ *
+ * @category runtime testing
+ * @since 4.0.0
+ */
+export const probe: <M extends AnyMachine, Error, Output>(
+  machine: ReadyMachine<M>,
+  ref: Machine.MachineRef<
+    Machine.Machine.Snapshot<Machine.Machine.States<M>>,
+    Machine.Machine.InputEvent<M>,
+    Error,
+    Output
+  >
+) => Effect.Effect<Probe<M, Error, Output>, internal.ProbeUnavailableError> = internal.probe
+
+/**
  * The result of evaluating one semantic invariant.
  *
  * `true` passes, `false` produces a default failure message, and a string

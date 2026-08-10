@@ -109,6 +109,8 @@ export { assertInvariants, checkInvariants, Invariant, InvariantError, invariant
 
 export { assertReachable, assertUnreachable, explore, findShortest, ReachabilityError } from "./exploration.js"
 
+export { probe, ProbeUnavailableError } from "./probe.js"
+
 export { run }
 
 export const interpretModel = ReferenceModel.interpretModel

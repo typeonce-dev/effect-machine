@@ -748,6 +748,32 @@ result; otherwise it fails as inconclusive. Cycles are retained as graph edges,
 but exploration does not enumerate every cyclic path. Invariants are checked
 on startup and on each planned edge extending a node's shortest trace.
 
+## Causal runtime probes
+
+Pure traces do not execute invokes or the managed runtime. When a test needs to
+prove that one live event has actually left the mailbox, attach a testing-only
+probe to a statechart reference:
+
+```ts
+const ref = yield * Machine.start(machine)
+const probe = yield * MachineTest.probe(machine, ref)
+
+const step = yield * probe.sendAndAwait(new CancelRequested({}))
+
+assert.strictEqual(step.handled, false)
+assert.deepStrictEqual(step.before, step.after)
+```
+
+`sendAndAwait` completes after that event's synchronous macrostep and managed
+commit work. It also completes for ignored events, which publish no snapshot
+and therefore cannot be synchronized by waiting for `ref.changes`.
+
+The step retains the exact runtime plan, before/after logical snapshots, and
+whether the event was handled or changed/reentered the active configuration.
+It does not wait for timers or invoked processes to finish. Production code
+continues to use enqueue-only `ref.send`; probes are exported only from the
+separate testing entry point.
+
 ## Current limits
 
 Declarative first-class guards are not part of the current API. Ordinary
