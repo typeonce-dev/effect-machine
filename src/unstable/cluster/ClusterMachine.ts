@@ -7,24 +7,12 @@ import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import type {
-  ClusterError,
-  ClusterSchema,
-  Entity,
-  EntityAddress,
-  MessageStorage,
-  Sharding,
-  Snowflake
-} from "effect/unstable/cluster"
+import type { Entity, MessageStorage, Sharding, Snowflake } from "effect/unstable/cluster"
 import type { Rpc } from "effect/unstable/rpc"
 import * as internal from "../../internal/machine/cluster.js"
 import { Accepted, Rejected, Storage } from "../../internal/machine/cluster.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type * as Machine from "../../Machine.js"
-
-type EntityAddress = EntityAddress.EntityAddress
-
-type PersistenceError = ClusterError.PersistenceError
 
 type Snowflake = Snowflake.Snowflake
 

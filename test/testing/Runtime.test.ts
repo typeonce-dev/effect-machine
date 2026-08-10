@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Clock, Effect, Exit, Option, Ref, Schema, Stream } from "effect"
+import { Cause, Clock, Effect, Exit, Option, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"

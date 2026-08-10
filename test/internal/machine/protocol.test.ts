@@ -5,8 +5,6 @@ import { decodeEvent } from "../../../src/internal/machine/protocol.js"
 
 class ProtocolIdle extends Schema.TaggedClass<ProtocolIdle>("ProtocolIdle")("ProtocolIdle", {}) {}
 
-class ProtocolDone extends Schema.TaggedClass<ProtocolDone>("ProtocolDone")("ProtocolDone", {}) {}
-
 const PublicEvent = Schema.TaggedStruct("PublicEvent", { value: Schema.String })
 const InternalEvent = Schema.TaggedStruct("InternalEvent", { value: Schema.String })
 

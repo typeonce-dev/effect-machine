@@ -1170,7 +1170,7 @@ describe("MachineTest finite-model reference interpreter", () => {
 
       const reference = MachineTest.interpretModel(model, ["Noop", "Reenter", "Switch"])
       assert.deepStrictEqual(reference.steps[0]?.microsteps[0], {
-        next: reference.steps[0]?.before,
+        next: reference.steps[0]!.before,
         event: "Noop",
         transitions: [{
           source: "left.branch.leaf",

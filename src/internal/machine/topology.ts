@@ -222,7 +222,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
         throw new Error(`Machine state keys cannot contain ".": "${key}"`)
       }
       const path = parent === undefined ? key : `${parent}.${key}`
-      const definition = getStateNodeDefinition(path, tree[key])
+      const definition = getStateNodeDefinition(path, tree[key]!)
       let node: Machine.StateNode
       let childStates: Machine.StateTree | undefined
       const base = { path, key, annotations: definition.annotations, order }

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Context, Data, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 

@@ -42,7 +42,7 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { getNode, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import { isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean

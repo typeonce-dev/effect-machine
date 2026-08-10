@@ -1357,6 +1357,12 @@ const selectHistoryTarget = (builder: Record<string, any>, path: string): unknow
   return current[parts[parts.length - 1]!]()
 }
 
+type TargetBuilder = {
+  readonly branch: Record<string, any>
+  readonly full: Record<string, any>
+  readonly history: Record<string, any>
+}
+
 const makeHandlers = (
   states: ReadonlyArray<FiniteState>,
   parent: string | undefined,
@@ -1371,7 +1377,7 @@ const makeHandlers = (
       handlers[node.key] = {
         choice: {
           targets: node.targets,
-          transition: ({ target }: { readonly target: Record<string, Record<string, any>> }) => {
+          transition: ({ target }: { readonly target: TargetBuilder }) => {
             const selected = byPath.get(node.selected)!
             const parts = selected.path.split(".")
             const builder = selected.root === byPath.get(path)!.root ? target.branch : target.full
@@ -1402,7 +1408,7 @@ const makeHandlers = (
                 : runtimeTargetPath(byPath, path, transition.target)
             ]
           }),
-        transition: ({ target }: { readonly target: Record<string, Record<string, any>> }) => {
+        transition: ({ target }: { readonly target: TargetBuilder }) => {
           if (transition.target === undefined) return undefined
           const targetState = byPath.get(transition.target)!
           if (targetState.node._tag === "History") return selectHistoryTarget(target.history, targetState.path)

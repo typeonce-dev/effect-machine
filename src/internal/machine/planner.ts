@@ -6,9 +6,8 @@
 
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
-import type { Command, Enqueue, InitialEvent as MachineInitialEvent, Machine, Runtime } from "../../Machine.js"
+import type { Enqueue, InitialEvent as MachineInitialEvent, Machine } from "../../Machine.js"
 import { getTargetBuilder, makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -33,7 +32,6 @@ import {
   normalizeConfiguration,
   normalizeConfigurationEffect,
   normalizeConfigurationSync,
-  normalizeTargetConfigurationEffect,
   normalizeTargetConfigurationSync,
   pathDepth,
   snapshotFromConfiguration,
@@ -41,16 +39,7 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
-import {
-  decodeEmit,
-  decodeEmitSync,
-  decodeEvent,
-  decodeEventSync,
-  decodeInput,
-  decodeInputSync,
-  decodeStateValue,
-  decodeStateValueSync
-} from "./protocol.js"
+import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
 import {
   getNode,
@@ -1268,16 +1257,6 @@ const collectEvaluatedTransition = <
 export const MaxMacrostepIterations = 1000
 export const InitialEvent: MachineInitialEvent = { _tag: InitialEventTypeId }
 
-const catchStartup = <A, E, R>(
-  effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, E | StartupError, R> =>
-  Effect.catchCause(effect, (cause): Effect.Effect<never, E | StartupError> => {
-    if (Cause.hasDies(cause)) {
-      return Effect.fail(new StartupError({ cause }))
-    }
-    return Effect.failCause(cause)
-  })
-
 export const isFinalState = (
   machine: Machine.Any,
   state: Machine.Snapshot<any>
@@ -1709,7 +1688,7 @@ const settle = <
     pendingCompletions.push(
       ...completed.completions.filter((completion) => machine.handlers[completion.path]?.onDone !== undefined)
     )
-    while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0].path)) {
+    while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0]!.path)) {
       pendingCompletions.shift()
     }
     const done = selectDoneTransitions<States, Events, Emits, E, R>(

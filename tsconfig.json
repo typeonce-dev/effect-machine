@@ -4,6 +4,8 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
     "skipLibCheck": true,
     "noEmit": true,
     "types": ["node", "vitest/globals"],

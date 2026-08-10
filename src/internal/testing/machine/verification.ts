@@ -12,34 +12,24 @@ import * as SchemaAST from "effect/SchemaAST"
 import { FastCheck } from "effect/testing"
 import * as Machine from "../../../Machine.js"
 import type {
-  CompletionCoverageEvidence,
   Coverage,
   CoverageSummary,
-  EventCoverage,
   EventCoverageItem,
   EventPlan,
-  HistoryCoverageEvidence,
   InitialPlan,
   InitialTrace,
-  LogicalConfigurationCoverage,
   Microstep,
-  MicrostepCoverageEvidence,
   ObservedGraph,
   ObservedGraphEdge,
-  ObservedGraphMicrostep,
   ObservedGraphNode,
-  ObservedGraphNodeObservations,
   PlanCompletion,
   RunError,
   RunFailure,
   RunServices,
   Scenario,
-  ScenarioCoverage,
-  ScenarioDiagnostics,
   ScenarioOptions,
   Scenarios,
   SchemaArbitraryDiagnostic,
-  StateCoverage,
   StateCoverageItem,
   Trace,
   TraceStep,
@@ -50,7 +40,7 @@ import type {
   VerifyOptions
 } from "../../../testing/MachineTest.js"
 import type { EnsureExecutable } from "../../machine/readiness.js"
-import { type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
+import { toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
 
@@ -128,16 +118,6 @@ type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>["Type"]
 type StatePath<M extends AnyMachine> = Machine.Machine.StateIdentifier<Machine.Machine.States<M>>
 
 type StateNodePath<M extends AnyMachine> = Machine.Machine.StateNodeIdentifier<Machine.Machine.States<M>>
-
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Machine.Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 type ReadyMachine<M extends AnyMachine> =
   & M
@@ -1443,7 +1423,7 @@ export const verify = <M extends AnyMachine>(
               path
             )
           } else if (recurse) {
-            validateRememberedControl(activeChildren[0], true)
+            validateRememberedControl(activeChildren[0]!, true)
           }
         } else if (node.type === "parallel") {
           for (const child of node.children) {
@@ -1812,7 +1792,7 @@ export const verify = <M extends AnyMachine>(
   let current = starting
   for (let index = 0; index < trace.initial.plan.microsteps.length; index++) {
     const location: VerificationLocation = { eventIndex: undefined, microstepIndex: index }
-    const microstep = trace.initial.plan.microsteps[index]
+    const microstep = trace.initial.plan.microsteps[index]!
     const next = inspectSnapshot(microstep.next, location, `initial microstep ${index} next state`)
     validateSnapshotMetadata(next, location, `initial microstep ${index} next state`)
     validateMicrostep(microstep, current, next, location)
@@ -1842,7 +1822,7 @@ export const verify = <M extends AnyMachine>(
 
   let previous = initialState
   for (let eventIndex = 0; eventIndex < trace.steps.length; eventIndex++) {
-    const step = trace.steps[eventIndex]
+    const step = trace.steps[eventIndex]!
     const location: VerificationLocation = { eventIndex }
     const before = inspectSnapshot(step.before, location, `event ${eventIndex} before state`)
     validateSnapshotMetadata(before, location, `event ${eventIndex} before state`, true)
@@ -1867,7 +1847,7 @@ export const verify = <M extends AnyMachine>(
     current = before
     for (let microstepIndex = 0; microstepIndex < step.plan.microsteps.length; microstepIndex++) {
       const microstepLocation: VerificationLocation = { eventIndex, microstepIndex }
-      const microstep = step.plan.microsteps[microstepIndex]
+      const microstep = step.plan.microsteps[microstepIndex]!
       const next = inspectSnapshot(
         microstep.next,
         microstepLocation,

@@ -13,7 +13,6 @@ import {
   type ActiveConfiguration,
   compareDocumentOrder,
   configurationFromSnapshot,
-  configurationFromSnapshotEffect,
   getActiveChildPath,
   getActiveValue,
   getPathToRoot,
@@ -25,7 +24,7 @@ import {
   validateHistoryRecordControl
 } from "./configuration.js"
 import { MachineSchemaDecodeError, MachineSchemaEncodeError } from "./errors.js"
-import { decodeBoundary, decodeOutputValue, getEventName } from "./protocol.js"
+import { decodeBoundary } from "./protocol.js"
 import { getNode, getStateNodeSchema } from "./topology.js"
 
 const EncodedSnapshotSchema = Schema.Struct({

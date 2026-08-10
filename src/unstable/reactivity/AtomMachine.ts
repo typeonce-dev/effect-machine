@@ -4,11 +4,9 @@
  * @since 4.0.0
  */
 
-import type * as Effect from "effect/Effect"
 import type * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import type * as Stream from "effect/Stream"
 import type { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"

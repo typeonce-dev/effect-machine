@@ -13,7 +13,7 @@ import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
 import type * as Machine from "../../Machine.js"
-import type { Bound, ChildMachineAtom, ChildOf, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
+import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
 import type { EnsureExecutable } from "./readiness.js"
 import * as Topology from "./topology.js"
@@ -137,10 +137,6 @@ const resumeMachineAtomEffect = (
 type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any> ? State : never
 type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any> ? Error : never
 type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output> ? Output : never
-
-type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, infer StartError> ? StartError
-  : Bridge extends ChildMachineAtom<any, infer StartError> ? StartError
-  : never
 
 const makeRuntimeResultAtom = <State, Error, Output, StartError>(
   snapshot: Atom.Atom<AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>>
@@ -517,47 +513,11 @@ export const matchesChild = <
     Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
   ).pipe(Atom.withEquality(Equal.equals))
 
-const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
-
-type MachineRequirementsOf<M extends Machine.Machine.Any> = MachineRequirements<
-  Machine.Machine.InitialServices<M>,
-  Machine.Machine.Services<M>,
-  Machine.Machine.Event<M>,
-  Machine.Machine.Emit<M>
->
-
-type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
-  ExternalRequirements<MachineRequirementsOf<M>>,
-  Services
->
-
-type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> = IsAny<MachineRequirementsOf<M>> extends true ? {
-    readonly [BoundRequirementsTypeId]: MachineRequirementsOf<M>
-  }
-  : [MissingBoundRequirements<Services, M>] extends [never] ? unknown
-  : {
-    readonly [BoundRequirementsTypeId]: MissingBoundRequirements<Services, M>
-  }
-
 type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
   Machine.Machine.Services<M>,
   Machine.Machine.Event<M>,
   Machine.Machine.Emit<M>
 >
-
-type MissingBoundResumeRequirements<Services, M extends Machine.Machine.Any> = Exclude<
-  ExternalRequirements<MachineResumeRequirementsOf<M>>,
-  Services
->
-
-type EnsureBoundResumeRequirements<Services, M extends Machine.Machine.Any> =
-  IsAny<MachineResumeRequirementsOf<M>> extends true ? {
-      readonly [BoundRequirementsTypeId]: MachineResumeRequirementsOf<M>
-    }
-    : [MissingBoundResumeRequirements<Services, M>] extends [never] ? unknown
-    : {
-      readonly [BoundRequirementsTypeId]: MissingBoundResumeRequirements<Services, M>
-    }
 
 type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ? {
     readonly "~effect/reactivity/AtomMachine/ConcreteMachineRequired": M
@@ -567,24 +527,6 @@ type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Mach
     Machine.Machine.UnhandledStates<M>,
     Machine.Machine.OutputStates<M>
   >
-
-type MachineInputArgsOf<M extends Machine.Machine.Any> = [
-  ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
-]
-
-type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
-  Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-  Machine.Machine.InputEvent<M>,
-  MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
-  Machine.Machine.Output<M>,
-  MachineStartError<
-    Machine.Machine.InitialError<M>,
-    Machine.Machine.Error<M>,
-    Machine.Machine.InitialServices<M>,
-    Machine.Machine.Services<M>,
-    RuntimeError
-  >
->
 
 type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.Snapshot<Machine.Machine.States<M>>,
