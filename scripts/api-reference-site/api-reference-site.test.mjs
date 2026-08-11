@@ -4,7 +4,13 @@ import {
   highlightCode,
   moduleRoute,
   normalizeBasePath,
+  normalizeOrigin,
+  renderIndexPage,
+  renderLayout,
   renderMarkdown,
+  renderRobots,
+  renderSitemap,
+  siteManifest,
   uniqueDeclarationIds
 } from "./generate.mjs"
 
@@ -54,4 +60,60 @@ test("normalizes root, project, and custom-domain base paths", () => {
   assert.equal(normalizeBasePath("/effect-machine/"), "/effect-machine/")
   assert.throws(() => normalizeBasePath("effect-machine"), /start with a slash/)
   assert.throws(() => normalizeBasePath("/../effect-machine"), /Invalid/)
+})
+
+const site = {
+  basePath: "/docs/",
+  description: "Schema-first state machines",
+  modules: [{
+    api: { declarationCount: 12, description: "State machine APIs" },
+    export: "./Machine",
+    label: "Machine",
+    route: "Machine"
+  }],
+  navigation: [],
+  origin: "https://docs.example.com",
+  package: {
+    name: "@typeonce/effect-machine",
+    description: "Schema-first state machines",
+    sourceUrl: "https://github.com/typeonce-dev/effect-machine",
+    version: "0.4.0"
+  },
+  socialImage: "social-card.png",
+  themeColor: { light: "#fbfbfd", dark: "#111115" },
+  title: "Effect Machine"
+}
+
+test("renders canonical and social metadata without exposing the internal channel", () => {
+  const html = renderLayout(site, {
+    content: '<section class="reference-hero"><div class="eyebrow">API reference</div></section>',
+    currentRoute: "Machine",
+    pageKind: "module",
+    title: "Machine · Effect Machine"
+  })
+  assert.match(html, /rel="canonical" href="https:\/\/docs\.example\.com\/docs\/Machine\/"/)
+  assert.match(html, /property="og:image" content="https:\/\/docs\.example\.com\/docs\/social-card\.png"/)
+  assert.match(html, /name="twitter:card" content="summary_large_image"/)
+  assert.match(html, /rel="manifest" href="\/docs\/site\.webmanifest"/)
+  assert.doesNotMatch(html, /v4 API reference/)
+})
+
+test("keeps the internal Effect channel out of the homepage label", () => {
+  const html = renderIndexPage({ ...site, channel: "v4" })
+  assert.match(html, /<div class="eyebrow">API reference<\/div>/)
+  assert.doesNotMatch(html, /v4 API reference/)
+})
+
+test("generates manifest, robots, and sitemap URLs from the deployment base", () => {
+  const manifest = siteManifest(site)
+  assert.equal(manifest.start_url, "/docs/")
+  assert.equal(manifest.icons[2].purpose, "maskable")
+  assert.match(renderRobots(site), /Sitemap: https:\/\/docs\.example\.com\/docs\/sitemap\.xml/)
+  assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/Machine\/<\/loc>/)
+})
+
+test("accepts only pathless HTTPS production origins", () => {
+  assert.equal(normalizeOrigin("https://docs.example.com"), "https://docs.example.com")
+  assert.throws(() => normalizeOrigin("http://docs.example.com"), /HTTPS origin/)
+  assert.throws(() => normalizeOrigin("https://docs.example.com/api"), /without a path/)
 })
