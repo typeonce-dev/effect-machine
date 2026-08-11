@@ -1,5 +1,11 @@
 # @typeonce/effect-machine
 
+## 0.5.1
+
+### Patch Changes
+
+- a23463c: Complete the interactive examples, align example state construction with the recommended API, and restructure the README around the current usage patterns.
+
 ## 0.5.0
 
 ### Minor Changes
