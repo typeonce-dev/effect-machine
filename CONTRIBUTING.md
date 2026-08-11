@@ -55,3 +55,26 @@ understands imports, re-exports, and dynamic imports, and enforces:
 
 The checker has executable fixture tests and runs as part of `pnpm check`. Add
 new rules only with a failing fixture that demonstrates the boundary.
+
+## API reference data
+
+`pnpm docs:api` generates an Effect-compatible TypeDoc dataset under
+`.data/api-reference/v4`. The dataset contains a top-level manifest, a package
+manifest, and one checksummed reflection JSON file per module configured in
+`api-reference.config.json`. Generated data is not committed.
+
+`pnpm docs:api:check` runs the API reference unit tests, generates the complete
+dataset in a temporary directory, validates its manifests and checksums, and
+ensures every reflection can be consumed by the site-facing normalizer. It runs
+as part of `pnpm check`.
+
+`pnpm docs:site` turns that dataset into a multi-page static website under
+`.data/api-reference-site/v4` and creates its Pagefind search index. Run
+`pnpm docs:site:serve` to preview the latest generated site locally. Site output
+is also generated data and is not committed.
+
+The release workflow calls the GitHub Pages workflow after Changesets publishes
+a package. The Pages workflow can also be run manually to deploy the current
+commit before a release without invoking the package-release job. Pages supplies
+`API_REFERENCE_BASE_PATH` during the build so project URLs and custom domains
+use the same generated site without configuration edits.

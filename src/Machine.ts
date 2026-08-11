@@ -1,7 +1,7 @@
 /**
  * Schema-first machine definitions.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import type * as Cause from "effect/Cause"
@@ -35,7 +35,7 @@ import type * as Topology from "./internal/machine/topology.js"
  * values.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type TypeId = "~effect/Machine"
 
@@ -43,7 +43,7 @@ export type TypeId = "~effect/Machine"
  * Runtime type identifier attached to `Machine` values.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const TypeId: TypeId = "~effect/Machine"
 
@@ -55,7 +55,7 @@ declare const MachineTypeId: unique symbol
  * actions.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { InitialEventTypeId }
 
@@ -64,7 +64,7 @@ export { InitialEventTypeId }
  * that run while the machine is settling its initial state.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InitialEvent {
   readonly _tag: typeof InitialEventTypeId
@@ -74,7 +74,7 @@ export interface InitialEvent {
  * Synthetic event value used while the machine settles its initial state.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const InitialEvent: InitialEvent = { _tag: InitialEventTypeId }
 
@@ -82,7 +82,7 @@ export const InitialEvent: InitialEvent = { _tag: InitialEventTypeId }
  * Returns `true` if a value is the synthetic machine initial event.
  *
  * @category guards
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const isInitialEvent = (u: unknown): u is InitialEvent => hasProperty(u, "_tag") && u._tag === InitialEventTypeId
 
@@ -106,7 +106,7 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  * flow. Use `after` for cancellable state-scoped delayed events.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Machine<
   States extends Machine.StateSchemas,
@@ -146,42 +146,42 @@ export interface Machine<
   /**
    * State tree that defines the machine topology and state value schemas.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly states: States
 
   /**
    * Events accepted through public machine input boundaries.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly events: InputEvents
 
   /**
    * Events reserved for invokes, child emissions, and other machine-local work.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly internalEvents: ReadonlyArray<Machine.TaggedSchema>
 
   /**
    * Events that the machine may emit to its parent or external adapter.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly emits: Emits
 
   /**
    * Optional schema used to decode the machine input before initialization.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly input: Input | undefined
 
   /**
    * Optional stable identity used by runtime and persistence integrations.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly id: string | undefined
 
@@ -204,7 +204,7 @@ export interface Machine<
    * later mutation of the objects supplied to this call cannot alter the
    * resulting machine.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly handle: Machine.Handler<
     States,
@@ -232,7 +232,7 @@ export {
    * exists for the current machine.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   ChildAlreadyExistsError,
   /**
@@ -240,7 +240,7 @@ export {
    * number of macrostep iterations.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   InfiniteTransitionError,
   /**
@@ -248,7 +248,7 @@ export {
    * structural configuration declared for a machine boundary.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   MachineSchemaDecodeError,
   /**
@@ -256,7 +256,7 @@ export {
    * its declared state or output schemas.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   MachineSchemaEncodeError,
   /**
@@ -264,7 +264,7 @@ export {
    * requires a managed machine process.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   ProcessLocalError,
   /**
@@ -272,7 +272,7 @@ export {
    * logic after the initial state has been computed.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   StartupError,
   /**
@@ -280,7 +280,7 @@ export {
    * producing an output.
    *
    * @category errors
-   * @since 4.0.0
+   * @since 0.4.0
    */
   StoppedError
 } from "./internal/machine/machine.js"
@@ -294,7 +294,7 @@ type MachineRuntimeRequirement = internalRuntime.MachineRuntime
  * the Effect that plans a machine step.
  *
  * @category services
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ActionRequirement<Error, Requirements> {
   readonly [ActionRequirementTypeId]: {
@@ -307,7 +307,7 @@ export interface ActionRequirement<Error, Requirements> {
  * Extracts the typed error channel of staged machine actions.
  *
  * @category utility types
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ActionError<Requirements> = Requirements extends ActionRequirement<infer Error, any> ? Error : never
 
@@ -315,7 +315,7 @@ export type ActionError<Requirements> = Requirements extends ActionRequirement<i
  * Extracts the service requirements of staged machine actions.
  *
  * @category utility types
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ActionServices<Requirements> = Requirements extends ActionRequirement<any, infer Services> ? Services
   : never
@@ -324,7 +324,7 @@ export type ActionServices<Requirements> = Requirements extends ActionRequiremen
  * Removes staged action requirements from machine planning services.
  *
  * @category utility types
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type PlanningServices<Requirements> = Exclude<Requirements, ActionRequirement<any, any>>
 
@@ -332,7 +332,7 @@ export type PlanningServices<Requirements> = Exclude<Requirements, ActionRequire
  * Resolves all services needed to execute a machine at runtime.
  *
  * @category utility types
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExecutionServices<Requirements> =
   | Exclude<PlanningServices<Requirements>, MachineRuntimeRequirement>
@@ -342,20 +342,20 @@ export type ExecutionServices<Requirements> =
  * Managed runtime capability used to deliver raised and emitted events.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Runtime<in Events, in Emits> {
   /**
    * Queues an event for the current machine macrostep.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly raise: (event: Events) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 
   /**
    * Emits an event through the running machine's parent boundary.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly sendParent: (event: Emits) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 }
@@ -366,7 +366,7 @@ export interface Runtime<in Events, in Emits> {
  * executes an Effect.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Enqueue<in Events, in Emits> {
   /** Raises an event inside the current macrostep. */
@@ -388,7 +388,12 @@ export interface Enqueue<in Events, in Emits> {
   }
 }
 
-/** A closed actor command recorded by a synchronous machine transition. */
+/**
+ * A closed actor command recorded by a synchronous machine transition.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type Command =
   | {
     readonly _tag: "SendTo"
@@ -403,14 +408,15 @@ export type Command =
 /**
  * Namespace containing type-level members associated with `Runtime`.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace Runtime {
   /**
    * Protocol annotation for managed event delivery.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Protocol {
     readonly events?: unknown
@@ -421,7 +427,7 @@ export declare namespace Runtime {
    * Extracts the events required by a runtime protocol annotation.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Events<Protocol> = Protocol extends { readonly events: infer Events } ? Events : never
 
@@ -429,7 +435,7 @@ export declare namespace Runtime {
    * Extracts the emitted events required by a runtime protocol annotation.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Emits<Protocol> = Protocol extends { readonly emits: infer Emits } ? Emits : never
 
@@ -437,7 +443,7 @@ export declare namespace Runtime {
    * Opaque service requirement for a machine runtime capability.
    *
    * @category services
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Requirement<Events, Emits> {
     readonly [RuntimeRequirementTypeId]: {
@@ -707,7 +713,7 @@ type FromMethod<Arguments extends ReadonlyArray<unknown>, Result> = {
    * machine plans the resulting configuration. The input may be omitted when
    * the schema accepts an empty constructor object.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly from: FromCallable<Arguments, Machine.StateConstruction<Result>>
 }
@@ -1305,7 +1311,7 @@ type LocalTargetBuilderForScope<
        * Updates the value of the state containing the local group and moves to
        * one of the states inside it. Values in other active branches are kept.
        *
-       * @since 4.0.0
+       * @since 0.4.0
        */
       readonly with:
         & (<Result extends ConstructionResult<LocalTargetResultWithPrefix<States, Children, Scope>>>(
@@ -1538,7 +1544,7 @@ type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialE
  * with output or fail while processing an event.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeSnapshot<State, Error = never, Output = never> =
   | {
@@ -1564,7 +1570,7 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
  * Represents a classified terminal outcome derived from a runtime snapshot.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeOutcome<State, Error = never, Output = never> =
   | {
@@ -1611,7 +1617,7 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
  * `StoppedError`.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface MachineRef<out State, in Event, out Error = never, out Output = never> {
   /** Stable machine definition id, or a generated fallback when none was declared. */
@@ -1641,7 +1647,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /**
    * Returns the current directly owned child for a typed descriptor.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly child: <Child extends ChildMachine.Any>(
     child: Child
@@ -1650,7 +1656,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /**
    * Streams activation, replacement, and removal of a directly owned child.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly childChanges: <Child extends ChildMachine.Any>(
     child: Child
@@ -1661,7 +1667,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
  * Machine-specific process logic used by `spawn` and `invoke`.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Logic<
   State,
@@ -1681,14 +1687,15 @@ export interface Logic<
 /**
  * Public types used by advanced machine process logic.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace Logic {
   /**
    * Machine-local endpoint that can receive events and be stopped.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Address<in Event> {
     /** Parent-local address id. */
@@ -1708,7 +1715,7 @@ export declare namespace Logic {
    * Starts child process logic owned by the current machine process.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Spawn {
     <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
@@ -1746,7 +1753,7 @@ export declare namespace Logic {
    * invoke snapshot mapper when either can represent the communication.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Scope<Event> {
     /** Address of the process being initialized. */
@@ -1775,7 +1782,7 @@ export declare namespace Logic {
    * Machine-local capabilities available while stateful process logic runs.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Context<State, Event> extends Scope<Event> {
     /** Waits for the next event delivered to this process. */
@@ -1809,7 +1816,7 @@ type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
  * event, error, and output types are inferred without separate annotations.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ChildMachine<Id extends string, M extends Machine.Any> {
   readonly [ChildMachineTypeId]: typeof ChildMachineTypeId
@@ -1824,14 +1831,15 @@ export interface ChildMachine<Id extends string, M extends Machine.Any> {
 /**
  * Namespace containing type-level members associated with `ChildMachine`.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace ChildMachine {
   /**
    * Any typed child machine descriptor.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Any = ChildMachine<string, Machine.Any>
 
@@ -1839,7 +1847,7 @@ export declare namespace ChildMachine {
    * Running machine reference selected by a child descriptor.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Ref<Child> = Child extends ChildMachine<string, infer M> ? MachineRef<
       Machine.Snapshot<Machine.States<M>>,
@@ -1857,7 +1865,7 @@ export declare namespace ChildMachine {
    * Event accepted by the child selected by a descriptor.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Event<Child> = Ref<Child> extends MachineRef<any, infer Event, any, any> ? Event : never
 }
@@ -1866,21 +1874,22 @@ export declare namespace ChildMachine {
  * Parent-local address for a child process that can receive events.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ChildAddress<Event> = string & ChildAddress.Variance<Event>
 
 /**
  * Namespace containing type-level members associated with `ChildAddress`.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace ChildAddress {
   /**
    * Variance marker carried by a typed child process address.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Variance<in Event> {
     readonly [ChildAddressTypeId]: {
@@ -1892,7 +1901,7 @@ export declare namespace ChildAddress {
    * Extracts the event protocol accepted by a child address.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Event<Address> = Address extends ChildAddress<infer Event> ? Event : unknown
 
@@ -1901,7 +1910,7 @@ export declare namespace ChildAddress {
    * protocol.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Compatibility<Address, Event> = [Address] extends [ChildAddress<infer AddressEvent>] ?
     [AddressEvent] extends [Event] ? unknown : {
@@ -1917,7 +1926,7 @@ export declare namespace ChildAddress {
    * child process event protocol.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type OptionsCompatibility<Options, Event> = "id" extends keyof Options ? Options extends {
       readonly id?: infer Address
@@ -1930,7 +1939,7 @@ export declare namespace ChildAddress {
  * Options for spawning child processes.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface SpawnOptions {
   readonly id?: string
@@ -1940,7 +1949,7 @@ export interface SpawnOptions {
  * Options for spawning child processes with a parent-local id.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface SpawnIdOptions extends SpawnOptions {
   readonly id: string
@@ -1949,7 +1958,8 @@ export interface SpawnIdOptions extends SpawnOptions {
 /**
  * Namespace containing type-level members associated with `Machine`.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace Machine {
   /**
@@ -1997,7 +2007,7 @@ export declare namespace Machine {
    * that proof on another concrete `Machine` type.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Any extends Pipeable {
     readonly [TypeId]: TypeId
@@ -2025,7 +2035,7 @@ export declare namespace Machine {
    * Extracts the state schema tree carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type States<M extends Any> = M[typeof MachineTypeId]["states"]
 
@@ -2033,7 +2043,7 @@ export declare namespace Machine {
    * Extracts the complete event schema tuple carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Events<M extends Any> = M[typeof MachineTypeId]["events"]
 
@@ -2041,7 +2051,7 @@ export declare namespace Machine {
    * Extracts the input schema carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Input<M extends Any> = M[typeof MachineTypeId]["input"]
 
@@ -2049,7 +2059,7 @@ export declare namespace Machine {
    * Extracts state paths that do not yet have handlers.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type UnhandledStates<M extends Any> = M[typeof MachineTypeId]["unhandledStates"]
 
@@ -2057,7 +2067,7 @@ export declare namespace Machine {
    * Extracts the runtime error channel carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Error<M extends Any> = M[typeof MachineTypeId]["error"]
 
@@ -2065,7 +2075,7 @@ export declare namespace Machine {
    * Extracts runtime service requirements carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Services<M extends Any> = M[typeof MachineTypeId]["services"]
 
@@ -2073,7 +2083,7 @@ export declare namespace Machine {
    * Extracts the startup error channel carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InitialError<M extends Any> = M[typeof MachineTypeId]["initialError"]
 
@@ -2081,7 +2091,7 @@ export declare namespace Machine {
    * Extracts startup service requirements carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InitialServices<M extends Any> = M[typeof MachineTypeId]["initialServices"]
 
@@ -2089,7 +2099,7 @@ export declare namespace Machine {
    * Extracts final state paths carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type FinalStates<M extends Any> = M[typeof MachineTypeId]["finalStates"]
 
@@ -2097,7 +2107,7 @@ export declare namespace Machine {
    * Extracts the terminal output channel carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Output<M extends Any> = M[typeof MachineTypeId]["output"]
 
@@ -2105,7 +2115,7 @@ export declare namespace Machine {
    * Extracts the emitted event schema tuple carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Emits<M extends Any> = M[typeof MachineTypeId]["emits"]
 
@@ -2113,7 +2123,7 @@ export declare namespace Machine {
    * Extracts state paths with implemented output handlers.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type OutputStates<M extends Any> = M[typeof MachineTypeId]["outputStates"]
 
@@ -2121,7 +2131,7 @@ export declare namespace Machine {
    * Extracts the public input event schema tuple carried by a machine definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
 
@@ -2129,7 +2139,7 @@ export declare namespace Machine {
    * Extracts the complete event protocol handled inside a machine.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Event<M extends Any> = EventOf<Events<M>>
 
@@ -2137,7 +2147,7 @@ export declare namespace Machine {
    * Extracts the event protocol accepted by public machine input boundaries.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InputEvent<M extends Any> = EventOf<InputEvents<M>>
 
@@ -2145,7 +2155,7 @@ export declare namespace Machine {
    * Extracts the event protocol emitted by a machine.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Emit<M extends Any> = EmitOf<Emits<M>>
 
@@ -2157,7 +2167,7 @@ export declare namespace Machine {
    * This mirrors the tagged-schema constraint used by `Schema.toTaggedUnion`.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type TaggedSchema = Schema.Top & { readonly Type: { readonly _tag: PropertyKey } }
 
@@ -2169,7 +2179,7 @@ export declare namespace Machine {
    * affect state identity, targeting, or runtime behavior.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface StateNodeAnnotations extends Schema.Annotations.Annotations {
     readonly title?: string | undefined
@@ -2187,7 +2197,7 @@ export declare namespace Machine {
    * Configuration accepted for an atomic object state node.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type AtomicStateNodeConfig =
     | {
@@ -2205,7 +2215,7 @@ export declare namespace Machine {
    * Configuration accepted for a compound object state node.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface CompoundStateNodeConfig {
     readonly schema: TaggedSchema
@@ -2218,7 +2228,7 @@ export declare namespace Machine {
    * Configuration accepted for a parallel object state node.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface ParallelStateNodeConfig {
     readonly schema: TaggedSchema
@@ -2237,7 +2247,7 @@ export declare namespace Machine {
    * history owner, so its validity is independent of the transition source.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface HistoryStateNodeConfig {
     readonly type: "history"
@@ -2254,7 +2264,7 @@ export declare namespace Machine {
    * Effect to select a typed target.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface ChoiceStateNodeConfig {
     readonly type: "choice"
@@ -2265,7 +2275,7 @@ export declare namespace Machine {
    * Configuration accepted for an object state node.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateNodeConfig =
     | AtomicStateNodeConfig
@@ -2281,7 +2291,7 @@ export declare namespace Machine {
    * prototype-mutating key `__proto__` and symbol keys are not accepted.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateTree = Readonly<Record<string, TaggedSchema | StateNodeConfig>>
 
@@ -2289,7 +2299,7 @@ export declare namespace Machine {
    * State schema definitions accepted by `make`.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateSchemas = StateTree
 
@@ -2307,7 +2317,7 @@ export declare namespace Machine {
    * require every direct region for parallel states.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InitialBuilder<States extends StateSchemas> = InitialSnapshotBuilderWithPrefix<States>
 
@@ -2321,7 +2331,7 @@ export declare namespace Machine {
    * state tree.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface DefinedStates<States extends StateSchemas> {
     /** Original state tree supplied to {@link defineStates}. */
@@ -2333,7 +2343,7 @@ export declare namespace Machine {
     /**
      * Returns the decoded value for an active state path.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly get: <Path extends StateIdentifier<States>>(
       snapshot: Snapshot<States>,
@@ -2348,7 +2358,7 @@ export declare namespace Machine {
      *
      * Parent values are keyed by their full state paths.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly getWithParents: <Path extends StateIdentifier<States>>(
       snapshot: Snapshot<States>,
@@ -2358,7 +2368,7 @@ export declare namespace Machine {
     /**
      * Returns the snapshot for an active state path.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly getSnapshot: <Path extends StateIdentifier<States>>(
       snapshot: Snapshot<States>,
@@ -2368,7 +2378,7 @@ export declare namespace Machine {
     /**
      * Returns whether a state path is active in the snapshot.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly matches: <Path extends StateIdentifier<States>>(
       snapshot: Snapshot<States>,
@@ -2380,7 +2390,7 @@ export declare namespace Machine {
    * Validates the nested shape of state schema definitions.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ValidateStateSchemas<States extends StateSchemas> = ValidateStateTree<States>
 
@@ -2482,7 +2492,7 @@ export declare namespace Machine {
    * property while preserving a uniform inspection shape.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ActiveStateNode<ActivePath extends string = string, ChoicePath extends string = ActivePath> =
     | AtomicStateNode<ActivePath, ActivePath>
@@ -2503,7 +2513,7 @@ export declare namespace Machine {
    * Runtime lookup table for state nodes.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface StateNodes<
     ActivePath extends string = string,
@@ -2518,7 +2528,7 @@ export declare namespace Machine {
    * Trigger that selects a registered transition handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type TransitionTrigger<EventTag extends PropertyKey = PropertyKey> =
     | {
@@ -2540,7 +2550,7 @@ export declare namespace Machine {
    * A declared parent path covers every descendant below that state.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type TransitionTargets<Path extends string = string> =
     | {
@@ -2562,7 +2572,7 @@ export declare namespace Machine {
    * available without executing the handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface TransitionDefinition<
     SourcePath extends string = string,
@@ -2583,7 +2593,7 @@ export declare namespace Machine {
    * invoke factory is reported as dynamic and is never evaluated by inspection.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ActivityDefinition<SourcePath extends string = string> = Activities.ActivityDefinition<SourcePath>
 
@@ -2592,7 +2602,7 @@ export declare namespace Machine {
    * one planned microstep.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface RetainedTransition<
     SourcePath extends string = string,
@@ -2612,7 +2622,7 @@ export declare namespace Machine {
    * Constructor arguments for a machine initial state function.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InputArgs<Input extends Schema.Top> = Input extends typeof Schema.Void ? []
     : [input: Input["Type"]]
@@ -2621,7 +2631,7 @@ export declare namespace Machine {
    * Extracts the discriminator value represented by a tagged schema.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type TagOf<S extends TaggedSchema> = S["Type"]["_tag"]
 
@@ -2629,7 +2639,7 @@ export declare namespace Machine {
    * Extracts the schema from a state tree node definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type NodeSchema<Node> = Node extends TaggedSchema ? Node
     : Node extends { readonly schema: infer Schema extends TaggedSchema } ? Schema
@@ -2639,7 +2649,7 @@ export declare namespace Machine {
    * Prefixes a state path with its parent path.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type JoinPath<Parent extends string, Child extends string> = Parent extends "" ? Child : `${Parent}.${Child}`
 
@@ -2647,7 +2657,7 @@ export declare namespace Machine {
    * Extracts the state path values represented by a state definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateIdentifier<States extends StateSchemas> = StateIdentifierWithPrefix<States>
 
@@ -2656,7 +2666,7 @@ export declare namespace Machine {
    * parent path prefix.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateIdentifierWithPrefix<
     States extends StateSchemas,
@@ -2675,7 +2685,7 @@ export declare namespace Machine {
    * Extracts the transition-only history pseudo-state paths in a definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HistoryIdentifier<States extends StateSchemas> = HistoryIdentifierWithPrefix<States>
 
@@ -2686,7 +2696,7 @@ export declare namespace Machine {
    * Extracts every compiled state-node path, including history pseudo-states.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateNodeIdentifier<States extends StateSchemas> =
     | StateIdentifier<States>
@@ -2737,7 +2747,7 @@ export declare namespace Machine {
    * shallow history restoration.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type RequiredHistoryInitializers<States extends StateSchemas> = [HistoryIdentifier<States>] extends [never]
     ? never
@@ -2791,7 +2801,7 @@ export declare namespace Machine {
    * Extracts a state-tree node by state path.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type NodeByIdentifier<
     States extends StateSchemas,
@@ -2809,7 +2819,7 @@ export declare namespace Machine {
    * Extracts a schema from a state definition by state identifier.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SchemaByIdentifier<
     States extends StateSchemas,
@@ -2820,7 +2830,7 @@ export declare namespace Machine {
    * Extracts the union of state values represented by a state definition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateOf<States extends StateSchemas> = StateIdentifier<States> extends infer StateId
     ? StateId extends StateIdentifier<States> ? SchemaByIdentifier<States, StateId>["Type"]
@@ -2831,7 +2841,7 @@ export declare namespace Machine {
    * Extracts the union of event values represented by an event schema list.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EventOf<Events extends ReadonlyArray<TaggedSchema>> = Events[number]["Type"]
 
@@ -2840,7 +2850,7 @@ export declare namespace Machine {
    * schema list.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EmitOf<Emits extends ReadonlyArray<TaggedSchema>> = Emits[number]["Type"]
 
@@ -2848,7 +2858,7 @@ export declare namespace Machine {
    * Event values received by lifecycle callbacks.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type LifecycleEvent<Events extends ReadonlyArray<TaggedSchema>> = EventOf<Events> | InitialEvent
 
@@ -2856,7 +2866,7 @@ export declare namespace Machine {
    * Extracts a state value from a state definition by identifier.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateByIdentifier<
     States extends StateSchemas,
@@ -2867,7 +2877,7 @@ export declare namespace Machine {
    * Extracts every parent state path from a state identifier.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ParentStateIdentifier<StateId extends string> = StateId extends `${infer Parent}.${infer Child}`
     ? Parent | (Child extends `${string}.${string}` ? `${Parent}.${ParentStateIdentifier<Child>}` : never)
@@ -2877,7 +2887,7 @@ export declare namespace Machine {
    * Extracts the nearest parent state path from a state identifier.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ImmediateParentStateIdentifier<StateId extends string> = StateId extends `${infer Head}.${infer Tail}` ?
     Tail extends `${string}.${string}` ? `${Head}.${ImmediateParentStateIdentifier<Tail>}`
@@ -2888,7 +2898,7 @@ export declare namespace Machine {
    * Maps every parent state path of a state identifier to its decoded value.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ParentStateValues<
     States extends StateSchemas,
@@ -2905,7 +2915,7 @@ export declare namespace Machine {
    * Extracts the nearest parent value, or `undefined` for a root state.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ParentStateValue<
     States extends StateSchemas,
@@ -2922,7 +2932,7 @@ export declare namespace Machine {
    * Represents a decoded state value together with all of its parent values.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateWithParents<
     States extends StateSchemas,
@@ -2942,7 +2952,7 @@ export declare namespace Machine {
    * Extracts the declared output type for a state node.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type OutputByIdentifier<
     States extends StateSchemas,
@@ -2976,7 +2986,7 @@ export declare namespace Machine {
    * Extracts the output passed when a state node completes.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type CompletionOutputByIdentifier<
     States extends StateSchemas,
@@ -3006,7 +3016,7 @@ export declare namespace Machine {
    * before that root becomes the machine's terminal result.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type TerminalOutput<States extends StateSchemas> = {
     readonly [Key in Extract<keyof States, string>]: Extract<Key, StateIdentifier<States>> extends
@@ -3027,7 +3037,7 @@ export declare namespace Machine {
    * Extracts every state path whose definition declares an output schema.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type DeclaredOutputState<States extends StateSchemas> =
     & {
@@ -3042,7 +3052,7 @@ export declare namespace Machine {
    * implementation before a machine is planned or started.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EnsureOutputImplementations<
     States extends StateSchemas,
@@ -3067,7 +3077,7 @@ export declare namespace Machine {
    * machine snapshot.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotDecodingServices<States extends StateSchemas> = StateIdentifier<States> extends infer StateId
     ? StateId extends StateIdentifier<States> ?
@@ -3081,7 +3091,7 @@ export declare namespace Machine {
    * machine snapshot.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotEncodingServices<States extends StateSchemas> = StateIdentifier<States> extends infer StateId
     ? StateId extends StateIdentifier<States> ?
@@ -3094,7 +3104,7 @@ export declare namespace Machine {
    * Encoded value for one active state path in a normalized machine snapshot.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface EncodedSnapshotState {
     readonly path: string
@@ -3106,7 +3116,7 @@ export declare namespace Machine {
    * snapshot. An omitted output represents `undefined`.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface EncodedSnapshotCompletion {
     readonly path: string
@@ -3130,7 +3140,7 @@ export declare namespace Machine {
    * scopes, queues, and subscriptions is not included.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface EncodedSnapshot {
     readonly _tag: "MachineSnapshot"
@@ -3143,7 +3153,7 @@ export declare namespace Machine {
    * Completed state path and its resolved output value.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface SnapshotCompletion {
     readonly path: string
@@ -3171,7 +3181,7 @@ export declare namespace Machine {
    * or transport boundary.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface SnapshotMetadata {
     readonly completed?: ReadonlyArray<SnapshotCompletion>
@@ -3183,7 +3193,7 @@ export declare namespace Machine {
    * decoded state value.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface AtomicSnapshot<Path extends string, Value> extends SnapshotMetadata {
     readonly path: Path
@@ -3195,7 +3205,7 @@ export declare namespace Machine {
    * snapshot.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface CompoundSnapshot<Path extends string, Value, Child> extends SnapshotMetadata {
     readonly path: Path
@@ -3208,7 +3218,7 @@ export declare namespace Machine {
    * per child region.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface ParallelSnapshot<Path extends string, Value, Regions> extends SnapshotMetadata {
     readonly path: Path
@@ -3221,7 +3231,7 @@ export declare namespace Machine {
    * identifier.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotByIdentifier<
     States extends StateSchemas,
@@ -3247,7 +3257,7 @@ export declare namespace Machine {
    * Extracts child snapshots under a parent path prefix.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotWithPrefix<
     States extends StateSchemas,
@@ -3261,7 +3271,7 @@ export declare namespace Machine {
    * child region.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotRegionsWithPrefix<
     States extends StateSchemas,
@@ -3274,7 +3284,7 @@ export declare namespace Machine {
    * Extracts a snapshot for a state node while preserving its full path.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotByIdentifierWithPath<
     States extends StateSchemas,
@@ -3303,7 +3313,7 @@ export declare namespace Machine {
    * are narrowed to the branch leading to `Owner`.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type CompleteSnapshotContaining<
     States extends StateSchemas,
@@ -3315,7 +3325,7 @@ export declare namespace Machine {
    * definition.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type Snapshot<States extends StateSchemas> = {
     readonly [StateId in ActiveStateKey<States>]: SnapshotByIdentifier<States, StateId & StateIdentifier<States>>
@@ -3325,7 +3335,7 @@ export declare namespace Machine {
    * Extracts the root state identifier from a state path.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type RootStateIdentifier<StateId extends string> = StateId extends `${infer Root}.${string}` ? Root : StateId
 
@@ -3333,7 +3343,7 @@ export declare namespace Machine {
    * Extracts the public snapshot shape that contains a final state path.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type SnapshotContainingFinal<
     States extends StateSchemas,
@@ -3350,7 +3360,7 @@ export declare namespace Machine {
    * Extracts state identifiers whose state-tree definition marks them final.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type FinalStateFromDefinition<States extends StateSchemas> =
     & {
@@ -3364,7 +3374,7 @@ export declare namespace Machine {
    * Extracts an event value from an event schema list by tag.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EventByTag<
     Events extends ReadonlyArray<TaggedSchema>,
@@ -3387,7 +3397,7 @@ export declare namespace Machine {
    * planning succeeds.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface StateConstruction<Result> {
     readonly [Topology.StateConstructionTypeId]: Result
@@ -3397,7 +3407,7 @@ export declare namespace Machine {
    * Machine-bound target instruction accepted from transition handlers.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Target<
     States extends StateSchemas,
@@ -3422,7 +3432,7 @@ export declare namespace Machine {
    * history node's typed default when no record exists.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface HistoryTarget<
     States extends StateSchemas,
@@ -3461,7 +3471,7 @@ export declare namespace Machine {
    * every active child below the selected root.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type FullTargetBuilder<States extends StateSchemas> = FullSnapshotBuilderWithPrefix<States>
 
@@ -3469,7 +3479,7 @@ export declare namespace Machine {
    * Builder for a complete fallback configuration containing a history owner.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HistoryDefaultTargetBuilder<
     States extends StateSchemas,
@@ -3485,7 +3495,7 @@ export declare namespace Machine {
    * the source state and should preserve active ancestor and sibling values.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type LocalTargetBuilder<
     States extends StateSchemas,
@@ -3504,7 +3514,7 @@ export declare namespace Machine {
    * root while preserving unmentioned active ancestors or parallel regions.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type BranchTargetBuilder<
     States extends StateSchemas,
@@ -3532,7 +3542,7 @@ export declare namespace Machine {
    * enter again.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface TargetBuilder<
     States extends StateSchemas,
@@ -3542,7 +3552,7 @@ export declare namespace Machine {
      * Moves to another state in the same local group. The value of the state
      * containing that group, and values in other active branches, are kept.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly local: LocalTargetBuilder<States, Source>
 
@@ -3551,7 +3561,7 @@ export declare namespace Machine {
      * values change only when their builder methods are explicitly called;
      * other active branches are kept.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly branch: BranchTargetBuilder<States, Source>
 
@@ -3565,7 +3575,7 @@ export declare namespace Machine {
      * When it contains parallel states, an active state must be provided for
      * every region.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly full: FullTargetBuilder<States>
 
@@ -3577,7 +3587,7 @@ export declare namespace Machine {
    * Context passed to a state/event handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface HandlerContext<
     States extends StateSchemas,
@@ -3599,7 +3609,7 @@ export declare namespace Machine {
      * Provides typed builders for choosing the next active state from this
      * handler. Each builder documents which existing state values it keeps.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly target: TargetBuilder<States, StateId>
   }
@@ -3608,7 +3618,7 @@ export declare namespace Machine {
    * Context passed to an entry or exit state handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface StateActionContext<
     States extends StateSchemas,
@@ -3626,7 +3636,7 @@ export declare namespace Machine {
    * Context passed to an invoked child process source.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface InvokeContext<
     States extends StateSchemas,
@@ -3644,7 +3654,7 @@ export declare namespace Machine {
    * Context passed to an invoked child process active snapshot mapper.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface InvokeSnapshotContext<State, Error, Output> {
     readonly id: string
@@ -3655,7 +3665,7 @@ export declare namespace Machine {
    * Context passed to an invoked machine terminal output mapper.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface InvokeDoneContext<Output> {
     readonly id: string
@@ -3666,7 +3676,7 @@ export declare namespace Machine {
    * Context passed to an eventless transition handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface AlwaysContext<
     States extends StateSchemas,
@@ -3686,7 +3696,7 @@ export declare namespace Machine {
      * eventless handler. Each builder documents which existing state values it
      * keeps.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly target: TargetBuilder<States, StateId>
   }
@@ -3695,7 +3705,7 @@ export declare namespace Machine {
    * Context passed to a state completion transition handler.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface DoneContext<
     States extends StateSchemas,
@@ -3716,7 +3726,7 @@ export declare namespace Machine {
      * state completes. Each builder documents which existing state values it
      * keeps.
      *
-     * @since 4.0.0
+     * @since 0.4.0
      */
     readonly target: TargetBuilder<States, StateId>
   }
@@ -3746,7 +3756,7 @@ export declare namespace Machine {
    * Context passed to a final state output function.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface FinalOutputContext<
     States extends StateSchemas,
@@ -3763,7 +3773,7 @@ export declare namespace Machine {
    * Extracts region outputs for a completed parallel state.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ParallelOutputRegions<
     States extends StateSchemas,
@@ -3781,7 +3791,7 @@ export declare namespace Machine {
    * Context passed to a parallel state output function.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface ParallelOutputContext<
     States extends StateSchemas,
@@ -3799,7 +3809,7 @@ export declare namespace Machine {
    * Return value accepted from entry and exit state actions.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateActionResult<E, R> = undefined
 
@@ -3807,7 +3817,7 @@ export declare namespace Machine {
    * Return value accepted from a machine initial state function.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InitialResult<States extends StateSchemas, E, R> =
     | Snapshot<States>
@@ -3829,7 +3839,7 @@ export declare namespace Machine {
    * accepted at transition boundaries.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HandlerResult<States extends StateSchemas, E, R> =
     | Snapshot<States>
@@ -3861,35 +3871,35 @@ export declare namespace Machine {
    * Extracts the union of handler return values from a handler map.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HandlerEffect<Handlers> = Handlers[keyof Handlers]
   /**
    * Extracts the error type from a handler return value.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HandlerError<Handlers> = Effect.Error<HandlerEffect<Handlers>>
   /**
    * Extracts the service requirements from a handler return value.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HandlerServices<Handlers> = Effect.Services<HandlerEffect<Handlers>>
   /**
    * Extracts the return value from an initial state function.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InitialReturn<Initial> = Initial extends (...args: any) => infer Ret ? Ret : never
   /**
    * Extracts the return value from an entry or exit action.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateActionReturn<Config, Key extends "entry" | "exit"> = Key extends keyof Config
     ? NonNullable<Config[Key]> extends (...args: any) => infer Ret ? Ret : never
@@ -3915,7 +3925,7 @@ export declare namespace Machine {
    * Extracts the return value from an event transition config.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EventTransitionReturn<Transition> = Transition extends (...args: any) => infer Ret ? Ret
     : Transition extends { readonly transition: (...args: any) => infer Ret } ? Ret
@@ -3924,7 +3934,7 @@ export declare namespace Machine {
    * Extracts the return value from a state's event handlers.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EventHandlerReturn<Config> = Config extends { readonly on?: infer On }
     ? { readonly [EventTag in keyof On]: EventTransitionReturn<NonNullable<On[EventTag]>> }[
@@ -3935,7 +3945,7 @@ export declare namespace Machine {
    * Extracts the invoke config or configs from a state config.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeReturn<Config> = "invoke" extends keyof Config
     ? Config extends { readonly invoke?: infer Invoke }
@@ -3949,14 +3959,14 @@ export declare namespace Machine {
    * Extracts the child process logic returned by an invoke source.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeLogic<Invoke> = Invoke extends { readonly src: (...args: any) => infer Logic } ? Logic : never
   /**
    * Extracts the startup error from an invoke source child process logic.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeInitialError<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly initialError: Types.Covariant<infer InitialError> }
@@ -3967,7 +3977,7 @@ export declare namespace Machine {
    * Extracts the runtime error from an invoked child process.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeRuntimeError<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly error: Types.Covariant<infer Error> }
@@ -3978,7 +3988,7 @@ export declare namespace Machine {
    * Extracts the output from an invoked child process.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeOutput<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly output: Types.Covariant<infer Output> }
@@ -3989,7 +3999,7 @@ export declare namespace Machine {
    * Extracts the service requirements from an invoke source child process logic.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeServices<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly requirements: Types.Covariant<infer Requirements> }
@@ -4000,7 +4010,7 @@ export declare namespace Machine {
    * Extracts events emitted directly by an invoked child.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeEmits<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly emits: Types.Covariant<infer Emits> }
@@ -4010,7 +4020,7 @@ export declare namespace Machine {
    * Extracts events returned by an invoked child snapshot mapper.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeSnapshotEvent<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly snapshotEvent: Types.Covariant<infer Event> }
@@ -4020,7 +4030,7 @@ export declare namespace Machine {
    * Extracts the parent transition error contribution from invoked children.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeError<Config> = [InvokeReturn<Config>] extends [never] ? never
     : ChildAlreadyExistsError | InvokeInitialError<InvokeReturn<Config>> | InvokeRuntimeError<InvokeReturn<Config>>
@@ -4028,7 +4038,7 @@ export declare namespace Machine {
    * Extracts the parent service requirement contribution from invoked children.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeRequirements<Config> = [InvokeReturn<Config>] extends [never] ? never
     : MachineRuntimeRequirement | InvokeServices<InvokeReturn<Config>>
@@ -4036,7 +4046,7 @@ export declare namespace Machine {
    * Extracts the return value from an eventless transition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type AlwaysReturn<Config> = Config extends { readonly always?: infer Always }
     ? EventTransitionReturn<NonNullable<Always>>
@@ -4045,7 +4055,7 @@ export declare namespace Machine {
    * Extracts the return value from a state completion transition.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type DoneReturn<Config> = Config extends { readonly onDone?: infer OnDone }
     ? EventTransitionReturn<NonNullable<OnDone>>
@@ -4054,7 +4064,7 @@ export declare namespace Machine {
    * Extracts the return value from a final state output function.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type FinalOutputReturn<Config> = Config extends { readonly output?: infer Output }
     ? NonNullable<Output> extends (...args: any) => infer Ret ? Ret : never
@@ -4064,7 +4074,7 @@ export declare namespace Machine {
    * Extracts all service requirements contributed by a state handler config.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ConfigServices<Config> =
     | Effect.Services<EventHandlerReturn<Config>>
@@ -4081,7 +4091,7 @@ export declare namespace Machine {
    * Configuration for invoking a child process while a state is active.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface InvokeConfig<
     States extends StateSchemas,
@@ -4164,7 +4174,7 @@ export declare namespace Machine {
    * event before constructing one or more invoke configurations.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type InvokeDefinition<
     States extends StateSchemas,
@@ -4208,7 +4218,7 @@ export declare namespace Machine {
    * Configuration accepted for a non-final state.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type ActiveStateConfig<
     States extends StateSchemas,
@@ -4381,7 +4391,7 @@ export declare namespace Machine {
    * Configuration accepted for a final state.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type FinalStateConfig<
     States extends StateSchemas,
@@ -4403,7 +4413,7 @@ export declare namespace Machine {
    * Configuration accepted by `handle` for a state tag.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type HandlerConfig<
     States extends StateSchemas,
@@ -5029,7 +5039,7 @@ export declare namespace Machine {
    * Adds state handlers from a root state object.
    *
    * @category combinators
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Handler<
     States extends StateSchemas,
@@ -5082,7 +5092,7 @@ export declare namespace Machine {
    * Any state config.
    *
    * @category utility types
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type AnyStateConfig =
     | StateConfig<any, any, any, any, any, any, any>
@@ -5092,7 +5102,7 @@ export declare namespace Machine {
    * Runtime event-handler map stored for a single state tag.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type EventHandlerMap<
     States extends StateSchemas,
@@ -5125,7 +5135,7 @@ export declare namespace Machine {
    * Runtime state config stored for a single state tag.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface StateConfig<
     States extends StateSchemas,
@@ -5179,7 +5189,7 @@ export declare namespace Machine {
    * Runtime handler table stored on a machine.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export type StateConfigs<
     States extends StateSchemas,
@@ -5202,7 +5212,7 @@ export declare namespace Machine {
  * Returns `true` if a value is a `Machine`.
  *
  * @category guards
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const isMachine: (u: unknown) => u is Machine.Any = internal.isMachine
 
@@ -5210,7 +5220,7 @@ export const isMachine: (u: unknown) => u is Machine.Any = internal.isMachine
  * Returns `true` if a state snapshot is final for a machine.
  *
  * @category guards
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const isFinal: <
   const States extends Machine.StateSchemas,
@@ -5277,7 +5287,7 @@ export const isFinal: <
  * ```
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const defineStates: DefineStates = internal.defineStates
 
@@ -5404,7 +5414,7 @@ interface Make {
  *
  * @see {@link defineStates} for typed initial snapshot builders.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const make: Make = internal.make
 
@@ -5430,12 +5440,26 @@ type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends
  * **Example**
  *
  * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {
+ *   by: Schema.Number
+ * }) {}
+ *
+ * const States = Machine.defineStates({ Idle })
+ * const counter = Machine.make({
+ *   states: States.states,
+ *   events: [Increment],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: { on: { Increment: () => States.initial.Idle.from() } } })
+ *
  * const increment = Machine.event(counter, Increment, { by: 1 })
- * yield* ref.send(increment)
  * ```
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const event: <const M extends Machine.Any, const EventSchema extends Machine.TaggedSchema>(
   machine: M,
@@ -5466,9 +5490,29 @@ export const event: <const M extends Machine.Any, const EventSchema extends Mach
  * guarantee JSON-compatible values; schemas used with JSON-backed storage must
  * have JSON-compatible encoded representations.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const encoded = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   return yield* Machine.encodeSnapshot(machine, initial.state)
+ * })
+ * ```
+ *
  * @see {@link decodeSnapshot} for restoring an encoded snapshot.
  * @category encoding
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const encodeSnapshot: <
   const States extends Machine.StateSchemas,
@@ -5526,9 +5570,30 @@ export const encodeSnapshot: <
  * Decoding restores logical statechart data only. It does not restart invoked
  * processes, recreate spawned children, or restore a previous `MachineRef`.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const roundTrip = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
+ *   return yield* Machine.decodeSnapshot(machine, encoded)
+ * })
+ * ```
+ *
  * @see {@link encodeSnapshot} for creating the normalized representation.
  * @category decoding
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const decodeSnapshot: <
   const States extends Machine.StateSchemas,
@@ -5608,7 +5673,7 @@ export const decodeSnapshot: <
  * @see {@link effect} for one-shot child effects.
  * @see {@link spawn} for children whose lifetime is controlled by actions.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const invoke: <
   ChildState,
@@ -5705,10 +5770,27 @@ type InvokeEffectConfig<
  * Declare mapped outcomes in `internalEvents` unless they are also legitimate
  * public commands.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Loaded extends Schema.TaggedClass<Loaded>("Loaded")("Loaded", {
+ *   value: Schema.String
+ * }) {}
+ *
+ * const load = Machine.invokeEffect({
+ *   id: "load",
+ *   effect: Effect.succeed("ready"),
+ *   onSuccess: (value) => new Loaded({ value })
+ * })
+ * ```
+ *
  * @see {@link invoke} for arbitrary child process logic.
  * @see {@link after} for a state-scoped delayed event.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const invokeEffect: <const Fx extends Effect.Effect<any, any, any>, SuccessEvent, FailureEvent = never>(
   config: InvokeEffectConfig<Fx, SuccessEvent, FailureEvent>
@@ -5724,8 +5806,19 @@ export const invokeEffect: <const Fx extends Effect.Effect<any, any, any>, Succe
  * that state exits. The delayed value should normally be declared in
  * `internalEvents`.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
+ *
+ * const timeout = Machine.after("5 seconds", new TimedOut({}))
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const after: <Event extends { readonly _tag: PropertyKey }>(
   duration: Duration.Input,
@@ -5776,7 +5869,7 @@ type RetagArgs<Target extends Machine.TaggedSchema, Source> = [
  * remains authoritative at runtime.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const retag: <const Target extends Machine.TaggedSchema, const Source extends { readonly _tag: PropertyKey }>(
   target: Target & RetagTargetCompatibility<Target>,
@@ -5814,7 +5907,7 @@ type InvokeMachineInput<Input extends Schema.Top> = Input extends typeof Schema.
  * @see {@link invoke} for invoking lower-level process logic.
  * @see {@link sendTo} for sending events to the invoked machine.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const invokeMachine: {
   <
@@ -5991,10 +6084,27 @@ export const invokeMachine: {
  * protocol. Manual planners may inspect commands but need a running actor scope
  * to execute child-addressed operations.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const initialState = Effect.map(Machine.planInitial(machine), (plan) => plan.state)
+ * ```
+ *
  * @see {@link plan} for planning a received event.
  * @see {@link start} for the managed runtime protocol.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const planInitial: <
   const States extends Machine.StateSchemas,
@@ -6080,7 +6190,7 @@ export const planInitial: <
  * active configuration.
  *
  * @category getters
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const stateNodes: <M extends Machine.Any>(machine: M) => ReadonlyArray<
   Machine.StateNode<
@@ -6102,7 +6212,7 @@ export const stateNodes: <M extends Machine.Any>(machine: M) => ReadonlyArray<
  * remain dynamic.
  *
  * @category getters
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const transitionDefinitions: <M extends Machine.Any>(machine: M) => ReadonlyArray<
   Machine.TransitionDefinition<
@@ -6123,7 +6233,7 @@ export const transitionDefinitions: <M extends Machine.Any>(machine: M) => Reado
  * never evaluated during inspection.
  *
  * @category getters
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const activityDefinitions: <M extends Machine.Any>(
   machine: M
@@ -6140,7 +6250,7 @@ export const activityDefinitions: <M extends Machine.Any>(
  * and are not returned.
  *
  * @category getters
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const configuration: <M extends Machine.Any>(
   machine: M,
@@ -6156,7 +6266,7 @@ export const configuration: <M extends Machine.Any>(
  * Returns the event tags handled by the current state snapshot.
  *
  * @category getters
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const enabled: <
   const States extends Machine.StateSchemas,
@@ -6208,10 +6318,32 @@ export const enabled: <
  * `emittedEvents`. Events with no enabled transition are ignored and produce
  * an unchanged plan.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Off extends Schema.TaggedClass<Off>("Off")("Off", {}) {}
+ * class On extends Schema.TaggedClass<On>("On")("On", {}) {}
+ * class Toggle extends Schema.TaggedClass<Toggle>("Toggle")("Toggle", {}) {}
+ * const States = Machine.defineStates({ Off, On })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [Toggle],
+ *   initial: () => States.initial.Off.from()
+ * }).handle({ Off: { on: { Toggle: () => States.initial.On.from() } }, On: {} })
+ *
+ * const nextState = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   return (yield* Machine.plan(machine, initial.state, new Toggle({}))).next
+ * })
+ * ```
+ *
  * @see {@link planInitial} for planning machine startup.
  * @see {@link start} for managed execution and lifecycle observation.
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const plan: <
   const States extends Machine.StateSchemas,
@@ -6324,7 +6456,7 @@ export const plan: <
  * @see {@link transition} for event-driven state.
  * @see {@link logic} for direct control over intermediate snapshots.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const effect: <Output, Error = never, Requirements = never>(
   effect: Effect.Effect<Output, Error, Requirements>
@@ -6356,7 +6488,7 @@ export const effect: <Output, Error = never, Requirements = never>(
  * @see {@link effect} for one-shot work.
  * @see {@link transition} for event-driven state.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const logic: <
   State,
@@ -6390,10 +6522,22 @@ export const logic: <
  * Each received event runs the transition Effect against the latest state. The
  * resulting state is published before the next queued event is processed.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * const counter = Machine.transition(
+ *   0,
+ *   (count, event: { readonly by: number }) => Effect.succeed(count + event.by)
+ * )
+ * ```
+ *
  * @see {@link effect} for one-shot work.
  * @see {@link logic} for direct process lifecycle control.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const transition: <State, Event, Error = never, Requirements = never>(
   initial: State,
@@ -6407,7 +6551,7 @@ export const transition: <State, Event, Error = never, Requirements = never>(
  * constructed descriptors for the same pair address the same invoked child.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const child: <const Id extends string, M extends Machine.Any>(id: Id, machine: M) => ChildMachine<Id, M> =
   internal.child
@@ -6419,7 +6563,7 @@ export const child: <const Id extends string, M extends Machine.Any>(id: Id, mac
  * the address with `spawn`, `invoke`, or `sendTo`.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const childAddress: <Event = never>(id: string) => ChildAddress<Event> = internal.childAddress
 
@@ -6440,7 +6584,7 @@ export const childAddress: <Event = never>(id: string) => ChildAddress<Event> = 
  * @see {@link invoke} for children that start and stop with a state.
  * @see {@link sendTo} for sending events to named children.
  * @category runtime
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const spawn: {
   <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
@@ -6486,7 +6630,7 @@ export const spawn: {
  * Sends an event to a named child process of the running machine.
  *
  * @category runtime
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const sendTo: {
   <Child extends ChildMachine.Any>(
@@ -6503,7 +6647,7 @@ export const sendTo: {
  * Stops a named child process of the running machine.
  *
  * @category runtime
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const stopChild: {
   <Event>(child: ChildAddress<Event>): Effect.Effect<void, never, MachineRuntimeRequirement>
@@ -6514,7 +6658,7 @@ export const stopChild: {
  * Returns a stream of terminal lifecycle outcomes for a running machine.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const watch: <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
@@ -6542,10 +6686,30 @@ export const watch: <State, Event, Error = never, Output = never>(
  * rather than being returned by `send`. Sending after the machine reaches any
  * terminal state fails immediately with `StoppedError`.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const state = Effect.gen(function*() {
+ *   const ref = yield* Machine.start(machine)
+ *   return yield* ref.state
+ * })
+ * ```
+ *
  * @see {@link plan} for inspecting the same transition plan without executing it.
  * @see {@link watch} for classified terminal outcomes.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const start: <
   const States extends Machine.StateSchemas,
@@ -6629,10 +6793,32 @@ export const start: <
  * evaluated merely because the runtime was resumed; only ordinary subsequent
  * transition planning can enter and stabilize states.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const resumed = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   const encoded = yield* Machine.encodeSnapshot(machine, initial.state)
+ *   const snapshot = yield* Machine.decodeSnapshot(machine, encoded)
+ *   return yield* Machine.resume(machine, snapshot)
+ * })
+ * ```
+ *
  * @see {@link decodeSnapshot} for the schema and transport boundary.
  * @see {@link start} for ordinary initial startup.
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const resume: <
   const States extends Machine.StateSchemas,

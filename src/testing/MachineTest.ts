@@ -1,7 +1,7 @@
 /**
  * Property-based scenario generation and planner trace utilities.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import type * as Effect from "effect/Effect"
@@ -115,7 +115,7 @@ export {
  * machine.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const interpretModel: (model: FiniteModel, events: ReadonlyArray<string>) => ReferenceModel.ReferenceTrace =
   internal.interpretModel
@@ -145,7 +145,7 @@ type ReadyMachine<M extends AnyMachine> =
  * exact decoded type. Events use only the public input protocol.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type Scenario<M extends AnyMachine> = Machine.Machine.Input<M> extends typeof Schema.Void ? {
     readonly events: ReadonlyArray<Machine.Machine.InputEvent<M>>
@@ -162,7 +162,7 @@ export type Scenario<M extends AnyMachine> = Machine.Machine.Input<M> extends ty
  * value. An events override therefore owns its own length distribution.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ScenarioOptions<M extends AnyMachine> =
   & {
@@ -181,7 +181,7 @@ export type ScenarioOptions<M extends AnyMachine> =
  * Diagnostics for one schema-derived arbitrary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface SchemaArbitraryDiagnostic {
   readonly boundary: "input" | "event"
@@ -193,7 +193,7 @@ export interface SchemaArbitraryDiagnostic {
  * Diagnostics describing how a scenario arbitrary was assembled.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ScenarioDiagnostics {
   readonly input: "none" | "schema" | "override"
@@ -205,7 +205,7 @@ export interface ScenarioDiagnostics {
  * A scenario arbitrary together with schema-derivation diagnostics.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Scenarios<M extends AnyMachine> {
   readonly arbitrary: FastCheck.Arbitrary<Scenario<M>>
@@ -218,8 +218,27 @@ export interface Scenarios<M extends AnyMachine> {
  * Unsupported schema derivations fail immediately through `Schema.toArbitrary`.
  * Non-fatal derivation warnings are returned instead of being hidden.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [Reset],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: { on: { Reset: () => States.initial.Idle.from() } } })
+ *
+ * const generated = MachineTest.scenarios(machine, { maxEvents: 5 })
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const scenarios: <M extends AnyMachine>(machine: M, options?: ScenarioOptions<M>) => Scenarios<M> =
   internal.scenarios
@@ -228,7 +247,7 @@ export const scenarios: <M extends AnyMachine>(machine: M, options?: ScenarioOpt
  * Completion information retained by an initial or event plan.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type PlanCompletion<M extends AnyMachine> =
   | {
@@ -244,7 +263,7 @@ export type PlanCompletion<M extends AnyMachine> =
  * One public planned microstep, including retained post-conflict transitions.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Microstep<
   M extends AnyMachine,
@@ -271,7 +290,7 @@ export interface Microstep<
  * The complete data returned while planning machine startup.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type InitialPlan<M extends AnyMachine> =
   & {
@@ -290,7 +309,7 @@ export type InitialPlan<M extends AnyMachine> =
  * The complete data returned while planning one public event.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type EventPlan<M extends AnyMachine> =
   & {
@@ -305,7 +324,7 @@ export type EventPlan<M extends AnyMachine> =
  * Startup portion of an executable planner trace.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InitialTrace<M extends AnyMachine> {
   readonly plan: InitialPlan<M>
@@ -319,7 +338,7 @@ export interface InitialTrace<M extends AnyMachine> {
  * One event portion of an executable planner trace.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface TraceStep<M extends AnyMachine> {
   readonly index: number
@@ -335,7 +354,7 @@ export interface TraceStep<M extends AnyMachine> {
  * A scenario and every plan produced by executing it without running actions.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Trace<M extends AnyMachine> {
   readonly scenario: Scenario<M>
@@ -353,7 +372,7 @@ export interface Trace<M extends AnyMachine> {
  * the APIs for complete diagnostic transition metadata.
  *
  * @category runtime testing
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ProbeMicrostep<M extends AnyMachine> = Omit<Microstep<M>, "transitions">
 
@@ -361,7 +380,7 @@ export type ProbeMicrostep<M extends AnyMachine> = Omit<Microstep<M>, "transitio
  * Runtime plan evidence associated with one acknowledged public event.
  *
  * @category runtime testing
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ProbePlan<M extends AnyMachine> =
   & {
@@ -382,7 +401,7 @@ export type ProbePlan<M extends AnyMachine> =
  * configuration; compare `before` and `after` for state-value assertions.
  *
  * @category runtime testing
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ProbeStep<M extends AnyMachine> {
   readonly event: Machine.Machine.InputEvent<M>
@@ -401,7 +420,7 @@ export interface ProbeStep<M extends AnyMachine> {
  * without waiting for a snapshot that will never be published.
  *
  * @category runtime testing
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Probe<M extends AnyMachine, Error = never, Output = never> {
   readonly machine: M
@@ -438,7 +457,7 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
  * statechart runtime.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { ProbeUnavailableError } from "../internal/testing/machine/verification.js"
 
@@ -449,8 +468,29 @@ export { ProbeUnavailableError } from "../internal/testing/machine/verification.
  * available exclusively through `MachineRef.send` and retain their
  * asynchronous enqueue-only semantics.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const program = Effect.gen(function*() {
+ *   const ref = yield* Machine.start(machine)
+ *   return yield* MachineTest.probe(machine, ref)
+ * })
+ * ```
+ *
  * @category runtime testing
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const probe: <M extends AnyMachine, Error, Output>(
   machine: ReadyMachine<M>,
@@ -462,7 +502,12 @@ export const probe: <M extends AnyMachine, Error, Output>(
   >
 ) => Effect.Effect<Probe<M, Error, Output>, internal.ProbeUnavailableError> = internal.probe
 
-/** The runtime error channel exposed by a managed reference for a machine. */
+/**
+ * The runtime error channel exposed by a managed reference for a machine.
+ *
+ * @category utility types
+ * @since 0.4.0
+ */
 export type RuntimeInvariantErrorChannel<M extends AnyMachine> =
   | Machine.Machine.Error<M>
   | Machine.ActionError<Machine.Machine.Services<M>>
@@ -470,14 +515,24 @@ export type RuntimeInvariantErrorChannel<M extends AnyMachine> =
   | Machine.MachineSchemaDecodeError
   | Machine.StoppedError
 
-/** A causal command record projected independently of a reference model. */
+/**
+ * A causal command record projected independently of a reference model.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface CausalRuntimeEvidenceRecord<M extends AnyMachine, Error, Output> {
   readonly index: number
   readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
   readonly actual: internal.CausalRuntimeCommandActual<M, Error, Output, unknown>
 }
 
-/** The model-independent evidence shared by causal command transcripts. */
+/**
+ * The model-independent evidence shared by causal command transcripts.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface CausalRuntimeEvidence<M extends AnyMachine, Error, Output> {
   readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
   readonly initial: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
@@ -485,13 +540,28 @@ export interface CausalRuntimeEvidence<M extends AnyMachine, Error, Output> {
   readonly final: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
 }
 
-/** The runtime snapshots selected by one snapshot invariant. */
+/**
+ * The runtime snapshots selected by one snapshot invariant.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export type RuntimeSnapshotObservationMode = "settled" | "awaited" | "all" | "final"
 
-/** The semantic location of one retained runtime snapshot. */
+/**
+ * The semantic location of one retained runtime snapshot.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export type RuntimeSnapshotObservation = "initial" | "command" | "awaited" | "final"
 
-/** A model-independent command record supplied to runtime laws. */
+/**
+ * A model-independent command record supplied to runtime laws.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantRecord<M extends AnyMachine> {
   readonly index: number
   readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
@@ -510,7 +580,12 @@ export interface RuntimeInvariantRecord<M extends AnyMachine> {
   >
 }
 
-/** A model-independent causal transcript supplied to runtime laws. */
+/**
+ * A model-independent causal transcript supplied to runtime laws.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantTranscript<M extends AnyMachine> {
   readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
   readonly initial: Machine.RuntimeSnapshot<
@@ -526,7 +601,12 @@ export interface RuntimeInvariantTranscript<M extends AnyMachine> {
   >
 }
 
-/** Evidence passed to a runtime snapshot invariant. */
+/**
+ * Evidence passed to a runtime snapshot invariant.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeSnapshotInvariantContext<M extends AnyMachine> {
   readonly machine: M
   readonly transcript: RuntimeInvariantTranscript<M>
@@ -539,7 +619,12 @@ export interface RuntimeSnapshotInvariantContext<M extends AnyMachine> {
   readonly result: internal.CausalRuntimeCommandResult<M> | undefined
 }
 
-/** Evidence passed to an invariant for one completed causal command. */
+/**
+ * Evidence passed to an invariant for one completed causal command.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeCommandInvariantContext<M extends AnyMachine> {
   readonly machine: M
   readonly transcript: RuntimeInvariantTranscript<M>
@@ -552,20 +637,35 @@ export interface RuntimeCommandInvariantContext<M extends AnyMachine> {
   readonly awaited: RuntimeInvariantRecord<M>["awaited"]
 }
 
-/** Evidence passed to a whole-runtime-transcript invariant. */
+/**
+ * Evidence passed to a whole-runtime-transcript invariant.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeTranscriptInvariantContext<M extends AnyMachine> {
   readonly machine: M
   readonly transcript: RuntimeInvariantTranscript<M>
 }
 
-/** Options for a runtime snapshot invariant. */
+/**
+ * Options for a runtime snapshot invariant.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeSnapshotInvariantOptions<M extends AnyMachine>
   extends InvariantOptions<RuntimeSnapshotInvariantContext<M>>
 {
   readonly observe?: RuntimeSnapshotObservationMode
 }
 
-/** A semantic property checked against selected live runtime snapshots. */
+/**
+ * A semantic property checked against selected live runtime snapshots.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export interface RuntimeSnapshotInvariant<M extends AnyMachine>
   extends InvariantOptions<RuntimeSnapshotInvariantContext<M>>
 {
@@ -575,7 +675,12 @@ export interface RuntimeSnapshotInvariant<M extends AnyMachine>
   readonly check: (context: RuntimeSnapshotInvariantContext<M>) => InvariantOutcome
 }
 
-/** A semantic property checked after every completed causal command. */
+/**
+ * A semantic property checked after every completed causal command.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export interface RuntimeCommandInvariant<M extends AnyMachine>
   extends InvariantOptions<RuntimeCommandInvariantContext<M>>
 {
@@ -584,7 +689,12 @@ export interface RuntimeCommandInvariant<M extends AnyMachine>
   readonly check: (context: RuntimeCommandInvariantContext<M>) => InvariantOutcome
 }
 
-/** A semantic property checked once against a complete causal transcript. */
+/**
+ * A semantic property checked once against a complete causal transcript.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export interface RuntimeTranscriptInvariant<M extends AnyMachine>
   extends InvariantOptions<RuntimeTranscriptInvariantContext<M>>
 {
@@ -593,13 +703,23 @@ export interface RuntimeTranscriptInvariant<M extends AnyMachine>
   readonly check: (context: RuntimeTranscriptInvariantContext<M>) => InvariantOutcome
 }
 
-/** A user-defined semantic property over retained live runtime evidence. */
+/**
+ * A user-defined semantic property over retained live runtime evidence.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export type RuntimeInvariant<M extends AnyMachine> =
   | RuntimeSnapshotInvariant<M>
   | RuntimeCommandInvariant<M>
   | RuntimeTranscriptInvariant<M>
 
-/** Machine-bound runtime invariant constructors with exact event inference. */
+/**
+ * Machine-bound runtime invariant constructors with exact event inference.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantBuilder<M extends AnyMachine> {
   readonly snapshot: (
     name: string,
@@ -618,14 +738,29 @@ export interface RuntimeInvariantBuilder<M extends AnyMachine> {
   ) => RuntimeTranscriptInvariant<M>
 }
 
-/** Creates reusable semantic laws for causal runtime evidence. */
+/**
+ * Creates reusable semantic laws for causal runtime evidence.
+ *
+ * @category constructors
+ * @since 0.4.0
+ */
 export const runtimeInvariants: <M extends AnyMachine>(machine: M) => RuntimeInvariantBuilder<M> =
   internal.runtimeInvariants
 
-/** Scope of a runtime invariant. */
+/**
+ * Scope of a runtime invariant.
+ *
+ * @category invariants
+ * @since 0.4.0
+ */
 export type RuntimeInvariantScope = "snapshot" | "command" | "transcript"
 
-/** Aggregate result for one runtime invariant. */
+/**
+ * Aggregate result for one runtime invariant.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantCheckResult {
   readonly invariant: string
   readonly scope: RuntimeInvariantScope
@@ -634,12 +769,22 @@ export interface RuntimeInvariantCheckResult {
   readonly failures: number
 }
 
-/** Aggregate result for all checked runtime invariants. */
+/**
+ * Aggregate result for all checked runtime invariants.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantReport {
   readonly checks: ReadonlyArray<RuntimeInvariantCheckResult>
 }
 
-/** One runtime invariant violation and its exact retained location. */
+/**
+ * One runtime invariant violation and its exact retained location.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface RuntimeInvariantViolation<M extends AnyMachine = AnyMachine> {
   readonly invariant: string
   readonly scope: RuntimeInvariantScope
@@ -652,24 +797,44 @@ export interface RuntimeInvariantViolation<M extends AnyMachine = AnyMachine> {
   readonly message: string
 }
 
-/** All violations found in one causal runtime transcript. */
+/**
+ * All violations found in one causal runtime transcript.
+ *
+ * @category errors
+ * @since 0.4.0
+ */
 export { RuntimeInvariantError } from "../internal/testing/machine/verification.js"
 
-/** Checks runtime invariants and returns their complete non-vacuity report. */
+/**
+ * Checks runtime invariants and returns their complete non-vacuity report.
+ *
+ * @category verification
+ * @since 0.4.0
+ */
 export const checkRuntimeInvariants: <M extends AnyMachine, Error, Output>(
   machine: M,
   transcript: CausalRuntimeEvidence<M, Error, Output>,
   invariants: ReadonlyArray<RuntimeInvariant<M>>
 ) => Effect.Effect<RuntimeInvariantReport, internal.RuntimeInvariantError<M>> = internal.checkRuntimeInvariants
 
-/** Asserts runtime invariants against an existing causal transcript. */
+/**
+ * Asserts runtime invariants against an existing causal transcript.
+ *
+ * @category verification
+ * @since 0.4.0
+ */
 export const assertRuntimeInvariants: <M extends AnyMachine, Error, Output>(
   machine: M,
   transcript: CausalRuntimeEvidence<M, Error, Output>,
   invariants: ReadonlyArray<RuntimeInvariant<M>>
 ) => Effect.Effect<void, internal.RuntimeInvariantError<M>> = internal.assertRuntimeInvariants
 
-/** One disagreement between pure planning and a causally processed send. */
+/**
+ * One disagreement between pure planning and a causally processed send.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface PlannerRuntimeAgreementViolation<M extends AnyMachine = AnyMachine> {
   readonly commandIndex: number
   readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
@@ -686,10 +851,20 @@ export interface PlannerRuntimeAgreementViolation<M extends AnyMachine = AnyMach
   readonly message: string
 }
 
-/** Raised when live causal evidence disagrees with a fresh pure plan. */
+/**
+ * Raised when live causal evidence disagrees with a fresh pure plan.
+ *
+ * @category errors
+ * @since 0.4.0
+ */
 export { PlannerRuntimeAgreementError } from "../internal/testing/machine/verification.js"
 
-/** Checks that every processed public send agrees with a fresh pure plan. */
+/**
+ * Checks that every processed public send agrees with a fresh pure plan.
+ *
+ * @category verification
+ * @since 0.4.0
+ */
 export const assertPlannerRuntimeAgreement: <M extends AnyMachine, Error, Output>(
   machine: ReadyMachine<M>,
   transcript: CausalRuntimeEvidence<M, Error, Output>
@@ -703,7 +878,7 @@ export const assertPlannerRuntimeAgreement: <M extends AnyMachine, Error, Output
  * fails with that string as its counterexample explanation.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type InvariantOutcome = boolean | string
 
@@ -716,7 +891,7 @@ export type InvariantOutcome = boolean | string
  * - `final` observes only the final state.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type StateObservationMode = "settled" | "microsteps" | "all" | "final"
 
@@ -724,7 +899,7 @@ export type StateObservationMode = "settled" | "microsteps" | "all" | "final"
  * The semantic location of one state observation.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type StateObservation = "initial" | "event" | "microstep" | "final"
 
@@ -732,7 +907,7 @@ export type StateObservation = "initial" | "event" | "microstep" | "final"
  * Evidence passed to a state invariant.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StateInvariantContext<M extends AnyMachine> {
   readonly machine: M
@@ -750,7 +925,7 @@ export interface StateInvariantContext<M extends AnyMachine> {
  * Evidence passed to an invariant for one public event step.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StepInvariantContext<M extends AnyMachine> {
   readonly machine: M
@@ -769,7 +944,7 @@ export interface StepInvariantContext<M extends AnyMachine> {
  * Evidence passed to a whole-trace invariant.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface TraceInvariantContext<M extends AnyMachine> {
   readonly machine: M
@@ -783,7 +958,7 @@ export interface TraceInvariantContext<M extends AnyMachine> {
  * `require.minObservations` when that must fail the check instead.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InvariantOptions<Context> {
   readonly when?: (context: Context) => boolean
@@ -796,7 +971,7 @@ export interface InvariantOptions<Context> {
  * Options for a state invariant.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StateInvariantOptions<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
   readonly observe?: StateObservationMode
@@ -806,7 +981,7 @@ export interface StateInvariantOptions<M extends AnyMachine> extends InvariantOp
  * A semantic property checked against selected state observations.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StateInvariant<M extends AnyMachine> extends InvariantOptions<StateInvariantContext<M>> {
   readonly _tag: "StateInvariant"
@@ -819,7 +994,7 @@ export interface StateInvariant<M extends AnyMachine> extends InvariantOptions<S
  * A semantic property checked after every public event.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StepInvariant<M extends AnyMachine> extends InvariantOptions<StepInvariantContext<M>> {
   readonly _tag: "StepInvariant"
@@ -831,7 +1006,7 @@ export interface StepInvariant<M extends AnyMachine> extends InvariantOptions<St
  * A semantic property checked once against a complete trace.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface TraceInvariant<M extends AnyMachine> extends InvariantOptions<TraceInvariantContext<M>> {
   readonly _tag: "TraceInvariant"
@@ -843,7 +1018,7 @@ export interface TraceInvariant<M extends AnyMachine> extends InvariantOptions<T
  * A user-defined semantic property over a planner trace.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type Invariant<M extends AnyMachine> = StateInvariant<M> | StepInvariant<M> | TraceInvariant<M>
 
@@ -851,7 +1026,7 @@ export type Invariant<M extends AnyMachine> = StateInvariant<M> | StepInvariant<
  * Machine-bound invariant constructors with complete contextual inference.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InvariantBuilder<M extends AnyMachine> {
   readonly state: (
@@ -876,7 +1051,7 @@ export interface InvariantBuilder<M extends AnyMachine> {
  * machine types should be inferred without an explicit type argument.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const Invariant: {
   readonly state: <M extends AnyMachine>(
@@ -901,8 +1076,31 @@ export const Invariant: {
  * types. The machine is used only for inference; invariant evaluation remains
  * pure and reusable across traces from that machine.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
+ *   value: Schema.Number
+ * }) {}
+ * const States = Machine.defineStates({ Count })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Count(new Count({ value: 0 }))
+ * }).handle({ Count: {} })
+ *
+ * const nonNegative = MachineTest.invariants(machine).state(
+ *   "count is non-negative",
+ *   ({ snapshot }) => snapshot.value.value >= 0
+ * )
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<M> = internal.invariants
 
@@ -910,7 +1108,7 @@ export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<
  * The scope of a semantic invariant.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type InvariantScope = "state" | "step" | "trace"
 
@@ -921,7 +1119,7 @@ export type InvariantScope = "state" | "step" | "trace"
  * observations, in which case it becomes `insufficient`.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type InvariantStatus = "passed" | "failed" | "untested" | "insufficient"
 
@@ -929,7 +1127,7 @@ export type InvariantStatus = "passed" | "failed" | "untested" | "insufficient"
  * Aggregate result for one invariant.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InvariantCheckResult {
   readonly invariant: string
@@ -943,7 +1141,7 @@ export interface InvariantCheckResult {
  * Aggregate result for all checked invariants.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InvariantReport {
   readonly checks: ReadonlyArray<InvariantCheckResult>
@@ -953,7 +1151,7 @@ export interface InvariantReport {
  * One semantic invariant violation with its precise trace location.
  *
  * @category invariants
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface InvariantViolation<M extends AnyMachine = AnyMachine> {
   readonly invariant: string
@@ -973,7 +1171,7 @@ export interface InvariantViolation<M extends AnyMachine = AnyMachine> {
  * counterexample and aggregate report.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { InvariantError } from "../internal/testing/machine/verification.js"
 
@@ -985,7 +1183,7 @@ export { InvariantError } from "../internal/testing/machine/verification.js"
  * an Effect property test to retain FastCheck shrinking.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const checkInvariants: <M extends AnyMachine>(
   machine: M,
@@ -1001,7 +1199,7 @@ export const checkInvariants: <M extends AnyMachine>(
  * same complete report and trace evidence.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const assertInvariants: <M extends AnyMachine>(
   machine: M,
@@ -1017,7 +1215,7 @@ export const assertInvariants: <M extends AnyMachine>(
  * exploration.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExplorationKey = PropertyKey
 
@@ -1028,7 +1226,7 @@ export type ExplorationKey = PropertyKey
  * transitions. A limit never makes an incomplete result appear exhaustive.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ExplorationLimits {
   readonly maxDepth?: number
@@ -1040,7 +1238,7 @@ export interface ExplorationLimits {
  * Resolved bounds retained by an exploration result.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ResolvedExplorationLimits {
   readonly maxDepth: number
@@ -1052,7 +1250,7 @@ export interface ResolvedExplorationLimits {
  * Evidence available while assigning a state key.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ExplorationStateContext<M extends AnyMachine> {
   readonly machine: M
@@ -1068,7 +1266,7 @@ export interface ExplorationStateContext<M extends AnyMachine> {
  * `trace` is the first, and therefore shortest, trace that reached `key`.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ExplorationNode<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey>
   extends ExplorationStateContext<M>
@@ -1080,7 +1278,7 @@ export interface ExplorationNode<M extends AnyMachine, Key extends ExplorationKe
  * One concretely planned public event in the exploration graph.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ExplorationEdge<M extends AnyMachine> {
   readonly event: Machine.Machine.InputEvent<M>
@@ -1092,7 +1290,7 @@ export interface ExplorationEdge<M extends AnyMachine> {
  * One boundary that could not be explored because a hard limit was reached.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
   | {
@@ -1121,7 +1319,7 @@ export type ExplorationFrontier<M extends AnyMachine, Key extends ExplorationKey
  * key abstraction.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExplorationCompleteness<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
   | {
@@ -1137,7 +1335,7 @@ export type ExplorationCompleteness<M extends AnyMachine, Key extends Exploratio
  * Deterministic breadth-first exploration counts.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ExplorationStats {
   readonly states: number
@@ -1150,7 +1348,7 @@ export interface ExplorationStats {
  * A bounded logical state graph and its shortest-path evidence.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> {
   readonly graph: Graph.DirectedGraph<ExplorationNode<M, Key>, ExplorationEdge<M>>
@@ -1177,7 +1375,7 @@ interface ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> {
  * relation defined by `stateKey`.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
   & ExploreOptionsBase<M, Key>
@@ -1195,8 +1393,35 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * so a failure retains a shortest discovered counterexample. Staged actions
  * and runtime activities are not executed.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
+ *   value: Schema.Number
+ * }) {}
+ * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
+ * const States = Machine.defineStates({ Count })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [Increment],
+ *   initial: () => States.initial.Count(new Count({ value: 0 }))
+ * }).handle({
+ *   Count: { on: { Increment: ({ state }) =>
+ *     States.initial.Count(new Count({ value: state.value + 1 })) } }
+ * })
+ *
+ * const explored = MachineTest.explore(machine, {
+ *   events: ({ snapshot }) => snapshot.value.value < 2 ? [new Increment({})] : [],
+ *   stateKey: ({ snapshot }) => snapshot.value.value
+ * })
+ * ```
+ *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
   machine: ReadyMachine<M>,
@@ -1211,7 +1436,7 @@ export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
  * A predicate over one explored logical state.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ExplorationPredicate<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> = (
   node: ExplorationNode<M, Key>
@@ -1221,7 +1446,7 @@ export type ExplorationPredicate<M extends AnyMachine, Key extends ExplorationKe
  * Why a reachability assertion failed.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ReachabilityFailure = "NotFound" | "UnexpectedMatch" | "Inconclusive"
 
@@ -1229,7 +1454,7 @@ export type ReachabilityFailure = "NotFound" | "UnexpectedMatch" | "Inconclusive
  * A failed or inconclusive reachability assertion.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { ReachabilityError } from "../internal/testing/machine/verification.js"
 
@@ -1238,7 +1463,7 @@ export { ReachabilityError } from "../internal/testing/machine/verification.js"
  * predicate.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const findShortest: <M extends AnyMachine, Key extends ExplorationKey>(
   exploration: Exploration<M, Key>,
@@ -1252,7 +1477,7 @@ export const findShortest: <M extends AnyMachine, Key extends ExplorationKey>(
  * claiming the state is unreachable.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const assertReachable: <M extends AnyMachine, Key extends ExplorationKey>(
   exploration: Exploration<M, Key>,
@@ -1267,7 +1492,7 @@ export const assertReachable: <M extends AnyMachine, Key extends ExplorationKey>
  * result without a witness fails as inconclusive.
  *
  * @category exploration
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKey>(
   exploration: Exploration<M, Key>,
@@ -1284,7 +1509,7 @@ export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKe
  * and accumulates every disagreement in one structured error.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const verifyModel: <M extends AnyMachine>(
   model: FiniteModel,
@@ -1296,7 +1521,7 @@ export const verifyModel: <M extends AnyMachine>(
  * segment preceding it.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
   | {
@@ -1324,7 +1549,7 @@ export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
  * Errors that can be produced while planning a complete scenario.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RunError<M extends AnyMachine> =
   | Machine.Machine.InitialError<M>
@@ -1341,7 +1566,7 @@ export type RunError<M extends AnyMachine> =
  * later execution, not synchronous planning.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RunServices<M extends AnyMachine> = IsAny<
   Machine.PlanningServices<Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
@@ -1355,8 +1580,26 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * Typed planning errors retain the scenario and successfully completed prefix
  * in a `RunFailure`.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const trace = MachineTest.run(machine, { events: [] })
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const run: <M extends AnyMachine>(
   machine: ReadyMachine<M>,
@@ -1367,7 +1610,7 @@ export const run: <M extends AnyMachine>(
  * A deterministic hit/miss summary for a finite set declared by a machine.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CoverageSummary<Item> {
   readonly total: number
@@ -1381,7 +1624,7 @@ export interface CoverageSummary<Item> {
  * One active (non-history) state node in a state coverage summary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StateCoverageItem<Path extends string = string> {
   readonly path: Path
@@ -1392,7 +1635,7 @@ export interface StateCoverageItem<Path extends string = string> {
  * State activation and lifecycle coverage.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface StateCoverage<Path extends string = string> {
   readonly activation: CoverageSummary<StateCoverageItem<Path>>
@@ -1404,7 +1647,7 @@ export interface StateCoverage<Path extends string = string> {
  * One stable transition-definition identity in definition order.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface TransitionCoverageItem<
   SourcePath extends string = string,
@@ -1423,7 +1666,7 @@ export interface TransitionCoverageItem<
  * One public event tag declared by the machine.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface EventCoverageItem<Tag extends PropertyKey = PropertyKey> {
   readonly tag: Tag
@@ -1434,7 +1677,7 @@ export interface EventCoverageItem<Tag extends PropertyKey = PropertyKey> {
  * Public event coverage, including events that no transition retained.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type EventCoverage<Tag extends PropertyKey = PropertyKey> =
   | {
@@ -1465,7 +1708,7 @@ export type EventCoverage<Tag extends PropertyKey = PropertyKey> =
  * Trace-derived scenario counts. There is no finite declared scenario space.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ScenarioCoverage {
   readonly traces: number
@@ -1477,7 +1720,7 @@ export interface ScenarioCoverage {
  * Trace-derived logical configuration counts. There is no claimed exhaustive total.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface LogicalConfigurationCoverage {
   readonly observations: number
@@ -1489,7 +1732,7 @@ export interface LogicalConfigurationCoverage {
  * Directly observed startup and microstep evidence.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface MicrostepCoverageEvidence {
   readonly total: number
@@ -1507,7 +1750,7 @@ export interface MicrostepCoverageEvidence {
  * Directly observed completion evidence.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CompletionCoverageEvidence<Path extends string = string> {
   readonly donePlans: number
@@ -1519,7 +1762,7 @@ export interface CompletionCoverageEvidence<Path extends string = string> {
  * Directly observed history records and history-target transitions.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface HistoryCoverageEvidence<Path extends string = string> {
   readonly recordObservations: number
@@ -1535,7 +1778,7 @@ export interface HistoryCoverageEvidence<Path extends string = string> {
  * Coverage computed only from observable machine definitions and planner traces.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Coverage<M extends AnyMachine> {
   readonly states: StateCoverage<StatePath<M>>
@@ -1564,8 +1807,29 @@ export interface Coverage<M extends AnyMachine> {
  * configurations report observations only because their complete spaces are
  * generally infinite.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const report = Effect.map(
+ *   MachineTest.run(machine, { events: [] }),
+ *   (trace) => MachineTest.coverage(machine, trace)
+ * )
+ * ```
+ *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const coverage: <M extends AnyMachine>(
   machine: M,
@@ -1576,7 +1840,7 @@ export const coverage: <M extends AnyMachine>(
  * The observation roles summarized for one logical graph node.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ObservedGraphNodeObservations {
   readonly total: number
@@ -1589,7 +1853,7 @@ export interface ObservedGraphNodeObservations {
  * One full encoded logical snapshot stored in the observed Effect graph.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ObservedGraphNode<M extends AnyMachine> {
   readonly id: string
@@ -1603,7 +1867,7 @@ export interface ObservedGraphNode<M extends AnyMachine> {
  * Retained evidence for one microstep inside an observed graph edge.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ObservedGraphMicrostep<M extends AnyMachine> {
   readonly next: string
@@ -1620,7 +1884,7 @@ export interface ObservedGraphMicrostep<M extends AnyMachine> {
  * A startup or public-event macrostep retained by the observed graph.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ObservedGraphEdge<M extends AnyMachine> =
   | {
@@ -1642,7 +1906,7 @@ export type ObservedGraphEdge<M extends AnyMachine> =
  * An Effect directed graph plus stable indexes useful to graph algorithms.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ObservedGraph<M extends AnyMachine> {
   readonly graph: Graph.DirectedGraph<ObservedGraphNode<M>, ObservedGraphEdge<M>>
@@ -1660,7 +1924,7 @@ export interface ObservedGraph<M extends AnyMachine> {
  * claim to be a static or exhaustive graph of the machine.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const observedGraph: <M extends AnyMachine>(
   machine: M,
@@ -1675,7 +1939,7 @@ export const observedGraph: <M extends AnyMachine>(
  * Independently checked families of planner laws.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type VerificationLawGroup =
   | "configuration"
@@ -1688,7 +1952,7 @@ export type VerificationLawGroup =
  * Stable identifiers for individual planner laws.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type VerificationLaw =
   | "configuration.shape"
@@ -1722,7 +1986,7 @@ export type VerificationLaw =
  * One independently observed violation in a planner trace.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface VerificationViolation {
   readonly law: VerificationLaw
@@ -1737,7 +2001,7 @@ export interface VerificationViolation {
  * All violations found while checking one trace.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { VerificationError } from "../internal/testing/machine/verification.js"
 
@@ -1745,7 +2009,7 @@ export { VerificationError } from "../internal/testing/machine/verification.js"
  * Selects law families for the single canonical verifier. All run by default.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface VerifyOptions {
   readonly laws?: ReadonlyArray<VerificationLawGroup>
@@ -1759,8 +2023,29 @@ export interface VerifyOptions {
  * Every selected law is evaluated and returned in one structured error so a
  * shrunk property-test counterexample retains all relevant evidence.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { MachineTest } from "@typeonce/effect-machine/testing"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const checked = Effect.gen(function*() {
+ *   const trace = yield* MachineTest.run(machine, { events: [] })
+ *   yield* MachineTest.verify(machine, trace)
+ * })
+ * ```
+ *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const verify: <M extends AnyMachine>(
   machine: M,
@@ -1776,7 +2061,7 @@ export const verify: <M extends AnyMachine>(
  * Failures include their original cause and every available successful prefix.
  *
  * @category formatting
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const formatTrace: <M extends AnyMachine, Cause>(trace: Trace<M> | RunFailure<Cause, M>) => string =
   internal.formatTrace

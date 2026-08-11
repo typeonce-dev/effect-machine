@@ -7,7 +7,7 @@ import type * as Schema from "effect/Schema"
  * declared state or output schemas.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEncodeError")<{
   readonly machineId: string | undefined
@@ -21,7 +21,7 @@ export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEnc
  * structural configuration declared for a machine boundary.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class MachineSchemaDecodeError extends Data.TaggedError("MachineSchemaDecodeError")<{
   readonly machineId: string | undefined
@@ -36,7 +36,7 @@ export class MachineSchemaDecodeError extends Data.TaggedError("MachineSchemaDec
  * number of macrostep iterations.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class InfiniteTransitionError extends Data.TaggedError("InfiniteTransitionError")<{
   readonly machineId: string | undefined
@@ -49,7 +49,7 @@ export class InfiniteTransitionError extends Data.TaggedError("InfiniteTransitio
  * logic after the initial state has been computed.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly cause: Cause.Cause<unknown>
@@ -60,7 +60,7 @@ export class StartupError extends Data.TaggedError("StartupError")<{
  * exists for the current machine.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class ChildAlreadyExistsError extends Data.TaggedError("ChildAlreadyExistsError")<{
   readonly id: string
@@ -71,7 +71,7 @@ export class ChildAlreadyExistsError extends Data.TaggedError("ChildAlreadyExist
  * requires a managed machine process.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class ProcessLocalError extends Data.TaggedError("ProcessLocalError")<{
   readonly operation: string
@@ -82,6 +82,6 @@ export class ProcessLocalError extends Data.TaggedError("ProcessLocalError")<{
  * producing an output.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class StoppedError extends Data.TaggedError("StoppedError") {}

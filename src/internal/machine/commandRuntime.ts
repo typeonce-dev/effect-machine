@@ -1,7 +1,7 @@
 /**
  * Internal process-side machine command execution.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Effect from "effect/Effect"

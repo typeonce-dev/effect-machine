@@ -1,7 +1,7 @@
 /**
  * Internal machine topology and target helpers.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Option from "effect/Option"

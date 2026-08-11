@@ -7,7 +7,7 @@ import { FastCheck } from "effect/testing"
  * filter through rejection sampling.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface SchemaArbitraryOpaqueFilterWarning {
   readonly _tag: "OpaqueFilter"
@@ -19,7 +19,7 @@ export interface SchemaArbitraryOpaqueFilterWarning {
  * Non-fatal diagnostic emitted while deriving a schema arbitrary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type SchemaArbitraryWarning = SchemaArbitraryOpaqueFilterWarning
 
@@ -27,7 +27,7 @@ export type SchemaArbitraryWarning = SchemaArbitraryOpaqueFilterWarning
  * Diagnostics collected while deriving a schema arbitrary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface SchemaArbitraryReport {
   readonly warnings: ReadonlyArray<SchemaArbitraryWarning>

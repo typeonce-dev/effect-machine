@@ -1,7 +1,7 @@
 /**
  * Internal encoded snapshot serialization.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Cause from "effect/Cause"

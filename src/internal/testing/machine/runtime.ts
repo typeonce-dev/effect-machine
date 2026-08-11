@@ -1,7 +1,7 @@
 /**
  * Effect-native command-model testing for live machine references.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Cause from "effect/Cause"
@@ -24,7 +24,7 @@ type AnyMachine = Machine.Machine.Any
  * A command applied to a running machine during model-based testing.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeCommand<Event> =
   | {
@@ -47,7 +47,7 @@ export type RuntimeCommand<Event> =
  * Constructs a command that sends one public event.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const sendCommand = <Event>(event: Event): RuntimeCommand<Event> => ({
   _tag: "Send",
@@ -58,7 +58,7 @@ export const sendCommand = <Event>(event: Event): RuntimeCommand<Event> => ({
  * Constructs a command that advances Effect's `TestClock`.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const advanceCommand = <Event = never>(duration: Duration.Input): RuntimeCommand<Event> => ({
   _tag: "Advance",
@@ -69,7 +69,7 @@ export const advanceCommand = <Event = never>(duration: Duration.Input): Runtime
  * Constructs an idempotent command that stops the machine.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const stopCommand = <Event = never>(): RuntimeCommand<Event> => ({ _tag: "Stop" })
 
@@ -78,7 +78,7 @@ export const stopCommand = <Event = never>(): RuntimeCommand<Event> => ({ _tag: 
  * commands. Its behavior is selected by the reference-model step.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const checkpointCommand = <Event = never>(label?: string): RuntimeCommand<Event> => ({
   _tag: "Checkpoint",
@@ -89,7 +89,7 @@ export const checkpointCommand = <Event = never>(label?: string): RuntimeCommand
  * The result of executing one runtime command.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeCommandResult =
   | { readonly _tag: "SendAccepted" }
@@ -108,7 +108,7 @@ export type RuntimeCommandResult =
  * when the model already knows there is no outstanding asynchronous work.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeSynchronization<State, Error, Output> =
   | { readonly _tag: "None" }
@@ -123,7 +123,7 @@ export type RuntimeSynchronization<State, Error, Output> =
  * Constructors for runtime synchronization policies.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const RuntimeSynchronization = {
   none: { _tag: "None" } as const,
@@ -138,7 +138,7 @@ export const RuntimeSynchronization = {
  * The pure/reference-model result for one runtime command.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeModelStep<Model, Expected, State, Error, Output> {
   readonly model: Model
@@ -151,7 +151,7 @@ export interface RuntimeModelStep<Model, Expected, State, Error, Output> {
  * runner. The `RuntimeModelStep` name remains as a compatibility alias.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output> = RuntimeModelStep<
   Model,
@@ -168,7 +168,7 @@ export type EnqueuedRuntimeModelStep<Model, Expected, State, Error, Output> = Ru
  * publications until its predicate matches.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RuntimeAwait<State, Error, Output> =
   | { readonly _tag: "None" }
@@ -184,7 +184,7 @@ export type RuntimeAwait<State, Error, Output> =
  * submitted `Send` always completes its exact managed macrostep first.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeModelStep<Model, Expected, State, Error, Output> {
   readonly model: Model
@@ -196,7 +196,7 @@ export interface CausalRuntimeModelStep<Model, Expected, State, Error, Output> {
  * Exact execution result for one causal runtime command.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type CausalRuntimeCommandResult<M extends AnyMachine> =
   | { readonly _tag: "SendProcessed"; readonly step: ProbeStep<M> }
@@ -209,7 +209,7 @@ export type CausalRuntimeCommandResult<M extends AnyMachine> =
  * Actual causal evidence made available to inspection and assertions.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeCommandActual<
   M extends AnyMachine,
@@ -230,7 +230,7 @@ export interface CausalRuntimeCommandActual<
  * Context supplied to a custom causal runtime inspection effect.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeInspectionContext<M extends AnyMachine, Error, Output> {
   readonly index: number
@@ -248,7 +248,7 @@ export interface CausalRuntimeInspectionContext<M extends AnyMachine, Error, Out
  * Context supplied to a causal reference-model assertion.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeAssertionContext<
   M extends AnyMachine,
@@ -268,7 +268,7 @@ export interface CausalRuntimeAssertionContext<
  * model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeModelOptions<
   M extends AnyMachine,
@@ -310,14 +310,24 @@ export interface CausalRuntimeModelOptions<
   ) => Effect.Effect<void, AssertionError, AssertionServices>
 }
 
-/** Context used to select additional asynchronous observation for a law-oriented command run. */
+/**
+ * Context used to select additional asynchronous observation for a law-oriented command run.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface CausalVerificationAwaitContext<M extends AnyMachine, Error, Output> {
   readonly index: number
   readonly command: RuntimeCommand<Machine.Machine.InputEvent<M>>
   readonly probe: Probe<M, Error, Output>
 }
 
-/** Configuration for causal verification without a separate reference model. */
+/**
+ * Configuration for causal verification without a separate reference model.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface CausalVerificationOptions<M extends AnyMachine, Error, Output> {
   readonly invariants: ReadonlyArray<RuntimeInvariant<M>>
   readonly observationTimeout?: Duration.Input
@@ -326,7 +336,12 @@ export interface CausalVerificationOptions<M extends AnyMachine, Error, Output> 
   ) => RuntimeAwait<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
 }
 
-/** A law-oriented causal transcript without dummy model or expected fields. */
+/**
+ * A law-oriented causal transcript without dummy model or expected fields.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export interface CausalVerificationTranscript<M extends AnyMachine, Error, Output>
   extends CausalRuntimeEvidence<M, Error, Output>
 {}
@@ -335,7 +350,7 @@ export interface CausalVerificationTranscript<M extends AnyMachine, Error, Outpu
  * Actual evidence made available to a runtime command assertion.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeCommandActual<State, Error, Output, Observed> {
   readonly result: RuntimeCommandResult
@@ -348,7 +363,7 @@ export interface RuntimeCommandActual<State, Error, Output, Observed> {
  * Context supplied to a custom runtime inspection effect.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeInspectionContext<State, Event, Error, Output> {
   readonly index: number
@@ -363,7 +378,7 @@ export interface RuntimeInspectionContext<State, Event, Error, Output> {
  * Context supplied to the reference-model assertion.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
   extends RuntimeInspectionContext<State, Event, Error, Output>
@@ -377,7 +392,7 @@ export interface RuntimeAssertionContext<Model, Expected, State, Event, Error, O
  * Configuration for an Effect-native runtime command-model run.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeModelOptions<
   Model,
@@ -421,7 +436,7 @@ export interface RuntimeModelOptions<
  * One successfully checked command in a replayable runtime transcript.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> {
   readonly index: number
@@ -435,7 +450,7 @@ export interface RuntimeCommandRecord<Model, Expected, State, Event, Error, Outp
  * A complete command-model execution transcript.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> {
   readonly commands: ReadonlyArray<RuntimeCommand<Event>>
@@ -451,21 +466,47 @@ export interface RuntimeTranscript<Model, Expected, State, Event, Error, Output,
   readonly synchronized: boolean
 }
 
-/** Explicit enqueue-oriented names for the compatibility runtime model types. */
+/**
+ * Enqueue-oriented name for actual runtime command evidence.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeCommandActual<State, Error, Output, Observed> = RuntimeCommandActual<
   State,
   Error,
   Output,
   Observed
 >
+
+/**
+ * Enqueue-oriented name for runtime inspection context.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeInspectionContext<State, Event, Error, Output> = RuntimeInspectionContext<
   State,
   Event,
   Error,
   Output
 >
+
+/**
+ * Enqueue-oriented name for runtime assertion context.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed> =
   RuntimeAssertionContext<Model, Expected, State, Event, Error, Output, Observed>
+
+/**
+ * Enqueue-oriented options for a runtime reference model.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeModelOptions<
   Model,
   Expected,
@@ -495,6 +536,13 @@ export type EnqueuedRuntimeModelOptions<
   AssertionError,
   AssertionServices
 >
+
+/**
+ * Enqueue-oriented name for a checked runtime command record.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, Output, Observed> = RuntimeCommandRecord<
   Model,
   Expected,
@@ -504,6 +552,13 @@ export type EnqueuedRuntimeCommandRecord<Model, Expected, State, Event, Error, O
   Output,
   Observed
 >
+
+/**
+ * Enqueue-oriented name for a complete runtime transcript.
+ *
+ * @category models
+ * @since 0.4.0
+ */
 export type EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Output, Observed> = RuntimeTranscript<
   Model,
   Expected,
@@ -518,7 +573,7 @@ export type EnqueuedRuntimeTranscript<Model, Expected, State, Event, Error, Outp
  * One successfully checked causal command.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeCommandRecord<
   M extends AnyMachine,
@@ -543,7 +598,7 @@ export interface CausalRuntimeCommandRecord<
  * corresponding model step requested `probe.await.until`.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeTranscript<
   M extends AnyMachine,
@@ -565,7 +620,7 @@ export interface CausalRuntimeTranscript<
  * begun but before a complete checked record exists.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface CausalRuntimeCommandAttempt<
   M extends AnyMachine,
@@ -593,7 +648,7 @@ export interface CausalRuntimeCommandAttempt<
  * Failure raised when an expected public change stream observation is absent.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class RuntimeObservationError extends Data.TaggedError("MachineTestRuntimeObservationError")<{
   readonly index: number
@@ -606,7 +661,7 @@ export class RuntimeObservationError extends Data.TaggedError("MachineTestRuntim
  * A typed command-model failure retaining the successfully checked prefix.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class RuntimeCommandFailure<
   Failure = unknown,
@@ -631,7 +686,7 @@ export class RuntimeCommandFailure<
  * prefix and exact attempted command.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class CausalRuntimeCommandFailure<
   Failure = unknown,
@@ -864,7 +919,7 @@ const awaitCausal = <State, Event, Error, Output>(
  * property run cannot be mistaken for a machine counterexample.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const runEnqueuedCommands = <
   Model,
@@ -1114,11 +1169,13 @@ export const runEnqueuedCommands = <
   )
 
 /**
+ * Compatibility alias for enqueue-oriented runtime command execution.
+ *
  * @deprecated Use `runEnqueuedCommands`. This compatibility name does not
  * expose whether sends are merely enqueued or causally processed.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const runRuntimeCommands: typeof runEnqueuedCommands = runEnqueuedCommands
 
@@ -1136,7 +1193,7 @@ export const runRuntimeCommands: typeof runEnqueuedCommands = runEnqueuedCommand
  * depends on burst enqueueing or outstanding mailbox work.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const runCausalCommands = <
   M extends AnyMachine,
@@ -1352,7 +1409,7 @@ export const runCausalCommands = <
  * expected results come from an application model.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const verifyCausalCommands = <M extends AnyMachine, Error, Output>(
   probe: Probe<M, Error, Output>,
@@ -1397,7 +1454,7 @@ export const verifyCausalCommands = <M extends AnyMachine, Error, Output>(
  * Options controlling schema-derived runtime command generation.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeCommandsOptions<M extends AnyMachine> {
   readonly minCommands?: number
@@ -1414,7 +1471,7 @@ export interface RuntimeCommandsOptions<M extends AnyMachine> {
  * Diagnostics describing a schema-derived runtime command arbitrary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeCommandsDiagnostics {
   readonly events: "none" | "schema" | "override"
@@ -1428,7 +1485,7 @@ export interface RuntimeCommandsDiagnostics {
  * A shrinkable runtime command arbitrary and its derivation diagnostics.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface RuntimeCommands<M extends AnyMachine> {
   readonly arbitrary: FastCheck.Arbitrary<ReadonlyArray<RuntimeCommand<Machine.Machine.InputEvent<M>>>>
@@ -1450,7 +1507,7 @@ const validateCommandLength = (name: "minCommands" | "maxCommands", value: numbe
  * callbacks and would erase Effect error and service channels.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const runtimeCommands = <M extends AnyMachine>(
   machine: M,
@@ -1525,7 +1582,7 @@ export const runtimeCommands = <M extends AnyMachine>(
  * Formats a runtime transcript or failure as replayable line-oriented evidence.
  *
  * @category formatting
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const formatEnqueuedTranscript = (
   value:
@@ -1583,10 +1640,12 @@ export const formatEnqueuedTranscript = (
 }
 
 /**
+ * Compatibility alias for enqueue-oriented transcript formatting.
+ *
  * @deprecated Use `formatEnqueuedTranscript`.
  *
  * @category formatting
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const formatRuntimeTranscript: typeof formatEnqueuedTranscript = formatEnqueuedTranscript
 
@@ -1595,7 +1654,7 @@ export const formatRuntimeTranscript: typeof formatEnqueuedTranscript = formatEn
  * evidence, including exact probe steps and explicit asynchronous observations.
  *
  * @category formatting
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const formatCausalTranscript = (
   value:

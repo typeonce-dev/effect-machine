@@ -17,7 +17,7 @@ import * as Machine from "../../../Machine.js"
  * An atomic state in a finite generated model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteAtomicState {
   readonly _tag: "Atomic"
@@ -30,7 +30,7 @@ export interface FiniteAtomicState {
  * A final state in a finite generated model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteFinalState {
   readonly _tag: "Final"
@@ -45,7 +45,7 @@ export interface FiniteFinalState {
  * A compound state in a finite generated model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteCompoundState {
   readonly _tag: "Compound"
@@ -65,7 +65,7 @@ export interface FiniteCompoundState {
  * compared without sharing executable callbacks with the reference model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteParallelState {
   readonly _tag: "Parallel"
@@ -86,7 +86,7 @@ export interface FiniteParallelState {
  * parallel owner and is used only before that history register is captured.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteHistoryState {
   readonly _tag: "History"
@@ -107,7 +107,7 @@ export interface FiniteChoiceState {
  * A finite model state.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type FiniteState =
   | FiniteAtomicState
@@ -123,7 +123,7 @@ export type FiniteState =
  * same validation, compilation, and reference interpretation path.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type FiniteTransitionTrigger =
   | { readonly type: "event"; readonly event: string }
@@ -134,7 +134,7 @@ export type FiniteTransitionTrigger =
  * One deterministic transition in a finite generated model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 interface FiniteTransitionBase {
   readonly source: string
@@ -148,7 +148,7 @@ interface FiniteTransitionBase {
  * A public event transition may explicitly request source reentry.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type FiniteEventTransition = FiniteTransitionBase & {
   readonly trigger: Extract<FiniteTransitionTrigger, { readonly type: "event" }>
@@ -160,7 +160,7 @@ export type FiniteEventTransition = FiniteTransitionBase & {
  * the event-only reentry option.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type FiniteAutomaticTransition = FiniteTransitionBase & {
   readonly trigger: Exclude<FiniteTransitionTrigger, { readonly type: "event" }>
@@ -170,7 +170,7 @@ export type FiniteAutomaticTransition = FiniteTransitionBase & {
  * One deterministic event or automatic transition in a finite model.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type FiniteTransition = FiniteEventTransition | FiniteAutomaticTransition
 
@@ -181,7 +181,7 @@ export type FiniteTransition = FiniteEventTransition | FiniteAutomaticTransition
  * from that state's generated default value.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteHistoryMutation {
   readonly source: string
@@ -194,7 +194,7 @@ export interface FiniteHistoryMutation {
  * One exact transition in a generated history witness.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteHistoryTransfer {
   readonly source: string
@@ -211,7 +211,7 @@ export interface FiniteHistoryTransfer {
  * root, and restores the remembered non-default value through `history`.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteHistoryScenario {
   readonly history: string
@@ -231,7 +231,7 @@ export interface FiniteHistoryScenario {
  * or a different root as a complete configuration.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteModel {
   readonly roots: ReadonlyArray<FiniteState>
@@ -247,7 +247,7 @@ export interface FiniteModel {
  * Limits controlling finite model generation.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteModelOptions {
   /** Maximum number of root states. Always between one and three. */
@@ -272,7 +272,7 @@ export interface FiniteModelOptions {
  * Resolved limits and structural guarantees for a finite model arbitrary.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteModelDiagnostics {
   readonly limits: {
@@ -304,7 +304,7 @@ export interface FiniteModelDiagnostics {
  * A finite model arbitrary and the exact limits used to construct it.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface FiniteModels {
   readonly arbitrary: FastCheck.Arbitrary<FiniteModel>
@@ -854,7 +854,7 @@ const makeTransitionArbitrary = (
  * or parallel sources. Separate focused witnesses cover cyclic stabilization.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => {
   const limits = resolveOptions(options)
@@ -1476,7 +1476,7 @@ const makeHandlers = (
  * conformance stages.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const flattened = validateModel(model)

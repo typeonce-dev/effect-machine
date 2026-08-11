@@ -1,0 +1,72 @@
+{
+  "channel": "v4",
+  "output": ".data/api-reference/v4",
+  "tsconfig": "tsconfig.json",
+  "barrels": [
+    {
+      "export": ".",
+      "source": "src/index.ts"
+    },
+    {
+      "export": "./testing",
+      "source": "src/testing/index.ts"
+    },
+    {
+      "export": "./reactivity",
+      "source": "src/unstable/reactivity/index.ts"
+    },
+    {
+      "export": "./cluster",
+      "source": "src/unstable/cluster/index.ts"
+    }
+  ],
+  "modules": [
+    {
+      "export": "./Machine",
+      "source": "src/Machine.ts",
+      "barrel": ".",
+      "examples": [
+        "after",
+        "decodeSnapshot",
+        "defineStates",
+        "effect",
+        "encodeSnapshot",
+        "event",
+        "invoke",
+        "invokeEffect",
+        "make",
+        "plan",
+        "planInitial",
+        "resume",
+        "start",
+        "transition"
+      ]
+    },
+    {
+      "export": "./testing/MachineTest",
+      "source": "src/testing/MachineTest.ts",
+      "barrel": "./testing",
+      "examples": [
+        "coverage",
+        "explore",
+        "invariants",
+        "probe",
+        "run",
+        "scenarios",
+        "verify"
+      ]
+    },
+    {
+      "export": "./unstable/reactivity/AtomMachine",
+      "source": "src/unstable/reactivity/AtomMachine.ts",
+      "barrel": "./reactivity",
+      "examples": ["make", "matches", "select", "selectChild"]
+    },
+    {
+      "export": "./unstable/cluster/ClusterMachine",
+      "source": "src/unstable/cluster/ClusterMachine.ts",
+      "barrel": "./cluster",
+      "examples": ["make"]
+    }
+  ]
+}

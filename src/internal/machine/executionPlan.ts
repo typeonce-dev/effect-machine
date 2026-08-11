@@ -1,7 +1,7 @@
 /**
  * Internal compiled machine execution plans.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import type { Machine } from "../../Machine.js"

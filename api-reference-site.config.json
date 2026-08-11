@@ -1,0 +1,7 @@
+{
+  "input": ".data/api-reference/v4",
+  "output": ".data/api-reference-site/v4",
+  "basePath": "/",
+  "title": "Effect Machine",
+  "description": "API reference for Effect Machine"
+}
