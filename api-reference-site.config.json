@@ -2,6 +2,12 @@
   "input": ".data/api-reference/v4",
   "output": ".data/api-reference-site/v4",
   "basePath": "/",
+  "origin": "https://effect-machine.typeonce.dev",
   "title": "Effect Machine",
-  "description": "API reference for Effect Machine"
+  "description": "Schema-first state machines and statecharts for Effect",
+  "themeColor": {
+    "light": "#fbfbfd",
+    "dark": "#111115"
+  },
+  "socialImage": "social-card.png"
 }

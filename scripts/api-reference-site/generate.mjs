@@ -1,4 +1,5 @@
 import {
+  cpSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -101,9 +102,15 @@ const writeSite = (outputDirectory, site) => {
   for (const asset of ["styles.css", "client.js"]) {
     copyFileSync(join(scriptDirectory, "assets", asset), join(assetDirectory, asset))
   }
+  for (const entry of readdirSync(join(scriptDirectory, "public"))) {
+    cpSync(join(scriptDirectory, "public", entry), join(outputDirectory, entry), { recursive: true })
+  }
+  writeJson(join(outputDirectory, "site.webmanifest"), siteManifest(site))
+  writeFileSync(join(outputDirectory, "robots.txt"), renderRobots(site))
+  writeFileSync(join(outputDirectory, "sitemap.xml"), renderSitemap(site))
 }
 
-const renderIndexPage = (site) => {
+export const renderIndexPage = (site) => {
   const moduleCards = site.modules.map((module) => `
     <a class="module-card" href="${siteUrl(site, module.route)}">
       <span class="module-card__path">${escapeHtml(displayExport(module.export))}</span>
@@ -113,7 +120,7 @@ const renderIndexPage = (site) => {
     </a>`).join("")
   const content = `
     <section class="reference-hero" data-pagefind-meta="type:overview">
-      <div class="eyebrow">${escapeHtml(site.channel)} API reference</div>
+      <div class="eyebrow">API reference</div>
       <h1>${escapeHtml(site.package.name)}</h1>
       <p>${escapeHtml(site.package.description)}</p>
       <div class="hero-meta">
@@ -233,15 +240,39 @@ const renderDeclaration = (declaration, id) => {
     </article>`
 }
 
-const renderLayout = (site, { content, currentRoute, description, pageKind, title, toc = "" }) => `<!doctype html>
+export const renderLayout = (site, { content, currentRoute, description, pageKind, title, toc = "" }) => {
+  const pageDescription = description ?? site.description
+  const canonical = canonicalUrl(site, currentRoute)
+  const socialImage = absoluteSiteUrl(site, site.socialImage)
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="${escapeAttribute(description ?? site.description)}">
+    <meta name="description" content="${escapeAttribute(pageDescription)}">
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="${escapeAttribute(site.themeColor.light)}">
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="${escapeAttribute(site.themeColor.dark)}">
     <meta name="api-reference-base" content="${escapeAttribute(site.basePath)}">
     <meta name="generator" content="effect-machine-api-reference-site">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="${escapeAttribute(site.title)}">
+    <meta property="og:title" content="${escapeAttribute(title)}">
+    <meta property="og:description" content="${escapeAttribute(pageDescription)}">
+    <meta property="og:url" content="${escapeAttribute(canonical)}">
+    <meta property="og:image" content="${escapeAttribute(socialImage)}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="${escapeAttribute(`${site.package.name} API reference`)}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="${escapeAttribute(title)}">
+    <meta name="twitter:description" content="${escapeAttribute(pageDescription)}">
+    <meta name="twitter:image" content="${escapeAttribute(socialImage)}">
     <title>${escapeHtml(title)}</title>
+    <link rel="canonical" href="${escapeAttribute(canonical)}">
+    <link rel="icon" href="${siteUrl(site, "favicon.svg")}" type="image/svg+xml">
+    <link rel="icon" href="${siteUrl(site, "favicon.ico")}" sizes="any">
+    <link rel="apple-touch-icon" href="${siteUrl(site, "apple-touch-icon.png")}">
+    <link rel="manifest" href="${siteUrl(site, "site.webmanifest")}">
     <script>document.documentElement.dataset.theme=localStorage.getItem("api-theme")||"auto"</script>
     <link rel="stylesheet" href="${siteUrl(site, "assets/styles.css")}">
     <script type="module" src="${siteUrl(site, "assets/client.js")}"></script>
@@ -261,6 +292,7 @@ const renderLayout = (site, { content, currentRoute, description, pageKind, titl
   </body>
 </html>
 `
+}
 
 const renderHeader = (site) => `
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -268,6 +300,7 @@ const renderHeader = (site) => `
     <div class="site-header__brand">
       <button class="icon-button mobile-navigation-button" type="button" aria-label="Open navigation" aria-controls="module-navigation" aria-expanded="false">Menu</button>
       <a href="${siteUrl(site, "")}" aria-label="${escapeAttribute(site.package.name)} API reference home">
+        <img class="brand-mark" src="${siteUrl(site, "logo.svg")}" alt="" width="28" height="28">
         <span class="brand-name">${escapeHtml(site.package.name)}</span>
       </a>
       <span class="version">v${escapeHtml(site.package.version.replace(/^v/, ""))}</span>
@@ -433,6 +466,39 @@ export const uniqueDeclarationIds = (groups) => {
 }
 
 const siteUrl = (site, path) => `${site.basePath}${path}`.replace(/\/{2,}/g, "/")
+const absoluteSiteUrl = (site, path) => new URL(siteUrl(site, path), `${site.origin}/`).href
+const canonicalUrl = (site, route) => absoluteSiteUrl(site, route === "" ? "" : `${route}/`)
+
+export const siteManifest = (site) => ({
+  name: `${site.package.name} API reference`,
+  short_name: "effect-machine",
+  description: site.description,
+  id: site.basePath,
+  start_url: site.basePath,
+  scope: site.basePath,
+  display: "standalone",
+  background_color: site.themeColor.light,
+  theme_color: site.themeColor.light,
+  icons: [
+    { src: siteUrl(site, "icon-192.png"), sizes: "192x192", type: "image/png" },
+    { src: siteUrl(site, "icon-512.png"), sizes: "512x512", type: "image/png" },
+    { src: siteUrl(site, "icon-maskable-512.png"), sizes: "512x512", type: "image/png", purpose: "maskable" }
+  ]
+})
+
+export const renderRobots = (site) => `User-agent: *
+Allow: ${site.basePath}
+
+Sitemap: ${absoluteSiteUrl(site, "sitemap.xml")}
+`
+
+export const renderSitemap = (site) => `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${["", ...site.modules.map((module) => `${module.route}/`)]
+    .map((route) => `  <url><loc>${escapeXml(absoluteSiteUrl(site, route))}</loc></url>`)
+    .join("\n")}
+</urlset>
+`
 const displayExport = (value) => value === "." ? "root" : value.replace(/^\.\//, "")
 const titleCase = (value) => value.replace(/(^|\s)(\p{L})/gu, (_, space, letter) => `${space}${letter.toUpperCase()}`)
 const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "api"
@@ -447,10 +513,39 @@ const readConfig = (path) => {
   if (typeof config.title !== "string" || typeof config.description !== "string") {
     throw new Error("API reference site title and description must be configured")
   }
+  if (
+    typeof config.origin !== "string" ||
+    typeof config.socialImage !== "string" ||
+    typeof config.themeColor?.light !== "string" ||
+    typeof config.themeColor?.dark !== "string"
+  ) {
+    throw new Error("API reference site origin, social image, and theme colors must be configured")
+  }
   return {
     ...config,
+    origin: normalizeOrigin(config.origin),
     basePath: normalizeBasePath(process.env.API_REFERENCE_BASE_PATH ?? config.basePath)
   }
+}
+
+export const normalizeOrigin = (value) => {
+  let url
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error("API reference site origin must be an absolute URL")
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error("API reference site origin must be an HTTPS origin without a path")
+  }
+  return url.origin
 }
 
 export const normalizeBasePath = (value) => {
@@ -489,6 +584,17 @@ const validateSite = (outputDirectory, site) => {
     "index.html",
     "assets/styles.css",
     "assets/client.js",
+    "apple-touch-icon.png",
+    "favicon.ico",
+    "favicon.svg",
+    "icon-192.png",
+    "icon-512.png",
+    "icon-maskable-512.png",
+    "logo.svg",
+    "robots.txt",
+    "site.webmanifest",
+    "sitemap.xml",
+    site.socialImage,
     ...site.modules.map((module) => join(module.route, "index.html"))
   ]) {
     if (!isFile(safeResolve(outputDirectory, path))) throw new Error(`Missing generated site file: ${path}`)
@@ -510,6 +616,7 @@ const writePage = (path, html) => {
   writeFileSync(path, html)
 }
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"))
+const writeJson = (path, value) => writeFileSync(path, `${JSON.stringify(value, undefined, 2)}\n`)
 const isFile = (path) => statSync(path, { throwIfNoEntry: false })?.isFile() === true
 const escapeHtml = (value) => String(value)
   .replaceAll("&", "&amp;")
@@ -518,6 +625,7 @@ const escapeHtml = (value) => String(value)
   .replaceAll('"', "&quot;")
   .replaceAll("'", "&#39;")
 const escapeAttribute = escapeHtml
+const escapeXml = escapeHtml
 
 const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 if (isMain) {

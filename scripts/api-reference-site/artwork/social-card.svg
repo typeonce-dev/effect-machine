@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(255 315) rotate(18) scale(420 390)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6555e8" stop-opacity=".28" />
+      <stop offset="1" stop-color="#6555e8" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="line" x1="64" y1="64" x2="1136" y2="566" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9a8cff" />
+      <stop offset="1" stop-color="#6555e8" stop-opacity=".1" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#111115" />
+  <rect x="32" y="32" width="1136" height="566" rx="32" fill="none" stroke="url(#line)" />
+  <rect width="1200" height="630" fill="url(#glow)" />
+  <g transform="translate(92 164) scale(2.7)">
+    <g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
+      <path d="M22.2 43.7a36 36 0 0 1 67.6 0" />
+      <path d="M89.8 68.3a36 36 0 0 1-67.6 0" />
+      <g transform="rotate(90 56 56)">
+        <path d="M34.4 48.1a23 23 0 0 1 43.2 0" />
+        <path d="M77.6 63.9a23 23 0 0 1-43.2 0" />
+      </g>
+    </g>
+    <circle cx="56" cy="56" r="11" fill="#fff" />
+  </g>
+  <text x="448" y="225" fill="#9a8cff" font-family="Arial, Helvetica, sans-serif" font-size="24" font-weight="700" letter-spacing="3">API REFERENCE</text>
+  <text x="448" y="304" fill="#f1f1f4" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="700">@typeonce/effect-machine</text>
+  <text x="448" y="366" fill="#c7c7d0" font-family="Arial, Helvetica, sans-serif" font-size="27">Schema-first state machines</text>
+  <text x="448" y="404" fill="#c7c7d0" font-family="Arial, Helvetica, sans-serif" font-size="27">and statecharts for Effect</text>
+  <text x="448" y="510" fill="#777784" font-family="Menlo, Monaco, monospace" font-size="19">effect-machine.typeonce.dev</text>
+</svg>

@@ -151,6 +151,23 @@ button {
   gap: 0.65rem;
 }
 
+.brand-mark {
+  display: block;
+  filter: invert(1);
+  height: 1.55rem;
+  width: 1.55rem;
+}
+
+:root[data-theme="dark"] .brand-mark {
+  filter: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] .brand-mark {
+    filter: none;
+  }
+}
+
 .brand-name {
   font-size: 0.95rem;
   font-weight: 700;
