@@ -1,7 +1,7 @@
 /**
  * Runs Effect machines as persisted Cluster entities.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -32,7 +32,7 @@ export declare namespace CommitResult {
    * Indicates that the request id and checkpoint were committed atomically.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Committed {
     readonly _tag: "Committed"
@@ -42,7 +42,7 @@ export declare namespace CommitResult {
    * Indicates that the request id was already committed.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Duplicate {
     readonly _tag: "Duplicate"

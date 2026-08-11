@@ -1,7 +1,7 @@
 /**
  * Atom bridge for running machines.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Data from "effect/Data"

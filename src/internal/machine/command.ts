@@ -1,7 +1,7 @@
 /**
  * Internal machine command collection.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import type { Command, Enqueue, Machine } from "../../Machine.js"

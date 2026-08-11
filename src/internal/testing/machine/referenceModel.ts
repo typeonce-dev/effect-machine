@@ -25,7 +25,7 @@ import type {
  * The deterministic value assigned to one active finite-model state.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceStateValue {
   readonly _tag: string
@@ -36,7 +36,7 @@ export interface ReferenceStateValue {
  * One output retained for an actively completed state.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceCompletion {
   readonly path: string
@@ -47,7 +47,7 @@ export interface ReferenceCompletion {
  * One independently captured shallow or deep history register.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceHistoryRecord {
   readonly mode: "shallow" | "deep"
@@ -59,7 +59,7 @@ export interface ReferenceHistoryRecord {
  * An independently interpreted finite-model configuration.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceState {
   /** Active ancestors and leaf in state-definition order. */
@@ -78,7 +78,7 @@ export interface ReferenceState {
  * One transition retained by the independent reference step.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceTransition {
   readonly source: string
@@ -96,7 +96,7 @@ export interface ReferenceTransition {
  * The independently calculated planner microstep for one selected event.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceMicrostep {
   readonly next: ReferenceState
@@ -111,7 +111,7 @@ export interface ReferenceMicrostep {
  * Startup semantics calculated without executing the real machine.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceInitialStep {
   readonly startingState: ReferenceState
@@ -126,7 +126,7 @@ export interface ReferenceInitialStep {
  * One public event interpreted against a reference configuration.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceStep {
   readonly index: number
@@ -142,7 +142,7 @@ export interface ReferenceStep {
  * A complete, pure interpretation of a finite model and event sequence.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ReferenceTrace {
   readonly events: ReadonlyArray<string>
@@ -155,7 +155,7 @@ export interface ReferenceTrace {
  * Location of one planner/reference disagreement.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ModelVerificationLocation {
   readonly phase: "initial" | "event" | "final"
@@ -177,7 +177,7 @@ type ModelStateField =
  * Stable semantic observation compared by the finite-model oracle.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ModelVerificationField =
   | `${ModelStateField}.${"activePaths" | "values" | "completions" | "history"}`
@@ -208,7 +208,7 @@ export type ModelVerificationField =
  * One structured semantic disagreement with the independent interpreter.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ModelVerificationMismatch {
   readonly location: ModelVerificationLocation
@@ -223,7 +223,7 @@ export interface ModelVerificationMismatch {
  * All semantic disagreements found for one finite-model trace.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class ModelVerificationError extends Data.TaggedError("MachineTestModelVerificationError")<{
   readonly mismatches: ReadonlyArray<ModelVerificationMismatch>
@@ -1206,7 +1206,7 @@ const stepModel = (
  * executing a `Machine`.
  *
  * @category verification
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const interpretModel = (
   model: FiniteModel,

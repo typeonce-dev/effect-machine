@@ -170,7 +170,7 @@ const renderModulePage = (site, module) => {
         </div>
         ${renderMarkdown(module.api.description)}
         <div class="module-meta">
-          ${module.api.since === undefined ? "" : `<span>Since ${escapeHtml(module.api.since)}</span>`}
+          ${module.api.since === undefined ? "" : `<span>Since v${escapeHtml(module.api.since)}</span>`}
           <span>${module.api.declarationCount} declarations</span>
           <code>${escapeHtml(module.export)}</code>
         </div>
@@ -229,7 +229,7 @@ const renderDeclaration = (declaration, id) => {
           <strong>See also</strong>
           <ul>${see.map((entry) => `<li>${renderInlineMarkdown(entry)}</li>`).join("")}</ul>
         </div>`}
-      ${declaration.since === undefined ? "" : `<div class="since">Since ${escapeHtml(declaration.since)}</div>`}
+      ${declaration.since === undefined ? "" : `<div class="since">Since v${escapeHtml(declaration.since)}</div>`}
     </article>`
 }
 

@@ -1,7 +1,7 @@
 /**
  * Serializable structural metadata for state-owned machine activities.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 /** @internal */

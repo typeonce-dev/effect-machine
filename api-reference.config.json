@@ -24,22 +24,49 @@
     {
       "export": "./Machine",
       "source": "src/Machine.ts",
-      "barrel": "."
+      "barrel": ".",
+      "examples": [
+        "after",
+        "decodeSnapshot",
+        "defineStates",
+        "effect",
+        "encodeSnapshot",
+        "event",
+        "invoke",
+        "invokeEffect",
+        "make",
+        "plan",
+        "planInitial",
+        "resume",
+        "start",
+        "transition"
+      ]
     },
     {
       "export": "./testing/MachineTest",
       "source": "src/testing/MachineTest.ts",
-      "barrel": "./testing"
+      "barrel": "./testing",
+      "examples": [
+        "coverage",
+        "explore",
+        "invariants",
+        "probe",
+        "run",
+        "scenarios",
+        "verify"
+      ]
     },
     {
       "export": "./unstable/reactivity/AtomMachine",
       "source": "src/unstable/reactivity/AtomMachine.ts",
-      "barrel": "./reactivity"
+      "barrel": "./reactivity",
+      "examples": ["make", "matches", "select", "selectChild"]
     },
     {
       "export": "./unstable/cluster/ClusterMachine",
       "source": "src/unstable/cluster/ClusterMachine.ts",
-      "barrel": "./cluster"
+      "barrel": "./cluster",
+      "examples": ["make"]
     }
   ]
 }

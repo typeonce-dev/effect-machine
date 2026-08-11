@@ -20,7 +20,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Application } from "typedoc"
 import { attachLeadingModuleComment } from "./module-comment.mjs"
-import { normalizeApiModule } from "./normalize.mjs"
+import { normalizeApiModule, validateApiDocumentation } from "./normalize.mjs"
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const repositoryDirectory = resolve(scriptDirectory, "../..")
@@ -116,6 +116,7 @@ const generateDataset = async (config, outputDirectory) => {
 
     const reflection = readJson(jsonPath)
     const normalized = normalizeApiModule(reflection)
+    validateApiDocumentation(module.export, normalized, module.examples)
     if (
       normalized.name.length === 0 ||
       normalized.description === undefined ||
@@ -194,7 +195,7 @@ export const validateDataset = (outputDirectory) => {
       if (reflection.schemaVersion !== "2.0" || reflection.variant !== "project") {
         throw new Error(`Invalid TypeDoc reflection: ${reflectionPath}`)
       }
-      normalizeApiModule(reflection)
+      validateApiDocumentation(module.export, normalizeApiModule(reflection))
     }
   }
   return dataset
@@ -209,6 +210,9 @@ const readConfig = (path) => {
   if (!Array.isArray(config.barrels) || !Array.isArray(config.modules) || config.modules.length === 0) {
     throw new Error("API reference barrels and at least one module must be configured")
   }
+  if (config.modules.some((module) => module.examples !== undefined && !Array.isArray(module.examples))) {
+    throw new Error("API reference module examples must be an array")
+  }
   return config
 }
 
@@ -218,7 +222,8 @@ const resolveEntry = (packageDirectory, entry) => {
   return {
     ...entry,
     source,
-    outputPath: exportPathToOutputPath(entry.export)
+    outputPath: exportPathToOutputPath(entry.export),
+    examples: entry.examples ?? []
   }
 }
 

@@ -2,18 +2,18 @@ import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { ReflectionKind } from "typedoc"
 import { splitJsDocComment } from "./module-comment.mjs"
-import { normalizeApiModule } from "./normalize.mjs"
+import { normalizeApiModule, validateApiDocumentation } from "./normalize.mjs"
 
 test("parses an Effect-style leading module comment", () => {
   assert.deepEqual(
     splitJsDocComment(`
  * Schema-first machine definitions.
  *
- * @since 4.0.0
+ * @since 0.4.0
  `),
     {
       summary: "Schema-first machine definitions.",
-      tags: [{ tag: "@since", content: "4.0.0" }]
+      tags: [{ tag: "@since", content: "0.4.0" }]
     }
   )
 })
@@ -26,10 +26,10 @@ test("keeps tags inside code fences as example source", () => {
  * const value = "@since is code"
  * \`\`\`
  *
- * @since 4.0.0
+ * @since 0.4.0
  `)
   assert.match(parsed.summary, /@since is code/)
-  assert.deepEqual(parsed.tags, [{ tag: "@since", content: "4.0.0" }])
+  assert.deepEqual(parsed.tags, [{ tag: "@since", content: "0.4.0" }])
 })
 
 test("normalizes categories, signatures, examples, tags, and source links", () => {
@@ -100,4 +100,12 @@ test("normalizes categories, signatures, examples, tags, and source links", () =
   assert.equal(normalized.groups[0].declarations[0].examples[0].title, "Creating a machine")
   assert.deepEqual(normalized.groups[0].declarations[0].see, ["Machine"])
   assert.equal(normalized.sourceUrl, "https://example.com/Machine.ts#L1")
+  assert.doesNotThrow(() => validateApiDocumentation("./Machine", normalized, ["make"]))
+
+  const incomplete = structuredClone(normalized)
+  incomplete.groups[0].declarations[0].examples = []
+  assert.throws(
+    () => validateApiDocumentation("./Machine", incomplete, ["make"]),
+    /make: missing example/
+  )
 })

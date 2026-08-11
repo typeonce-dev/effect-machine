@@ -28,6 +28,40 @@ export const normalizeApiModule = (reflection) => {
   }
 }
 
+/**
+ * Enforces the documentation contract for declarations rendered by the static
+ * reference. Example requirements stay explicit because not every public type
+ * or low-level utility benefits from an example.
+ */
+export const validateApiDocumentation = (moduleExport, api, requiredExamples = []) => {
+  const declarations = api.groups.flatMap((group) => group.declarations)
+  const violations = []
+
+  for (const declaration of declarations) {
+    if (declaration.description === undefined) violations.push(`${declaration.name}: missing summary`)
+    if (declaration.category === "Other") violations.push(`${declaration.name}: missing @category`)
+    if (declaration.since === undefined) {
+      violations.push(`${declaration.name}: missing @since`)
+    } else if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(declaration.since)) {
+      violations.push(`${declaration.name}: invalid @since ${JSON.stringify(declaration.since)}`)
+    }
+  }
+
+  const declarationsByName = new Map(declarations.map((declaration) => [declaration.name, declaration]))
+  for (const name of requiredExamples) {
+    const declaration = declarationsByName.get(name)
+    if (declaration === undefined) {
+      violations.push(`${name}: configured example requirement does not match a declaration`)
+    } else if (declaration.examples.length === 0) {
+      violations.push(`${name}: missing example`)
+    }
+  }
+
+  if (violations.length > 0) {
+    throw new Error(`Incomplete API documentation for ${moduleExport}:\n- ${violations.join("\n- ")}`)
+  }
+}
+
 const groupBy = (values, keyOf) => {
   const groups = new Map()
   for (const value of values) {

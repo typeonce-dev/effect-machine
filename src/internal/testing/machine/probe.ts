@@ -1,7 +1,7 @@
 /**
  * Causal testing access to a running statechart.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Data from "effect/Data"
@@ -16,7 +16,7 @@ type AnyMachine = Machine.Machine.Any
  * Raised when a reference was not created by the managed statechart runtime.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export class ProbeUnavailableError extends Data.TaggedError("MachineTestProbeUnavailableError")<{
   readonly message: string

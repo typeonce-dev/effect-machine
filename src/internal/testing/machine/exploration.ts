@@ -1,7 +1,7 @@
 /**
  * Bounded breadth-first exploration over concrete planner events.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Data from "effect/Data"

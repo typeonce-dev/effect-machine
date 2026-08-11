@@ -1,7 +1,7 @@
 /**
  * Property-based testing and planner trace utilities.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 export * as MachineTest from "./MachineTest.js"

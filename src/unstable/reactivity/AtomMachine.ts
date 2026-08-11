@@ -1,7 +1,7 @@
 /**
  * Atom bridge for running machines.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import type * as Option from "effect/Option"
@@ -17,7 +17,7 @@ import type * as Machine from "../../Machine.js"
  * Error returned when a machine command is issued before startup completes.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { NotReadyError } from "../../internal/machine/atom.js"
 
@@ -25,7 +25,7 @@ export { NotReadyError } from "../../internal/machine/atom.js"
  * Error returned when a command targets a child machine that is not active.
  *
  * @category errors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { ChildNotActiveError } from "../../internal/machine/atom.js"
 
@@ -87,13 +87,13 @@ type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
  * same atom values share one running machine per registry.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface MachineAtom<State, Event, Error = never, Output = never, StartError = never> {
   /**
    * Atom containing the running machine handle once startup succeeds.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly ref: Atom.Atom<
     AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output>, StartError>
@@ -102,7 +102,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   /**
    * Atom containing the latest machine lifecycle snapshot.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly snapshot: Atom.Atom<
     AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError>
@@ -115,7 +115,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * runtime snapshot reports a terminal error. Use `result` when runtime
    * failures must be represented in the atom failure channel.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly state: Atom.Atom<AsyncResult.AsyncResult<State, StartError>>
 
@@ -123,7 +123,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * Atom containing the current state, with startup and runtime failures in
    * one typed failure channel.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly result: Atom.Atom<AsyncResult.AsyncResult<State, StartError | Error>>
 
@@ -131,7 +131,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * Writable atom that sends events to the machine. Writes before startup
    * completes fail with `NotReadyError`.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly send: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | Machine.StoppedError>,
@@ -142,7 +142,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * Writable atom that stops the machine. Writes before startup completes fail
    * with `NotReadyError`.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly stop: Atom.Writable<AsyncResult.AsyncResult<void, StartError | NotReadyError>, void>
 
@@ -151,7 +151,7 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
    * Reusing the same descriptor returns the same live bridge while it remains
    * referenced.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly child: <Child extends Machine.ChildMachine.Any>(
     child: Child
@@ -179,13 +179,13 @@ type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output
  * machine invoked by the selected child.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartError = unknown> {
   /**
    * Atom containing the current child reference when the child is active.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly ref: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>
@@ -194,7 +194,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   /**
    * Atom containing the current child lifecycle snapshot when active.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly snapshot: Atom.Atom<
     AsyncResult.AsyncResult<
@@ -214,7 +214,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    * Runtime failures retain the last successful state. Use `result` when they
    * must be represented in the atom failure channel.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly state: Atom.Atom<
     AsyncResult.AsyncResult<Option.Option<RefState<Machine.ChildMachine.Ref<Child>>>, StartError>
@@ -223,7 +223,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    * Atom containing the current child state when active, with startup and
    * runtime failures in one typed failure channel.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly result: Atom.Atom<
     AsyncResult.AsyncResult<
@@ -236,7 +236,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    *
    * Writes fail with `ChildNotActiveError` while the child is inactive.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly send: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError | Machine.StoppedError>,
@@ -247,7 +247,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    *
    * Writes fail with `ChildNotActiveError` while the child is inactive.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly stop: Atom.Writable<
     AsyncResult.AsyncResult<void, StartError | NotReadyError | ChildNotActiveError>,
@@ -257,7 +257,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
    * Creates a reactive bridge for a directly owned nested child. Reusing the
    * same descriptor returns the same live bridge while it remains referenced.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly child: <Nested extends Machine.ChildMachine.Any>(
     child: Nested
@@ -273,7 +273,7 @@ type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, i
  * descriptor.
  *
  * @category utility types
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type ChildOf<
   Parent extends MachineAtom<any, any, any, any, any> | ChildMachineAtom<any, any>,
@@ -307,12 +307,26 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
  * **Example**
  *
  * ```ts
- * const readyAtom = AtomMachine.select(machineAtom, "Ready")
- * // Atom<AsyncResult<Option<Ready>, StartError | RuntimeError>>
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ *
+ * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
+ *   value: Schema.Number
+ * }) {}
+ * const States = Machine.defineStates({ Count })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Count(new Count({ value: 0 }))
+ * }).handle({ Count: {} })
+ * const machineAtom = AtomMachine.make(machine)
+ *
+ * const countAtom = AtomMachine.select(machineAtom, "Count")
  * ```
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const select: <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
@@ -340,7 +354,7 @@ export const select: <
  * ```
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const selectChild: <
   Child extends Machine.ChildMachine.Any,
@@ -360,8 +374,27 @@ export const selectChild: <
  * The derived atom suppresses equal updates. Runtime failures remain in the
  * typed failure channel.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ * const machineAtom = AtomMachine.make(machine)
+ *
+ * const isIdleAtom = AtomMachine.matches(machineAtom, "Idle")
+ * ```
+ *
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const matches: <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
@@ -383,7 +416,7 @@ export const matches: <
  * constructing it inside a component.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const matchesChild: <
   Child extends Machine.ChildMachine.Any,
@@ -474,7 +507,7 @@ type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = Machine
  * An `AtomMachine` factory with one owned Effect runtime.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Bound<Services, RuntimeError = never> {
   /**
@@ -483,7 +516,7 @@ export interface Bound<Services, RuntimeError = never> {
    * The machine's external service requirements must be provided by the
    * runtime. Machine-native runtime requirements are supplied automatically.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly make: <M extends Machine.Machine.Any>(
     machine:
@@ -509,8 +542,26 @@ export interface Bound<Services, RuntimeError = never> {
  * Use `bind(runtime).make(machine)` when the machine requires external
  * services.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const machineAtom = AtomMachine.make(machine)
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const make: {
   <
@@ -571,7 +622,7 @@ export const make: {
  * function and its input, errors, and services are not involved.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const resume: {
   <M extends Machine.Machine.Any>(
@@ -591,7 +642,7 @@ export const resume: {
  * while every call to `make` still creates an independent machine bridge.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const bind: <Services, RuntimeError>(
   runtime: Atom.AtomRuntime<Services, RuntimeError>

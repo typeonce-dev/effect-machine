@@ -1,7 +1,7 @@
 /**
  * Runs Effect machines as persisted Cluster entities.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
@@ -26,7 +26,7 @@ type Snowflake = Snowflake.Snowflake
  * checkpoint.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface Checkpoint {
   /** Stable identity of the machine definition that produced the snapshot. */
@@ -52,7 +52,7 @@ export interface Checkpoint {
  * redelivery even after later requests have advanced the checkpoint.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface LoadResult {
   /** Latest checkpoint for the entity, when one has been committed. */
@@ -66,7 +66,7 @@ export interface LoadResult {
  * Result of atomically committing a Cluster machine request.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
 
@@ -74,7 +74,7 @@ export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
  * Constructors and types for Cluster machine commit results.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const CommitResult = {
   Committed: (): CommitResult.Committed => ({ _tag: "Committed" }),
@@ -84,14 +84,15 @@ export const CommitResult = {
 /**
  * Types for Cluster machine commit results.
  *
- * @since 4.0.0
+ * @category models
+ * @since 0.4.0
  */
 export declare namespace CommitResult {
   /**
    * Indicates that the request id and checkpoint were committed atomically.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Committed {
     readonly _tag: "Committed"
@@ -101,7 +102,7 @@ export declare namespace CommitResult {
    * Indicates that the request id was already committed.
    *
    * @category models
-   * @since 4.0.0
+   * @since 0.4.0
    */
   export interface Duplicate {
     readonly _tag: "Duplicate"
@@ -126,7 +127,7 @@ export declare namespace CommitResult {
  * provide checkpoint-and-emission atomicity.
  *
  * @category services
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { Storage }
 
@@ -135,7 +136,7 @@ export { Storage }
  * recognized as a redelivery.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { Accepted }
 
@@ -144,7 +145,7 @@ export { Accepted }
  * advancing its checkpoint.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const RejectionReason = Schema.Literals([
   "MachineIdMismatch",
@@ -160,7 +161,7 @@ export const RejectionReason = Schema.Literals([
  * Type of {@link RejectionReason}.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export type RejectionReason = typeof RejectionReason.Type
 
@@ -169,7 +170,7 @@ export type RejectionReason = typeof RejectionReason.Type
  * leaves the previous checkpoint in place and suppresses emitted events.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export { Rejected }
 
@@ -177,7 +178,7 @@ export { Rejected }
  * Schema for Cluster machine request outcomes.
  *
  * @category schemas
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const SendResult = Schema.Union([Accepted, Rejected])
 
@@ -201,7 +202,7 @@ type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
  * the checkpoint at most once.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.4.0
  */
 export interface ClusterMachine<
   in out Type extends string,
@@ -225,7 +226,7 @@ export interface ClusterMachine<
    * is persisted after commit and recovered through request-id deduplication if
    * delivery is interrupted. Machines that never emit may omit `enqueue`.
    *
-   * @since 4.0.0
+   * @since 0.4.0
    */
   readonly toLayer: <R = never>(options?: {
     readonly enqueue?: (
@@ -267,7 +268,7 @@ type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extend
  * `MessageStorage` transaction marker.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const makeMemory: Effect.Effect<Storage["Service"]> = internal.makeMemory
 
@@ -275,7 +276,7 @@ export const makeMemory: Effect.Effect<Storage["Service"]> = internal.makeMemory
  * Layer providing the in-memory Cluster machine checkpoint store.
  *
  * @category layers
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
 
@@ -303,8 +304,26 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * Arbitrary action effects may run again after a crash before checkpoint
  * commit, so the bridge does not provide exactly-once external effects.
  *
+ * **Example**
+ *
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
+ *
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+ * const States = Machine.defineStates({ Idle })
+ * const machine = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   initial: () => States.initial.Idle.from()
+ * }).handle({ Idle: {} })
+ *
+ * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })
+ * ```
+ *
  * @category constructors
- * @since 4.0.0
+ * @since 0.4.0
  */
 export const make: <
   const Type extends string,

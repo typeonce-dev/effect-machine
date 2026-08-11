@@ -1,7 +1,7 @@
 /**
  * Planner trace construction shared by scenario runs and graph exploration.
  *
- * @since 4.0.0
+ * @since 0.4.0
  */
 
 import * as Effect from "effect/Effect"
