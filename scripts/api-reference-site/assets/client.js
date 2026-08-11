@@ -35,8 +35,16 @@ navigationButton?.addEventListener("click", () => setNavigationOpen(true))
 navigationClose?.addEventListener("click", () => setNavigationOpen(false))
 navigationBackdrop?.addEventListener("click", () => setNavigationOpen(false))
 
-let pagefind
+let pagefindPromise
 let searchSequence = 0
+
+const loadPagefind = () => {
+  pagefindPromise ??= import(`${basePath}pagefind/pagefind.js`).then(async (pagefind) => {
+    await pagefind.options({ baseUrl: basePath })
+    return pagefind
+  })
+  return pagefindPromise
+}
 
 const openSearch = () => {
   searchDialog?.showModal()
@@ -72,7 +80,7 @@ searchInput?.addEventListener("input", async () => {
   }
   searchStatus.textContent = "Searching…"
   try {
-    pagefind ??= await import(`${basePath}pagefind/pagefind.js`)
+    const pagefind = await loadPagefind()
     const search = await pagefind.search(query)
     const data = await Promise.all(search.results.slice(0, 12).map((result) => result.data()))
     if (sequence !== searchSequence) return

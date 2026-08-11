@@ -444,17 +444,24 @@ const readConfig = (path) => {
   if (typeof config.input !== "string" || typeof config.output !== "string") {
     throw new Error("API reference site input and output must be configured")
   }
-  if (
-    !config.basePath.startsWith("/") ||
-    !config.basePath.endsWith("/") ||
-    config.basePath.split("/").some((part) => part === "." || part === "..")
-  ) {
-    throw new Error("API reference site basePath must start and end with a slash")
-  }
   if (typeof config.title !== "string" || typeof config.description !== "string") {
     throw new Error("API reference site title and description must be configured")
   }
-  return config
+  return {
+    ...config,
+    basePath: normalizeBasePath(process.env.API_REFERENCE_BASE_PATH ?? config.basePath)
+  }
+}
+
+export const normalizeBasePath = (value) => {
+  if (typeof value !== "string" || (value.length > 0 && !value.startsWith("/"))) {
+    throw new Error("API reference site basePath must be empty or start with a slash")
+  }
+  const segments = value.split("/").filter(Boolean)
+  if (segments.some((part) => part === "." || part === ".." || !/^[a-z0-9._~-]+$/i.test(part))) {
+    throw new Error(`Invalid API reference site basePath: ${JSON.stringify(value)}`)
+  }
+  return segments.length === 0 ? "/" : `/${segments.join("/")}/`
 }
 
 const prepareOutputDirectory = (path) => {

@@ -1,6 +1,12 @@
 import { strict as assert } from "node:assert"
 import { test } from "node:test"
-import { highlightCode, moduleRoute, renderMarkdown, uniqueDeclarationIds } from "./generate.mjs"
+import {
+  highlightCode,
+  moduleRoute,
+  normalizeBasePath,
+  renderMarkdown,
+  uniqueDeclarationIds
+} from "./generate.mjs"
 
 test("derives stable module routes from JSON paths", () => {
   assert.equal(moduleRoute("Machine.json"), "Machine")
@@ -39,4 +45,13 @@ test("highlights TypeScript without changing its source text", () => {
     source
   )
   assert.doesNotMatch(highlightCode("<script>", "typescript"), /<script>/)
+})
+
+test("normalizes root, project, and custom-domain base paths", () => {
+  assert.equal(normalizeBasePath(""), "/")
+  assert.equal(normalizeBasePath("/"), "/")
+  assert.equal(normalizeBasePath("/effect-machine"), "/effect-machine/")
+  assert.equal(normalizeBasePath("/effect-machine/"), "/effect-machine/")
+  assert.throws(() => normalizeBasePath("effect-machine"), /start with a slash/)
+  assert.throws(() => normalizeBasePath("/../effect-machine"), /Invalid/)
 })

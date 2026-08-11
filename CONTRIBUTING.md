@@ -72,3 +72,9 @@ as part of `pnpm check`.
 `.data/api-reference-site/v4` and creates its Pagefind search index. Run
 `pnpm docs:site:serve` to preview the latest generated site locally. Site output
 is also generated data and is not committed.
+
+The release workflow calls the GitHub Pages workflow after Changesets publishes
+a package. The Pages workflow can also be run manually to deploy the current
+commit before a release without invoking the package-release job. Pages supplies
+`API_REFERENCE_BASE_PATH` during the build so project URLs and custom domains
+use the same generated site without configuration edits.
