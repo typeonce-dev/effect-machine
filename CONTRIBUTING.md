@@ -67,3 +67,8 @@ manifest, and one checksummed reflection JSON file per module configured in
 dataset in a temporary directory, validates its manifests and checksums, and
 ensures every reflection can be consumed by the site-facing normalizer. It runs
 as part of `pnpm check`.
+
+`pnpm docs:site` turns that dataset into a multi-page static website under
+`.data/api-reference-site/v4` and creates its Pagefind search index. Run
+`pnpm docs:site:serve` to preview the latest generated site locally. Site output
+is also generated data and is not committed.
