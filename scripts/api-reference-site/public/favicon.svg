@@ -1,15 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112">
-  <style>
-    .mark { stroke: #fff; }
-    .core { fill: #fff; }
-  </style>
-  <g class="mark" fill="none" stroke-width="7" stroke-linecap="round">
-    <path d="M22.2 43.7a36 36 0 0 1 67.6 0" />
-    <path d="M89.8 68.3a36 36 0 0 1-67.6 0" />
-    <g transform="rotate(90 56 56)">
-      <path d="M34.4 48.1a23 23 0 0 1 43.2 0" />
-      <path d="M77.6 63.9a23 23 0 0 1-43.2 0" />
-    </g>
-  </g>
-  <circle class="core" cx="56" cy="56" r="12" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 450" fill="none" stroke="currentColor" color="#fff">
+  <title>typeonce.dev</title>
+  <path d="M283.685 163C288.83 163 293 167.17 293 172.315V440C293 445.523 288.523 450 283 450H167C161.477 450 157 445.523 157 440L157 289.685C157 219.719 213.719 163 283.685 163Z" fill="currentColor" />
+  <path d="M227.958 114L114 114L114 228C114 165.054 165.017 114.023 227.958 114Z" fill="currentColor" />
+  <path d="M0 104.806C0 46.9234 46.9234 0 104.806 0H440.806C445.884 0 450 4.11609 450 9.19355C450 67.0766 403.077 114 345.194 114H9.19354C4.11608 114 0 109.884 0 104.806Z" fill="currentColor" />
+  <path d="M104 94C109.523 94 114 98.4772 114 104L114 233.806C114 238.884 109.884 243 104.806 243C46.9234 243 3.16749e-06 196.077 5.69763e-06 138.194L7.19228e-06 104C7.43369e-06 98.4772 4.47716 94 10 94L104 94Z" fill="currentColor" />
 </svg>
