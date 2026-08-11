@@ -55,3 +55,15 @@ understands imports, re-exports, and dynamic imports, and enforces:
 
 The checker has executable fixture tests and runs as part of `pnpm check`. Add
 new rules only with a failing fixture that demonstrates the boundary.
+
+## API reference data
+
+`pnpm docs:api` generates an Effect-compatible TypeDoc dataset under
+`.data/api-reference/v4`. The dataset contains a top-level manifest, a package
+manifest, and one checksummed reflection JSON file per module configured in
+`api-reference.config.json`. Generated data is not committed.
+
+`pnpm docs:api:check` runs the API reference unit tests, generates the complete
+dataset in a temporary directory, validates its manifests and checksums, and
+ensures every reflection can be consumed by the site-facing normalizer. It runs
+as part of `pnpm check`.

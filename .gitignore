@@ -1,6 +1,7 @@
 node_modules/
 dist/
 references/
+.data/
 *.tgz
 .DS_Store
 .pnpm-store
