@@ -1,5 +1,19 @@
 # @typeonce/effect-machine
 
+## 0.5.0
+
+### Minor Changes
+
+- f3e1e78: Add reusable runtime invariants, law-oriented causal command verification, and
+  an explicit planner/runtime agreement check. Causal probe microsteps now retain
+  stable public snapshots even when the optimized runtime reuses internal state.
+- 0dbb538: Add state, step, and trace invariants for checking application semantics over planner traces, including machine-inferred builders, conditional observation requirements, structured reports, and property-test assertions. Add bounded breadth-first exploration with state-dependent event representatives, shortest witnesses, explicit truncation frontiers, and fail-closed reachability assertions. Add testing-only runtime probes with acknowledged event delivery so tests can causally inspect ignored, targetless, changing, and failed live macrosteps without adding a production `sendAndAwait` API.
+- c01c7d2: Add explicitly named causal and enqueue-oriented runtime command runners. Causal command tests now retain an exact probe step for every processed send, support probe-bound asynchronous waits, attribute processing failures to the submitted command, and format replayable causal transcripts. Deprecate the ambiguous `runRuntimeCommands` and `formatRuntimeTranscript` names in favor of their explicit enqueue-oriented replacements.
+
+### Patch Changes
+
+- ea7c522: Add Effect-compatible TypeDoc API reference generation and a lightweight static reference website with module navigation, declaration pages, source links, responsive layouts, and local search. Document the public API with library-native version metadata and focused examples for the primary machine, persistence, testing, reactivity, and Cluster workflows.
+
 ## 0.4.0
 
 ### Minor Changes
