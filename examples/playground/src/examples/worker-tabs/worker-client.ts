@@ -9,6 +9,8 @@ export function createMachineWorker() {
   return {
     worker,
     send: (request: WorkerRequest) => worker.postMessage(request),
+    sendEvent: (event: Extract<WorkerRequest, { readonly _tag: "MachineEvent" }>["event"]) =>
+      worker.postMessage({ _tag: "MachineEvent", event } satisfies WorkerRequest),
     subscribe: (listener: (response: WorkerResponse) => void) => {
       const onMessage = (event: MessageEvent<WorkerResponse>) => listener(event.data)
       worker.addEventListener("message", onMessage)

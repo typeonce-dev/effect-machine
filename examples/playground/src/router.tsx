@@ -76,9 +76,9 @@ function HomePage() {
     <section className="home-page">
       <header className="hero">
         <p className="eyebrow">Examples playground</p>
-        <h1>Build one machine at a time.</h1>
+        <h1>Learn one machine at a time.</h1>
         <p className="lede">
-          Every route has an isolated machine file and a React component ready for your implementation.
+          Each route is a complete, focused implementation of one state-machine pattern.
         </p>
       </header>
       <div className="example-grid">
@@ -90,7 +90,7 @@ function HomePage() {
             <ul>
               {example.concepts.map((concept) => <li key={concept}>{concept}</li>)}
             </ul>
-            <span className="card-action">Open starter →</span>
+            <span className="card-action">Open example →</span>
           </Link>
         ))}
       </div>

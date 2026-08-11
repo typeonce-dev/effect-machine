@@ -39,22 +39,22 @@ const machine = Machine.make({
   states: States.states,
   events: [ReplaceInTeam],
   internalEvents: [TeamLoaded, TeamLoadFailed],
-  initial: () => States.initial.Loading(new Loading({}))
+  initial: () => States.initial.Loading.from()
 }).handle({
   Loading: {
     invoke: LoadTeam,
     on: {
-      TeamLoaded: ({ event, target }) => target.full.ActiveTeam(new ActiveTeam({ team: event.team })),
-      TeamLoadFailed: ({ target }) => target.full.Failed(new Failed({}))
+      TeamLoaded: ({ event, target }) => target.full.ActiveTeam.from({ team: event.team }),
+      TeamLoadFailed: ({ target }) => target.full.Failed.from()
     }
   },
   ActiveTeam: {
     invoke: [Machine.invokeMachine({ child: SelectionChild }), Machine.invokeMachine({ child: ReplaceChild })],
     on: {
       ReplaceInTeam: ({ event, target, state }) =>
-        target.full.ActiveTeam(
-          new ActiveTeam({ team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon)) })
-        )
+        target.full.ActiveTeam.from({
+          team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon))
+        })
     }
   },
   Failed: {}

@@ -1,55 +1,48 @@
-# Effect Machine examples playground
+# Effect Machine playground
 
-A React and Vite workspace with TanStack Router routes for implementing small
-`@typeonce/effect-machine` examples.
+Five complete React examples, ordered from a two-state machine to browser
+transport integration.
 
-## Run it
-
-From this directory:
+## Run
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Build and type-check with:
+Validate tests, types, and the production bundle with:
 
 ```sh
 pnpm check
 ```
 
-## Starters
+## Examples
 
-Each starter keeps its machine definition next to its route component:
+| Route            | Machine concept                                                  | Integration concept                                                     |
+| ---------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `/turnstile`     | Atomic states, typed commands, ignored events                    | Service-free `AtomMachine`                                              |
+| `/traffic-light` | Internal events, cancellable state-scoped timers, re-entry       | Reactive timer-driven rendering                                         |
+| `/microwave`     | Parallel regions, simultaneous transitions, conditional behavior | Safety-oriented controls                                                |
+| `/media-player`  | Nested compound/parallel states and state-scoped Effects         | Shared Atom runtime, DOM audio, Web Audio service                       |
+| `/worker-tabs`   | A machine hosted outside the UI thread                           | Schema-validated worker messages and `BroadcastChannel` synchronization |
 
-- `src/examples/turnstile`
-- `src/examples/traffic-light`
-- `src/examples/microwave`
-- `src/examples/media-player`
-- `src/examples/worker-tabs`
+Each route keeps its machine, adapter, and supporting protocol beside the page.
+The machines own legal behavior; components project snapshots and send typed
+public commands.
 
-The turnstile, traffic light, and microwave route components are intentionally
-light: their domain schemas, events, and state topology are ready, while the
-React-to-machine adapter is left for the exercise.
+## Notable boundaries
 
-The media player is a complete browser integration. `schemas.ts` owns its typed
-protocol, `service.ts` exposes the audio element and Web Audio graph as an
-Effect service, `invocations.ts` defines its state-scoped processes, and the
-React adapter registers the audio element through the shared service runtime
-before translating playback events into machine events. `view.ts` exhaustively
-projects the typed parallel snapshot into the React-facing view model. Its compound
-`Ready` state models the loaded playback lifecycle inside a parallel `Player`:
-the transport region owns loading, playback, buffering, and failures while the
-settings region independently owns `Audible` and `Muted`.
+- The traffic light exposes `Reset` publicly while timer deliveries stay in
+  `internalEvents`.
+- The microwave stores elapsed time only on `Cooking`, where it is valid.
+  `DoorOpened` is handled by both active parallel regions, opening the door and
+  stopping the engine in the same macrostep.
+- The media player keeps browser APIs behind an Effect service. Its invoked
+  work returns typed internal events to the deterministic transition core.
+- The worker validates unknown incoming messages with Effect Schema before
+  forwarding public events. Tabs replicate commands and exchange a typed
+  synchronization state when a tab joins.
 
-The workers route additionally contains:
-
-- `machine.worker.ts`: Vite's module-worker entry point and the place to start
-  the machine runtime.
-- `worker-client.ts`: typed worker construction, send, subscribe, and cleanup.
-- `tab-channel.ts`: a typed `BroadcastChannel` wrapper for cross-tab messages.
-- `protocol.ts`: worker and tab message boundaries.
-
-Vite discovers the worker because `worker-client.ts` constructs it with
-`new Worker(new URL("./machine.worker.ts", import.meta.url), { type: "module" })`.
-No extra Vite worker plugin is required.
+`src/examples/examples.test.ts` covers the smaller machines, including virtual
+clock advancement for `Machine.after`. The media player keeps focused model and
+property coverage in its own directory.
