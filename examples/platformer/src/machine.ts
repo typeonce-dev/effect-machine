@@ -138,16 +138,14 @@ export const CharacterStates = Machine.defineStates({
 })
 
 const initialCharacter = () =>
-  CharacterStates.initial.Character(State.cases.Character.make({}), (character) =>
+  CharacterStates.initial.Character.from((character) =>
     character
-      .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
-        locomotion.Playing(State.cases.Playing.make({}), (playing) =>
-          playing.Grounded(State.cases.Grounded.make({}), (grounded) =>
-            grounded.Standing(State.cases.Standing.make({})))))
-      .facing(State.cases.Facing.make({}), (facing) =>
-        facing.Right(State.cases.Right.make({})))
-      .contact(State.cases.WallContact.make({}), (contact) =>
-        contact.NoWall(State.cases.NoWall.make({}))))
+      .locomotion.from((locomotion) =>
+        locomotion.Playing.from((playing) => playing.Grounded.from((grounded) => grounded.Standing.from()))
+      )
+      .facing.from((facing) => facing.Right.from())
+      .contact.from((contact) => contact.NoWall.from())
+  )
 
 export const CharacterMachine = Machine.make({
   id: "PlatformerCharacter",
@@ -176,7 +174,7 @@ export const CharacterMachine = Machine.make({
               Pause: {
                 targets: ["Character.locomotion.Paused"],
                 transition: ({ event, target }) =>
-                  target.branch.Character.locomotion.Paused(State.cases.Paused.make({ pausedAt: event.at }))
+                  target.branch.Character.locomotion.Paused.from({ pausedAt: event.at })
               }
             },
             states: {
@@ -185,26 +183,27 @@ export const CharacterMachine = Machine.make({
                   JumpPressed: {
                     targets: ["Character"],
                     transition: ({ event, target }) =>
-                      target.full.Character(State.cases.Character.make({}), (character) =>
+                      target.full.Character.from((character) =>
                         character
-                          .locomotion(State.cases.Locomotion.make({}), (locomotion) =>
-                            locomotion.Playing(State.cases.Playing.make({}), (playing) =>
-                              playing.Airborne(State.cases.Airborne.make({ originY: event.y }), (airborne) =>
+                          .locomotion.from((locomotion) =>
+                            locomotion.Playing.from((playing) =>
+                              playing.Airborne.from({ originY: event.y }, (airborne) =>
                                 airborne
-                                  .motion(State.cases.Motion.make({}), (motion) =>
-                                    motion.Jumping(
-                                      State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Ground" })
-                                    ))
-                                  .airJump(State.cases.AirJump.make({}), (airJump) =>
-                                    airJump.AirJumpGroundLock(State.cases.AirJumpGroundLock.make({}))))))
-                          .facing(State.cases.Facing.make({}), (facing) =>
-                            facing.Right(State.cases.Right.make({})))
-                          .contact(State.cases.WallContact.make({}), (contact) =>
+                                  .motion.from((motion) =>
+                                    motion.Jumping.from({ startedAt: event.at, push: 0, kind: "Ground" })
+                                  )
+                                  .airJump.from((airJump) => airJump.AirJumpGroundLock.from()))
+                            )
+                          )
+                          .facing.from((facing) => facing.Right.from())
+                          .contact.from((contact) =>
                             event.wall === -1
-                              ? contact.LeftWall(State.cases.LeftWall.make({}))
+                              ? contact.LeftWall.from()
                               : event.wall === 1
-                              ? contact.RightWall(State.cases.RightWall.make({}))
-                              : contact.NoWall(State.cases.NoWall.make({}))))
+                              ? contact.RightWall.from()
+                              : contact.NoWall.from()
+                          )
+                      )
                   }
                 },
                 states: {
@@ -215,12 +214,11 @@ export const CharacterMachine = Machine.make({
                         transition: ({ event, target }) =>
                           event.axis === 0
                             ? undefined
-                            : target.local.Running(State.cases.Running.make({ startedAt: event.at }))
+                            : target.local.Running.from({ startedAt: event.at })
                       },
                       DownPressed: {
                         targets: ["Character.locomotion.Playing.Grounded.Ducking"],
-                        transition: ({ event, target }) =>
-                          target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                        transition: ({ event, target }) => target.local.Ducking.from({ startedAt: event.at })
                       }
                     }
                   },
@@ -228,13 +226,11 @@ export const CharacterMachine = Machine.make({
                     on: {
                       Move: {
                         targets: ["Character.locomotion.Playing.Grounded.Standing"],
-                        transition: ({ event, target }) =>
-                          event.axis === 0 ? target.local.Standing(State.cases.Standing.make({})) : undefined
+                        transition: ({ event, target }) => event.axis === 0 ? target.local.Standing.from() : undefined
                       },
                       DownPressed: {
                         targets: ["Character.locomotion.Playing.Grounded.Ducking"],
-                        transition: ({ event, target }) =>
-                          target.local.Ducking(State.cases.Ducking.make({ startedAt: event.at }))
+                        transition: ({ event, target }) => target.local.Ducking.from({ startedAt: event.at })
                       }
                     }
                   },
@@ -247,8 +243,8 @@ export const CharacterMachine = Machine.make({
                         ],
                         transition: ({ event, target }) =>
                           event.axis === 0
-                            ? target.local.Standing(State.cases.Standing.make({}))
-                            : target.local.Running(State.cases.Running.make({ startedAt: event.at }))
+                            ? target.local.Standing.from()
+                            : target.local.Running.from({ startedAt: event.at })
                       }
                     }
                   },
@@ -269,8 +265,8 @@ export const CharacterMachine = Machine.make({
                         ],
                         transition: ({ state, target }) =>
                           state.resumeAxis === 0
-                            ? target.local.Standing(State.cases.Standing.make({}))
-                            : target.local.Running(State.cases.Running.make({ startedAt: state.landedAt + 140 }))
+                            ? target.local.Standing.from()
+                            : target.local.Running.from({ startedAt: state.landedAt + 140 })
                       }
                     }
                   }
@@ -292,16 +288,12 @@ export const CharacterMachine = Machine.make({
                   Landed: {
                     targets: ["Character.locomotion.Playing.Grounded.Landing"],
                     transition: ({ event, target }) =>
-                      target.branch.Character.locomotion.Playing.Grounded(
-                        State.cases.Grounded.make({}),
-                        (grounded) =>
-                          grounded.Landing(
-                            State.cases.Landing.make({
-                              impact: event.impact,
-                              resumeAxis: event.axis,
-                              landedAt: event.at
-                            })
-                          )
+                      target.branch.Character.locomotion.Playing.Grounded.from((grounded) =>
+                        grounded.Landing.from({
+                          impact: event.impact,
+                          resumeAxis: event.axis,
+                          landedAt: event.at
+                        })
                       )
                   }
                 },
@@ -311,16 +303,12 @@ export const CharacterMachine = Machine.make({
                       DoubleJump: {
                         targets: ["Character.locomotion.Playing.Airborne.motion.Jumping"],
                         transition: ({ event, target }) =>
-                          target.local.Jumping(
-                            State.cases.Jumping.make({ startedAt: event.at, push: 0, kind: "Double" })
-                          )
+                          target.local.Jumping.from({ startedAt: event.at, push: 0, kind: "Double" })
                       },
                       WallJump: {
                         targets: ["Character.locomotion.Playing.Airborne.motion.Jumping"],
                         transition: ({ event, target }) =>
-                          target.local.Jumping(
-                            State.cases.Jumping.make({ startedAt: event.at, push: event.push, kind: "Wall" })
-                          )
+                          target.local.Jumping.from({ startedAt: event.at, push: event.push, kind: "Wall" })
                       }
                     },
                     states: {
@@ -328,13 +316,11 @@ export const CharacterMachine = Machine.make({
                         on: {
                           ApexReached: {
                             targets: ["Character.locomotion.Playing.Airborne.motion.Falling"],
-                            transition: ({ event, target }) =>
-                              target.local.Falling(State.cases.Falling.make({ apexY: event.y }))
+                            transition: ({ event, target }) => target.local.Falling.from({ apexY: event.y })
                           },
                           DownPressed: {
                             targets: ["Character.locomotion.Playing.Airborne.motion.Diving"],
-                            transition: ({ event, target }) =>
-                              target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                            transition: ({ event, target }) => target.local.Diving.from({ startedAt: event.at })
                           }
                         }
                       },
@@ -342,8 +328,7 @@ export const CharacterMachine = Machine.make({
                         on: {
                           DownPressed: {
                             targets: ["Character.locomotion.Playing.Airborne.motion.Diving"],
-                            transition: ({ event, target }) =>
-                              target.local.Diving(State.cases.Diving.make({ startedAt: event.at }))
+                            transition: ({ event, target }) => target.local.Diving.from({ startedAt: event.at })
                           }
                         }
                       },
@@ -355,7 +340,7 @@ export const CharacterMachine = Machine.make({
                       WallJump: {
                         reenter: true,
                         targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"],
-                        transition: ({ target }) => target.local.AirJumpWallLock(State.cases.AirJumpWallLock.make({}))
+                        transition: ({ target }) => target.local.AirJumpWallLock.from()
                       }
                     },
                     states: {
@@ -366,7 +351,7 @@ export const CharacterMachine = Machine.make({
                         on: {
                           AirJumpUnlocked: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
-                            transition: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                            transition: ({ target }) => target.local.AirJumpReady.from()
                           }
                         }
                       },
@@ -377,7 +362,7 @@ export const CharacterMachine = Machine.make({
                         on: {
                           AirJumpUnlocked: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
-                            transition: ({ target }) => target.local.AirJumpReady(State.cases.AirJumpReady.make({}))
+                            transition: ({ target }) => target.local.AirJumpReady.from()
                           }
                         }
                       },
@@ -387,7 +372,7 @@ export const CharacterMachine = Machine.make({
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpSpent"],
                             transition: ({ event, target }, enqueue) => {
                               enqueue.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
-                              return target.local.AirJumpSpent(State.cases.AirJumpSpent.make({}))
+                              return target.local.AirJumpSpent.from()
                             }
                           }
                         }
@@ -415,13 +400,11 @@ export const CharacterMachine = Machine.make({
             on: {
               Move: {
                 targets: ["Character.facing.Right"],
-                transition: ({ event, target }) =>
-                  event.axis === 1 ? target.local.Right(State.cases.Right.make({})) : undefined
+                transition: ({ event, target }) => event.axis === 1 ? target.local.Right.from() : undefined
               },
               WallJump: {
                 targets: ["Character.facing.Right"],
-                transition: ({ event, target }) =>
-                  event.push === 1 ? target.local.Right(State.cases.Right.make({})) : undefined
+                transition: ({ event, target }) => event.push === 1 ? target.local.Right.from() : undefined
               }
             }
           },
@@ -429,13 +412,11 @@ export const CharacterMachine = Machine.make({
             on: {
               Move: {
                 targets: ["Character.facing.Left"],
-                transition: ({ event, target }) =>
-                  event.axis === -1 ? target.local.Left(State.cases.Left.make({})) : undefined
+                transition: ({ event, target }) => event.axis === -1 ? target.local.Left.from() : undefined
               },
               WallJump: {
                 targets: ["Character.facing.Left"],
-                transition: ({ event, target }) =>
-                  event.push === -1 ? target.local.Left(State.cases.Left.make({})) : undefined
+                transition: ({ event, target }) => event.push === -1 ? target.local.Left.from() : undefined
               }
             }
           }
@@ -447,10 +428,10 @@ export const CharacterMachine = Machine.make({
             targets: ["Character.contact.NoWall", "Character.contact.LeftWall", "Character.contact.RightWall"],
             transition: ({ event, target }) =>
               event.wall === -1
-                ? target.local.LeftWall(State.cases.LeftWall.make({}))
+                ? target.local.LeftWall.from()
                 : event.wall === 1
-                ? target.local.RightWall(State.cases.RightWall.make({}))
-                : target.local.NoWall(State.cases.NoWall.make({}))
+                ? target.local.RightWall.from()
+                : target.local.NoWall.from()
           }
         },
         states: {

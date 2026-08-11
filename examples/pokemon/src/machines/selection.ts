@@ -92,10 +92,11 @@ export const SelectionMachine = Machine.make({
   events: [SelectPokemon, UpdateSearchText, SearchResult, ReplacePokemon],
   emits: [ReplaceInTeam],
   initial: () =>
-    SelectionStates.initial.form(new Form(), (form) =>
+    SelectionStates.initial.form.from((form) =>
       form
-        .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
-        .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
+        .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
+        .selection.from((selection) => selection.Unselected.from())
+    )
 }).handle({
   form: {
     states: {
@@ -104,7 +105,7 @@ export const SelectionMachine = Machine.make({
           UpdateSearchText: {
             reenter: true,
             transition: ({ event, target }) =>
-              target.local.with(new Search({ searchText: event.value }), (search) => search.Searching(new Searching()))
+              target.local.with.from({ searchText: event.value }, (search) => search.Searching.from())
           }
         },
         states: {
@@ -112,10 +113,11 @@ export const SelectionMachine = Machine.make({
             on: {
               ReplacePokemon: ({ event, state, target }, enqueue) => {
                 enqueue.emit(new ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
-                return target.full.form(new Form(), (form) =>
+                return target.full.form.from((form) =>
                   form
-                    .search(new Search({ searchText: "" }), (search) => search.NoPokemon(new NoPokemon()))
-                    .selection(new Selection(), (selection) => selection.Unselected(new Unselected())))
+                    .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
+                    .selection.from((selection) => selection.Unselected.from())
+                )
               }
             }
           },
@@ -125,8 +127,8 @@ export const SelectionMachine = Machine.make({
               SearchResult: ({ event, target }) =>
                 event.result.pipe(
                   Option.match({
-                    onNone: () => target.local.NoPokemon(new NoPokemon()),
-                    onSome: (pokemon) => target.local.WithPokemon(new WithPokemon({ pokemon }))
+                    onNone: () => target.local.NoPokemon.from(),
+                    onSome: (pokemon) => target.local.WithPokemon.from({ pokemon })
                   })
                 )
             }
@@ -137,15 +139,15 @@ export const SelectionMachine = Machine.make({
         states: {
           Unselected: {
             on: {
-              SelectPokemon: ({ event, target }) => target.local.Selected(new Selected({ id: event.id }))
+              SelectPokemon: ({ event, target }) => target.local.Selected.from({ id: event.id })
             }
           },
           Selected: {
             on: {
               SelectPokemon: ({ event, target, state }) =>
                 state.id === event.id
-                  ? target.local.Unselected(new Unselected())
-                  : target.local.Selected(new Selected({ id: event.id }))
+                  ? target.local.Unselected.from()
+                  : target.local.Selected.from({ id: event.id })
             }
           }
         }

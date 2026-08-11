@@ -1,30 +1,79 @@
-import { ExamplePage, StarterPanel } from "../../components/ExamplePage.tsx"
-import { MicrowaveMachine } from "./machine.ts"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { Match } from "effect"
+import { ExamplePage } from "../../components/ExamplePage.tsx"
+import { microwaveAtom } from "./atoms.ts"
+import { MicrowaveEvent } from "./machine.ts"
 
 export function MicrowavePage() {
-  void MicrowaveMachine
+  const stateResult = useAtomValue(microwaveAtom.state)
+  const send = useAtomSet(microwaveAtom.send)
 
   return (
     <ExamplePage
       title="Microwave"
-      summary="Explore parallel door and engine regions while keeping unsafe combinations out of the transition logic."
+      summary="Parallel door and engine regions react to the same event, so opening the door interrupts cooking atomically."
       machineFile="src/examples/microwave/machine.ts"
     >
-      <StarterPanel>
-        <div className="microwave" aria-hidden="true">
-          <div className="microwave-window" />
-          <div className="microwave-controls">
-            <span />
-            <span />
-            <span />
-          </div>
-        </div>
-        <h2>Define the safety rules</h2>
-        <p>
-          The parallel statechart is scaffolded. Add transitions for power, door changes, elapsed time, and automatic
-          interruption.
-        </p>
-      </StarterPanel>
+      {Match.value(stateResult).pipe(
+        Match.tagsExhaustive({
+          Initial: () => <div className="example-message">Starting the microwave…</div>,
+          Failure: () => <div className="example-message is-error">The microwave failed to start.</div>,
+          Success: ({ value: state }) => {
+            const engine = state.states.engine.state
+            const door = state.states.door.state
+            const cooking = engine.path === "Oven.engine.Cooking"
+            const open = door.path === "Oven.door.Open"
+            const elapsedSeconds = cooking ? engine.value.elapsedSeconds : 0
+
+            return (
+              <div className="machine-demo microwave-demo">
+                <div className={`microwave${cooking ? " is-cooking" : ""}${open ? " is-open" : ""}`}>
+                  <div className="microwave-window" aria-hidden="true">
+                    <span />
+                  </div>
+                  <div className="microwave-controls" aria-hidden="true">
+                    <strong>{String(elapsedSeconds).padStart(2, "0")}</strong>
+                    <span />
+                    <span />
+                  </div>
+                </div>
+                <div className="machine-demo-copy">
+                  <p className="machine-state-label">Parallel configuration</p>
+                  <h2>{cooking ? `Cooking · ${elapsedSeconds}s` : open ? "Idle · door open" : "Idle · door closed"}</h2>
+                  <p>
+                    Engine: <code>{engine.value._tag}</code> · Door: <code>{door.value._tag}</code>
+                  </p>
+                  <div className="machine-controls">
+                    <button
+                      type="button"
+                      disabled={open}
+                      onClick={() => send(MicrowaveEvent.cases.PowerPressed.make({}))}
+                    >
+                      {cooking ? "Stop" : "Start"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        send(
+                          open
+                            ? MicrowaveEvent.cases.DoorClosed.make({})
+                            : MicrowaveEvent.cases.DoorOpened.make({})
+                        )}
+                    >
+                      {open ? "Close door" : "Open door"}
+                    </button>
+                  </div>
+                  <p className="safety-note" aria-live="polite">
+                    {open
+                      ? "Power is disabled while the door is open."
+                      : "Opening the door while cooking stops the engine."}
+                  </p>
+                </div>
+              </div>
+            )
+          }
+        })
+      )}
     </ExamplePage>
   )
 }

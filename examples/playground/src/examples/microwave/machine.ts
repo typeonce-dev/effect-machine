@@ -2,11 +2,10 @@ import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
 export const MicrowaveState = Schema.TaggedUnion({
-  Oven: { elapsedSeconds: Schema.Number },
+  Oven: {},
   Engine: {},
-  Off: {},
   Idle: {},
-  Cooking: {},
+  Cooking: { elapsedSeconds: Schema.Number },
   Door: {},
   Closed: {},
   Open: {}
@@ -15,7 +14,10 @@ export const MicrowaveState = Schema.TaggedUnion({
 export const MicrowaveEvent = Schema.TaggedUnion({
   PowerPressed: {},
   DoorOpened: {},
-  DoorClosed: {},
+  DoorClosed: {}
+})
+
+export const MicrowaveInternalEvent = Schema.TaggedUnion({
   SecondElapsed: {}
 })
 
@@ -26,9 +28,8 @@ export const MicrowaveStates = Machine.defineStates({
     states: {
       engine: {
         schema: MicrowaveState.cases.Engine,
-        initial: "Off",
+        initial: "Idle",
         states: {
-          Off: MicrowaveState.cases.Off,
           Idle: MicrowaveState.cases.Idle,
           Cooking: MicrowaveState.cases.Cooking
         }
@@ -45,35 +46,58 @@ export const MicrowaveStates = Machine.defineStates({
   }
 })
 
-const initialMicrowave = () =>
-  MicrowaveStates.initial.Oven(MicrowaveState.cases.Oven.make({ elapsedSeconds: 0 }), (oven) =>
-    oven
-      .engine(MicrowaveState.cases.Engine.make({}), (engine) => engine.Off(MicrowaveState.cases.Off.make({})))
-      .door(MicrowaveState.cases.Door.make({}), (door) => door.Closed(MicrowaveState.cases.Closed.make({}))))
+const secondElapsed = MicrowaveInternalEvent.cases.SecondElapsed.make({})
 
-/**
- * The parallel topology is ready; fill the handlers with the safety rules you
- * want to explore (for example, opening the door must interrupt cooking).
- */
 export const MicrowaveMachine = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: [MicrowaveEvent],
-  initial: initialMicrowave
+  internalEvents: [MicrowaveInternalEvent],
+  initial: () =>
+    MicrowaveStates.initial.Oven.from((oven) =>
+      oven
+        .engine.from((engine) => engine.Idle.from())
+        .door.from((door) => door.Closed.from())
+    )
 }).handle({
   Oven: {
     states: {
       engine: {
         states: {
-          Off: {},
-          Idle: {},
-          Cooking: {}
+          Idle: {
+            on: {
+              PowerPressed: ({ snapshot, target }) =>
+                MicrowaveStates.matches(snapshot, "Oven.door.Closed")
+                  ? target.local.Cooking.from({ elapsedSeconds: 0 })
+                  : undefined
+            }
+          },
+          Cooking: {
+            invoke: Machine.after("1 second", secondElapsed, { id: "cooking-second" }),
+            on: {
+              PowerPressed: ({ target }) => target.local.Idle.from(),
+              DoorOpened: ({ target }) => target.local.Idle.from(),
+              SecondElapsed: {
+                reenter: true,
+                transition: ({ state, target }) =>
+                  target.local.Cooking.from({ elapsedSeconds: state.elapsedSeconds + 1 })
+              }
+            }
+          }
         }
       },
       door: {
         states: {
-          Closed: {},
-          Open: {}
+          Closed: {
+            on: {
+              DoorOpened: ({ target }) => target.local.Open.from()
+            }
+          },
+          Open: {
+            on: {
+              DoorClosed: ({ target }) => target.local.Closed.from()
+            }
+          }
         }
       }
     }

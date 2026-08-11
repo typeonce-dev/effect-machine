@@ -2,18 +2,250 @@
 
 Schema-first state machines and statecharts for Effect.
 
-> Early-release software: APIs may change, and releases are coupled to an exact
-> Effect beta.
+State, event, input, output, and persistence boundaries are described with
+Effect Schema. The same definition can be planned synchronously, run as a
+managed machine, mounted as an Atom, tested as a model, or hosted by the
+cluster adapter.
 
-## Installation
+> This is early-release software. Its API may change, and each release targets
+> one exact Effect beta.
+
+## Install
 
 ```sh
 pnpm add @typeonce/effect-machine effect@4.0.0-beta.107
 ```
 
-`effect` is an exact peer dependency, not a bundled runtime dependency.
-Consumers must install `effect@4.0.0-beta.107`. Upgrading this package may
-require upgrading Effect in lockstep; do not override the peer to another beta.
+`effect` is an exact peer dependency. Install the version above and upgrade it
+in lockstep with this package.
+
+## Quick start
+
+Define schemas first, derive the state topology, then add behavior:
+
+```ts
+import { Machine } from "@typeonce/effect-machine"
+import { Effect, Schema } from "effect"
+
+const State = Schema.TaggedUnion({
+  Idle: {},
+  Running: { count: Schema.Number }
+})
+
+const Event = Schema.TaggedUnion({
+  Start: {},
+  Increment: {},
+  Stop: {}
+})
+
+const States = Machine.defineStates(State.cases)
+
+const Counter = Machine.make({
+  id: "Counter",
+  states: States.states,
+  events: [Event],
+  initial: () => States.initial.Idle.from()
+}).handle({
+  Idle: {
+    on: {
+      Start: ({ target }) => target.full.Running.from({ count: 0 })
+    }
+  },
+  Running: {
+    on: {
+      Increment: ({ state, target }) => target.full.Running.from({ count: state.count + 1 }),
+      Stop: ({ target }) => target.full.Idle.from()
+    }
+  }
+})
+
+const program = Effect.gen(function*() {
+  const ref = yield* Machine.start(Counter)
+  yield* ref.send(Machine.event(Counter, Event.cases.Start))
+  yield* ref.send(Machine.event(Counter, Event.cases.Increment))
+})
+```
+
+`Machine.start` returns a `MachineRef` with `send`, `state`, `snapshot`,
+`changes`, `join`, and `stop`. Sending enqueues an event; observe `changes` or
+use the testing probe when work must be causally acknowledged.
+
+## Modeling workflow
+
+Use this order to preserve inference and keep boundaries explicit:
+
+1. Define domain, state, public-event, internal-event, and emitted-event schemas.
+2. Declare topology with `Machine.defineStates`.
+3. Create the protocol and initializer with `Machine.make`.
+4. Implement every active state with `.handle(...)`.
+5. Add runtime, Atom, testing, or cluster adapters at the application boundary.
+
+### Construct state through builders
+
+Use `.from(...)` when constructing a new state from fields:
+
+```ts
+target.local.Saving.from({ draft: event.draft })
+States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
+```
+
+The machine runs these inputs through the state schema while planning. Schema
+defaults, refinements, and tagged-class identity are therefore preserved, and
+decode failures remain typed machine failures. Pass a value directly only when
+it is already decoded, such as a value returned by `Machine.retag`.
+
+Put data on the narrowest state where it is valid. If sibling phases share
+data, put it on their compound parent.
+
+### Separate public and internal events
+
+`events` is the public command protocol. Invoke results, timer deliveries,
+raised events, and child emissions belong in `internalEvents`:
+
+```ts
+const Command = Schema.TaggedUnion({ Save: {} })
+const Internal = Schema.TaggedUnion({
+  Saved: { id: Schema.String },
+  SaveFailed: { message: Schema.String }
+})
+
+const machine = Machine.make({
+  states: States.states,
+  events: [Command],
+  internalEvents: [Internal],
+  initial: () => States.initial.Idle.from()
+})
+```
+
+Handlers see both protocols. Typed `send` and `Machine.plan` accept only public
+events. Event tags must be unique and public/internal tags must be disjoint.
+
+Use `Machine.event(machine, schema, fields?)` for reusable machine-owned event
+values. Ordinary objects and schema-constructed values are also accepted and
+decoded at the machine boundary.
+
+### Choose the target by scope
+
+| Builder          | Use when                                 | Preserves                                         |
+| ---------------- | ---------------------------------------- | ------------------------------------------------- |
+| `target.local`   | Moving inside the nearest compound scope | Ancestors and unrelated parallel regions          |
+| `target.branch`  | Moving elsewhere under the active root   | Omitted active ancestors and parallel regions     |
+| `target.full`    | Replacing or selecting a complete root   | Nothing implicit for a newly selected root        |
+| `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
+
+Builders describe the next logical configuration. Shared states exit and enter
+only when paths change; use `{ reenter: true, transition }` when the source must
+restart even if its path is unchanged.
+
+## Statechart capabilities
+
+`Machine.defineStates` supports:
+
+- atomic states;
+- compound states with one active child;
+- parallel states with one active state in every region;
+- final states and typed outputs;
+- transient choice states;
+- shallow and deep history states.
+
+Declare topology—including finality, output schemas, choices, and history—only
+in `defineStates`. Handlers implement behavior and output computation without
+repeating structural metadata. Final children complete their parent, so
+`onDone` belongs on that compound or parallel parent.
+
+Transition, entry, exit, choice, initial, and history callbacks are
+synchronous. Conditions use ordinary TypeScript control flow. Callbacks may
+select state and enqueue explicit `raise`, `emit`, `sendTo`, or `stop` commands;
+arbitrary asynchronous Effects do not run inside planning.
+
+## Effects, timers, and child machines
+
+State-scoped work starts on entry and is interrupted on exit:
+
+```ts
+Loading: {
+  invoke: Machine.invokeEffect({
+    id: "save-document",
+    effect: saveDocument,
+    onSuccess: (entry) => Internal.cases.Saved.make({ id: entry.id }),
+    onFailure: (error) => Internal.cases.SaveFailed.make({ message: String(error) })
+  })
+}
+
+Waiting: {
+  invoke: Machine.after(
+    "3 seconds",
+    Internal.cases.SaveFailed.make({ message: "Timed out" })
+  )
+}
+```
+
+Use `Machine.invokeEffect` for one Effect, `Machine.after` for a cancellable
+delay, and lower-level `Machine.invoke` only for custom process behavior or
+snapshot mapping. Use one exported `Machine.child(id, machine)` descriptor for
+`invokeMachine`, `sendTo`, and child lookup.
+
+Expected failures should become internal events. An unrecovered invoke or child
+failure terminates the owning runtime.
+
+## Reactivity
+
+`AtomMachine` runs one lazy machine instance per `AtomRegistry`:
+
+```ts
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Atom } from "effect/unstable/reactivity"
+
+const runtime = Atom.runtime(AppLayer)
+const counterAtom = AtomMachine.bind(runtime).make(Counter)
+```
+
+Binding a shared runtime once is the canonical form for service-backed
+applications. Service-free machines can use `AtomMachine.make(Counter)`.
+
+The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
+`send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select` and
+`AtomMachine.matches` for typed, equality-aware derivations. React applications
+using `@effect/atom-react` need a `RegistryProvider`.
+
+## Persistence
+
+Logical snapshots can be validated for storage or transport:
+
+```ts
+const encoded = yield * Machine.encodeSnapshot(machine, snapshot)
+const decoded = yield * Machine.decodeSnapshot(machine, encoded)
+const ref = yield * Machine.resume(machine, decoded)
+```
+
+Resumption restores logical state, values, completion, and history metadata.
+It creates a fresh runtime: active invokes restart, timers restart at their
+full duration, and prior fibers, subscriptions, queues, and child runtimes are
+not restored. Store machine identity and migration/version metadata beside the
+encoded snapshot.
+
+## Testing
+
+The testing entrypoint provides complementary layers:
+
+- `MachineTest.run` and `verify` inspect pure planner traces;
+- invariants and generated scenarios check application laws;
+- `explore` performs bounded breadth-first state-space exploration;
+- `probe` causally acknowledges live runtime commands;
+- runtime command models cover timers, invokes, bursts, and scheduling.
+
+```ts
+import { MachineTest } from "@typeonce/effect-machine/testing"
+
+const trace = yield* MachineTest.run(Counter, {
+  events: [Event.cases.Start.make({}), Event.cases.Increment.make({})]
+})
+
+yield* MachineTest.verify(Counter, trace)
+```
+
+Pure planner tests do not execute invokes or time. Use a started machine and a
+probe when those semantics matter.
 
 ## Entrypoints
 
@@ -24,856 +256,27 @@ import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 ```
 
-Each ESM entrypoint is independent and tree-shakeable. Importing the root does
-not load the reactivity, cluster, or testing modules.
+Each ESM entrypoint is independent and tree-shakeable.
 
-## First machine
+## Examples
 
-Schemas provide runtime decoders and the types used by handlers, targets,
-inputs, outputs, and running references. The public/internal event distinction
-has an additional boundary described below.
+Every package directly under [`examples/`](./examples) has its own lockfile and
+`check` script.
 
-Effect's `Schema.TaggedUnion` is a compact way to declare cases. Its `cases`
-property contains the individual tagged schemas, and each case has a typed
-`make` constructor.
+| Example                             | What it demonstrates                                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [Playground](./examples/playground) | Five focused React examples: atomic turnstile commands, state-scoped traffic-light timers, microwave safety across parallel regions, a service-backed media player, and a worker-hosted machine synchronized across tabs |
+| [Pokémon](./examples/pokemon)       | Compound and parallel states, invoked child machines, typed emissions, Atom reactivity, and a live Effect service                                                                                                        |
+| [Platformer](./examples/platformer) | Nested parallel statecharts, typed deep history, raised events, state-scoped timers, deterministic model tests, and a playable SVG adapter                                                                               |
 
-```ts
-import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
+The playground is the shortest path from one concept to working code. The
+standalone examples show larger composition and ownership boundaries.
 
-const State = Schema.TaggedUnion({
-  Idle: {},
-  Running: {}
-})
+## Reference and development
 
-const Event = Schema.TaggedUnion({
-  Start: {}
-})
-
-const States = Machine.defineStates(State.cases)
-
-const Counter = Machine.make({
-  id: "Counter",
-  states: States.states,
-  events: [Event.cases.Start],
-  initial: () => States.initial.Idle.from()
-}).handle({
-  Idle: {
-    on: {
-      Start: ({ target }) => target.full.Running.from()
-    }
-  },
-  Running: {}
-})
-```
-
-Handler objects mirror the state definition recursively. `effect-machine` does
-not impose a fixed handler-tree depth; inference continues until TypeScript's
-normal, shape-dependent compiler limits.
-
-`initial` is always a function. For a machine with an input schema, the
-initializer receives the decoded input.
-
-Builder methods accept an already constructed state value directly, or expose
-`.from` for constructing one safely from the state schema's make input:
-
-```ts
-target.local.Running(decodedRunning)
-target.local.Running.from({ startedAt: event.at })
-```
-
-Use the direct call when a decoded value already exists. Use `.from` when
-entering a state from fields. Construction runs through the schema's
-`makeEffect` while the machine plans the configuration, so constructor
-defaults and tagged-class identity are preserved and failed refinements become
-`MachineSchemaDecodeError` failures instead of synchronous throws. The same
-form is available on initial, local, branch, full, compound, parallel, and
-final builders. A `.from` builder result is therefore a machine construction
-instruction; it becomes a validated public snapshot when planning succeeds.
-
-When `{}` is valid constructor input, omit it. Required state fields remain
-required, while compound and parallel states still require their active-child
-callback:
-
-```ts
-States.initial.Idle.from()
-States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
-States.initial.Flow.from((flow) => flow.Idle.from())
-```
-
-Tagged classes are equally valid when cases need class methods or nominal
-identity:
-
-```ts
-class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
-```
-
-## Public and internal events
-
-Declare commands that callers may send in `events`. Declare machine-local
-deliveries, such as invoke results and child emissions, in `internalEvents`:
-
-```ts
-const Command = Schema.TaggedUnion({
-  Save: {}
-})
-
-const InternalEvent = Schema.TaggedUnion({
-  Saved: { id: Schema.String },
-  SaveFailed: { message: Schema.String }
-})
-
-const machine = Machine.make({
-  states: States.states,
-  events: [Command.cases.Save],
-  internalEvents: [InternalEvent.cases.Saved, InternalEvent.cases.SaveFailed],
-  initial: () => States.initial.Idle.from()
-})
-```
-
-Construct reusable events with `Machine.event` when the schema is owned by the
-machine protocol:
-
-```ts
-const save = Machine.event(machine, Command.cases.Save)
-yield * ref.send(save)
-```
-
-The schema constructor runs once and the decoded value is trusted by that
-machine and definitions derived from it with `handle`. This avoids decoding a
-known event again on every delivery. A configured `Schema.TaggedUnion` can use
-either the union schema itself or one of its `cases`. Treat the returned event
-as immutable; sending it to an unrelated machine goes through that machine's
-normal decoder.
-
-Ordinary values remain valid and are decoded at every boundary:
-
-```ts
-yield * ref.send({ _tag: "Save" })
-```
-
-Handlers and machine logic see the complete union. Local public APIs such as
-`MachineRef.send`, `machineAtom.send`, and `Machine.plan` expose only `events`
-in TypeScript. The local planner and runtime still share the complete event
-decoder so machine-local deliveries can flow through the same execution
-protocol; bypassing the types with JavaScript or `any` is therefore not a
-runtime authorization boundary. Cluster RPC delivery additionally validates
-incoming payloads against the public `events` schemas.
-
-The utility types make the distinction available to application code:
-
-```ts
-type PublicCommand = Machine.Machine.InputEvent<typeof machine>
-type HandledEvent = Machine.Machine.Event<typeof machine>
-```
-
-Tags must be unique within each list, and public and internal tags must be
-disjoint. Reusing a tag is a type error, so a command cannot accidentally
-masquerade as an internal result.
-
-## Statechart structure
-
-`Machine.defineStates` accepts atomic, compound, parallel, final, choice, and history
-nodes:
-
-```ts
-const State = Schema.TaggedUnion({
-  Form: { draft: Schema.String },
-  Editing: {},
-  Saving: {},
-  Done: {}
-})
-
-const States = Machine.defineStates({
-  Form: {
-    schema: State.cases.Form,
-    initial: "Editing",
-    states: {
-      Editing: State.cases.Editing,
-      Saving: State.cases.Saving,
-      Done: {
-        schema: State.cases.Done,
-        type: "final",
-        output: Schema.String
-      }
-    }
-  }
-})
-```
-
-Compound states have one active child and declare its initial key. Parallel
-states use `type: "parallel"` and have one active state in every direct region.
-Finality is topology, so declare `type: "final"` only in the state definition.
-Handlers implement behavior and output computation without repeating it:
-
-```ts
-const machine = Machine.make({
-  states: States.states,
-  events: [],
-  initial: () => States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
-}).handle({
-  Form: {
-    states: {
-      Done: {
-        output: () => "saved"
-      }
-    }
-  }
-})
-```
-
-Every declared output schema must have a matching handler implementation before
-the machine can be planned, started, invoked, or adapted to Atom/Cluster.
-Final children complete their parent; put `onDone` on that compound or parallel
-parent, not on the final leaf.
-
-Put data on the narrowest state where it is valid. If several sibling phases
-share data, prefer storing it on their compound parent instead of copying it
-into every child state.
-
-### Choice states
-
-A choice is a transient, targetable decision point. Declare it with only
-`type: "choice"`; it has no schema, value, children, lifecycle actions, invoke,
-or event handlers. A choice is therefore absent from `StateIdentifier`, stable
-snapshots, configurations, and encoded snapshots.
-
-```ts
-const States = Machine.defineStates({
-  Flow: {
-    schema: State.cases.Flow,
-    initial: "Routing",
-    states: {
-      Routing: { type: "choice" },
-      Approved: State.cases.Approved,
-      Rejected: State.cases.Rejected
-    }
-  }
-})
-
-const machine = Machine.make({
-  states: States.states,
-  events: [Event],
-  initial: () =>
-    States.initial.Flow(
-      State.cases.Flow.make({ score: 80 }),
-      (flow) => flow.Routing()
-    )
-}).handle({
-  Flow: {
-    states: {
-      Routing: {
-        choice: {
-          targets: ["Flow.Approved", "Flow.Rejected"],
-          transition: ({ parent, target }) =>
-            parent.score >= 70
-              ? target.local.Approved(State.cases.Approved.make({}))
-              : target.local.Rejected(State.cases.Rejected.make({}))
-        }
-      }
-    }
-  }
-})
-```
-
-The resolver is ordinary TypeScript or an `Effect`. It receives the triggering
-lifecycle event, typed parent values, target builders, and the normal planning
-capabilities, but no `state` because the choice itself has no state value. Its
-declared `targets` are both a compile-time bound and inspectable graph edges.
-The resolver must return one of them; missing, malformed, or undeclared targets
-fail planning. Choice implementations are required before execution APIs are
-available.
-
-Initial, event, completion, always, history-default, and other choice
-transitions settle in the same macrostep. Chained choices use the normal
-infinite-transition limit. Choice nodes never run entry or exit actions and
-never become active while their resolution remains visible in traces and
-coverage as a `choice` transition trigger.
-
-### History states
-
-A history pseudo-state remembers the last active configuration of its parent.
-It has no value schema and never appears in an active snapshot. History is
-shallow by default; use `history: "deep"` to retain the complete descendant
-configuration and its validated values:
-
-```ts
-const States = Machine.defineStates({
-  checkout: {
-    schema: Checkout,
-    initial: "shipping",
-    states: {
-      shipping: Shipping,
-      payment: {
-        schema: Payment,
-        initial: "cardEntry",
-        states: {
-          cardEntry: CardEntry,
-          verifying: Verifying
-        }
-      },
-      resume: { type: "history", history: "deep" }
-    }
-  },
-  support: Support
-})
-```
-
-Implement a typed default for the first transition before any configuration
-has been remembered, then target history without supplying a state value:
-
-```ts
-machine.handle({
-  checkout: {
-    history: {
-      resume: {
-        default: () => initialCheckoutSnapshot
-      }
-    }
-  },
-  support: {
-    on: {
-      Resume: ({ target }) => target.history.checkout.resume()
-    }
-  }
-})
-```
-
-A history default is source-independent. It must construct a complete root
-configuration containing the history owner, including every inactive ancestor
-above a nested owner and every required region of a parallel ancestor. For a
-top-level owner, its owner snapshot is already a complete root snapshot.
-
-For example, a history node owned by `App.Workspace` can be targeted from an
-unrelated `Closed` root and supplies the complete `App` configuration on first
-use:
-
-```ts
-Workspace: {
-  history: {
-    resume: {
-      default: ({ target }) =>
-        target.App(
-          State.cases.App.make({ workspaceId: "default" }),
-          (app) =>
-            app.Workspace(
-              State.cases.Workspace.make({}),
-              (workspace) =>
-                workspace.Editing(State.cases.Editing.make({}))
-            )
-        )
-    }
-  }
-}
-```
-
-The containing branch is enforced statically: unrelated roots, sibling
-compound branches that omit the owner, owner-only nested snapshots, and
-incomplete parallel configurations are rejected.
-
-Deep history restores every remembered descendant value. Shallow history
-restores the parent and direct-child values, then follows normal initial paths.
-Only compound or parallel states that shallow restoration can enter implicitly
-need an `initial` handler to construct those new child values:
-
-```ts
-payment: {
-  initial: ;
-  ;(({ state }) => new CardEntry({ attempt: state.attempt, cardNumber: "" }))
-}
-```
-
-Execution APIs remain unavailable until required history defaults and shallow
-initializers have been implemented. History records are part of logical
-snapshots and are schema-validated by `encodeSnapshot` and `decodeSnapshot`.
-
-Transition between structurally related tagged states with `Machine.retag`.
-The source `_tag` is discarded, compatible fields are reused, and missing or
-incompatible required fields must be supplied:
-
-```ts
-const saving = Machine.retag(State.cases.Saving, editing)
-```
-
-## Choosing a target builder
-
-Transition contexts expose four typed target builders:
-
-| Builder          | Destination                                       | Configuration behavior                                                                         |
-| ---------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `target.local`   | Inside the source's nearest compound scope        | Keeps the compound value, active ancestors, and unrelated parallel regions                     |
-| `target.branch`  | Anywhere under the source's active top-level root | Replaces the selected branch while keeping omitted active ancestor values and parallel regions |
-| `target.full`    | Any top-level root                                | Builds a complete active snapshot for the selected root                                        |
-| `target.history` | A declared history pseudo-state                   | Restores its parent's remembered configuration or runs its typed default                       |
-
-When `target.local` or `target.branch` enters an inactive nested parallel
-state, its callback must select every region, just like `initial` and
-`target.full`. When that parallel state is already active, `target.branch`
-can still update one region directly and preserves the other active regions.
-
-The builder controls how the next configuration is assembled; it does not by
-itself decide which invokes restart. The runtime derives exit and entry paths
-from the previous and next active paths. Shared active ancestors remain entered,
-even when `target.full` supplies their values again. Use an event transition
-with `reenter: true` when the source state should explicitly exit and enter
-again:
-
-```ts
-Refresh: {
-  reenter: true,
-  transition: ({ state, target }) =>
-    target.full.Ready(new Ready({ value: state.value }))
-}
-```
-
-`States.get`, `States.getWithParents`, `States.getSnapshot`, and
-`States.matches` accept typed dotted paths. Handler `parents` values are also
-keyed by full dotted paths, such as `parents["Form.Editing"]`; `context.parent`
-provides the immediate parent directly and is `undefined` at a root state.
-
-Event, eventless, and completion transition contexts also expose `snapshot`, a
-read-only view of the complete logical configuration captured at the beginning
-of that transition microstep. This lets one parallel region inspect a sibling
-without copying active-state facts into parent values:
-
-```ts
-BufferReady: ;
-;(({ snapshot, target }) =>
-  States.matches(snapshot, "Player.Network.Online")
-    ? target.local.Playing(State.cases.Playing.make({}))
-    : undefined)
-```
-
-All non-conflicting handlers selected together observe the same captured
-snapshot. Handlers are synchronous and cannot read mutable live runtime state
-later. `snapshot` is intentionally absent from entry, exit,
-invoke, and choice contexts. In particular, startup and chained choices may run
-before a complete stable snapshot containing their pseudo-source exists.
-
-Effect Schema annotations are the metadata source for active states. Annotate
-the schema itself; `Machine.stateNodes` exposes the resolved annotation map:
-
-```ts
-const Saving = State.cases.Saving.annotate({
-  title: "Saving document",
-  description: "Persisting local changes to the server"
-})
-```
-
-Schema-less choice and history nodes accept only descriptive `title`,
-`description`, and `documentation` annotations. Titles may be used as display
-labels, but structural paths remain the only identity and targeting mechanism.
-
-## Synchronous transitions and actor commands
-
-Transition, entry, exit, choice, initial, and history callbacks are synchronous.
-They select state and may enqueue only explicit statechart or actor operations:
-raise an internal event, emit to the parent, send to an invoked child, or stop a
-child. Arbitrary Effects are not accepted at this boundary.
-
-```ts
-const handlers = {
-  Save: ({ target }, enqueue) => {
-    enqueue.emit(new SaveRequested({}))
-    return target.local.Saving.from()
-  }
-}
-```
-
-Use `Machine.invokeEffect`, `Machine.invoke`, or an invoked child machine for
-asynchronous work. Their results return to the parent as typed events, keeping
-the transition core deterministic and synchronous.
-
-`Machine.plan` and `Machine.planInitial` return a `done` discriminator. When
-`done` is `true`, `output` is the schema-derived structural terminal union;
-while the machine remains active, it is `undefined`. A started machine's
-`join` uses the same terminal union. Output-less structural terminal paths
-contribute `undefined`, while active atomic roots do not.
-
-This union is intentionally conservative with respect to handler behavior. For
-example, a root `onDone` transition may make one structurally terminal result
-unreachable even though its schema remains in `Machine.TerminalOutput`.
-
-## State-scoped invokes
-
-`Machine.invoke` runs child logic while its owning state is active. Leaving the
-state interrupts the child. For a one-shot Effect, `Machine.invokeEffect` maps
-typed success and failure values directly to internal events:
-
-```ts
-const loading = {
-  invoke: ({ state }) =>
-    Machine.invokeEffect({
-      id: "save",
-      effect: save(state),
-      onSuccess: (entry) => InternalEvent.cases.Saved.make({ id: entry.id }),
-      onFailure: (error) =>
-        InternalEvent.cases.SaveFailed.make({
-          message: String(error)
-        })
-    })
-}
-```
-
-Omit `onFailure` when the Effect cannot fail. Defects and interruption remain
-failures rather than being mapped.
-
-`Machine.after` creates a cancellable, state-scoped delayed event with the same
-lifetime:
-
-```ts
-invoke: Machine.after("3 seconds", InternalEvent.cases.SaveFailed.make({ message: "Timed out" }), {
-  id: "save-timeout"
-})
-```
-
-Provide an explicit id when more than one active timer could deliver the same
-event tag.
-
-Use lower-level `Machine.invoke` with `Machine.effect` for custom child logic or
-snapshot mapping. Its `id` is only the state-local lifecycle key. If the parent
-must send events to that invocation, create a typed low-level address with
-`Machine.childAddress<Event>("worker")` and pass it through the explicit
-`address` option; the address protocol is checked against the child logic.
-Lifecycle ids must be unique among simultaneously active invokes owned by the
-same state.
-
-Invoke outputs, invoke snapshot events, and invoked-child emissions belong in
-`internalEvents`. They are available to typed handlers but are not accepted by
-the typed public input APIs. Include a child machine's emitted protocol with
-`internalEvents: [...ChildMachine.emits]` when those emissions should be handled
-by the parent.
-
-For a child statechart, create one descriptor for `invokeMachine`, `sendTo`,
-and child lookup:
-
-```ts
-const Editor = Machine.child("editor", EditorMachine)
-```
-
-`Machine.child(id, machine)` is the complete statechart descriptor;
-`Machine.childAddress<Event>(id)` is the lower-level event-only address.
-Descriptors are matched by id and machine identity, so independently created
-descriptors for the same pair address the same child without a global cache.
-Exporting one descriptor remains the clearest module boundary.
-
-`Machine.activityDefinitions(machine)` inspects state-owned work without
-executing it. Static descriptors report their source path, lifecycle id, and
-kind. Timers also report normalized duration and emitted event tag;
-`invokeEffect` mappings are described as dynamic; invoked machines expose only
-safe child identity. A function-valued `invoke` factory is reported as dynamic
-and is never evaluated during inspection. The result is serializable and does
-not contain Effects, closures, services, or child runtimes.
-
-## Reactivity
-
-`AtomMachine.make` creates a lazy bridge backed by one running machine per
-`AtomRegistry`. Mounting or reading one of its atoms starts the machine;
-disposing the registry-owned reference stops it.
-
-```ts
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Atom } from "effect/unstable/reactivity"
-
-const runtime = Atom.runtime(AppLayer)
-const machines = AtomMachine.bind(runtime)
-const machineAtom = machines.make(Counter)
-```
-
-For applications with a shared runtime, treat
-`AtomMachine.bind(runtime).make(...)` as the canonical form. It keeps runtime
-ownership at the composition boundary so it does not need to be passed through
-every feature. Service-free machines may use `AtomMachine.make(machine)`
-directly.
-
-The bridge exposes:
-
-- `ref`: the running `MachineRef`
-- `result`: fail-aware logical state, combining startup and post-start runtime
-  failures
-- `snapshot`: authoritative runtime lifecycle, including `active`, `done`,
-  `error`, and `stopped`
-- `state`: the last logical state, including the retained state after a runtime
-  failure
-- `send` and `stop`: writable command atoms
-- `child(descriptor)`: a reactive bridge for a directly owned child
-
-Use `AtomMachine.select` and `AtomMachine.matches` for equality-aware root
-derivations. Use `selectChild` and `matchesChild` for child bridges. Selector
-paths and selected value types are inferred directly from the bridge snapshot,
-so these combinators do not need the `DefinedStates` object. They follow normal
-Atom identity semantics and return a new atom on each call, so retain or memoize
-them when constructing them in a component. The `child` method uses Effect's
-`Atom.family` to reuse a live bridge for the same descriptor without maintaining
-a package-level cache.
-`AtomMachine.ChildMachineAtom<typeof Child>` uses `unknown` as its startup-error
-default for general component props.
-`AtomMachine.ChildOf<typeof parentAtom, typeof Child>` preserves the exact
-parent startup-error channel.
-
-Child state and snapshot atoms contain `Option.none()` while that child is
-inactive. React applications using `@effect/atom-react` need a
-`RegistryProvider`; see the [Pokémon example](./examples/pokemon).
-
-## Snapshots and persistence
-
-`Machine.encodeSnapshot` and `Machine.decodeSnapshot` validate logical
-statechart data for storage or transport. The encoded representation does not
-contain the machine definition, machine version, services, subscriptions, or
-running child processes. Store machine identity and migration/version metadata
-alongside it.
-
-Resume a decoded logical snapshot explicitly:
-
-```ts
-const encoded = yield * Machine.encodeSnapshot(machine, snapshot)
-const decoded = yield * Machine.decodeSnapshot(machine, encoded)
-const ref = yield * Machine.resume(machine, decoded)
-```
-
-`resume` does not call `initial`, require machine input, or replay entry,
-transition, completion, eventless, raised-event, or emitted-event work that
-produced the snapshot. The decoded snapshot is the first published logical
-state. A final snapshot immediately yields a completed ref with its output.
-
-Resumption creates a fresh runtime. Invokes owned by active states start once in
-normal ancestor/document order and receive `Machine.InitialEvent` as their
-lifecycle event. `invokeEffect` runs again, invoked machines start from their
-own initial state, and `Machine.after` timers restart from their full declared
-duration. Spawned children, queued events, subscriptions, fibers, scopes,
-elapsed timer time, child snapshots, and prior `RuntimeSnapshot` status/errors
-are not restored. Completion and history metadata remain logical state and are
-not replayed. A changed machine definition does not cause `resume` itself to
-evaluate newly enabled `always` or `onDone` transitions.
-
-Reactive applications use `AtomMachine.resume(machine, decoded)` for a
-service-free machine or `AtomMachine.bind(runtime).resume(machine, decoded)`
-for a service-backed machine. These bridges have the same lazy one-runtime-per-
-registry ownership and disposal behavior as `AtomMachine.make`.
-
-`ClusterMachine` provides a separate persisted entity adapter. Its process-local
-restrictions, checkpoint planning, and delivery guarantees are documented on
-that API. `Machine.resume` is logical resumption, not durable process or cluster
-restoration.
-
-## Property-based semantic invariants
-
-`MachineTest.verify` checks statechart structure and planner lifecycle laws.
-Application semantics belong in invariants that can be reused across generated
-scenarios and, in future, bounded exploration:
-
-```ts
-import { MachineTest } from "@typeonce/effect-machine/testing"
-import { Effect } from "effect"
-
-const invariant = MachineTest.invariants(accountMachine)
-const laws = [
-  invariant.state(
-    "balance is never negative",
-    ({ snapshot }) =>
-      snapshot.value.balance >= 0 ||
-      `negative balance: ${snapshot.value.balance}`
-  ),
-  invariant.step(
-    "withdrawal removes exactly its amount",
-    ({ before, event, after }) =>
-      event._tag !== "Withdraw" ||
-      after.value.balance === before.value.balance - event.amount
-  )
-]
-
-const generated = MachineTest.scenarios(accountMachine, {
-  minEvents: 0,
-  maxEvents: 30
-})
-
-it.effect.prop(
-  "preserves account laws",
-  { scenario: generated.arbitrary },
-  ({ scenario }) =>
-    MachineTest.run(accountMachine, scenario).pipe(
-      Effect.tap((trace) => MachineTest.verify(accountMachine, trace)),
-      Effect.flatMap((trace) => MachineTest.assertInvariants(accountMachine, trace, laws))
-    )
-)
-```
-
-State invariants observe settled startup and public-event states by default.
-Set `observe` to `"microsteps"`, `"all"`, or `"final"` for a different scope.
-Use `when` for conditional laws. A condition with no matches is reported as
-`untested`; add `require: { minObservations: 1 }` when a particular trace must
-exercise it. `checkInvariants` returns this report, while `assertInvariants`
-returns `void` for direct use in property tests. Failures retain the complete
-shrunk trace and precise event, microstep, configuration, and observation
-location.
-
-These APIs inspect planner evidence. Staged action effects, invokes, timing,
-and process scheduling require the runtime command-model APIs instead.
-
-Use bounded exploration when random scenarios should be complemented by a
-systematic search over concrete event representatives:
-
-```ts
-const explored = yield * MachineTest.explore(accountMachine, {
-  events: ({ snapshot }) => [
-    new Deposit({ amount: 1 }),
-    new Withdraw({ amount: snapshot.value.balance }),
-    new Withdraw({ amount: snapshot.value.balance + 1 })
-  ],
-  stateKey: ({ snapshot }) => `${snapshot.value._tag}:${snapshot.value.balance}`,
-  limits: {
-    maxDepth: 20,
-    maxStates: 1_000,
-    maxTransitions: 10_000
-  },
-  invariants: laws
-})
-
-const rejected = yield * MachineTest.assertReachable(
-  explored,
-  "insufficient funds rejection",
-  ({ configuration }) => configuration.includes("Rejected")
-)
-
-console.log(rejected.trace.scenario.events) // shortest witness
-```
-
-Exploration is breadth-first, so each retained node owns its shortest trace.
-It is exhaustive only for the concrete events returned by `events` and the
-equivalence relation defined by `stateKey`. Equal keys intentionally collapse
-snapshots and only the first representative is expanded. Results distinguish
-`Complete` from `Truncated` and retain the depth, state, or transition frontier
-that hit a limit. An unreachability assertion succeeds only for a complete
-result; otherwise it fails as inconclusive. Cycles are retained as graph edges,
-but exploration does not enumerate every cyclic path. Invariants are checked
-on startup and on each planned edge extending a node's shortest trace.
-
-## Causal runtime probes
-
-Pure traces do not execute invokes or the managed runtime. When a test needs to
-prove that one live event has actually left the mailbox, attach a testing-only
-probe to a statechart reference:
-
-```ts
-const ref = yield * Machine.start(machine)
-const probe = yield * MachineTest.probe(machine, ref)
-
-const step = yield * probe.sendAndAwait(new CancelRequested({}))
-
-assert.strictEqual(step.handled, false)
-assert.deepStrictEqual(step.before, step.after)
-```
-
-`sendAndAwait` completes after that event's synchronous macrostep and managed
-commit work. It also completes for ignored events, which publish no snapshot
-and therefore cannot be synchronized by waiting for `ref.changes`.
-
-The step retains the exact runtime plan, before/after logical snapshots, and
-whether the event was handled or changed/reentered the active configuration.
-It does not wait for timers or invoked processes to finish. Production code
-continues to use enqueue-only `ref.send`; probes are exported only from the
-separate testing entry point.
-
-For command-model and property tests, choose the delivery semantics explicitly.
-`runCausalCommands` requires a probe and completes every accepted send before
-checking it or starting the next command:
-
-```ts
-const transcript = yield * MachineTest.runCausalCommands(
-  probe,
-  commands,
-  {
-    initialModel,
-    transition: (model, command) =>
-      Effect.succeed({
-        model: updateModel(model, command),
-        expected: expectedResult(model, command)
-      }),
-    assert: ({ actual, expected }) =>
-      Effect.sync(() => {
-        if (actual.result._tag === "SendProcessed") {
-          assert.deepStrictEqual(actual.result.step.after, expected.snapshot)
-          assert.strictEqual(actual.result.step.handled, expected.handled)
-        }
-      })
-  }
-)
-```
-
-A causal model step needs no synchronization policy. Use the probe-bound
-`probe.await.until(...)` only for later asynchronous work such as a timer,
-invoke result, or child delivery. The predicate sees the exact runtime snapshot
-type. `actual.awaited` retains every snapshot tested by that explicit wait.
-
-Use `runEnqueuedCommands(ref, ...)` when the property intentionally submits
-bursts or retains outstanding mailbox work. Its model steps continue to use
-`RuntimeSynchronization`. The old `runRuntimeCommands` and
-`formatRuntimeTranscript` names are deprecated aliases for the enqueue-oriented
-runner and formatter because their delivery semantics were not visible.
-
-### Runtime invariants and planner agreement
-
-Planner invariants and runtime invariants are deliberately separate. Runtime
-laws inspect causal command evidence, explicit asynchronous observations, and
-runtime status without requiring a duplicate reference model:
-
-```ts
-const invariant = MachineTest.runtimeInvariants(machine)
-const laws = [
-  invariant.snapshot("count never becomes negative", ({ snapshot }) => snapshot.state.value.count >= 0),
-  invariant.command(
-    "every accepted add is processed",
-    ({ command, result }) =>
-      command._tag !== "Send" || command.event._tag !== "Add" ||
-      result._tag === "SendProcessed"
-  )
-]
-
-const transcript = yield * MachineTest.verifyCausalCommands(
-  probe,
-  commands,
-  { invariants: laws }
-)
-```
-
-Use the existing `runCausalCommands` when a simplified application model
-provides exact expected results. Its returned transcript implements the same
-model-independent evidence interface, so reusable runtime laws compose with
-it directly:
-
-```ts
-const transcript = yield * MachineTest.runCausalCommands(probe, commands, model)
-
-yield * MachineTest.assertRuntimeInvariants(machine, transcript, laws)
-yield * MachineTest.assertPlannerRuntimeAgreement(machine, transcript)
-```
-
-`checkRuntimeInvariants` returns an aggregate report; `assertRuntimeInvariants`
-fails with every predicate and non-vacuity violation. Snapshot laws observe the
-initial and post-command snapshots by default. Select `"awaited"`, `"all"`, or
-`"final"` explicitly when a law targets observations retained by
-`probe.await.until` or only the final runtime snapshot.
-
-`assertPlannerRuntimeAgreement` is an explicit consistency check, not an
-application oracle. For each processed send it freshly plans from the receipt's
-`before` snapshot and compares handled/change flags, the public next snapshots,
-completion, command counts, emitted events, and public microstep evidence. It
-does not prove that the planner implements the intended business rules; use a
-reference model and runtime invariants for that.
-
-## Current limits
-
-Declarative first-class guards are not part of the current API. Ordinary
-TypeScript conditions implement guards. Use `Machine.after` for a cancellable
-state-scoped delayed event.
-
-## Guidance for agents and contributors
-
-The shipped [agent guide](./docs/agent-guide.md) contains the recommended
-definition order, modeling rules, lifecycle invariants, React recipe, common
-compiler errors, and unsupported features.
-
-## Development and validation
+- [API reference](https://effect-machine.typeonce.dev)
+- [Agent and implementation guide](./docs/agent-guide.md)
+- [Contributing guide](./CONTRIBUTING.md)
 
 Use pnpm 10 and Node.js 20 or newer:
 
@@ -882,40 +285,9 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Individual commands are available for `build`, `test`, `test:types`,
-`typecheck`, `format:check`, `test:consumer`, and `pack:check`. Runtime tests use
-`@effect/vitest`; type tests use TSTyche and TypeScript 6.0.3. The consumer check
-packs the package, imports all public entrypoints, and compiles a strict
-TypeScript consumer with `skipLibCheck: false`.
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before proposing a change. Pull
-requests receive an automated base-versus-head type-instantiation report.
-
-## Examples
-
-The [platformer statechart example](./examples/platformer) is a playable SVG
-demo centered on a schema-first character machine. It demonstrates nested
-compound locomotion, parallel airborne motion and air-jump regions, independent
-facing and wall-contact regions, a pause/resume flow backed by typed deep
-history, typed protocol events, state-scoped timers, and state-driven SVG
-transforms.
-
-The [Pokémon statechart example](./examples/pokemon) is a standalone React and
-Vite project demonstrating compound and parallel states, state-scoped invokes,
-invoked child statecharts, typed emissions, and Atom reactivity. It uses a local
-`file:` dependency on this package while retaining an isolated dependency graph,
-lockfile, build, and CI job.
-
-The [playground](./examples/playground) collects focused interactive examples
-for traffic lights, turnstiles, media players, microwaves, and worker-backed
-machines. CI discovers every direct package under `examples/` and runs its
-`check` script automatically.
-
-## Releases
-
-Add a changeset with `pnpm changeset`. CI validates frozen installation and the
-complete check suite. The release workflow opens version PRs and publishes with
-npm provenance through GitHub Actions.
+Declarative first-class guards are not currently part of the API; use ordinary
+TypeScript conditions. Pull requests that change `src/` or `package.json` need
+a changeset and the performance checks described in `AGENTS.md`.
 
 When equivalent Machine modules ship in Effect, this package is intended to
-become a thin compatibility re-export package before eventual retirement.
+become a compatibility re-export before eventual retirement.

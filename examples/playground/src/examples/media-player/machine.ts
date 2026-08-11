@@ -6,27 +6,22 @@ import {
   initialPlaybackData,
   MediaPlayerEvent,
   MediaPlayerInternalEvent,
-  MediaPlayerState,
   MediaPlayerStates,
   updatePlaybackData
 } from "./schemas.ts"
 import { MediaPlayer } from "./service.ts"
 
 const initialPlayer = () =>
-  MediaPlayerStates.initial.Player(MediaPlayerState.cases.Player.make({}), (player) =>
+  MediaPlayerStates.initial.Player.from((player) =>
     player
-      .transport(
-        MediaPlayerState.cases.Transport.make({}),
-        (transport) => transport.Empty(MediaPlayerState.cases.Empty.make({}))
+      .transport.from((transport) => transport.Empty.from())
+      .settings.from((settings) =>
+        settings.Audible.from({
+          volume: initialAudioSettings.volume,
+          playbackRate: initialAudioSettings.playbackRate
+        })
       )
-      .settings(
-        MediaPlayerState.cases.Settings.make({}),
-        (settings) =>
-          settings.Audible(MediaPlayerState.cases.Audible.make({
-            volume: initialAudioSettings.volume,
-            playbackRate: initialAudioSettings.playbackRate
-          }))
-      ))
+  )
 
 export const MediaPlayerMachine = Machine.make({
   id: "MediaPlayer",
@@ -41,15 +36,12 @@ export const MediaPlayerMachine = Machine.make({
         on: {
           SourceSelected: {
             reenter: true,
-            transition: ({ event, target }) =>
-              target.local.Loading(MediaPlayerState.cases.Loading.make({ url: event.url }))
+            transition: ({ event, target }) => target.local.Loading.from({ url: event.url })
           },
 
-          MediaFailed: ({ event, target }) =>
-            target.local.Failed(MediaPlayerState.cases.Failed.make({ message: event.message })),
+          MediaFailed: ({ event, target }) => target.local.Failed.from({ message: event.message }),
 
-          OperationFailed: ({ event, target }) =>
-            target.local.Failed(MediaPlayerState.cases.Failed.make({ message: event.message }))
+          OperationFailed: ({ event, target }) => target.local.Failed.from({ message: event.message })
         },
         states: {
           Empty: {},
@@ -57,11 +49,7 @@ export const MediaPlayerMachine = Machine.make({
           Loading: {
             invoke: ({ state }) => loadAudio(state.url),
             on: {
-              LoadSucceeded: ({ target }) =>
-                target.local.Ready(
-                  MediaPlayerState.cases.Ready.make({}),
-                  (ready) => ready.Paused(MediaPlayerState.cases.Paused.make(initialPlaybackData))
-                )
+              LoadSucceeded: ({ target }) => target.local.Ready.from((ready) => ready.Paused.from(initialPlaybackData))
             }
           },
 
@@ -71,131 +59,80 @@ export const MediaPlayerMachine = Machine.make({
                 invoke: pauseAudio,
                 on: {
                   PlayRequested: ({ state, target }) =>
-                    target.local.Playing(
-                      MediaPlayerState.cases.Playing.make({
-                        ...updatePlaybackData(state, {}),
-                        loudness: null
-                      })
-                    ),
+                    target.local.Playing.from({
+                      ...updatePlaybackData(state, {}),
+                      loudness: null
+                    }),
 
-                  RestartRequested: ({ state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
-                    )
+                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {}))
                 }
               },
 
               Playing: {
                 invoke: [playAudio, analyzeAudio],
                 on: {
-                  PauseRequested: ({ state, target }) =>
-                    target.local.Paused(
-                      MediaPlayerState.cases.Paused.make(updatePlaybackData(state, {}))
-                    ),
+                  PauseRequested: ({ state, target }) => target.local.Paused.from(updatePlaybackData(state, {})),
 
-                  RestartRequested: ({ state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
-                    ),
+                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
 
-                  MediaWaiting: ({ state, target }) =>
-                    target.local.Buffering(
-                      MediaPlayerState.cases.Buffering.make(updatePlaybackData(state, {}))
-                    ),
+                  MediaWaiting: ({ state, target }) => target.local.Buffering.from(updatePlaybackData(state, {})),
 
                   PlaybackEnded: ({ event, state, target }) =>
-                    target.local.Ended(
-                      MediaPlayerState.cases.Ended.make(
-                        updatePlaybackData(state, { currentTime: event.currentTime })
-                      )
-                    ),
+                    target.local.Ended.from(updatePlaybackData(state, { currentTime: event.currentTime })),
 
                   TimeUpdated: ({ event, state, target }) =>
-                    target.local.Playing(
-                      MediaPlayerState.cases.Playing.make({
-                        currentTime: event.currentTime,
-                        loudness: state.loudness
-                      })
-                    ),
+                    target.local.Playing.from({
+                      currentTime: event.currentTime,
+                      loudness: state.loudness
+                    }),
 
                   LoudnessMeasured: ({ event, state, target }) =>
-                    target.local.Playing(
-                      MediaPlayerState.cases.Playing.make({
-                        currentTime: state.currentTime,
-                        loudness: {
-                          rms: event.rms,
-                          peak: event.peak,
-                          decibels: event.decibels
-                        }
-                      })
-                    )
+                    target.local.Playing.from({
+                      currentTime: state.currentTime,
+                      loudness: {
+                        rms: event.rms,
+                        peak: event.peak,
+                        decibels: event.decibels
+                      }
+                    })
                 }
               },
 
               Buffering: {
                 on: {
                   MediaCanPlay: ({ state, target }) =>
-                    target.local.Playing(
-                      MediaPlayerState.cases.Playing.make({
-                        ...updatePlaybackData(state, {}),
-                        loudness: null
-                      })
-                    ),
+                    target.local.Playing.from({
+                      ...updatePlaybackData(state, {}),
+                      loudness: null
+                    }),
 
-                  PauseRequested: ({ state, target }) =>
-                    target.local.Paused(
-                      MediaPlayerState.cases.Paused.make(updatePlaybackData(state, {}))
-                    ),
+                  PauseRequested: ({ state, target }) => target.local.Paused.from(updatePlaybackData(state, {})),
 
-                  RestartRequested: ({ state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
-                    ),
+                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
 
                   PlaybackEnded: ({ event, state, target }) =>
-                    target.local.Ended(
-                      MediaPlayerState.cases.Ended.make(
-                        updatePlaybackData(state, { currentTime: event.currentTime })
-                      )
-                    ),
+                    target.local.Ended.from(updatePlaybackData(state, { currentTime: event.currentTime })),
 
                   TimeUpdated: ({ event, state, target }) =>
-                    target.local.Buffering(
-                      MediaPlayerState.cases.Buffering.make(
-                        updatePlaybackData(state, { currentTime: event.currentTime })
-                      )
-                    )
+                    target.local.Buffering.from(updatePlaybackData(state, { currentTime: event.currentTime }))
                 }
               },
 
               Restarting: {
                 invoke: restartAudio,
                 on: {
-                  RestartSucceeded: ({ target }) =>
-                    target.local.Playing(
-                      MediaPlayerState.cases.Playing.make({ currentTime: 0, loudness: null })
-                    ),
+                  RestartSucceeded: ({ target }) => target.local.Playing.from({ currentTime: 0, loudness: null }),
 
                   TimeUpdated: ({ event, state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(
-                        updatePlaybackData(state, { currentTime: event.currentTime })
-                      )
-                    )
+                    target.local.Restarting.from(updatePlaybackData(state, { currentTime: event.currentTime }))
                 }
               },
 
               Ended: {
                 on: {
-                  PlayRequested: ({ state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
-                    ),
+                  PlayRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
 
-                  RestartRequested: ({ state, target }) =>
-                    target.local.Restarting(
-                      MediaPlayerState.cases.Restarting.make(updatePlaybackData(state, {}))
-                    )
+                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {}))
                 }
               }
             }
@@ -225,26 +162,26 @@ export const MediaPlayerMachine = Machine.make({
               VolumeChanged: {
                 reenter: true,
                 transition: ({ event, state, target }) =>
-                  target.local.Audible(MediaPlayerState.cases.Audible.make({
+                  target.local.Audible.from({
                     volume: event.volume,
                     playbackRate: state.playbackRate
-                  }))
+                  })
               },
 
               PlaybackRateChanged: {
                 reenter: true,
                 transition: ({ event, state, target }) =>
-                  target.local.Audible(MediaPlayerState.cases.Audible.make({
+                  target.local.Audible.from({
                     volume: state.volume,
                     playbackRate: event.playbackRate
-                  }))
+                  })
               },
 
               MuteRequested: ({ state, target }) =>
-                target.local.Muted(MediaPlayerState.cases.Muted.make({
+                target.local.Muted.from({
                   volume: state.volume,
                   playbackRate: state.playbackRate
-                }))
+                })
             }
           },
 
@@ -254,26 +191,26 @@ export const MediaPlayerMachine = Machine.make({
               VolumeChanged: {
                 reenter: true,
                 transition: ({ event, state, target }) =>
-                  target.local.Muted(MediaPlayerState.cases.Muted.make({
+                  target.local.Muted.from({
                     volume: event.volume,
                     playbackRate: state.playbackRate
-                  }))
+                  })
               },
 
               PlaybackRateChanged: {
                 reenter: true,
                 transition: ({ event, state, target }) =>
-                  target.local.Muted(MediaPlayerState.cases.Muted.make({
+                  target.local.Muted.from({
                     volume: state.volume,
                     playbackRate: event.playbackRate
-                  }))
+                  })
               },
 
               UnmuteRequested: ({ state, target }) =>
-                target.local.Audible(MediaPlayerState.cases.Audible.make({
+                target.local.Audible.from({
                   volume: state.volume,
                   playbackRate: state.playbackRate
-                }))
+                })
             }
           }
         }

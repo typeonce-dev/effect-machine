@@ -51,9 +51,11 @@ const InternalEvent = Schema.TaggedUnion({
 const States = Machine.defineStates(State.cases)
 ```
 
-Construct values with `State.cases.Idle.make({})` or
-`Event.cases.Save.make({})`. Use `Schema.TaggedClass` instead when a case needs
-class methods or nominal class identity.
+Construct event values with `Event.cases.Save.make({})`. Construct new state
+values through the target or initial builder's `.from(...)` method so schema
+construction runs inside planning. Pass a state directly only when it is
+already decoded. Use `Schema.TaggedClass` when a case needs class methods or
+nominal class identity; `.from(...)` preserves that identity.
 
 ## Hard invariants
 
@@ -190,7 +192,7 @@ const States = Machine.defineStates({
 const machine = Machine.make({
   states: States.states,
   events: [],
-  initial: () => States.initial.Done(State.cases.Done.make({}))
+  initial: () => States.initial.Done.from()
 }).handle({
   Done: {
     output: () => "done"
@@ -268,15 +270,8 @@ Workspace: {
   history: {
     resume: {
       default: ({ target }) =>
-        target.App(
-          State.cases.App.make({ workspaceId: "default" }),
-          (app) =>
-            app.Workspace(
-              State.cases.Workspace.make({}),
-              (workspace) =>
-                workspace.Editing(State.cases.Editing.make({}))
-            )
-        )
+        target.App.from({ workspaceId: "default" }, (app) =>
+          app.Workspace.from((workspace) => workspace.Editing.from()))
     }
   }
 }
@@ -315,7 +310,7 @@ exiting shared states. To force the source to exit and enter again:
 Refresh: {
   reenter: true,
   transition: ({ state, target }) =>
-    target.full.Ready(new Ready({ value: state.value }))
+    target.full.Ready.from({ value: state.value })
 }
 ```
 
@@ -382,7 +377,7 @@ microstep, before any selected transition is applied:
 ```ts
 BufferReady: ({ snapshot, target }) =>
   States.matches(snapshot, "Player.Network.Online")
-    ? target.local.Playing(new Playing({}))
+    ? target.local.Playing.from()
     : undefined
 ```
 
@@ -426,7 +421,7 @@ A transition returns a target synchronously:
 
 ```ts
 Submit: ({ state, target }) =>
-  state.valid ? target.local.Saving(new Saving({ draft: state.draft })) : undefined
+  state.valid ? target.local.Saving.from({ draft: state.draft }) : undefined
 ```
 
 Closed statechart and actor operations use `enqueue`:
@@ -434,7 +429,7 @@ Closed statechart and actor operations use `enqueue`:
 ```ts
 Submit: ({ target }, enqueue) => {
   enqueue.emit(new SaveRequested({}))
-  return target.local.Saving(new Saving({}))
+  return target.local.Saving.from()
 }
 ```
 
@@ -878,7 +873,7 @@ reference model when correctness of the expected behavior matters.
 Wrap the initial builder result:
 
 ```ts
-initial: () => States.initial.Idle(new Idle({}))
+initial: () => States.initial.Idle.from()
 ```
 
 ### Invoked child output must be a machine event

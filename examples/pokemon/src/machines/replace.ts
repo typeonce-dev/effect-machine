@@ -42,11 +42,11 @@ export const ReplaceMachine = Machine.make({
   states: ReplaceStates.states,
   events: [ReplacePokemon, Replaced],
   emits: [ReplaceInTeam],
-  initial: () => ReplaceStates.initial.Idle(new Idle())
+  initial: () => ReplaceStates.initial.Idle.from()
 }).handle({
   Idle: {
     on: {
-      ReplacePokemon: ({ event, target }) => target.full.Replacing(new Replacing({ id: event.id }))
+      ReplacePokemon: ({ event, target }) => target.full.Replacing.from({ id: event.id })
     }
   },
   Replacing: {
@@ -54,7 +54,7 @@ export const ReplaceMachine = Machine.make({
     on: {
       Replaced: ({ event, target, state }, enqueue) => {
         enqueue.emit(new ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
-        return target.full.Idle(new Idle())
+        return target.full.Idle.from()
       }
     }
   }

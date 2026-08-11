@@ -1,27 +1,58 @@
-import { ExamplePage, StarterPanel } from "../../components/ExamplePage.tsx"
-import { TrafficLightMachine } from "./machine.ts"
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { Match } from "effect"
+import { ExamplePage } from "../../components/ExamplePage.tsx"
+import { trafficLightAtom } from "./atoms.ts"
+import { trafficLightDurations, TrafficLightEvent } from "./machine.ts"
 
 export function TrafficLightPage() {
-  void TrafficLightMachine
+  const stateResult = useAtomValue(trafficLightAtom.state)
+  const send = useAtomSet(trafficLightAtom.send)
 
   return (
     <ExamplePage
       title="Traffic light"
-      summary="Turn the explicit TimerElapsed cycle into state-scoped delays and make each signal duration visible."
+      summary="Each signal owns a cancellable delay; leaving the state replaces its timer with the next signal's timer."
       machineFile="src/examples/traffic-light/machine.ts"
     >
-      <StarterPanel>
-        <div className="traffic-light" aria-label="Inactive traffic light placeholder">
-          <span className="red" />
-          <span className="yellow" />
-          <span className="green" />
-        </div>
-        <h2>Add state-scoped timers</h2>
-        <p>
-          The transition cycle is ready. Replace manual events with{" "}
-          <code>Machine.after</code>, then render the current state here.
-        </p>
-      </StarterPanel>
+      {Match.value(stateResult).pipe(
+        Match.tagsExhaustive({
+          Initial: () => <div className="example-message">Starting the signal cycle…</div>,
+          Failure: () => <div className="example-message is-error">The traffic light failed to start.</div>,
+          Success: ({ value: state }) => {
+            const signal = state.value._tag
+            const red = signal === "Red" || signal === "RedYellow"
+            const yellow = signal === "RedYellow" || signal === "Yellow"
+            const green = signal === "Green"
+            const duration = trafficLightDurations[signal]
+
+            return (
+              <div className="machine-demo traffic-light-demo">
+                <div className="traffic-light" aria-label={`${signal} traffic signal`}>
+                  <span className={`red${red ? " is-active" : ""}`} />
+                  <span className={`yellow${yellow ? " is-active" : ""}`} />
+                  <span className={`green${green ? " is-active" : ""}`} />
+                </div>
+                <div className="machine-demo-copy">
+                  <p className="machine-state-label">Current state</p>
+                  <h2>{signal === "RedYellow" ? "Red + yellow" : signal}</h2>
+                  <p>
+                    The next transition is scheduled in {(duration / 1_000).toFixed(1)} seconds by a state-scoped{` `}
+                    <code>Machine.after</code> invocation.
+                  </p>
+                  <div className="timer-track" key={state.path}>
+                    <span style={{ animationDuration: `${duration}ms` }} />
+                  </div>
+                  <div className="machine-controls">
+                    <button type="button" onClick={() => send(TrafficLightEvent.cases.Reset.make({}))}>
+                      Reset cycle
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+        })
+      )}
     </ExamplePage>
   )
 }
