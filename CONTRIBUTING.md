@@ -77,4 +77,7 @@ The release workflow calls the GitHub Pages workflow after Changesets publishes
 a package. The Pages workflow can also be run manually to deploy the current
 commit before a release without invoking the package-release job. Pages supplies
 `API_REFERENCE_BASE_PATH` during the build so project URLs and custom domains
-use the same generated site without configuration edits.
+use the same generated site without configuration edits. It also reads the
+repository star count through GitHub's API and supplies it as
+`API_REFERENCE_GITHUB_STARS`, keeping the deployed badge independent of
+browser-side API access.

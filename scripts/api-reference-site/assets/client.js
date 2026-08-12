@@ -8,15 +8,15 @@ const searchDialog = document.querySelector("[data-search-dialog]")
 const searchInput = document.querySelector("[data-search-input]")
 const searchStatus = document.querySelector("[data-search-status]")
 const searchResults = document.querySelector("[data-search-results]")
-const githubStars = document.querySelector("[data-github-stars]")
 
 const themes = ["auto", "light", "dark"]
-const themeLabels = { auto: "System theme", light: "Light theme", dark: "Dark theme" }
+const themeLabels = { auto: "System", light: "Light", dark: "Dark" }
 
 const updateThemeButton = () => {
   const theme = root.dataset.theme ?? "auto"
-  themeButton.textContent = theme === "dark" ? "Light" : theme === "light" ? "Dark" : "Theme"
-  themeButton.title = themeLabels[theme]
+  const label = themeLabels[theme]
+  themeButton.textContent = label
+  themeButton.title = `Current theme: ${label}`
 }
 
 themeButton?.addEventListener("click", () => {
@@ -27,39 +27,6 @@ themeButton?.addEventListener("click", () => {
   updateThemeButton()
 })
 updateThemeButton()
-
-const showGitHubStars = (count) => {
-  const countElement = githubStars?.querySelector("[data-github-star-count]")
-  if (githubStars === null || countElement === null || !Number.isSafeInteger(count) || count < 0) return
-  countElement.textContent = new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-    notation: count >= 1_000 ? "compact" : "standard"
-  }).format(count)
-  githubStars.title = `${count.toLocaleString()} GitHub star${count === 1 ? "" : "s"}`
-  githubStars.hidden = false
-}
-
-const loadGitHubStars = async () => {
-  const repository = githubStars?.dataset.githubStars
-  if (repository === undefined) return
-  const cacheKey = `api-reference:github-stars:${repository}`
-  try {
-    const cached = sessionStorage.getItem(cacheKey)
-    if (cached !== null) {
-      showGitHubStars(Number(cached))
-      return
-    }
-    const response = await fetch(`https://api.github.com/repos/${repository}`)
-    if (!response.ok) return
-    const body = await response.json()
-    if (!Number.isSafeInteger(body.stargazers_count) || body.stargazers_count < 0) return
-    sessionStorage.setItem(cacheKey, String(body.stargazers_count))
-    showGitHubStars(body.stargazers_count)
-  } catch {
-    // The repository link remains usable when storage or GitHub is unavailable.
-  }
-}
-void loadGitHubStars()
 
 const setNavigationOpen = (open) => {
   document.body.classList.toggle("navigation-is-open", open)
