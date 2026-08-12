@@ -30,6 +30,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - id: pages
         uses: actions/configure-pages@v5
+      - name: Read repository stars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          stars="$(gh api "repos/$GITHUB_REPOSITORY" --jq .stargazers_count)"
+          echo "API_REFERENCE_GITHUB_STARS=$stars" >> "$GITHUB_ENV"
       - run: pnpm docs:site
         env:
           API_REFERENCE_BASE_PATH: ${{ steps.pages.outputs.base_path }}

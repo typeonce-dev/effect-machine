@@ -5,6 +5,7 @@ import {
   githubRepository,
   moduleRoute,
   normalizeBasePath,
+  normalizeGitHubStars,
   normalizeOrigin,
   renderIndexPage,
   renderLayout,
@@ -66,6 +67,7 @@ test("normalizes root, project, and custom-domain base paths", () => {
 const site = {
   basePath: "/docs/",
   description: "Schema-first state machines",
+  githubStars: 1_234,
   modules: [{
     api: { declarationCount: 12, description: "State machine APIs" },
     export: "./Machine",
@@ -109,10 +111,34 @@ test("links the header to the repository root and exposes its star-count target"
   })
   assert.match(
     html,
-    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine" aria-label="View typeonce-dev\/effect-machine on GitHub"/
+    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine" aria-label="View typeonce-dev\/effect-machine on GitHub \(1,234 GitHub stars\)"/
   )
-  assert.match(html, /data-github-stars="typeonce-dev\/effect-machine" hidden/)
+  assert.match(html, /class="github-stars" title="1,234 GitHub stars"/)
+  assert.match(html, /<span>1,234<\/span>/)
+  assert.doesNotMatch(html, /class="github-stars"[^>]*(?:data-github-stars|hidden)/)
   assert.doesNotMatch(html, /github-link[^>]+\/tree\//)
+})
+
+test("omits the star badge when the build does not supply a count", () => {
+  const html = renderLayout({ ...site, githubStars: undefined }, {
+    content: "",
+    currentRoute: "",
+    pageKind: "overview",
+    title: "Effect Machine"
+  })
+  assert.match(html, /aria-label="View typeonce-dev\/effect-machine on GitHub"/)
+  assert.doesNotMatch(html, /class="github-stars"/)
+})
+
+test("accepts only non-negative safe integers for build-time GitHub stars", () => {
+  assert.equal(normalizeGitHubStars(undefined), undefined)
+  assert.equal(normalizeGitHubStars(""), undefined)
+  assert.equal(normalizeGitHubStars("0"), 0)
+  assert.equal(normalizeGitHubStars("1234"), 1_234)
+  assert.throws(() => normalizeGitHubStars("-1"), /non-negative integer/)
+  assert.throws(() => normalizeGitHubStars("1.5"), /non-negative integer/)
+  assert.throws(() => normalizeGitHubStars("01"), /non-negative integer/)
+  assert.throws(() => normalizeGitHubStars("9007199254740992"), /safe integer range/)
 })
 
 test("accepts only root GitHub repository URLs for the header integration", () => {

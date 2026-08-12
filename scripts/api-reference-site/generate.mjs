@@ -296,6 +296,10 @@ export const renderLayout = (site, { content, currentRoute, description, pageKin
 
 const renderHeader = (site) => {
   const repository = githubRepository(site.package.repositoryUrl)
+  const stars = renderGitHubStars(site.githubStars)
+  const githubLabel = stars === ""
+    ? `View ${repository} on GitHub`
+    : `View ${repository} on GitHub (${githubStarsLabel(site.githubStars)})`
   return `
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="site-header" data-pagefind-ignore>
@@ -312,17 +316,23 @@ const renderHeader = (site) => {
         <span>Search the API</span>
         <kbd>⌘ K</kbd>
       </button>
-      <a class="header-link github-link" href="${escapeAttribute(site.package.repositoryUrl)}" aria-label="View ${escapeAttribute(repository)} on GitHub">
+      <a class="header-link github-link" href="${escapeAttribute(site.package.repositoryUrl)}" aria-label="${escapeAttribute(githubLabel)}">
         <span class="github-link__label">GitHub</span>
-        <span class="github-stars" data-github-stars="${escapeAttribute(repository)}" hidden>
-          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.193a.75.75 0 0 1-1.088.79L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194-3.047-2.97a.75.75 0 0 1 .416-1.278l4.21-.612L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
-          <span data-github-star-count></span>
-        </span>
+        ${stars}
       </a>
       <button class="icon-button theme-button" type="button" aria-label="Change color theme" title="Change color theme">Theme</button>
     </div>
   </header>`
 }
+
+const renderGitHubStars = (count) => count === undefined ? "" : `
+        <span class="github-stars" title="${escapeAttribute(githubStarsLabel(count))}">
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.193a.75.75 0 0 1-1.088.79L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194-3.047-2.97a.75.75 0 0 1 .416-1.278l4.21-.612L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+          <span>${new Intl.NumberFormat("en-US").format(count)}</span>
+        </span>`
+
+const githubStarsLabel = (count) =>
+  `${new Intl.NumberFormat("en-US").format(count)} GitHub star${count === 1 ? "" : "s"}`
 
 export const githubRepository = (value) => {
   const url = new URL(value)
@@ -542,8 +552,21 @@ const readConfig = (path) => {
   return {
     ...config,
     origin: normalizeOrigin(config.origin),
-    basePath: normalizeBasePath(process.env.API_REFERENCE_BASE_PATH ?? config.basePath)
+    basePath: normalizeBasePath(process.env.API_REFERENCE_BASE_PATH ?? config.basePath),
+    githubStars: normalizeGitHubStars(process.env.API_REFERENCE_GITHUB_STARS)
   }
+}
+
+export const normalizeGitHubStars = (value) => {
+  if (value === undefined || value === "") return undefined
+  if (!/^(0|[1-9]\d*)$/.test(value)) {
+    throw new Error("API_REFERENCE_GITHUB_STARS must be a non-negative integer")
+  }
+  const count = Number(value)
+  if (!Number.isSafeInteger(count)) {
+    throw new Error("API_REFERENCE_GITHUB_STARS exceeds the safe integer range")
+  }
+  return count
 }
 
 export const normalizeOrigin = (value) => {

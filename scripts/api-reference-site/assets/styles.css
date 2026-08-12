@@ -241,10 +241,6 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-.github-stars[hidden] {
-  display: none;
-}
-
 .github-stars svg {
   fill: currentColor;
 }
