@@ -84,7 +84,7 @@
     "typescript": "6.0.3",
     "vitest": "4.1.10",
     "xstate-v5": "npm:xstate@5.32.5",
-    "xstate-v6": "npm:xstate@6.0.0-alpha.31"
+    "xstate-v6": "npm:xstate@6.0.0-alpha.36"
   },
   "packageManager": "pnpm@10.17.1",
   "engines": {

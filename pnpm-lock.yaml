@@ -49,8 +49,8 @@ importers:
         specifier: npm:xstate@5.32.5
         version: xstate@5.32.5
       xstate-v6:
-        specifier: npm:xstate@6.0.0-alpha.31
-        version: xstate@6.0.0-alpha.31
+        specifier: npm:xstate@6.0.0-alpha.36
+        version: xstate@6.0.0-alpha.36
 
 packages:
 
@@ -1131,8 +1131,8 @@ packages:
   xstate@5.32.5:
     resolution: {integrity: sha512-ULazi1oe6wGrXl0Frb6otSlkm5HLifbbVTkMk5kkSKqz4TkxJaVpnl6jOJwKeid3ORPxYyZQgNLUSYX9q65SIA==}
 
-  xstate@6.0.0-alpha.31:
-    resolution: {integrity: sha512-nWdxu+Rg95zBMg8jwtKtSY3WMpe9ZgOe0ZwxOMKIdpuRUnlvAK+u9bIP2T3j+xWW3Oec/paNBVYT5J55Ya0DxA==}
+  xstate@6.0.0-alpha.36:
+    resolution: {integrity: sha512-8zXcB9BU/o0j3NTrOLovqMr9h0Ni0Y06Dz1BW6g7ZHTg/C64RcTqZkkLdR1KywhMdTN44DzTbNwqgdY3rQz6DA==}
     hasBin: true
 
   yaml@2.9.0:
@@ -2119,6 +2119,6 @@ snapshots:
 
   xstate@5.32.5: {}
 
-  xstate@6.0.0-alpha.31: {}
+  xstate@6.0.0-alpha.36: {}
 
   yaml@2.9.0: {}
