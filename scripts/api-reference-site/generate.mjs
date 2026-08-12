@@ -50,7 +50,7 @@ const readSiteModel = (inputDirectory, config) => {
   const packageManifestPath = safeResolve(inputDirectory, packageEntry.manifest)
   const packageDirectory = dirname(packageManifestPath)
   const packageManifest = readJson(packageManifestPath)
-  if (packageManifest.schemaVersion !== 3 || !Array.isArray(packageManifest.modules)) {
+  if (packageManifest.schemaVersion !== 4 || !Array.isArray(packageManifest.modules)) {
     throw new Error("Unsupported API reference package manifest")
   }
 
@@ -294,7 +294,9 @@ export const renderLayout = (site, { content, currentRoute, description, pageKin
 `
 }
 
-const renderHeader = (site) => `
+const renderHeader = (site) => {
+  const repository = githubRepository(site.package.repositoryUrl)
+  return `
   <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="site-header" data-pagefind-ignore>
     <div class="site-header__brand">
@@ -310,10 +312,26 @@ const renderHeader = (site) => `
         <span>Search the API</span>
         <kbd>⌘ K</kbd>
       </button>
-      <a class="header-link" href="${escapeAttribute(site.package.sourceUrl)}">GitHub</a>
+      <a class="header-link github-link" href="${escapeAttribute(site.package.repositoryUrl)}" aria-label="View ${escapeAttribute(repository)} on GitHub">
+        <span class="github-link__label">GitHub</span>
+        <span class="github-stars" data-github-stars="${escapeAttribute(repository)}" hidden>
+          <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.193a.75.75 0 0 1-1.088.79L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194-3.047-2.97a.75.75 0 0 1 .416-1.278l4.21-.612L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+          <span data-github-star-count></span>
+        </span>
+      </a>
       <button class="icon-button theme-button" type="button" aria-label="Change color theme" title="Change color theme">Theme</button>
     </div>
   </header>`
+}
+
+export const githubRepository = (value) => {
+  const url = new URL(value)
+  const segments = url.pathname.split("/").filter(Boolean)
+  if (url.protocol !== "https:" || url.hostname !== "github.com" || segments.length !== 2) {
+    throw new Error(`Expected a GitHub repository URL, received ${value}`)
+  }
+  return segments.join("/")
+}
 
 const renderNavigation = (site, currentRoute) => `
   <aside class="module-navigation" id="module-navigation" aria-label="API modules" data-pagefind-ignore>

@@ -139,13 +139,14 @@ const generateDataset = async (config, outputDirectory) => {
   const packageSourceUrl = `${repositoryUrl}/tree/${revision}${packageSourcePath === "" ? "" : `/${packageSourcePath}`}`
   const packageManifestOutput = join(packageOutputDirectory, "manifest.json")
   writeJson(packageManifestOutput, {
-    schemaVersion: 3,
+    schemaVersion: 4,
     channel: config.channel,
     name: packageManifest.name,
     version: packageManifest.version,
     revision,
     description: packageManifest.description ?? packageManifest.name,
     npmUrl: `https://www.npmjs.com/package/${packageManifest.name}`,
+    repositoryUrl,
     sourceUrl: packageSourceUrl,
     barrels: barrels.map((barrel) => ({
       export: barrel.export,
@@ -177,11 +178,12 @@ export const validateDataset = (outputDirectory) => {
     const packageManifestPath = safeResolve(outputDirectory, packageEntry.manifest)
     const packageManifest = readJson(packageManifestPath)
     if (
-      packageManifest.schemaVersion !== 3 ||
+      packageManifest.schemaVersion !== 4 ||
       packageManifest.channel !== dataset.channel ||
       packageManifest.revision !== dataset.revision ||
       packageManifest.name !== packageEntry.name ||
-      packageManifest.version !== packageEntry.version
+      packageManifest.version !== packageEntry.version ||
+      typeof packageManifest.repositoryUrl !== "string"
     ) {
       throw new Error(`Package manifest does not match dataset entry: ${packageManifestPath}`)
     }

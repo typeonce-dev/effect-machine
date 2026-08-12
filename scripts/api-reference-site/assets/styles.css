@@ -215,6 +215,40 @@ kbd {
   font-weight: 600;
 }
 
+.github-link {
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.github-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.github-link__label,
+.github-stars {
+  align-items: center;
+  display: inline-flex;
+  padding: 0.45rem 0.6rem;
+}
+
+.github-stars {
+  border-left: 1px solid var(--border);
+  gap: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.github-stars[hidden] {
+  display: none;
+}
+
+.github-stars svg {
+  fill: currentColor;
+}
+
 .icon-button {
   background: transparent;
   border: 0;
