@@ -1,5 +1,13 @@
 # @typeonce/effect-machine
 
+## 0.6.1
+
+### Patch Changes
+
+- efc4f2f: Reduce pull request performance-check latency while preserving focused type,
+  runtime, and memory regression coverage.
+- a6774a0: Include the original TypeScript sources in the published package.
+
 ## 0.6.0
 
 ### Minor Changes
