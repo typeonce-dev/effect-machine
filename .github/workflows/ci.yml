@@ -47,7 +47,7 @@ jobs:
   discover-examples:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.examples.outputs.matrix }}
+      matrix: ${{ steps.examples.outputs.examples }}
       required: ${{ steps.examples.outputs.examples_required }}
     steps:
       - uses: actions/checkout@v7
