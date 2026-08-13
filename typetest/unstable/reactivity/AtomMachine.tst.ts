@@ -126,8 +126,10 @@ describe("AtomMachine", () => {
     const parent = null as unknown as Parent
     const child = null as unknown as AtomMachine.ChildOf<Parent, typeof Child>
     const selected = AtomMachine.select(parent, "Idle")
+    const selectedSnapshot = AtomMachine.selectSnapshot(parent, "Idle")
     const matched = AtomMachine.matches(parent, "Idle")
     const childSelected = AtomMachine.selectChild(child, "Idle")
+    const childSelectedSnapshot = AtomMachine.selectSnapshotChild(child, "Idle")
     const childMatched = AtomMachine.matchesChild(child, "Idle")
 
     expect<typeof parent.result>().type.toBe<
@@ -136,20 +138,29 @@ describe("AtomMachine", () => {
     expect<typeof selected>().type.toBe<
       Atom.Atom<AsyncResult.AsyncResult<Option.Option<Idle>, StartFailure | RuntimeFailure>>
     >()
+    expect<Atom.Success<typeof selectedSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
     expect<typeof matched>().type.toBe<
       Atom.Atom<AsyncResult.AsyncResult<boolean, StartFailure | RuntimeFailure>>
     >()
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect<Atom.Failure<typeof childSelected>>().type.toBe<Atom.Failure<typeof child.result>>()
+    expect<Atom.Failure<typeof childSelectedSnapshot>>().type.toBe<Atom.Failure<typeof child.result>>()
     expect<Atom.Failure<typeof childMatched>>().type.toBe<Atom.Failure<typeof child.result>>()
     expect<Extract<Atom.Failure<typeof child.result>, StartFailure>>().type.toBe<StartFailure>()
     expect<AtomMachine.ChildMachineAtom<typeof Child>>().type.toBe<
       AtomMachine.ChildMachineAtom<typeof Child, unknown>
     >()
     expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Missing")
+    expect(AtomMachine.selectSnapshot).type.not.toBeCallableWith(parent, "Missing")
     expect(AtomMachine.matches).type.not.toBeCallableWith(parent, "Missing")
     expect(AtomMachine.selectChild).type.not.toBeCallableWith(child, "Missing")
+    expect(AtomMachine.selectSnapshotChild).type.not.toBeCallableWith(child, "Missing")
     expect(AtomMachine.matchesChild).type.not.toBeCallableWith(child, "Missing")
     expect(AtomMachine.select).type.not.toBeCallableWith(parent, States, "Idle")
     expect(AtomMachine.matches).type.not.toBeCallableWith(parent, States, "Idle")
@@ -163,7 +174,9 @@ describe("AtomMachine", () => {
     const parent = null as unknown as Parent
     const root = AtomMachine.select(parent, "Ready")
     const region = AtomMachine.select(parent, "Ready.editor")
+    const regionSnapshot = AtomMachine.selectSnapshot(parent, "Ready.editor")
     const leaf = AtomMachine.select(parent, "Ready.editor.Editing")
+    const leafSnapshot = AtomMachine.selectSnapshot(parent, "Ready.editor.Editing")
     const matched = AtomMachine.matches(parent, "Ready.network.Online")
     const path = null as unknown as "Dormant" | "Ready.editor.Editing"
     const selectedUnion = AtomMachine.select(parent, path)
@@ -171,7 +184,13 @@ describe("AtomMachine", () => {
 
     expect<Atom.Success<typeof root>>().type.toBe<Option.Option<Ready>>()
     expect<Atom.Success<typeof region>>().type.toBe<Option.Option<Editor>>()
+    expect<Atom.Success<typeof regionSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+    >()
     expect<Atom.Success<typeof leaf>>().type.toBe<Option.Option<Editing>>()
+    expect<Atom.Success<typeof leafSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor.Editing">>
+    >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
     expect<Atom.Success<typeof selectedUnion>>().type.toBe<Option.Option<Dormant | Editing>>()
     expect<Atom.Failure<typeof leaf>>().type.toBe<StartFailure | RuntimeFailure>()
@@ -183,9 +202,13 @@ describe("AtomMachine", () => {
     const NestedChild = Machine.child("nested", null as unknown as NestedMachine)
     const child = null as unknown as AtomMachine.ChildOf<Parent, typeof NestedChild>
     const childSelected = AtomMachine.selectChild(child, "Ready.editor.Saving")
+    const childSelectedSnapshot = AtomMachine.selectSnapshotChild(child, "Ready.editor.Saving")
     const childMatched = AtomMachine.matchesChild(child, "Ready.network.Offline")
 
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Saving>>()
+    expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor.Saving">>
+    >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect<Atom.Failure<typeof childSelected>>().type.toBe<Atom.Failure<typeof child.result>>()
     expect<Atom.Failure<typeof childMatched>>().type.toBe<Atom.Failure<typeof child.result>>()

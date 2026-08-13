@@ -171,11 +171,13 @@ describe("AtomMachine", () => {
       const Impostor = Machine.child("counter", makeCounterMachine())
       const impostorAtoms = parentAtoms.child(Impostor)
       const selectedCount = AtomMachine.selectChild(childAtoms, "Count")
+      const selectedCountSnapshot = AtomMachine.selectSnapshotChild(childAtoms, "Count")
       const countMatches = AtomMachine.matchesChild(childAtoms, "Count")
       const parentRef = yield* AtomRegistry.getResult(registry, parentAtoms.ref)
       const directChild = yield* parentRef.child(Child)
       assert(Option.isNone(directChild))
       assert(Option.isNone(yield* AtomRegistry.getResult(registry, selectedCount)))
+      assert(Option.isNone(yield* AtomRegistry.getResult(registry, selectedCountSnapshot)))
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), false)
       yield* Effect.sync(() => registry.set(childAtoms.send, new Finish({ by: 1 })))
       const inactiveSend = yield* Effect.sync(() => registry.get(childAtoms.send))
@@ -204,6 +206,12 @@ describe("AtomMachine", () => {
       const selectedInitial = yield* waitForResult(registry, selectedCount, Option.isSome)
       assert(Option.isSome(selectedInitial))
       assert.strictEqual(selectedInitial.value.value, 0)
+      const selectedInitialSnapshot = yield* waitForResult(registry, selectedCountSnapshot, Option.isSome)
+      assert(Option.isSome(selectedInitialSnapshot))
+      assert.deepStrictEqual(selectedInitialSnapshot.value, {
+        path: "Count",
+        value: new Count({ value: 0 })
+      })
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), true)
 
       yield* Effect.sync(() => registry.set(childAtoms.send, new Finish({ by: 2 })))
@@ -220,11 +228,19 @@ describe("AtomMachine", () => {
       )
       assert(Option.isSome(selectedUpdated))
       assert.strictEqual(selectedUpdated.value.value, 2)
+      const selectedUpdatedSnapshot = yield* waitForResult(
+        registry,
+        selectedCountSnapshot,
+        (state) => Option.isSome(state) && state.value.value.value === 2
+      )
+      assert(Option.isSome(selectedUpdatedSnapshot))
+      assert.strictEqual(selectedUpdatedSnapshot.value.value.value, 2)
 
       yield* Effect.sync(() => registry.set(parentAtoms.send, new ReadValue({})))
       const inactive = yield* waitForResult(registry, childAtoms.ref, Option.isNone)
       assert(Option.isNone(inactive))
       assert(Option.isNone(yield* waitForResult(registry, selectedCount, Option.isNone)))
+      assert(Option.isNone(yield* waitForResult(registry, selectedCountSnapshot, Option.isNone)))
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), false)
     })))
 
@@ -342,16 +358,31 @@ describe("AtomMachine", () => {
       const registry = yield* makeRegistry
       const bridge = AtomMachine.make(machine)
       const ready = AtomMachine.select(bridge, "Ready")
+      const readySnapshot = AtomMachine.selectSnapshot(bridge, "Ready")
       const editor = AtomMachine.select(bridge, "Ready.editor")
+      const editorSnapshot = AtomMachine.selectSnapshot(bridge, "Ready.editor")
       const editing = AtomMachine.select(bridge, "Ready.editor.Editing")
+      const editingSnapshot = AtomMachine.selectSnapshot(bridge, "Ready.editor.Editing")
       const saving = AtomMachine.select(bridge, "Ready.editor.Saving")
+      const savingSnapshot = AtomMachine.selectSnapshot(bridge, "Ready.editor.Saving")
       const online = AtomMachine.matches(bridge, "Ready.network.Online")
       const offline = AtomMachine.matches(bridge, "Ready.network.Offline")
 
       assert(Option.isSome(yield* AtomRegistry.getResult(registry, ready)))
+      const selectedReadySnapshot = yield* AtomRegistry.getResult(registry, readySnapshot)
+      assert(Option.isSome(selectedReadySnapshot))
+      assert.strictEqual(selectedReadySnapshot.value.path, "Ready")
+      assert.strictEqual(selectedReadySnapshot.value.states.editor.path, "Ready.editor")
       assert(Option.isSome(yield* AtomRegistry.getResult(registry, editor)))
+      const selectedEditorSnapshot = yield* AtomRegistry.getResult(registry, editorSnapshot)
+      assert(Option.isSome(selectedEditorSnapshot))
+      assert.strictEqual(selectedEditorSnapshot.value.state.path, "Ready.editor.Editing")
       assert(Option.isSome(yield* AtomRegistry.getResult(registry, editing)))
+      const selectedEditingSnapshot = yield* AtomRegistry.getResult(registry, editingSnapshot)
+      assert(Option.isSome(selectedEditingSnapshot))
+      assert.strictEqual(selectedEditingSnapshot.value.path, "Ready.editor.Editing")
       assert(Option.isNone(yield* AtomRegistry.getResult(registry, saving)))
+      assert(Option.isNone(yield* AtomRegistry.getResult(registry, savingSnapshot)))
       assert.strictEqual(yield* AtomRegistry.getResult(registry, online), true)
       assert.strictEqual(yield* AtomRegistry.getResult(registry, offline), false)
     })))
