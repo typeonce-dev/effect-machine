@@ -19,13 +19,15 @@ jobs:
   comment:
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     steps:
       - name: Check out trusted reporting code
         uses: actions/checkout@v7
 
       - name: Download performance report
+        id: download
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: runtime-performance-report
@@ -34,6 +36,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Render report from validated benchmark data
+        if: steps.download.outcome == 'success'
         run: >-
           node scripts/compare-runtime-performance.mjs
           report/base
@@ -41,6 +44,7 @@ jobs:
           > "$RUNNER_TEMP/report.md"
 
       - name: Create or update pull request comment
+        if: steps.download.outcome == 'success'
         uses: actions/github-script@v9
         env:
           REPORT_PATH: ${{ runner.temp }}/report.md

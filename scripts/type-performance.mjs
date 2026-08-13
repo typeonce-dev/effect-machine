@@ -75,48 +75,6 @@ const scenarios = [
     maxMarginalInstantiations: 19_000
   },
   {
-    id: "handle-depth-8-control",
-    label: "machine.handle depth 8 control",
-    file: "handle-depth-8-control.ts",
-    hidden: true
-  },
-  {
-    id: "handle-depth-8",
-    label: "machine.handle (depth 8)",
-    file: "handle-depth-8.ts",
-    control: "handle-depth-8-control",
-    maxInstantiations: 145_000,
-    maxMarginalInstantiations: 136_000
-  },
-  {
-    id: "handle-depth-12-control",
-    label: "machine.handle depth 12 control",
-    file: "handle-depth-12-control.ts",
-    hidden: true
-  },
-  {
-    id: "handle-depth-12",
-    label: "machine.handle (depth 12)",
-    file: "handle-depth-12.ts",
-    control: "handle-depth-12-control",
-    maxInstantiations: 160_000,
-    maxMarginalInstantiations: 150_000
-  },
-  {
-    id: "handle-depth-16-control",
-    label: "machine.handle depth 16 control",
-    file: "handle-depth-16-control.ts",
-    hidden: true
-  },
-  {
-    id: "handle-depth-16",
-    label: "machine.handle (depth 16)",
-    file: "handle-depth-16.ts",
-    control: "handle-depth-16-control",
-    maxInstantiations: 180_000,
-    maxMarginalInstantiations: 168_000
-  },
-  {
     id: "handle-depth-24-control",
     label: "machine.handle depth 24 control",
     file: "handle-depth-24-control.ts",

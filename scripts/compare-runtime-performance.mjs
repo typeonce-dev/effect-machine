@@ -1,11 +1,14 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
+import { findRuntimePerformanceRegressions } from "./runtime-performance-regression.mjs"
 
-const [baseDirectory, pullRequestDirectory] = process.argv.slice(2)
+const arguments_ = process.argv.slice(2)
+const check = arguments_.includes("--check")
+const [baseDirectory, pullRequestDirectory] = arguments_.filter((argument) => argument !== "--check")
 
 if (baseDirectory === undefined || pullRequestDirectory === undefined) {
   throw new Error(
-    "Usage: node scripts/compare-runtime-performance.mjs <base-report-directory> <pr-report-directory>"
+    "Usage: node scripts/compare-runtime-performance.mjs [--check] <base-report-directory> <pr-report-directory>"
   )
 }
 
@@ -240,6 +243,8 @@ const baseReports = readReports(baseDirectory, false)
 const pullRequestReports = readReports(pullRequestDirectory, true)
 const base = baseReports.length === 0 ? undefined : aggregate(baseReports, "base")
 const pullRequest = aggregate(pullRequestReports, "pull request")
+const comparable = base !== undefined && JSON.stringify(base.configuration) === JSON.stringify(pullRequest.configuration)
+const regressions = comparable ? findRuntimePerformanceRegressions(base, pullRequest) : []
 
 const integer = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
 const decimal = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 })
@@ -324,7 +329,7 @@ for (const scenario of machineScenarios) {
 if (runtimeScenarios.length > 0) {
   lines.push(
     "",
-    "### Effect runtime reference points",
+    "### Process runtime reference points",
     "",
     `| Scenario | ${runtimeImplementations.map((implementation) => escapeCell(implementation.label)).join(" | ")} |`,
     `| --- | ${runtimeImplementations.map(() => "---:").join(" | ")} |`
@@ -423,7 +428,7 @@ if (base === undefined) {
   if (baseRuntime.size > 0 && pullRequestRuntime.size > 0) {
     lines.push(
       "",
-      "### Effect runtime reference change from base",
+      "### Process runtime reference change from base",
       "",
       "| Metric | Base | Base variability | PR | PR variability | Difference |",
       "| --- | ---: | ---: | ---: | ---: | ---: |"
@@ -442,6 +447,23 @@ if (base === undefined) {
 
 lines.push(
   "",
+  "### Regression guard",
+  "",
+  comparable
+    ? regressions.length === 0
+      ? "No large, noise-adjusted throughput or heap regressions detected."
+      : "The required regression guard detected:"
+    : "The regression guard was not evaluated because the base and pull request configurations are not comparable."
+)
+
+for (const regression of regressions) {
+  lines.push(
+    `- ${escapeCell(regression.label)} ${regression.kind === "throughput" ? "decreased" : "increased"} by ${decimal.format(regression.changePercent)}% (allowed ${decimal.format(regression.thresholdPercent)}%).`
+  )
+}
+
+lines.push(
+  "",
   "<details>",
   "<summary>Versions and interpretation</summary>",
   "",
@@ -449,9 +471,12 @@ lines.push(
     `- ${escapeCell(implementation.label)}: ${code(implementation.version)}`
   ),
   "",
-  "Higher throughput is better; lower heap is better. Variability is the median absolute deviation across independent processes, relative to their median. Runtime measurements on shared GitHub-hosted hardware remain informational, so small differences should be confirmed across multiple workflow runs.",
+  "Higher throughput is better; lower heap is better. Variability is the median absolute deviation across independent processes, relative to their median. Small differences on shared GitHub-hosted hardware remain informational; the required guard rejects only large changes beyond the measured noise allowance.",
   "",
   "</details>"
 )
 
 console.log(lines.join("\n"))
+if (check && regressions.length > 0) {
+  process.exitCode = 1
+}

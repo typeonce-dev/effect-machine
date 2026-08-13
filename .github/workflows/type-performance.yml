@@ -11,8 +11,25 @@ permissions:
   contents: read
 
 jobs:
-  type-performance:
-    name: type-performance
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.classify.outputs.type_performance }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: classify
+        run: >-
+          node scripts/ci-changes.mjs
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
+          --github-output "$GITHUB_OUTPUT"
+
+  measure:
+    needs: changes
+    if: needs.changes.outputs.required == 'true'
+    name: type-performance measurement
     runs-on: ubuntu-latest
     steps:
       - name: Check out base
@@ -66,3 +83,23 @@ jobs:
             ${{ runner.temp }}/after.json
           if-no-files-found: error
           retention-days: 7
+
+  type-performance:
+    if: always()
+    needs: [changes, measure]
+    name: type-performance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require relevant type performance to pass
+        env:
+          CHANGE_RESULT: ${{ needs.changes.result }}
+          MEASUREMENT_REQUIRED: ${{ needs.changes.outputs.required }}
+          MEASUREMENT_RESULT: ${{ needs.measure.result }}
+        run: |
+          test "$CHANGE_RESULT" = "success"
+          if test "$MEASUREMENT_REQUIRED" = "true"; then
+            test "$MEASUREMENT_RESULT" = "success"
+          else
+            test "$MEASUREMENT_RESULT" = "skipped"
+            echo "Type performance is not affected by this pull request." >> "$GITHUB_STEP_SUMMARY"
+          fi
