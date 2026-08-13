@@ -13,7 +13,7 @@ cluster adapter.
 ## Install
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0-beta.107
+pnpm add @typeonce/effect-machine effect@4.0.0-rc.108
 ```
 
 `effect` is an exact peer dependency. Install the version above and upgrade it

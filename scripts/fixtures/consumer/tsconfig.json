@@ -11,5 +11,5 @@
     "exactOptionalPropertyTypes": true,
     "types": ["node"]
   },
-  "include": ["consumer.ts", "deep-bound.ts", "effect-beta-compat.d.ts"]
+  "include": ["consumer.ts", "deep-bound.ts", "effect-compat.d.ts"]
 }

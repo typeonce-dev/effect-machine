@@ -2,8 +2,8 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-beta.107
-  "@effect/vitest": 4.0.0-beta.107
+  effect: 4.0.0-rc.108
+  "@effect/vitest": 4.0.0-rc.108
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
