@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     branches: [main]
+    paths:
+      - ".changeset/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "src/**"
 
 concurrency:
   group: release-${{ github.ref }}

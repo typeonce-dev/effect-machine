@@ -11,8 +11,25 @@ permissions:
   contents: read
 
 jobs:
-  runtime-performance:
-    name: runtime-performance
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      required: ${{ steps.classify.outputs.runtime_performance }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: classify
+        run: >-
+          node scripts/ci-changes.mjs
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
+          --github-output "$GITHUB_OUTPUT"
+
+  measure:
+    needs: changes
+    if: needs.changes.outputs.required == 'true'
+    name: runtime-performance measurement
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -52,6 +69,7 @@ jobs:
           pnpm --dir base build
 
       - name: Measure base and pull request
+        id: benchmark
         shell: bash
         run: |
           set -euo pipefail
@@ -79,16 +97,41 @@ jobs:
           measure base "$reports/base/5.json"
           measure head "$reports/head/5.json"
 
-          node head/scripts/compare-runtime-performance.mjs \
-            "$reports/base" \
-            "$reports/head" \
-            > "$RUNNER_TEMP/runtime-performance-report.md"
+          if ! node head/scripts/compare-runtime-performance.mjs \
+              --check \
+              "$reports/base" \
+              "$reports/head" \
+              > "$RUNNER_TEMP/runtime-performance-report.md"; then
+            cat "$RUNNER_TEMP/runtime-performance-report.md" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           cat "$RUNNER_TEMP/runtime-performance-report.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload report for the comment workflow
+        if: always() && steps.benchmark.outcome != 'skipped'
         uses: actions/upload-artifact@v7
         with:
           name: runtime-performance-report
           path: ${{ runner.temp }}/runtime-performance
           if-no-files-found: error
           retention-days: 7
+
+  runtime-performance:
+    if: always()
+    needs: [changes, measure]
+    name: runtime-performance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require relevant runtime performance to pass
+        env:
+          CHANGE_RESULT: ${{ needs.changes.result }}
+          MEASUREMENT_REQUIRED: ${{ needs.changes.outputs.required }}
+          MEASUREMENT_RESULT: ${{ needs.measure.result }}
+        run: |
+          test "$CHANGE_RESULT" = "success"
+          if test "$MEASUREMENT_REQUIRED" = "true"; then
+            test "$MEASUREMENT_RESULT" = "success"
+          else
+            test "$MEASUREMENT_RESULT" = "skipped"
+            echo "Runtime performance is not affected by this pull request." >> "$GITHUB_STEP_SUMMARY"
+          fi

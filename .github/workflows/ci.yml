@@ -2,8 +2,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -49,11 +47,18 @@ jobs:
   discover-examples:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.examples.outputs.matrix }}
+      matrix: ${{ steps.examples.outputs.examples }}
+      required: ${{ steps.examples.outputs.examples_required }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - id: examples
-        run: echo "matrix=$(node scripts/list-examples.mjs)" >> "$GITHUB_OUTPUT"
+        run: >-
+          node scripts/ci-changes.mjs
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
+          --github-output "$GITHUB_OUTPUT"
 
   example:
     needs: discover-examples
@@ -92,7 +97,13 @@ jobs:
       - name: Require every example check to pass
         env:
           DISCOVERY_RESULT: ${{ needs.discover-examples.result }}
+          EXAMPLES_REQUIRED: ${{ needs.discover-examples.outputs.required }}
           EXAMPLE_RESULT: ${{ needs.example.result }}
         run: |
           test "$DISCOVERY_RESULT" = "success"
-          test "$EXAMPLE_RESULT" = "success"
+          if test "$EXAMPLES_REQUIRED" = "true"; then
+            test "$EXAMPLE_RESULT" = "success"
+          else
+            test "$EXAMPLE_RESULT" = "skipped"
+            echo "Examples are not affected by this pull request." >> "$GITHUB_STEP_SUMMARY"
+          fi

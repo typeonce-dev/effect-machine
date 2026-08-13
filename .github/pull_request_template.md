@@ -11,10 +11,10 @@
 
 - [ ] `pnpm check`
 - [ ] Relevant example checks, when examples changed
-- [ ] Reviewed the automated type-performance report, when the public TypeScript API or inference changed
-- [ ] Reviewed the automated runtime-performance report, when runtime behavior changed
+- [ ] Automated type-performance measurement passed or was not required
+- [ ] Automated runtime- and memory-performance measurement passed or was not required
 
 <!--
-The type- and runtime-performance workflows post and update their base-versus-PR comparisons automatically.
+The type- and runtime-performance workflows measure only relevant changes and post their base-versus-PR comparisons automatically.
 Do not copy a manually measured table into this description.
 -->
