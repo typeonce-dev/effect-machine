@@ -1,5 +1,15 @@
 # @typeonce/effect-machine
 
+## 0.6.0
+
+### Minor Changes
+
+- e786835: Upgrade Effect and the companion Effect packages from the beta release line to `4.0.0-rc.108`.
+
+### Patch Changes
+
+- 449984b: Upgrade the XState v6 performance comparison to `6.0.0-alpha.36`.
+
 ## 0.5.1
 
 ### Patch Changes
