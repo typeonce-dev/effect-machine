@@ -2341,14 +2341,26 @@ export declare namespace Machine {
     readonly initial: InitialBuilder<States>
 
     /**
-     * Returns the decoded value for an active state path.
+     * Returns the decoded value for an active state path. The supplied
+     * snapshot may be a complete root snapshot or a snapshot previously
+     * extracted from this definition. Extracted snapshots accept only their
+     * own absolute path and descendant paths.
      *
      * @since 0.4.0
      */
-    readonly get: <Path extends StateIdentifier<States>>(
-      snapshot: Snapshot<States>,
-      path: Path
-    ) => Option.Option<StateByIdentifier<States, Path>>
+    readonly get: {
+      <Path extends StateIdentifier<States>>(
+        snapshot: Snapshot<States>,
+        path: Path
+      ): Option.Option<StateByIdentifier<States, Path>>
+      <
+        const From extends StateIdentifier<States>,
+        const Path extends StateIdentifier<States>
+      >(
+        snapshot: SnapshotByIdentifier<States, From>,
+        path: Path & (Path extends NoInfer<From> | `${NoInfer<From>}.${string}` ? unknown : never)
+      ): Option.Option<StateByIdentifier<States, Path>>
+    }
 
     /**
      * Returns the decoded value for an active state path together with all of
@@ -2366,24 +2378,48 @@ export declare namespace Machine {
     ) => Option.Option<StateWithParents<States, Path>>
 
     /**
-     * Returns the snapshot for an active state path.
+     * Returns the snapshot for an active state path. The supplied snapshot may
+     * be a complete root snapshot or a snapshot previously extracted from this
+     * definition. Extracted snapshots accept only their own absolute path and
+     * descendant paths.
      *
      * @since 0.4.0
      */
-    readonly getSnapshot: <Path extends StateIdentifier<States>>(
-      snapshot: Snapshot<States>,
-      path: Path
-    ) => Option.Option<SnapshotByIdentifier<States, Path>>
+    readonly getSnapshot: {
+      <Path extends StateIdentifier<States>>(
+        snapshot: Snapshot<States>,
+        path: Path
+      ): Option.Option<SnapshotByIdentifier<States, Path>>
+      <
+        const From extends StateIdentifier<States>,
+        const Path extends StateIdentifier<States>
+      >(
+        snapshot: SnapshotByIdentifier<States, From>,
+        path: Path & (Path extends NoInfer<From> | `${NoInfer<From>}.${string}` ? unknown : never)
+      ): Option.Option<SnapshotByIdentifier<States, Path>>
+    }
 
     /**
-     * Returns whether a state path is active in the snapshot.
+     * Returns whether a state path is active in the snapshot. The supplied
+     * snapshot may be a complete root snapshot or a snapshot previously
+     * extracted from this definition. Extracted snapshots accept only their
+     * own absolute path and descendant paths.
      *
      * @since 0.4.0
      */
-    readonly matches: <Path extends StateIdentifier<States>>(
-      snapshot: Snapshot<States>,
-      path: Path
-    ) => boolean
+    readonly matches: {
+      <Path extends StateIdentifier<States>>(
+        snapshot: Snapshot<States>,
+        path: Path
+      ): boolean
+      <
+        const From extends StateIdentifier<States>,
+        const Path extends StateIdentifier<States>
+      >(
+        snapshot: SnapshotByIdentifier<States, From>,
+        path: Path & (Path extends NoInfer<From> | `${NoInfer<From>}.${string}` ? unknown : never)
+      ): boolean
+    }
   }
 
   /**

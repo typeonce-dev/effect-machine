@@ -357,6 +357,15 @@ States.getSnapshot(snapshot, "Route.Ready")
 States.matches(snapshot, "Route.Ready.Saving")
 ```
 
+Snapshots returned by `getSnapshot` can be queried again with `get`,
+`getSnapshot`, or `matches`. Paths remain absolute and are restricted to the
+extracted snapshot and its descendants:
+
+```ts
+const ready = Option.getOrThrow(States.getSnapshot(snapshot, "Route.Ready"))
+States.matches(ready, "Route.Ready.Saving")
+```
+
 All paths are checked against the definition. `context.parent` is the immediate
 typed parent (`undefined` at a root). Use `parents` when another ancestor is
 needed:
@@ -642,10 +651,15 @@ the `DefinedStates` object:
 
 ```ts
 AtomMachine.select(machineAtom, "Ready")
+AtomMachine.selectSnapshot(machineAtom, "Ready")
 AtomMachine.matches(machineAtom, "Ready.Saving")
 AtomMachine.selectChild(childAtom, "Editing")
+AtomMachine.selectSnapshotChild(childAtom, "Editing")
 AtomMachine.matchesChild(childAtom, "Editing")
 ```
+
+`select` returns only the decoded state value. Use `selectSnapshot` when a
+component needs the selected node's compound or parallel child topology.
 
 Like ordinary Effect Atom combinators, each selector call returns a derived
 atom. Define it at a stable composition boundary or memoize it when constructing

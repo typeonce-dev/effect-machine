@@ -204,9 +204,10 @@ Binding a shared runtime once is the canonical form for service-backed
 applications. Service-free machines can use `AtomMachine.make(Counter)`.
 
 The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
-`send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select` and
-`AtomMachine.matches` for typed, equality-aware derivations. React applications
-using `@effect/atom-react` need a `RegistryProvider`.
+`send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,
+`AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
+equality-aware derivations. React applications using `@effect/atom-react` need
+a `RegistryProvider`.
 
 ## Persistence
 

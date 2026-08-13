@@ -295,6 +295,10 @@ type SnapshotValueByIdentifier<State, Path extends SnapshotIdentifier<State>> = 
   Node extends { readonly path: Path; readonly value: infer Value } ? Value : never
   : never
 
+type SnapshotByIdentifier<State, Path extends SnapshotIdentifier<State>> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: Path } ? Node : never
+  : never
+
 type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.ChildMachine.Ref<Child>>
 
 /**
@@ -340,6 +344,27 @@ export const select: <
 > = internal.select
 
 /**
+ * Selects the typed logical snapshot for an active state path.
+ *
+ * Unlike {@link select}, the selected value retains its child snapshot
+ * topology. The derived atom suppresses structurally equal updates. Keep the
+ * returned atom stable when constructing it inside a component.
+ *
+ * @category combinators
+ * @since 0.7.0
+ */
+export const selectSnapshot: <
+  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+  Event,
+  Error,
+  Output,
+  StartError,
+  const Path extends SnapshotIdentifier<State>
+>(self: MachineAtom<State, Event, Error, Output, StartError>, path: Path) => Atom.Atom<
+  AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
+> = internal.selectSnapshot
+
+/**
  * Selects the typed value for an active state path in an invoked child.
  *
  * Valid paths and their selected value types are inferred from the child
@@ -366,6 +391,28 @@ export const selectChild: <
     StartError | RefError<Machine.ChildMachine.Ref<Child>>
   >
 > = internal.selectChild
+
+/**
+ * Selects the typed logical snapshot for an active state path in an invoked
+ * child.
+ *
+ * An inactive child or state path produces `Option.none()`. Unlike
+ * {@link selectChild}, the selected value retains its child snapshot topology.
+ * The derived atom suppresses structurally equal updates.
+ *
+ * @category combinators
+ * @since 0.7.0
+ */
+export const selectSnapshotChild: <
+  Child extends Machine.ChildMachine.Any,
+  StartError,
+  const Path extends SnapshotIdentifier<ChildState<Child>>
+>(self: ChildMachineAtom<Child, StartError>, path: Path) => Atom.Atom<
+  AsyncResult.AsyncResult<
+    Option.Option<SnapshotByIdentifier<ChildState<Child>, Path>>,
+    StartError | RefError<Machine.ChildMachine.Ref<Child>>
+  >
+> = internal.selectSnapshotChild
 
 /**
  * Returns whether a state path is active.

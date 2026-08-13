@@ -713,10 +713,11 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
   return {
     states,
     initial: makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
-    get: ((snapshot, path) =>
-      Topology.getSnapshotByPath(snapshot, path).pipe(
-        Option.map((snapshot) => snapshot.value)
-      )) as Machine.DefinedStates<States>["get"],
+    get:
+      ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
+        Topology.getSnapshotByPath(snapshot, path).pipe(
+          Option.map((snapshot) => snapshot.value)
+        )) as Machine.DefinedStates<States>["get"],
     getWithParents: ((snapshot, path) => {
       const parents: Record<string, unknown> = {}
       return Topology.getSnapshotByPath(snapshot, path, parents).pipe(
@@ -724,7 +725,9 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
       )
     }) as Machine.DefinedStates<States>["getWithParents"],
     getSnapshot: Topology.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
-    matches: (snapshot, path) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))
+    matches:
+      ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
+        Option.isSome(Topology.getSnapshotByPath(snapshot, path))) as Machine.DefinedStates<States>["matches"]
   }
 }) as DefineStates
 

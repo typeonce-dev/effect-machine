@@ -367,6 +367,19 @@ describe("Machine", () => {
     expect(UpStates.get).type.not.toBeCallableWith(snapshot, "up.missing")
     expect(UpStates.getWithParents).type.not.toBeCallableWith(snapshot, "up.missing")
 
+    const upSnapshot = Option.getOrThrow(UpStates.getSnapshot(snapshot, "up"))
+    const authSnapshot = Option.getOrThrow(UpStates.getSnapshot(upSnapshot, "up.auth"))
+    expect(UpStates.get(upSnapshot, "up.auth.signedOut")).type.toBe<Option.Option<SignedOut>>()
+    expect(UpStates.getSnapshot(upSnapshot, "up.sync")).type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof UpStates.states, "up.sync">>
+    >()
+    expect(UpStates.matches(authSnapshot, "up.auth.signedIn")).type.toBe<boolean>()
+    expect(UpStates.get(authSnapshot, "up.auth")).type.toBe<Option.Option<Auth>>()
+    expect(UpStates.get).type.not.toBeCallableWith(authSnapshot, "up.sync.idle")
+    expect(UpStates.getSnapshot).type.not.toBeCallableWith(authSnapshot, "up")
+    expect(UpStates.matches).type.not.toBeCallableWith(authSnapshot, "signedOut")
+    expect(UpStates.matches).type.not.toBeCallableWith(authSnapshot, "down")
+
     const other = Machine.defineStates({ other: Down })
     expect(UpStates.get).type.not.toBeCallableWith(other.initial.other(new Down({})), "up")
     expect(UpStates.getWithParents).type.not.toBeCallableWith(other.initial.other(new Down({})), "up")

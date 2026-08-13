@@ -426,6 +426,24 @@ describe("Machine", () => {
     )
     assert.strictEqual(states.matches(snapshot, "fulfillment.shipping"), true)
     assert.strictEqual(states.matches(snapshot, "fulfillment.shipping.quoted"), false)
+
+    const fulfillmentSnapshot = Option.getOrThrow(states.getSnapshot(snapshot, "fulfillment"))
+    assert.deepStrictEqual(states.get(fulfillmentSnapshot, "fulfillment.inventory"), Option.some(inventory))
+    assert.deepStrictEqual(
+      states.getSnapshot(fulfillmentSnapshot, "fulfillment.shipping"),
+      Option.some(fulfillmentSnapshot.states.shipping)
+    )
+    assert.strictEqual(states.matches(fulfillmentSnapshot, "fulfillment.inventory.checking"), true)
+    assert.strictEqual(states.matches(fulfillmentSnapshot, "fulfillment.inventory.reserved"), false)
+
+    const inventorySnapshot = Option.getOrThrow(
+      states.getSnapshot(fulfillmentSnapshot, "fulfillment.inventory")
+    )
+    assert.deepStrictEqual(states.get(inventorySnapshot, "fulfillment.inventory"), Option.some(inventory))
+    assert.deepStrictEqual(
+      states.get(inventorySnapshot, "fulfillment.inventory.checking"),
+      Option.some(checking)
+    )
   })
 
   it.effect("initial builder constructs compound initial snapshots", () =>
