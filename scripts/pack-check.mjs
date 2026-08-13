@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
@@ -18,7 +18,11 @@ try {
   const listing = spawnSync("tar", ["-tzf", archive], { encoding: "utf8" })
   if (listing.status !== 0) throw new Error(listing.stderr)
   const files = listing.stdout.trim().split("\n")
+  const sourceFiles = (await readdir(join(root, "src"), { recursive: true }))
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => `package/src/${file.replaceAll("\\", "/")}`)
   const required = [
+    ...sourceFiles,
     "package/dist/index.js",
     "package/dist/index.d.ts",
     "package/dist/unstable/reactivity/index.js",
@@ -47,7 +51,7 @@ try {
   if (legacyBuildFiles.length > 0) {
     throw new Error(`tarball contains legacy entrypoint artifacts:\n${legacyBuildFiles.join("\n")}`)
   }
-  const forbidden = files.filter((file) => /^package\/(?:src|test|typetest|scripts|\.github|\.changeset)\//.test(file))
+  const forbidden = files.filter((file) => /^package\/(?:test|typetest|scripts|\.github|\.changeset)\//.test(file))
   if (forbidden.length > 0) throw new Error(`tarball contains repository files:\n${forbidden.join("\n")}`)
   console.log(`pack verification passed (${files.length} files)`)
 } finally {
