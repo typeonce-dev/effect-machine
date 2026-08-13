@@ -1,5 +1,13 @@
 # @typeonce/effect-machine
 
+## 0.7.0
+
+### Minor Changes
+
+- b192484: Allow state query helpers to inspect extracted snapshot subtrees, and add
+  equality-aware `AtomMachine.selectSnapshot` and `selectSnapshotChild`
+  combinators.
+
 ## 0.6.1
 
 ### Patch Changes
