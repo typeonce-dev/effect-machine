@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { appendFileSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -86,6 +86,7 @@ const readAvailableExamples = () => {
   const examplesRoot = resolve(import.meta.dirname, "..", "examples")
   return readdirSync(examplesRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => existsSync(resolve(examplesRoot, entry.name, "package.json")))
     .map((entry) => {
       const packageJson = JSON.parse(readFileSync(resolve(examplesRoot, entry.name, "package.json"), "utf8"))
       if (typeof packageJson.scripts?.check !== "string") {
