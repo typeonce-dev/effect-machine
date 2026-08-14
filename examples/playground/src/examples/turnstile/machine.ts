@@ -11,12 +11,16 @@ export const TurnstileStates = Machine.defineStates({
   Unlocked: {}
 })
 
-export const TurnstileMachine = Machine.make({
+const definition = Machine.make({
   id: "Turnstile",
   states: TurnstileStates.states,
   events: [TurnstileEvent],
   initial: () => TurnstileStates.initial.Locked.from()
-}).handle({
+})
+
+export const TurnstileEvents = Machine.events(definition)
+
+export const TurnstileMachine = definition.handle({
   Locked: {
     on: {
       CoinInserted: ({ target }) => target.full.Unlocked.from()

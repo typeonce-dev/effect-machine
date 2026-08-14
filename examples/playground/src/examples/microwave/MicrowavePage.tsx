@@ -2,7 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { Match } from "effect"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
 import { microwaveAtom } from "./atoms.ts"
-import { MicrowaveEvent } from "./machine.ts"
+import { MicrowaveEvents } from "./machine.ts"
 
 export function MicrowavePage() {
   const stateResult = useAtomValue(microwaveAtom.state)
@@ -49,7 +49,7 @@ export function MicrowavePage() {
                     <button
                       type="button"
                       disabled={open}
-                      onClick={() => send(MicrowaveEvent.cases.PowerPressed.make({}))}
+                      onClick={() => send(MicrowaveEvents.PowerPressed())}
                     >
                       {cooking ? "Stop" : "Start"}
                     </button>
@@ -57,9 +57,7 @@ export function MicrowavePage() {
                       type="button"
                       onClick={() =>
                         send(
-                          open
-                            ? MicrowaveEvent.cases.DoorClosed.make({})
-                            : MicrowaveEvent.cases.DoorOpened.make({})
+                          open ? MicrowaveEvents.DoorClosed() : MicrowaveEvents.DoorOpened()
                         )}
                     >
                       {open ? "Close door" : "Open door"}

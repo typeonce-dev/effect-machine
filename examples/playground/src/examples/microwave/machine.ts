@@ -37,9 +37,7 @@ export const MicrowaveStates = Machine.defineStates({
   }
 })
 
-const secondElapsed = MicrowaveInternalEvent.cases.SecondElapsed.make({})
-
-export const MicrowaveMachine = Machine.make({
+const definition = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: [MicrowaveEvent],
@@ -50,7 +48,13 @@ export const MicrowaveMachine = Machine.make({
         .engine.from((engine) => engine.Idle.from())
         .door.from((door) => door.Closed.from())
     )
-}).handle({
+})
+
+export const MicrowaveEvents = Machine.events(definition)
+const InternalEvents = Machine.internalEvents(definition)
+const secondElapsed = InternalEvents.SecondElapsed()
+
+export const MicrowaveMachine = definition.handle({
   Oven: {
     states: {
       engine: {

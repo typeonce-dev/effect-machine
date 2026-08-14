@@ -3,7 +3,7 @@ import { Match } from "effect"
 import { useState } from "react"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
 import { turnstileAtom } from "./atoms.ts"
-import { TurnstileEvent } from "./machine.ts"
+import { TurnstileEvents } from "./machine.ts"
 
 export function TurnstilePage() {
   const stateResult = useAtomValue(turnstileAtom.state)
@@ -39,7 +39,7 @@ export function TurnstilePage() {
                         setLastCommand(
                           locked ? "Coin accepted. Gate unlocked." : "Coin ignored: the gate is already unlocked."
                         )
-                        send(TurnstileEvent.cases.CoinInserted.make({}))
+                        send(TurnstileEvents.CoinInserted())
                       }}
                     >
                       Insert coin
@@ -50,7 +50,7 @@ export function TurnstilePage() {
                         setLastCommand(
                           locked ? "Push ignored: insert a coin first." : "Gate pushed. Turnstile locked again."
                         )
-                        send(TurnstileEvent.cases.GatePushed.make({}))
+                        send(TurnstileEvents.GatePushed())
                       }}
                     >
                       Push gate

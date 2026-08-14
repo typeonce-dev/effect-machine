@@ -1,6 +1,7 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Data, Effect, Stream } from "effect"
-import { type LoudnessSample, MediaPlayerInternalEvent, type SoundSettings, toAudioSettings } from "./schemas.ts"
+import { MediaPlayerInternalEvents } from "./definition.ts"
+import { type LoudnessSample, type SoundSettings, toAudioSettings } from "./schemas.ts"
 import { MediaPlayer, MediaPlayerError } from "./service.ts"
 
 export const loadAudio = (url: string) =>
@@ -10,8 +11,8 @@ export const loadAudio = (url: string) =>
       const mediaPlayer = yield* MediaPlayer
       yield* mediaPlayer.load(url)
     }),
-    onSuccess: () => MediaPlayerInternalEvent.cases.LoadSucceeded.make({}),
-    onFailure: (failure) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
+    onSuccess: () => MediaPlayerInternalEvents.LoadSucceeded(),
+    onFailure: (failure) => MediaPlayerInternalEvents.OperationFailed({ message: failure.message })
   })
 
 export const pauseAudio = Machine.invokeEffect({
@@ -21,7 +22,7 @@ export const pauseAudio = Machine.invokeEffect({
     yield* mediaPlayer.pause
   }),
   onSuccess: () => undefined,
-  onFailure: (failure) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
+  onFailure: (failure) => MediaPlayerInternalEvents.OperationFailed({ message: failure.message })
 })
 
 export const playAudio = Machine.invokeEffect({
@@ -31,7 +32,7 @@ export const playAudio = Machine.invokeEffect({
     yield* mediaPlayer.play
   }),
   onSuccess: () => undefined,
-  onFailure: (failure) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
+  onFailure: (failure) => MediaPlayerInternalEvents.OperationFailed({ message: failure.message })
 })
 
 export const restartAudio = Machine.invokeEffect({
@@ -40,8 +41,8 @@ export const restartAudio = Machine.invokeEffect({
     const mediaPlayer = yield* MediaPlayer
     yield* mediaPlayer.restart
   }),
-  onSuccess: () => MediaPlayerInternalEvent.cases.RestartSucceeded.make({}),
-  onFailure: (failure) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
+  onSuccess: () => MediaPlayerInternalEvents.RestartSucceeded(),
+  onFailure: (failure) => MediaPlayerInternalEvents.OperationFailed({ message: failure.message })
 })
 
 export const applyAudioSettings = (settings: SoundSettings, muted: boolean) =>
@@ -82,7 +83,7 @@ export const analyzeAudio = Machine.invoke({
   snapshot: ({ snapshot }) =>
     LoudnessProcessState.$match(snapshot.state, {
       Waiting: () => undefined,
-      Measured: ({ sample }) => MediaPlayerInternalEvent.cases.LoudnessMeasured.make(sample),
-      Failed: ({ failure }) => MediaPlayerInternalEvent.cases.OperationFailed.make({ message: failure.message })
+      Measured: ({ sample }) => MediaPlayerInternalEvents.LoudnessMeasured(sample),
+      Failed: ({ failure }) => MediaPlayerInternalEvents.OperationFailed({ message: failure.message })
     })
 })

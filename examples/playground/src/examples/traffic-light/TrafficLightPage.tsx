@@ -2,7 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { Match } from "effect"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
 import { trafficLightAtom } from "./atoms.ts"
-import { trafficLightDurations, TrafficLightEvent } from "./machine.ts"
+import { trafficLightDurations, TrafficLightEvents } from "./machine.ts"
 
 export function TrafficLightPage() {
   const stateResult = useAtomValue(trafficLightAtom.state)
@@ -43,7 +43,7 @@ export function TrafficLightPage() {
                     <span style={{ animationDuration: `${duration}ms` }} />
                   </div>
                   <div className="machine-controls">
-                    <button type="button" onClick={() => send(TrafficLightEvent.cases.Reset.make({}))}>
+                    <button type="button" onClick={() => send(TrafficLightEvents.Reset())}>
                       Reset cycle
                     </button>
                   </div>

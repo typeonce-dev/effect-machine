@@ -121,13 +121,18 @@ const initialCharacter = () =>
       .contact.from((contact) => contact.NoWall.from())
   )
 
-export const CharacterMachine = Machine.make({
+const definition = Machine.make({
   id: "PlatformerCharacter",
   states: CharacterStates.states,
   events: [Event],
   internalEvents: [InternalEvent],
   initial: initialCharacter
-}).handle({
+})
+
+export const CharacterEvents = Machine.events(definition)
+const InternalEvents = Machine.internalEvents(definition)
+
+export const CharacterMachine = definition.handle({
   Character: {
     on: {
       Reset: {
@@ -223,7 +228,7 @@ export const CharacterMachine = Machine.make({
                     }
                   },
                   Landing: {
-                    invoke: Machine.after("140 millis", InternalEvent.cases.LandingSettled.make({}), {
+                    invoke: Machine.after("140 millis", InternalEvents.LandingSettled(), {
                       id: "landing-settle"
                     }),
                     on: {
@@ -254,8 +259,8 @@ export const CharacterMachine = Machine.make({
                       const push = awayFrom(event.wall)
                       enqueue.raise(
                         push === 0
-                          ? InternalEvent.cases.TryAirJump.make({ at: event.at })
-                          : InternalEvent.cases.WallJump.make({ at: event.at, push })
+                          ? InternalEvents.TryAirJump({ at: event.at })
+                          : InternalEvents.WallJump({ at: event.at, push })
                       )
                     }
                   },
@@ -319,7 +324,7 @@ export const CharacterMachine = Machine.make({
                     },
                     states: {
                       AirJumpGroundLock: {
-                        invoke: Machine.after("120 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                        invoke: Machine.after("120 millis", InternalEvents.AirJumpUnlocked(), {
                           id: "ground-air-jump-unlock"
                         }),
                         on: {
@@ -330,7 +335,7 @@ export const CharacterMachine = Machine.make({
                         }
                       },
                       AirJumpWallLock: {
-                        invoke: Machine.after("240 millis", InternalEvent.cases.AirJumpUnlocked.make({}), {
+                        invoke: Machine.after("240 millis", InternalEvents.AirJumpUnlocked(), {
                           id: "wall-air-jump-unlock"
                         }),
                         on: {
@@ -345,7 +350,7 @@ export const CharacterMachine = Machine.make({
                           TryAirJump: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpSpent"],
                             transition: ({ event, target }, enqueue) => {
-                              enqueue.raise(InternalEvent.cases.DoubleJump.make({ at: event.at }))
+                              enqueue.raise(InternalEvents.DoubleJump({ at: event.at }))
                               return target.local.AirJumpSpent.from()
                             }
                           }

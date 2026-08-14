@@ -5,17 +5,17 @@ import { Effect } from "effect"
 import { MicrowaveEvent, MicrowaveMachine } from "./microwave/machine.ts"
 import { TrafficLightMachine } from "./traffic-light/machine.ts"
 import { TurnstileEvent, TurnstileMachine } from "./turnstile/machine.ts"
-import { SharedMachine, SharedMachineEvent } from "./worker-tabs/machine.ts"
+import { SharedMachine, SharedTransportEvents } from "./worker-tabs/machine.ts"
 
 describe("playground machines", () => {
   it.effect("accepts only the command enabled by the current turnstile state", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(TurnstileMachine, {
         events: [
-          TurnstileEvent.cases.GatePushed.make({}),
-          TurnstileEvent.cases.CoinInserted.make({}),
-          TurnstileEvent.cases.CoinInserted.make({}),
-          TurnstileEvent.cases.GatePushed.make({})
+          Machine.event(TurnstileMachine, TurnstileEvent.cases.GatePushed),
+          Machine.event(TurnstileMachine, TurnstileEvent.cases.CoinInserted),
+          Machine.event(TurnstileMachine, TurnstileEvent.cases.CoinInserted),
+          Machine.event(TurnstileMachine, TurnstileEvent.cases.GatePushed)
         ]
       })
 
@@ -46,11 +46,11 @@ describe("playground machines", () => {
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(MicrowaveMachine, {
         events: [
-          MicrowaveEvent.cases.PowerPressed.make({}),
-          MicrowaveEvent.cases.DoorOpened.make({}),
-          MicrowaveEvent.cases.PowerPressed.make({}),
-          MicrowaveEvent.cases.DoorClosed.make({}),
-          MicrowaveEvent.cases.PowerPressed.make({})
+          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed),
+          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.DoorOpened),
+          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed),
+          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.DoorClosed),
+          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed)
         ]
       })
 
@@ -67,9 +67,9 @@ describe("playground machines", () => {
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(SharedMachine, {
         events: [
-          SharedMachineEvent.cases.Started.make({}),
-          SharedMachineEvent.cases.Incremented.make({}),
-          SharedMachineEvent.cases.Synchronized.make({ active: false, count: 12 })
+          SharedTransportEvents.Started(),
+          SharedTransportEvents.Incremented(),
+          SharedTransportEvents.Synchronized({ active: false, count: 12 })
         ]
       })
 

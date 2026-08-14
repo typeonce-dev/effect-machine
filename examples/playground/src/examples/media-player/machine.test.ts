@@ -1,23 +1,26 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Machine } from "@typeonce/effect-machine"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect, Graph } from "effect"
 import { MediaPlayerMachine } from "./machine.ts"
 import { MediaPlayerEvent } from "./schemas.ts"
 
 const everyPublicEvent = [
-  MediaPlayerEvent.cases.SourceSelected.make({ url: "https://example.com/audio.mp3" }),
-  MediaPlayerEvent.cases.PlayRequested.make({}),
-  MediaPlayerEvent.cases.PauseRequested.make({}),
-  MediaPlayerEvent.cases.RestartRequested.make({}),
-  MediaPlayerEvent.cases.MediaWaiting.make({}),
-  MediaPlayerEvent.cases.MediaCanPlay.make({}),
-  MediaPlayerEvent.cases.PlaybackEnded.make({ currentTime: 42 }),
-  MediaPlayerEvent.cases.TimeUpdated.make({ currentTime: 21 }),
-  MediaPlayerEvent.cases.MediaFailed.make({ message: "unsupported codec" }),
-  MediaPlayerEvent.cases.VolumeChanged.make({ volume: 0.4 }),
-  MediaPlayerEvent.cases.PlaybackRateChanged.make({ playbackRate: 1.5 }),
-  MediaPlayerEvent.cases.MuteRequested.make({}),
-  MediaPlayerEvent.cases.UnmuteRequested.make({})
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.SourceSelected, {
+    url: "https://example.com/audio.mp3"
+  }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlayRequested),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PauseRequested),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.RestartRequested),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaWaiting),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaCanPlay),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlaybackEnded, { currentTime: 42 }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.TimeUpdated, { currentTime: 21 }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaFailed, { message: "unsupported codec" }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.VolumeChanged, { volume: 0.4 }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlaybackRateChanged, { playbackRate: 1.5 }),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MuteRequested),
+  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.UnmuteRequested)
 ]
 
 const generated = MachineTest.scenarios(MediaPlayerMachine, {
@@ -149,8 +152,10 @@ describe("media-player statechart model", () => {
           configuration.includes("Player.settings.Muted")
       )
       assert.deepStrictEqual(loadingAndMuted.trace.scenario.events, [
-        MediaPlayerEvent.cases.SourceSelected.make({ url: "https://example.com/audio.mp3" }),
-        MediaPlayerEvent.cases.MuteRequested.make({})
+        Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.SourceSelected, {
+          url: "https://example.com/audio.mp3"
+        }),
+        Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MuteRequested)
       ])
 
       yield* MachineTest.assertUnreachable(

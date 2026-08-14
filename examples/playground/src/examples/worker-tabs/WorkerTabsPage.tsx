@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
-import { type SharedEvent, SharedMachineEvent, type SharedSnapshot } from "./machine.ts"
+import { type SharedEvent, type SharedSnapshot, SharedTransportEvents } from "./machine.ts"
 import type { WorkerResponse } from "./protocol.ts"
 import { createTabChannel } from "./tab-channel.ts"
 import { createMachineWorker, type MachineWorkerClient } from "./worker-client.ts"
@@ -58,9 +58,7 @@ export function WorkerTabsPage() {
         }
         case "SyncState":
           if (message.recipientId === tabId.current) {
-            worker.sendEvent(
-              SharedMachineEvent.cases.Synchronized.make({ active: message.active, count: message.count })
-            )
+            worker.sendEvent(SharedTransportEvents.Synchronized({ active: message.active, count: message.count }))
             setTabMessage(`Synchronized with tab ${message.senderId}.`)
           }
       }
@@ -104,18 +102,18 @@ export function WorkerTabsPage() {
               type="button"
               onClick={() =>
                 send(
-                  active ? SharedMachineEvent.cases.Incremented.make({}) : SharedMachineEvent.cases.Started.make({})
+                  active ? SharedTransportEvents.Incremented() : SharedTransportEvents.Started()
                 )}
             >
               {active ? "Increment" : "Start"}
             </button>
-            <button type="button" onClick={() => send(SharedMachineEvent.cases.Reset.make({}))}>
+            <button type="button" onClick={() => send(SharedTransportEvents.Reset())}>
               Reset
             </button>
             <button
               type="button"
               disabled={!active}
-              onClick={() => send(SharedMachineEvent.cases.Stopped.make({}))}
+              onClick={() => send(SharedTransportEvents.Stopped())}
             >
               Stop
             </button>
