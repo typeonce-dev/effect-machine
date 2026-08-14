@@ -67,7 +67,7 @@
     "pack:check": "node scripts/pack-check.mjs",
     "check": "pnpm format:check && pnpm check:architecture && pnpm check:ci && pnpm docs:api:check && pnpm docs:site:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check",
     "changeset": "changeset",
-    "version-packages": "changeset version",
+    "version-packages": "changeset version && dprint fmt",
     "release": "pnpm build && changeset publish"
   },
   "peerDependencies": {

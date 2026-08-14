@@ -10,11 +10,11 @@
   const States = Machine.defineStates({
     Form: {
       initial: "Editing",
-      states: { Editing: {}, Saving },
-    },
-  });
+      states: { Editing: {}, Saving }
+    }
+  })
 
-  States.initial.Form.from((form) => form.Editing.from());
+  States.initial.Form.from((form) => form.Editing.from())
   ```
 
 ## 0.7.0
@@ -27,17 +27,17 @@
   earlier instead of requiring the complete root snapshot.
 
   ```ts
-  const readySnapshot = States.getSnapshot(snapshot, "Ready");
+  const readySnapshot = States.getSnapshot(snapshot, "Ready")
 
   if (Option.isSome(readySnapshot)) {
-    States.get(readySnapshot.value, "Ready.editor");
-    States.matches(readySnapshot.value, "Ready.editor.Editing");
+    States.get(readySnapshot.value, "Ready.editor")
+    States.matches(readySnapshot.value, "Ready.editor.Editing")
   }
 
   const editorSnapshotAtom = AtomMachine.selectSnapshot(
     machineAtom,
     "Ready.editor"
-  );
+  )
   ```
 
   Add equality-aware `AtomMachine.selectSnapshot` and
