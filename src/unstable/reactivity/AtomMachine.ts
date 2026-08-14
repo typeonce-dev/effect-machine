@@ -537,7 +537,7 @@ type MachineInputArgsOf<M extends Machine.Machine.Any> = [
 
 type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-  Machine.Machine.InputEvent<M>,
+  Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
   MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
   Machine.Machine.Output<M>,
   MachineStartError<
@@ -551,7 +551,7 @@ type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
 
 type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-  Machine.Machine.InputEvent<M>,
+  Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
   MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
   Machine.Machine.Output<M>,
   Machine.MachineSchemaDecodeError | RuntimeError
@@ -661,7 +661,7 @@ export const make: {
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
-    Machine.Machine.EventOf<InputEvents>,
+    Machine.Machine.EventInputOf<InputEvents>,
     MachineRuntimeError<E, R>,
     Output,
     MachineStartError<InitialE, E, InitialR, R>

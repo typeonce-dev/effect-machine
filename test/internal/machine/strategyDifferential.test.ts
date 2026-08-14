@@ -277,6 +277,48 @@ describe("machine planner and runtime strategies", () => {
       }
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("decodes deferred event constructions in generic and compiled managed runtimes", () =>
+    Effect.gen(function*() {
+      const Event = Schema.TaggedUnion({ Set: { value: Schema.NonEmptyString } })
+      const states = Machine.defineStates({ Count })
+      const definition = Machine.make({
+        states: states.states,
+        events: [Event],
+        initial: () => states.initial.Count(new Count({ value: 0 }))
+      })
+      const events = Machine.events(definition)
+      const machine = definition.handle({
+        Count: {
+          on: {
+            Set: ({ event, target }) => target.full.Count(new Count({ value: event.value.length }))
+          }
+        }
+      })
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        const updated = yield* ref.changes.pipe(
+          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.value.value === 2),
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* ref.send(events.Set({ value: "ok" }))
+        yield* Fiber.join(updated)
+        const snapshot = yield* ref.snapshot
+        assert.strictEqual(snapshot.status, "active")
+        assert.strictEqual(snapshot.state.value.value, 2, `${strategy} decoded the construction`)
+        yield* ref.stop
+
+        const invalidRef = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* invalidRef.send(events.Set({ value: "" }))
+        const error = yield* Effect.flip(invalidRef.join)
+        assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+        assert.strictEqual(error.boundary, "event")
+        assert.strictEqual(error.event, "Set")
+      }
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("matches acknowledged probe delivery in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()

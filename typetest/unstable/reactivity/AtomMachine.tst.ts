@@ -131,7 +131,9 @@ describe("AtomMachine", () => {
     const child = AtomMachine.make(parentMachine).child(Child)
 
     expect<Atom.Success<typeof child.ref>>().type.toBe<Option.Option<Machine.ChildMachine.Ref<typeof Child>>>()
-    expect<typeof child.send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<Tick>()
+    expect<typeof child.send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
+      Machine.Machine.EventInput<Tick>
+    >()
   })
 
   it("derives fail-aware results, selectors, and child bridge types", () => {
@@ -287,7 +289,9 @@ describe("AtomMachine", () => {
     })
     const bridge = AtomMachine.make(machine)
 
-    expect<typeof bridge.send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<Tick>()
+    expect<typeof bridge.send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
+      Machine.Machine.EventInput<Tick>
+    >()
   })
 
   it("requires output implementations and preserves exact terminal output", () => {

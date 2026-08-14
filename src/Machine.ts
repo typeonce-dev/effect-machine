@@ -49,6 +49,7 @@ export const TypeId: TypeId = "~effect/Machine"
 
 declare const MachineOutputStatesTypeId: unique symbol
 declare const MachineTypeId: unique symbol
+declare const EventConstructionTypeId: unique symbol
 
 /**
  * Type identifier used for the synthetic event passed to startup lifecycle
@@ -350,7 +351,7 @@ export interface Runtime<in Events, in Emits> {
    *
    * @since 0.4.0
    */
-  readonly raise: (event: Events) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+  readonly raise: (event: Machine.EventInput<Events>) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 
   /**
    * Emits an event through the running machine's parent boundary.
@@ -370,7 +371,7 @@ export interface Runtime<in Events, in Emits> {
  */
 export interface Enqueue<in Events, in Emits> {
   /** Raises an event inside the current macrostep. */
-  readonly raise: (event: Events) => void
+  readonly raise: (event: Machine.EventInput<Events>) => void
 
   /** Emits an event through the machine's parent boundary. */
   readonly emit: (event: Emits) => void
@@ -1868,7 +1869,7 @@ export declare namespace ChildMachine {
    */
   export type Ref<Child> = Child extends ChildMachine<string, infer M> ? MachineRef<
       Machine.Snapshot<Machine.States<M>>,
-      Machine.InputEvent<M>,
+      Machine.EventInput<Machine.InputEvent<M>>,
       | Machine.Error<M>
       | ActionError<Machine.Services<M>>
       | InfiniteTransitionError
@@ -2152,6 +2153,13 @@ export declare namespace Machine {
    */
   export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
 
+  /** Extracts the internal event schema tuple carried by a machine definition. */
+  export type InternalEvents<M extends Any> = Events<M> extends readonly [
+    ...InputEvents<M>,
+    ...infer Internal extends ReadonlyArray<TaggedSchema>
+  ] ? Internal
+    : readonly []
+
   /**
    * Extracts the complete event protocol handled inside a machine.
    *
@@ -2167,6 +2175,53 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export type InputEvent<M extends Any> = EventOf<InputEvents<M>>
+
+  /**
+   * Opaque event construction returned by {@link events} and
+   * {@link internalEvents}.
+   *
+   * The machine resolves the instruction through its event schema when it is
+   * delivered. Only the discriminator is available before decoding succeeds.
+   */
+  export interface EventConstruction<out Event extends { readonly _tag: PropertyKey }> {
+    readonly [EventConstructionTypeId]: Event
+    readonly _tag: Event["_tag"]
+  }
+
+  /** A decoded event or a deferred machine-bound construction of that event. */
+  export type EventInput<Event> =
+    | Event
+    | (Event extends { readonly _tag: PropertyKey } ? EventConstruction<Event> : never)
+
+  /** Event inputs accepted for a schema tuple at machine delivery boundaries. */
+  export type EventInputOf<Events extends ReadonlyArray<TaggedSchema>> = EventInput<EventOf<Events>>
+
+  type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
+
+  type EventConstructor<
+    EventSchema extends TaggedSchema,
+    Tag extends EventSchema["Type"]["_tag"]
+  > = {} extends EventConstructorInput<EventSchema> ?
+    (input?: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
+    : (input: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
+
+  type EventConstructorsForSchema<EventSchema extends TaggedSchema> = EventSchema extends {
+    readonly cases: infer Cases extends Readonly<Record<PropertyKey, TaggedSchema>>
+  } ? {
+      readonly [Tag in keyof Cases]: Tag extends Cases[Tag]["Type"]["_tag"] ? EventConstructor<Cases[Tag], Tag>
+        : never
+    }
+    : EventSchema extends { readonly members: infer Members extends ReadonlyArray<TaggedSchema> } ?
+      Types.UnionToIntersection<EventConstructorsForSchema<Members[number]>>
+    : {
+      readonly [Tag in EventSchema["Type"]["_tag"]]: EventConstructor<EventSchema, Tag>
+    }
+
+  /** Protocol-bound constructors keyed by each configured event tag. */
+  export type EventConstructors<Events extends ReadonlyArray<TaggedSchema>> = {
+    readonly [Tag in keyof Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>]:
+      Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>[Tag]
+  }
 
   /**
    * Extracts the event protocol emitted by a machine.
@@ -4927,12 +4982,12 @@ export declare namespace Machine {
     StateId extends string,
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
-    : [Exclude<InvokeOutput<InvokeReturn<Config>>, EventOf<Events> | void>] extends [never] ? unknown
+    : [Exclude<InvokeOutput<InvokeReturn<Config>>, EventInput<EventOf<Events>> | void>] extends [never] ? unknown
     : {
       readonly invoke: HandlerValidationError<
         "Invoked child output must be a machine event or void",
         StateId,
-        Exclude<InvokeOutput<InvokeReturn<Config>>, EventOf<Events> | void>
+        Exclude<InvokeOutput<InvokeReturn<Config>>, EventInput<EventOf<Events>> | void>
       >
     }
 
@@ -4956,12 +5011,13 @@ export declare namespace Machine {
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
     : IsAny<InvokeSnapshotEvent<InvokeReturn<Config>>> extends true ? unknown
-    : [Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventOf<Events> | undefined>] extends [never] ? unknown
+    : [Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventInput<EventOf<Events>> | undefined>] extends [never]
+      ? unknown
     : {
       readonly invoke: HandlerValidationError<
         "Invoked child snapshot mapper must return a machine event or undefined",
         StateId,
-        Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventOf<Events> | undefined>
+        Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventInput<EventOf<Events>> | undefined>
       >
     }
 
@@ -5544,6 +5600,9 @@ type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends
  * Events supplied through ordinary `send` and `plan` calls remain untrusted
  * and continue through full runtime schema validation.
  * Treat the returned event as immutable after construction.
+ * This eager low-level constructor throws `MachineSchemaDecodeError` when
+ * construction fails. Prefer {@link events} and {@link internalEvents} for
+ * ordinary delivery so construction remains inside the machine error channel.
  *
  * The schema must be one of the machine's configured public or internal event
  * schemas, or a case schema belonging to a configured `Schema.TaggedUnion`.
@@ -5577,6 +5636,55 @@ export const event: <const M extends Machine.Any, const EventSchema extends Mach
   schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
   ...args: EventConstructorArgs<EventSchema>
 ) => EventSchema["Type"] = internal.event
+
+/**
+ * Returns deferred constructors for every public event in a machine protocol.
+ *
+ * Constructor inputs retain their schema-derived required fields, defaults,
+ * and transformations. Construction is deferred until delivery so failures
+ * enter the machine's `MachineSchemaDecodeError` channel rather than throwing
+ * at the call site.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const Event = Machine.events(counter)
+ * yield* ref.send(Event.Increment({ by: 1 }))
+ * ```
+ *
+ * @category constructors
+ * @since 0.9.0
+ */
+export const events: <const M extends Machine.Any>(
+  machine: M
+) => Machine.EventConstructors<Machine.InputEvents<M>> = internal.events
+
+/**
+ * Returns deferred constructors for every internal event in a machine
+ * protocol.
+ *
+ * Use these constructors for invoke results, timers, raised events, and other
+ * machine-local deliveries. Construction failures are reported through the
+ * owning machine's `MachineSchemaDecodeError` channel.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const InternalEvent = Machine.internalEvents(definition)
+ *
+ * const load = Machine.invokeEffect({
+ *   id: "load",
+ *   effect: Effect.succeed("ready"),
+ *   onSuccess: (value) => InternalEvent.Loaded({ value })
+ * })
+ * ```
+ *
+ * @category constructors
+ * @since 0.9.0
+ */
+export const internalEvents: <const M extends Machine.Any>(
+  machine: M
+) => Machine.EventConstructors<Machine.InternalEvents<M>> = internal.internalEvents
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.
@@ -5887,14 +5995,20 @@ type InvokeEffectConfig<
  * import { Effect, Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  *
- * class Loaded extends Schema.TaggedClass<Loaded>("Loaded")("Loaded", {
- *   value: Schema.String
- * }) {}
+ * const Internal = Schema.TaggedUnion({ Loaded: { value: Schema.String } })
+ * const States = Machine.defineStates({ Loading: {} })
+ * const definition = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   internalEvents: [Internal],
+ *   initial: () => States.initial.Loading.from()
+ * })
+ * const InternalEvent = Machine.internalEvents(definition)
  *
  * const load = Machine.invokeEffect({
  *   id: "load",
  *   effect: Effect.succeed("ready"),
- *   onSuccess: (value) => new Loaded({ value })
+ *   onSuccess: (value) => InternalEvent.Loaded({ value })
  * })
  * ```
  *
@@ -5923,9 +6037,17 @@ export const invokeEffect: <const Fx extends Effect.Effect<any, any, any>, Succe
  * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  *
- * class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
+ * const Internal = Schema.TaggedUnion({ TimedOut: {} })
+ * const States = Machine.defineStates({ Waiting: {} })
+ * const definition = Machine.make({
+ *   states: States.states,
+ *   events: [],
+ *   internalEvents: [Internal],
+ *   initial: () => States.initial.Waiting.from()
+ * })
+ * const InternalEvent = Machine.internalEvents(definition)
  *
- * const timeout = Machine.after("5 seconds", new TimedOut({}))
+ * const timeout = Machine.after("5 seconds", InternalEvent.TimedOut())
  * ```
  *
  * @category constructors
@@ -6081,7 +6203,7 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
@@ -6158,7 +6280,7 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
@@ -6489,7 +6611,7 @@ export const plan: <
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   state: Machine.Snapshot<States>,
-  event: Machine.EventOf<InputEvents>
+  event: Machine.EventInputOf<InputEvents>
 ) => Effect.Effect<
   & {
     readonly next: Machine.Snapshot<States>
@@ -6858,7 +6980,7 @@ export const start: <
 ) => Effect.Effect<
   MachineRef<
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     | E
     | ActionError<R>
     | InfiniteTransitionError
@@ -6967,7 +7089,7 @@ export const resume: <
 ) => Effect.Effect<
   MachineRef<
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     | E
     | ActionError<R>
     | InfiniteTransitionError

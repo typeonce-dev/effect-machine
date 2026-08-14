@@ -40,12 +40,14 @@ const Event = Schema.TaggedUnion({
 
 const States = Machine.defineStates(State.cases)
 
-const Counter = Machine.make({
+const CounterDefinition = Machine.make({
   id: "Counter",
   states: States.states,
   events: [Event],
   initial: () => States.initial.Idle.from()
-}).handle({
+})
+
+const Counter = CounterDefinition.handle({
   Idle: {
     on: {
       Start: ({ target }) => target.full.Running.from({ count: 0 })
@@ -59,10 +61,12 @@ const Counter = Machine.make({
   }
 })
 
+const CounterEvent = Machine.events(Counter)
+
 const program = Effect.gen(function*() {
   const ref = yield* Machine.start(Counter)
-  yield* ref.send(Machine.event(Counter, Event.cases.Start))
-  yield* ref.send(Machine.event(Counter, Event.cases.Increment))
+  yield* ref.send(CounterEvent.Start())
+  yield* ref.send(CounterEvent.Increment())
 })
 ```
 
@@ -130,20 +134,32 @@ const Internal = Schema.TaggedUnion({
   SaveFailed: { message: Schema.String }
 })
 
-const machine = Machine.make({
+const definition = Machine.make({
   states: States.states,
   events: [Command],
   internalEvents: [Internal],
   initial: () => States.initial.Idle.from()
 })
+
+const CommandEvent = Machine.events(definition)
+const InternalEvent = Machine.internalEvents(definition)
 ```
 
 Handlers see both protocols. Typed `send` and `Machine.plan` accept only public
 events. Event tags must be unique and public/internal tags must be disjoint.
 
-Use `Machine.event(machine, schema, fields?)` for reusable machine-owned event
-values. Ordinary objects and schema-constructed values are also accepted and
-decoded at the machine boundary.
+Use `Machine.events(machine)` and `Machine.internalEvents(machine)` as the
+standard constructors for their respective protocols:
+
+```ts
+ref.send(CommandEvent.Save())
+enqueue.raise(InternalEvent.Saved({ id: "entry-1" }))
+```
+
+The returned constructors preserve each schema's make input, including required
+fields and constructor defaults. They defer schema construction until delivery,
+so invalid values fail planning or the running machine with
+`MachineSchemaDecodeError` instead of throwing at the call site.
 
 ### Choose the target by scope
 
@@ -188,15 +204,15 @@ Loading: {
   invoke: Machine.invokeEffect({
     id: "save-document",
     effect: saveDocument,
-    onSuccess: (entry) => Internal.cases.Saved.make({ id: entry.id }),
-    onFailure: (error) => Internal.cases.SaveFailed.make({ message: String(error) })
+    onSuccess: (entry) => InternalEvent.Saved({ id: entry.id }),
+    onFailure: (error) => InternalEvent.SaveFailed({ message: String(error) })
   })
 }
 
 Waiting: {
   invoke: Machine.after(
     "3 seconds",
-    Internal.cases.SaveFailed.make({ message: "Timed out" })
+    InternalEvent.SaveFailed({ message: "Timed out" })
   )
 }
 ```
@@ -260,14 +276,19 @@ The testing entrypoint provides complementary layers:
 import { MachineTest } from "@typeonce/effect-machine/testing"
 
 const trace = yield* MachineTest.run(Counter, {
-  events: [Event.cases.Start.make({}), Event.cases.Increment.make({})]
+  events: [
+    Machine.event(Counter, Event.cases.Start),
+    Machine.event(Counter, Event.cases.Increment)
+  ]
 })
 
 yield* MachineTest.verify(Counter, trace)
 ```
 
-Pure planner tests do not execute invokes or time. Use a started machine and a
-probe when those semantics matter.
+`MachineTest` scenarios retain decoded event values for model inspection, so
+this is the main case for the eager `Machine.event` API. Pure planner tests do
+not execute invokes or time. Use a started machine and a probe when those
+semantics matter.
 
 ## Entrypoints
 

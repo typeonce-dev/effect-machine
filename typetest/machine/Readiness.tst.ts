@@ -194,24 +194,40 @@ describe("executable machine readiness", () => {
       Machine.Machine.Snapshot<typeof completeStates.states>
     >()
     expect<Effect.Success<typeof started>["send"]>().type.toBe<
-      (event: Tick) => Effect.Effect<void, Machine.StoppedError>
+      (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
     >()
     expect<Effect.Success<typeof resumed>["send"]>().type.toBe<
-      (event: Tick) => Effect.Effect<void, Machine.StoppedError>
+      (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
     >()
     expect(invocation).type.toBeAssignableTo<Machine.Machine.AnyInvokeConfig>()
     expect<Effect.Success<typeof trace>>().type.toBe<MachineTest.Trace<typeof complete>>()
     expect<AtomChannels<typeof atom>>().type.toBe<
-      readonly [Machine.Machine.Snapshot<typeof completeStates.states>, Tick, string]
+      readonly [
+        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Machine.EventInput<Tick>,
+        string
+      ]
     >()
     expect<AtomChannels<typeof resumedAtom>>().type.toBe<
-      readonly [Machine.Machine.Snapshot<typeof completeStates.states>, Tick, string]
+      readonly [
+        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Machine.EventInput<Tick>,
+        string
+      ]
     >()
     expect<AtomChannels<typeof boundAtom>>().type.toBe<
-      readonly [Machine.Machine.Snapshot<typeof completeStates.states>, Tick, string]
+      readonly [
+        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Machine.EventInput<Tick>,
+        string
+      ]
     >()
     expect<AtomChannels<typeof boundResumedAtom>>().type.toBe<
-      readonly [Machine.Machine.Snapshot<typeof completeStates.states>, Tick, string]
+      readonly [
+        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Machine.EventInput<Tick>,
+        string
+      ]
     >()
     expect(cluster.machine).type.toBe<typeof complete>()
   })

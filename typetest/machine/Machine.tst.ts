@@ -573,7 +573,7 @@ describe("Machine", () => {
     expect(anyMachine).type.not.toHaveProperty("eventSchemas")
     expect<Machine.Machine.InputEvent<typeof machine>>().type.toBe<SignIn>()
     expect<Machine.Machine.Event<typeof machine>>().type.toBe<SignIn | SignInCompleted>()
-    expect<Parameters<Ref["send"]>[0]>().type.toBe<SignIn>()
+    expect<Parameters<Ref["send"]>[0]>().type.toBe<Machine.Machine.EventInput<SignIn>>()
     expect(Machine.plan).type.toBeCallableWith(
       machine,
       UpStates.initial.down(new Down({})),

@@ -302,7 +302,7 @@ type Output = typeof machineAtom extends AtomMachine.MachineAtom<any, any, any, 
 type Failure = Atom.Failure<typeof machineAtom.result>
 
 type StateIsExact = Expect<Equal<StateSuccess, Snapshot>>
-type EventsArePublicOnly = Expect<Equal<SendEvent, typeof Event.Type>>
+type EventsArePublicOnly = Expect<Equal<SendEvent, Machine.Machine.EventInput<typeof Event.Type>>>
 type OutputIsExact = Expect<Equal<Output, string>>
 type RuntimeErrorIsPreserved = Expect<Equal<Extract<Failure, RuntimeFailure>, RuntimeFailure>>
 type FailureIsNotUnknown = Expect<Equal<unknown extends Failure ? true : false, false>>
