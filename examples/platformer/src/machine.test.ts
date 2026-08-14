@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import { makeTextRenderer } from "../../../test/machine/visualization/text.ts"
 import {
   airJumpMode,
+  CharacterEvents,
   CharacterMachine,
   type CharacterSnapshot,
   Event,
@@ -100,37 +101,50 @@ const laws = [
   resumeRestoresDeepHistory
 ]
 
+// Exploration scenarios retain decoded events for trace inspection.
+const EventValue = {
+  Resume: () => Machine.event(CharacterMachine, Event.cases.Resume),
+  Pause: (fields: { readonly at: number }) => Machine.event(CharacterMachine, Event.cases.Pause, fields),
+  Reset: () => Machine.event(CharacterMachine, Event.cases.Reset),
+  JumpPressed: (fields: { readonly at: number; readonly y: number; readonly wall: -1 | 0 | 1 }) =>
+    Machine.event(CharacterMachine, Event.cases.JumpPressed, fields),
+  Landed: (fields: { readonly impact: number; readonly axis: -1 | 0 | 1; readonly at: number }) =>
+    Machine.event(CharacterMachine, Event.cases.Landed, fields),
+  ApexReached: (fields: { readonly y: number }) => Machine.event(CharacterMachine, Event.cases.ApexReached, fields),
+  DownPressed: (fields: { readonly at: number }) => Machine.event(CharacterMachine, Event.cases.DownPressed, fields)
+}
+
 const explorationEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof CharacterMachine>) => {
   const locomotion = snapshot.states.locomotion.state
   if (locomotion.path === "Character.locomotion.Paused") {
-    return [Event.cases.Resume.make({})]
+    return [EventValue.Resume()]
   }
 
-  const pauseAndReset = [Event.cases.Pause.make({ at: 70 }), Event.cases.Reset.make({})]
+  const pauseAndReset = [EventValue.Pause({ at: 70 }), EventValue.Reset()]
   if (locomotion.state.path === "Character.locomotion.Playing.Grounded") {
     return [
-      Event.cases.JumpPressed.make({ at: 20, y: 100, wall: -1 }),
-      Event.cases.JumpPressed.make({ at: 20, y: 100, wall: 0 }),
-      Event.cases.JumpPressed.make({ at: 20, y: 100, wall: 1 }),
+      EventValue.JumpPressed({ at: 20, y: 100, wall: -1 }),
+      EventValue.JumpPressed({ at: 20, y: 100, wall: 0 }),
+      EventValue.JumpPressed({ at: 20, y: 100, wall: 1 }),
       ...pauseAndReset
     ]
   }
 
   const motion = locomotion.state.states.motion.state
   const airborne = [
-    Event.cases.JumpPressed.make({ at: 30, y: 80, wall: -1 }),
-    Event.cases.JumpPressed.make({ at: 30, y: 80, wall: 1 }),
-    Event.cases.Landed.make({ impact: 12, axis: 0, at: 60 }),
+    EventValue.JumpPressed({ at: 30, y: 80, wall: -1 }),
+    EventValue.JumpPressed({ at: 30, y: 80, wall: 1 }),
+    EventValue.Landed({ impact: 12, axis: 0, at: 60 }),
     ...pauseAndReset
   ]
   return motion.path === "Character.locomotion.Playing.Airborne.motion.Jumping"
     ? [
-      Event.cases.ApexReached.make({ y: 50 }),
-      Event.cases.DownPressed.make({ at: 40 }),
+      EventValue.ApexReached({ y: 50 }),
+      EventValue.DownPressed({ at: 40 }),
       ...airborne
     ]
     : motion.path === "Character.locomotion.Playing.Airborne.motion.Falling"
-    ? [Event.cases.DownPressed.make({ at: 40 }), ...airborne]
+    ? [EventValue.DownPressed({ at: 40 }), ...airborne]
     : airborne
 }
 
@@ -166,20 +180,20 @@ describe("platformer history integration", () => {
       const ducking = yield* Machine.plan(
         CharacterMachine,
         initial.state,
-        Event.cases.DownPressed.make({ at: 10 })
+        CharacterEvents.DownPressed({ at: 10 })
       )
       const beforePause = playingSnapshot(ducking.next)
 
       const paused = yield* Machine.plan(
         CharacterMachine,
         ducking.next,
-        Event.cases.Pause.make({ at: 20 })
+        CharacterEvents.Pause({ at: 20 })
       )
       const pausedLocomotion = paused.next.states.locomotion.state
       expect(pausedLocomotion.path).toBe("Character.locomotion.Paused")
       expect(pausedLocomotion.value).toEqual({ _tag: "Paused", pausedAt: 20 })
 
-      const resumed = yield* Machine.plan(CharacterMachine, paused.next, Event.cases.Resume.make({}))
+      const resumed = yield* Machine.plan(CharacterMachine, paused.next, CharacterEvents.Resume())
       expect(playingSnapshot(resumed.next)).toEqual(beforePause)
       expect(resumed.next.states.facing.state.path).toBe("Character.facing.Right")
       expect(resumed.next.states.contact.state.path).toBe("Character.contact.NoWall")
@@ -192,19 +206,19 @@ describe("platformer history integration", () => {
       const airborne = yield* Machine.plan(
         CharacterMachine,
         initial.state,
-        Event.cases.JumpPressed.make({ at: 100, y: 207, wall: -1 })
+        CharacterEvents.JumpPressed({ at: 100, y: 207, wall: -1 })
       )
       const falling = yield* Machine.plan(
         CharacterMachine,
         airborne.next,
-        Event.cases.ApexReached.make({ y: 91 })
+        CharacterEvents.ApexReached({ y: 91 })
       )
       const beforePause = playingSnapshot(falling.next)
 
       const paused = yield* Machine.plan(
         CharacterMachine,
         falling.next,
-        Event.cases.Pause.make({ at: 180 })
+        CharacterEvents.Pause({ at: 180 })
       )
       expect(paused.next.history?.["Character.locomotion.Playing.resume"]?.active).toEqual([
         "Character",
@@ -217,7 +231,7 @@ describe("platformer history integration", () => {
         "Character.locomotion.Playing.Airborne.airJump.AirJumpGroundLock"
       ])
 
-      const resumed = yield* Machine.plan(CharacterMachine, paused.next, Event.cases.Resume.make({}))
+      const resumed = yield* Machine.plan(CharacterMachine, paused.next, CharacterEvents.Resume())
       const restored = playingSnapshot(resumed.next)
       expect(restored).toEqual(beforePause)
 

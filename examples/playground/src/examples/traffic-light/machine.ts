@@ -23,15 +23,19 @@ export const TrafficLightStates = Machine.defineStates({
   Yellow: {}
 })
 
-const elapsed = TrafficLightInternalEvent.cases.TimerElapsed.make({})
-
-export const TrafficLightMachine = Machine.make({
+const definition = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: [TrafficLightEvent],
   internalEvents: [TrafficLightInternalEvent],
   initial: () => TrafficLightStates.initial.Red.from()
-}).handle({
+})
+
+export const TrafficLightEvents = Machine.events(definition)
+const InternalEvents = Machine.internalEvents(definition)
+const elapsed = InternalEvents.TimerElapsed()
+
+export const TrafficLightMachine = definition.handle({
   Red: {
     invoke: Machine.after(trafficLightDurations.Red, elapsed),
     on: {

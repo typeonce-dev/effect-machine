@@ -1,35 +1,11 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
+import { MediaPlayerDefinition } from "./definition.ts"
 import { analyzeAudio, applyAudioSettings, loadAudio, pauseAudio, playAudio, restartAudio } from "./invocations.ts"
-import {
-  initialAudioSettings,
-  initialPlaybackData,
-  MediaPlayerEvent,
-  MediaPlayerInternalEvent,
-  MediaPlayerStates,
-  updatePlaybackData
-} from "./schemas.ts"
+import { initialPlaybackData, updatePlaybackData } from "./schemas.ts"
 import { MediaPlayer } from "./service.ts"
 
-const initialPlayer = () =>
-  MediaPlayerStates.initial.Player.from((player) =>
-    player
-      .transport.from((transport) => transport.Empty.from())
-      .settings.from((settings) =>
-        settings.Audible.from({
-          volume: initialAudioSettings.volume,
-          playbackRate: initialAudioSettings.playbackRate
-        })
-      )
-  )
-
-export const MediaPlayerMachine = Machine.make({
-  id: "MediaPlayer",
-  states: MediaPlayerStates.states,
-  events: [MediaPlayerEvent],
-  internalEvents: [MediaPlayerInternalEvent],
-  initial: initialPlayer
-}).handle({
+export const MediaPlayerMachine = MediaPlayerDefinition.handle({
   Player: {
     states: {
       transport: {

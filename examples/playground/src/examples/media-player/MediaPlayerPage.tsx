@@ -3,7 +3,7 @@ import { Match } from "effect"
 import { useCallback, useEffect, useState } from "react"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
 import { mediaPlayerAtom, mediaPlayerViewAtom, registerMediaPlayerElement } from "./atoms.ts"
-import { MediaPlayerEvent } from "./schemas.ts"
+import { MediaPlayerEvents } from "./definition.ts"
 
 interface AudioSource {
   readonly name: string
@@ -75,7 +75,7 @@ export function MediaPlayerPage() {
                           if (file === undefined) return
                           const next = { name: file.name, url: URL.createObjectURL(file) }
                           setSource(next)
-                          send(MediaPlayerEvent.cases.SourceSelected.make({ url: next.url }))
+                          send(MediaPlayerEvents.SourceSelected({ url: next.url }))
                         }}
                       />
                     </label>
@@ -86,16 +86,16 @@ export function MediaPlayerPage() {
                   ref={registerAudioElement}
                   className="media-audio-element"
                   preload="auto"
-                  onWaiting={() => send(MediaPlayerEvent.cases.MediaWaiting.make({}))}
-                  onCanPlay={() => send(MediaPlayerEvent.cases.MediaCanPlay.make({}))}
+                  onWaiting={() => send(MediaPlayerEvents.MediaWaiting())}
+                  onCanPlay={() => send(MediaPlayerEvents.MediaCanPlay())}
                   onError={({ currentTarget }) =>
-                    send(MediaPlayerEvent.cases.MediaFailed.make({
+                    send(MediaPlayerEvents.MediaFailed({
                       message: currentTarget.error?.message ?? "The selected audio file could not be loaded"
                     }))}
                   onTimeUpdate={({ currentTarget }) =>
-                    send(MediaPlayerEvent.cases.TimeUpdated.make({ currentTime: currentTarget.currentTime }))}
+                    send(MediaPlayerEvents.TimeUpdated({ currentTime: currentTarget.currentTime }))}
                   onEnded={({ currentTarget }) =>
-                    send(MediaPlayerEvent.cases.PlaybackEnded.make({ currentTime: currentTarget.currentTime }))}
+                    send(MediaPlayerEvents.PlaybackEnded({ currentTime: currentTarget.currentTime }))}
                 />
 
                 <div className="media-player-layout">
@@ -116,21 +116,21 @@ export function MediaPlayerPage() {
                       <button
                         type="button"
                         disabled={!canPlay || source === undefined}
-                        onClick={() => send(MediaPlayerEvent.cases.PlayRequested.make({}))}
+                        onClick={() => send(MediaPlayerEvents.PlayRequested())}
                       >
                         Play
                       </button>
                       <button
                         type="button"
                         disabled={!canPause}
-                        onClick={() => send(MediaPlayerEvent.cases.PauseRequested.make({}))}
+                        onClick={() => send(MediaPlayerEvents.PauseRequested())}
                       >
                         Pause
                       </button>
                       <button
                         type="button"
                         disabled={!canRestart}
-                        onClick={() => send(MediaPlayerEvent.cases.RestartRequested.make({}))}
+                        onClick={() => send(MediaPlayerEvents.RestartRequested())}
                       >
                         Restart
                       </button>
@@ -164,7 +164,7 @@ export function MediaPlayerPage() {
                           step="0.01"
                           value={settings.volume}
                           onChange={({ currentTarget }) =>
-                            send(MediaPlayerEvent.cases.VolumeChanged.make({
+                            send(MediaPlayerEvents.VolumeChanged({
                               volume: currentTarget.valueAsNumber
                             }))}
                         />
@@ -177,8 +177,8 @@ export function MediaPlayerPage() {
                           onChange={({ currentTarget }) =>
                             send(
                               currentTarget.checked
-                                ? MediaPlayerEvent.cases.MuteRequested.make({})
-                                : MediaPlayerEvent.cases.UnmuteRequested.make({})
+                                ? MediaPlayerEvents.MuteRequested()
+                                : MediaPlayerEvents.UnmuteRequested()
                             )}
                         />
                       </label>
@@ -187,7 +187,7 @@ export function MediaPlayerPage() {
                         <select
                           value={settings.playbackRate}
                           onChange={({ currentTarget }) =>
-                            send(MediaPlayerEvent.cases.PlaybackRateChanged.make({
+                            send(MediaPlayerEvents.PlaybackRateChanged({
                               playbackRate: Number(currentTarget.value)
                             }))}
                         >
