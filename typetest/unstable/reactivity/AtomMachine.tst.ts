@@ -90,6 +90,22 @@ const NestedStates = Machine.defineStates({
   }
 })
 
+const StructuralNestedStates = Machine.defineStates({
+  Ready: {
+    type: "parallel",
+    states: {
+      editor: {
+        initial: "Idle",
+        states: {
+          Idle: {},
+          Saving
+        }
+      },
+      network: {}
+    }
+  }
+})
+
 const makeMachine = () =>
   Machine.make({
     states: States.states,
@@ -214,6 +230,30 @@ describe("AtomMachine", () => {
     expect<Atom.Failure<typeof childMatched>>().type.toBe<Atom.Failure<typeof child.result>>()
     expect(AtomMachine.selectChild).type.not.toBeCallableWith(child, "Idle")
     expect(AtomMachine.matchesChild).type.not.toBeCallableWith(child, "Ready.editor.Missing")
+  })
+
+  it("selects values only from schema-backed paths while structural paths remain queryable", () => {
+    type Snapshot = Machine.Machine.Snapshot<typeof StructuralNestedStates.states>
+    type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
+    const parent = null as unknown as Parent
+
+    const readySnapshot = AtomMachine.selectSnapshot(parent, "Ready")
+    const editorSnapshot = AtomMachine.selectSnapshot(parent, "Ready.editor")
+    const matched = AtomMachine.matches(parent, "Ready.editor.Idle")
+    const saving = AtomMachine.select(parent, "Ready.editor.Saving")
+
+    expect<Atom.Success<typeof readySnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof StructuralNestedStates.states, "Ready">>
+    >()
+    expect<Atom.Success<typeof editorSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof StructuralNestedStates.states, "Ready.editor">>
+    >()
+    expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
+    expect<Atom.Success<typeof saving>>().type.toBe<Option.Option<Saving>>()
+    expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready")
+    expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready.editor")
+    expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready.editor.Idle")
+    expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready.network")
   })
 
   it("accepts machines without external requirements", () => {

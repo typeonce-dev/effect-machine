@@ -278,10 +278,14 @@ type FromMethodKind = "leaf" | "nested"
 
 const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) => unknown>(
   method: Method,
-  kind: FromMethodKind
+  kind: FromMethodKind,
+  valued: boolean
 ): Method & { readonly from: (...args: ReadonlyArray<any>) => unknown } => {
   Object.defineProperty(method, "from", {
     value: (...args: ReadonlyArray<any>) => {
+      if (!valued) {
+        return method(undefined, ...args)
+      }
       const omitted = args.length === 0 || (kind === "nested" && args.length === 1 && typeof args[0] === "function")
       const input = omitted ? {} : args[0]
       const rest = omitted ? args : args.slice(1)
@@ -312,7 +316,8 @@ const makeSnapshotBuilder = (
     builder[key] = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) =>
         makeSnapshotForNode(definition, key, value, selector, options),
-      node.states === undefined ? "leaf" : "nested"
+      node.states === undefined ? "leaf" : "nested",
+      node.schema !== undefined
     )
   }
   return builder
@@ -339,14 +344,18 @@ const makeParallelSnapshotBuilder = (
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
     const node = Topology.getStateNodeDefinition(path, definition)
-    builder[key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-      const nextRegions: Record<string, unknown> = {}
-      for (const regionKey of Object.keys(regions)) {
-        nextRegions[regionKey] = regions[regionKey]
-      }
-      nextRegions[key] = makeSnapshotForNode(definition, key, value, selector, options)
-      return makeParallelSnapshotBuilder(states, options, nextRegions)
-    }, node.states === undefined ? "leaf" : "nested")
+    builder[key] = withFrom(
+      (value: unknown, selector?: (builder: unknown) => unknown) => {
+        const nextRegions: Record<string, unknown> = {}
+        for (const regionKey of Object.keys(regions)) {
+          nextRegions[regionKey] = regions[regionKey]
+        }
+        nextRegions[key] = makeSnapshotForNode(definition, key, value, selector, options)
+        return makeParallelSnapshotBuilder(states, options, nextRegions)
+      },
+      node.states === undefined ? "leaf" : "nested",
+      node.schema !== undefined
+    )
   }
   return builder
 }
@@ -525,13 +534,25 @@ const makeLocalTargetChildBuilder = (
       builder[child.key] = () => Topology.makeChoiceTarget(child.path, parent.path, values)
       continue
     }
-    builder[child.key] = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-      if (child.type === "atomic" || child.type === "final") {
-        return makeTargetWithValues(child.path, value, values)
-      }
-      if (child.type === "parallel") {
-        if (source !== child.path && !source.startsWith(`${child.path}.`)) {
-          return makeParallelTarget(states, child, value, selector, values)
+    builder[child.key] = withFrom(
+      (value: unknown, selector?: (builder: unknown) => unknown) => {
+        if (child.type === "atomic" || child.type === "final") {
+          return makeTargetWithValues(child.path, value, values)
+        }
+        if (child.type === "parallel") {
+          if (source !== child.path && !source.startsWith(`${child.path}.`)) {
+            return makeParallelTarget(states, child, value, selector, values)
+          }
+          if (selector === undefined) {
+            throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
+          }
+          return selector(makeLocalTargetChildBuilder(
+            states,
+            stateNodes,
+            child.path,
+            child.schema === undefined ? values : extendTargetValues(values, child.path, value),
+            source
+          ))
         }
         if (selector === undefined) {
           throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
@@ -540,21 +561,13 @@ const makeLocalTargetChildBuilder = (
           states,
           stateNodes,
           child.path,
-          extendTargetValues(values, child.path, value),
+          child.schema === undefined ? values : extendTargetValues(values, child.path, value),
           source
         ))
-      }
-      if (selector === undefined) {
-        throw new Error(`Machine expected target "${child.path}" builder to provide an active child state`)
-      }
-      return selector(makeLocalTargetChildBuilder(
-        states,
-        stateNodes,
-        child.path,
-        extendTargetValues(values, child.path, value),
-        source
-      ))
-    }, child.type === "atomic" || child.type === "final" ? "leaf" : "nested")
+      },
+      child.type === "atomic" || child.type === "final" ? "leaf" : "nested",
+      child.schema !== undefined
+    )
   }
   return builder
 }
@@ -569,12 +582,19 @@ const makeLocalTargetBuilder = (
     return {}
   }
   const builder = makeLocalTargetChildBuilder(states, stateNodes, scope, undefined, source) as Record<string, unknown>
-  builder.with = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-    if (selector === undefined) {
-      throw new Error(`Machine expected target "${scope}" builder to provide an active child state`)
-    }
-    return selector(makeLocalTargetChildBuilder(states, stateNodes, scope, { [scope]: value }, source))
-  }, "nested")
+  const scopeNode = getTargetBuilderNode(stateNodes, scope)
+  if (scopeNode.schema !== undefined) {
+    builder.with = withFrom(
+      (value: unknown, selector?: (builder: unknown) => unknown) => {
+        if (selector === undefined) {
+          throw new Error(`Machine expected target "${scope}" builder to provide an active child state`)
+        }
+        return selector(makeLocalTargetChildBuilder(states, stateNodes, scope, { [scope]: value }, source))
+      },
+      "nested",
+      true
+    )
+  }
   return builder
 }
 
@@ -610,12 +630,31 @@ const makeBranchTargetNodeBuilder = (
 ): unknown => {
   const node = getTargetBuilderNode(stateNodes, path)
   if (node.type === "atomic" || node.type === "final") {
-    return withFrom((value: unknown) => makeTargetWithValues(node.path, value, values), "leaf")
+    return withFrom(
+      (value: unknown) => makeTargetWithValues(node.path, value, values),
+      "leaf",
+      node.schema !== undefined
+    )
   }
-  const builder = withFrom((value: unknown, selector?: (builder: unknown) => unknown) => {
-    if (node.type === "parallel") {
-      if (source !== node.path && !source.startsWith(`${node.path}.`)) {
-        return makeParallelTarget(states, node, value, selector, values)
+  const builder = withFrom(
+    (value: unknown, selector?: (builder: unknown) => unknown) => {
+      if (node.type === "parallel") {
+        if (source !== node.path && !source.startsWith(`${node.path}.`)) {
+          return makeParallelTarget(states, node, value, selector, values)
+        }
+        if (selector === undefined) {
+          throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
+        }
+        const nextBuilder: Record<string, unknown> = {}
+        addBranchTargetChildren(
+          nextBuilder,
+          states,
+          stateNodes,
+          node.path,
+          node.schema === undefined ? values : extendTargetValues(values, node.path, value),
+          source
+        )
+        return selector(nextBuilder)
       }
       if (selector === undefined) {
         throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
@@ -626,25 +665,14 @@ const makeBranchTargetNodeBuilder = (
         states,
         stateNodes,
         node.path,
-        extendTargetValues(values, node.path, value),
+        node.schema === undefined ? values : extendTargetValues(values, node.path, value),
         source
       )
       return selector(nextBuilder)
-    }
-    if (selector === undefined) {
-      throw new Error(`Machine expected target "${node.path}" builder to provide an active child state`)
-    }
-    const nextBuilder: Record<string, unknown> = {}
-    addBranchTargetChildren(
-      nextBuilder,
-      states,
-      stateNodes,
-      node.path,
-      extendTargetValues(values, node.path, value),
-      source
-    )
-    return selector(nextBuilder)
-  }, "nested") as unknown as Record<string, unknown>
+    },
+    "nested",
+    node.schema !== undefined
+  ) as unknown as Record<string, unknown>
   if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
     addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
   }

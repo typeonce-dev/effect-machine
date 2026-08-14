@@ -109,7 +109,7 @@ export const startAll = (
     .filter((path) => configuration.active.has(path))
     .flatMap((path) =>
       resolve(Configuration.getStateConfigByPath(machine, path), {
-        state: Configuration.getActiveValue(configuration, path),
+        state: configuration.values.get(path),
         parent: Configuration.getParentValue(machine, configuration, path),
         parents: Configuration.getParentValues(machine, configuration, path),
         event

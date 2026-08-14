@@ -21,7 +21,7 @@ Use this order so inference has all schemas available when handlers are
 declared:
 
 1. Domain schemas used by state and event fields.
-2. Tagged state schemas.
+2. Tagged schemas for states that own data.
 3. Tagged public-event, internal-event, and emitted-event schemas.
 4. `Machine.defineStates`.
 5. `Machine.make`, including input, events, internal events, emits, and the
@@ -108,24 +108,63 @@ its extra control is required:
 
 ## Atomic, compound, parallel, and history states
 
+An active state does not need a schema unless it owns data. Omit `schema` for
+control-only atomic, compound, parallel, and final states:
+
+```ts
+const States = Machine.defineStates({
+  Idle: {},
+  Form: {
+    initial: "Editing",
+    states: {
+      Editing: {},
+      Saving: State.cases.Saving
+    }
+  }
+})
+
+States.initial.Idle.from()
+States.initial.Form.from((form) => form.Editing.from())
+```
+
+Schema-less states have the same control semantics as schema-backed states:
+they are active, targetable, matchable, receive lifecycle handlers, and appear
+in snapshots. They do not have a state value:
+
+```ts
+Idle: {
+  on: {
+    Start: ({ state, target }) => {
+      // state: undefined
+      return target.full.Form.from((form) => form.Editing.from())
+    }
+  }
+}
+
+States.matches(snapshot, "Form")              // allowed
+States.getSnapshot(snapshot, "Form")          // allowed
+States.get(snapshot, "Form")                  // type error: no value schema
+```
+
+For a schema-less path, builders expose only `.from(...)`; the direct callable
+form is reserved for already-decoded schema values. Structural ancestors are
+also omitted from `parents`; an immediate structural parent is typed as
+`undefined`. Add `schema` when a state begins to own data or needs runtime
+validation and persistence for that data.
+
 Use an atomic state when no child phase can be active beneath it.
 
 Use a compound state when exactly one child phase is active. It must declare an
 `initial` child:
 
 ```ts
-const FormState = Schema.TaggedUnion({
-  Form: { draft: Schema.String },
-  Editing: {},
-  Saving: {}
-})
+const FormState = Schema.TaggedUnion({ Saving: { draft: Schema.String } })
 
 const FormStates = Machine.defineStates({
   Form: {
-    schema: FormState.cases.Form,
     initial: "Editing",
     states: {
-      Editing: FormState.cases.Editing,
+      Editing: {},
       Saving: FormState.cases.Saving
     }
   }
@@ -135,35 +174,22 @@ const FormStates = Machine.defineStates({
 Use a parallel state when every direct region is active:
 
 ```ts
-const ParallelState = Schema.TaggedUnion({
-  Screen: {},
-  Network: {},
-  Online: {},
-  Offline: {},
-  Panel: {},
-  Closed: {},
-  Open: {}
-})
-
 const ParallelStates = Machine.defineStates({
   Screen: {
-    schema: ParallelState.cases.Screen,
     type: "parallel",
     states: {
       network: {
-        schema: ParallelState.cases.Network,
         initial: "Online",
         states: {
-          Online: ParallelState.cases.Online,
-          Offline: ParallelState.cases.Offline
+          Online: {},
+          Offline: {}
         }
       },
       panel: {
-        schema: ParallelState.cases.Panel,
         initial: "Closed",
         states: {
-          Closed: ParallelState.cases.Closed,
-          Open: ParallelState.cases.Open
+          Closed: {},
+          Open: {}
         }
       }
     }
@@ -366,9 +392,11 @@ const ready = Option.getOrThrow(States.getSnapshot(snapshot, "Route.Ready"))
 States.matches(ready, "Route.Ready.Saving")
 ```
 
-All paths are checked against the definition. `context.parent` is the immediate
-typed parent (`undefined` at a root). Use `parents` when another ancestor is
-needed:
+All paths are checked against the definition. `get` and `getWithParents` accept
+only schema-backed paths; use `matches` or `getSnapshot` for any active path.
+`context.parent` is the immediate typed parent value (`undefined` at a root or
+when that parent is schema-less). `parents` contains only valued ancestors. Use
+its full paths when another ancestor value is needed:
 
 ```ts
 parents["Route.Ready"]

@@ -70,7 +70,7 @@ interface NormalizedStateNodeDefinitionBase {
 type NormalizedStateNodeDefinition =
   | (NormalizedStateNodeDefinitionBase & {
     readonly type: "atomic"
-    readonly schema: Machine.TaggedSchema
+    readonly schema: Machine.TaggedSchema | undefined
     readonly output: undefined
     readonly history: undefined
     readonly initial: undefined
@@ -78,7 +78,7 @@ type NormalizedStateNodeDefinition =
   })
   | (NormalizedStateNodeDefinitionBase & {
     readonly type: "compound"
-    readonly schema: Machine.TaggedSchema
+    readonly schema: Machine.TaggedSchema | undefined
     readonly output: undefined
     readonly history: undefined
     readonly initial: string
@@ -86,7 +86,7 @@ type NormalizedStateNodeDefinition =
   })
   | (NormalizedStateNodeDefinitionBase & {
     readonly type: "parallel"
-    readonly schema: Machine.TaggedSchema
+    readonly schema: Machine.TaggedSchema | undefined
     readonly output: Schema.Top | undefined
     readonly history: undefined
     readonly initial: undefined
@@ -94,7 +94,7 @@ type NormalizedStateNodeDefinition =
   })
   | (NormalizedStateNodeDefinitionBase & {
     readonly type: "final"
-    readonly schema: Machine.TaggedSchema
+    readonly schema: Machine.TaggedSchema | undefined
     readonly output: Schema.Top | undefined
     readonly history: undefined
     readonly initial: undefined
@@ -154,9 +154,10 @@ export const getStateNodeDefinition = (
       states: undefined
     }
   }
-  if (!hasProperty(definition, "schema") || !Schema.isSchema(definition.schema)) {
-    throw new Error(`Machine.make expected state "${path}" to be a tagged schema or state node config`)
-  }
+  const schema = hasProperty(definition, "schema") && Schema.isSchema(definition.schema)
+    ? definition.schema as Machine.TaggedSchema
+    : undefined
+  const annotations = schema === undefined ? definition.annotations : Schema.resolveAnnotations(schema)
   if (definition.type === "parallel" && !hasProperty(definition, "states")) {
     throw new Error(`Machine.make expected parallel state "${path}" to declare child regions`)
   }
@@ -167,9 +168,9 @@ export const getStateNodeDefinition = (
     }
     if (definition.type === "parallel") {
       return {
-        schema: definition.schema,
+        schema,
         output: Schema.isSchema(definition.output) ? definition.output : undefined,
-        annotations: Schema.resolveAnnotations(definition.schema),
+        annotations,
         type: "parallel",
         history: undefined,
         initial: undefined,
@@ -180,9 +181,9 @@ export const getStateNodeDefinition = (
       throw new Error(`Machine.make expected compound state "${path}" to declare an initial child`)
     }
     return {
-      schema: definition.schema,
+      schema,
       output: undefined,
-      annotations: Schema.resolveAnnotations(definition.schema),
+      annotations,
       type: "compound",
       history: undefined,
       initial: definition.initial,
@@ -192,18 +193,18 @@ export const getStateNodeDefinition = (
   const output = Schema.isSchema(definition.output) ? definition.output : undefined
   return definition.type === "final"
     ? {
-      schema: definition.schema,
+      schema,
       output,
-      annotations: Schema.resolveAnnotations(definition.schema),
+      annotations,
       type: "final",
       history: undefined,
       initial: undefined,
       states: undefined
     }
     : {
-      schema: definition.schema,
+      schema,
       output: undefined,
-      annotations: Schema.resolveAnnotations(definition.schema),
+      annotations,
       type: "atomic",
       history: undefined,
       initial: undefined,
@@ -405,7 +406,7 @@ export const makeTarget = <
     readonly snapshot?: Machine.SnapshotByIdentifier<States, StateId>
     readonly values?: Partial<
       {
-        readonly [AncestorStateId in Machine.StateIdentifier<States>]: Machine.StateByIdentifier<
+        readonly [AncestorStateId in Machine.ValuedStateIdentifier<States>]: Machine.StateByIdentifier<
           States,
           AncestorStateId
         >
@@ -445,7 +446,9 @@ export const getSnapshotByPath = (
     return Option.none()
   }
   if (parents !== undefined) {
-    parents[snapshot.path] = snapshot.value
+    if (snapshot.value !== undefined) {
+      parents[snapshot.path] = snapshot.value
+    }
   }
   if (hasProperty(snapshot, "state") && isSnapshot(snapshot.state)) {
     return getSnapshotByPath(snapshot.state, path, parents)
@@ -473,7 +476,7 @@ export const getNode = (machine: Machine.Any, path: string): Machine.StateNode =
 
 export const getStateNodeSchema = (node: Machine.StateNode): Machine.TaggedSchema => {
   if (node.schema === undefined) {
-    throw new Error(`Machine pseudo-state "${node.path}" has no active value schema`)
+    throw new Error(`Machine state "${node.path}" has no value schema`)
   }
   return node.schema
 }

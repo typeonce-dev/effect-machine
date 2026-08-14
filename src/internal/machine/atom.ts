@@ -431,6 +431,13 @@ type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
   Node extends { readonly path: infer Path extends string } ? Path : never
   : never
 
+type ValuedSnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: infer Path extends string; readonly value: infer Value } ?
+    [Value] extends [undefined] ? never
+    : Path
+  : never
+  : never
+
 type SnapshotValueByIdentifier<State, Path extends SnapshotIdentifier<State>> = SnapshotNode<State> extends infer Node ?
   Node extends { readonly path: Path; readonly value: infer Value } ? Value : never
   : never
@@ -443,7 +450,7 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
 
 const selectValueByPath = <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
-  Path extends SnapshotIdentifier<State>
+  Path extends ValuedSnapshotIdentifier<State>
 >(
   snapshot: State,
   path: Path
@@ -467,7 +474,7 @@ export const select = <
   Error,
   Output,
   StartError,
-  const Path extends SnapshotIdentifier<State>
+  const Path extends ValuedSnapshotIdentifier<State>
 >(
   self: MachineAtom<State, Event, Error, Output, StartError>,
   path: Path
@@ -498,7 +505,7 @@ export const selectSnapshot = <
 export const selectChild = <
   Child extends Machine.ChildMachine.Any,
   StartError,
-  const Path extends SnapshotIdentifier<ChildState<Child>>
+  const Path extends ValuedSnapshotIdentifier<ChildState<Child>>
 >(
   self: ChildMachineAtom<Child, StartError>,
   path: Path

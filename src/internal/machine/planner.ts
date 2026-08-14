@@ -18,7 +18,6 @@ import {
   configurationFromHistoryRecord,
   getActiveLeafPathFrom,
   getActiveLeafPaths,
-  getActiveValue,
   getHistoryRecord,
   getInitialEntryPaths,
   getLeafPath,
@@ -201,66 +200,76 @@ const completeHistoryConfiguration = (
         if (node.initial === undefined) {
           throw new Error(`Machine shallow history expected compound state "${path}" to have an initial child`)
         }
-        const initializer = machine.handlers[path]?.initial
-        if (initializer === undefined) {
-          throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
-        }
+        const child = getNode(machine, node.initial)
         const current = {
           active,
           values,
           outputs: configuration.outputs,
           history: configuration.history
         } as ActiveConfiguration
-        const initialized = collectStateInitializer(machine, initializer, {
-          state: getActiveValue(current, path),
-          parent: getParentValue(machine, current, path),
-          parents: getParentValues(machine, current, path),
-          event
-        })
-        const child = getNode(machine, node.initial)
         active.add(child.path)
-        values.set(child.path, decodeStateValueSync(machine, child, initialized.value))
-        commands.push(...initialized.commands)
-        raisedEvents.push(...initialized.raisedEvents)
-        emittedEvents.push(...initialized.emittedEvents)
+        if (child.schema !== undefined) {
+          const initializer = machine.handlers[path]?.initial
+          if (initializer === undefined) {
+            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
+          }
+          const initialized = collectStateInitializer(machine, initializer, {
+            state: current.values.get(path),
+            parent: getParentValue(machine, current, path),
+            parents: getParentValues(machine, current, path),
+            event
+          })
+          values.set(child.path, decodeStateValueSync(machine, child, initialized.value))
+          commands.push(...initialized.commands)
+          raisedEvents.push(...initialized.raisedEvents)
+          emittedEvents.push(...initialized.emittedEvents)
+        }
         changed = true
       }
       if (node.type === "parallel") {
         const missing = node.children.filter((childPath) => !active.has(childPath))
         if (missing.length > 0) {
-          const initializer = machine.handlers[path]?.initial
-          if (initializer === undefined) {
-            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
-          }
+          const valuedMissing = missing.filter((childPath) => getNode(machine, childPath).schema !== undefined)
           const current = {
             active,
             values,
             outputs: configuration.outputs,
             history: configuration.history
           } as ActiveConfiguration
-          const initialized = collectStateInitializer(machine, initializer, {
-            state: getActiveValue(current, path),
+          const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initial
+          if (valuedMissing.length > 0 && initializer === undefined) {
+            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
+          }
+          const initialized = initializer === undefined ? undefined : collectStateInitializer(machine, initializer, {
+            state: current.values.get(path),
             parent: getParentValue(machine, current, path),
             parents: getParentValues(machine, current, path),
             event
           })
-          if (typeof initialized.value !== "object" || initialized.value === null) {
+          if (initialized !== undefined && (typeof initialized.value !== "object" || initialized.value === null)) {
             throw new Error(`Machine parallel state initializer for "${path}" must return its region values`)
           }
           for (const childPath of missing) {
             const child = getNode(machine, childPath)
-            if (!Object.prototype.hasOwnProperty.call(initialized.value, child.key)) {
-              throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
-            }
             active.add(child.path)
-            values.set(
-              child.path,
-              decodeStateValueSync(machine, child, (initialized.value as Record<string, unknown>)[child.key])
-            )
+            if (child.schema !== undefined) {
+              if (
+                initialized === undefined ||
+                !Object.prototype.hasOwnProperty.call(initialized.value as object, child.key)
+              ) {
+                throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
+              }
+              values.set(
+                child.path,
+                decodeStateValueSync(machine, child, (initialized.value as Record<string, unknown>)[child.key])
+              )
+            }
           }
-          commands.push(...initialized.commands)
-          raisedEvents.push(...initialized.raisedEvents)
-          emittedEvents.push(...initialized.emittedEvents)
+          if (initialized !== undefined) {
+            commands.push(...initialized.commands)
+            raisedEvents.push(...initialized.raisedEvents)
+            emittedEvents.push(...initialized.emittedEvents)
+          }
           changed = true
         }
       }
@@ -495,7 +504,7 @@ const makeStateActionContext = <
   path: string,
   event: Machine.LifecycleEvent<Events>
 ): Machine.StateActionContext<States, Events, Emits, StateId> => ({
-  state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event
@@ -514,7 +523,7 @@ const makeTransitionContext = <
   event: Machine.EventByTag<Events, EventTag>,
   snapshot: Machine.Snapshot<States>
 ): Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any> => ({
-  state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
@@ -535,7 +544,7 @@ const makeDoneContext = <
   output: unknown,
   snapshot: Machine.Snapshot<States>
 ): Machine.DoneContext<States, Events, Emits, StateId> => ({
-  state: getActiveValue(configuration, path) as Machine.StateByIdentifier<States, StateId>,
+  state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   parent: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   parents: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
@@ -629,7 +638,7 @@ const selectAlwaysTransitions = <
               Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>
             >,
             context: {
-              state: getActiveValue(configuration, path) as Machine.StateByIdentifier<
+              state: configuration.values.get(path) as Machine.StateByIdentifier<
                 States,
                 Machine.StateIdentifier<States>
               >,
@@ -919,7 +928,9 @@ const choicesFromTarget = (
       return
     }
     if (typeof current !== "object" || current === null || !("path" in current) || !("value" in current)) return
-    values[String(current.path)] = current.value
+    if (current.value !== undefined) {
+      values[String(current.path)] = current.value
+    }
     if ("state" in current) visit(current.state)
     if ("states" in current && typeof current.states === "object" && current.states !== null) {
       for (const state of Object.values(current.states)) visit(state)

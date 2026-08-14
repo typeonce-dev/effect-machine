@@ -84,7 +84,7 @@ const historyFromSnapshot = (
     const active = new Set<string>()
     const values = new Map<string, unknown>()
     for (const activePath of entry.active) {
-      if (active.has(activePath) || !Object.prototype.hasOwnProperty.call(entry.values, activePath)) {
+      if (active.has(activePath)) {
         throw new Error(`Machine snapshot contains invalid remembered state "${activePath}"`)
       }
       const node = getNode(machine, activePath)
@@ -96,9 +96,15 @@ const historyFromSnapshot = (
         throw new Error(`Machine snapshot contains invalid remembered value for "${activePath}"`)
       }
       active.add(activePath)
-      values.set(activePath, decodeStateValueSync(machine, node, entry.values[activePath]))
+      const hasValue = Object.prototype.hasOwnProperty.call(entry.values, activePath)
+      if (node.schema === undefined) {
+        if (hasValue) throw new Error(`Machine snapshot contains a value for structural state "${activePath}"`)
+      } else {
+        if (!hasValue) throw new Error(`Machine snapshot omits remembered value for "${activePath}"`)
+        values.set(activePath, decodeStateValueSync(machine, node, entry.values[activePath]))
+      }
     }
-    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
+    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== values.size) {
       throw new Error(`Machine snapshot contains incomplete history record "${path}"`)
     }
     history.set(path, {
@@ -138,7 +144,6 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
       const node = machine.stateNodes.byPath.get(activePath)
       if (
         active.has(activePath) || node === undefined || node.type === "history" || node.type === "choice" ||
-        !Object.prototype.hasOwnProperty.call(entry.values, activePath) ||
         !(isPathInSubtree(activePath, historyNode.parent) ||
           getPathToRoot(machine, historyNode.parent).includes(activePath))
       ) {
@@ -152,15 +157,39 @@ const historyFromSnapshotEffect = Effect.fnUntraced(function*(
         )
       }
       active.add(activePath)
-      values.set(
-        activePath,
-        yield* decodeBoundary(machine, getStateNodeSchema(node), entry.values[activePath], {
-          boundary: "history",
-          state: activePath
-        })
-      )
+      const hasValue = Object.prototype.hasOwnProperty.call(entry.values, activePath)
+      if (node.schema === undefined) {
+        if (hasValue) {
+          return yield* Effect.fail(
+            new MachineSchemaDecodeError({
+              machineId: machine.id,
+              boundary: "history",
+              state: activePath,
+              cause: Cause.die(new Error(`Machine snapshot contains a value for structural state "${activePath}"`))
+            })
+          )
+        }
+      } else {
+        if (!hasValue) {
+          return yield* Effect.fail(
+            new MachineSchemaDecodeError({
+              machineId: machine.id,
+              boundary: "history",
+              state: activePath,
+              cause: Cause.die(new Error(`Machine snapshot omits remembered value for "${activePath}"`))
+            })
+          )
+        }
+        values.set(
+          activePath,
+          yield* decodeBoundary(machine, getStateNodeSchema(node), entry.values[activePath], {
+            boundary: "history",
+            state: activePath
+          })
+        )
+      }
     }
-    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== active.size) {
+    if (!active.has(historyNode.parent) || Object.keys(entry.values).length !== values.size) {
       return yield* Effect.fail(
         new MachineSchemaDecodeError({
           machineId: machine.id,
@@ -212,7 +241,7 @@ const historyToSnapshot = (
     entries[path] = {
       mode: record.mode,
       active,
-      values: Object.fromEntries(active.map((path) => [path, record.values.get(path)]))
+      values: Object.fromEntries(record.values)
     }
   }
   return entries
@@ -329,7 +358,9 @@ export const getParentValues = (
   const paths = getPathToRoot(machine, path)
   for (let index = 0; index < paths.length - 1; index++) {
     const parent = paths[index]!
-    parents[parent] = getActiveValue(configuration, parent)
+    if (configuration.values.has(parent)) {
+      parents[parent] = configuration.values.get(parent)
+    }
   }
   return parents
 }
@@ -340,7 +371,7 @@ export const getParentValue = (
   path: string
 ): unknown => {
   const parent = getNode(machine, path).parent
-  return parent === undefined ? undefined : getActiveValue(configuration, parent)
+  return parent === undefined ? undefined : configuration.values.get(parent)
 }
 
 export const getInitialEntryPaths = (
@@ -368,7 +399,7 @@ export const snapshotFromPath = <const States extends Machine.StateSchemas>(
   const node = getNode(machine, path)
   const snapshot: Record<string, unknown> = {
     path,
-    value: getActiveValue(configuration, path)
+    value: configuration.values.get(path)
   }
   if (node.type === "compound") {
     const child = node.children.find((child) => configuration.active.has(child))
@@ -438,9 +469,14 @@ export const configurationFromSnapshot = (
 
   const visit = (current: Machine.AtomicSnapshot<string, unknown>): void => {
     const node = getNode(machine, String(current.path))
-    const value = decodeStateValueSync(machine, node, current.value)
     active.add(node.path)
-    values.set(node.path, value)
+    if (node.schema === undefined) {
+      if (current.value !== undefined) {
+        throw new Error(`Machine structural snapshot "${node.path}" cannot contain a value`)
+      }
+    } else {
+      values.set(node.path, decodeStateValueSync(machine, node, current.value))
+    }
     if (node.type === "compound") {
       if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
         throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
@@ -520,9 +556,14 @@ export const configurationFromSnapshotEffect = Effect.fnUntraced(function*(
     current: Machine.AtomicSnapshot<string, unknown>
   ) {
     const node = getNode(machine, String(current.path))
-    const value = yield* decodeStateValue(machine, node, current.value)
     active.add(node.path)
-    values.set(node.path, value)
+    if (node.schema === undefined) {
+      if (current.value !== undefined) {
+        throw new Error(`Machine structural snapshot "${node.path}" cannot contain a value`)
+      }
+    } else {
+      values.set(node.path, yield* decodeStateValue(machine, node, current.value))
+    }
     if (node.type === "compound") {
       if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
         throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
@@ -645,7 +686,9 @@ export const captureHistory = (
     }
     const values = new Map<string, unknown>()
     for (const path of active) {
-      values.set(path, getActiveValue(current, path))
+      if (current.values.has(path)) {
+        values.set(path, current.values.get(path))
+      }
     }
     history.set(node.path, {
       mode,
@@ -722,6 +765,15 @@ export const configurationFromTargetPathEffect = Effect.fnUntraced(function*(
   for (const currentPath of paths) {
     const currentNode = getNode(machine, currentPath)
     active.add(currentPath)
+    if (currentNode.schema === undefined) {
+      const supplied = currentPath === node.path ?
+        value
+        : providedValues !== undefined && hasOwn(providedValues, currentPath) ?
+        providedValues[currentPath]
+        : undefined
+      if (supplied !== undefined) throw new Error(`Machine structural target "${currentPath}" cannot contain a value`)
+      continue
+    }
     if (currentPath === node.path) {
       values.set(currentPath, yield* decodeStateValue(machine, currentNode, value))
     } else if (providedValues !== undefined && hasOwn(providedValues, currentPath)) {
@@ -783,6 +835,12 @@ export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*
   for (const ancestor of paths.slice(0, -1)) {
     const node = getNode(machine, ancestor)
     active.add(ancestor)
+    if (node.schema === undefined) {
+      if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
+        throw new Error(`Machine structural target "${ancestor}" cannot contain a value`)
+      }
+      continue
+    }
     if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
       values.set(ancestor, yield* decodeStateValue(machine, node, providedValues[ancestor]))
     } else if (current.values.has(ancestor)) {
@@ -816,6 +874,9 @@ export const configurationFromTargetSnapshotEffect = Effect.fnUntraced(function*
             if (!isPathInSubtree(providedPath, child)) continue
             const providedNode = getNode(machine, providedPath)
             active.add(providedPath)
+            if (providedNode.schema === undefined) {
+              throw new Error(`Machine structural target "${providedPath}" cannot contain a value`)
+            }
             values.set(providedPath, yield* decodeStateValue(machine, providedNode, providedValue))
           }
         }
@@ -885,6 +946,15 @@ const configurationFromTargetPathSync = (
   for (const currentPath of paths) {
     const currentNode = getNode(machine, currentPath)
     active.add(currentPath)
+    if (currentNode.schema === undefined) {
+      const supplied = currentPath === node.path ?
+        value
+        : providedValues !== undefined && hasOwn(providedValues, currentPath) ?
+        providedValues[currentPath]
+        : undefined
+      if (supplied !== undefined) throw new Error(`Machine structural target "${currentPath}" cannot contain a value`)
+      continue
+    }
     if (currentPath === node.path) {
       values.set(currentPath, decodeStateValueSync(machine, currentNode, value))
     } else if (providedValues !== undefined && hasOwn(providedValues, currentPath)) {
@@ -932,6 +1002,12 @@ const configurationFromTargetSnapshotSync = (
   for (const ancestor of paths.slice(0, -1)) {
     const node = getNode(machine, ancestor)
     active.add(ancestor)
+    if (node.schema === undefined) {
+      if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
+        throw new Error(`Machine structural target "${ancestor}" cannot contain a value`)
+      }
+      continue
+    }
     if (providedValues !== undefined && hasOwn(providedValues, ancestor)) {
       values.set(ancestor, decodeStateValueSync(machine, node, providedValues[ancestor]))
     } else if (current.values.has(ancestor)) {
@@ -960,6 +1036,9 @@ const configurationFromTargetSnapshotSync = (
           if (!isPathInSubtree(providedPath, child)) continue
           const providedNode = getNode(machine, providedPath)
           active.add(providedPath)
+          if (providedNode.schema === undefined) {
+            throw new Error(`Machine structural target "${providedPath}" cannot contain a value`)
+          }
           values.set(providedPath, decodeStateValueSync(machine, providedNode, providedValue))
         }
       }
@@ -1098,7 +1177,7 @@ export const resolveFinalOutputEffect: <
 ) {
   const node = getNode(machine, path)
   const output = getStateConfigByPath(machine, path)?.output?.({
-    state: getActiveValue(configuration, path),
+    state: configuration.values.get(path),
     parent: getParentValue(machine, configuration, path),
     parents: getParentValues(machine, configuration, path),
     event,
@@ -1251,7 +1330,7 @@ const resolveFinalOutputSync = <const Events extends ReadonlyArray<Machine.Tagge
 ): unknown => {
   const node = getNode(machine, path)
   const output = getStateConfigByPath(machine, path)?.output?.({
-    state: getActiveValue(configuration, path),
+    state: configuration.values.get(path),
     parent: getParentValue(machine, configuration, path),
     parents: getParentValues(machine, configuration, path),
     event,

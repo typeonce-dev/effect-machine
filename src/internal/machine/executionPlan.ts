@@ -100,6 +100,12 @@ const compileIndexedExecutionDescriptor = (
     if (node.type === "choice" || node.type === "history") {
       return undefined
     }
+    // Structural active states deliberately use the generic semantic
+    // reference until the indexed value table represents absent values as an
+    // explicit capability rather than an `undefined` slot.
+    if (node.schema === undefined) {
+      return undefined
+    }
     if (node.type === "atomic" || node.type === "final") {
       leafPaths.push(node.path)
     }

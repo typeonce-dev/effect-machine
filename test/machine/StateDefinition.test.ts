@@ -43,6 +43,43 @@ const makeFromUnknownStates = (states: unknown): unknown =>
   })
 
 describe("exact state-definition runtime validation", () => {
+  it("accepts schema-less active states without confusing them with pseudo-states", () => {
+    const states = Machine.defineStates({
+      Idle: {
+        annotations: { title: "Idle", description: "No state-local data" }
+      },
+      Flow: {
+        initial: "Waiting",
+        states: {
+          Waiting: {},
+          Done: { type: "final", output: Schema.String }
+        }
+      },
+      Regions: {
+        type: "parallel",
+        states: {
+          left: {},
+          right: {}
+        }
+      }
+    })
+    const machine = Machine.make({
+      states: states.states,
+      events: [],
+      initial: () => states.initial.Idle.from()
+    })
+
+    const nodes = Machine.stateNodes(machine)
+    assert.strictEqual(nodes.find(({ path }) => path === "Idle")?.schema, undefined)
+    assert.deepStrictEqual(nodes.find(({ path }) => path === "Idle")?.annotations, {
+      title: "Idle",
+      description: "No state-local data"
+    })
+    assert.strictEqual(nodes.find(({ path }) => path === "Flow")?.type, "compound")
+    assert.strictEqual(nodes.find(({ path }) => path === "Flow.Done")?.type, "final")
+    assert.strictEqual(nodes.find(({ path }) => path === "Regions")?.type, "parallel")
+  })
+
   it("recognizes Effect schemas before inspecting config properties", () => {
     const AnnotatedIdle = Idle.annotate({
       title: "Idle",
@@ -243,5 +280,32 @@ describe("exact state-definition runtime validation", () => {
       "Root.History.annotations.title",
       "must be strings"
     )
+  })
+
+  it("rejects malformed schema-less active states at the runtime boundary", () => {
+    const invalidTrees: ReadonlyArray<readonly [unknown, string, string]> = [
+      [{ Invalid: { schema: undefined } }, "Invalid.schema", "required PropertyKey _tag"],
+      [{ Invalid: { states: { Child: {} } } }, "Invalid.initial", "must declare an initial child"],
+      [{ Invalid: { type: "parallel" } }, "Invalid.states", "must declare child regions"],
+      [
+        { Invalid: { annotations: { executable: "no" } } },
+        "Invalid.annotations",
+        "cannot declare property"
+      ],
+      [
+        { Invalid: { annotations: { title: 1 } } },
+        "Invalid.annotations.title",
+        "must be strings"
+      ]
+    ]
+
+    for (const [states, path, detail] of invalidTrees) {
+      expectDefinitionError(
+        () => Machine.defineStates(states as Machine.Machine.StateSchemas),
+        "Machine.defineStates",
+        path,
+        detail
+      )
+    }
   })
 })

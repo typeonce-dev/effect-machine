@@ -558,7 +558,7 @@ type ValidateStateNode<Node, AllowHistory extends boolean, Path extends Property
       & ValidatePseudoStateAnnotations<Node, Path>
       & (AllowHistory extends true ? ValidateChoiceStateNode<Node>
         : StateDefinitionError<"Choice states must be declared below an active parent state", Path>)
-  : Node extends { readonly schema: Machine.TaggedSchema } ? ValidateStateNodeConfig<Node, Path>
+  : Node extends Machine.StateNodeConfig ? ValidateStateNodeConfig<Node, Path>
   : StateDefinitionError<"State nodes must be tagged schemas or state node configs", Path>
 
 type ValidateHistoryStateNode<Node extends Machine.HistoryStateNodeConfig> = [
@@ -572,27 +572,31 @@ type ValidateChoiceStateNode<Node extends Machine.ChoiceStateNodeConfig> = [
   : StateDefinitionError<"Choice states cannot declare schemas, children, initial states, output, or history">
 
 type ValidateStateNodeConfig<
-  Node extends { readonly schema: Machine.TaggedSchema },
+  Node extends Machine.StateNodeConfig,
   Path extends PropertyKey
 > = Node extends { readonly type: "parallel" } ?
     & ValidateExactStateNodeProperties<Node, "parallel", Path>
     & ValidateStateNodeWithChildren<Node, Node extends { readonly states: infer Children } ? Children : never, Path>
+    & ValidatePseudoStateAnnotations<Node, Path>
   : Node extends { readonly type: "final" } ?
       & ValidateExactStateNodeProperties<Node, "final", Path>
       & ValidateStateNodeWithoutChildren<Node>
+      & ValidatePseudoStateAnnotations<Node, Path>
   : Node extends { readonly states: infer Children } ?
       & ValidateExactStateNodeProperties<Node, "compound", Path>
       & ValidateStateNodeWithChildren<Node, Children, Path>
+      & ValidatePseudoStateAnnotations<Node, Path>
   :
     & ValidateExactStateNodeProperties<Node, "atomic", Path>
     & ValidateStateNodeWithoutChildren<Node>
+    & ValidatePseudoStateAnnotations<Node, Path>
 
 type ValidateOutputSchema<Node> = "output" extends keyof Node ? Node extends { readonly output: Schema.Top } ? unknown
   : StateDefinitionError<"State output must be a schema">
   : unknown
 
 type ValidateStateNodeWithChildren<
-  Node extends { readonly schema: Machine.TaggedSchema },
+  Node extends Machine.StateNodeConfig,
   Children,
   Path extends PropertyKey
 > = Children extends Machine.StateSchemas ?
@@ -605,7 +609,7 @@ type ValidateStateNodeWithChildren<
   : StateDefinitionError<"Child states must be a state tree">
 
 type ValidateCompoundStateNode<
-  Node extends { readonly schema: Machine.TaggedSchema },
+  Node extends Machine.StateNodeConfig,
   Children extends Machine.StateSchemas,
   Path extends PropertyKey
 > = Node extends { readonly initial: infer Initial } ?
@@ -615,8 +619,8 @@ type ValidateCompoundStateNode<
   : StateDefinitionError<"Compound initial must be one of its direct child keys">
   : StateDefinitionError<"Compound states must declare an initial child">
 
-type ValidateStateNodeWithoutChildren<Node extends { readonly schema: Machine.TaggedSchema }> = "initial" extends
-  keyof Node ? StateDefinitionError<"Atomic states cannot declare an initial child">
+type ValidateStateNodeWithoutChildren<Node extends Machine.StateNodeConfig> = "initial" extends keyof Node ?
+  StateDefinitionError<"Atomic states cannot declare an initial child">
   : Node extends { readonly type: infer Type } ? Type extends "final" ? ValidateOutputSchema<Node>
     : Type extends "active" | undefined ?
       "output" extends keyof Node ? StateDefinitionError<"Only final and parallel states can declare output">
@@ -722,6 +726,56 @@ type ConstructionResult<Result> = Result | Machine.StateConstruction<Result>
 
 type UnwrapConstruction<Result> = Result extends Machine.StateConstruction<infer Value> ? Value : Result
 
+type NodeValue<Node> = [Machine.NodeSchema<Node>] extends [never] ? undefined
+  : Machine.NodeSchema<Node>["Type"]
+
+type NodeMakeInput<Node> = [Machine.NodeSchema<Node>] extends [never] ? never
+  : Machine.NodeSchema<Node>["~type.make.in"]
+
+type WithNodeValue<Node, Rest extends ReadonlyArray<unknown>> = Machine.NodeSchema<Node> extends never ? Rest
+  : readonly [value: NodeValue<Node>, ...Rest]
+
+type WithNodeInput<Node, Rest extends ReadonlyArray<unknown>> = Machine.NodeSchema<Node> extends never ? Rest
+  : readonly [input: NodeMakeInput<Node>, ...Rest]
+
+type NodeBuilderMethod<
+  Node,
+  Arguments extends ReadonlyArray<unknown>,
+  Result,
+  FromArguments extends ReadonlyArray<unknown>,
+  FromResult
+> = Machine.NodeSchema<Node> extends never ? {
+    readonly from: FromCallable<FromArguments, FromResult>
+  }
+  :
+    & ((...args: Arguments) => Result)
+    & { readonly from: FromCallable<FromArguments, FromResult> }
+
+type NodeMethod<
+  Node,
+  Arguments extends ReadonlyArray<unknown>,
+  Result,
+  FromArguments extends ReadonlyArray<unknown>
+> = Machine.NodeSchema<Node> extends never ? FromMethod<FromArguments, Result>
+  : ((...args: Arguments) => Result) & FromMethod<FromArguments, Result>
+
+type NodeConstructionSelectorFromCallable<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
+    <Selected extends ConstructionResult<Result>>(
+      state: (builder: Builder) => Selected
+    ): Machine.StateConstruction<UnwrapConstruction<Selected>>
+  }
+  : ConstructionSelectorFromCallable<NodeMakeInput<Node>, Builder, Result>
+
+type NestedTargetMethod<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
+    readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
+  }
+  :
+    & (<Selected extends ConstructionResult<Result>>(
+      value: NodeValue<Node>,
+      state: (builder: Builder) => Selected
+    ) => Selected)
+    & { readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result> }
+
 type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input ? {
     <Selected extends ConstructionResult<Result>>(
       state: (builder: Builder) => Selected
@@ -751,14 +805,18 @@ type InitialSnapshotMethod<
   States extends Machine.StateSchemas,
   StateId extends ActiveStateKey<States>,
   Prefix extends string
-> =
-  & ((
-    ...args: InitialSnapshotArguments<States, StateId, Prefix>
-  ) => InitialSnapshotResult<States, StateId, Prefix>)
-  & FromMethod<
+> = Machine.NodeSchema<States[StateId]> extends never ? FromMethod<
     InitialSnapshotFromArguments<States, StateId, Prefix>,
     InitialSnapshotResult<States, StateId, Prefix>
   >
+  :
+    & ((
+      ...args: InitialSnapshotArguments<States, StateId, Prefix>
+    ) => InitialSnapshotResult<States, StateId, Prefix>)
+    & FromMethod<
+      InitialSnapshotFromArguments<States, StateId, Prefix>,
+      InitialSnapshotResult<States, StateId, Prefix>
+    >
 
 type InitialSnapshotArguments<
   States extends Machine.StateSchemas,
@@ -766,21 +824,21 @@ type InitialSnapshotArguments<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-      value: Machine.NodeSchema<Node>["Type"],
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    WithNodeValue<Node, [
       states: (
         builder: InitialParallelBuilder<Children, Path>
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>>
-    ]
+    ]>
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ? [
-        value: Machine.NodeSchema<Node>["Type"],
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ?
+      WithNodeValue<Node, [
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
         ) => InitialSelectableResult<Children, Initial, Path>
-      ]
+      ]>
     : never
-  : [value: Machine.NodeSchema<Node>["Type"]]
+  : WithNodeValue<Node, []>
   : never
 
 type InitialSnapshotFromArguments<
@@ -789,21 +847,21 @@ type InitialSnapshotFromArguments<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-      input: Machine.NodeSchema<Node>["~type.make.in"],
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    WithNodeInput<Node, [
       states: (
         builder: InitialParallelBuilder<Children, Path>
       ) => SnapshotBuilderComplete<InitialSnapshotRegionsWithPrefix<Children, Path>, boolean>
-    ]
+    ]>
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ? [
-        input: Machine.NodeSchema<Node>["~type.make.in"],
+    Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ?
+      WithNodeInput<Node, [
         state: (
           builder: Pick<InitialSnapshotBuilderWithPrefix<Children, Path>, Initial>
         ) => ConstructionResult<InitialSelectableResult<Children, Initial, Path>>
-      ]
+      ]>
     : never
-  : [input: Machine.NodeSchema<Node>["~type.make.in"]]
+  : WithNodeInput<Node, []>
   : never
 
 type InitialSnapshotResult<
@@ -815,18 +873,18 @@ type InitialSnapshotResult<
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
     Machine.ParallelSnapshot<
       Path,
-      Machine.NodeSchema<Node>["Type"],
+      NodeValue<Node>,
       InitialSnapshotRegionsWithPrefix<Children, Path>
     >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
     Node extends { readonly initial: infer Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> } ?
       Machine.CompoundSnapshot<
         Path,
-        Machine.NodeSchema<Node>["Type"],
+        NodeValue<Node>,
         InitialSelectableResult<Children, Initial, Path>
       >
     : never
-  : Machine.AtomicSnapshot<Path, Machine.NodeSchema<Node>["Type"]>
+  : Machine.AtomicSnapshot<Path, NodeValue<Node>>
   : never
 
 type InitialSelectableResult<
@@ -853,28 +911,25 @@ type InitialParallelBuilder<
 > =
   & SnapshotBuilderComplete<Regions, Constructed>
   & {
-    readonly [Key in Remaining]:
-      & ((
-        ...args: InitialSnapshotArguments<States, Key, Prefix>
-      ) => InitialParallelBuilder<
+    readonly [Key in Remaining]: NodeBuilderMethod<
+      States[Key],
+      InitialSnapshotArguments<States, Key, Prefix>,
+      InitialParallelBuilder<
         States,
         Prefix,
         Exclude<Remaining, Key>,
         Regions & { readonly [Region in Key]: InitialSnapshotResult<States, Key, Prefix> },
         Constructed
-      >)
-      & {
-        readonly from: FromCallable<
-          InitialSnapshotFromArguments<States, Key, Prefix>,
-          InitialParallelBuilder<
-            States,
-            Prefix,
-            Exclude<Remaining, Key>,
-            Regions & { readonly [Region in Key]: InitialSnapshotResult<States, Key, Prefix> },
-            true
-          >
-        >
-      }
+      >,
+      InitialSnapshotFromArguments<States, Key, Prefix>,
+      InitialParallelBuilder<
+        States,
+        Prefix,
+        Exclude<Remaining, Key>,
+        Regions & { readonly [Region in Key]: InitialSnapshotResult<States, Key, Prefix> },
+        true
+      >
+    >
   }
 
 type FullSnapshotBuilderWithPrefix<
@@ -892,14 +947,18 @@ type FullSnapshotMethod<
   States extends Machine.StateSchemas,
   StateId extends ActiveStateKey<States>,
   Prefix extends string
-> =
-  & ((
-    ...args: FullSnapshotArguments<States, StateId, Prefix>
-  ) => FullSnapshotResult<States, StateId, Prefix>)
-  & FromMethod<
+> = Machine.NodeSchema<States[StateId]> extends never ? FromMethod<
     FullSnapshotFromArguments<States, StateId, Prefix>,
     FullSnapshotResult<States, StateId, Prefix>
   >
+  :
+    & ((
+      ...args: FullSnapshotArguments<States, StateId, Prefix>
+    ) => FullSnapshotResult<States, StateId, Prefix>)
+    & FromMethod<
+      FullSnapshotFromArguments<States, StateId, Prefix>,
+      FullSnapshotResult<States, StateId, Prefix>
+    >
 
 type FullSnapshotArguments<
   States extends Machine.StateSchemas,
@@ -907,21 +966,20 @@ type FullSnapshotArguments<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-      value: Machine.NodeSchema<Node>["Type"],
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    WithNodeValue<Node, [
       states: (
         builder: FullParallelBuilder<Children, Path>
       ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-    ]
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
-      value: Machine.NodeSchema<Node>["Type"],
+    ]>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeValue<Node, [
       state: (
         builder: FullSnapshotBuilderWithPrefix<Children, Path>
       ) =>
         | Machine.SnapshotWithPrefix<Children, Path>
         | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
-    ]
-  : [value: Machine.NodeSchema<Node>["Type"]]
+    ]>
+  : WithNodeValue<Node, []>
   : never
 
 type FullSnapshotFromArguments<
@@ -930,22 +988,21 @@ type FullSnapshotFromArguments<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
-  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-      input: Machine.NodeSchema<Node>["~type.make.in"],
+  Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+    WithNodeInput<Node, [
       states: (
         builder: FullParallelBuilder<Children, Path>
       ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-    ]
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
-      input: Machine.NodeSchema<Node>["~type.make.in"],
+    ]>
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeInput<Node, [
       state: (
         builder: FullSnapshotBuilderWithPrefix<Children, Path>
       ) => ConstructionResult<
         | Machine.SnapshotWithPrefix<Children, Path>
         | Machine.ChoiceTargetInstruction<Machine.ChoiceIdentifierWithPrefix<Children, Path>>
       >
-    ]
-  : [input: Machine.NodeSchema<Node>["~type.make.in"]]
+    ]>
+  : WithNodeInput<Node, []>
   : never
 
 type FullSnapshotResult<
@@ -964,28 +1021,25 @@ type FullParallelBuilder<
 > =
   & SnapshotBuilderComplete<Regions, Constructed>
   & {
-    readonly [Key in Remaining]:
-      & ((
-        ...args: FullSnapshotArguments<States, Key, Prefix>
-      ) => FullParallelBuilder<
+    readonly [Key in Remaining]: NodeBuilderMethod<
+      States[Key],
+      FullSnapshotArguments<States, Key, Prefix>,
+      FullParallelBuilder<
         States,
         Prefix,
         Exclude<Remaining, Key>,
         Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
         Constructed
-      >)
-      & {
-        readonly from: FromCallable<
-          FullSnapshotFromArguments<States, Key, Prefix>,
-          FullParallelBuilder<
-            States,
-            Prefix,
-            Exclude<Remaining, Key>,
-            Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-            true
-          >
-        >
-      }
+      >,
+      FullSnapshotFromArguments<States, Key, Prefix>,
+      FullParallelBuilder<
+        States,
+        Prefix,
+        Exclude<Remaining, Key>,
+        Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
+        true
+      >
+    >
   }
 
 type HistorySnapshotArguments<
@@ -996,18 +1050,17 @@ type HistorySnapshotArguments<
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = Path extends Owner ? FullSnapshotArguments<States, StateId, Prefix>
   : States[StateId] extends infer Node ?
-    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-        value: Machine.NodeSchema<Node>["Type"],
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+      WithNodeValue<Node, [
         states: (
           builder: HistoryParallelBuilder<Children, Path, Owner>
         ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>>
-      ]
-    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
-        value: Machine.NodeSchema<Node>["Type"],
+      ]>
+    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeValue<Node, [
         state: (
           builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
         ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
-      ]
+      ]>
     : never
   : never
 
@@ -1019,18 +1072,17 @@ type HistorySnapshotFromArguments<
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = Path extends Owner ? FullSnapshotFromArguments<States, StateId, Prefix>
   : States[StateId] extends infer Node ?
-    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ? [
-        input: Machine.NodeSchema<Node>["~type.make.in"],
+    Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
+      WithNodeInput<Node, [
         states: (
           builder: HistoryParallelBuilder<Children, Path, Owner>
         ) => SnapshotBuilderComplete<HistorySnapshotRegions<Children, Path, Owner>, boolean>
-      ]
-    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? [
-        input: Machine.NodeSchema<Node>["~type.make.in"],
+      ]>
+    : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? WithNodeInput<Node, [
         state: (
           builder: HistorySnapshotBuilderWithPrefix<Children, Owner, Path>
         ) => ConstructionResult<HistorySnapshotWithPrefix<Children, Owner, Path>>
-      ]
+      ]>
     : never
   : never
 
@@ -1045,12 +1097,12 @@ type HistorySnapshotResult<
     Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
       Machine.ParallelSnapshot<
         Path,
-        Machine.NodeSchema<Node>["Type"],
+        NodeValue<Node>,
         HistorySnapshotRegions<Children, Path, Owner>
       >
     : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? Machine.CompoundSnapshot<
         Path,
-        Machine.NodeSchema<Node>["Type"],
+        NodeValue<Node>,
         HistorySnapshotWithPrefix<Children, Owner, Path>
       >
     : never
@@ -1061,14 +1113,18 @@ type HistorySnapshotMethod<
   StateId extends ActiveStateKey<States>,
   Prefix extends string,
   Owner extends string
-> =
-  & ((
-    ...args: HistorySnapshotArguments<States, StateId, Prefix, Owner>
-  ) => HistorySnapshotResult<States, StateId, Prefix, Owner>)
-  & FromMethod<
+> = Machine.NodeSchema<States[StateId]> extends never ? FromMethod<
     HistorySnapshotFromArguments<States, StateId, Prefix, Owner>,
     HistorySnapshotResult<States, StateId, Prefix, Owner>
   >
+  :
+    & ((
+      ...args: HistorySnapshotArguments<States, StateId, Prefix, Owner>
+    ) => HistorySnapshotResult<States, StateId, Prefix, Owner>)
+    & FromMethod<
+      HistorySnapshotFromArguments<States, StateId, Prefix, Owner>,
+      HistorySnapshotResult<States, StateId, Prefix, Owner>
+    >
 
 type HistorySnapshotWithPrefix<
   States extends Machine.StateSchemas,
@@ -1117,50 +1173,48 @@ type HistoryParallelBuilder<
   & {
     readonly [Key in Remaining]: Owner extends
       | Machine.JoinPath<Prefix, Key>
-      | `${Machine.JoinPath<Prefix, Key>}.${string}` ?
-        & ((...args: HistorySnapshotArguments<States, Key, Prefix, Owner>) => HistoryParallelBuilder<
+      | `${Machine.JoinPath<Prefix, Key>}.${string}` ? NodeBuilderMethod<
+        States[Key],
+        HistorySnapshotArguments<States, Key, Prefix, Owner>,
+        HistoryParallelBuilder<
           States,
           Prefix,
           Owner,
           Exclude<Remaining, Key>,
           Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
           Constructed
-        >)
-        & {
-          readonly from: FromCallable<
-            HistorySnapshotFromArguments<States, Key, Prefix, Owner>,
-            HistoryParallelBuilder<
-              States,
-              Prefix,
-              Owner,
-              Exclude<Remaining, Key>,
-              Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
-              true
-            >
-          >
-        }
-      :
-        & ((...args: FullSnapshotArguments<States, Key, Prefix>) => HistoryParallelBuilder<
+        >,
+        HistorySnapshotFromArguments<States, Key, Prefix, Owner>,
+        HistoryParallelBuilder<
+          States,
+          Prefix,
+          Owner,
+          Exclude<Remaining, Key>,
+          Regions & { readonly [Region in Key]: HistorySnapshotResult<States, Key, Prefix, Owner> },
+          true
+        >
+      >
+      : NodeBuilderMethod<
+        States[Key],
+        FullSnapshotArguments<States, Key, Prefix>,
+        HistoryParallelBuilder<
           States,
           Prefix,
           Owner,
           Exclude<Remaining, Key>,
           Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
           Constructed
-        >)
-        & {
-          readonly from: FromCallable<
-            FullSnapshotFromArguments<States, Key, Prefix>,
-            HistoryParallelBuilder<
-              States,
-              Prefix,
-              Owner,
-              Exclude<Remaining, Key>,
-              Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
-              true
-            >
-          >
-        }
+        >,
+        FullSnapshotFromArguments<States, Key, Prefix>,
+        HistoryParallelBuilder<
+          States,
+          Prefix,
+          Owner,
+          Exclude<Remaining, Key>,
+          Regions & { readonly [Region in Key]: FullSnapshotResult<States, Key, Prefix> },
+          true
+        >
+      >
   }
 
 type ParentPath<Path extends string> = Path extends `${infer Parent}.${infer Child}`
@@ -1245,59 +1299,36 @@ type LocalTargetMethod<
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    Source extends Path | `${Path}.${string}` ?
-        & (<Result extends ConstructionResult<LocalTargetResultWithPrefix<AllStates, Children, Path>>>(
-          value: Machine.NodeSchema<Node>["Type"],
-          state: (
-            builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-          ) => Result
-        ) => Result)
-        & {
-          readonly from: ConstructionSelectorFromCallable<
-            Machine.NodeSchema<Node>["~type.make.in"],
-            LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-            LocalTargetResultWithPrefix<AllStates, Children, Path>
-          >
-        }
-    :
-      & ((
-        value: Machine.NodeSchema<Node>["Type"],
+    Source extends Path | `${Path}.${string}` ? NestedTargetMethod<
+        Node,
+        LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+        LocalTargetResultWithPrefix<AllStates, Children, Path>
+      >
+    : NodeMethod<
+      Node,
+      WithNodeValue<Node, [
         states: (
           builder: FullParallelBuilder<Children, Path>
         ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-      ) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>)
-      & FromMethod<
-        [
-          input: Machine.NodeSchema<Node>["~type.make.in"],
-          states: (
-            builder: FullParallelBuilder<Children, Path>
-          ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-        ],
-        Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-      >
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      & (<Result extends ConstructionResult<LocalTargetResultWithPrefix<AllStates, Children, Path>>>(
-        value: Machine.NodeSchema<Node>["Type"],
-        state: (
-          builder: LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-        ) => Result
-      ) => Result)
-      & {
-        readonly from: ConstructionSelectorFromCallable<
-          Machine.NodeSchema<Node>["~type.make.in"],
-          LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-          LocalTargetResultWithPrefix<AllStates, Children, Path>
-        >
-      }
-  :
-    & ((value: Machine.NodeSchema<Node>["Type"]) => Machine.Target<
-      AllStates,
-      StateIdentifierFromPath<AllStates, Path>
-    >)
-    & FromMethod<
-      [input: Machine.NodeSchema<Node>["~type.make.in"]],
-      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+      ]>,
+      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+      WithNodeInput<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
+      ]>
     >
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? NestedTargetMethod<
+      Node,
+      LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+      LocalTargetResultWithPrefix<AllStates, Children, Path>
+    >
+  : NodeMethod<
+    Node,
+    WithNodeValue<Node, []>,
+    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+    WithNodeInput<Node, []>
+  >
   : never
 
 type LocalTargetBuilderForScope<
@@ -1306,28 +1337,29 @@ type LocalTargetBuilderForScope<
   Source extends Machine.StateNodeIdentifier<States>
 > = ChildrenOf<States, Scope> extends infer Children extends Machine.StateSchemas ?
     & LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
-    & {
-      /**
-       * Updates the value of the state containing the local group and moves to
-       * one of the states inside it. Values in other active branches are kept.
-       *
-       * @since 0.4.0
-       */
-      readonly with:
-        & (<Result extends ConstructionResult<LocalTargetResultWithPrefix<States, Children, Scope>>>(
-          value: Machine.StateByIdentifier<States, Scope>,
-          state: (
-            builder: LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
-          ) => Result
-        ) => Result)
-        & {
-          readonly from: ConstructionSelectorFromCallable<
-            Machine.SchemaByIdentifier<States, Scope>["~type.make.in"],
-            LocalTargetBuilderWithPrefix<States, Children, Scope, Source>,
-            LocalTargetResultWithPrefix<States, Children, Scope>
-          >
-        }
-    }
+    & (Scope extends Machine.ValuedStateIdentifier<States> ? {
+        /**
+         * Updates the value of the state containing the local group and moves to
+         * one of the states inside it. Values in other active branches are kept.
+         *
+         * @since 0.4.0
+         */
+        readonly with:
+          & (<Result extends ConstructionResult<LocalTargetResultWithPrefix<States, Children, Scope>>>(
+            value: Machine.StateByIdentifier<States, Scope>,
+            state: (
+              builder: LocalTargetBuilderWithPrefix<States, Children, Scope, Source>
+            ) => Result
+          ) => Result)
+          & {
+            readonly from: ConstructionSelectorFromCallable<
+              Machine.SchemaByIdentifier<States, Scope>["~type.make.in"],
+              LocalTargetBuilderWithPrefix<States, Children, Scope, Source>,
+              LocalTargetResultWithPrefix<States, Children, Scope>
+            >
+          }
+      } :
+      {})
   : {}
 
 type BranchTargetResult<
@@ -1381,60 +1413,39 @@ type BranchTargetMethod<
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
     Source extends Path | `${Path}.${string}` ?
-        & (<Result extends ConstructionResult<BranchTargetResultWithPrefix<AllStates, Children, Path>>>(
-          value: Machine.NodeSchema<Node>["Type"],
-          state: (
-            builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-          ) => Result
-        ) => Result)
-        & {
-          readonly from: ConstructionSelectorFromCallable<
-            Machine.NodeSchema<Node>["~type.make.in"],
-            BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-            BranchTargetResultWithPrefix<AllStates, Children, Path>
-          >
-        }
-        & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-    :
-      & ((
-        value: Machine.NodeSchema<Node>["Type"],
-        states: (
-          builder: FullParallelBuilder<Children, Path>
-        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-      ) => Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>)
-      & FromMethod<
-        [
-          input: Machine.NodeSchema<Node>["~type.make.in"],
-          states: (
-            builder: FullParallelBuilder<Children, Path>
-          ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-        ],
-        Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
-      >
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      & (<Result extends ConstructionResult<BranchTargetResultWithPrefix<AllStates, Children, Path>>>(
-        value: Machine.NodeSchema<Node>["Type"],
-        state: (
-          builder: BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-        ) => Result
-      ) => Result)
-      & {
-        readonly from: ConstructionSelectorFromCallable<
-          Machine.NodeSchema<Node>["~type.make.in"],
+        & NestedTargetMethod<
+          Node,
           BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
           BranchTargetResultWithPrefix<AllStates, Children, Path>
         >
-      }
-      & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-  :
-    & ((value: Machine.NodeSchema<Node>["Type"]) => Machine.Target<
-      AllStates,
-      StateIdentifierFromPath<AllStates, Path>
-    >)
-    & FromMethod<
-      [input: Machine.NodeSchema<Node>["~type.make.in"]],
-      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>
+        & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+    : NodeMethod<
+      Node,
+      WithNodeValue<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
+      ]>,
+      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+      WithNodeInput<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
+      ]>
     >
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
+      & NestedTargetMethod<
+        Node,
+        BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+        BranchTargetResultWithPrefix<AllStates, Children, Path>
+      >
+      & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+  : NodeMethod<
+    Node,
+    WithNodeValue<Node, []>,
+    Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+    WithNodeInput<Node, []>
+  >
   : never
 
 type BranchTargetBuilderForRoot<
@@ -1471,15 +1482,21 @@ type HasDirectShallowHistory<States extends Machine.StateSchemas> = {
   readonly [Key in HistoryStateKey<States>]: States[Key] extends { readonly history: "deep" } ? never : Key
 }[HistoryStateKey<States>] extends never ? false : true
 
+type HasValuedActiveChild<States extends Machine.StateSchemas> = {
+  readonly [Key in ActiveStateKey<States>]: Machine.NodeSchema<States[Key]> extends never ? never : Key
+}[ActiveStateKey<States>] extends never ? false : true
+
 type InitializerClosureForNode<
   AllStates extends Machine.StateSchemas,
   Node,
   Path extends string
 > = Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-    | Extract<Path, Machine.StateIdentifier<AllStates>>
+    | (HasValuedActiveChild<Children> extends true ? Extract<Path, Machine.StateIdentifier<AllStates>> : never)
     | InitializerClosuresForChildren<AllStates, Children, Path>
   : Node extends { readonly states: infer Children extends Machine.StateSchemas; readonly initial: infer Initial } ?
-      | Extract<Path, Machine.StateIdentifier<AllStates>>
+      | (Initial extends ActiveStateKey<Children> ? Machine.NodeSchema<Children[Initial]> extends never ? never
+        : Extract<Path, Machine.StateIdentifier<AllStates>>
+        : never)
       | (Initial extends ActiveStateKey<Children> ? InitializerClosureForNode<
           AllStates,
           Children[Initial],
@@ -2175,8 +2192,9 @@ export declare namespace Machine {
    * Descriptive annotations exposed for compiled state nodes.
    *
    * Schema-backed states resolve their complete Effect Schema annotation map.
-   * Pseudo-states accept only the descriptive fields below. Annotations never
-   * affect state identity, targeting, or runtime behavior.
+   * Schema-less active states and pseudo-states accept only the descriptive
+   * fields below. Annotations never affect state identity, targeting, or
+   * runtime behavior.
    *
    * @category models
    * @since 0.4.0
@@ -2187,14 +2205,18 @@ export declare namespace Machine {
     readonly documentation?: string | undefined
   }
 
-  /** Descriptive annotations accepted by schema-less pseudo-states. */
-  export type PseudoStateAnnotations = Pick<
+  /** Descriptive annotations accepted by schema-less active and pseudo-states. */
+  export type SchemaLessStateAnnotations = Pick<
     StateNodeAnnotations,
     "title" | "description" | "documentation"
   >
 
+  /** @deprecated Use {@link SchemaLessStateAnnotations}. */
+  export type PseudoStateAnnotations = SchemaLessStateAnnotations
+
   /**
-   * Configuration accepted for an atomic object state node.
+   * Configuration accepted for an atomic object state node. Omit `schema` when
+   * the state owns no value; a schema-less final may still declare `output`.
    *
    * @category models
    * @since 0.4.0
@@ -2204,38 +2226,72 @@ export declare namespace Machine {
       readonly schema: TaggedSchema
       readonly type?: "active"
       readonly output?: never
+      readonly annotations?: never
     }
     | {
       readonly schema: TaggedSchema
       readonly type: "final"
       readonly output?: Schema.Top
+      readonly annotations?: never
+    }
+    | {
+      readonly schema?: never
+      readonly type?: "active"
+      readonly output?: never
+      readonly annotations?: SchemaLessStateAnnotations
+    }
+    | {
+      readonly schema?: never
+      readonly type: "final"
+      readonly output?: Schema.Top
+      readonly annotations?: SchemaLessStateAnnotations
     }
 
   /**
-   * Configuration accepted for a compound object state node.
+   * Configuration accepted for a compound object state node. Omit `schema`
+   * when the compound state exists only to own control topology.
    *
    * @category models
    * @since 0.4.0
    */
-  export interface CompoundStateNodeConfig {
-    readonly schema: TaggedSchema
-    readonly type?: "active"
-    readonly initial: string
-    readonly states: StateTree
-  }
+  export type CompoundStateNodeConfig =
+    | {
+      readonly schema: TaggedSchema
+      readonly type?: "active"
+      readonly initial: string
+      readonly states: StateTree
+      readonly annotations?: never
+    }
+    | {
+      readonly schema?: never
+      readonly type?: "active"
+      readonly initial: string
+      readonly states: StateTree
+      readonly annotations?: SchemaLessStateAnnotations
+    }
 
   /**
-   * Configuration accepted for a parallel object state node.
+   * Configuration accepted for a parallel object state node. Omit `schema`
+   * when the parallel state exists only to own its regions.
    *
    * @category models
    * @since 0.4.0
    */
-  export interface ParallelStateNodeConfig {
-    readonly schema: TaggedSchema
-    readonly type: "parallel"
-    readonly output?: Schema.Top
-    readonly states: StateTree
-  }
+  export type ParallelStateNodeConfig =
+    | {
+      readonly schema: TaggedSchema
+      readonly type: "parallel"
+      readonly output?: Schema.Top
+      readonly states: StateTree
+      readonly annotations?: never
+    }
+    | {
+      readonly schema?: never
+      readonly type: "parallel"
+      readonly output?: Schema.Top
+      readonly states: StateTree
+      readonly annotations?: SchemaLessStateAnnotations
+    }
 
   /**
    * Pseudo-state that restores the last active configuration of its parent.
@@ -2253,7 +2309,7 @@ export declare namespace Machine {
     readonly type: "history"
     /** Defaults to shallow history. */
     readonly history?: "shallow" | "deep"
-    readonly annotations?: PseudoStateAnnotations
+    readonly annotations?: SchemaLessStateAnnotations
   }
 
   /**
@@ -2268,7 +2324,7 @@ export declare namespace Machine {
    */
   export interface ChoiceStateNodeConfig {
     readonly type: "choice"
-    readonly annotations?: PseudoStateAnnotations
+    readonly annotations?: SchemaLessStateAnnotations
   }
 
   /**
@@ -2349,13 +2405,13 @@ export declare namespace Machine {
      * @since 0.4.0
      */
     readonly get: {
-      <Path extends StateIdentifier<States>>(
+      <Path extends ValuedStateIdentifier<States>>(
         snapshot: Snapshot<States>,
         path: Path
       ): Option.Option<StateByIdentifier<States, Path>>
       <
         const From extends StateIdentifier<States>,
-        const Path extends StateIdentifier<States>
+        const Path extends ValuedStateIdentifier<States>
       >(
         snapshot: SnapshotByIdentifier<States, From>,
         path: Path & (Path extends NoInfer<From> | `${NoInfer<From>}.${string}` ? unknown : never)
@@ -2372,7 +2428,7 @@ export declare namespace Machine {
      *
      * @since 0.4.0
      */
-    readonly getWithParents: <Path extends StateIdentifier<States>>(
+    readonly getWithParents: <Path extends ValuedStateIdentifier<States>>(
       snapshot: Snapshot<States>,
       path: Path
     ) => Option.Option<StateWithParents<States, Path>>
@@ -2434,7 +2490,7 @@ export declare namespace Machine {
   export interface StateNodeBase<Path extends string = string> {
     readonly path: Path
     readonly key: string
-    /** Resolved Effect Schema annotations, or descriptive pseudo-state annotations. */
+    /** Resolved schema annotations, or descriptive schema-less-state annotations. */
     readonly annotations: Readonly<StateNodeAnnotations> | undefined
     readonly order: number
   }
@@ -2444,7 +2500,7 @@ export declare namespace Machine {
     extends StateNodeBase<OwnPath>
   {
     readonly type: "atomic"
-    readonly schema: TaggedSchema
+    readonly schema: TaggedSchema | undefined
     readonly output: undefined
     readonly history: undefined
     readonly parent: ActivePath | undefined
@@ -2459,7 +2515,7 @@ export declare namespace Machine {
     ChoicePath extends string = ActivePath
   > extends StateNodeBase<OwnPath> {
     readonly type: "compound"
-    readonly schema: TaggedSchema
+    readonly schema: TaggedSchema | undefined
     readonly output: undefined
     readonly history: undefined
     readonly parent: ActivePath | undefined
@@ -2473,7 +2529,7 @@ export declare namespace Machine {
     extends StateNodeBase<OwnPath>
   {
     readonly type: "parallel"
-    readonly schema: TaggedSchema
+    readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
     readonly history: undefined
     readonly parent: ActivePath | undefined
@@ -2487,7 +2543,7 @@ export declare namespace Machine {
     extends StateNodeBase<OwnPath>
   {
     readonly type: "final"
-    readonly schema: TaggedSchema
+    readonly schema: TaggedSchema | undefined
     readonly output: Schema.Top | undefined
     readonly history: undefined
     readonly parent: ActivePath | undefined
@@ -2696,6 +2752,19 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export type StateIdentifier<States extends StateSchemas> = StateIdentifierWithPrefix<States>
+
+  /** Extracts active state paths whose definitions declare a state value schema. */
+  export type ValuedStateIdentifier<States extends StateSchemas> = StateIdentifier<States> extends infer StateId
+    ? StateId extends StateIdentifier<States> ? NodeSchema<NodeByIdentifier<States, StateId>> extends never ? never
+      : StateId
+    : never
+    : never
+
+  /** Extracts active state paths whose definitions intentionally omit a state value schema. */
+  export type StructuralStateIdentifier<States extends StateSchemas> = Exclude<
+    StateIdentifier<States>,
+    ValuedStateIdentifier<States>
+  >
 
   /**
    * Extracts the state path values represented by a state definition under a
@@ -2907,7 +2976,7 @@ export declare namespace Machine {
   export type StateByIdentifier<
     States extends StateSchemas,
     StateId extends StateIdentifier<States>
-  > = Extract<StateOf<States>, SchemaByIdentifier<States, StateId>["Type"]>
+  > = StateId extends ValuedStateIdentifier<States> ? SchemaByIdentifier<States, StateId>["Type"] : undefined
 
   /**
    * Extracts every parent state path from a state identifier.
@@ -2940,7 +3009,7 @@ export declare namespace Machine {
     States extends StateSchemas,
     StateId extends StateIdentifier<States>
   > = StateId extends StateIdentifier<States> ? {
-      readonly [Parent in Extract<ParentStateIdentifier<StateId>, StateIdentifier<States>>]: StateByIdentifier<
+      readonly [Parent in Extract<ParentStateIdentifier<StateId>, ValuedStateIdentifier<States>>]: StateByIdentifier<
         States,
         Parent
       >
@@ -2959,7 +3028,7 @@ export declare namespace Machine {
   > = StateId extends StateIdentifier<States> ?
     Extract<ImmediateParentStateIdentifier<StateId>, StateIdentifier<States>> extends infer Parent
       ? [Parent] extends [never] ? undefined
-      : Parent extends StateIdentifier<States> ? StateByIdentifier<States, Parent>
+      : Parent extends ValuedStateIdentifier<States> ? StateByIdentifier<States, Parent>
       : undefined
     : undefined
     : never
@@ -3144,7 +3213,7 @@ export declare namespace Machine {
    */
   export interface EncodedSnapshotState {
     readonly path: string
-    readonly value: unknown
+    readonly value?: unknown
   }
 
   /**
@@ -3329,17 +3398,17 @@ export declare namespace Machine {
   > = States[StateId] extends { readonly type: "parallel"; readonly states: infer Children }
     ? Children extends StateSchemas ? ParallelSnapshot<
         Path,
-        NodeSchema<States[StateId]>["Type"],
+        NodeValue<States[StateId]>,
         SnapshotRegionsWithPrefix<Children, Path>
       >
-    : AtomicSnapshot<Path, NodeSchema<States[StateId]>["Type"]>
+    : AtomicSnapshot<Path, NodeValue<States[StateId]>>
     : States[StateId] extends { readonly states: infer Children } ? Children extends StateSchemas ? CompoundSnapshot<
           Path,
-          NodeSchema<States[StateId]>["Type"],
+          NodeValue<States[StateId]>,
           SnapshotWithPrefix<Children, Path>
         >
-      : AtomicSnapshot<Path, NodeSchema<States[StateId]>["Type"]>
-    : AtomicSnapshot<Path, NodeSchema<States[StateId]>["Type"]>
+      : AtomicSnapshot<Path, NodeValue<States[StateId]>>
+    : AtomicSnapshot<Path, NodeValue<States[StateId]>>
 
   /**
    * Extracts a complete root snapshot whose selected configuration contains a
@@ -3455,7 +3524,7 @@ export declare namespace Machine {
     readonly value: StateByIdentifier<States, StateId>
     readonly values?: Partial<
       {
-        readonly [AncestorStateId in StateIdentifier<States>]: StateByIdentifier<States, AncestorStateId>
+        readonly [AncestorStateId in ValuedStateIdentifier<States>]: StateByIdentifier<States, AncestorStateId>
       }
     >
   }
@@ -3779,7 +3848,7 @@ export declare namespace Machine {
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
     >
     readonly parents: {
-      readonly [Parent in Extract<ParentStateIdentifier<ChoiceId>, StateIdentifier<States>>]: StateByIdentifier<
+      readonly [Parent in Extract<ParentStateIdentifier<ChoiceId>, ValuedStateIdentifier<States>>]: StateByIdentifier<
         States,
         Parent
       >
@@ -4328,10 +4397,14 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > = NodeByIdentifier<States, StateId> extends infer Node ?
     Node extends { readonly type: "parallel"; readonly states: infer Children extends StateSchemas } ? {
-        readonly [Key in ActiveStateKey<Children>]: NodeSchema<Children[Key]>["Type"]
+        readonly [Key in ActiveStateKey<Children> as NodeSchema<Children[Key]> extends never ? never : Key]: NodeValue<
+          Children[Key]
+        >
       }
     : Node extends { readonly states: infer Children extends StateSchemas; readonly initial: infer Initial } ?
-      Initial extends ActiveStateKey<Children> ? NodeSchema<Children[Initial]>["Type"] : never
+      Initial extends ActiveStateKey<Children> ? NodeSchema<Children[Initial]> extends never ? never
+        : NodeValue<Children[Initial]>
+      : never
     : never
     : never
 
@@ -5303,7 +5376,9 @@ export const isFinal: <
  *
  * The returned `states` property is the same object passed to `defineStates`.
  * The returned `initial` builder creates snapshots without user-authored path
- * strings and enforces compound and parallel initial-state rules.
+ * strings and enforces compound and parallel initial-state rules. Active nodes
+ * may omit `schema` when they own no value; those builders expose `.from(...)`
+ * and still participate fully in targeting, matching, and snapshots.
  *
  * **Example** (Atomic initial snapshot)
  *
