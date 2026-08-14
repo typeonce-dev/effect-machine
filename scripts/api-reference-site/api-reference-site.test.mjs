@@ -7,9 +7,13 @@ import {
   normalizeBasePath,
   normalizeGitHubStars,
   normalizeOrigin,
+  parseChangelog,
+  parseChangeset,
+  renderChangelogPage,
   renderIndexPage,
   renderLayout,
   renderMarkdown,
+  renderModulePage,
   renderRobots,
   renderSitemap,
   siteManifest,
@@ -28,6 +32,22 @@ test("renders documentation prose while escaping source HTML", () => {
     '<h4 class="prose-heading">Details</h4><p>Use <code>&lt;Machine&gt;</code> safely.</p><ul><li>First</li><li>Second</li></ul>'
   )
   assert.doesNotMatch(renderMarkdown("<script>alert(1)</script>"), /<script>/)
+})
+
+test("renders fenced code with highlighting and copy controls", () => {
+  const html = renderMarkdown(`Call the new API:
+
+\`\`\`ts
+const value = Machine.example("safe")
+\`\`\`
+
+Then reuse \`value\`.`)
+  assert.match(html, /<p>Call the new API:<\/p>/)
+  assert.match(html, /class="code-block code-block--markdown"/)
+  assert.match(html, /aria-label="Copy ts code"/)
+  assert.match(html, /syntax-keyword">const<\/span>/)
+  assert.match(html, /syntax-string">&quot;safe&quot;<\/span>/)
+  assert.match(html, /<p>Then reuse <code>value<\/code>\.<\/p>/)
 })
 
 test("assigns deterministic unique anchors to duplicate declarations", () => {
@@ -87,6 +107,92 @@ const site = {
   themeColor: { light: "#fbfbfd", dark: "#111115" },
   title: "Effect Machine"
 }
+
+test("parses Changesets release entries and pending descriptions", () => {
+  const releases = parseChangelog(`# Package
+
+## 1.2.0
+
+### Minor Changes
+
+- abc1234: Add a typed \`make\` helper.
+
+  Preserve inference across multiple lines.
+
+  \`\`\`ts
+  const machine = make()
+  \`\`\`
+
+### Patch Changes
+
+- def5678: Fix escaped output.
+`, new Map([["1.2.0", "2026-08-13"]]))
+  assert.deepEqual(releases, [{
+    version: "1.2.0",
+    date: "2026-08-13",
+    groups: [{
+      type: "minor",
+      entries: [{
+        description: "Add a typed `make` helper.\n\nPreserve inference across multiple lines.\n\n```ts\nconst machine = make()\n```"
+      }]
+    }, {
+      type: "patch",
+      entries: [{ description: "Fix escaped output." }]
+    }]
+  }])
+  assert.deepEqual(parseChangeset(`---
+"@typeonce/effect-machine": minor
+---
+
+Add snapshot selectors.
+`, "@typeonce/effect-machine"), { type: "minor", description: "Add snapshot selectors." })
+  assert.equal(parseChangeset(`---
+"another-package": patch
+---
+
+Ignore this package.
+`, "@typeonce/effect-machine"), undefined)
+})
+
+test("renders a navigable changelog with release dates", () => {
+  const html = renderChangelogPage({
+    ...site,
+    changelog: [{
+      version: "1.2.0",
+      date: "2026-08-13",
+      groups: [{ type: "minor", entries: [{ description: "Add a feature." }] }]
+    }]
+  })
+  assert.match(html, /class="navigation-changelog is-current"/)
+  assert.match(html, /id="release-1-2-0">v1\.2\.0/)
+  assert.match(html, /datetime="2026-08-13">August 13, 2026/)
+  assert.match(html, /<li><p>Add a feature\.<\/p><\/li>/)
+})
+
+test("renders collapsible category navigation with declaration anchors", () => {
+  const declaration = {
+    name: "make",
+    kind: "variable",
+    description: "Creates a machine.",
+    examples: [],
+    see: []
+  }
+  const module = {
+    api: {
+      declarationCount: 1,
+      description: "State machine APIs",
+      groups: [{ category: "constructors", declarations: [declaration] }]
+    },
+    export: "./Machine",
+    label: "Machine",
+    route: "Machine"
+  }
+  const html = renderModulePage({ ...site, modules: [module] }, module)
+  assert.match(html, /<details class="page-toc__group">/)
+  assert.match(html, /<summary>[\s\S]*Constructors[\s\S]*<\/summary>/)
+  assert.match(html, /<a href="#make">make<\/a>/)
+  assert.match(html, /<h3 id="make">make<\/h3>/)
+})
 
 test("renders canonical and social metadata without exposing the internal channel", () => {
   const html = renderLayout(site, {
@@ -162,6 +268,7 @@ test("generates manifest, robots, and sitemap URLs from the deployment base", ()
   assert.equal(manifest.icons[2].purpose, "maskable")
   assert.match(renderRobots(site), /Sitemap: https:\/\/docs\.example\.com\/docs\/sitemap\.xml/)
   assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/Machine\/<\/loc>/)
+  assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/changelog\/<\/loc>/)
 })
 
 test("accepts only pathless HTTPS production origins", () => {

@@ -4,9 +4,31 @@
 
 ### Minor Changes
 
-- b192484: Allow state query helpers to inspect extracted snapshot subtrees, and add
-  equality-aware `AtomMachine.selectSnapshot` and `selectSnapshotChild`
-  combinators.
+- b192484: Allow `Machine.defineStates` query helpers to inspect an extracted
+  snapshot subtree. Paths remain absolute and type-safe, but `get`,
+  `getSnapshot`, and `matches` can now continue from a snapshot selected
+  earlier instead of requiring the complete root snapshot.
+
+  ```ts
+  const readySnapshot = States.getSnapshot(snapshot, "Ready")
+
+  if (Option.isSome(readySnapshot)) {
+    States.get(readySnapshot.value, "Ready.editor")
+    States.matches(readySnapshot.value, "Ready.editor.Editing")
+  }
+
+  const editorSnapshotAtom = AtomMachine.selectSnapshot(
+    machineAtom,
+    "Ready.editor"
+  )
+  ```
+
+  Add equality-aware `AtomMachine.selectSnapshot` and
+  `AtomMachine.selectSnapshotChild` combinators for reactive consumers that
+  need the complete logical snapshot subtree instead of only its state value.
+  The selected atoms retain nested topology, suppress structurally equal
+  updates, and produce `Option.none()` while the path or invoked child is
+  inactive.
 
 ## 0.6.1
 

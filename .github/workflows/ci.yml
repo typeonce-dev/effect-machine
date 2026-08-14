@@ -62,6 +62,7 @@ jobs:
 
   example:
     needs: discover-examples
+    if: needs.discover-examples.outputs.required == 'true'
     strategy:
       fail-fast: false
       matrix:

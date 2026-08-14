@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import {
   cpSync,
   copyFileSync,
@@ -67,6 +68,7 @@ const readSiteModel = (inputDirectory, config) => {
       navigationGroup: navigationGroup(segments)
     }
   })
+  const changelog = readChangelog(packageManifest.name)
 
   return {
     ...config,
@@ -74,7 +76,8 @@ const readSiteModel = (inputDirectory, config) => {
     revision: dataset.revision,
     package: packageManifest,
     modules,
-    navigation: groupNavigation(modules)
+    navigation: groupNavigation(modules),
+    changelog
   }
 }
 
@@ -94,6 +97,7 @@ const groupNavigation = (modules) => {
 
 const writeSite = (outputDirectory, site) => {
   writePage(join(outputDirectory, "index.html"), renderIndexPage(site))
+  writePage(join(outputDirectory, "changelog", "index.html"), renderChangelogPage(site))
   for (const module of site.modules) {
     writePage(join(outputDirectory, module.route, "index.html"), renderModulePage(site, module))
   }
@@ -144,17 +148,72 @@ export const renderIndexPage = (site) => {
   })
 }
 
-const renderModulePage = (site, module) => {
+export const renderChangelogPage = (site) => {
+  const releases = site.changelog ?? []
+  const toc = releases.map((release) => `
+    <a href="#release-${slugify(release.version)}">
+      <span>${escapeHtml(release.version === "unreleased" ? "Unreleased" : `v${release.version}`)}</span>
+      ${release.date === undefined ? "" : `<small>${escapeHtml(release.date)}</small>`}
+    </a>`).join("")
+  const content = `
+    <article class="changelog" data-pagefind-meta="type:changelog">
+      <header class="changelog-header">
+        <div class="breadcrumbs">
+          <a href="${siteUrl(site, "")}">API</a>
+          <span aria-hidden="true">/</span>
+          <span>Changelog</span>
+        </div>
+        <div class="eyebrow">Release history</div>
+        <h1>Changelog</h1>
+        <p>New features, improvements, and fixes from each release.</p>
+      </header>
+      ${releases.map(renderRelease).join("")}
+    </article>`
+  return renderLayout(site, {
+    title: `Changelog · ${site.title}`,
+    description: `Release history for ${site.package.name}`,
+    content,
+    currentRoute: "changelog",
+    pageKind: "changelog",
+    toc
+  })
+}
+
+const renderRelease = (release) => `
+  <section class="release" aria-labelledby="release-${slugify(release.version)}">
+    <header class="release__header">
+      <h2 id="release-${slugify(release.version)}">${
+  escapeHtml(release.version === "unreleased" ? "Unreleased" : `v${release.version}`)
+}</h2>
+      ${release.date === undefined ? "" : `
+        <time datetime="${escapeAttribute(release.date)}">${escapeHtml(formatReleaseDate(release.date))}</time>`}
+    </header>
+    ${release.groups.map((group) => `
+      <section class="release-group">
+        <h3>${escapeHtml(`${titleCase(group.type)} changes`)}</h3>
+        <ul class="change-list">
+          ${group.entries.map((entry) => `<li>${renderMarkdown(entry.description)}</li>`).join("")}
+        </ul>
+      </section>`).join("")}
+  </section>`
+
+export const renderModulePage = (site, module) => {
   const declarationIds = uniqueDeclarationIds(module.api.groups)
   const categoryLinks = module.api.groups.map((group) => `
-    <a href="#${slugify(group.category)}">
-      <span>${escapeHtml(titleCase(group.category))}</span>
-      <small>${group.declarations.length}</small>
-    </a>`).join("")
+    <details class="page-toc__group">
+      <summary>
+        <span>${escapeHtml(titleCase(group.category))}</span>
+        <small>${group.declarations.length}</small>
+      </summary>
+      <nav aria-label="${escapeAttribute(titleCase(group.category))} APIs">
+        ${group.declarations.map((declaration) => `
+          <a href="#${declarationIds.get(declaration)}">${escapeHtml(declaration.name)}</a>`).join("")}
+      </nav>
+    </details>`).join("")
   const groups = module.api.groups.map((group) => `
-    <section class="api-group" aria-labelledby="${slugify(group.category)}">
+    <section class="api-group" aria-labelledby="category-${slugify(group.category)}">
       <div class="api-group__heading">
-        <h2 id="${slugify(group.category)}">${escapeHtml(titleCase(group.category))}</h2>
+        <h2 id="category-${slugify(group.category)}">${escapeHtml(titleCase(group.category))}</h2>
         <span>${group.declarations.length}</span>
       </div>
       ${group.declarations.map((declaration) =>
@@ -210,11 +269,11 @@ const renderDeclaration = (declaration, id) => {
     .map((entry) => entry.replace(/^\s*-\s*/, "").trim())
     .filter(Boolean)
   return `
-    <article class="declaration" id="${id}" data-pagefind-meta="kind:${escapeAttribute(declaration.kind)}">
+    <article class="declaration" aria-labelledby="${id}" data-pagefind-meta="kind:${escapeAttribute(declaration.kind)}">
       <header class="declaration__header">
         <div class="declaration__title">
           <a class="anchor" href="#${id}" aria-label="Link to ${escapeAttribute(declaration.name)}">#</a>
-          <h3>${escapeHtml(declaration.name)}</h3>
+          <h3 id="${id}">${escapeHtml(declaration.name)}</h3>
           <span class="kind kind--${slugify(declaration.kind)}">${escapeHtml(declaration.kind)}</span>
         </div>
         ${declaration.sourceUrl === undefined ? "" : sourceLink(declaration.sourceUrl, "Source")}
@@ -350,6 +409,7 @@ const renderNavigation = (site, currentRoute) => `
       <button class="icon-button navigation-close" type="button" aria-label="Close navigation">Close</button>
     </div>
     <a class="navigation-overview${currentRoute === "" ? " is-current" : ""}" href="${siteUrl(site, "")}">Overview</a>
+    <a class="navigation-changelog${currentRoute === "changelog" ? " is-current" : ""}" href="${siteUrl(site, "changelog")}">Changelog</a>
     ${site.navigation.map((group) => `
       <section>
         <h2>${escapeHtml(group.label)}</h2>
@@ -381,6 +441,33 @@ const renderSearchDialog = () => `
 
 export const renderMarkdown = (value) => {
   if (value === undefined || value.trim().length === 0) return ""
+  const lines = value.trim().replaceAll("\r\n", "\n").split("\n")
+  const output = []
+  const prose = []
+  const flushProse = () => {
+    if (prose.length === 0) return
+    output.push(renderProseMarkdown(prose.join("\n")))
+    prose.length = 0
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const fence = /^\s*```([^`]*)\s*$/u.exec(lines[index])
+    if (fence === null) {
+      prose.push(lines[index])
+      continue
+    }
+    flushProse()
+    const source = []
+    for (index += 1; index < lines.length && !/^\s*```\s*$/u.test(lines[index]); index++) {
+      source.push(lines[index])
+    }
+    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim()))
+  }
+  flushProse()
+  return output.join("")
+}
+
+const renderProseMarkdown = (value) => {
+  if (value.trim().length === 0) return ""
   return value.trim().split(/\n\s*\n/).map((block) => {
     const lines = block.split("\n").map((line) => line.trim()).filter(Boolean)
     if (lines.length === 1 && /^\*\*[^*]+\*\*$/.test(lines[0])) {
@@ -391,6 +478,125 @@ export const renderMarkdown = (value) => {
     }
     return `<p>${renderInlineMarkdown(lines.join(" "))}</p>`
   }).join("")
+}
+
+const renderMarkdownCodeBlock = (source, language) => {
+  const normalizedLanguage = ({ js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript" })[
+    language.toLowerCase()
+  ] ?? language.toLowerCase()
+  const label = language.length === 0 ? "code" : `${language} code`
+  return `
+    <div class="code-block code-block--markdown">
+      <button class="copy-button" type="button" aria-label="Copy ${escapeAttribute(label)}">Copy</button>
+      <pre><code>${highlightCode(source, normalizedLanguage)}</code></pre>
+    </div>`
+}
+
+export const parseChangelog = (markdown, releaseDates = new Map()) => {
+  const headings = [...markdown.matchAll(/^##\s+([^\n]+)\s*$/gm)]
+  return headings.map((heading, index) => {
+    const version = heading[1].trim().replace(/^v/, "")
+    const start = heading.index + heading[0].length
+    const end = headings[index + 1]?.index ?? markdown.length
+    return {
+      version,
+      date: releaseDates.get(version),
+      groups: parseChangeGroups(markdown.slice(start, end))
+    }
+  }).filter((release) => release.groups.length > 0)
+}
+
+export const parseChangeset = (markdown, packageName) => {
+  const match = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]+)$/u.exec(markdown.trim())
+  if (match === null) return undefined
+  const escapedPackage = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const bump = new RegExp(`^\\s*["']?${escapedPackage}["']?\\s*:\\s*(major|minor|patch)\\s*$`, "mu")
+    .exec(match[1])?.[1]
+  const description = match[2].trim()
+  return bump === undefined || description.length === 0 ? undefined : { type: bump, description }
+}
+
+const parseChangeGroups = (markdown) => {
+  const groups = []
+  let group
+  let entry
+  const finishEntry = () => {
+    if (entry === undefined || group === undefined) return
+    const description = entry.join("\n").trim()
+    if (description.length > 0) group.entries.push({ description })
+    entry = undefined
+  }
+  for (const line of markdown.split("\n")) {
+    const heading = /^###\s+(Major|Minor|Patch) Changes\s*$/iu.exec(line)
+    if (heading !== null) {
+      finishEntry()
+      group = { type: heading[1].toLowerCase(), entries: [] }
+      groups.push(group)
+      continue
+    }
+    const bullet = /^-\s+(?:[0-9a-f]+:\s+)?(.*)$/iu.exec(line)
+    if (bullet !== null && group !== undefined) {
+      finishEntry()
+      entry = [bullet[1]]
+      continue
+    }
+    if (entry !== undefined) entry.push(line.replace(/^ {2}/, ""))
+  }
+  finishEntry()
+  return groups.filter((candidate) => candidate.entries.length > 0)
+}
+
+const readChangelog = (packageName) => {
+  const releases = parseChangelog(
+    readFileSync(join(repositoryDirectory, "CHANGELOG.md"), "utf8"),
+    readReleaseDates(packageName)
+  )
+  const pending = readdirSync(join(repositoryDirectory, ".changeset"), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md")
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => parseChangeset(
+      readFileSync(join(repositoryDirectory, ".changeset", entry.name), "utf8"),
+      packageName
+    ))
+    .filter((entry) => entry !== undefined)
+  if (pending.length === 0) return releases
+  const grouped = new Map()
+  for (const entry of pending) grouped.set(entry.type, [...grouped.get(entry.type) ?? [], entry])
+  return [{
+    version: "unreleased",
+    groups: ["major", "minor", "patch"]
+      .filter((type) => grouped.has(type))
+      .map((type) => ({ type, entries: grouped.get(type) }))
+  }, ...releases]
+}
+
+const readReleaseDates = (packageName) => {
+  let output
+  try {
+    output = execFileSync(
+      "git",
+      ["for-each-ref", "--format=%(refname:strip=2)\t%(creatordate:short)", "refs/tags"],
+      { cwd: repositoryDirectory, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }
+    )
+  } catch {
+    return new Map()
+  }
+  const prefix = `${packageName}@`
+  return new Map(output.trim().split("\n").flatMap((line) => {
+    const [tag, date] = line.split("\t")
+    return tag?.startsWith(prefix) && /^\d{4}-\d{2}-\d{2}$/.test(date ?? "")
+      ? [[tag.slice(prefix.length).replace(/^v/, ""), date]]
+      : []
+  }))
+}
+
+const formatReleaseDate = (value) => {
+  const [year, month, day] = value.split("-").map(Number)
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ]
+  return `${months[month - 1]} ${day}, ${year}`
 }
 
 const renderInlineMarkdown = (value) => escapeHtml(value)
@@ -522,7 +728,7 @@ Sitemap: ${absoluteSiteUrl(site, "sitemap.xml")}
 
 export const renderSitemap = (site) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${["", ...site.modules.map((module) => `${module.route}/`)]
+${["", "changelog/", ...site.modules.map((module) => `${module.route}/`)]
     .map((route) => `  <url><loc>${escapeXml(absoluteSiteUrl(site, route))}</loc></url>`)
     .join("\n")}
 </urlset>
@@ -623,6 +829,7 @@ const assertSafeOutputDirectory = (path) => {
 const validateSite = (outputDirectory, site) => {
   for (const path of [
     "index.html",
+    "changelog/index.html",
     "assets/styles.css",
     "assets/client.js",
     "apple-touch-icon.png",

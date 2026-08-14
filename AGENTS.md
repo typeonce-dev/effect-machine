@@ -49,5 +49,5 @@ Every package directly below `examples/` must have a `check` script and a commit
 
 ## Pull request conventions
 
-- Add or update a changeset for changes under `src/` or changes to `package.json`.
+- Add or update a changeset for changes under `src/` or changes to `package.json`, following the changelog-writing guide in `.changeset/README.md`.
 - Fill in the pull request template, including the validation performed and the changeset decision.
