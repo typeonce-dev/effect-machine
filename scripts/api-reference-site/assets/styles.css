@@ -312,6 +312,10 @@ kbd {
   padding: 0.55rem 0.65rem;
 }
 
+.module-navigation .navigation-changelog {
+  margin-top: 0.15rem;
+}
+
 .module-navigation a:hover,
 .module-navigation a.is-current {
   background: var(--accent-soft);
@@ -347,7 +351,8 @@ kbd {
 }
 
 .reference-hero,
-.module-reference {
+.module-reference,
+.changelog {
   margin: 0 auto;
   max-width: 64rem;
 }
@@ -381,14 +386,16 @@ h3 {
 }
 
 .reference-hero h1,
-.module-header h1 {
+.module-header h1,
+.changelog-header h1 {
   font-size: clamp(2.35rem, 4.5vw, 4.2rem);
   line-height: 0.95;
   margin-bottom: 1.25rem;
 }
 
 .reference-hero > p,
-.module-header > p {
+.module-header > p,
+.changelog-header > p {
   color: var(--text-soft);
   font-size: 1.06rem;
   line-height: 1.75;
@@ -503,6 +510,50 @@ h3 {
   padding: 0.34rem 0 0.34rem 0.75rem;
 }
 
+.page-toc__group + .page-toc__group {
+  margin-top: 0.25rem;
+}
+
+.page-toc__group summary {
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.73rem;
+  gap: 0.35rem;
+  justify-content: space-between;
+  list-style: none;
+  padding: 0.34rem 0;
+}
+
+.page-toc__group summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-toc__group summary::before {
+  content: "›";
+  font-size: 0.9rem;
+  transition: transform 140ms ease;
+}
+
+.page-toc__group[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.page-toc__group summary span {
+  flex: 1;
+}
+
+.page-toc__group nav {
+  margin: 0.1rem 0 0.45rem;
+}
+
+.page-toc__group nav a {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+  padding-left: 1rem;
+}
+
 .page-toc a:hover {
   border-color: var(--accent);
   color: var(--accent);
@@ -519,6 +570,66 @@ h3 {
   font-size: 0.72rem;
   gap: 0.5rem;
   margin-bottom: 3.5rem;
+}
+
+.changelog-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3rem;
+}
+
+.release {
+  padding-top: 4rem;
+}
+
+.release__header {
+  align-items: baseline;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 0.8rem;
+}
+
+.release__header h2 {
+  font-size: 1.75rem;
+  margin: 0;
+}
+
+.release__header time {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.release-group {
+  margin-top: 2rem;
+}
+
+.release-group h3 {
+  color: var(--muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.change-list {
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.change-list li {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  line-height: 1.7;
+  padding-left: 0.25rem;
+}
+
+.change-list li::marker {
+  color: var(--accent);
+}
+
+.change-list p:last-child {
+  margin-bottom: 0;
 }
 
 .breadcrumbs a:hover,
@@ -541,7 +652,8 @@ h3 {
 
 .module-meta code,
 .declaration__description code,
-.see-also code {
+.see-also code,
+.change-list p code {
   background: var(--code);
   border: 1px solid var(--border);
   border-radius: 0.28rem;
@@ -921,7 +1033,8 @@ h3 {
   }
 
   .reference-hero h1,
-  .module-header h1 {
+  .module-header h1,
+  .changelog-header h1 {
     font-size: clamp(2.15rem, 11vw, 3.35rem);
   }
 

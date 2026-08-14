@@ -85,14 +85,26 @@ searchInput?.addEventListener("input", async () => {
     const search = await pagefind.search(query)
     const data = await Promise.all(search.results.slice(0, 12).map((result) => result.data()))
     if (sequence !== searchSequence) return
-    searchStatus.textContent = `${search.results.length} result${search.results.length === 1 ? "" : "s"}`
-    for (const result of data) {
+    const seen = new Set()
+    const results = data.flatMap((result) => {
+      const sections = result.sub_results?.filter((section) => section.url.includes("#")) ?? []
+      const candidates = sections.length === 0
+        ? [{ title: result.meta.title, url: result.url, excerpt: result.excerpt }]
+        : sections.map((section) => ({ ...section, title: `${section.title} · ${result.meta.title}` }))
+      return candidates.filter((candidate) => {
+        if (seen.has(candidate.url)) return false
+        seen.add(candidate.url)
+        return true
+      })
+    }).slice(0, 12)
+    searchStatus.textContent = `${results.length} result${results.length === 1 ? "" : "s"}`
+    for (const result of results) {
       const item = document.createElement("li")
       const link = document.createElement("a")
       const title = document.createElement("strong")
       const excerpt = document.createElement("span")
       link.href = result.url
-      title.textContent = result.meta.title
+      title.textContent = result.title
       excerpt.innerHTML = result.excerpt
       link.append(title, excerpt)
       item.append(link)
