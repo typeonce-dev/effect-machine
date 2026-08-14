@@ -194,6 +194,24 @@ describe("machine planner and runtime strategies", () => {
       })
     }))
 
+  it.effect("fails closed to the generic planner for schema-less active states", () =>
+    Effect.gen(function*() {
+      const states = Machine.defineStates({ Idle: {} })
+      const machine = Machine.make({
+        states: states.states,
+        events: [],
+        initial: () => states.initial.Idle.from()
+      }).handle({ Idle: {} })
+
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
+      yield* verifyPlannerStrategies({
+        machine,
+        events: [],
+        expected: "generic",
+        label: "schema-less fallback"
+      })
+    }))
+
   it("falls back to the generic planner for unknown state semantics", () => {
     const machine = makeFlatMachine()
     const config = machine.handlers.Count as Machine.Machine.AnyStateConfig & Record<PropertyKey, unknown>

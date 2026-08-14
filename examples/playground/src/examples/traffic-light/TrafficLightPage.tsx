@@ -19,7 +19,7 @@ export function TrafficLightPage() {
           Initial: () => <div className="example-message">Starting the signal cycle…</div>,
           Failure: () => <div className="example-message is-error">The traffic light failed to start.</div>,
           Success: ({ value: state }) => {
-            const signal = state.value._tag
+            const signal = state.path
             const red = signal === "Red" || signal === "RedYellow"
             const yellow = signal === "RedYellow" || signal === "Yellow"
             const green = signal === "Green"

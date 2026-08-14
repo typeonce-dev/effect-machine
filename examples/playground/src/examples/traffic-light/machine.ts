@@ -1,13 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
-export const TrafficLightState = Schema.TaggedUnion({
-  Red: {},
-  RedYellow: {},
-  Green: {},
-  Yellow: {}
-})
-
 export const TrafficLightEvent = Schema.TaggedUnion({
   Reset: {}
 })
@@ -23,7 +16,12 @@ export const trafficLightDurations = {
   Yellow: 1_500
 } as const
 
-export const TrafficLightStates = Machine.defineStates(TrafficLightState.cases)
+export const TrafficLightStates = Machine.defineStates({
+  Red: {},
+  RedYellow: {},
+  Green: {},
+  Yellow: {}
+})
 
 const elapsed = TrafficLightInternalEvent.cases.TimerElapsed.make({})
 

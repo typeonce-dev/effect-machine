@@ -94,6 +94,27 @@ defaults, refinements, and tagged-class identity are therefore preserved, and
 decode failures remain typed machine failures. Pass a value directly only when
 it is already decoded, such as a value returned by `Machine.retag`.
 
+Omit `schema` when a state represents control flow but owns no data:
+
+```ts
+const States = Machine.defineStates({
+  Form: {
+    initial: "Editing",
+    states: {
+      Editing: {},
+      Saving
+    }
+  }
+})
+
+States.initial.Form.from((form) => form.Editing.from())
+```
+
+Schema-less states remain active, targetable, matchable, and visible through
+`getSnapshot`, but have no value to read. Their builders expose only `.from`,
+their handler `state` is `undefined`, and `get` / `getWithParents` accept only
+schema-backed paths. Add a schema later if the state starts owning data.
+
 Put data on the narrowest state where it is valid. If sibling phases share
 data, put it on their compound parent.
 

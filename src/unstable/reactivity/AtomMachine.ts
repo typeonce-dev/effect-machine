@@ -291,6 +291,13 @@ type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
   Node extends { readonly path: infer Path extends string } ? Path : never
   : never
 
+type ValuedSnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
+  Node extends { readonly path: infer Path extends string; readonly value: infer Value } ?
+    [Value] extends [undefined] ? never
+    : Path
+  : never
+  : never
+
 type SnapshotValueByIdentifier<State, Path extends SnapshotIdentifier<State>> = SnapshotNode<State> extends infer Node ?
   Node extends { readonly path: Path; readonly value: infer Value } ? Value : never
   : never
@@ -338,7 +345,7 @@ export const select: <
   Error,
   Output,
   StartError,
-  const Path extends SnapshotIdentifier<State>
+  const Path extends ValuedSnapshotIdentifier<State>
 >(self: MachineAtom<State, Event, Error, Output, StartError>, path: Path) => Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
 > = internal.select
@@ -384,7 +391,7 @@ export const selectSnapshot: <
 export const selectChild: <
   Child extends Machine.ChildMachine.Any,
   StartError,
-  const Path extends SnapshotIdentifier<ChildState<Child>>
+  const Path extends ValuedSnapshotIdentifier<ChildState<Child>>
 >(self: ChildMachineAtom<Child, StartError>, path: Path) => Atom.Atom<
   AsyncResult.AsyncResult<
     Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,

@@ -24,6 +24,8 @@ export function MicrowavePage() {
             const cooking = engine.path === "Oven.engine.Cooking"
             const open = door.path === "Oven.door.Open"
             const elapsedSeconds = cooking ? engine.value.elapsedSeconds : 0
+            const engineName = cooking ? "Cooking" : "Idle"
+            const doorName = open ? "Open" : "Closed"
 
             return (
               <div className="machine-demo microwave-demo">
@@ -41,7 +43,7 @@ export function MicrowavePage() {
                   <p className="machine-state-label">Parallel configuration</p>
                   <h2>{cooking ? `Cooking · ${elapsedSeconds}s` : open ? "Idle · door open" : "Idle · door closed"}</h2>
                   <p>
-                    Engine: <code>{engine.value._tag}</code> · Door: <code>{door.value._tag}</code>
+                    Engine: <code>{engineName}</code> · Door: <code>{doorName}</code>
                   </p>
                   <div className="machine-controls">
                     <button

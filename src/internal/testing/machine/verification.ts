@@ -1114,7 +1114,9 @@ export const verify = <M extends AnyMachine>(
         }
         return
       }
-      if (reportConfiguration && !schemaMatches(node.schema, current.value)) {
+      if (reportConfiguration && node.schema === undefined && current.value !== undefined) {
+        add("configuration.schema", location, `${label} structural state "${path}" contains a value`, path)
+      } else if (reportConfiguration && node.schema !== undefined && !schemaMatches(node.schema, current.value)) {
         add("configuration.schema", location, `${label} value for "${path}" does not match its schema`, path)
       }
 
@@ -1284,9 +1286,17 @@ export const verify = <M extends AnyMachine>(
             path
           )
         }
-        if (!hasOwn(entry.values, path)) {
+        const hasValue = hasOwn(entry.values, path)
+        if (node.schema === undefined && hasValue) {
+          add(
+            "history.value",
+            location,
+            `${label} history record "${historyPath}" values structural state "${path}"`,
+            path
+          )
+        } else if (node.schema !== undefined && !hasValue) {
           add("history.value", location, `${label} history record "${historyPath}" omits value for "${path}"`, path)
-        } else if (!schemaMatches(node.schema, entry.values[path])) {
+        } else if (node.schema !== undefined && !schemaMatches(node.schema, entry.values[path])) {
           add(
             "history.value",
             location,

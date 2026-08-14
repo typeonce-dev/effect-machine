@@ -2,10 +2,10 @@ import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
 
 export const StateNodePropertyPolicy = {
-  atomic: ["schema", "type"],
-  final: ["schema", "type", "output"],
-  compound: ["schema", "type", "initial", "states"],
-  parallel: ["schema", "type", "output", "states"],
+  atomic: ["schema", "type", "annotations"],
+  final: ["schema", "type", "output", "annotations"],
+  compound: ["schema", "type", "initial", "states", "annotations"],
+  parallel: ["schema", "type", "output", "states", "annotations"],
   history: ["type", "history", "annotations"],
   choice: ["type", "annotations"]
 } as const
@@ -152,18 +152,22 @@ const assertAllowedProperties = (
   }
 }
 
-const validatePseudoAnnotations = (
+const validateSchemaLessAnnotations = (
   boundary: StateDefinitionBoundary,
   path: string,
   annotations: unknown
 ): void => {
-  assertPlainRecord(boundary, `${path}.annotations`, annotations, "pseudo-state annotations")
+  assertPlainRecord(boundary, `${path}.annotations`, annotations, "schema-less state annotations")
   for (const property of Reflect.ownKeys(annotations)) {
     if (!(PseudoStateAnnotationProperties as ReadonlyArray<PropertyKey>).includes(property)) {
-      fail(boundary, `${path}.annotations`, `pseudo-state annotations cannot declare property "${String(property)}"`)
+      fail(
+        boundary,
+        `${path}.annotations`,
+        `schema-less state annotations cannot declare property "${String(property)}"`
+      )
     }
     if (typeof annotations[property] !== "string") {
-      fail(boundary, `${path}.annotations.${String(property)}`, "pseudo-state annotation values must be strings")
+      fail(boundary, `${path}.annotations.${String(property)}`, "schema-less state annotation values must be strings")
     }
   }
 }
@@ -211,7 +215,7 @@ const validateStateTree = (
         fail(boundary, path, `${kind} states must be declared below an active parent state`)
       }
       if (hasOwn(node, "annotations")) {
-        validatePseudoAnnotations(boundary, path, node.annotations)
+        validateSchemaLessAnnotations(boundary, path, node.annotations)
       }
       if (kind === "history" && hasOwn(node, "history") && node.history !== "shallow" && node.history !== "deep") {
         fail(boundary, `${path}.history`, "history must be \"shallow\" or \"deep\"")
@@ -219,8 +223,15 @@ const validateStateTree = (
       continue
     }
 
-    if (!hasOwn(node, "schema") || !isTaggedSchema(node.schema)) {
-      fail(boundary, `${path}.schema`, "active states must declare an Effect Schema with a required PropertyKey _tag")
+    const valued = hasOwn(node, "schema")
+    if (valued && !isTaggedSchema(node.schema)) {
+      fail(boundary, `${path}.schema`, "state schemas must decode to an object with a required PropertyKey _tag")
+    }
+    if (valued && hasOwn(node, "annotations")) {
+      fail(boundary, `${path}.annotations`, "schema-backed states must declare annotations on their schema")
+    }
+    if (!valued && hasOwn(node, "annotations")) {
+      validateSchemaLessAnnotations(boundary, path, node.annotations)
     }
     if (kind === "atomic" && hasOwn(node, "type") && node.type !== "active") {
       fail(boundary, `${path}.type`, "atomic state type must be \"active\"")

@@ -31,7 +31,7 @@ const EncodedSnapshotSchema = Schema.Struct({
   _tag: Schema.Literal("MachineSnapshot"),
   active: Schema.Array(Schema.Struct({
     path: Schema.String,
-    value: Schema.Unknown
+    value: Schema.optional(Schema.Unknown)
   })),
   completed: Schema.optional(Schema.Array(Schema.Struct({
     path: Schema.String,
@@ -220,13 +220,17 @@ export const encodeSnapshot = (
       const path of Array.from(configuration.active).sort((left, right) => compareDocumentOrder(machine, left, right))
     ) {
       const node = getNode(machine, path)
-      active.push({
-        path,
-        value: yield* encodeBoundary(machine, getStateNodeSchema(node), getActiveValue(configuration, path), {
-          boundary: "state",
-          state: path
+      if (node.schema === undefined) {
+        active.push({ path })
+      } else {
+        active.push({
+          path,
+          value: yield* encodeBoundary(machine, getStateNodeSchema(node), getActiveValue(configuration, path), {
+            boundary: "state",
+            state: path
+          })
         })
-      })
+      }
     }
 
     const completed: Array<Machine.EncodedSnapshotCompletion> = []
@@ -290,7 +294,6 @@ export const encodeSnapshot = (
         const stateNode = machine.stateNodes.byPath.get(path)
         if (
           stateNode === undefined || stateNode.type === "history" || stateNode.type === "choice" ||
-          !record.values.has(path) ||
           !(isPathInSubtree(path, record.parent) || getPathToRoot(machine, record.parent).includes(path))
         ) {
           return yield* Effect.fail(
@@ -302,14 +305,23 @@ export const encodeSnapshot = (
             })
           )
         }
-        encodedValues[path] = yield* encodeBoundary(
-          machine,
-          getStateNodeSchema(stateNode),
-          record.values.get(path),
-          { boundary: "history", state: path }
-        )
+        if (stateNode.schema === undefined) {
+          if (record.values.has(path)) {
+            throw new Error(`Machine history record contains a value for structural state "${path}"`)
+          }
+        } else {
+          if (!record.values.has(path)) {
+            throw new Error(`Machine history record omits value for "${path}"`)
+          }
+          encodedValues[path] = yield* encodeBoundary(
+            machine,
+            getStateNodeSchema(stateNode),
+            record.values.get(path),
+            { boundary: "history", state: path }
+          )
+        }
       }
-      if (record.values.size !== record.active.size) {
+      if (Object.keys(encodedValues).length !== record.values.size) {
         return yield* Effect.fail(
           new MachineSchemaEncodeError({
             machineId: machine.id,
@@ -356,13 +368,19 @@ export const decodeSnapshot = (
       }
       const node = getNode(machine, entry.path)
       active.add(entry.path)
-      values.set(
-        entry.path,
-        yield* decodeEncodedBoundary(machine, getStateNodeSchema(node), entry.value, {
-          boundary: "state",
-          state: entry.path
-        })
-      )
+      const hasValue = Object.prototype.hasOwnProperty.call(entry, "value")
+      if (node.schema === undefined) {
+        if (hasValue) throw new Error(`Machine encoded snapshot contains a value for structural state "${entry.path}"`)
+      } else {
+        if (!hasValue) throw new Error(`Machine encoded snapshot omits value for state "${entry.path}"`)
+        values.set(
+          entry.path,
+          yield* decodeEncodedBoundary(machine, getStateNodeSchema(node), entry.value, {
+            boundary: "state",
+            state: entry.path
+          })
+        )
+      }
     }
 
     const history = new Map<string, HistoryRecord>()
@@ -397,7 +415,6 @@ export const decodeSnapshot = (
         const stateNode = machine.stateNodes.byPath.get(path)
         if (
           stateNode === undefined || stateNode.type === "history" || stateNode.type === "choice" ||
-          !Object.prototype.hasOwnProperty.call(encodedRecord.values, path) ||
           !(isPathInSubtree(path, historyNode.parent) || getPathToRoot(machine, historyNode.parent).includes(path))
         ) {
           return yield* Effect.fail(
@@ -410,15 +427,23 @@ export const decodeSnapshot = (
           )
         }
         rememberedActive.add(path)
-        rememberedValues.set(
-          path,
-          yield* decodeEncodedBoundary(machine, getStateNodeSchema(stateNode), encodedRecord.values[path], {
-            boundary: "history",
-            state: path
-          })
-        )
+        const hasValue = Object.prototype.hasOwnProperty.call(encodedRecord.values, path)
+        if (stateNode.schema === undefined) {
+          if (hasValue) {
+            throw new Error(`Machine encoded history contains a value for structural state "${path}"`)
+          }
+        } else {
+          if (!hasValue) throw new Error(`Machine encoded history omits value for state "${path}"`)
+          rememberedValues.set(
+            path,
+            yield* decodeEncodedBoundary(machine, getStateNodeSchema(stateNode), encodedRecord.values[path], {
+              boundary: "history",
+              state: path
+            })
+          )
+        }
       }
-      if (Object.keys(encodedRecord.values).length !== rememberedActive.size) {
+      if (Object.keys(encodedRecord.values).length !== rememberedValues.size) {
         return yield* Effect.fail(
           new MachineSchemaDecodeError({
             machineId: machine.id,

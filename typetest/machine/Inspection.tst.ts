@@ -44,7 +44,7 @@ describe("Machine inspection", () => {
     const inspect = (node: Machine.Machine.StateNode<"state">) => {
       switch (node.type) {
         case "atomic":
-          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema | undefined>()
           expect(node.output).type.toBe<undefined>()
           expect(node.history).type.toBe<undefined>()
           expect(node.children).type.toBe<readonly []>()
@@ -52,7 +52,7 @@ describe("Machine inspection", () => {
           expect(node.parent).type.toBe<"state" | undefined>()
           break
         case "compound":
-          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema | undefined>()
           expect(node.output).type.toBe<undefined>()
           expect(node.history).type.toBe<undefined>()
           expect(node.children).type.toBe<ReadonlyArray<"state">>()
@@ -60,7 +60,7 @@ describe("Machine inspection", () => {
           expect(node.parent).type.toBe<"state" | undefined>()
           break
         case "parallel":
-          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema | undefined>()
           expect(node.output).type.toBe<Schema.Top | undefined>()
           expect(node.history).type.toBe<undefined>()
           expect(node.children).type.toBe<ReadonlyArray<"state">>()
@@ -68,7 +68,7 @@ describe("Machine inspection", () => {
           expect(node.parent).type.toBe<"state" | undefined>()
           break
         case "final":
-          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema>()
+          expect(node.schema).type.toBe<Machine.Machine.TaggedSchema | undefined>()
           expect(node.output).type.toBe<Schema.Top | undefined>()
           expect(node.history).type.toBe<undefined>()
           expect(node.children).type.toBe<readonly []>()

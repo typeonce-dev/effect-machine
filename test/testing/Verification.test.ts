@@ -195,6 +195,38 @@ const historyMachine = Machine.make({
   }
 })
 
+const StructuralHistoryStates = Machine.defineStates({
+  workspace: {
+    initial: "editor",
+    states: {
+      editor: {
+        initial: "idle",
+        states: { idle: {} }
+      },
+      exact: { type: "history", history: "deep" }
+    }
+  },
+  away: {}
+})
+
+const structuralHistoryInitial = () =>
+  StructuralHistoryStates.initial.workspace.from((workspace) => workspace.editor.from((editor) => editor.idle.from()))
+
+const structuralHistoryMachine = Machine.make({
+  states: StructuralHistoryStates.states,
+  events: [Leave],
+  initial: structuralHistoryInitial
+}).handle({
+  workspace: {
+    history: {
+      exact: { default: structuralHistoryInitial }
+    },
+    on: {
+      Leave: ({ target }) => target.full.away.from()
+    }
+  }
+})
+
 class Finished extends Schema.TaggedClass<Finished>("Finished")("Finished", {}) {}
 
 const CompletionStates = Machine.defineStates({
@@ -274,6 +306,45 @@ const laws = (error: MachineTest.VerificationError): ReadonlyArray<MachineTest.V
   error.violations.map((violation) => violation.law)
 
 describe("MachineTest.verify", () => {
+  it.effect("accepts structural configurations and history without invented values", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(structuralHistoryMachine, { events: [new Leave({})] })
+      yield* MachineTest.verify(structuralHistoryMachine, trace)
+
+      const valuedState = {
+        ...trace,
+        final: { ...trace.final, value: { _tag: "Invented" } }
+      } as unknown as typeof trace
+      const stateError = yield* MachineTest.verify(structuralHistoryMachine, valuedState, {
+        laws: ["configuration"]
+      }).pipe(Effect.flip)
+      assert.ok(
+        stateError.violations.some((violation) => violation.law === "configuration.schema" && violation.path === "away")
+      )
+
+      const final = trace.final as any
+      const exact = final.history["workspace.exact"]
+      const valuedHistory = {
+        ...trace,
+        final: {
+          ...final,
+          history: {
+            ...final.history,
+            "workspace.exact": {
+              ...exact,
+              values: { ...exact.values, workspace: { _tag: "Invented" } }
+            }
+          }
+        }
+      } as typeof trace
+      const historyError = yield* MachineTest.verify(structuralHistoryMachine, valuedHistory, {
+        laws: ["history"]
+      }).pipe(Effect.flip)
+      assert.ok(
+        historyError.violations.some((violation) => violation.law === "history.value" && violation.path === "workspace")
+      )
+    }))
+
   it.effect("accepts valid compound, parallel, history, and completion traces", () =>
     Effect.gen(function*() {
       const navigation = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
