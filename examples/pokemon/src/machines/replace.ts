@@ -2,8 +2,6 @@ import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
-class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
-
 class Replacing extends Schema.TaggedClass<Replacing>("Replacing")("Replacing", {
   id: Pokemon.fields.id
 }) {}
@@ -35,7 +33,7 @@ const ReplaceWithRandomMachine = Machine.invoke({
     )
 })
 
-export const ReplaceStates = Machine.defineStates({ Idle, Replacing })
+export const ReplaceStates = Machine.defineStates({ Idle: {}, Replacing })
 
 export { ReplacePokemon }
 export const ReplaceMachine = Machine.make({

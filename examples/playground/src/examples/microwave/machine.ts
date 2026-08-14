@@ -2,13 +2,7 @@ import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
 export const MicrowaveState = Schema.TaggedUnion({
-  Oven: {},
-  Engine: {},
-  Idle: {},
-  Cooking: { elapsedSeconds: Schema.Number },
-  Door: {},
-  Closed: {},
-  Open: {}
+  Cooking: { elapsedSeconds: Schema.Number }
 })
 
 export const MicrowaveEvent = Schema.TaggedUnion({
@@ -23,23 +17,20 @@ export const MicrowaveInternalEvent = Schema.TaggedUnion({
 
 export const MicrowaveStates = Machine.defineStates({
   Oven: {
-    schema: MicrowaveState.cases.Oven,
     type: "parallel",
     states: {
       engine: {
-        schema: MicrowaveState.cases.Engine,
         initial: "Idle",
         states: {
-          Idle: MicrowaveState.cases.Idle,
+          Idle: {},
           Cooking: MicrowaveState.cases.Cooking
         }
       },
       door: {
-        schema: MicrowaveState.cases.Door,
         initial: "Closed",
         states: {
-          Closed: MicrowaveState.cases.Closed,
-          Open: MicrowaveState.cases.Open
+          Closed: {},
+          Open: {}
         }
       }
     }

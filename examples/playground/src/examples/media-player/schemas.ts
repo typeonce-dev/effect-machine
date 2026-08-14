@@ -40,15 +40,7 @@ const soundSettingsFields = {
 }
 
 export const MediaPlayerState = Schema.TaggedUnion({
-  Player: {},
-
-  Transport: {},
-
-  Empty: {},
-
   Loading: { url: Schema.String },
-
-  Ready: {},
 
   Paused: playbackFields,
 
@@ -64,8 +56,6 @@ export const MediaPlayerState = Schema.TaggedUnion({
   Ended: playbackFields,
 
   Failed: { message: Schema.String },
-
-  Settings: {},
 
   Audible: soundSettingsFields,
 
@@ -101,19 +91,16 @@ export const MediaPlayerInternalEvent = Schema.TaggedUnion({
 
 export const MediaPlayerStates = Machine.defineStates({
   Player: {
-    schema: MediaPlayerState.cases.Player,
     type: "parallel",
     states: {
       transport: {
-        schema: MediaPlayerState.cases.Transport,
         initial: "Empty",
         states: {
-          Empty: MediaPlayerState.cases.Empty,
+          Empty: {},
 
           Loading: MediaPlayerState.cases.Loading,
 
           Ready: {
-            schema: MediaPlayerState.cases.Ready,
             initial: "Paused",
             states: {
               Paused: MediaPlayerState.cases.Paused,
@@ -133,7 +120,6 @@ export const MediaPlayerStates = Machine.defineStates({
       },
 
       settings: {
-        schema: MediaPlayerState.cases.Settings,
         initial: "Audible",
         states: {
           Audible: MediaPlayerState.cases.Audible,

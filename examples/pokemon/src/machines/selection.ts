@@ -2,27 +2,17 @@ import { Machine } from "@typeonce/effect-machine"
 import { Effect, Option, Schema } from "effect"
 import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
 
-class Form extends Schema.TaggedClass<Form>("Form")("Form", {}) {}
-
 class Search extends Schema.TaggedClass<Search>("Search")("Search", {
   searchText: Schema.String
 }) {}
-
-class Selection extends Schema.TaggedClass<Selection>("Selection")("Selection", {}) {}
-
-class Unselected extends Schema.TaggedClass<Unselected>("Unselected")("Unselected", {}) {}
 
 class Selected extends Schema.TaggedClass<Selected>("Selected")("Selected", {
   id: Pokemon.fields.id
 }) {}
 
-class NoPokemon extends Schema.TaggedClass<NoPokemon>("NoPokemon")("NoPokemon", {}) {}
-
 class WithPokemon extends Schema.TaggedClass<WithPokemon>("WithPokemon")("WithPokemon", {
   pokemon: Pokemon
 }) {}
-
-class Searching extends Schema.TaggedClass<Searching>("Searching")("Searching", {}) {}
 
 /** Events */
 
@@ -62,23 +52,21 @@ const SearchMachine = ({ searchText }: { searchText: string }) =>
 
 export const SelectionStates = Machine.defineStates({
   form: {
-    schema: Form,
     type: "parallel",
     states: {
       search: {
         schema: Search,
         initial: "NoPokemon",
         states: {
-          NoPokemon,
+          NoPokemon: {},
           WithPokemon,
-          Searching
+          Searching: {}
         }
       },
       selection: {
-        schema: Selection,
         initial: "Unselected",
         states: {
-          Unselected,
+          Unselected: {},
           Selected
         }
       }

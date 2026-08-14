@@ -7,32 +7,14 @@ export type Axis = typeof Axis.Type
 const JumpKind = Schema.Literals(["Ground", "Double", "Wall"])
 
 const State = Schema.TaggedUnion({
-  Character: {},
-  Locomotion: {},
-  Playing: {},
   Paused: { pausedAt: Schema.Number },
-  Grounded: {},
-  Standing: {},
   Running: { startedAt: Schema.Number },
   Ducking: { startedAt: Schema.Number },
   Landing: { impact: Schema.Number, resumeAxis: Axis, landedAt: Schema.Number },
   Airborne: { originY: Schema.Number },
-  Motion: {},
   Jumping: { startedAt: Schema.Number, push: Axis, kind: JumpKind },
   Falling: { apexY: Schema.Number },
-  Diving: { startedAt: Schema.Number },
-  AirJump: {},
-  AirJumpGroundLock: {},
-  AirJumpWallLock: {},
-  AirJumpReady: {},
-  AirJumpSpent: {},
-  WallContact: {},
-  NoWall: {},
-  LeftWall: {},
-  RightWall: {},
-  Facing: {},
-  Left: {},
-  Right: {}
+  Diving: { startedAt: Schema.Number }
 })
 
 // Inputs and physics facts are one runtime-decoded, statically typed protocol.
@@ -61,22 +43,18 @@ const awayFrom = (wall: Axis): Axis => (wall === -1 ? 1 : wall === 1 ? -1 : 0)
 
 export const CharacterStates = Machine.defineStates({
   Character: {
-    schema: State.cases.Character,
     type: "parallel",
     states: {
       locomotion: {
-        schema: State.cases.Locomotion,
         initial: "Playing",
         states: {
           Playing: {
-            schema: State.cases.Playing,
             initial: "Grounded",
             states: {
               Grounded: {
-                schema: State.cases.Grounded,
                 initial: "Standing",
                 states: {
-                  Standing: State.cases.Standing,
+                  Standing: {},
                   Running: State.cases.Running,
                   Ducking: State.cases.Ducking,
                   Landing: State.cases.Landing
@@ -87,7 +65,6 @@ export const CharacterStates = Machine.defineStates({
                 type: "parallel",
                 states: {
                   motion: {
-                    schema: State.cases.Motion,
                     initial: "Jumping",
                     states: {
                       Jumping: State.cases.Jumping,
@@ -96,13 +73,12 @@ export const CharacterStates = Machine.defineStates({
                     }
                   },
                   airJump: {
-                    schema: State.cases.AirJump,
                     initial: "AirJumpGroundLock",
                     states: {
-                      AirJumpGroundLock: State.cases.AirJumpGroundLock,
-                      AirJumpWallLock: State.cases.AirJumpWallLock,
-                      AirJumpReady: State.cases.AirJumpReady,
-                      AirJumpSpent: State.cases.AirJumpSpent
+                      AirJumpGroundLock: {},
+                      AirJumpWallLock: {},
+                      AirJumpReady: {},
+                      AirJumpSpent: {}
                     }
                   }
                 }
@@ -117,20 +93,18 @@ export const CharacterStates = Machine.defineStates({
         }
       },
       facing: {
-        schema: State.cases.Facing,
         initial: "Right",
         states: {
-          Left: State.cases.Left,
-          Right: State.cases.Right
+          Left: {},
+          Right: {}
         }
       },
       contact: {
-        schema: State.cases.WallContact,
         initial: "NoWall",
         states: {
-          NoWall: State.cases.NoWall,
-          LeftWall: State.cases.LeftWall,
-          RightWall: State.cases.RightWall
+          NoWall: {},
+          LeftWall: {},
+          RightWall: {}
         }
       }
     }
@@ -457,9 +431,12 @@ export const locomotionState = (snapshot: CharacterSnapshot) => {
   }
 
   const playing = locomotion.state
-  return playing.path === "Character.locomotion.Playing.Grounded"
-    ? playing.state.value
-    : playing.states.motion.state.value
+  if (playing.path === "Character.locomotion.Playing.Airborne") {
+    return playing.states.motion.state.value
+  }
+  return playing.state.path === "Character.locomotion.Playing.Grounded.Standing"
+    ? { _tag: "Standing" as const }
+    : playing.state.value
 }
 
 export type LocomotionMode = ReturnType<typeof locomotionState>["_tag"]
@@ -468,22 +445,32 @@ export const locomotionMode = (snapshot: CharacterSnapshot): LocomotionMode => l
 
 export const locomotionBranch = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
-  return locomotion.path === "Character.locomotion.Paused" ? locomotion.value._tag : locomotion.state.value._tag
+  if (locomotion.path === "Character.locomotion.Paused") return "Paused" as const
+  return locomotion.state.path === "Character.locomotion.Playing.Grounded" ? "Grounded" as const : "Airborne" as const
 }
 
 export const airJumpMode = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
-  return locomotion.path === "Character.locomotion.Playing" &&
-      locomotion.state.path === "Character.locomotion.Playing.Airborne"
-    ? locomotion.state.states.airJump.state.value._tag
-    : undefined
+  if (
+    locomotion.path !== "Character.locomotion.Playing" ||
+    locomotion.state.path !== "Character.locomotion.Playing.Airborne"
+  ) return undefined
+
+  const path = locomotion.state.states.airJump.state.path
+  if (path === "Character.locomotion.Playing.Airborne.airJump.AirJumpGroundLock") return "AirJumpGroundLock" as const
+  if (path === "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock") return "AirJumpWallLock" as const
+  if (path === "Character.locomotion.Playing.Airborne.airJump.AirJumpReady") return "AirJumpReady" as const
+  return "AirJumpSpent" as const
 }
 
 export const wallContact = (snapshot: CharacterSnapshot) => {
-  return snapshot.states.contact.state.value._tag
+  const path = snapshot.states.contact.state.path
+  if (path === "Character.contact.NoWall") return "NoWall" as const
+  return path === "Character.contact.LeftWall" ? "LeftWall" as const : "RightWall" as const
 }
 
-export const facingDirection = (snapshot: CharacterSnapshot) => snapshot.states.facing.state.value._tag
+export const facingDirection = (snapshot: CharacterSnapshot) =>
+  snapshot.states.facing.state.path === "Character.facing.Left" ? "Left" as const : "Right" as const
 
 export const activeStateData = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
@@ -493,15 +480,16 @@ export const activeStateData = (snapshot: CharacterSnapshot) => {
   }
 
   const playing = locomotion.state
-  const { _tag: _branch, ...branchData } = playing.value
   if (playing.path === "Character.locomotion.Playing.Grounded") {
+    if (playing.state.path === "Character.locomotion.Playing.Grounded.Standing") return {}
     const { _tag: _leaf, ...leafData } = playing.state.value
-    return { ...branchData, ...leafData }
+    return leafData
   }
+  const { _tag: _branch, ...branchData } = playing.value
   const { _tag: _motion, ...motionData } = playing.states.motion.state.value
   return {
     ...branchData,
     ...motionData,
-    airJump: playing.states.airJump.state.value._tag
+    airJump: airJumpMode(snapshot)
   }
 }
