@@ -551,6 +551,192 @@ describe("Machine", () => {
     }))
 
   describe("event constructor", () => {
+    it.effect("constructs public and internal events lazily through protocol-bound collections", () =>
+      Effect.gen(function*() {
+        const PublicEvent = Schema.TaggedUnion({
+          SetValue: { value: Schema.NonEmptyString },
+          Reset: {}
+        })
+        const FiniteEvent = Schema.Struct({
+          _tag: Schema.Union([Schema.Literal("Alpha"), Schema.Literal("Beta")]),
+          value: Schema.String
+        })
+        class Defaulted extends Schema.TaggedClass<Defaulted>("DeferredDefaulted")("Defaulted", {
+          id: Schema.String,
+          label: Schema.String.pipe(
+            Schema.optionalKey,
+            Schema.withConstructorDefault(Effect.succeed("default-label"))
+          )
+        }) {}
+        const InternalEvent = Schema.TaggedUnion({
+          Loaded: { value: Schema.String },
+          TimedOut: {}
+        })
+        const State = Schema.TaggedStruct("DeferredEventState", { value: Schema.String })
+        const states = Machine.defineStates({ Active: State })
+        const definition = Machine.make({
+          states: states.states,
+          events: [PublicEvent, Defaulted, FiniteEvent],
+          internalEvents: [InternalEvent],
+          initial: () => states.initial.Active.from({ value: "initial" })
+        })
+        const events = Machine.events(definition)
+        const internalEvents = Machine.internalEvents(definition)
+        const machine = definition.handle({
+          Active: {
+            on: {
+              SetValue: ({ event, target }) => target.full.Active.from({ value: event.value }),
+              Reset: (_, enqueue) => {
+                enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
+              },
+              Defaulted: ({ event, target }) => target.full.Active.from({ value: event.label ?? "default-label" }),
+              Loaded: ({ event, target }) => target.full.Active.from({ value: event.value }),
+              TimedOut: ({ target }) => target.full.Active.from({ value: "timed-out" }),
+              Alpha: ({ event, target }) => target.full.Active.from({ value: event.value }),
+              Beta: ({ event, target }) => target.full.Active.from({ value: event.value })
+            }
+          }
+        })
+
+        assert.deepStrictEqual(Object.keys(events), ["SetValue", "Reset", "Defaulted", "Alpha", "Beta"])
+        assert.deepStrictEqual(Object.keys(internalEvents), ["Loaded", "TimedOut"])
+
+        const initial = yield* Machine.planInitial(machine)
+        const set = yield* Machine.plan(machine, initial.state, events.SetValue({ value: "next" }))
+        assert.deepStrictEqual(set.next, {
+          path: "Active",
+          value: { _tag: "DeferredEventState", value: "next" }
+        })
+
+        const defaulted = yield* Machine.plan(machine, set.next, events.Defaulted({ id: "event-1" }))
+        assert.deepStrictEqual(defaulted.next, {
+          path: "Active",
+          value: { _tag: "DeferredEventState", value: "default-label" }
+        })
+
+        const loaded = yield* Machine.plan(machine, defaulted.next, events.Reset())
+        assert.deepStrictEqual(loaded.next, {
+          path: "Active",
+          value: { _tag: "DeferredEventState", value: "loaded" }
+        })
+
+        const alpha = yield* Machine.plan(machine, loaded.next, events.Alpha({ value: "alpha" }))
+        assert.deepStrictEqual(alpha.next, {
+          path: "Active",
+          value: { _tag: "DeferredEventState", value: "alpha" }
+        })
+      }))
+
+    it.effect("reports deferred constructor failures through the running machine", () =>
+      Effect.gen(function*() {
+        const Event = Schema.TaggedUnion({
+          Submit: { value: Schema.NonEmptyString }
+        })
+        const states = Machine.defineStates({ Idle: {} })
+        const definition = Machine.make({
+          id: "deferred-event-failure",
+          states: states.states,
+          events: [Event],
+          initial: () => states.initial.Idle.from()
+        })
+        const events = Machine.events(definition)
+        const machine = definition.handle({ Idle: { on: { Submit: () => undefined } } })
+
+        let construction: ReturnType<typeof events.Submit> | undefined
+        assert.doesNotThrow(() => {
+          construction = events.Submit({ value: "" })
+        })
+
+        const initial = yield* Machine.planInitial(machine)
+        const planningError = yield* Machine.plan(machine, initial.state, construction!).pipe(Effect.flip)
+        assertMachineSchemaDecodeError(planningError, "event", { event: "Submit" })
+
+        const actor = yield* Machine.start(machine)
+        const snapshot = yield* sendAndWaitForSnapshot(
+          actor,
+          construction!,
+          (snapshot) => snapshot.status === "error"
+        )
+        const error = yield* Effect.flip(actor.join)
+
+        assertMachineSchemaDecodeError(error, "event", { event: "Submit" })
+        assert.strictEqual(snapshot.status, "error")
+      }))
+
+    it.effect("delivers internal constructions from invokeEffect and after", () =>
+      Effect.gen(function*() {
+        const release = yield* Deferred.make<void>()
+        const InternalEvent = Schema.TaggedUnion({ Loaded: {}, TimedOut: {} })
+        const states = Machine.defineStates({ Loading: {}, Waiting: {}, Done: {} })
+        const definition = Machine.make({
+          states: states.states,
+          events: [],
+          internalEvents: [InternalEvent],
+          initial: () => states.initial.Loading.from()
+        })
+        const internalEvents = Machine.internalEvents(definition)
+        const machine = definition.handle({
+          Loading: {
+            invoke: Machine.invokeEffect({
+              id: "load",
+              effect: Deferred.await(release),
+              onSuccess: () => internalEvents.Loaded()
+            }),
+            on: {
+              Loaded: ({ target }) => target.full.Waiting.from()
+            }
+          },
+          Waiting: {
+            invoke: Machine.after("1 second", internalEvents.TimedOut()),
+            on: {
+              TimedOut: ({ target }) => target.full.Done.from()
+            }
+          },
+          Done: {}
+        })
+
+        const actor = yield* Machine.start(machine)
+        const waiting = yield* waitForSnapshot(
+          actor,
+          (snapshot) => snapshot.status === "active" && snapshot.state.path === "Waiting"
+        ).pipe(Effect.forkChild)
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(waiting)
+
+        const done = yield* waitForSnapshot(
+          actor,
+          (snapshot) => snapshot.status === "active" && snapshot.state.path === "Done"
+        ).pipe(Effect.forkChild)
+        yield* TestClock.adjust("1 second")
+        yield* Fiber.join(done)
+        yield* actor.stop
+      }))
+
+    it.effect("rejects a construction owned by another machine protocol", () =>
+      Effect.gen(function*() {
+        const FirstEvent = Schema.TaggedUnion({ Submit: { value: Schema.String } })
+        const SecondEvent = Schema.TaggedUnion({ Submit: { value: Schema.String } })
+        const states = Machine.defineStates({ Idle: {} })
+        const first = Machine.make({
+          states: states.states,
+          events: [FirstEvent],
+          initial: () => states.initial.Idle.from()
+        })
+        const second = Machine.make({
+          states: states.states,
+          events: [SecondEvent],
+          initial: () => states.initial.Idle.from()
+        }).handle({ Idle: { on: { Submit: () => undefined } } })
+        const construction = Machine.events(first).Submit({ value: "value" })
+        const initial = yield* Machine.planInitial(second)
+        const error = yield* Machine.plan(second, initial.state, construction).pipe(Effect.flip)
+
+        assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+        assert.strictEqual(error.boundary, "event")
+        assert.strictEqual(error.event, "Submit")
+        assert.isTrue(Cause.isCause(error.cause))
+      }))
+
     it.effect("validates once and shares trust only with derived machine definitions", () =>
       Effect.gen(function*() {
         let validations = 0

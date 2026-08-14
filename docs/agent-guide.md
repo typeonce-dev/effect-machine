@@ -51,11 +51,13 @@ const InternalEvent = Schema.TaggedUnion({
 const States = Machine.defineStates(State.cases)
 ```
 
-Construct event values with `Event.cases.Save.make({})`. Construct new state
-values through the target or initial builder's `.from(...)` method so schema
-construction runs inside planning. Pass a state directly only when it is
-already decoded. Use `Schema.TaggedClass` when a case needs class methods or
-nominal class identity; `.from(...)` preserves that identity.
+After `Machine.make`, derive public constructors with `Machine.events(machine)`
+and internal constructors with `Machine.internalEvents(machine)`. Construct new
+state values through the target or initial builder's `.from(...)` method. Both
+event constructors and state `.from(...)` defer schema construction until
+planning, so validation failures remain typed machine errors. Use
+`Schema.TaggedClass` when a case needs class methods or nominal class identity;
+the deferred constructors preserve that identity after decoding.
 
 ## Hard invariants
 
@@ -499,41 +501,51 @@ an event for the parent. Both operations validate their schemas.
 union handled inside the statechart:
 
 ```ts
-const machine = Machine.make({
+const definition = Machine.make({
   states: States.states,
-  events: [Event.cases.Save],
-  internalEvents: [InternalEvent.cases.Saved, InternalEvent.cases.SaveFailed],
+  events: [Event],
+  internalEvents: [InternalEvent],
   initial: () => States.initial.Idle.from()
 })
+
+const Events = Machine.events(definition)
+const InternalEvents = Machine.internalEvents(definition)
 ```
 
-When the same already-constructed event may be delivered repeatedly, construct
-it once through its owning machine protocol:
+Use the protocol-bound constructors at every machine delivery boundary:
 
 ```ts
-const save = Machine.event(machine, Event.cases.Save)
-yield* ref.send(save)
+yield* ref.send(Events.Save())
+enqueue.raise(InternalEvents.Saved({ id: "entry-1" }))
 ```
 
-`Machine.event` runs the configured schema constructor once. That machine and
-definitions derived from it with `handle` then recognize the decoded event as
-trusted and do not decode it again. Tagged-union case schemas are recognized
-when their union is configured. Treat the returned event as immutable. Raw
-objects and values constructed for another machine continue through normal
-runtime validation on every delivery.
+`Machine.events` exposes only public constructors;
+`Machine.internalEvents` exposes only machine-local constructors. Both flatten
+configured tagged unions and preserve tagged classes, finite discriminator
+unions, required inputs, and constructor defaults. A constructor returns an
+opaque instruction whose `_tag` is available for activity metadata. Its decoded
+fields are intentionally unavailable until the owning machine processes it.
+
+Invalid constructor input fails `Machine.plan` or the running machine with
+`MachineSchemaDecodeError`; creating the instruction itself never performs
+schema validation. `Machine.event(machine, schema, fields?)` remains available
+as an eager low-level constructor for callers that explicitly want an already
+decoded value and accept synchronous failure.
 
 Use the exported utility types when another API must preserve the boundary:
 
 ```ts
-type PublicEvent = Machine.Machine.InputEvent<typeof machine>
-type AnyHandledEvent = Machine.Machine.Event<typeof machine>
+type PublicEvent = Machine.Machine.InputEvent<typeof definition>
+type AnyHandledEvent = Machine.Machine.Event<typeof definition>
 ```
 
-`MachineRef.send`, `machineAtom.send`, and `Machine.plan` use `InputEvent` at
-their TypeScript boundary. Transition handlers, raised events, invoke results,
-and mapped child events use the complete `Event` union. The local planner and
-runtime intentionally share the complete decoder to support those internal
-deliveries, so JavaScript or `any` can bypass the local public distinction.
+`MachineRef.send`, `machineAtom.send`, and `Machine.plan` accept decoded public
+events or constructions returned by `Machine.events`. Transition handlers
+receive only decoded events. Raised events, invoke results, and mapped child
+events additionally accept constructions from `Machine.internalEvents`. The
+local planner and runtime intentionally share the complete decoder to support
+those internal deliveries, so JavaScript or `any` can bypass the local public
+distinction.
 Cluster RPC payloads are additionally decoded against the public `events`
 schemas at the transport boundary. Never repeat an `_tag` within a list or
 across both configuration lists.
@@ -548,8 +560,8 @@ invoke: ({ state }) =>
   Machine.invokeEffect({
     id: "save",
     effect: SaveService.save(state.draft),
-    onSuccess: (entry) => new Saved({ entry }),
-    onFailure: (error) => new SaveFailed({ message: error.message })
+    onSuccess: (entry) => InternalEvents.Saved({ entry }),
+    onFailure: (error) => InternalEvents.SaveFailed({ message: error.message })
   })
 ```
 
@@ -566,7 +578,7 @@ recover only expected typed failures.
 A cancellable timer uses `Machine.after`:
 
 ```ts
-invoke: Machine.after("3 seconds", new ClearStatus({}), {
+invoke: Machine.after("3 seconds", InternalEvents.ClearStatus(), {
   id: "clear-status"
 })
 ```
@@ -601,7 +613,7 @@ invoke: Machine.invokeMachine({
 Use `Editor` for:
 
 ```ts
-Machine.sendTo(Editor, new Reset({}))
+Machine.sendTo(Editor, EditorEvent.Reset())
 parentRef.child(Editor)
 parentAtom.child(Editor)
 ```

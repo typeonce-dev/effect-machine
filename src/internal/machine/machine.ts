@@ -883,6 +883,16 @@ export const event = <
   ...args: EventConstructorArgs<EventSchema>
 ): EventSchema["Type"] => Protocol.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
 
+export const events = <M extends Machine.Any>(
+  machine: M
+): Machine.EventConstructors<Machine.InputEvents<M>> =>
+  Protocol.eventConstructors(machine.events) as Machine.EventConstructors<Machine.InputEvents<M>>
+
+export const internalEvents = <M extends Machine.Any>(
+  machine: M
+): Machine.EventConstructors<Machine.InternalEvents<M>> =>
+  Protocol.eventConstructors(machine.internalEvents) as Machine.EventConstructors<Machine.InternalEvents<M>>
+
 export const encodeSnapshot: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -1173,7 +1183,7 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
@@ -1250,7 +1260,7 @@ export const invokeMachine: {
     any,
     SnapshotEvent,
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
@@ -1494,7 +1504,7 @@ export const plan: <
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   state: Machine.Snapshot<States>,
-  event: Machine.EventOf<InputEvents>
+  event: Machine.EventInputOf<InputEvents>
 ) => Effect.Effect<
   & {
     readonly next: Machine.Snapshot<States>
@@ -1703,7 +1713,7 @@ export const start: <
 ) => Effect.Effect<
   MachineRef<
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     | E
     | ActionError<R>
     | InfiniteTransitionError
@@ -1761,7 +1771,7 @@ export const resume: <
 ) => Effect.Effect<
   MachineRef<
     Machine.Snapshot<States>,
-    Machine.EventOf<InputEvents>,
+    Machine.EventInputOf<InputEvents>,
     | E
     | ActionError<R>
     | InfiniteTransitionError
