@@ -9,6 +9,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => ({
   events: typeof Machine.event === "function"
     ? (...schemas) => schemas
     : (...schemas) => Machine.events(...schemas),
+  targetless: ({ target }) => typeof target.none === "function" ? target.none() : undefined,
   invokeChild: typeof Machine.invokeMachine === "function"
     ? ({ onSnapshot, onFailure, ...config }) => {
       if (onFailure !== undefined) {

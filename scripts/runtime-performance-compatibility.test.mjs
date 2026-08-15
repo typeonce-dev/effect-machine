@@ -4,6 +4,7 @@ import { makeEffectMachineBenchmarkApi } from "../perf/runtime/effect-machine-co
 
 test("uses the current child invocation capability when available", () => {
   const calls = []
+  const noTarget = Symbol("no-target")
   const Machine = {
     events: (...schemas) => ({ api: "current-events", schemas }),
     invoke: (config) => {
@@ -23,6 +24,7 @@ test("uses the current child invocation capability when available", () => {
     config
   })
   assert.deepEqual(calls, [config])
+  assert.equal(makeEffectMachineBenchmarkApi(Machine).targetless({ target: { none: () => noTarget } }), noTarget)
 })
 
 test("adapts lifecycle names for the legacy child invocation capability", () => {
@@ -57,6 +59,7 @@ test("adapts lifecycle names for the legacy child invocation capability", () => 
     }
   )
   assert.deepEqual(calls, [{ child: "counter", input: { seed: 1 }, onDone, snapshot: onSnapshot }])
+  assert.equal(makeEffectMachineBenchmarkApi(Machine).targetless({ target: {} }), undefined)
 })
 
 test("fails closed when a legacy capability cannot preserve lifecycle semantics", () => {
