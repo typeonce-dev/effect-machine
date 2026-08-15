@@ -19,8 +19,8 @@ describe("MachineTest exploration", () => {
   }).handle({
     counter: {
       on: {
-        Increment: () => undefined,
-        Internal: () => undefined
+        Increment: ({ target }) => target.none(),
+        Internal: ({ target }) => target.none()
       }
     }
   })

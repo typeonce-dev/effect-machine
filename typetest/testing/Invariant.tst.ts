@@ -17,8 +17,8 @@ describe("MachineTest invariants", () => {
   }).handle({
     idle: {
       on: {
-        Tick: () => undefined,
-        Internal: () => undefined
+        Tick: ({ target }) => target.none(),
+        Internal: ({ target }) => target.none()
       }
     }
   })

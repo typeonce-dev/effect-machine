@@ -192,7 +192,7 @@ export const CharacterMachine = definition.handle({
                         targets: ["Character.locomotion.Playing.Grounded.Running"],
                         transition: ({ event, target }) =>
                           event.axis === 0
-                            ? undefined
+                            ? target.none()
                             : target.local.Running.from({ startedAt: event.at })
                       },
                       DownPressed: {
@@ -205,7 +205,8 @@ export const CharacterMachine = definition.handle({
                     on: {
                       Move: {
                         targets: ["Character.locomotion.Playing.Grounded.Standing"],
-                        transition: ({ event, target }) => event.axis === 0 ? target.local.Standing.from() : undefined
+                        transition: ({ event, target }) =>
+                          event.axis === 0 ? target.local.Standing.from() : target.none()
                       },
                       DownPressed: {
                         targets: ["Character.locomotion.Playing.Grounded.Ducking"],
@@ -245,8 +246,10 @@ export const CharacterMachine = definition.handle({
                     on: {
                       Move: {
                         targets: ["Character.locomotion.Playing.Grounded.Landing"],
-                        transition: ({ event, state, target }) =>
-                          target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis }))
+                        transition: ({ event, state, target }) => {
+                          const { _tag: _, ...fields } = state
+                          return target.local.Landing.from({ ...fields, resumeAxis: event.axis })
+                        }
                       }
                     }
                   }
@@ -256,13 +259,14 @@ export const CharacterMachine = definition.handle({
                 on: {
                   JumpPressed: {
                     targets: [],
-                    transition: ({ event }, enqueue) => {
+                    transition: ({ event, target }, enqueue) => {
                       const push = awayFrom(event.wall)
                       enqueue.raise(
                         push === 0
                           ? InternalEvents.TryAirJump({ at: event.at })
                           : InternalEvents.WallJump({ at: event.at, push })
                       )
+                      return target.none()
                     }
                   },
                   Landed: {
@@ -380,11 +384,11 @@ export const CharacterMachine = definition.handle({
             on: {
               Move: {
                 targets: ["Character.facing.Right"],
-                transition: ({ event, target }) => event.axis === 1 ? target.local.Right.from() : undefined
+                transition: ({ event, target }) => event.axis === 1 ? target.local.Right.from() : target.none()
               },
               WallJump: {
                 targets: ["Character.facing.Right"],
-                transition: ({ event, target }) => event.push === 1 ? target.local.Right.from() : undefined
+                transition: ({ event, target }) => event.push === 1 ? target.local.Right.from() : target.none()
               }
             }
           },
@@ -392,11 +396,11 @@ export const CharacterMachine = definition.handle({
             on: {
               Move: {
                 targets: ["Character.facing.Left"],
-                transition: ({ event, target }) => event.axis === -1 ? target.local.Left.from() : undefined
+                transition: ({ event, target }) => event.axis === -1 ? target.local.Left.from() : target.none()
               },
               WallJump: {
                 targets: ["Character.facing.Left"],
-                transition: ({ event, target }) => event.push === -1 ? target.local.Left.from() : undefined
+                transition: ({ event, target }) => event.push === -1 ? target.local.Left.from() : target.none()
               }
             }
           }

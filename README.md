@@ -97,7 +97,18 @@ States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
 The machine runs these inputs through the state schema while planning. Schema
 defaults, refinements, and tagged-class identity are therefore preserved, and
 decode failures remain typed machine failures. Pass a value directly only when
-it is already decoded, such as a value returned by `Machine.retag`.
+it is already decoded.
+
+When sibling states share fields, remove the source discriminator and pass the
+remaining fields through the target schema:
+
+```ts
+Submit: ;
+;(({ state, target }) => {
+  const { _tag: _, ...fields } = state
+  return target.local.Saving.from({ ...fields, attempt: 1 })
+})
+```
 
 Omit `schema` when a state represents control flow but owns no data:
 
@@ -237,14 +248,20 @@ paths. `parent` always means the owning actor reference.
 
 | Builder          | Use when                                 | Preserves                                         |
 | ---------------- | ---------------------------------------- | ------------------------------------------------- |
+| `target.none()`  | Handling without selecting a destination | The complete current configuration                |
 | `target.local`   | Moving inside the nearest compound scope | Ancestors and unrelated parallel regions          |
 | `target.branch`  | Moving elsewhere under the active root   | Omitted active ancestors and parallel regions     |
 | `target.full`    | Replacing or selecting a complete root   | Nothing implicit for a newly selected root        |
 | `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
 
-Builders describe the next logical configuration. Shared states exit and enter
-only when paths change; use `{ reenter: true, transition }` when the source must
-restart even if its path is unchanged.
+Every installed transition handler returns either a concrete target or
+`target.none()`. An absent handler ignores the trigger; `target.none()` handles
+it and retains queued commands, raised events, and emitted events without
+selecting a destination. Declared `targets` constrain only concrete
+destinations, so `target.none()` is always permitted. Builders describe the
+next logical configuration. Shared states exit and enter only when paths
+change; use `{ reenter: true, transition }` when the source must restart. With
+`target.none()`, reentry restarts the source while retaining its configuration.
 
 ## Statechart capabilities
 

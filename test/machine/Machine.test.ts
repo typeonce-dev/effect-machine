@@ -109,7 +109,15 @@ describe("Machine", () => {
       const transition = {
         reenter: false,
         targets: [] as Array<"Stable">,
-        transition: () => undefined
+        transition: ({ target }: Machine.Machine.HandlerContext<
+          typeof states.states,
+          readonly [typeof Ping],
+          readonly [],
+          "Stable",
+          "Ping",
+          never,
+          never
+        >) => target.none()
       }
       const on: { Ping?: typeof transition } = { Ping: transition }
       const machine = Machine.make({
@@ -312,12 +320,33 @@ describe("Machine", () => {
     assert.strictEqual(Machine.isMachine({ [Machine.TypeId]: "not-a-machine" }), false)
   })
 
-  it("retag constructs the target case without copying the source discriminator", () => {
-    const result = Machine.retag(RequestSucceeded, new Submit({ value: "loaded" }))
+  it.effect("constructs a sibling target by destructuring the source value", () =>
+    Effect.gen(function*() {
+      class Convert extends Schema.TaggedClass<Convert>("Convert")("Convert", {}) {}
+      const states = Machine.defineStates({ Submit, RequestSucceeded })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Convert),
+        initial: () => states.initial.Submit(new Submit({ value: "loaded" }))
+      }).handle({
+        Submit: {
+          on: {
+            Convert: ({ state, target }) => {
+              const { _tag: _, ...fields } = state
+              return target.full.RequestSucceeded.from(fields)
+            }
+          }
+        }
+      })
 
-    assert.instanceOf(result, RequestSucceeded)
-    assert.deepStrictEqual(result, new RequestSucceeded({ value: "loaded" }))
-  })
+      const plan = yield* Machine.plan(
+        machine,
+        states.initial.Submit(new Submit({ value: "loaded" })),
+        new Convert({})
+      )
+      assert.instanceOf(plan.next.value, RequestSucceeded)
+      assert.deepStrictEqual(plan.next.value, new RequestSucceeded({ value: "loaded" }))
+    }))
 
   it("make stores the machine id", () => {
     const states = Machine.defineStates({ Idle, Loading })
@@ -588,6 +617,7 @@ describe("Machine", () => {
               SetValue: ({ event, target }) => target.full.Active.from({ value: event.value }),
               Reset: (_, enqueue) => {
                 enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
+                return _.target.none()
               },
               Defaulted: ({ event, target }) => target.full.Active.from({ value: event.label ?? "default-label" }),
               Loaded: ({ event, target }) => target.full.Active.from({ value: event.value }),
@@ -652,7 +682,7 @@ describe("Machine", () => {
           initial: () => states.initial.Idle.from()
         })
         const events = definition.events
-        const machine = definition.handle({ Idle: { on: { Submit: () => undefined } } })
+        const machine = definition.handle({ Idle: { on: { Submit: ({ target }) => target.none() } } })
 
         let construction: ReturnType<typeof events.Submit> | undefined
         assert.doesNotThrow(() => {
@@ -745,7 +775,7 @@ describe("Machine", () => {
           states: states.states,
           events: Machine.events(SecondEvent),
           initial: () => states.initial.Idle.from()
-        }).handle({ Idle: { on: { Submit: () => undefined } } })
+        }).handle({ Idle: { on: { Submit: ({ target }) => target.none() } } })
         const construction = first.events.Submit({ value: "value" })
         const initial = yield* Machine.planInitial(second)
         const error = yield* Machine.plan(second, initial.state, construction).pipe(Effect.flip)
@@ -3970,7 +4000,7 @@ describe("Machine", () => {
       assert.deepStrictEqual(planned.microsteps, [])
     }))
 
-  it.effect("handlers can omit returning a state for self-transitions", () =>
+  it.effect("handlers use target.none for explicit targetless transitions", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
@@ -3980,7 +4010,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: () => {}
+            Submit: ({ target }) => target.none()
           }
         }
       })
@@ -4535,7 +4565,7 @@ describe("Machine", () => {
                     Effect.andThen(Effect.never)
                   )
             }),
-            onFailure: () => undefined
+            onFailure: ({ target }) => target.none()
           }),
           on: {
             RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
@@ -4579,7 +4609,7 @@ describe("Machine", () => {
                     Effect.onInterrupt(() => sendTo(parent, new RequestSucceeded({ value: "stale" })))
                   )
             }),
-            onFailure: () => undefined
+            onFailure: ({ target }) => target.none()
           }),
           on: {
             Resolve: () => FlatInitial.Idle(new Idle({ userId: "resolved" }))
@@ -4772,7 +4802,7 @@ describe("Machine", () => {
       })
     }))
 
-  it.effect("start lets invoke snapshot handlers filter with undefined", () =>
+  it.effect("start lets invoke snapshot handlers filter with target.none", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
@@ -4801,7 +4831,9 @@ describe("Machine", () => {
                 )
             }),
             onSnapshot: ({ snapshot, target }) =>
-              snapshot.state === "ready" ? target.full.Success(new Success({ requestId: snapshot.state })) : undefined
+              snapshot.state === "ready"
+                ? target.full.Success(new Success({ requestId: snapshot.state }))
+                : target.none()
           })
         },
         Success: {
@@ -4855,7 +4887,7 @@ describe("Machine", () => {
               initial: "pending",
               run: () => Effect.void
             }),
-            onDone: () => undefined
+            onDone: ({ target }) => target.none()
           })
         }
       })
@@ -5406,7 +5438,7 @@ describe("Machine", () => {
     }).handle({
       ConcurrentIdle: {
         on: {
-          ConcurrentPing: () => {}
+          ConcurrentPing: ({ target }) => target.none()
         }
       }
     })

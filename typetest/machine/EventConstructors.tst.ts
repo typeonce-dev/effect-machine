@@ -113,12 +113,18 @@ describe("Machine event constructor collections", () => {
             Machine.invoke({
               id: "load",
               effect: Effect.succeed("ready"),
-              onDone: ({ output }, enqueue) => enqueue.raise(internalEvents.Loaded({ value: output }))
+              onDone: ({ output, target }, enqueue) => {
+                enqueue.raise(internalEvents.Loaded({ value: output }))
+                return target.none()
+              }
             }),
             Machine.invoke({
               id: "timeout",
               after: "1 second",
-              onDone: (_, enqueue) => enqueue.raise(internalEvents.Failed())
+              onDone: ({ target }, enqueue) => {
+                enqueue.raise(internalEvents.Failed())
+                return target.none()
+              }
             })
           ]
         }

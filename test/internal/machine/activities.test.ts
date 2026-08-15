@@ -40,10 +40,10 @@ const activityMachine = Machine.make({
       Machine.invoke({
         id: "load-document",
         effect: Effect.fail("unavailable").pipe(Effect.as(1)),
-        onDone: () => undefined,
-        onFailure: () => undefined
+        onDone: ({ target }) => target.none(),
+        onFailure: ({ target }) => target.none()
       }),
-      Machine.invoke({ id: "load-timeout", after: timerDuration, onDone: () => undefined }),
+      Machine.invoke({ id: "load-timeout", after: timerDuration, onDone: ({ target }) => target.none() }),
       Machine.invoke({ child })
     ]
   },
@@ -159,7 +159,7 @@ describe("machine activity metadata", () => {
           initial: () => activityStates.initial.Loading(new Loading({}))
         }).handle({
           Loading: {
-            invoke: Machine.invoke({ id, after: durationMillis, onDone: () => undefined })
+            invoke: Machine.invoke({ id, after: durationMillis, onDone: ({ target }) => target.none() })
           }
         })
         const definition = Machine.activityDefinitions(generated)[0]

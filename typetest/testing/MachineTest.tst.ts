@@ -22,8 +22,8 @@ describe("MachineTest", () => {
   }).handle({
     idle: {
       on: {
-        PublicEvent: () => undefined,
-        InternalEvent: () => undefined
+        PublicEvent: ({ target }) => target.none(),
+        InternalEvent: ({ target }) => target.none()
       }
     }
   })
@@ -105,7 +105,7 @@ describe("MachineTest", () => {
           effect: Effect.gen(function*() {
             yield* InvokeRequirement
           }),
-          onDone: () => undefined
+          onDone: ({ target }) => target.none()
         })
       }
     })

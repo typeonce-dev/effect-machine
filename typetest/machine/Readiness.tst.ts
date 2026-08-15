@@ -171,7 +171,7 @@ describe("executable machine readiness", () => {
     const resumed = Machine.resume(complete, completeSnapshot)
     const invocation = Machine.invoke({
       child: Machine.child("complete", complete),
-      onDone: () => undefined
+      onDone: ({ target }) => target.none()
     })
     const trace = MachineTest.run(complete, { events: [new Tick({})] })
     const atom = AtomMachine.make(complete)

@@ -65,7 +65,7 @@ const counterMachine = Machine.make({
   counter: {
     on: {
       Increment: ({ state, target }) => target.full.counter(new Counter({ count: state.count + 1 })),
-      Noop: () => undefined
+      Noop: ({ target }) => target.none()
     }
   }
 })

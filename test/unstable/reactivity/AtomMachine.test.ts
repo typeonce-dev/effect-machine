@@ -158,7 +158,7 @@ describe("AtomMachine", () => {
           }
         },
         ValueRead: {
-          invoke: Machine.invoke({ child: Child, onDone: () => undefined }),
+          invoke: Machine.invoke({ child: Child, onDone: ({ target }) => target.none() }),
           on: {
             ReadValue: () => MachineInitial.Count(new Count({ value: 0 }))
           }

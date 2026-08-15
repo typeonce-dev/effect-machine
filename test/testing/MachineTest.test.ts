@@ -249,7 +249,10 @@ describe("MachineTest", () => {
       }).handle({
         Idle: {
           on: {
-            Start: () => undefined
+            Start: {
+              targets: ["Idle"],
+              transition: ({ target }) => target.none()
+            }
           }
         }
       })

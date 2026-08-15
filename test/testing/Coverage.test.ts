@@ -60,7 +60,7 @@ const startupMachine = Machine.make({
     always: ({ target, state }) =>
       state.value === 0
         ? target.full.count(new Count({ value: 1 }))
-        : undefined,
+        : target.none(),
     on: {
       Add: ({ event, state, target }) => target.full.count(new Count({ value: state.value + event.amount }))
     }
@@ -81,9 +81,9 @@ const finiteEventMachine = Machine.make({
 }).handle({
   count: {
     on: {
-      [Tick]: () => undefined,
-      Alpha: () => undefined,
-      Beta: () => undefined
+      [Tick]: ({ target }) => target.none(),
+      Alpha: ({ target }) => target.none(),
+      Beta: ({ target }) => target.none()
     }
   }
 })

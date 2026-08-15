@@ -21,6 +21,8 @@ export const HistoryTargetTypeId: unique symbol = Symbol("effect/Machine/History
 
 export const ChoiceTargetTypeId: unique symbol = Symbol("effect/Machine/ChoiceTarget")
 
+export const NoTargetTypeId: unique symbol = Symbol("effect/Machine/NoTarget")
+
 interface StateInput {
   readonly [StateInputTypeId]: typeof StateInputTypeId
   readonly input: unknown
@@ -41,6 +43,19 @@ export interface ChoiceTarget {
   readonly parent: string
   readonly values?: Readonly<Record<string, unknown>>
 }
+
+/** Internal marker returned by an explicitly targetless transition. */
+export interface NoTarget {
+  readonly [NoTargetTypeId]: typeof NoTargetTypeId
+}
+
+const noTarget = Object.freeze({
+  [NoTargetTypeId]: NoTargetTypeId
+}) as NoTarget
+
+export const makeNoTarget = (): Machine.NoTarget => noTarget
+
+export const isNoTarget = (u: unknown): u is Machine.NoTarget => hasProperty(u, NoTargetTypeId)
 
 export const makeHistoryTarget = (path: string, parent: string): HistoryTarget => ({
   [HistoryTargetTypeId]: HistoryTargetTypeId,

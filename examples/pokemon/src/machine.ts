@@ -35,7 +35,7 @@ const machine = Machine.make({
     invoke: [
       Machine.invoke({
         child: SelectionChild,
-        onDone: () => undefined,
+        onDone: ({ target }) => target.none(),
         onFailure: ({ target }) => target.full.Failed.from()
       }),
       Machine.invoke({ child: ReplaceChild, onFailure: ({ target }) => target.full.Failed.from() })

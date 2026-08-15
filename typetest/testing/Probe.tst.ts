@@ -19,8 +19,8 @@ describe("MachineTest probe", () => {
   }).handle({
     State: {
       on: {
-        PublicEvent: () => undefined,
-        InternalEvent: () => undefined
+        PublicEvent: ({ target }) => target.none(),
+        InternalEvent: ({ target }) => target.none()
       }
     }
   })

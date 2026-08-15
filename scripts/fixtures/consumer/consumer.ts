@@ -53,12 +53,12 @@ const cluster = ClusterMachine.make("ConsumerEntity", machine, {
 const invoked = Machine.invoke({
   id: "fixture-load",
   effect: Effect.succeed("ready"),
-  onDone: () => undefined
+  onDone: ({ target }) => target.none()
 })
 const delayed = Machine.invoke({
   id: "fixture-delay",
   after: "1 second",
-  onDone: () => undefined
+  onDone: ({ target }) => target.none()
 })
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 

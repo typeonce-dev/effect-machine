@@ -28,7 +28,7 @@ const machine = Machine.make({
   Counter: {
     on: {
       Increment: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount })),
-      Noop: () => undefined,
+      Noop: ({ target }) => target.none(),
       Reenter: {
         reenter: true,
         transition: ({ state, target }) => target.full.Counter(new Counter({ count: state.count }))

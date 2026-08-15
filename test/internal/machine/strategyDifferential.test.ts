@@ -32,11 +32,15 @@ const makeFlatMachine = () => {
   }).handle({
     Count: {
       on: {
-        Noop: () => undefined,
+        Noop: {
+          targets: ["Done"],
+          transition: ({ target }) => target.none()
+        },
         Increment: ({ state, target }) => target.full.Count(new Count({ value: state.value + 1 })),
         Reenter: {
           reenter: true,
-          transition: ({ state, target }) => target.full.Count(new Count({ value: state.value }))
+          targets: ["Done"],
+          transition: ({ target }) => target.none()
         },
         Finish: ({ state, target }) => target.full.Done(new Done({ value: state.value }))
       }
@@ -52,6 +56,17 @@ describe("machine planner and runtime strategies", () => {
       events: [new Noop({}), new Increment({}), new Reenter({}), new Finish({})],
       expected: "indexed-flat",
       label: "flat strategy"
+    }))
+
+  it.effect("reenters the source when an explicit targetless transition requests reentry", () =>
+    Effect.gen(function*() {
+      const machine = makeFlatMachine()
+      const initial = yield* Machine.planInitial(machine)
+      const planned = yield* Machine.plan(machine, initial.state, new Reenter({}))
+
+      assert.deepStrictEqual(planned.next, initial.state)
+      assert.deepStrictEqual(planned.microsteps[0]?.exitPaths, ["Count"])
+      assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Count"])
     }))
 
   it.effect("keeps indexed execution microsteps narrower than diagnostic planner microsteps", () =>
@@ -558,9 +573,9 @@ describe("machine planner and runtime strategies", () => {
                       )
                 })
               },
-              onFailure: () => undefined,
+              onFailure: ({ target }) => target.none(),
               onSnapshot: ({ snapshot, target }) =>
-                snapshot.state === "stale" ? target.full.Failed(new Failed({})) : undefined
+                snapshot.state === "stale" ? target.full.Failed(new Failed({})) : target.none()
             }),
             on: {
               Reenter: {

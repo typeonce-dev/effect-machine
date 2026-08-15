@@ -47,7 +47,7 @@ const causalMachine = Machine.make({
   Counter: {
     on: {
       Add: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount })),
-      Noop: () => undefined,
+      Noop: ({ target }) => target.none(),
       Burst: ({ state, target }, enqueue) => {
         enqueue.raise(new InternalAdd({ amount: 10 }))
         return target.full.Counter(new Counter({ count: state.count + 1 }))

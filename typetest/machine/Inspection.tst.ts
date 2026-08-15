@@ -26,7 +26,7 @@ describe("Machine inspection", () => {
   }).handle({
     root: {
       on: {
-        Reset: () => undefined
+        Reset: ({ target }) => target.none()
       }
     }
   })

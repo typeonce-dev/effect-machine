@@ -59,7 +59,7 @@ describe("Machine transition snapshot context", () => {
                       captured = snapshot
                       return States.matches(snapshot, "System.Network.Online")
                         ? target.local.Playing(new Playing({}))
-                        : undefined
+                        : target.none()
                     }
                   }
                 }
@@ -146,7 +146,7 @@ describe("Machine transition snapshot context", () => {
                     captured = snapshot
                     return States.matches(snapshot, "System.Network.Online")
                       ? target.local.Playing(new Playing({}))
-                      : undefined
+                      : target.none()
                   }
                 }
               }

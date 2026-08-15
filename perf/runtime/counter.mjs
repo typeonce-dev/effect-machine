@@ -74,7 +74,7 @@ const counterParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: () => undefined })
+    invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: ({ target }) => target.none() })
   }
 })
 
@@ -87,8 +87,8 @@ const counterSnapshotParentMachine = Machine.make({
   Active: {
     invoke: benchmarkApi.invokeChild({
       child: CounterChild,
-      onDone: () => undefined,
-      onSnapshot: () => undefined
+      onDone: ({ target }) => target.none(),
+      onSnapshot: ({ target }) => target.none()
     })
   }
 })
