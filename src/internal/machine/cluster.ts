@@ -317,7 +317,7 @@ export const make = <
             if (initial.commands.length > 0) {
               return yield* fail(
                 "UnsupportedProcessLocal",
-                "Machine actor commands require a managed local process"
+                "Machine commands require a managed local process"
               )
             }
             current = initial.state
@@ -329,7 +329,7 @@ export const make = <
             if (planned.commands.length > 0) {
               return yield* fail(
                 "UnsupportedProcessLocal",
-                "Machine actor commands require a managed local process"
+                "Machine commands require a managed local process"
               )
             }
             current = planned.next

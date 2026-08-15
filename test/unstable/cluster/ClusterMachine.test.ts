@@ -540,7 +540,7 @@ describe("ClusterMachine", () => {
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
 
-  it.effect("rejects process-local actor commands", () =>
+  it.effect("rejects process-local machine commands", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
       const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }

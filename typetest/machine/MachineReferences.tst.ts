@@ -4,19 +4,19 @@ import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 
-describe("machine actor event channels", () => {
-  class Idle extends Schema.TaggedClass<Idle>("ActorEventsIdle")("Idle", {}) {}
-  class Ping extends Schema.TaggedClass<Ping>("ActorEventsPing")("Ping", {}) {}
-  class Local extends Schema.TaggedClass<Local>("ActorEventsLocal")("Local", {}) {}
-  class ParentNotice extends Schema.TaggedClass<ParentNotice>("ActorEventsParentNotice")("ParentNotice", {
+describe("machine reference event channels", () => {
+  class Idle extends Schema.TaggedClass<Idle>("MachineReferencesIdle")("Idle", {}) {}
+  class Ping extends Schema.TaggedClass<Ping>("MachineReferencesPing")("Ping", {}) {}
+  class Local extends Schema.TaggedClass<Local>("MachineReferencesLocal")("Local", {}) {}
+  class ParentNotice extends Schema.TaggedClass<ParentNotice>("MachineReferencesParentNotice")("ParentNotice", {
     value: Schema.Number
   }) {}
-  class OtherParentEvent extends Schema.TaggedClass<OtherParentEvent>("ActorEventsOtherParent")(
+  class OtherParentEvent extends Schema.TaggedClass<OtherParentEvent>("MachineReferencesOtherParent")(
     "OtherParentEvent",
     {}
   ) {}
-  class Published extends Schema.TaggedClass<Published>("ActorEventsPublished")("Published", {}) {}
-  class ValuedPublished extends Schema.TaggedClass<ValuedPublished>("ActorEventsValuedPublished")(
+  class Published extends Schema.TaggedClass<Published>("MachineReferencesPublished")("Published", {}) {}
+  class ValuedPublished extends Schema.TaggedClass<ValuedPublished>("MachineReferencesValuedPublished")(
     "ValuedPublished",
     { value: Schema.Number }
   ) {}
@@ -43,6 +43,14 @@ describe("machine actor event channels", () => {
   const Child = Machine.child("child", childMachine)
 
   it("types self, parent, raised events, and emissions as separate channels", () => {
+    expect<Machine.MachineTarget<Ping>["send"]>().type.toBeCallableWith(new Ping({}))
+    expect<Machine.MachineReferences<readonly [typeof Ping], readonly [typeof ParentNotice]>["self"]>().type.toBe<
+      Machine.MachineTarget<Machine.Machine.EventInputOf<readonly [typeof Ping]>>
+    >()
+    expect<
+      Machine.MachineReferences<readonly [typeof Ping], readonly [typeof ParentNotice]>["parent"]
+    >().type.toBe<Machine.MachineTarget<Machine.Machine.EventInputOf<readonly [typeof ParentNotice]>> | undefined>()
+
     Machine.make({
       states: states.states,
       events: Events,
