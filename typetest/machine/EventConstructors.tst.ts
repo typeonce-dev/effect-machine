@@ -71,17 +71,21 @@ describe("Machine event constructor collections", () => {
       .toRaiseError()
   })
 
-  it("accepts internal constructions from invokeEffect and after", () => {
+  it("accepts internal constructions raised from invocation handlers", () => {
     expect(
       machine.handle({
         Idle: {
           invoke: [
-            Machine.invokeEffect({
+            Machine.invoke({
               id: "load",
               effect: Effect.succeed("ready"),
-              onSuccess: (value) => internalEvents.Loaded({ value })
+              onDone: ({ output }, enqueue) => enqueue.raise(internalEvents.Loaded({ value: output }))
             }),
-            Machine.after("1 second", internalEvents.Failed())
+            Machine.invoke({
+              id: "timeout",
+              after: "1 second",
+              onDone: (_, enqueue) => enqueue.raise(internalEvents.Failed())
+            })
           ]
         }
       })

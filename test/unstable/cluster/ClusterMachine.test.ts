@@ -567,7 +567,8 @@ describe("ClusterMachine", () => {
         Count: {
           invoke: Machine.invoke({
             id: "child",
-            src: () => Machine.effect(Effect.void)
+            effect: Effect.void,
+            onDone: () => undefined
           })
         }
       })

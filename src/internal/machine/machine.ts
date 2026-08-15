@@ -1,4 +1,3 @@
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
@@ -34,6 +33,7 @@ import type { EnsureExecutable } from "./readiness.js"
 import * as internalRuntime from "./runtime.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
+import { ChildMachineLogicTypeId } from "./symbols.js"
 import * as Topology from "./topology.js"
 
 export {
@@ -45,13 +45,12 @@ export {
   StartupError,
   StoppedError
 } from "./errors.js"
-export { InitialEventTypeId } from "./symbols.js"
+export { ChildMachineLogicTypeId, InitialEventTypeId } from "./symbols.js"
 
 const TypeId = "~effect/Machine"
 export const SnapshotBuilderStateTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderState")
 export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
-type InvokeLifecycleId = string
 type IsAny<A> = 0 extends 1 & A ? true : false
 type MachineRuntimeRequirement = internalRuntime.MachineRuntime
 type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
@@ -967,145 +966,6 @@ export const decodeSnapshot: <
   Machine.SnapshotDecodingServices<States>
 > = Serialization.decodeSnapshot as any
 
-export const invoke = <
-  ChildState,
-  ChildEvent,
-  ChildError = never,
-  ChildRequirements = never,
-  ChildOutput = never,
-  ChildInitialError = never,
-  Event = never,
-  Address extends ChildAddress<never> | undefined = undefined
->(
-  config:
-    & {
-      readonly id: InvokeLifecycleId
-      readonly src: () => Logic<
-        ChildState,
-        ChildEvent,
-        ChildError,
-        ChildRequirements,
-        ChildOutput,
-        ChildInitialError
-      >
-      readonly snapshot?: (
-        context: Machine.InvokeSnapshotContext<ChildState, ChildError, ChildOutput>
-      ) => Event | undefined
-    }
-    & ([Address] extends [undefined] ? {
-        readonly address?: never
-      }
-      : {
-        readonly address: Exclude<Address, undefined>
-      } & ChildAddress.Compatibility<Exclude<Address, undefined>, NoInfer<ChildEvent>>)
-): Machine.InvokeConfig<
-  any,
-  any,
-  any,
-  any,
-  Event,
-  ChildState,
-  ChildEvent,
-  ChildError,
-  ChildRequirements,
-  ChildOutput,
-  ChildInitialError
-> => ({
-  ...config,
-  [InvokeTypeId]: undefined as any,
-  [Activities.ActivityMetadataTypeId]: { type: "process" }
-})
-
-type InvokeEffectResult<Requirements, Event> = Machine.InvokeConfig<
-  any,
-  any,
-  any,
-  any,
-  never,
-  void,
-  never,
-  never,
-  Requirements,
-  Event | void,
-  never
->
-
-type InvokeEffectIsInfallible<Fx extends Effect.Effect<any, any, any>> = IsAny<Effect.Error<Fx>> extends true ? false
-  : [Effect.Error<Fx>] extends [never] ? true
-  : false
-
-type InvokeEffectConfig<
-  Fx extends Effect.Effect<any, any, any>,
-  SuccessEvent,
-  FailureEvent
-> =
-  & {
-    readonly id: InvokeLifecycleId
-    readonly effect: Fx
-    readonly onSuccess: (value: NoInfer<Effect.Success<Fx>>) => SuccessEvent | void
-  }
-  & (
-    InvokeEffectIsInfallible<Fx> extends true ? {
-        readonly onFailure?: never
-      }
-      : {
-        readonly onFailure: (error: NoInfer<Effect.Error<Fx>>) => FailureEvent | void
-      }
-  )
-
-export const invokeEffect = <
-  const Fx extends Effect.Effect<any, any, any>,
-  SuccessEvent,
-  FailureEvent = never
->(
-  config: InvokeEffectConfig<Fx, SuccessEvent, FailureEvent>
-): InvokeEffectResult<
-  Effect.Services<Fx>,
-  SuccessEvent | (InvokeEffectIsInfallible<Fx> extends true ? never : FailureEvent)
-> =>
-  ((config: {
-    readonly id: string
-    readonly effect: Effect.Effect<unknown, unknown, unknown>
-    readonly onSuccess: (value: unknown) => unknown
-    readonly onFailure?: (error: unknown) => unknown
-  }) => ({
-    ...invoke({
-      id: config.id,
-      src: () =>
-        effect(
-          config.onFailure === undefined
-            ? Effect.map(config.effect, config.onSuccess)
-            : Effect.matchEffect(config.effect, {
-              onFailure: (error) => Effect.succeed(config.onFailure!(error)),
-              onSuccess: (value) => Effect.succeed(config.onSuccess(value))
-            })
-        )
-    }),
-    [Activities.ActivityMetadataTypeId]: {
-      type: "effect",
-      outcomes: {
-        success: "dynamic",
-        failure: config.onFailure === undefined ? "none" : "dynamic"
-      }
-    }
-  }))(config as any) as any
-
-export const after = <Event extends { readonly _tag: PropertyKey }>(
-  duration: Duration.Input,
-  event: Event,
-  options?: { readonly id?: InvokeLifecycleId }
-): InvokeEffectResult<never, Event> => ({
-  ...invoke({
-    id: options?.id ?? `Machine.after:${String(event._tag)}`,
-    src: () => effect(Effect.as(Effect.sleep(duration), event))
-  }),
-  [Activities.ActivityMetadataTypeId]: {
-    type: "timer",
-    duration: Duration.format(Duration.fromInputUnsafe(duration)),
-    event: String(event._tag)
-  }
-})
-
 export const retag = (
   target: Machine.TaggedSchema,
   source: { readonly _tag: PropertyKey },
@@ -1114,199 +974,6 @@ export const retag = (
   const { _tag: _, ...fields } = source
   return target.make({ ...fields, ...((patch ?? {}) as object) } as never)
 }
-
-type InvokeMachineInput<Input extends Schema.Top> = Input extends typeof Schema.Void ? {
-    readonly input?: never
-  }
-  : {
-    readonly input: Input["Type"]
-  }
-
-export const invokeMachine: {
-  <
-    const States extends Machine.StateSchemas,
-    const Events extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const Input extends Schema.Top = typeof Schema.Void,
-    UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-    E = never,
-    R = never,
-    InitialE = never,
-    InitialR = never,
-    FinalStates extends Machine.StateIdentifier<States> = never,
-    Output = never,
-    SnapshotEvent = never,
-    DoneEvent = never,
-    Id extends string = string,
-    OutputStates extends Machine.StateIdentifier<States> = never,
-    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
-  >(
-    config:
-      & {
-        readonly child: ChildMachine<
-          Id,
-          & Machine<
-            States,
-            Events,
-            Input,
-            UnhandledStates,
-            E,
-            R,
-            InitialE,
-            InitialR,
-            FinalStates,
-            Output,
-            Emits,
-            OutputStates,
-            InputEvents
-          >
-          & EnsureExecutable<States, UnhandledStates, OutputStates>
-        >
-        readonly snapshot?: (
-          context: Machine.InvokeSnapshotContext<
-            Machine.Snapshot<States>,
-            | E
-            | ActionError<R>
-            | InfiniteTransitionError
-            | MachineSchemaDecodeError
-            | StoppedError,
-            Output
-          >
-        ) => SnapshotEvent | undefined
-        readonly onDone: (context: Machine.InvokeDoneContext<Output>) => DoneEvent | undefined
-      }
-      & InvokeMachineInput<Input>
-  ): Machine.InvokeConfig<
-    any,
-    any,
-    any,
-    any,
-    SnapshotEvent,
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-    ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
-      Machine.EventOf<Events>,
-      Machine.EmitOf<Emits>
-    >,
-    Output,
-    | InitialE
-    | E
-    | ActionError<InitialR | R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StartupError
-    | StoppedError,
-    Machine.EmitOf<Emits>,
-    DoneEvent
-  >
-  <
-    const States extends Machine.StateSchemas,
-    const Events extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const Input extends Schema.Top = typeof Schema.Void,
-    UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-    E = never,
-    R = never,
-    InitialE = never,
-    InitialR = never,
-    FinalStates extends Machine.StateIdentifier<States> = never,
-    Output = never,
-    SnapshotEvent = never,
-    Id extends string = string,
-    OutputStates extends Machine.StateIdentifier<States> = never,
-    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
-  >(
-    config:
-      & {
-        readonly child: ChildMachine<
-          Id,
-          & Machine<
-            States,
-            Events,
-            Input,
-            UnhandledStates,
-            E,
-            R,
-            InitialE,
-            InitialR,
-            FinalStates,
-            Output,
-            Emits,
-            OutputStates,
-            InputEvents
-          >
-          & EnsureExecutable<States, UnhandledStates, OutputStates>
-        >
-        readonly snapshot?: (
-          context: Machine.InvokeSnapshotContext<
-            Machine.Snapshot<States>,
-            | E
-            | ActionError<R>
-            | InfiniteTransitionError
-            | MachineSchemaDecodeError
-            | StoppedError,
-            Output
-          >
-        ) => SnapshotEvent | undefined
-        readonly onDone?: never
-      }
-      & InvokeMachineInput<Input>
-  ): Machine.InvokeConfig<
-    any,
-    any,
-    any,
-    any,
-    SnapshotEvent,
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-    ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
-      Machine.EventOf<Events>,
-      Machine.EmitOf<Emits>
-    >,
-    Output,
-    | InitialE
-    | E
-    | ActionError<InitialR | R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StartupError
-    | StoppedError,
-    Machine.EmitOf<Emits>
-  >
-} = ((config: {
-  readonly child: ChildMachine.Any
-  readonly input?: unknown
-  readonly snapshot?: (context: Machine.InvokeSnapshotContext<any, any, any>) => unknown
-  readonly onDone?: (context: Machine.InvokeDoneContext<any>) => unknown
-}) => {
-  const machine = config.child.machine
-  // An invoke descriptor fixes both its machine and input. Compile its process
-  // logic once; all mutable execution state belongs to the process instance.
-  const logic = machine.input === undefined
-    ? (internalProcess.toProcessLogic as any)(machine)
-    : (internalProcess.toProcessLogic as any)(machine, config.input)
-  return {
-    id: config.child.id,
-    address: config.child.id,
-    descriptor: config.child,
-    src: () => logic,
-    snapshot: config.snapshot,
-    onDone: config.onDone,
-    [Activities.ActivityMetadataTypeId]: {
-      type: "machine",
-      child: {
-        id: config.child.id,
-        machineId: machine.id ?? null
-      }
-    },
-    [InvokeTypeId]: undefined as any
-  }
-}) as any
-
 export const planInitial: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -1542,13 +1209,6 @@ export const plan: <
   never
 > = internalPlanner.plan as any
 
-export const effect = <Output, Error = never, Requirements = never>(
-  effect: Effect.Effect<Output, Error, Requirements>
-): Logic<void, never, Error, Requirements, Output> => ({
-  initial: () => Effect.void,
-  run: () => effect
-})
-
 export const logic = <
   State,
   Event = never,
@@ -1597,7 +1257,11 @@ export const child = <const Id extends string, M extends Machine.Any>(
 ): ChildMachine<Id, M> => ({
   [ChildMachineTypeId]: ChildMachineTypeId,
   id,
-  machine
+  machine,
+  [ChildMachineLogicTypeId]: (input) =>
+    machine.input === undefined
+      ? (internalProcess.toProcessLogic as any)(machine)
+      : (internalProcess.toProcessLogic as any)(machine, input)
 })
 
 export const childAddress = <Event = never>(id: string): ChildAddress<Event> => id as ChildAddress<Event>

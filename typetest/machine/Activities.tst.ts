@@ -13,10 +13,10 @@ const machine = Machine.make({
   initial: () => States.initial.Loading(new Loading({}))
 }).handle({
   Loading: {
-    invoke: Machine.after("1 second", new TimedOut({}), { id: "timeout" })
+    invoke: Machine.invoke({ id: "timeout", after: "1 second", onDone: () => undefined })
   },
   Dynamic: {
-    invoke: () => Machine.after("2 seconds", new TimedOut({}))
+    invoke: Machine.invoke({ id: "dynamic", after: () => "2 seconds" as const, onDone: () => undefined })
   }
 })
 
@@ -25,7 +25,7 @@ describe("Machine activity inspection", () => {
     const definition = Machine.activityDefinitions(machine)[0]!
 
     expect(definition.source).type.toBe<"Loading" | "Dynamic">()
-    expect(definition.type).type.toBe<"process" | "effect" | "timer" | "machine" | "dynamic">()
+    expect(definition.type).type.toBe<"process" | "effect" | "timer" | "machine">()
   })
 
   it("narrows kind-specific descriptive metadata", () => {
@@ -33,10 +33,7 @@ describe("Machine activity inspection", () => {
 
     if (definition.type === "timer") {
       expect(definition.id).type.toBe<string>()
-      expect(definition.duration).type.toBe<string>()
-      expect(definition.event).type.toBe<string>()
-    } else if (definition.type === "dynamic") {
-      expect(definition).type.not.toHaveProperty("id")
+      expect(definition.duration).type.toBe<string | "dynamic">()
     }
   })
 })

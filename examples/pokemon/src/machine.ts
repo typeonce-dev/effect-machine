@@ -10,42 +10,36 @@ class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTea
   team: Schema.Array(Pokemon)
 }) {}
 
-class TeamLoaded extends Schema.TaggedClass<TeamLoaded>("TeamLoaded")("TeamLoaded", {
-  team: Schema.Array(Pokemon)
-}) {}
-
-class TeamLoadFailed extends Schema.TaggedClass<TeamLoadFailed>("TeamLoadFailed")("TeamLoadFailed", {}) {}
-
 export const States = Machine.defineStates({ Loading: {}, ActiveTeam, Failed: {} })
 
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
-const LoadTeam = Machine.invokeEffect({
-  id: "load-team",
-  effect: Effect.gen(function*() {
-    const service = yield* PokemonService
-    return yield* service.getRandomTeam()
-  }),
-  onSuccess: (team) => new TeamLoaded({ team }),
-  onFailure: () => new TeamLoadFailed({})
-})
-
 const machine = Machine.make({
   states: States.states,
   events: [ReplaceInTeam],
-  internalEvents: [TeamLoaded, TeamLoadFailed],
   initial: () => States.initial.Loading.from()
 }).handle({
   Loading: {
-    invoke: LoadTeam,
-    on: {
-      TeamLoaded: ({ event, target }) => target.full.ActiveTeam.from({ team: event.team }),
-      TeamLoadFailed: ({ target }) => target.full.Failed.from()
-    }
+    invoke: Machine.invoke({
+      id: "load-team",
+      effect: Effect.gen(function*() {
+        const service = yield* PokemonService
+        return yield* service.getRandomTeam()
+      }),
+      onDone: ({ output, target }) => target.full.ActiveTeam.from({ team: output }),
+      onFailure: ({ target }) => target.full.Failed.from()
+    })
   },
   ActiveTeam: {
-    invoke: [Machine.invokeMachine({ child: SelectionChild }), Machine.invokeMachine({ child: ReplaceChild })],
+    invoke: [
+      Machine.invoke({
+        child: SelectionChild,
+        onDone: () => undefined,
+        onFailure: ({ target }) => target.full.Failed.from()
+      }),
+      Machine.invoke({ child: ReplaceChild, onFailure: ({ target }) => target.full.Failed.from() })
+    ],
     on: {
       ReplaceInTeam: ({ event, target, state }) =>
         target.full.ActiveTeam.from({

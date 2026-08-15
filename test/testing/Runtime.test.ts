@@ -225,7 +225,7 @@ describe("MachineTest runtime commands", () => {
       yield* ref.stop
     }))
 
-  it.effect("advances TestClock deterministically through Machine.after", () =>
+  it.effect("advances TestClock deterministically through an inline timer", () =>
     Effect.gen(function*() {
       class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
@@ -238,8 +238,11 @@ describe("MachineTest runtime commands", () => {
         initial: () => states.initial.Waiting(new Waiting({}))
       }).handle({
         Waiting: {
-          invoke: Machine.after("1 second", new Timeout({})),
-          on: { Timeout: ({ target }) => target.full.TimedOut(new TimedOut({})) }
+          invoke: Machine.invoke({
+            id: "timeout",
+            after: "1 second",
+            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+          })
         },
         TimedOut: {}
       })
@@ -715,8 +718,11 @@ describe("MachineTest causal runtime commands", () => {
         initial: () => states.initial.Waiting(new Waiting({}))
       }).handle({
         Waiting: {
-          invoke: Machine.after("1 second", new Timeout({})),
-          on: { Timeout: ({ target }) => target.full.TimedOut(new TimedOut({})) }
+          invoke: Machine.invoke({
+            id: "timeout",
+            after: "1 second",
+            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+          })
         },
         TimedOut: {}
       })

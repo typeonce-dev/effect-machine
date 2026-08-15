@@ -201,29 +201,48 @@ State-scoped work starts on entry and is interrupted on exit:
 
 ```ts
 Loading: {
-  invoke: Machine.invokeEffect({
+  invoke: Machine.invoke({
     id: "save-document",
     effect: saveDocument,
-    onSuccess: (entry) => InternalEvent.Saved({ id: entry.id }),
-    onFailure: (error) => InternalEvent.SaveFailed({ message: String(error) })
+    onDone: ({ output, target }) => target.full.Saved({ id: output.id }),
+    onFailure: ({ error, target }) => target.full.Failed({ message: String(error) })
   })
 }
 
 Waiting: {
-  invoke: Machine.after(
-    "3 seconds",
-    InternalEvent.SaveFailed({ message: "Timed out" })
-  )
+  invoke: Machine.invoke({
+    id: "save-timeout",
+    after: "3 seconds",
+    onDone: ({ target }) => target.full.Failed({ message: "Timed out" })
+  })
 }
 ```
 
-Use `Machine.invokeEffect` for one Effect, `Machine.after` for a cancellable
-delay, and lower-level `Machine.invoke` only for custom process behavior or
-snapshot mapping. Use one exported `Machine.child(id, machine)` descriptor for
-`invokeMachine`, `sendTo`, and child lookup.
+Use `effect` for one Effect, `after` for a cancellable delay, `logic` for a
+reusable process, and `child` for a complete child statechart—all through
+`Machine.invoke({...})`. The helper is an identity at runtime and preserves
+owner-context and source-channel inference across lifecycle handlers, including
+for state-dependent Effects:
 
-Expected failures should become internal events. An unrecovered invoke or child
-failure terminates the owning runtime.
+```ts
+invoke: Machine.invoke({
+  id: "load-document",
+  effect: ({ state }) => loadDocument(state.documentId),
+  onDone: ({ output, target }) => target.full.Ready({ document: output }),
+  onFailure: ({ error, target }) => target.full.Failed({ message: error.message })
+})
+```
+
+A direct `invoke: { ... }` object is also supported when its lifecycle handlers
+do not need source-derived context. Reuse one exported
+`Machine.child(id, machine)` descriptor for invocation, `sendTo`, and child
+lookup.
+
+`onDone` is required for a non-`never` output, and `onFailure` is required for a
+non-`never` typed error; each handler is omitted when its channel is `never`.
+Defects, interruption, and source-construction failures terminate the owning
+runtime. `effect: Effect.sleep(...)` is valid, but `after` keeps timers explicit
+and makes static durations visible through activity inspection.
 
 ## Reactivity
 

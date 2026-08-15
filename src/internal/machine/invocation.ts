@@ -4,28 +4,26 @@
  * @since 0.4.0
  */
 
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import type { Machine } from "../../Machine.js"
+import type { ChildMachine, Logic, Machine } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
+import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
+import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
 import type * as Runtime from "./runtime.js"
+import { ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
-export type AnyConfig = Machine.InvokeConfig<
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any,
-  any
->
+export interface AnyConfig {
+  readonly id: string
+  readonly address?: string
+  readonly descriptor?: ChildMachine.Any
+  readonly src: () => Runtime.ProcessLogic<any, any, any, any, any, any>
+  readonly onDone?: unknown
+  readonly onFailure?: unknown
+  readonly onSnapshot?: unknown
+}
 
 /** @internal */
 export const makeKey = (path: string, id: string): string => `${path.length}:${path}${id}`
@@ -33,16 +31,79 @@ export const makeKey = (path: string, id: string): string => `${path.length}:${p
 /** @internal */
 export const makeChildId = (path: string, id: string): string => `Machine.invoke:${makeKey(path, id)}`
 
-const resolve = (
-  config: Machine.AnyStateConfig | undefined,
+const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, any, any> => ({
+  initial: () => Effect.void,
+  run: () => effect
+})
+
+const resolveValue = (value: unknown, context: Machine.InvokeContext<any, any, any, any>): unknown =>
+  typeof value === "function" ? value(context) : value
+
+const resolveOne = (
+  raw: Record<PropertyKey, any>,
   context: Machine.InvokeContext<any, any, any, any>
-): ReadonlyArray<AnyConfig> => {
-  const definition = config?.invoke
-  const invokes = typeof definition === "function" ? definition(context) : definition
-  if (invokes === undefined) return []
-  return Array.isArray(invokes) ? invokes as ReadonlyArray<AnyConfig> : [invokes as AnyConfig]
+): AnyConfig => {
+  if ("effect" in raw) {
+    return {
+      id: String(raw.id),
+      src: () =>
+        oneShot(resolveValue(raw.effect, context) as Effect.Effect<any, any, any>) as unknown as Runtime.ProcessLogic<
+          any,
+          any,
+          any,
+          any,
+          any,
+          any
+        >,
+      onDone: raw.onDone,
+      onFailure: raw.onFailure,
+      onSnapshot: raw.onSnapshot
+    }
+  }
+  if ("after" in raw) {
+    return {
+      id: String(raw.id),
+      src: () =>
+        oneShot(Effect.sleep(resolveValue(raw.after, context) as any)) as unknown as Runtime.ProcessLogic<
+          any,
+          any,
+          any,
+          any,
+          any,
+          any
+        >,
+      onDone: raw.onDone
+    }
+  }
+  if ("logic" in raw) {
+    return {
+      id: String(raw.id),
+      address: String(raw.address),
+      src: () => resolveValue(raw.logic, context) as Runtime.ProcessLogic<any, any, any, any, any, any>,
+      onDone: raw.onDone,
+      onFailure: raw.onFailure,
+      onSnapshot: raw.onSnapshot
+    }
+  }
+  if ("child" in raw) {
+    const descriptor = raw.child as ChildMachine.Any
+    return {
+      id: descriptor.id,
+      address: descriptor.id,
+      descriptor,
+      src: () =>
+        descriptor[ChildMachineLogicTypeId](
+          "input" in raw ? resolveValue(raw.input, context) : undefined
+        ) as Runtime.ProcessLogic<any, any, any, any, any, any>,
+      onDone: raw.onDone,
+      onFailure: raw.onFailure,
+      onSnapshot: raw.onSnapshot
+    }
+  }
+  throw new Error("Machine invoke must define exactly one of effect, after, logic, or child")
 }
 
+/** @internal */
 const runSequentialDiscard = <E, R>(
   effects: ReadonlyArray<Effect.Effect<void, E, R>>
 ): Effect.Effect<void, E, R> =>
@@ -52,44 +113,109 @@ const runSequentialDiscard = <E, R>(
     ? effects[0]!
     : Effect.all(effects, { discard: true })
 
+const sendLifecycle = (
+  scope: Runtime.ProcessScope<any>,
+  event: InvocationEvent.InvocationEvent
+): Effect.Effect<void> => scope.self.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void))
+
+const isFrameworkFailure = (error: unknown): boolean =>
+  error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError || error instanceof StoppedError
+
+const startResolved = (
+  scope: Runtime.ProcessScope<any>,
+  ownedChildren: Runtime.OwnedChildRuntime,
+  path: string,
+  invokeId: string,
+  childId: string,
+  descriptor: ChildMachine.Any | undefined,
+  src: () => Runtime.ProcessLogic<any, any, any, any, any, any>,
+  onDone: unknown,
+  onFailure: unknown,
+  onSnapshot: unknown
+): Effect.Effect<void, any, any> =>
+  Effect.suspend(() => {
+    const key = makeKey(path, invokeId)
+    return ownedChildren.spawn(src, {
+      key,
+      path,
+      id: childId,
+      duplicateId: invokeId,
+      ...(descriptor === undefined ? undefined : { descriptor }),
+      sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
+      onOutcome: (isCurrent, outcome) => {
+        if (outcome._tag === "Stopped" || !isCurrent()) return Effect.void
+        if (outcome._tag === "Done") {
+          if (onDone === undefined) {
+            return scope.failCause(Cause.die(
+              new Error(
+                `Invocation "${invokeId}" completed without the required onDone handler`
+              )
+            ))
+          }
+          return sendLifecycle(scope, InvocationEvent.done(path, invokeId, outcome.output))
+        }
+        if (
+          outcome._tag === "Failure" &&
+          onFailure !== undefined &&
+          (descriptor === undefined || !isFrameworkFailure(outcome.error))
+        ) {
+          return sendLifecycle(scope, InvocationEvent.failure(path, invokeId, outcome.error))
+        }
+        return scope.failCause(outcome.cause)
+      },
+      ...(onSnapshot === undefined ? undefined : {
+        onSnapshot: (isCurrent: () => boolean, snapshot: any) =>
+          isCurrent()
+            ? sendLifecycle(scope, InvocationEvent.snapshot(path, invokeId, snapshot))
+            : Effect.void
+      })
+    })
+  })
+
 const start = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   path: string,
   config: AnyConfig
-): Effect.Effect<void, any, any> =>
-  Effect.suspend(() => {
-    const invokeId = String(config.id)
-    const key = makeKey(path, invokeId)
-    const childId = config.address === undefined ? makeChildId(path, invokeId) : String(config.address)
-    return ownedChildren.spawn(config.src as () => Runtime.ProcessLogic<any, any, any, any, any, any>, {
-      key,
-      path,
-      id: childId,
-      duplicateId: invokeId,
-      ...(config.descriptor === undefined ? undefined : { descriptor: config.descriptor }),
-      sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
-      onOutcome: (isCurrent, outcome) => {
-        if (outcome._tag === "Stopped" || !isCurrent()) return Effect.void
-        if (outcome._tag !== "Done") return scope.failCause(outcome.cause)
-        const mappedEvent = config.onDone === undefined
-          ? outcome.output
-          : config.onDone({ id: config.id, output: outcome.output })
-        return mappedEvent === undefined
-          ? Effect.void
-          : scope.self.send(mappedEvent).pipe(Effect.catchTag("StoppedError", () => Effect.void))
-      },
-      ...(config.snapshot === undefined ? undefined : {
-        onSnapshot: (isCurrent: () => boolean, snapshot: any) => {
-          if (!isCurrent()) return Effect.void
-          const mappedEvent = config.snapshot!({ id: config.id, snapshot })
-          return mappedEvent === undefined
-            ? Effect.void
-            : scope.self.send(mappedEvent).pipe(Effect.catchTag("StoppedError", () => Effect.void))
-        }
-      })
-    })
-  })
+): Effect.Effect<void, any, any> => {
+  const invokeId = String(config.id)
+  return startResolved(
+    scope,
+    ownedChildren,
+    path,
+    invokeId,
+    config.address === undefined ? makeChildId(path, invokeId) : String(config.address),
+    config.descriptor,
+    config.src,
+    config.onDone,
+    config.onFailure,
+    config.onSnapshot
+  )
+}
+
+const startStaticChild = (
+  scope: Runtime.ProcessScope<any>,
+  ownedChildren: Runtime.OwnedChildRuntime,
+  path: string,
+  raw: Record<PropertyKey, any>
+): Effect.Effect<void, any, any> => {
+  // A zero-input child has no entry-context dependency. Reuse the descriptor's
+  // source function so each running parent does not retain a resolved config
+  // object and an otherwise redundant source closure.
+  const descriptor = raw.child as ChildMachine.Any
+  return startResolved(
+    scope,
+    ownedChildren,
+    path,
+    descriptor.id,
+    descriptor.id,
+    descriptor,
+    descriptor[ChildMachineLogicTypeId],
+    raw.onDone,
+    raw.onFailure,
+    raw.onSnapshot
+  )
+}
 
 /**
  * Starts every invocation owned by active entry paths in deterministic entry
@@ -107,13 +233,18 @@ export const startAll = (
 ): Effect.Effect<void, any, any> | undefined => {
   const effects = Planner.sortEntryPaths(machine, paths)
     .filter((path) => configuration.active.has(path))
-    .flatMap((path) =>
-      resolve(Configuration.getStateConfigByPath(machine, path), {
+    .flatMap((path) => {
+      const context = {
         state: configuration.values.get(path),
         parent: Configuration.getParentValue(machine, configuration, path),
         parents: Configuration.getParentValues(machine, configuration, path),
         event
-      }).map((config) => start(scope, ownedChildren, path, config))
-    )
+      }
+      return InvocationEvent.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).map((definition) =>
+        "child" in definition && !("input" in definition)
+          ? startStaticChild(scope, ownedChildren, path, definition)
+          : start(scope, ownedChildren, path, resolveOne(definition, context))
+      )
+    })
   return effects.length === 0 ? undefined : runSequentialDiscard(effects)
 }

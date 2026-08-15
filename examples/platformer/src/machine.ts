@@ -228,16 +228,10 @@ export const CharacterMachine = definition.handle({
                     }
                   },
                   Landing: {
-                    invoke: Machine.after("140 millis", InternalEvents.LandingSettled(), {
-                      id: "landing-settle"
-                    }),
-                    on: {
-                      Move: {
-                        targets: ["Character.locomotion.Playing.Grounded.Landing"],
-                        transition: ({ event, state, target }) =>
-                          target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis }))
-                      },
-                      LandingSettled: {
+                    invoke: Machine.invoke({
+                      id: "landing-settle",
+                      after: "140 millis",
+                      onDone: {
                         targets: [
                           "Character.locomotion.Playing.Grounded.Standing",
                           "Character.locomotion.Playing.Grounded.Running"
@@ -246,6 +240,13 @@ export const CharacterMachine = definition.handle({
                           state.resumeAxis === 0
                             ? target.local.Standing.from()
                             : target.local.Running.from({ startedAt: state.landedAt + 140 })
+                      }
+                    }),
+                    on: {
+                      Move: {
+                        targets: ["Character.locomotion.Playing.Grounded.Landing"],
+                        transition: ({ event, state, target }) =>
+                          target.local.Landing(Machine.retag(State.cases.Landing, state, { resumeAxis: event.axis }))
                       }
                     }
                   }
@@ -324,26 +325,26 @@ export const CharacterMachine = definition.handle({
                     },
                     states: {
                       AirJumpGroundLock: {
-                        invoke: Machine.after("120 millis", InternalEvents.AirJumpUnlocked(), {
-                          id: "ground-air-jump-unlock"
-                        }),
-                        on: {
-                          AirJumpUnlocked: {
+                        invoke: Machine.invoke({
+                          id: "ground-air-jump-unlock",
+                          after: "120 millis",
+                          onDone: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
                             transition: ({ target }) => target.local.AirJumpReady.from()
                           }
-                        }
+                        }),
+                        on: {}
                       },
                       AirJumpWallLock: {
-                        invoke: Machine.after("240 millis", InternalEvents.AirJumpUnlocked(), {
-                          id: "wall-air-jump-unlock"
-                        }),
-                        on: {
-                          AirJumpUnlocked: {
+                        invoke: Machine.invoke({
+                          id: "wall-air-jump-unlock",
+                          after: "240 millis",
+                          onDone: {
                             targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
                             transition: ({ target }) => target.local.AirJumpReady.from()
                           }
-                        }
+                        }),
+                        on: {}
                       },
                       AirJumpReady: {
                         on: {

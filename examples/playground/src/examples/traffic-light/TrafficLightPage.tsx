@@ -37,7 +37,7 @@ export function TrafficLightPage() {
                   <h2>{signal === "RedYellow" ? "Red + yellow" : signal}</h2>
                   <p>
                     The next transition is scheduled in {(duration / 1_000).toFixed(1)} seconds by a state-scoped{` `}
-                    <code>Machine.after</code> invocation.
+                    an inline <code>after</code> invocation.
                   </p>
                   <div className="timer-track" key={state.path}>
                     <span style={{ animationDuration: `${duration}ms` }} />

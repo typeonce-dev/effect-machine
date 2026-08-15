@@ -43,20 +43,11 @@ describe("Machine.resume", () => {
       class RightOn extends Schema.TaggedClass<RightOn>("RightOn")("RightOn", {}) {}
       class Inactive extends Schema.TaggedClass<Inactive>("Inactive")("Inactive", {}) {}
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const lifecycleEvents: Array<boolean> = []
-      const invoked = (label: string) =>
-        Machine.invoke({
-          id: label,
-          src: () =>
-            Machine.logic({
-              initial: () => Ref.update(starts, (labels) => [...labels, label]).pipe(Effect.as(label)),
-              run: () => Effect.never
-            })
+      const restoredLogic = (label: string) =>
+        Machine.logic({
+          initial: () => Ref.update(starts, (labels) => [...labels, label]).pipe(Effect.as(label)),
+          run: () => Effect.never
         })
-      const restoredInvoke = (label: string) => (context: { readonly event: unknown }) => {
-        lifecycleEvents.push(Machine.isInitialEvent(context.event))
-        return invoked(label)
-      }
       const states = Machine.defineStates({
         Root: {
           schema: Root,
@@ -82,19 +73,53 @@ describe("Machine.resume", () => {
         initial: () => states.initial.Inactive(new Inactive({}))
       }).handle({
         Root: {
-          invoke: restoredInvoke("root"),
+          invoke: Machine.invoke({
+            id: "root",
+            address: Machine.childAddress("root"),
+            logic: restoredLogic("root")
+          }),
           states: {
             left: {
-              invoke: restoredInvoke("left"),
-              states: { On: { invoke: restoredInvoke("left-leaf") } }
+              invoke: Machine.invoke({
+                id: "left",
+                address: Machine.childAddress("left"),
+                logic: restoredLogic("left")
+              }),
+              states: {
+                On: {
+                  invoke: Machine.invoke({
+                    id: "left-leaf",
+                    address: Machine.childAddress("left-leaf"),
+                    logic: restoredLogic("left-leaf")
+                  })
+                }
+              }
             },
             right: {
-              invoke: restoredInvoke("right"),
-              states: { On: { invoke: restoredInvoke("right-leaf") } }
+              invoke: Machine.invoke({
+                id: "right",
+                address: Machine.childAddress("right"),
+                logic: restoredLogic("right")
+              }),
+              states: {
+                On: {
+                  invoke: Machine.invoke({
+                    id: "right-leaf",
+                    address: Machine.childAddress("right-leaf"),
+                    logic: restoredLogic("right-leaf")
+                  })
+                }
+              }
             }
           }
         },
-        Inactive: { invoke: restoredInvoke("inactive") }
+        Inactive: {
+          invoke: Machine.invoke({
+            id: "inactive",
+            address: Machine.childAddress("inactive"),
+            logic: restoredLogic("inactive")
+          })
+        }
       })
       const snapshot = states.initial.Root(new Root({}), (root) =>
         root
@@ -105,7 +130,6 @@ describe("Machine.resume", () => {
       yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
       assert.deepStrictEqual(yield* ref.state, snapshot)
       assert.deepStrictEqual(yield* Ref.get(starts), ["root", "left", "right", "left-leaf", "right-leaf"])
-      assert.deepStrictEqual(lifecycleEvents, [true, true, true, true, true])
       yield* ref.stop
     }))
 
@@ -267,10 +291,13 @@ describe("Machine.resume", () => {
         initial: () => states.initial.Cancelled(new Cancelled({}))
       }).handle({
         Waiting: {
-          invoke: Machine.after("1 second", new Timeout({})),
+          invoke: Machine.invoke({
+            id: "timeout",
+            after: "1 second",
+            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+          }),
           on: {
-            Cancel: ({ target }) => target.full.Cancelled(new Cancelled({})),
-            Timeout: ({ target }) => target.full.TimedOut(new TimedOut({}))
+            Cancel: ({ target }) => target.full.Cancelled(new Cancelled({}))
           }
         },
         Cancelled: {},
@@ -291,7 +318,7 @@ describe("Machine.resume", () => {
       yield* second.stop
     }))
 
-  it.effect("restarts invokeEffect once and maps its result through the normal runtime", () =>
+  it.effect("restarts an inline Effect once and handles its result through the normal runtime", () =>
     Effect.gen(function*() {
       class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
       class Loaded extends Schema.TaggedClass<Loaded>("Loaded")("Loaded", { value: Schema.String }) {}
@@ -307,12 +334,11 @@ describe("Machine.resume", () => {
         initial: () => states.initial.Loaded(new Loaded({ value: "initial" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeEffect({
+          invoke: Machine.invoke({
             id: "load",
             effect: Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
-            onSuccess: (value) => new LoadedEvent({ value })
-          }),
-          on: { LoadedEvent: ({ event, target }) => target.full.Loaded(new Loaded({ value: event.value })) }
+            onDone: ({ output, target }) => target.full.Loaded(new Loaded({ value: output }))
+          })
         },
         Loaded: {}
       })
@@ -324,7 +350,7 @@ describe("Machine.resume", () => {
       yield* ref.stop
     }))
 
-  it.effect("maps a restarted invokeEffect typed failure once", () =>
+  it.effect("handles a restarted inline Effect typed failure once", () =>
     Effect.gen(function*() {
       class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
       class Failed extends Schema.TaggedClass<Failed>("Failed")("Failed", { message: Schema.String }) {}
@@ -343,15 +369,13 @@ describe("Machine.resume", () => {
         initial: () => states.initial.Failed(new Failed({ message: "initial" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeEffect({
+          invoke: Machine.invoke({
             id: "load",
             effect: Ref.update(runs, (n) => n + 1).pipe(
               Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
             ),
-            onSuccess: (_value: never) => undefined,
-            onFailure: (error) => new FailedEvent({ message: error.message })
-          }),
-          on: { FailedEvent: ({ event, target }) => target.full.Failed(new Failed({ message: event.message })) }
+            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+          })
         },
         Failed: {}
       })
@@ -394,11 +418,10 @@ describe("Machine.resume", () => {
         initial: () => states.initial.ChildOutput(new ChildOutput({ value: 0 }))
       }).handle({
         Parent: {
-          invoke: Machine.invokeMachine({
+          invoke: Machine.invoke({
             child: Child,
-            onDone: ({ output }) => new ChildOutput({ value: output })
-          }),
-          on: { ChildOutput: ({ event, target }) => target.full.ChildOutput(event) }
+            onDone: ({ output, target }) => target.full.ChildOutput(new ChildOutput({ value: output }))
+          })
         },
         ChildOutput: {}
       })

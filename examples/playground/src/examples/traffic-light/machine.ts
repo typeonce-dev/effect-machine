@@ -5,10 +5,6 @@ export const TrafficLightEvent = Schema.TaggedUnion({
   Reset: {}
 })
 
-export const TrafficLightInternalEvent = Schema.TaggedUnion({
-  TimerElapsed: {}
-})
-
 export const trafficLightDurations = {
   Red: 4_000,
   RedYellow: 1_000,
@@ -27,44 +23,52 @@ const definition = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: [TrafficLightEvent],
-  internalEvents: [TrafficLightInternalEvent],
   initial: () => TrafficLightStates.initial.Red.from()
 })
 
 export const TrafficLightEvents = Machine.events(definition)
-const InternalEvents = Machine.internalEvents(definition)
-const elapsed = InternalEvents.TimerElapsed()
-
 export const TrafficLightMachine = definition.handle({
   Red: {
-    invoke: Machine.after(trafficLightDurations.Red, elapsed),
+    invoke: Machine.invoke({
+      id: "red-timer",
+      after: trafficLightDurations.Red,
+      onDone: ({ target }) => target.full.RedYellow.from()
+    }),
     on: {
       Reset: {
         reenter: true,
         transition: ({ target }) => target.full.Red.from()
-      },
-      TimerElapsed: ({ target }) => target.full.RedYellow.from()
+      }
     }
   },
   RedYellow: {
-    invoke: Machine.after(trafficLightDurations.RedYellow, elapsed),
+    invoke: Machine.invoke({
+      id: "red-yellow-timer",
+      after: trafficLightDurations.RedYellow,
+      onDone: ({ target }) => target.full.Green.from()
+    }),
     on: {
-      Reset: ({ target }) => target.full.Red.from(),
-      TimerElapsed: ({ target }) => target.full.Green.from()
+      Reset: ({ target }) => target.full.Red.from()
     }
   },
   Green: {
-    invoke: Machine.after(trafficLightDurations.Green, elapsed),
+    invoke: Machine.invoke({
+      id: "green-timer",
+      after: trafficLightDurations.Green,
+      onDone: ({ target }) => target.full.Yellow.from()
+    }),
     on: {
-      Reset: ({ target }) => target.full.Red.from(),
-      TimerElapsed: ({ target }) => target.full.Yellow.from()
+      Reset: ({ target }) => target.full.Red.from()
     }
   },
   Yellow: {
-    invoke: Machine.after(trafficLightDurations.Yellow, elapsed),
+    invoke: Machine.invoke({
+      id: "yellow-timer",
+      after: trafficLightDurations.Yellow,
+      onDone: ({ target }) => target.full.Red.from()
+    }),
     on: {
-      Reset: ({ target }) => target.full.Red.from(),
-      TimerElapsed: ({ target }) => target.full.Red.from()
+      Reset: ({ target }) => target.full.Red.from()
     }
   }
 })

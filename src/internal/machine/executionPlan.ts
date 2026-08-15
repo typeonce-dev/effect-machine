@@ -21,6 +21,7 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError } from "./errors.js"
+import * as InvocationEvent from "./invocationEvent.js"
 import {
   broadenTransitionBoundary,
   type EvaluatedTransition,
@@ -775,6 +776,34 @@ const planIndexedState = (
   input: unknown,
   retainMicrosteps: boolean
 ): ExecutionMacrostep<OwnedIndexedState> => {
+  if (InvocationEvent.isInvocationEvent(input)) {
+    // Invocation lifecycle transitions retain the generic planner as their
+    // semantic reference. Ordinary machine events and initialization stay on
+    // the indexed representation; only the private lifecycle macrostep crosses
+    // the representation boundary.
+    const planned = planConfiguration(
+      machine as any,
+      activeConfigurationFromIndexedState(descriptor, configuration),
+      input
+    )
+    return {
+      next: ownedIndexedStateFromActive(descriptor, planned.next),
+      commands: planned.commands,
+      emittedEvents: planned.emittedEvents,
+      microsteps: planned.microsteps.map((step) => ({
+        next: ownedIndexedStateFromActive(descriptor, step.next),
+        event: step.event,
+        commands: step.commands,
+        raisedEvents: step.raisedEvents,
+        emittedEvents: step.emittedEvents,
+        exitPaths: step.exitPaths,
+        entryPaths: step.entryPaths,
+        changed: step.changed
+      })),
+      done: planned.done,
+      output: planned.output
+    }
+  }
   const decoded = decodeEventSync(machine, input)
   if (descriptor.flat) {
     return planIndexedFlatState(machine, descriptor, configuration, decoded, retainMicrosteps)

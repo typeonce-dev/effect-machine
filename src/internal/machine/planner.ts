@@ -38,6 +38,7 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
+import * as InvocationEvent from "./invocationEvent.js"
 import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
 import {
@@ -796,6 +797,54 @@ const selectEventTransitions = <
     }
   }
   return selected
+}
+
+const selectInvocationTransition = <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  E,
+  R
+>(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  event: InvocationEvent.InvocationEvent
+): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
+  if (!configuration.active.has(event.path)) return []
+  const config = machine.handlers[event.path] as Machine.AnyStateConfig | undefined
+  const invoke = InvocationEvent.definitions(config?.invoke).find((definition) => {
+    const id = "child" in definition ? definition.child?.id : definition.id
+    return String(id) === event.id
+  })
+  if (invoke === undefined) return []
+  const handler = event.type === "done"
+    ? invoke.onDone
+    : event.type === "failure"
+    ? invoke.onFailure
+    : invoke.onSnapshot
+  const transition = normalizeTransition(handler)
+  if (transition === undefined) return []
+  const snapshot = snapshotFromConfiguration<States>(machine, configuration)
+  const context = {
+    state: configuration.values.get(event.path),
+    parent: getParentValue(machine, configuration, event.path),
+    parents: getParentValues(machine, configuration, event.path),
+    snapshot,
+    target: getTargetBuilder(machine, event.path),
+    id: event.id,
+    ...(event.type === "done"
+      ? { output: event.output }
+      : event.type === "failure"
+      ? { error: event.error }
+      : { snapshot: event.snapshot })
+  }
+  return [{
+    sourcePath: event.path,
+    leafPath: getActiveLeafPathFrom(machine, configuration, event.path),
+    trigger: { type: "invoke", id: event.id, outcome: event.type },
+    transition: transition as unknown as MicrostepTransition<States, E, R, any>,
+    context
+  }]
 }
 
 export const getTargetNodePath = <const States extends Machine.StateSchemas>(
@@ -1812,11 +1861,11 @@ const macrostepConfiguration = <
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   configuration: ActiveConfiguration,
-  event: Machine.EventOf<Events>
+  event: Machine.EventOf<Events> | InvocationEvent.InvocationEvent
 ) => {
-  const decodedEvent = decodeEventSync<Events>(machine, event)
+  const decodedEvent = InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync<Events>(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
-    const completed = completeConfigurationSync(machine, configuration, decodedEvent)
+    const completed = completeConfigurationSync(machine, configuration, decodedEvent as any)
     const root = getRootPath(machine, completed.configuration)
     if (!completed.configuration.outputs.has(root)) {
       throw new Error("Machine reached a terminal configuration without a completed root output")
@@ -1831,11 +1880,13 @@ const macrostepConfiguration = <
     }
   }
 
-  const selections = selectEventTransitions<States, Events, Emits, E, R>(
-    machine,
-    configuration,
-    decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
-  )
+  const selections = InvocationEvent.isInvocationEvent(decodedEvent)
+    ? selectInvocationTransition<States, Events, Emits, E, R>(machine, configuration, decodedEvent)
+    : selectEventTransitions<States, Events, Emits, E, R>(
+      machine,
+      configuration,
+      decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
+    )
   if (selections.length === 0) {
     return {
       next: configuration,
@@ -1849,14 +1900,14 @@ const macrostepConfiguration = <
   const step = microstep(
     machine,
     configuration,
-    decodedEvent,
+    decodedEvent as any,
     selections
   )
   const commands = [...step.commands]
   const raisedEvents = [...step.raisedEvents]
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
-  return settle(machine, step.next, decodedEvent, commands, raisedEvents, emittedEvents, microsteps)
+  return settle(machine, step.next, decodedEvent as any, commands, raisedEvents, emittedEvents, microsteps)
 }
 
 const snapshotMacrostep = <

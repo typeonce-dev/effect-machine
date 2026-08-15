@@ -406,14 +406,14 @@ describe("machine planner and runtime strategies", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            src: () => Machine.effect(Effect.succeed(new Loaded({ value: "complete" })))
-          }),
-          on: {
-            Loaded: ({ event }) => states.initial.Success(new Success({ value: event.value }))
-          }
+            effect: Effect.succeed(new Loaded({ value: "complete" })),
+            onDone: ({ output }) => states.initial.Success(new Success({ value: output.value }))
+          })
         },
         Success: { output: ({ state }) => state.value }
       })
+
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
 
       const results: Array<unknown> = []
       for (const strategy of ["generic", "compiled"] as const) {
@@ -425,6 +425,44 @@ describe("machine planner and runtime strategies", () => {
           output,
           status: snapshot.status,
           state: yield* Machine.encodeSnapshot(machine, snapshot.state)
+        })
+      }
+      assert.deepStrictEqual(results[1], results[0])
+    }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("matches generic and indexed invoke failure traces", () =>
+    Effect.gen(function*() {
+      class Loading extends Schema.TaggedClass<Loading>("StrategyInvokeFailureLoading")("Loading", {}) {}
+      class Failed extends Schema.TaggedClass<Failed>("StrategyInvokeFailureFailed")("Failed", {
+        error: Schema.String
+      }) {}
+      const states = Machine.defineStates({
+        Loading,
+        Failed: { schema: Failed, type: "final", output: Schema.String }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: [],
+        initial: () => states.initial.Loading(new Loading({}))
+      }).handle({
+        Loading: {
+          invoke: Machine.invoke({
+            id: "load",
+            effect: Effect.fail("unavailable"),
+            onFailure: ({ error, target }) => target.full.Failed(new Failed({ error }))
+          })
+        },
+        Failed: { output: ({ state }) => state.error }
+      })
+
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
+
+      const results: Array<unknown> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        results.push({
+          output: yield* ref.join,
+          snapshot: yield* ref.snapshot
         })
       }
       assert.deepStrictEqual(results[1], results[0])
@@ -451,7 +489,8 @@ describe("machine planner and runtime strategies", () => {
           Loading: {
             invoke: Machine.invoke({
               id: "worker",
-              src: () => {
+              address: Machine.childAddress("worker"),
+              logic: () => {
                 generation += 1
                 const current = generation
                 return Machine.logic({
@@ -467,7 +506,9 @@ describe("machine planner and runtime strategies", () => {
                     )
                 })
               },
-              snapshot: ({ snapshot }) => snapshot.state === "stale" ? new Stale({}) : undefined
+              onFailure: () => undefined,
+              onSnapshot: ({ snapshot, target }) =>
+                snapshot.state === "stale" ? target.full.Failed(new Failed({})) : undefined
             }),
             on: {
               Reenter: {

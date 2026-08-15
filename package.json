@@ -50,7 +50,7 @@
     "test": "vitest run",
     "test:types": "tstyche",
     "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs",
-    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/runtime-performance-regression.test.mjs",
+    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/runtime-performance-compatibility.test.mjs scripts/runtime-performance-regression.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "perf:types": "pnpm build && node scripts/type-performance.mjs",
     "perf:runtime": "pnpm build && node --expose-gc scripts/runtime-performance.mjs",

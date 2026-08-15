@@ -392,6 +392,29 @@ export const transitionDefinitions = (
         targets: transitionTargets(config.onDone)
       })
     }
+    const invokes = config.invoke === undefined
+      ? []
+      : Array.isArray(config.invoke)
+      ? config.invoke
+      : [config.invoke]
+    for (const invoke of invokes) {
+      const id = "child" in invoke ? String(invoke.child.id) : String(invoke.id)
+      for (const outcome of ["done", "failure", "snapshot"] as const) {
+        const handler = outcome === "done"
+          ? invoke.onDone
+          : outcome === "failure"
+          ? invoke.onFailure
+          : invoke.onSnapshot
+        if (handler !== undefined) {
+          definitions.push({
+            source: node.path,
+            trigger: { type: "invoke", id, outcome },
+            reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
+            targets: transitionTargets(handler)
+          })
+        }
+      }
+    }
   }
   return definitions
 }

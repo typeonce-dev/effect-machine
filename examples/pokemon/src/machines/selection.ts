@@ -32,23 +32,17 @@ class ReplacePokemon extends Schema.TaggedClass<ReplacePokemon>("ReplacePokemon"
   id: Pokemon.fields.id
 }) {}
 
-const SearchMachine = ({ searchText }: { searchText: string }) =>
-  Machine.invoke({
-    id: "search",
-    src: () =>
-      Machine.effect(
-        Effect.sleep("500 millis").pipe(
-          Effect.andThen(
-            Effect.gen(function*() {
-              const pk = yield* PokemonService
-              const pokemon = yield* pk.getByName(searchText)
-              return new SearchResult({ result: pokemon })
-            })
-          ),
-          Effect.onInterrupt(() => Effect.log("Search interrupted"))
-        )
-      )
-  })
+const searchPokemon = (searchText: string) =>
+  Effect.sleep("500 millis").pipe(
+    Effect.andThen(
+      Effect.gen(function*() {
+        const pk = yield* PokemonService
+        const pokemon = yield* pk.getByName(searchText)
+        return new SearchResult({ result: pokemon })
+      })
+    ),
+    Effect.onInterrupt(() => Effect.log("Search interrupted"))
+  )
 
 export const SelectionStates = Machine.defineStates({
   form: {
@@ -110,16 +104,18 @@ export const SelectionMachine = Machine.make({
             }
           },
           Searching: {
-            invoke: ({ parents }) => SearchMachine({ searchText: parents["form.search"].searchText }),
-            on: {
-              SearchResult: ({ event, target }) =>
-                event.result.pipe(
+            invoke: Machine.invoke({
+              id: "search",
+              effect: ({ parents }) => searchPokemon(parents["form.search"].searchText),
+              onDone: ({ output, target }) =>
+                output.result.pipe(
                   Option.match({
                     onNone: () => target.local.NoPokemon.from(),
                     onSome: (pokemon) => target.local.WithPokemon.from({ pokemon })
                   })
-                )
-            }
+                ),
+              onFailure: ({ target }) => target.local.NoPokemon.from()
+            })
           }
         }
       },
