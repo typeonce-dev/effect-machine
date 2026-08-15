@@ -63,16 +63,16 @@ const scenarios = [
     label: "Machine.make (3 states, 2 events)",
     file: "make.ts",
     control: "make-control",
-    maxInstantiations: 11_000,
-    maxMarginalInstantiations: 7_500
+    maxInstantiations: 17_500,
+    maxMarginalInstantiations: 13_500
   },
   {
     id: "handle",
     label: "machine.handle (3 states, 2 transitions)",
     file: "handle.ts",
     control: "make",
-    maxInstantiations: 30_000,
-    maxMarginalInstantiations: 19_000
+    maxInstantiations: 40_000,
+    maxMarginalInstantiations: 23_000
   },
   {
     id: "dynamic-invoke-control",

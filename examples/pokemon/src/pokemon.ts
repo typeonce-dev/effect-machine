@@ -1,3 +1,4 @@
+import { Machine } from "@typeonce/effect-machine"
 import { Array, Context, Effect, flow, Layer, Option, Random, Schema } from "effect"
 import {
   FetchHttpClient,
@@ -21,6 +22,8 @@ export class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInT
   id: Pokemon.fields.id,
   pokemon: Pokemon
 }) {}
+
+export const TeamEvents = Machine.events(ReplaceInTeam)
 
 export class PokemonService extends Context.Service<PokemonService>()("app/PokemonService", {
   make: Effect.gen(function*() {

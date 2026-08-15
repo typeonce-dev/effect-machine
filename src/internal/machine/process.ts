@@ -131,7 +131,8 @@ const makeChildlessCompiledDrain = (
         planned = executionPlan.plan(
           configuration ?? executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           event,
-          acknowledged
+          acknowledged,
+          context.scope
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -255,7 +256,8 @@ const makeInvokingCompiledDrain = (
           configuration ??
             executionPlan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, current)),
           event,
-          acknowledged
+          acknowledged,
+          scope
         )
       } catch (error) {
         return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
@@ -426,9 +428,11 @@ const makeProcessLogic: <
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
-  const makeCompiledInitial = compiledInitial === undefined ? undefined : () => {
+  const makeCompiledInitial = compiledInitial === undefined ? undefined : (
+    scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
+  ) => {
     try {
-      const planned = compiledInitial(initialArgs)
+      const planned = compiledInitial(initialArgs, scope)
       const result = {
         state: planned.state as Machine.Snapshot<States>,
         done: planned.done,
@@ -455,7 +459,7 @@ const makeProcessLogic: <
   ) =>
     compiledInitial === undefined
       ? internalRuntime.provideMachineRuntime(
-        internalPlanner.planInitial(machine, ...initialArgs).pipe(
+        internalPlanner.planInitial(internalPlanner.withActorScope(machine, scope), ...initialArgs).pipe(
           Effect.flatMap((planned) => {
             const commands = planned.commands.length === 0
               ? undefined
@@ -480,7 +484,7 @@ const makeProcessLogic: <
         ),
         scope
       )
-      : Effect.try({ try: makeCompiledInitial!, catch: (error) => error as any })
+      : Effect.try({ try: () => makeCompiledInitial!(scope), catch: (error) => error as any })
   return ({
     execution: {
       _tag: "Compiled",
@@ -536,7 +540,10 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  configuration ?? Configuration.normalizeConfigurationSync(machine, current),
+                  Configuration.withActorScope(
+                    configuration ?? Configuration.normalizeConfigurationSync(machine, current),
+                    context
+                  ),
                   event
                 )
               } catch (error) {
@@ -644,7 +651,10 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  configuration ?? Configuration.normalizeConfigurationSync(machine, current),
+                  Configuration.withActorScope(
+                    configuration ?? Configuration.normalizeConfigurationSync(machine, current),
+                    context
+                  ),
                   event
                 )
               } catch (error) {

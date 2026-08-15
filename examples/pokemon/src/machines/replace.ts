@@ -1,6 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
-import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
+import { Pokemon, PokemonService, TeamEvents } from "../pokemon.ts"
 
 class Replacing extends Schema.TaggedClass<Replacing>("Replacing")("Replacing", {
   id: Pokemon.fields.id
@@ -29,11 +29,13 @@ const replaceWithRandom = Effect.sleep("500 millis").pipe(
 
 export const ReplaceStates = Machine.defineStates({ Idle: {}, Replacing })
 
-export const ReplaceEvents = Machine.events(ReplacePokemon, Replaced)
+export const ReplaceEvents = Machine.events(ReplacePokemon)
+const ReplaceInternalEvents = Machine.internalEvents(Replaced)
 export const ReplaceMachine = Machine.make({
   states: ReplaceStates.states,
   events: ReplaceEvents,
-  emits: [ReplaceInTeam],
+  internalEvents: ReplaceInternalEvents,
+  parentEvents: TeamEvents,
   initial: () => ReplaceStates.initial.Idle.from()
 }).handle({
   Idle: {
@@ -45,11 +47,16 @@ export const ReplaceMachine = Machine.make({
     invoke: Machine.invoke({
       id: "replaceWithRandom",
       effect: replaceWithRandom,
-      onDone: ({ output, target, state }, enqueue) => {
-        enqueue.emit(new ReplaceInTeam({ id: state.id, pokemon: output.pokemon }))
-        return target.full.Idle.from()
-      },
+      onDone: ({ output }, enqueue) => enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon })),
       onFailure: ({ target }) => target.full.Idle.from()
-    })
+    }),
+    on: {
+      Replaced: ({ event, parent, state, target }, enqueue) => {
+        if (parent !== undefined) {
+          enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
+        }
+        return target.full.Idle.from()
+      }
+    }
   }
 })

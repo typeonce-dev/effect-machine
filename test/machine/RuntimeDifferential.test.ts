@@ -170,22 +170,33 @@ describe("pure planning and managed runtime differential", () => {
                 Advance: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 10 })),
                 Bump: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 100 })),
                 Inspect: (context) => {
-                  const { state, parent, parents, snapshot } = context
+                  const { state, containingState, ancestors, snapshot } = context
                   if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
-                  const expectedKeys = ["state", "parent", "parents", "event", "snapshot", "target"]
+                  const expectedKeys = [
+                    "self",
+                    "parent",
+                    "state",
+                    "containingState",
+                    "ancestors",
+                    "event",
+                    "snapshot",
+                    "target"
+                  ]
                   const spread = { ...context }
                   assert.deepStrictEqual(Object.keys(context), expectedKeys)
                   assert.deepStrictEqual(Object.keys(spread), expectedKeys)
+                  assert.strictEqual(spread.self, context.self)
+                  assert.strictEqual(spread.parent, context.parent)
                   assert.strictEqual(spread.state, state)
-                  assert.strictEqual(spread.parent, parent)
-                  assert.strictEqual(spread.parents, parents)
+                  assert.strictEqual(spread.containingState, containingState)
+                  assert.strictEqual(spread.ancestors, ancestors)
                   assert.strictEqual(spread.event, context.event)
                   assert.strictEqual(spread.snapshot, snapshot)
                   assert.strictEqual(spread.target, context.target)
                   observations.push({
                     state: state.value,
-                    parent: parent._tag,
-                    parents: parents.Running._tag,
+                    parent: containingState._tag,
+                    parents: ancestors.Running._tag,
                     left: snapshot.states.Left.value.value,
                     right: snapshot.states.Right.value.value
                   })
@@ -425,7 +436,7 @@ describe("pure planning and managed runtime differential", () => {
         states: states.states,
         events: Machine.events(Begin),
         internalEvents: Machine.internalEvents(RaisedOne, RaisedTwo),
-        emits: [Notice],
+        emittedEvents: Machine.emittedEvents(Notice),
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: {

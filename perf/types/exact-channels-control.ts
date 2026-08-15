@@ -21,7 +21,7 @@ export const machine = Machine.make({
   states: States.states,
   events: Machine.events(Start),
   internalEvents: Machine.internalEvents(Loaded),
-  emits: [Notice],
+  emittedEvents: Machine.emittedEvents(Notice),
   input: Input,
   initial: (input) => States.initial.Idle(Idle.make({ value: input.seed }))
 })

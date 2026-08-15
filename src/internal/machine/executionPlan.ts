@@ -4,7 +4,8 @@
  * @since 0.4.0
  */
 
-import type { Machine } from "../../Machine.js"
+import * as Effect from "effect/Effect"
+import type { ActorRef, Machine } from "../../Machine.js"
 import { getTargetBuilder, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -17,10 +18,12 @@ import {
   isDescendantOf,
   normalizeConfigurationSync,
   normalizeTargetConfigurationSync,
+  type PlanningActorScope,
   snapshotFromConfiguration,
-  validateInitialConfiguration
+  validateInitialConfiguration,
+  withActorScope
 } from "./configuration.js"
-import { InfiniteTransitionError } from "./errors.js"
+import { InfiniteTransitionError, StoppedError } from "./errors.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import {
   broadenTransitionBoundary,
@@ -63,6 +66,29 @@ interface IndexedExecutionDescriptor {
     }>
   >
 }
+
+const planningActorScopes = new WeakMap<Machine.Any, PlanningActorScope>()
+
+const getPlanningActorScope = (machine: Machine.Any): PlanningActorScope => {
+  const cached = planningActorScopes.get(machine)
+  if (cached !== undefined) return cached
+  const self: ActorRef<unknown> = {
+    id: machine.id ?? "Machine",
+    sessionId: "Machine.plan",
+    send: () => Effect.fail(new StoppedError())
+  }
+  const scope = { self, parent: undefined }
+  planningActorScopes.set(machine, scope)
+  return scope
+}
+
+const getActorContext = (
+  machine: Machine.Any,
+  actorScope: PlanningActorScope | undefined
+): PlanningActorScope =>
+  actorScope === undefined
+    ? getPlanningActorScope(machine)
+    : { self: actorScope.self, parent: actorScope.parent }
 
 const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
   "initial",
@@ -336,18 +362,20 @@ const makeIndexedTransitionContext = (
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
   sourceIndex: number,
-  event: any
+  event: any,
+  actorScope?: PlanningActorScope
 ): any => {
   const source = descriptor.nodes[sourceIndex]!
   const parentIndex = descriptor.parentIndices[sourceIndex]!
-  const parents: Record<string, unknown> = {}
+  const ancestors: Record<string, unknown> = {}
   for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
-    parents[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
+    ancestors[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
   }
   return {
+    ...getActorContext(machine, actorScope),
     state: configuration.values[sourceIndex],
-    parent: parentIndex < 0 ? undefined : configuration.values[parentIndex],
-    parents,
+    containingState: parentIndex < 0 ? undefined : configuration.values[parentIndex],
+    ancestors,
     event,
     snapshot: snapshotFromIndexedState(descriptor, configuration),
     target: getTargetBuilder(machine, source.path)
@@ -407,7 +435,7 @@ const collectIndexedTransition = (
       ;(emittedEvents ??= []).push(decodeEmitSync(machine, event))
     },
     sendTo: (child: unknown, event: unknown) => {
-      ;(commands ??= []).push({ _tag: "SendTo", child: child as any, event })
+      ;(commands ??= []).push({ _tag: "SendTo", target: child as any, event })
     },
     stop: (child: unknown) => {
       ;(commands ??= []).push({ _tag: "Stop", child: child as any })
@@ -425,7 +453,8 @@ const selectIndexedEventTransitions = (
   machine: Machine.Any,
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
-  event: any
+  event: any,
+  actorScope?: PlanningActorScope
 ): ReadonlyArray<IndexedSelectedTransition> => {
   const selected: Array<IndexedSelectedTransition> = []
   for (const leafIndex of configuration.activeLeaves) {
@@ -446,7 +475,8 @@ const selectIndexedEventTransitions = (
             descriptor,
             configuration,
             sourceIndex,
-            event
+            event,
+            actorScope
           )
         })
       }
@@ -629,7 +659,8 @@ const planIndexedFlatState = (
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
   decoded: { readonly _tag: PropertyKey },
-  retainMicrosteps: boolean
+  retainMicrosteps: boolean,
+  actorScope?: PlanningActorScope
 ): ExecutionMacrostep<OwnedIndexedState> => {
   let current = configuration
   let event: any = decoded
@@ -681,9 +712,10 @@ const planIndexedFlatState = (
         machine,
         transition.transition,
         {
+          ...getActorContext(machine, actorScope),
           state: current.values[sourceIndex],
-          parent: undefined,
-          parents: {},
+          containingState: undefined,
+          ancestors: {},
           event,
           snapshot: snapshotFromIndexedState(descriptor, current),
           target: getTargetBuilder(machine, sourcePath)
@@ -774,7 +806,8 @@ const planIndexedState = (
   descriptor: IndexedExecutionDescriptor,
   configuration: OwnedIndexedState,
   input: unknown,
-  retainMicrosteps: boolean
+  retainMicrosteps: boolean,
+  actorScope?: PlanningActorScope
 ): ExecutionMacrostep<OwnedIndexedState> => {
   if (InvocationEvent.isInvocationEvent(input)) {
     // Invocation lifecycle transitions retain the generic planner as their
@@ -783,7 +816,9 @@ const planIndexedState = (
     // the representation boundary.
     const planned = planConfiguration(
       machine as any,
-      activeConfigurationFromIndexedState(descriptor, configuration),
+      actorScope === undefined
+        ? activeConfigurationFromIndexedState(descriptor, configuration)
+        : withActorScope(activeConfigurationFromIndexedState(descriptor, configuration), actorScope),
       input
     )
     return {
@@ -806,7 +841,7 @@ const planIndexedState = (
   }
   const decoded = decodeEventSync(machine, input)
   if (descriptor.flat) {
-    return planIndexedFlatState(machine, descriptor, configuration, decoded, retainMicrosteps)
+    return planIndexedFlatState(machine, descriptor, configuration, decoded, retainMicrosteps, actorScope)
   }
   if (descriptor.finalIndices.some((index) => configuration.active[index] === 1)) {
     const active = activeConfigurationFromIndexedState(descriptor, configuration)
@@ -827,7 +862,7 @@ const planIndexedState = (
     }
   }
 
-  const selections = selectIndexedEventTransitions(machine, descriptor, configuration, decoded)
+  const selections = selectIndexedEventTransitions(machine, descriptor, configuration, decoded, actorScope)
   if (selections.length === 0) {
     return {
       next: configuration,
@@ -895,7 +930,7 @@ const planIndexedState = (
     }
     raisedIndex += 1
     currentEvent = raised
-    const raisedSelections = selectIndexedEventTransitions(machine, descriptor, current, raised)
+    const raisedSelections = selectIndexedEventTransitions(machine, descriptor, current, raised, actorScope)
     if (raisedSelections.length === 0) continue
     const step = indexedMicrostep(machine, descriptor, current, raised, raisedSelections)
     current = step.next
@@ -913,10 +948,12 @@ export interface CompiledExecutionPlan {
   readonly plan: (
     state: unknown,
     event: unknown,
-    retainMicrosteps?: boolean
+    retainMicrosteps?: boolean,
+    actorScope?: PlanningActorScope
   ) => ExecutionMacrostep
   readonly initial?: (
-    args: ReadonlyArray<unknown>
+    args: ReadonlyArray<unknown>,
+    actorScope?: PlanningActorScope
   ) => {
     readonly state: Machine.Snapshot<any>
     readonly configuration: unknown
@@ -933,7 +970,14 @@ const makeActiveExecutionPlan = (machine: Machine.Any): CompiledExecutionPlan =>
   fromConfiguration: (configuration) => configuration,
   toConfiguration: (state) => state as ActiveConfiguration,
   snapshot: (state) => snapshotFromConfiguration(machine, state as ActiveConfiguration),
-  plan: (state, event) => planConfiguration(machine as any, state as ActiveConfiguration, event as any)
+  plan: (state, event, _retainMicrosteps, actorScope) =>
+    planConfiguration(
+      machine as any,
+      actorScope === undefined
+        ? state as ActiveConfiguration
+        : withActorScope(state as ActiveConfiguration, actorScope),
+      event as any
+    )
 })
 
 const makeIndexedExecutionPlan = (
@@ -943,16 +987,17 @@ const makeIndexedExecutionPlan = (
   fromConfiguration: (configuration) => ownedIndexedStateFromActive(indexed, configuration),
   toConfiguration: (state) => activeConfigurationFromIndexedState(indexed, state as OwnedIndexedState),
   snapshot: (state) => snapshotFromIndexedState(indexed, state as OwnedIndexedState),
-  plan: (state, event, retainMicrosteps = false) =>
-    planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps),
-  initial: (args) => {
+  plan: (state, event, retainMicrosteps = false, actorScope) =>
+    planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps, actorScope),
+  initial: (args, actorScope) => {
     const inputArgs = machine.input === undefined
       ? args
       : args.length === 0
       ? (decodeInputSync(machine, machine.input, undefined), args)
       : [decodeInputSync(machine, machine.input, args[0])]
     const initial = machine.initial(...inputArgs as any)
-    const active = normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
+    const normalized = normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
+    const active = actorScope === undefined ? normalized : withActorScope(normalized, actorScope)
     validateInitialConfiguration(machine, active)
     const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
     const configuration = ownedIndexedStateFromActive(indexed, completed)

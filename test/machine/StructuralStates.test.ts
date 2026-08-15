@@ -108,9 +108,9 @@ const makeMachine = () =>
               states: {
                 Paused: {
                   on: {
-                    Play: ({ parent, state, target }) => {
+                    Play: ({ containingState, state, target }) => {
                       assert.strictEqual(state, undefined)
-                      return target.local.Playing.from({ position: Math.min(0, parent.duration) })
+                      return target.local.Playing.from({ position: Math.min(0, containingState.duration) })
                     }
                   }
                 },

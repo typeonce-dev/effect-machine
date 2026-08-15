@@ -139,10 +139,10 @@ describe("structural active state types", () => {
                   expect(state).type.toBe<undefined>()
                 },
                 on: {
-                  Select: ({ parent, parents, state, target }) => {
+                  Select: ({ containingState, ancestors, state, target }) => {
                     expect(state).type.toBe<undefined>()
-                    expect(parent).type.toBe<undefined>()
-                    expect(parents).type.toBe<{}>()
+                    expect(containingState).type.toBe<undefined>()
+                    expect(ancestors).type.toBe<{}>()
                     expect(target.local).type.not.toHaveProperty("with")
                     expect(target.local.Empty.from).type.toBeCallableWith()
                     expect(target.local.Empty.from).type.not.toBeCallableWith({})
@@ -165,14 +165,14 @@ describe("structural active state types", () => {
                 states: {
                   Paused: {
                     on: {
-                      Play: ({ parent, parents, state, target }) => {
+                      Play: ({ containingState, ancestors, state, target }) => {
                         expect(state).type.toBe<undefined>()
-                        expect(parent).type.toBe<Ready>()
-                        expect(parents).type.toBe<{ readonly "player.transport.Ready": Ready }>()
+                        expect(containingState).type.toBe<Ready>()
+                        expect(ancestors).type.toBe<{ readonly "player.transport.Ready": Ready }>()
                         expect(target.local).type.toHaveProperty("with")
                         expect(target.local.Playing.from).type.toBeCallableWith({ position: 0 })
                         return target.local.with.from(
-                          { duration: parent.duration },
+                          { duration: containingState.duration },
                           (ready) => ready.Playing.from({ position: 0 })
                         )
                       }

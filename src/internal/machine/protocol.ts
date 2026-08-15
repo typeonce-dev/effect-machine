@@ -15,7 +15,7 @@ import { MachineSchemaDecodeError } from "./errors.js"
 import { getStateNodeSchema, isStateInput } from "./topology.js"
 
 export interface DecodeBoundaryOptions {
-  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "history" | "configuration"
+  readonly boundary: "input" | "event" | "emission" | "state" | "output" | "history" | "configuration"
   readonly state?: string
   readonly event?: string
 }
@@ -25,6 +25,8 @@ interface MachineProtocolSchemas {
   readonly emit: Schema.Top
   readonly eventConstructors: ReadonlySet<object>
   readonly trustedEvents: WeakSet<object>
+  readonly emissionConstructors: ReadonlySet<object>
+  readonly trustedEmissions: WeakSet<object>
 }
 
 interface EventProtocolDefinition {
@@ -42,6 +44,7 @@ interface EventConstruction {
 }
 
 interface EventConstructionDefinition {
+  readonly kind: Machine.EventProtocolKind
   readonly schema: Machine.TaggedSchema
   readonly input: unknown
   readonly inputError?: unknown
@@ -124,13 +127,21 @@ const getEventProtocolDefinition = (
 ): EventProtocolDefinition => {
   const definition = eventProtocolDefinitions.get(protocol as object)
   if (definition === undefined) {
-    throw new Error("Machine expected an event protocol created with Machine.events or Machine.internalEvents")
+    throw new Error(
+      "Machine expected an event protocol created with Machine.events, Machine.internalEvents, or Machine.emittedEvents"
+    )
   }
   if (expectedKind !== undefined && definition.kind !== expectedKind) {
     throw new Error(`Machine expected a ${expectedKind} event protocol`)
   }
   return definition
 }
+
+export const isEventProtocol = <Kind extends Machine.EventProtocolKind>(
+  value: unknown,
+  kind: Kind
+): value is Machine.EventProtocol.Any<Kind> =>
+  typeof value === "object" && value !== null && eventProtocolDefinitions.get(value)?.kind === kind
 
 export const eventProtocolSchemas = <Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
   protocol: Machine.EventProtocol<Machine.EventProtocolKind, Schemas>
@@ -142,9 +153,13 @@ export const inputEventSchemas = (machine: Machine.Any): ReadonlyArray<Machine.T
 export const internalEventSchemas = (machine: Machine.Any): ReadonlyArray<Machine.TaggedSchema> =>
   getEventProtocolDefinition(machine.internalEvents, "internal").schemas
 
+export const emittedEventSchemas = (machine: Machine.Any): ReadonlyArray<Machine.TaggedSchema> =>
+  getEventProtocolDefinition(machine.emittedEvents, "emitted").schemas
+
 export const setProtocol = (machine: Machine.Any): void => {
   const inputEvents = inputEventSchemas(machine)
   const localEvents = internalEventSchemas(machine)
+  const emittedEvents = emittedEventSchemas(machine)
   const publicTags = new Set(Reflect.ownKeys(machine.events))
   for (const tag of Reflect.ownKeys(machine.internalEvents)) {
     if (publicTags.has(tag)) {
@@ -154,9 +169,11 @@ export const setProtocol = (machine: Machine.Any): void => {
   const events = [...inputEvents, ...localEvents]
   setProtocolSchemas(machine, {
     event: Schema.Union(events),
-    emit: Schema.Union(machine.emits),
+    emit: Schema.Union(emittedEvents),
     eventConstructors: collectEventConstructors(events),
-    trustedEvents: new WeakSet()
+    trustedEvents: new WeakSet(),
+    emissionConstructors: collectEventConstructors(emittedEvents),
+    trustedEmissions: new WeakSet()
   })
 }
 
@@ -167,6 +184,7 @@ export const getEventName = (event: unknown): string | undefined =>
   hasProperty(event, "_tag") ? String(event._tag) : undefined
 
 const makeEventConstruction = (
+  kind: Machine.EventProtocolKind,
   schema: Machine.TaggedSchema,
   tag: PropertyKey,
   input: unknown
@@ -186,6 +204,7 @@ const makeEventConstruction = (
     _tag: tag
   }
   eventConstructionDefinitions.set(construction, {
+    kind,
     schema,
     input: ownedInput,
     ...(inputError === undefined ? {} : { inputError })
@@ -197,6 +216,7 @@ const isEventConstruction = (value: unknown): value is EventConstruction =>
   typeof value === "object" && value !== null && eventConstructionDefinitions.has(value)
 
 const eventConstructors = (
+  kind: Machine.EventProtocolKind,
   schemas: ReadonlyArray<Machine.TaggedSchema>
 ): Readonly<Record<PropertyKey, (...args: ReadonlyArray<unknown>) => EventConstruction>> => {
   const leaves: Array<Machine.TaggedSchema> = []
@@ -252,7 +272,7 @@ const eventConstructors = (
       }
       Object.defineProperty(constructors, tag, {
         value: (...args: ReadonlyArray<unknown>) =>
-          makeEventConstruction(schema, tag, args.length === 0 ? {} : args[0]),
+          makeEventConstruction(kind, schema, tag, args.length === 0 ? {} : args[0]),
         enumerable: true
       })
     }
@@ -268,7 +288,7 @@ export const makeEventProtocol = <
   schemas: Schemas
 ): Machine.EventProtocol<Kind, Schemas> => {
   const ownedSchemas = Object.freeze(Array.from(schemas)) as unknown as Schemas
-  const protocol = eventConstructors(ownedSchemas) as Machine.EventProtocol<Kind, Schemas>
+  const protocol = eventConstructors(kind, ownedSchemas) as Machine.EventProtocol<Kind, Schemas>
   eventProtocolDefinitions.set(protocol as object, { kind, schemas: ownedSchemas })
   return Object.freeze(protocol) as Machine.EventProtocol<Kind, Schemas>
 }
@@ -336,13 +356,14 @@ const makeBoundarySync = <A>(
 
 const eventConstructionProtocolError = (
   machine: Machine.Any,
-  construction: EventConstruction
+  construction: EventConstruction,
+  boundary: "event" | "emission"
 ): MachineSchemaDecodeError =>
   new MachineSchemaDecodeError({
     machineId: machine.id,
-    boundary: "event",
+    boundary,
     event: String(construction._tag),
-    cause: Cause.die(new Error("Constructed event schema does not belong to the machine event protocol"))
+    cause: Cause.die(new Error(`Constructed ${boundary} schema does not belong to the machine ${boundary} protocol`))
   })
 
 const eventConstructionInput = (
@@ -358,11 +379,12 @@ const eventConstructionInput = (
 const eventConstructionInputError = (
   machine: Machine.Any,
   construction: EventConstruction,
+  boundary: "event" | "emission",
   cause: unknown
 ): MachineSchemaDecodeError =>
   new MachineSchemaDecodeError({
     machineId: machine.id,
-    boundary: "event",
+    boundary,
     event: String(construction._tag),
     cause: Cause.die(cause)
   })
@@ -370,52 +392,68 @@ const eventConstructionInputError = (
 const decodeEventConstruction = (
   machine: Machine.Any,
   protocol: MachineProtocolSchemas,
-  construction: EventConstruction
+  construction: EventConstruction,
+  boundary: "event" | "emission"
 ): Effect.Effect<unknown, MachineSchemaDecodeError> => {
   const definition = eventConstructionDefinitions.get(construction)
-  if (definition === undefined || !protocol.eventConstructors.has(definition.schema as object)) {
-    return Effect.fail(eventConstructionProtocolError(machine, construction))
+  const constructors = boundary === "event" ? protocol.eventConstructors : protocol.emissionConstructors
+  if (
+    definition === undefined ||
+    (boundary === "emission" ? definition.kind !== "emitted" : definition.kind === "emitted") ||
+    !constructors.has(definition.schema as object)
+  ) {
+    return Effect.fail(eventConstructionProtocolError(machine, construction, boundary))
   }
   return Effect.try({
     try: () => eventConstructionInput(construction, definition),
-    catch: (cause) => eventConstructionInputError(machine, construction, cause)
+    catch: (cause) => eventConstructionInputError(machine, construction, boundary, cause)
   }).pipe(
     Effect.flatMap((input) =>
       definition.schema.makeEffect(input as never).pipe(
         Effect.mapError((cause) =>
           new MachineSchemaDecodeError({
             machineId: machine.id,
-            boundary: "event",
+            boundary,
             event: String(construction._tag),
             cause: new Schema.SchemaError(cause)
           })
         )
       )
     ),
-    Effect.tap((event) => Effect.sync(() => protocol.trustedEvents.add(event as object)))
+    Effect.tap((event) =>
+      Effect.sync(() =>
+        (boundary === "event" ? protocol.trustedEvents : protocol.trustedEmissions).add(event as object)
+      )
+    )
   )
 }
 
 const decodeEventConstructionSync = (
   machine: Machine.Any,
   protocol: MachineProtocolSchemas,
-  construction: EventConstruction
+  construction: EventConstruction,
+  boundary: "event" | "emission"
 ): unknown => {
   const definition = eventConstructionDefinitions.get(construction)
-  if (definition === undefined || !protocol.eventConstructors.has(definition.schema as object)) {
-    throw eventConstructionProtocolError(machine, construction)
+  const constructors = boundary === "event" ? protocol.eventConstructors : protocol.emissionConstructors
+  if (
+    definition === undefined ||
+    (boundary === "emission" ? definition.kind !== "emitted" : definition.kind === "emitted") ||
+    !constructors.has(definition.schema as object)
+  ) {
+    throw eventConstructionProtocolError(machine, construction, boundary)
   }
   let input: unknown
   try {
     input = eventConstructionInput(construction, definition)
   } catch (cause) {
-    throw eventConstructionInputError(machine, construction, cause)
+    throw eventConstructionInputError(machine, construction, boundary, cause)
   }
   const event = makeBoundarySync(machine, definition.schema, input, {
-    boundary: "event",
+    boundary,
     event: String(construction._tag)
   })
-  protocol.trustedEvents.add(event as object)
+  ;(boundary === "event" ? protocol.trustedEvents : protocol.trustedEmissions).add(event as object)
   return event
 }
 
@@ -435,7 +473,7 @@ export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSch
 ): Effect.Effect<Machine.EventOf<Events>, MachineSchemaDecodeError> => {
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
-    return decodeEventConstruction(machine, protocol, event) as Effect.Effect<
+    return decodeEventConstruction(machine, protocol, event, "event") as Effect.Effect<
       Machine.EventOf<Events>,
       MachineSchemaDecodeError
     >
@@ -458,7 +496,7 @@ export const decodeEventSync = <const Events extends ReadonlyArray<Machine.Tagge
 ): Machine.EventOf<Events> => {
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
-    return decodeEventConstructionSync(machine, protocol, event) as Machine.EventOf<Events>
+    return decodeEventConstructionSync(machine, protocol, event, "event") as Machine.EventOf<Events>
   }
   if (isTrustedEvent(protocol, event)) {
     return event as Machine.EventOf<Events>
@@ -476,12 +514,22 @@ export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchem
   machine: Machine.Any,
   event: unknown
 ): Effect.Effect<Machine.EmitOf<Emits>, MachineSchemaDecodeError> => {
+  const protocol = getProtocolSchemas(machine)
+  if (isEventConstruction(event)) {
+    return decodeEventConstruction(machine, protocol, event, "emission") as Effect.Effect<
+      Machine.EmitOf<Emits>,
+      MachineSchemaDecodeError
+    >
+  }
+  if (typeof event === "object" && event !== null && protocol.trustedEmissions.has(event)) {
+    return Effect.succeed(event as Machine.EmitOf<Emits>)
+  }
   const eventName = getEventName(event)
   return decodeBoundary<Machine.EmitOf<Emits>>(
     machine,
-    getProtocolSchemas(machine).emit,
+    protocol.emit,
     event,
-    eventName === undefined ? { boundary: "emit" } : { boundary: "emit", event: eventName }
+    eventName === undefined ? { boundary: "emission" } : { boundary: "emission", event: eventName }
   )
 }
 
@@ -489,12 +537,19 @@ export const decodeEmitSync = <const Emits extends ReadonlyArray<Machine.TaggedS
   machine: Machine.Any,
   event: unknown
 ): Machine.EmitOf<Emits> => {
+  const protocol = getProtocolSchemas(machine)
+  if (isEventConstruction(event)) {
+    return decodeEventConstructionSync(machine, protocol, event, "emission") as Machine.EmitOf<Emits>
+  }
+  if (typeof event === "object" && event !== null && protocol.trustedEmissions.has(event)) {
+    return event as Machine.EmitOf<Emits>
+  }
   const eventName = getEventName(event)
   return decodeBoundarySync<Machine.EmitOf<Emits>>(
     machine,
-    getProtocolSchemas(machine).emit,
+    protocol.emit,
     event,
-    eventName === undefined ? { boundary: "emit" } : { boundary: "emit", event: eventName }
+    eventName === undefined ? { boundary: "emission" } : { boundary: "emission", event: eventName }
   )
 }
 

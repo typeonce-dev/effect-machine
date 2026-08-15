@@ -25,7 +25,7 @@ Define schemas first, derive the state topology, then add behavior:
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 
 const State = Schema.TaggedUnion({
   Idle: {},
@@ -70,8 +70,8 @@ const program = Effect.gen(function*() {
 ```
 
 `Machine.start` returns a `MachineRef` with `send`, `state`, `snapshot`,
-`changes`, `join`, and `stop`. Sending enqueues an event; observe `changes` or
-use the testing probe when work must be causally acknowledged.
+`changes`, `emissions`, `join`, and `stop`. Sending enqueues an event; observe
+`changes` or use the testing probe when work must be causally acknowledged.
 
 ## Modeling workflow
 
@@ -123,10 +123,11 @@ schema-backed paths. Add a schema later if the state starts owning data.
 Put data on the narrowest state where it is valid. If sibling phases share
 data, put it on their compound parent.
 
-### Separate public and internal events
+### Separate inputs, raised events, and emissions
 
-`events` is the public command protocol. Invoke results, timer deliveries,
-raised events, and child emissions belong in `internalEvents`:
+`events` is the public actor-input protocol. Events raised to the same machine
+belong in `internalEvents`. Ephemeral outward notifications have their own
+`emittedEvents` protocol:
 
 ```ts
 const Command = Schema.TaggedUnion({ Save: {} })
@@ -134,15 +135,20 @@ const Internal = Schema.TaggedUnion({
   Saved: { id: Schema.String },
   SaveFailed: { message: Schema.String }
 })
+const Emitted = Schema.TaggedUnion({
+  SaveObserved: { id: Schema.String }
+})
 
 export const CommandEvent = Machine.events(Command)
 export type PublicCommandEvent = Machine.EventOf<typeof CommandEvent>
 const InternalEvent = Machine.internalEvents(Internal)
+const Emissions = Machine.emittedEvents(Emitted)
 
 const definition = Machine.make({
   states: States.states,
   events: CommandEvent,
   internalEvents: InternalEvent,
+  emittedEvents: Emissions,
   initial: () => States.initial.Idle.from()
 })
 ```
@@ -157,6 +163,7 @@ events without exposing schema `.make` methods:
 ```ts
 ref.send(CommandEvent.Save())
 enqueue.raise(InternalEvent.Saved({ id: "entry-1" }))
+enqueue.emit(Emissions.SaveObserved({ id: "entry-1" }))
 ```
 
 The returned constructors preserve each schema's make input, including required
@@ -166,6 +173,65 @@ so invalid values fail planning or the running machine with
 Schemas with an open discriminator such as `_tag: Schema.String` remain valid
 protocols but cannot expose a finite constructor set; pass a complete event
 object to `send` or `Machine.plan` for those events.
+
+`ref.emissions` is a hot `Stream`: it publishes only notifications produced
+after subscription, replays nothing, and completes when the actor terminates.
+Snapshots remain separate and stateful: `ref.changes` begins with the current
+lifecycle snapshot and then follows later changes. Because `Machine.start`
+returns only after initialization, startup emissions are not observable from
+the returned ref; represent startup facts in state when they must be retained.
+
+```ts
+const next = ref.emissions.pipe(Stream.take(1), Stream.runHead)
+```
+
+Invalid event and emission constructions fail the machine with a typed
+`MachineSchemaDecodeError`; they do not throw from the constructor call.
+
+### Send explicitly between actors
+
+`raise` targets the current machine in the same macrostep. `sendTo` targets an
+actor mailbox and is processed later. A child declares the subset of parent
+inputs it may send with `parentEvents`:
+
+```ts
+const ParentEvents = Machine.events(ChildFinished)
+
+const child = Machine.make({
+  states: ChildStates.states,
+  events: ChildEvents,
+  parentEvents: ParentEvents,
+  initial: () => ChildStates.initial.Working.from()
+}).handle({
+  Working: {
+    on: {
+      Finish: ({ parent, target }, enqueue) => {
+        if (parent !== undefined) {
+          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+        }
+        return target.full.Done.from()
+      }
+    }
+  },
+  Done: {}
+})
+
+const Child = Machine.child("worker", child)
+const ParentInputs = Machine.events(Start, ParentEvents)
+```
+
+The same child remains isolated and may be started as a root, where `parent` is
+`undefined`. When `Child` is invoked, the parent definition must accept every
+event in `parentEvents`; otherwise `.handle(...)` is a compile-time error.
+Inside the child, the parent reference accepts only those declared events.
+`emit` never sends to the parent: it only publishes on the emitting actor's
+`emissions` stream.
+
+Every handler also receives `self`, which can be targeted with `sendTo` when a
+later mailbox turn is required. Use `raise` instead for same-macrostep work.
+Structural state values use distinct names: `containingState` is the immediate
+valued state in the same statechart, while `ancestors` maps valued ancestor
+paths. `parent` always means the owning actor reference.
 
 ### Choose the target by scope
 
@@ -270,6 +336,17 @@ The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 `AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
 equality-aware derivations. React applications using `@effect/atom-react` need
 a `RegistryProvider`.
+
+Emissions stay streams rather than becoming retained atom state:
+
+```ts
+const rootEmissions = AtomMachine.emissions(counterAtom)
+const childEmissions = AtomMachine.childEmissions(counterAtom.child(Worker))
+```
+
+These streams require the same `AtomRegistry`, follow the currently mounted
+actor instance, and do not replay notifications from an earlier subscription
+or child instance.
 
 ## Persistence
 

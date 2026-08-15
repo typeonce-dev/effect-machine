@@ -319,6 +319,56 @@ describe("machine planner and runtime strategies", () => {
       }
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("publishes and validates emitted events in generic and compiled managed runtimes", () =>
+    Effect.gen(function*() {
+      class Idle extends Schema.TaggedClass<Idle>("StrategyEmissionIdle")("Idle", {}) {}
+      class Publish extends Schema.TaggedClass<Publish>("StrategyEmissionPublish")("Publish", {}) {}
+      class Published extends Schema.TaggedClass<Published>("StrategyEmissionPublished")("Published", {
+        value: Schema.Number
+      }) {}
+      const states = Machine.defineStates({ Idle })
+      const Events = Machine.events(Publish)
+      const Emissions = Machine.emittedEvents(Published)
+      let value: unknown = 1
+      const machine = Machine.make({
+        states: states.states,
+        events: Events,
+        emittedEvents: Emissions,
+        initial: () => states.initial.Idle(new Idle({}))
+      }).handle({
+        Idle: {
+          on: {
+            Publish: ({ parent, self }, enqueue) => {
+              assert.strictEqual(parent, undefined)
+              assert.ok(self.sessionId.startsWith("machine:"))
+              enqueue.emit(Emissions.Published({ value } as never))
+            }
+          }
+        }
+      })
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        value = 1
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        const observed = yield* ref.emissions.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* ref.send(Events.Publish())
+        assert.deepStrictEqual(Array.from(yield* Fiber.join(observed)), [new Published({ value: 1 })])
+        yield* ref.stop
+
+        value = "invalid"
+        const invalid = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* invalid.send(Events.Publish())
+        const error = yield* Effect.flip(invalid.join)
+        assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+        assert.strictEqual(error.boundary, "emission")
+        assert.strictEqual(error.event, "Published")
+      }
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("matches acknowledged probe delivery in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()
@@ -495,15 +545,17 @@ describe("machine planner and runtime strategies", () => {
                 const current = generation
                 return Machine.logic({
                   initial: "active",
-                  run: ({ sendParent, setState }) =>
-                    (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
-                      Effect.andThen(Effect.never),
-                      Effect.onInterrupt(() =>
-                        setState("stale").pipe(
-                          Effect.andThen(sendParent(new Stale({})))
+                  run: ({ parent, sendTo, setState }) =>
+                    parent === undefined ?
+                      Effect.die("worker expected an owning actor") :
+                      (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
+                        Effect.andThen(Effect.never),
+                        Effect.onInterrupt(() =>
+                          setState("stale").pipe(
+                            Effect.andThen(sendTo(parent, new Stale({})))
+                          )
                         )
                       )
-                    )
                 })
               },
               onFailure: () => undefined,

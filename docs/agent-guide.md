@@ -22,10 +22,10 @@ declared:
 
 1. Domain schemas used by state and event fields.
 2. Tagged schemas for states that own data.
-3. Tagged public-event, internal-event, and emitted-event schemas.
+3. Tagged public-event, internal-event, parent-event, and emitted-event schemas.
 4. `Machine.defineStates`.
-5. `Machine.make`, including input, events, internal events, emits, and the
-   initial function.
+5. `Machine.make`, including input, `events`, `internalEvents`, `parentEvents`,
+   `emittedEvents`, and the initial function.
 6. One or more `.handle(...)` calls.
 7. Child descriptors.
 8. Runtime, Atom, or Cluster adapters.
@@ -80,7 +80,7 @@ the deferred constructors preserve that identity after decoding.
   a handler.
 - Every declared output schema needs a matching handler implementation before
   planning or execution.
-- `parents` keys are full dotted paths.
+- Handler `ancestors` keys are full dotted paths.
 - Invoke lifetimes follow state entry and exit, not the spelling of the target
   builder.
 - Handle every typed invoked Effect failure with `onFailure`. Defects and
@@ -88,9 +88,10 @@ the deferred constructors preserve that identity after decoding.
 - Reuse an exported child descriptor for inline invocation, `sendTo`, and child
   lookup. Independently constructed descriptors are equivalent only when both
   their id and machine identity match.
-- `events` is the public input protocol. `internalEvents` contains machine-local
-  deliveries such as raised events and invoked-child emissions. Handlers see
-  both; typed public `send` and `Machine.plan` accept only `events`.
+- `events` is the public actor-input protocol. `internalEvents` contains
+  machine-local raised events. `parentEvents` describes the public events a
+  child may send to its owner. `emittedEvents` describes outward ephemeral
+  notifications and is never delivered implicitly to a parent.
 - Event tags in `events` and `internalEvents` must be disjoint.
 - Event tags must also be unique within each protocol list.
 
@@ -156,8 +157,8 @@ States.get(snapshot, "Form")                  // type error: no value schema
 
 For a schema-less path, builders expose only `.from(...)`; the direct callable
 form is reserved for already-decoded schema values. Structural ancestors are
-also omitted from `parents`; an immediate structural parent is typed as
-`undefined`. Add `schema` when a state begins to own data or needs runtime
+also omitted from `ancestors`; an immediate structural containing state is
+typed as `undefined`. Add `schema` when a state begins to own data or needs runtime
 validation and persistence for that data.
 
 Use an atomic state when no child phase can be active beneath it.
@@ -380,7 +381,7 @@ parallel builders still require a callback selecting their active child or
 every active region. Omitted input is normalized to `{}` and still passes
 through `schema.makeEffect`, including refinements.
 
-## Reading state and parents
+## Reading state and structural ancestors
 
 `Machine.defineStates` returns typed helpers:
 
@@ -402,16 +403,18 @@ States.matches(ready, "Route.Ready.Saving")
 
 All paths are checked against the definition. `get` and `getWithParents` accept
 only schema-backed paths; use `matches` or `getSnapshot` for any active path.
-`context.parent` is the immediate typed parent value (`undefined` at a root or
-when that parent is schema-less). `parents` contains only valued ancestors. Use
-its full paths when another ancestor value is needed:
+`context.containingState` is the immediate typed state value (`undefined` at a
+root or when that state is schema-less). `context.ancestors` contains only
+valued structural ancestors. This is separate from `context.parent`, which is
+the owning actor reference or `undefined` for a root actor. Use full state paths
+when another ancestor value is needed:
 
 ```ts
-parents["Route.Ready"]
-parents["Route.Ready.Editing"]
+ancestors["Route.Ready"]
+ancestors["Route.Ready.Editing"]
 ```
 
-Do not guess short properties such as `parents.Ready`.
+Do not guess short properties such as `ancestors.Ready`.
 
 ### Inspecting the full transition configuration
 
@@ -473,10 +476,71 @@ Closed statechart and actor operations use `enqueue`:
 
 ```ts
 Submit: ({ target }, enqueue) => {
-  enqueue.emit(new SaveRequested({}))
+  enqueue.emit(Emissions.SaveRequested())
   return target.local.Saving.from()
 }
 ```
+
+Declare emission constructors separately from actor inputs:
+
+```ts
+const Emissions = Machine.emittedEvents(SaveRequested, AuditRecorded)
+
+const definition = Machine.make({
+  events: Commands,
+  internalEvents: InternalEvents,
+  emittedEvents: Emissions,
+  // ...
+})
+```
+
+`enqueue.raise(...)` is a same-macrostep input to self. `enqueue.sendTo(...)`
+targets an actor mailbox and is processed later. `enqueue.emit(...)` is neither:
+it publishes a one-off outward notification. Observe it with
+`ref.emissions`, a hot non-replayed `Stream` that completes with the actor.
+`ref.changes` is stateful and begins with the current lifecycle snapshot.
+Startup emissions occur before `Machine.start` returns and therefore are not
+visible through the returned ref; use state for facts that must be retained.
+
+For child-to-parent input, export a public builder protocol and reuse it at both
+composition boundaries:
+
+```ts
+export const ParentEvents = Machine.events(ChildFinished)
+
+const child = Machine.make({
+  events: ChildEvents,
+  parentEvents: ParentEvents,
+  // ...
+}).handle({
+  Working: {
+    on: {
+      Finish: ({ parent }, enqueue) => {
+        if (parent !== undefined) {
+          enqueue.sendTo(parent, ParentEvents.ChildFinished())
+        }
+      }
+    }
+  }
+})
+
+const parent = Machine.make({
+  events: Machine.events(ParentCommands, ParentEvents),
+  // ...
+})
+```
+
+Invoking the child under a parent that lacks any required `parentEvents` case
+is a type error. Within child handlers, `parent` accepts only that protocol.
+The same child may run as a root, where `parent` is `undefined`. `self` accepts
+the machine's public inputs. Neither actor reference is a structural state
+value; use `containingState` and `ancestors` for statechart ancestry.
+
+Atom-backed actors retain the same transient semantics. Use
+`AtomMachine.emissions(machineAtom)` for a root and
+`AtomMachine.childEmissions(childAtom)` for the currently active child. Both
+return streams requiring the corresponding `AtomRegistry`; emissions are not
+stored as atom state.
 
 For asynchronous validation or persistence, invoke an Effect or child machine
 from the state and handle its typed success or failure event in a later
@@ -551,8 +615,9 @@ type AnyHandledEvent = Machine.Machine.Event<typeof definition>
 
 `MachineRef.send`, `machineAtom.send`, and `Machine.plan` accept decoded public
 events or constructions returned by `Machine.events`. Transition handlers
-receive only decoded events. Raised events and child emissions additionally
-accept constructions from `Machine.internalEvents`. The
+receive only decoded events. Raised events additionally accept constructions
+from `Machine.internalEvents`; outward notifications accept constructions from
+`Machine.emittedEvents`. The
 local planner and runtime intentionally share the complete decoder to support
 those internal deliveries, so JavaScript or `any` can bypass the local public
 distinction.
@@ -582,11 +647,11 @@ self-interrupts fails the parent. `onDone` is required when the output is not
 are forbidden when their channel is `never`.
 
 The source may also be a function of the owning state's entry context when it
-needs `state`, `parent`, `parents`, or the entry `event`. Source construction
+needs `state`, `containingState`, `ancestors`, or the entry `event`. Source construction
 errors, defects, and interruption are machine failures rather than a second
 phase in `onFailure`.
 
-When a source function reads `state`, `parent`, `parents`, or the entry `event`,
+When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
 `Machine.invoke` infers that owner context and the returned Effect's output,
 error, and service channels together. No return annotation is needed:
 
@@ -955,13 +1020,19 @@ Wrap the initial builder result:
 initial: () => States.initial.Idle.from()
 ```
 
-### Invoked child emits events not accepted by the parent
+### Invoked child expects events not accepted by the parent
 
-Create an internal descriptor from the child's emitted schemas:
+Export one parent-event protocol from the child boundary and compose it into
+the parent's public events:
 
 ```ts
-events: Machine.events(Submit),
-internalEvents: Machine.internalEvents(...ChildMachine.emits)
+export const ChildParentEvents = Machine.events(ChildFinished)
+
+// child
+parentEvents: ChildParentEvents
+
+// parent
+events: Machine.events(Submit, ChildParentEvents)
 ```
 
 ### An internal event is rejected by `send`
@@ -996,10 +1067,10 @@ handlers own behavior.
 
 ### Parent property does not exist
 
-Use its full path:
+Use the structural ancestor's full path:
 
 ```ts
-parents["Route.Ready"]
+ancestors["Route.Ready"]
 ```
 
 ### Child descriptor types are unrelated

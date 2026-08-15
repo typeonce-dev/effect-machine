@@ -43,16 +43,19 @@ const ChildStates = Machine.defineStates({
     output: Schema.String
   }
 })
+const ChildParentEvents = Machine.events(Internal.cases.ChildNotice)
 const childMachine = Machine.make({
   states: ChildStates.states,
   events: Machine.events(),
-  emits: [Internal.cases.ChildNotice],
+  parentEvents: ChildParentEvents,
   input: Schema.Struct({ value: Schema.String }),
   initial: ({ value }) => ChildStates.initial.Done(ChildState.cases.Done.make({ value }))
 }).handle({
   Done: {
-    entry: ({ state }, enqueue) => {
-      enqueue.emit(Internal.cases.ChildNotice.make({ value: state.value }))
+    entry: ({ parent, state }, enqueue) => {
+      if (parent !== undefined) {
+        enqueue.sendTo(parent, ChildParentEvents.ChildNotice({ value: state.value }))
+      }
     },
     output: ({ state }) => state.value
   }
@@ -82,11 +85,12 @@ const States = Machine.defineStates({
   }
 })
 
+const Emissions = Machine.emittedEvents(Emitted.cases.Notice)
 const machine = Machine.make({
   states: States.states,
-  events: Machine.events(Event.cases.Begin, Event.cases.Save),
-  internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted, ...childMachine.emits),
-  emits: [Emitted.cases.Notice],
+  events: Machine.events(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
+  internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
+  emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
   initial: ({ seed: _seed }) => States.initial.Idle(State.cases.Idle.make({}))
 }).handle({
@@ -124,7 +128,7 @@ const machine = Machine.make({
             },
             on: {
               ChildNotice: ({ event, target }, enqueue) => {
-                enqueue.emit(Emitted.cases.Notice.make({ value: event.value }))
+                enqueue.emit(Emissions.Notice({ value: event.value }))
                 return target.local.Saving(State.cases.Saving.make({ value: event.value }))
               },
               ChildCompleted: ({ event, target }) => target.full.Done(State.cases.Done.make({ value: event.value }))
@@ -298,11 +302,13 @@ const machineAtom = Bound.make(machine, { seed: "initial" })
 type Snapshot = Machine.Machine.Snapshot<typeof States.states>
 type StateSuccess = Atom.Success<typeof machineAtom.state>
 type SendEvent = typeof machineAtom.send extends Atom.Writable<any, infer InputEvent> ? InputEvent : never
-type Output = typeof machineAtom extends AtomMachine.MachineAtom<any, any, any, infer Value, any> ? Value : never
+type Output = typeof machineAtom extends AtomMachine.MachineAtom<any, any, any, infer Value, any, any> ? Value : never
 type Failure = Atom.Failure<typeof machineAtom.result>
 
 type StateIsExact = Expect<Equal<StateSuccess, Snapshot>>
-type EventsArePublicOnly = Expect<Equal<SendEvent, Machine.Machine.EventInput<typeof Event.Type>>>
+type EventsArePublicOnly = Expect<
+  Equal<SendEvent, Machine.Machine.EventInput<Machine.Machine.InputEvent<typeof machine>>>
+>
 type OutputIsExact = Expect<Equal<Output, string>>
 type RuntimeErrorIsPreserved = Expect<Equal<Extract<Failure, RuntimeFailure>, RuntimeFailure>>
 type FailureIsNotUnknown = Expect<Equal<unknown extends Failure ? true : false, false>>

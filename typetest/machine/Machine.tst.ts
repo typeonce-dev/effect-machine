@@ -229,14 +229,14 @@ describe("Machine", () => {
 
   it("machine contexts expose type-safe parent state values", () => {
     const nested = null as unknown as SignedOutContext
-    expect(nested.parent).type.toBe<Auth>()
-    expect(nested.parents).type.toBe<{
+    expect(nested.containingState).type.toBe<Auth>()
+    expect(nested.ancestors).type.toBe<{
       readonly up: Up
       readonly "up.auth": Auth
     }>()
-    expect(nested.parents.up).type.toBe<Up>()
-    expect(nested.parents["up.auth"]).type.toBe<Auth>()
-    expect(nested.parents).type.not.toHaveProperty("up.sync")
+    expect(nested.ancestors.up).type.toBe<Up>()
+    expect(nested.ancestors["up.auth"]).type.toBe<Auth>()
+    expect(nested.ancestors).type.not.toHaveProperty("up.sync")
     expect(nested).type.not.toHaveProperty("action")
 
     type NestedParents = {
@@ -249,7 +249,7 @@ describe("Machine", () => {
         readonly [typeof SignIn],
         [],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
     expect<
       Machine.Machine.InvokeContext<
@@ -257,7 +257,7 @@ describe("Machine", () => {
         readonly [typeof SignIn],
         [],
         "up.auth.signedOut"
-      >["parent"]
+      >["containingState"]
     >().type.toBe<Auth>()
     expect<
       Machine.Machine.InvokeContext<
@@ -265,7 +265,7 @@ describe("Machine", () => {
         readonly [typeof SignIn],
         [],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
     expect<
       Machine.Machine.AlwaysContext<
@@ -273,7 +273,7 @@ describe("Machine", () => {
         readonly [typeof SignIn],
         [],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
     expect<
       Machine.Machine.DoneContext<
@@ -281,26 +281,26 @@ describe("Machine", () => {
         readonly [typeof SignIn],
         [],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
     expect<
       Machine.Machine.FinalOutputContext<
         typeof UpStates.states,
         readonly [typeof SignIn],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
     expect<
       Machine.Machine.ParallelOutputContext<
         typeof UpStates.states,
         readonly [typeof SignIn],
         "up.auth.signedOut"
-      >["parents"]
+      >["ancestors"]
     >().type.toBe<NestedParents>()
 
     const root = null as unknown as SignInContext
-    expect(root.parent).type.toBe<undefined>()
-    expect(root.parents).type.toBe<{}>()
+    expect(root.containingState).type.toBe<undefined>()
+    expect(root.ancestors).type.toBe<{}>()
 
     expect<
       Machine.Machine.ParentStateValue<
@@ -458,7 +458,7 @@ describe("Machine", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
-      emits: [SignInCompleted],
+      emittedEvents: Machine.emittedEvents(SignInCompleted),
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
@@ -820,7 +820,7 @@ describe("Machine", () => {
     const child = Machine.make({
       states: childStates.states,
       events: Machine.events(SignIn),
-      emits: [SignIn],
+      emittedEvents: Machine.emittedEvents(SignIn),
       input: ChildInput,
       initial: () => childStates.initial.done(new Down({}))
     }).handle({
@@ -859,7 +859,7 @@ describe("Machine", () => {
     const incompatibleEmits = Machine.make({
       states: childStates.states,
       events: Machine.events(SignIn),
-      emits: [Down],
+      emittedEvents: Machine.emittedEvents(Down),
       input: ChildInput,
       initial: () => childStates.initial.done(new Down({}))
     }).handle({

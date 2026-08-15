@@ -47,8 +47,8 @@ export const makeCollector = <Event>(machine: Machine.Any): Collected<Event> => 
       emit: (event) => {
         emittedEvents.push(decodeEmitSync(machine, event))
       },
-      sendTo: (child: unknown, event: unknown) => {
-        commands.push({ _tag: "SendTo", child: child as any, event })
+      sendTo: (target: unknown, event: unknown) => {
+        commands.push({ _tag: "SendTo", target: target as any, event })
       },
       stop: (child: unknown) => {
         commands.push({ _tag: "Stop", child: child as any })

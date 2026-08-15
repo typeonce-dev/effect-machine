@@ -30,8 +30,8 @@ const machine = Machine.make({
       Routing: {
         choice: {
           targets: ["Flow.Approved", "Flow.Rejected"],
-          transition: ({ parent, target }) => {
-            return parent.score >= 70
+          transition: ({ containingState, target }) => {
+            return containingState.score >= 70
               ? target.local.Approved(new Approved({}))
               : target.local.Rejected(new Rejected({}))
           }
