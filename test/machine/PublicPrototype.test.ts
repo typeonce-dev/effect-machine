@@ -9,7 +9,7 @@ it("uses the public pipeable and inspectable prototypes", () => {
   const states = Machine.defineStates({ Idle })
   const machine = Machine.make({
     states: states.states,
-    events: [Start],
+    events: Machine.events(Start),
     initial: () => states.initial.Idle(new Idle())
   })
 

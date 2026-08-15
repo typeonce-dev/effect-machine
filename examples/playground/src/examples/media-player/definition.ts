@@ -1,5 +1,7 @@
 import { Machine } from "@typeonce/effect-machine"
-import { initialAudioSettings, MediaPlayerEvent, MediaPlayerInternalEvent, MediaPlayerStates } from "./schemas.ts"
+import { initialAudioSettings, MediaPlayerEvents, MediaPlayerInternalEvents, MediaPlayerStates } from "./schemas.ts"
+
+export { MediaPlayerEvents, MediaPlayerInternalEvents } from "./schemas.ts"
 
 const initialPlayer = () =>
   MediaPlayerStates.initial.Player.from((player) =>
@@ -16,10 +18,7 @@ const initialPlayer = () =>
 export const MediaPlayerDefinition = Machine.make({
   id: "MediaPlayer",
   states: MediaPlayerStates.states,
-  events: [MediaPlayerEvent],
-  internalEvents: [MediaPlayerInternalEvent],
+  events: MediaPlayerEvents,
+  internalEvents: MediaPlayerInternalEvents,
   initial: initialPlayer
 })
-
-export const MediaPlayerEvents = Machine.events(MediaPlayerDefinition)
-export const MediaPlayerInternalEvents = Machine.internalEvents(MediaPlayerDefinition)

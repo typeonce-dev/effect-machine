@@ -1,10 +1,12 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
-export const TurnstileEvent = Schema.TaggedUnion({
+const TurnstileEvent = Schema.TaggedUnion({
   CoinInserted: {},
   GatePushed: {}
 })
+
+export const TurnstileEvents = Machine.events(TurnstileEvent)
 
 export const TurnstileStates = Machine.defineStates({
   Locked: {},
@@ -14,11 +16,9 @@ export const TurnstileStates = Machine.defineStates({
 const definition = Machine.make({
   id: "Turnstile",
   states: TurnstileStates.states,
-  events: [TurnstileEvent],
+  events: TurnstileEvents,
   initial: () => TurnstileStates.initial.Locked.from()
 })
-
-export const TurnstileEvents = Machine.events(definition)
 
 export const TurnstileMachine = definition.handle({
   Locked: {

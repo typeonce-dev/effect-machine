@@ -114,7 +114,7 @@ describe("Machine", () => {
       const on: { Ping?: typeof transition } = { Ping: transition }
       const machine = Machine.make({
         states: states.states,
-        events: [Ping],
+        events: Machine.events(Ping),
         initial: () => states.initial.Stable(new Stable({}))
       }).handle({ Stable: { on } })
 
@@ -289,7 +289,7 @@ describe("Machine", () => {
       const states = Machine.defineStates({ Idle })
       const machine = Machine.make({
         states: states.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
       })
@@ -304,7 +304,7 @@ describe("Machine", () => {
     const states = Machine.defineStates({ Idle })
     const machine = Machine.make({
       states: states.states,
-      events: [],
+      events: Machine.events(),
       initial: () => states.initial.Idle(new Idle({ userId: "user-1" }))
     })
 
@@ -324,7 +324,7 @@ describe("Machine", () => {
     const machine = Machine.make({
       id: "UserMachine",
       states: states.states,
-      events: [Submit],
+      events: Machine.events(Submit),
       input: Input,
       initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
     }).handle({
@@ -351,7 +351,7 @@ describe("Machine", () => {
       const defined = Machine.defineStates(states)
       const machine = Machine.make({
         states: defined.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => defined.initial.idle(new Idle({ userId: "user-1" }))
       })
 
@@ -462,7 +462,7 @@ describe("Machine", () => {
       const entering = new EnteringPayment({ amount: 100 })
       const machine = Machine.make({
         states: states.states,
-        events: [Authorize],
+        events: Machine.events(Authorize),
         initial: () =>
           states.initial.payment(
             payment,
@@ -511,7 +511,7 @@ describe("Machine", () => {
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.fulfillment(
             fulfillment,
@@ -574,14 +574,14 @@ describe("Machine", () => {
         })
         const State = Schema.TaggedStruct("DeferredEventState", { value: Schema.String })
         const states = Machine.defineStates({ Active: State })
+        const events = Machine.events(PublicEvent, Defaulted, FiniteEvent)
+        const internalEvents = Machine.internalEvents(InternalEvent)
         const definition = Machine.make({
           states: states.states,
-          events: [PublicEvent, Defaulted, FiniteEvent],
-          internalEvents: [InternalEvent],
+          events,
+          internalEvents,
           initial: () => states.initial.Active.from({ value: "initial" })
         })
-        const events = Machine.events(definition)
-        const internalEvents = Machine.internalEvents(definition)
         const machine = definition.handle({
           Active: {
             on: {
@@ -600,9 +600,21 @@ describe("Machine", () => {
 
         assert.deepStrictEqual(Object.keys(events), ["SetValue", "Reset", "Defaulted", "Alpha", "Beta"])
         assert.deepStrictEqual(Object.keys(internalEvents), ["Loaded", "TimedOut"])
+        assert.strictEqual(definition.events, events)
+        assert.strictEqual(definition.internalEvents, internalEvents)
+        assert.strictEqual(Object.isFrozen(events), true)
+        assert.strictEqual(Object.hasOwn(events, "schemas"), false)
+        assert.strictEqual(Object.hasOwn(events, "cases"), false)
+        const reset = events.Reset()
+        assert.strictEqual(Object.isFrozen(reset), true)
+        assert.strictEqual(Object.hasOwn(reset, "schema"), false)
+        assert.strictEqual(Object.hasOwn(reset, "input"), false)
 
         const initial = yield* Machine.planInitial(machine)
-        const set = yield* Machine.plan(machine, initial.state, events.SetValue({ value: "next" }))
+        const fields = { value: "next" }
+        const setValue = events.SetValue(fields)
+        fields.value = "mutated"
+        const set = yield* Machine.plan(machine, initial.state, setValue)
         assert.deepStrictEqual(set.next, {
           path: "Active",
           value: { _tag: "DeferredEventState", value: "next" }
@@ -636,20 +648,30 @@ describe("Machine", () => {
         const definition = Machine.make({
           id: "deferred-event-failure",
           states: states.states,
-          events: [Event],
+          events: Machine.events(Event),
           initial: () => states.initial.Idle.from()
         })
-        const events = Machine.events(definition)
+        const events = definition.events
         const machine = definition.handle({ Idle: { on: { Submit: () => undefined } } })
 
         let construction: ReturnType<typeof events.Submit> | undefined
         assert.doesNotThrow(() => {
           construction = events.Submit({ value: "" })
         })
+        const accessorFailure = events.Submit({
+          get value(): string {
+            throw new Error("accessor failed")
+          }
+        })
 
         const initial = yield* Machine.planInitial(machine)
         const planningError = yield* Machine.plan(machine, initial.state, construction!).pipe(Effect.flip)
         assertMachineSchemaDecodeError(planningError, "event", { event: "Submit" })
+        const accessorError = yield* Machine.plan(machine, initial.state, accessorFailure).pipe(Effect.flip)
+        assert.instanceOf(accessorError, Machine.MachineSchemaDecodeError)
+        assert.strictEqual(accessorError.boundary, "event")
+        assert.strictEqual(accessorError.event, "Submit")
+        assert.isTrue(Cause.isCause(accessorError.cause))
 
         const actor = yield* Machine.start(machine)
         const snapshot = yield* sendAndWaitForSnapshot(
@@ -670,8 +692,8 @@ describe("Machine", () => {
         const states = Machine.defineStates({ Loading: {}, Waiting: {}, Done: {} })
         const definition = Machine.make({
           states: states.states,
-          events: [],
-          internalEvents: [InternalEvent],
+          events: Machine.events(),
+          internalEvents: Machine.internalEvents(InternalEvent),
           initial: () => states.initial.Loading.from()
         })
         const machine = definition.handle({
@@ -716,15 +738,15 @@ describe("Machine", () => {
         const states = Machine.defineStates({ Idle: {} })
         const first = Machine.make({
           states: states.states,
-          events: [FirstEvent],
+          events: Machine.events(FirstEvent),
           initial: () => states.initial.Idle.from()
         })
         const second = Machine.make({
           states: states.states,
-          events: [SecondEvent],
+          events: Machine.events(SecondEvent),
           initial: () => states.initial.Idle.from()
         }).handle({ Idle: { on: { Submit: () => undefined } } })
-        const construction = Machine.events(first).Submit({ value: "value" })
+        const construction = first.events.Submit({ value: "value" })
         const initial = yield* Machine.planInitial(second)
         const error = yield* Machine.plan(second, initial.state, construction).pipe(Effect.flip)
 
@@ -733,104 +755,6 @@ describe("Machine", () => {
         assert.strictEqual(error.event, "Submit")
         assert.isTrue(Cause.isCause(error.cause))
       }))
-
-    it.effect("validates once and shares trust only with derived machine definitions", () =>
-      Effect.gen(function*() {
-        let validations = 0
-        const Tick = Schema.TaggedStruct("ConstructedTick", { value: Schema.Number }).pipe(
-          Schema.refine((event): event is typeof event => {
-            validations += 1
-            return true
-          })
-        )
-        const AlternateTick = Schema.TaggedStruct("ConstructedTick", { value: Schema.Number })
-        const Counter = Schema.TaggedStruct("ConstructedCounter", { value: Schema.Number })
-        const states = Machine.defineStates({ Counter })
-        const definition = Machine.make({
-          states: states.states,
-          events: [Tick],
-          initial: () => states.initial.Counter.from({ value: 0 })
-        })
-
-        const tick = Machine.event(definition, Tick, { value: 1 })
-        assert.deepStrictEqual(tick, { _tag: "ConstructedTick", value: 1 })
-        assert.strictEqual(validations, 1)
-
-        const machine = definition.handle({
-          Counter: {
-            on: {
-              ConstructedTick: () => undefined
-            }
-          }
-        })
-        const initial = yield* Machine.planInitial(machine)
-        for (let index = 0; index < 5; index++) {
-          yield* Machine.plan(machine, initial.state, tick)
-        }
-        assert.strictEqual(validations, 1)
-
-        const raw = Tick.make({ value: 2 })
-        assert.strictEqual(validations, 2)
-        yield* Machine.plan(machine, initial.state, raw)
-        assert.strictEqual(validations, 3)
-
-        const unrelated = Machine.make({
-          states: states.states,
-          events: [Tick],
-          initial: () => states.initial.Counter.from({ value: 0 })
-        }).handle({
-          Counter: {
-            on: {
-              ConstructedTick: () => undefined
-            }
-          }
-        })
-        yield* Machine.plan(unrelated, (yield* Machine.planInitial(unrelated)).state, tick)
-        assert.strictEqual(validations, 4)
-
-        assert.throws(
-          () => Machine.event(machine, AlternateTick, { value: 1 }),
-          "Machine.event expected a schema from the machine event protocol"
-        )
-
-        let invalid: unknown
-        try {
-          Machine.event(definition, Tick, { value: "invalid" } as never)
-        } catch (cause) {
-          invalid = cause
-        }
-        assertMachineSchemaDecodeError(invalid, "event")
-      }))
-
-    it("constructs configured TaggedUnion cases", () => {
-      const Event = Schema.TaggedUnion({
-        Ping: { message: Schema.String },
-        Stop: {}
-      })
-      class Defaulted extends Schema.TaggedClass<Defaulted>("ConstructedDefaulted")("Defaulted", {
-        id: Schema.String,
-        label: Schema.String.pipe(
-          Schema.optionalKey,
-          Schema.withConstructorDefault(Effect.succeed("default-label"))
-        )
-      }) {}
-      const State = Schema.TaggedStruct("EventConstructorIdle", {})
-      const states = Machine.defineStates({ Idle: State })
-      const machine = Machine.make({
-        states: states.states,
-        events: [Event, Defaulted],
-        initial: () => states.initial.Idle.from()
-      })
-
-      assert.deepStrictEqual(
-        Machine.event(machine, Event.cases.Ping, { message: "hello" }),
-        { _tag: "Ping", message: "hello" }
-      )
-      assert.deepStrictEqual(Machine.event(machine, Event.cases.Stop), { _tag: "Stop" })
-      const defaulted = Machine.event(machine, Defaulted, { id: "event-1" })
-      assert.instanceOf(defaulted, Defaulted)
-      assert.deepStrictEqual(defaulted, new Defaulted({ id: "event-1", label: "default-label" }))
-    })
   })
 
   describe("state builder from", () => {
@@ -840,7 +764,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-default",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.idle.from({ id: "idle-1" })
         })
 
@@ -868,7 +792,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [Event],
+          events: Machine.events(Event),
           initial: () => states.initial.Idle.from()
         }).handle({
           Idle: {
@@ -903,7 +827,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-default-only",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.DefaultOnly.from()
         })
 
@@ -954,13 +878,13 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-empty-targets",
           states: states.states,
-          events: [
+          events: Machine.events(
             Event.cases.Local,
             Event.cases.LocalWith,
             Event.cases.Branch,
             Event.cases.Full,
             Event.cases.Finish
-          ],
+          ),
           initial: () => states.initial.Flow.from((flow) => flow.Idle.from())
         }).handle({
           Flow: {
@@ -1038,7 +962,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-empty-parallel",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.Parallel.from((parallel) =>
               parallel
@@ -1067,7 +991,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-empty-refinement",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => invalid
         })
 
@@ -1084,7 +1008,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-refinement",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => invalid
         })
 
@@ -1100,7 +1024,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "from-transition-refinement",
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle.from({ userId: "user-1" })
         }).handle({
           NonEmptyIdle: {
@@ -1152,7 +1076,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [Submit],
+          events: Machine.events(Submit),
           initial: () => states.initial.idle.from({ userId: "user-1" })
         }).handle({
           idle: {
@@ -1212,7 +1136,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [Submit],
+          events: Machine.events(Submit),
           initial: () =>
             states.initial.payment.from(
               { id: "payment-1" },
@@ -1263,7 +1187,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [Submit],
+          events: Machine.events(Submit),
           initial: () =>
             states.initial.workflow.from(
               { id: "workflow-1" },
@@ -1309,7 +1233,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           input: NonEmptyInput,
           initial: (input) => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: input.userId }))
         })
@@ -1324,7 +1248,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
         })
 
@@ -1338,7 +1262,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
@@ -1364,7 +1288,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
@@ -1399,7 +1323,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle, NonEmptyLoading })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
@@ -1426,7 +1350,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
@@ -1461,7 +1385,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
@@ -1506,7 +1430,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.all(
               new ParallelRoot({ id: "all" }),
@@ -1531,7 +1455,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [NonEmptySubmit],
+          events: Machine.events(NonEmptySubmit),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         })
 
@@ -1555,7 +1479,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           id: "Counter",
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.count(new EncodedCount({ count: 1 }))
         })
         const planned = yield* Machine.planInitial(machine)
@@ -1602,7 +1526,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.fulfillment(
               new Fulfillment({ id: "fulfillment-1" }),
@@ -1651,7 +1575,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.all(
               new ParallelRoot({ id: "all" }),
@@ -1695,7 +1619,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.all(
               new ParallelRoot({ id: "all" }),
@@ -1725,7 +1649,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         })
 
@@ -1742,7 +1666,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         })
 
@@ -1760,7 +1684,7 @@ describe("Machine", () => {
         const states = Machine.defineStates({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
         })
 
@@ -1789,7 +1713,7 @@ describe("Machine", () => {
         })
         const machine = Machine.make({
           states: states.states,
-          events: [],
+          events: Machine.events(),
           initial: () =>
             states.initial.payment(
               new Payment({ id: "payment-1" }),
@@ -1817,7 +1741,7 @@ describe("Machine", () => {
           idle: Idle,
           loading: Loading
         },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => LowercaseInitial.idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -1849,7 +1773,7 @@ describe("Machine", () => {
           a: Duplicate,
           b: Duplicate
         },
-        events: [Submit, Reset],
+        events: Machine.events(Submit, Reset),
         initial: () => DuplicateInitial.a(new Duplicate({ value: "a" }))
       }).handle({
         a: {
@@ -1889,7 +1813,7 @@ describe("Machine", () => {
           a: Duplicate,
           b: Duplicate
         },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => DuplicateInitial.a(new Duplicate({ value: "a" }))
       }).handle({
         a: {
@@ -1921,7 +1845,7 @@ describe("Machine", () => {
             type: "final"
           }
         },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => LowercaseInitial.idle(new Idle({ userId: "user-1" }))
       }).handle({
         idle: {
@@ -1959,7 +1883,7 @@ describe("Machine", () => {
           },
           failed: Failed
         },
-        events: [Authorize],
+        events: Machine.events(Authorize),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -2016,7 +1940,7 @@ describe("Machine", () => {
           },
           failed: Failed
         },
-        events: [Authorize, Reset],
+        events: Machine.events(Authorize, Reset),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -2077,7 +2001,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [Reset],
+        events: Machine.events(Reset),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -2137,7 +2061,7 @@ describe("Machine", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => states.initial.idle(new Idle({ userId: "user-1" }))
       }).handle({
         idle: {
@@ -2229,7 +2153,7 @@ describe("Machine", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () =>
           states.initial.workflow(
             workflow,
@@ -2341,7 +2265,7 @@ describe("Machine", () => {
       )
       const machine = Machine.make({
         states: states.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => initial
       }).handle({
         app: {
@@ -2426,7 +2350,7 @@ describe("Machine", () => {
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.fulfillment(
             fulfillment,
@@ -2513,7 +2437,7 @@ describe("Machine", () => {
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.fulfillment(
             fulfillment,
@@ -2604,7 +2528,7 @@ describe("Machine", () => {
       const nextInventory = new Inventory({ warehouse: "warehouse-2" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.fulfillment(
             fulfillment,
@@ -2696,7 +2620,7 @@ describe("Machine", () => {
       const quoting = new QuotingShipping({ postalCode: "12345" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.fulfillment(
             fulfillment,
@@ -2790,7 +2714,7 @@ describe("Machine", () => {
       const shipping = new Shipping({ address: "Main Street" })
       const machine = Machine.make({
         states: states.states,
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () =>
           states.initial.payment(
             payment,
@@ -2855,7 +2779,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [Authorize, Reset],
+        events: Machine.events(Authorize, Reset),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -2912,7 +2836,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [Reset],
+        events: Machine.events(Reset),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -2961,7 +2885,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [Authorize, Reset],
+        events: Machine.events(Authorize, Reset),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -3039,7 +2963,7 @@ describe("Machine", () => {
           },
           failed: Failed
         },
-        events: [ReserveInventory, Reset],
+        events: Machine.events(ReserveInventory, Reset),
         initial: () => ({
           path: "checkout",
           value: checkout,
@@ -3127,7 +3051,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -3242,7 +3166,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -3382,7 +3306,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [ReserveInventory, Resolve],
+        events: Machine.events(ReserveInventory, Resolve),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -3505,7 +3429,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -3610,7 +3534,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [ReserveInventory, Resolve],
+        events: Machine.events(ReserveInventory, Resolve),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -3693,7 +3617,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
       })
 
@@ -3706,7 +3630,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -3734,7 +3658,7 @@ describe("Machine", () => {
   it("enabled returns the event tags handled by the current state", () => {
     const machine = Machine.make({
       states: { Idle, Loading },
-      events: [Submit, Reset],
+      events: Machine.events(Submit, Reset),
       input: Input,
       initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
     }).handle({
@@ -3763,7 +3687,7 @@ describe("Machine", () => {
         Idle,
         Success: { schema: Success, type: "final" }
       },
-      events: [Submit],
+      events: Machine.events(Submit),
       input: Input,
       initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
     }).handle({
@@ -3785,7 +3709,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Success: SuccessOutput },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -3815,7 +3739,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Success: SuccessOutput },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -3843,7 +3767,7 @@ describe("Machine", () => {
       let outputCalls = 0
       const machine = Machine.make({
         states: { Success: SuccessOutput },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
       }).handle({
         Success: {
@@ -3877,7 +3801,7 @@ describe("Machine", () => {
       let outputCalls = 0
       const machine = Machine.make({
         states: { Success: SuccessOutput },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
       }).handle({
         Success: {
@@ -3906,7 +3830,7 @@ describe("Machine", () => {
           Idle,
           Success: { schema: Success, type: "final" }
         },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -3940,7 +3864,7 @@ describe("Machine", () => {
           Idle,
           Success: { schema: Success, type: "final" }
         },
-        events: [Submit, Reset],
+        events: Machine.events(Submit, Reset),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -3973,7 +3897,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
       }).handle({
         Idle: {
@@ -4000,7 +3924,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4031,7 +3955,7 @@ describe("Machine", () => {
           Idle,
           Success: { schema: Success, type: "final" }
         },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4050,7 +3974,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4073,7 +3997,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4117,7 +4041,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Success: SuccessOutput },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4152,7 +4076,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         id: "UserMachine",
         states: { Idle, Loading },
-        events: [Submit, Reset],
+        events: Machine.events(Submit, Reset),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4176,7 +4100,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, RequestSucceeded],
+        events: Machine.events(Submit, RequestSucceeded),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4217,7 +4141,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, RequestSucceeded],
+        events: Machine.events(Submit, RequestSucceeded),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4259,14 +4183,14 @@ describe("Machine", () => {
       const childStates = Machine.defineStates({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
       })
       const Child = Machine.child("shared-child", childMachine)
       const parentStates = Machine.defineStates({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
@@ -4310,14 +4234,14 @@ describe("Machine", () => {
       const childStates = Machine.defineStates({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
       }).handle({ Idle: {} })
       const Child = Machine.child("owned-child", childMachine)
       const parentStates = Machine.defineStates({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: { invoke: Machine.invoke({ child: Child }) }
@@ -4343,7 +4267,7 @@ describe("Machine", () => {
       const childStates = Machine.defineStates({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
-        events: [],
+        events: Machine.events(),
         input: Input,
         initial: (input) => {
           starts += 1
@@ -4354,7 +4278,7 @@ describe("Machine", () => {
       const parentStates = Machine.defineStates({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
@@ -4389,7 +4313,7 @@ describe("Machine", () => {
       })
       const childMachine = Machine.make({
         states: childStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => childStates.initial.Success(new Success({ requestId: "child-output" }))
       }).handle({
         Success: { output: ({ state }) => state.requestId }
@@ -4401,7 +4325,7 @@ describe("Machine", () => {
       })
       const parentMachine = Machine.make({
         states: parentStates.states,
-        events: [ChildFinished],
+        events: Machine.events(ChildFinished),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
@@ -4423,7 +4347,7 @@ describe("Machine", () => {
       const states = Machine.defineStates({ Idle })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         input: Input,
         initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4453,14 +4377,14 @@ describe("Machine", () => {
       const childStates = Machine.defineStates({ Idle })
       const child = Machine.make({
         states: childStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
       })
       const Child = Machine.child("child-machine", child)
       const parentStates = Machine.defineStates({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4489,7 +4413,7 @@ describe("Machine", () => {
       const parentStates = Machine.defineStates({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4521,7 +4445,7 @@ describe("Machine", () => {
       const error = new InvokeError({ message: "boom" })
       const machine = Machine.make({
         states: { Idle, Loading, Failed: FailedOutput },
-        events: [Submit, RequestFailed],
+        events: Machine.events(Submit, RequestFailed),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4562,8 +4486,8 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit],
-        internalEvents: [RequestSucceeded],
+        events: Machine.events(Submit),
+        internalEvents: Machine.internalEvents(RequestSucceeded),
         initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
       }).handle({
         Idle: {
@@ -4594,7 +4518,7 @@ describe("Machine", () => {
       const childStarted = yield* Deferred.make<void>()
       const machine = Machine.make({
         states: { Loading, Success: SuccessOutput },
-        events: [RequestSucceeded],
+        events: Machine.events(RequestSucceeded),
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4631,7 +4555,7 @@ describe("Machine", () => {
       const childStarted = yield* Deferred.make<void>()
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Resolve, RequestSucceeded],
+        events: Machine.events(Resolve, RequestSucceeded),
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Idle: {
@@ -4683,8 +4607,8 @@ describe("Machine", () => {
       const failure = new InvokeError({ message: "unavailable" })
       const machine = Machine.make({
         states: { Loading, Failed: FailedOutput },
-        events: [],
-        internalEvents: [RequestSucceeded, RequestFailed],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(RequestSucceeded, RequestFailed),
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4711,8 +4635,8 @@ describe("Machine", () => {
       })
       const machine = Machine.make({
         states: { Loading, Success: SuccessOutput },
-        events: [],
-        internalEvents: [RequestSucceeded],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(RequestSucceeded),
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4741,8 +4665,8 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Loading, Success: SuccessOutput },
-        events: [],
-        internalEvents: [RequestSucceeded],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(RequestSucceeded),
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
@@ -4768,7 +4692,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, RequestProgress],
+        events: Machine.events(Submit, RequestProgress),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4812,7 +4736,7 @@ describe("Machine", () => {
       const error = new InvokeError({ message: "boom" })
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4850,7 +4774,7 @@ describe("Machine", () => {
       const release = yield* Deferred.make<void>()
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, RequestProgress],
+        events: Machine.events(Submit, RequestProgress),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4910,7 +4834,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -4965,7 +4889,7 @@ describe("Machine", () => {
       })
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
-        events: [Submit, Resolve, RequestSucceeded],
+        events: Machine.events(Submit, Resolve, RequestSucceeded),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -5049,7 +4973,7 @@ describe("Machine", () => {
             }
           }
         },
-        events: [Authorize],
+        events: Machine.events(Authorize),
         initial: () => ({
           path: "payment",
           value: payment,
@@ -5167,7 +5091,7 @@ describe("Machine", () => {
             output: Schema.String
           }
         },
-        events: [ReserveInventory],
+        events: Machine.events(ReserveInventory),
         initial: () => ({
           path: "fulfillment",
           value: fulfillment,
@@ -5255,7 +5179,7 @@ describe("Machine", () => {
       const defect = new Error("initializer defect")
       const machine = Machine.make({
         states: { Idle },
-        events: [],
+        events: Machine.events(),
         initial: () => {
           throw defect
         }
@@ -5292,7 +5216,7 @@ describe("Machine", () => {
       }
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => invalidInitialState as any
       })
 
@@ -5310,7 +5234,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         id: "LoopMachine",
         states: { Idle, Loading },
-        events: [Submit],
+        events: Machine.events(Submit),
         input: Input,
         initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
       }).handle({
@@ -5340,7 +5264,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         id: "InitialLoopMachine",
         states: { Idle, Loading },
-        events: [],
+        events: Machine.events(),
         initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
       }).handle({
         Idle: {
@@ -5380,7 +5304,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         id: "CompletionLoopMachine",
         states: states.states,
-        events: [Submit],
+        events: Machine.events(Submit),
         initial: () => states.initial.idle(new Idle({ userId: "user-1" }))
       }).handle({
         idle: {
@@ -5444,7 +5368,7 @@ describe("Machine", () => {
   const makeParallelCounterMachine = () =>
     Machine.make({
       states: ParallelCounterStates.states,
-      events: [AdvanceCounters],
+      events: Machine.events(AdvanceCounters),
       initial: () =>
         ParallelCounterStates.initial.running(
           new CounterRunning({}),
@@ -5473,7 +5397,7 @@ describe("Machine", () => {
     const states = Machine.defineStates({ ConcurrentIdle })
     return Machine.make({
       states: states.states,
-      events: [ConcurrentPing],
+      events: Machine.events(ConcurrentPing),
       initial: () => states.initial.ConcurrentIdle(new ConcurrentIdle({}))
     }).handle({
       ConcurrentIdle: {

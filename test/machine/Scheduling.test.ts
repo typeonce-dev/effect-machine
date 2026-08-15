@@ -19,8 +19,8 @@ describe("machine scheduling", () => {
       const states = Machine.defineStates({ SchedulingActive })
       const machine = Machine.make({
         states: states.states,
-        events: [StartBurst],
-        internalEvents: [Burst],
+        events: Machine.events(StartBurst),
+        internalEvents: Machine.internalEvents(Burst),
         initial: () => states.initial.SchedulingActive(new SchedulingActive({ count: 0 }))
       }).handle({
         SchedulingActive: {

@@ -15,8 +15,8 @@ describe("MachineTest", () => {
   const States = Machine.defineStates({ idle: Idle })
   const machine = Machine.make({
     states: States.states,
-    events: [PublicEvent],
-    internalEvents: [InternalEvent],
+    events: Machine.events(PublicEvent),
+    internalEvents: Machine.internalEvents(InternalEvent),
     input: Input,
     initial: () => States.initial.idle(new Idle({}))
   }).handle({
@@ -50,7 +50,7 @@ describe("MachineTest", () => {
   it("omits input for machines without an input schema", () => {
     const noInput = Machine.make({
       states: States.states,
-      events: [PublicEvent],
+      events: Machine.events(PublicEvent),
       initial: () => States.initial.idle(new Idle({}))
     }).handle({ idle: {} })
     type Scenario = MachineTest.Scenario<typeof noInput>
@@ -96,7 +96,7 @@ describe("MachineTest", () => {
     class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {}
     const invokedMachine = Machine.make({
       states: States.states,
-      events: [PublicEvent],
+      events: Machine.events(PublicEvent),
       initial: () => States.initial.idle(new Idle({}))
     }).handle({
       idle: {

@@ -1487,7 +1487,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const initial = byPath.get(model.initial)!
   const machine = Machine.make({
     states: defined.states as any,
-    events: eventSchemas as any,
+    events: Machine.events(...eventSchemas) as any,
     initial: () => selectSnapshot(defined.initial as any, initial.path, byPath, [initial.path], 0) as any
   })
   const transitions = new Map(model.transitions.map((transition) => [

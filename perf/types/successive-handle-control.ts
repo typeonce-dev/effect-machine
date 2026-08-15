@@ -35,6 +35,6 @@ export const initialIdle = () => States.initial.Flow(Flow.make({}), (flow) => fl
 
 export const machine = Machine.make({
   states: States.states,
-  events: [Start, Finish],
+  events: Machine.events(Start, Finish),
   initial: initialIdle
 })

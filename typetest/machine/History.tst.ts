@@ -162,7 +162,7 @@ describe("Machine history states", () => {
   it("exposes zero-argument history targets without value overrides", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => States.initial.support(new Support({}))
     }).handle({
       support: {
@@ -188,7 +188,7 @@ describe("Machine history states", () => {
 
     const machine = Machine.make({
       states: States.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => States.initial.support(new Support({}))
     }).handle({
       support: {
@@ -242,7 +242,7 @@ describe("Machine history states", () => {
   it("rejects defaults outside the history parent and wrong initial child values", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => States.initial.support(new Support({}))
     })
 
@@ -285,7 +285,7 @@ describe("Machine history states", () => {
 
     const machine = Machine.make({
       states: NestedStates.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => NestedStates.initial.Closed(new Closed({}))
     })
 
@@ -411,7 +411,7 @@ describe("Machine history states", () => {
   it("rejects Effects returned by nested history defaults", () => {
     const machine = Machine.make({
       states: NestedStates.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => NestedStates.initial.Closed(new Closed({}))
     })
     expect(machine.handle).type.not.toBeCallableWith({
@@ -432,7 +432,7 @@ describe("Machine history states", () => {
   it("tracks defaults and shallow initializers across successive handle calls", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => States.initial.support(new Support({}))
     })
     const afterDefaults = machine.handle({
@@ -498,7 +498,7 @@ describe("Machine history states", () => {
 
     const machine = Machine.make({
       states: DeepOnlyStates.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => DeepOnlyStates.initial.support(new Support({}))
     }).handle({
       checkout: {
@@ -549,7 +549,7 @@ describe("Machine history states", () => {
 
     const machine = Machine.make({
       states: ParallelStates.states,
-      events: [Resume],
+      events: Machine.events(Resume),
       initial: () => ParallelStates.initial.support(new Support({}))
     })
     const complete = machine.handle({

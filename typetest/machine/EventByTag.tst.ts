@@ -34,7 +34,7 @@ describe("Machine.EventByTag", () => {
     const states = Machine.defineStates({ Idle })
     Machine.make({
       states: states.states,
-      events: [FiniteUnion],
+      events: Machine.events(FiniteUnion),
       initial: () => states.initial.Idle(new Idle({}))
     }).handle({
       Idle: {

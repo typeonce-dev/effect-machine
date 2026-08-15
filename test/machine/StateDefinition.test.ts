@@ -36,7 +36,7 @@ const expectDefinitionError = (
 const makeFromUnknownStates = (states: unknown): unknown =>
   Machine.make({
     states: states as Machine.Machine.StateSchemas,
-    events: [],
+    events: Machine.events(),
     initial: (): never => {
       throw new Error("unreachable")
     }
@@ -65,7 +65,7 @@ describe("exact state-definition runtime validation", () => {
     })
     const machine = Machine.make({
       states: states.states,
-      events: [],
+      events: Machine.events(),
       initial: () => states.initial.Idle.from()
     })
 
@@ -88,7 +88,7 @@ describe("exact state-definition runtime validation", () => {
     const states = Machine.defineStates({ Idle: AnnotatedIdle })
     const machine = Machine.make({
       states: states.states,
-      events: [],
+      events: Machine.events(),
       initial: () => states.initial.Idle(new Idle({}))
     })
 
@@ -105,7 +105,7 @@ describe("exact state-definition runtime validation", () => {
     const states = Machine.defineStates({ Opaque: OpaqueState })
     const machine = Machine.make({
       states: states.states,
-      events: [],
+      events: Machine.events(),
       initial: () => states.initial.Opaque({ _tag: "OpaqueState", value: 1 })
     })
 

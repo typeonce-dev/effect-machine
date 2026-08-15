@@ -11,8 +11,8 @@ describe("MachineTest invariants", () => {
   const States = Machine.defineStates({ idle: Idle })
   const machine = Machine.make({
     states: States.states,
-    events: [Tick],
-    internalEvents: [Internal],
+    events: Machine.events(Tick),
+    internalEvents: Machine.internalEvents(Internal),
     initial: () => States.initial.idle(new Idle({ count: 0 }))
   }).handle({
     idle: {

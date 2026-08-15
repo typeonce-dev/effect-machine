@@ -315,7 +315,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *

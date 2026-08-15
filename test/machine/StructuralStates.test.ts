@@ -78,7 +78,7 @@ const initial = States.initial.player.from((player) =>
 const makeMachine = () =>
   Machine.make({
     states: States.states,
-    events: [SourceSelected, Loaded, Play, Mute],
+    events: Machine.events(SourceSelected, Loaded, Play, Mute),
     initial: () => initial
   }).handle({
     player: {
@@ -150,7 +150,7 @@ const historyFallback = () =>
 
 const historyMachine = Machine.make({
   states: HistoryStates.states,
-  events: [Edit, Leave, ResumeShallow, ResumeDeep],
+  events: Machine.events(Edit, Leave, ResumeShallow, ResumeDeep),
   initial: historyFallback
 }).handle({
   flow: {
@@ -311,7 +311,7 @@ describe("structural active states", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: FinalStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () => FinalStates.initial.Done.from()
       }).handle({
         Done: {

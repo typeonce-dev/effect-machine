@@ -14,6 +14,7 @@ import { Rpc } from "effect/unstable/rpc"
 import type * as Machine from "../../Machine.js"
 import type { Checkpoint, ClusterMachine, LoadResult } from "../../unstable/cluster/ClusterMachine.js"
 import * as internalMachine from "./machine.js"
+import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 
 type EntityAddress = EntityAddress.EntityAddress
@@ -248,7 +249,7 @@ export const make = <
     OutputStates,
     InputEvents
   >
-  const eventSchema = Schema.Union(machine.events as MachineEvents<M>)
+  const eventSchema = Schema.Union(Protocol.inputEventSchemas(machine) as MachineEvents<M>)
   const rpc = Rpc.make("send", {
     payload: eventSchema,
     success: SendResult

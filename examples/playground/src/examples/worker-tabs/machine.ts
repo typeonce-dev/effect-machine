@@ -1,17 +1,12 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
+import { type SharedEvent, SharedMachineEvents } from "./protocol.ts"
+
+export type { SharedEvent } from "./protocol.ts"
 
 export const SharedMachineState = Schema.TaggedUnion({
   Idle: { count: Schema.Number },
   Active: { count: Schema.Number }
-})
-
-export const SharedMachineEvent = Schema.TaggedUnion({
-  Started: {},
-  Incremented: {},
-  Reset: {},
-  Stopped: {},
-  Synchronized: { active: Schema.Boolean, count: Schema.Number }
 })
 
 export const SharedMachineStates = Machine.defineStates(SharedMachineState.cases)
@@ -19,19 +14,21 @@ export const SharedMachineStates = Machine.defineStates(SharedMachineState.cases
 const definition = Machine.make({
   id: "WorkerHostedMachine",
   states: SharedMachineStates.states,
-  events: [SharedMachineEvent],
+  events: SharedMachineEvents,
   initial: () => SharedMachineStates.initial.Idle.from({ count: 0 })
 })
 
 // Worker and BroadcastChannel messages need decoded, cloneable data rather
 // than the opaque instructions returned by Machine.events.
 export const SharedTransportEvents = {
-  Started: () => Machine.event(definition, SharedMachineEvent.cases.Started),
-  Incremented: () => Machine.event(definition, SharedMachineEvent.cases.Incremented),
-  Reset: () => Machine.event(definition, SharedMachineEvent.cases.Reset),
-  Stopped: () => Machine.event(definition, SharedMachineEvent.cases.Stopped),
-  Synchronized: (fields: { readonly active: boolean; readonly count: number }) =>
-    Machine.event(definition, SharedMachineEvent.cases.Synchronized, fields)
+  Started: (): SharedEvent => ({ _tag: "Started" }),
+  Incremented: (): SharedEvent => ({ _tag: "Incremented" }),
+  Reset: (): SharedEvent => ({ _tag: "Reset" }),
+  Stopped: (): SharedEvent => ({ _tag: "Stopped" }),
+  Synchronized: (fields: { readonly active: boolean; readonly count: number }): SharedEvent => ({
+    _tag: "Synchronized",
+    ...fields
+  })
 }
 
 export const SharedMachine = definition.handle({
@@ -58,5 +55,4 @@ export const SharedMachine = definition.handle({
   }
 })
 
-export type SharedEvent = typeof SharedMachineEvent.Type
 export type SharedSnapshot = Machine.Machine.Snapshot<typeof SharedMachineStates.states>

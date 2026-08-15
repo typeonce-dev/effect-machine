@@ -25,8 +25,8 @@ const CounterStates = Machine.defineStates({ Counter })
 const makeCounterMachine = () =>
   Machine.make({
     states: CounterStates.states,
-    events: [Add],
-    internalEvents: [InternalAdd],
+    events: Machine.events(Add),
+    internalEvents: Machine.internalEvents(InternalAdd),
     initial: () => CounterStates.initial.Counter(new Counter({ count: 0 }))
   }).handle({
     Counter: {
@@ -40,8 +40,8 @@ const makeCounterMachine = () =>
 
 const causalMachine = Machine.make({
   states: CounterStates.states,
-  events: [Add, Noop, Ignored, Burst],
-  internalEvents: [InternalAdd],
+  events: Machine.events(Add, Noop, Ignored, Burst),
+  internalEvents: Machine.internalEvents(InternalAdd),
   initial: () => CounterStates.initial.Counter(new Counter({ count: 0 }))
 }).handle({
   Counter: {
@@ -233,8 +233,8 @@ describe("MachineTest runtime commands", () => {
       const states = Machine.defineStates({ Waiting, TimedOut })
       const machine = Machine.make({
         states: states.states,
-        events: [],
-        internalEvents: [Timeout],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(Timeout),
         initial: () => states.initial.Waiting(new Waiting({}))
       }).handle({
         Waiting: {
@@ -713,8 +713,8 @@ describe("MachineTest causal runtime commands", () => {
       const states = Machine.defineStates({ Waiting, TimedOut })
       const timerMachine = Machine.make({
         states: states.states,
-        events: [],
-        internalEvents: [Timeout],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(Timeout),
         initial: () => states.initial.Waiting(new Waiting({}))
       }).handle({
         Waiting: {

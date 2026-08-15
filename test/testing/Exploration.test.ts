@@ -16,7 +16,7 @@ const States = Machine.defineStates({ counter: Counter })
 
 const machine = Machine.make({
   states: States.states,
-  events: [Increment, Reset, Corrupt],
+  events: Machine.events(Increment, Reset, Corrupt),
   initial: () => States.initial.counter(new Counter({ count: 0 }))
 }).handle({
   counter: {
@@ -206,7 +206,7 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const inputMachine = Machine.make({
         states: States.states,
-        events: [Increment],
+        events: Machine.events(Increment),
         input: Seed,
         initial: ({ count }) => States.initial.counter(new Counter({ count }))
       }).handle({ counter: {} })

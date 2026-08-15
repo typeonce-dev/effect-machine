@@ -18,7 +18,7 @@ const State = Schema.TaggedUnion({
 })
 
 // Inputs and physics facts are one runtime-decoded, statically typed protocol.
-export const Event = Schema.TaggedUnion({
+const Event = Schema.TaggedUnion({
   Move: { axis: Axis, at: Schema.Number },
   JumpPressed: { at: Schema.Number, y: Schema.Number, wall: Axis },
   WallContact: { wall: Axis },
@@ -38,6 +38,9 @@ const InternalEvent = Schema.TaggedUnion({
   DoubleJump: { at: Schema.Number },
   WallJump: { at: Schema.Number, push: Axis }
 })
+
+export const CharacterEvents = Machine.events(Event)
+const InternalEvents = Machine.internalEvents(InternalEvent)
 
 const awayFrom = (wall: Axis): Axis => (wall === -1 ? 1 : wall === 1 ? -1 : 0)
 
@@ -124,13 +127,10 @@ const initialCharacter = () =>
 const definition = Machine.make({
   id: "PlatformerCharacter",
   states: CharacterStates.states,
-  events: [Event],
-  internalEvents: [InternalEvent],
+  events: CharacterEvents,
+  internalEvents: InternalEvents,
   initial: initialCharacter
 })
-
-export const CharacterEvents = Machine.events(definition)
-const InternalEvents = Machine.internalEvents(definition)
 
 export const CharacterMachine = definition.handle({
   Character: {

@@ -69,7 +69,7 @@ describe("Machine.resume", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Inactive(new Inactive({}))
       }).handle({
         Root: {
@@ -157,18 +157,19 @@ describe("Machine.resume", () => {
         root
           .left(new Left({}), (left) => left.A(new LeftA({})))
           .right(new Right({}), (right) => right.A(new RightA({}))))
-      const machine = Machine.make({ states: states.states, events: [Advance], initial: () => initial }).handle({
-        Root: {
-          states: {
-            left: {
-              states: { A: { on: { Advance: ({ target }) => target.local.B(new LeftB({})) } } }
-            },
-            right: {
-              states: { A: { on: { Advance: ({ target }) => target.local.B(new RightB({})) } } }
+      const machine = Machine.make({ states: states.states, events: Machine.events(Advance), initial: () => initial })
+        .handle({
+          Root: {
+            states: {
+              left: {
+                states: { A: { on: { Advance: ({ target }) => target.local.B(new LeftB({})) } } }
+              },
+              right: {
+                states: { A: { on: { Advance: ({ target }) => target.local.B(new RightB({})) } } }
+              }
             }
           }
-        }
-      })
+        })
       const ref = yield* Machine.resume(machine, initial)
       yield* sendAndWait(
         ref,
@@ -205,7 +206,7 @@ describe("Machine.resume", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Finish],
+        events: Machine.events(Finish),
         initial: () => states.initial.Count(new Count({ value: 0 }))
       }).handle({
         Count: { on: { Finish: ({ target }) => target.full.Done(new Done({ value: 9 })) } },
@@ -242,10 +243,11 @@ describe("Machine.resume", () => {
           { path: "Flow", output: undefined }
         ]
       }
-      const machine = Machine.make({ states: states.states, events: [Ping], initial: () => logical }).handle({
-        Flow: { onDone: ({ target }) => target.full.Next(new Next({})) },
-        Next: {}
-      })
+      const machine = Machine.make({ states: states.states, events: Machine.events(Ping), initial: () => logical })
+        .handle({
+          Flow: { onDone: ({ target }) => target.full.Next(new Next({})) },
+          Next: {}
+        })
       const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
       const ref = yield* Machine.resume(machine, decoded)
 
@@ -263,7 +265,7 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ A, B })
       const machine = Machine.make({
         states: states.states,
-        events: [Ping],
+        events: Machine.events(Ping),
         initial: () => states.initial.A(new A({}))
       }).handle({
         A: { always: ({ target }) => target.full.B(new B({})) },
@@ -286,8 +288,8 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ Waiting, Cancelled, TimedOut })
       const machine = Machine.make({
         states: states.states,
-        events: [Cancel],
-        internalEvents: [Timeout],
+        events: Machine.events(Cancel),
+        internalEvents: Machine.internalEvents(Timeout),
         initial: () => states.initial.Cancelled(new Cancelled({}))
       }).handle({
         Waiting: {
@@ -329,8 +331,8 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ Loading, Loaded })
       const machine = Machine.make({
         states: states.states,
-        events: [],
-        internalEvents: [LoadedEvent],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(LoadedEvent),
         initial: () => states.initial.Loaded(new Loaded({ value: "initial" }))
       }).handle({
         Loading: {
@@ -364,8 +366,8 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ Loading, Failed })
       const machine = Machine.make({
         states: states.states,
-        events: [],
-        internalEvents: [FailedEvent],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(FailedEvent),
         initial: () => states.initial.Failed(new Failed({ message: "initial" }))
       }).handle({
         Loading: {
@@ -402,7 +404,7 @@ describe("Machine.resume", () => {
       })
       const child = Machine.make({
         states: childStates.states,
-        events: [ChildFinish],
+        events: Machine.events(ChildFinish),
         initial: () => childStates.initial.ChildIdle(new ChildIdle({ value: 1 }))
       }).handle({
         ChildIdle: {
@@ -414,7 +416,7 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ Parent, ChildOutput })
       const machine = Machine.make({
         states: states.states,
-        events: [ChildOutput],
+        events: Machine.events(ChildOutput),
         initial: () => states.initial.ChildOutput(new ChildOutput({ value: 0 }))
       }).handle({
         Parent: {
@@ -460,7 +462,7 @@ describe("Machine.resume", () => {
         root
           .left(new Region({}), (left) => left.Leaf(new Leaf({ value: 1 })))
           .right(new Region({}), (right) => right.Leaf(new Leaf({ value: 2 }))))
-      const machine = Machine.make({ states: states.states, events: [], initial: () => valid })
+      const machine = Machine.make({ states: states.states, events: Machine.events(), initial: () => valid })
       const forged: ReadonlyArray<unknown> = [
         { path: "Missing", value: {} },
         { path: "Root", value: new Root({}), states: { left: valid.states.left } },
@@ -497,7 +499,7 @@ describe("Machine.resume", () => {
       const states = Machine.defineStates({ Count })
       const machine = Machine.make({
         states: states.states,
-        events: [Add],
+        events: Machine.events(Add),
         initial: () => states.initial.Count(new Count({ value: 0 }))
       }).handle({
         Count: {

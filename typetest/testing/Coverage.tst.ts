@@ -13,7 +13,7 @@ describe("MachineTest coverage and observed graph", () => {
   const States = Machine.defineStates({ idle: Idle, done: Done })
   const machine = Machine.make({
     states: States.states,
-    events: [Start],
+    events: Machine.events(Start),
     initial: () => States.initial.idle(new Idle({}))
   }).handle({
     idle: {

@@ -74,6 +74,6 @@ export const initialWorkspace = () =>
 
 export const machine = Machine.make({
   states: States.states,
-  events: [],
+  events: Machine.events(),
   initial: initialWorkspace
 })

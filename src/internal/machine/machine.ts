@@ -86,7 +86,8 @@ interface DefineStates {
   ): Machine.DefinedStates<States>
   <const States extends Machine.StateSchemas>(states: InvalidDefinedStateTreeInput<States>): never
 }
-type ValidateInputEventProtocol<InputEvents extends ReadonlyArray<Machine.TaggedSchema>> = InputEvents
+type ValidateInputEventProtocol<InputEvents extends ReadonlyArray<Machine.TaggedSchema>> = InputEvents extends
+  ReadonlyArray<Machine.TaggedSchema> ? unknown : never
 type ValidateInternalEventProtocol<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
@@ -769,9 +770,11 @@ type MakeConfig<
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
-  readonly events: InputEvents & ValidateInputEventProtocol<NoInfer<InputEvents>>
+  readonly events:
+    & Machine.EventProtocol<"public", InputEvents>
+    & ValidateInputEventProtocol<NoInfer<InputEvents>>
   readonly internalEvents?:
-    & InternalEvents
+    & Machine.EventProtocol<"internal", InternalEvents>
     & ValidateInternalEventProtocol<
       NoInfer<InputEvents>,
       NoInfer<InternalEvents>
@@ -845,8 +848,8 @@ export const make: Make = (<
   config: {
     readonly id?: string
     readonly states: States
-    readonly events: InputEvents
-    readonly internalEvents?: InternalEvents
+    readonly events: Machine.EventProtocol<"public", InputEvents>
+    readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
     readonly emits?: Emits
     readonly input?: Input
     readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
@@ -856,7 +859,7 @@ export const make: Make = (<
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
-  self.internalEvents = config.internalEvents ?? []
+  self.internalEvents = config.internalEvents ?? Protocol.makeEventProtocol("internal", [] as const)
   self.emits = config.emits ?? []
   self.input = config.input
   self.id = config.id
@@ -869,28 +872,15 @@ export const make: Make = (<
   return self
 }) as Make
 
-type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends EventSchema["~type.make.in"] ?
-  [input?: EventSchema["~type.make.in"]]
-  : [input: EventSchema["~type.make.in"]]
+export const events = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+  ...schemas: Schemas
+): Machine.EventProtocol<"public", readonly [...Schemas]> =>
+  Protocol.makeEventProtocol<"public", readonly [...Schemas]>("public", schemas)
 
-export const event = <
-  const M extends Machine.Any,
-  const EventSchema extends Machine.TaggedSchema
->(
-  machine: M,
-  schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
-  ...args: EventConstructorArgs<EventSchema>
-): EventSchema["Type"] => Protocol.makeEvent(machine, schema, args.length === 0 ? {} : args[0])
-
-export const events = <M extends Machine.Any>(
-  machine: M
-): Machine.EventConstructors<Machine.InputEvents<M>> =>
-  Protocol.eventConstructors(machine.events) as Machine.EventConstructors<Machine.InputEvents<M>>
-
-export const internalEvents = <M extends Machine.Any>(
-  machine: M
-): Machine.EventConstructors<Machine.InternalEvents<M>> =>
-  Protocol.eventConstructors(machine.internalEvents) as Machine.EventConstructors<Machine.InternalEvents<M>>
+export const internalEvents = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+  ...schemas: Schemas
+): Machine.EventProtocol<"internal", readonly [...Schemas]> =>
+  Protocol.makeEventProtocol<"internal", readonly [...Schemas]>("internal", schemas)
 
 export const encodeSnapshot: <
   const States extends Machine.StateSchemas,

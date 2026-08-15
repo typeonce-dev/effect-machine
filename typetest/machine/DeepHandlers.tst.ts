@@ -160,7 +160,7 @@ const deepHistoryFallback = (
 const makeDeepMachine = () =>
   Machine.make({
     states: DeepStates.states,
-    events: [Advance],
+    events: Machine.events(Advance),
     initial: (): never => {
       throw new Error("type-only")
     }
@@ -427,7 +427,7 @@ describe("deep handler trees", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: (): never => {
         throw new Error("type-only")
       }

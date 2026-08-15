@@ -2,9 +2,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { Machine } from "@typeonce/effect-machine"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect } from "effect"
-import { MicrowaveEvent, MicrowaveMachine } from "./microwave/machine.ts"
+import { MicrowaveMachine } from "./microwave/machine.ts"
 import { TrafficLightMachine } from "./traffic-light/machine.ts"
-import { TurnstileEvent, TurnstileMachine } from "./turnstile/machine.ts"
+import { TurnstileMachine } from "./turnstile/machine.ts"
 import { SharedMachine, SharedTransportEvents } from "./worker-tabs/machine.ts"
 
 describe("playground machines", () => {
@@ -12,10 +12,10 @@ describe("playground machines", () => {
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(TurnstileMachine, {
         events: [
-          Machine.event(TurnstileMachine, TurnstileEvent.cases.GatePushed),
-          Machine.event(TurnstileMachine, TurnstileEvent.cases.CoinInserted),
-          Machine.event(TurnstileMachine, TurnstileEvent.cases.CoinInserted),
-          Machine.event(TurnstileMachine, TurnstileEvent.cases.GatePushed)
+          { _tag: "GatePushed" },
+          { _tag: "CoinInserted" },
+          { _tag: "CoinInserted" },
+          { _tag: "GatePushed" }
         ]
       })
 
@@ -46,11 +46,11 @@ describe("playground machines", () => {
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(MicrowaveMachine, {
         events: [
-          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed),
-          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.DoorOpened),
-          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed),
-          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.DoorClosed),
-          Machine.event(MicrowaveMachine, MicrowaveEvent.cases.PowerPressed)
+          { _tag: "PowerPressed" },
+          { _tag: "DoorOpened" },
+          { _tag: "PowerPressed" },
+          { _tag: "DoorClosed" },
+          { _tag: "PowerPressed" }
         ]
       })
 

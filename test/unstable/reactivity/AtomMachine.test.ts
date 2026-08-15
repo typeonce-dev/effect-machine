@@ -72,7 +72,7 @@ const waitForResult = <A, E>(
 const makeCounterMachine = () =>
   Machine.make({
     states: CounterStates.states,
-    events: [Finish],
+    events: Machine.events(Finish),
     initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
   }).handle({
     Count: {
@@ -91,7 +91,7 @@ describe("AtomMachine", () => {
       const invokeStopped = yield* Deferred.make<void>()
       const machine = Machine.make({
         states: CounterStates.states,
-        events: [Finish],
+        events: Machine.events(Finish),
         initial: () => {
           initialCalls += 1
           return CounterStates.initial.Count(new Count({ value: 0 }))
@@ -149,7 +149,7 @@ describe("AtomMachine", () => {
       const Child = Machine.child("counter", childMachine)
       const parent = Machine.make({
         states: { Count, ValueRead },
-        events: [Finish, ReadValue],
+        events: Machine.events(Finish, ReadValue),
         initial: () => MachineInitial.Count(new Count({ value: 0 }))
       }).handle({
         Count: {
@@ -331,7 +331,7 @@ describe("AtomMachine", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () =>
           states.initial.Ready(new Ready({}), (ready) =>
             ready
@@ -464,7 +464,7 @@ describe("AtomMachine", () => {
             output: Schema.Number
           }
         },
-        events: [Finish],
+        events: Machine.events(Finish),
         initial: () => MachineInitial.Count(new Count({ value: 1 }))
       }).handle({
         Count: {

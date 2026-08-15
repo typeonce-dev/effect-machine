@@ -33,7 +33,7 @@ describe("Machine choice pseudo-states", () => {
   it("exposes only choice context and requires implementation before planning", () => {
     const incomplete = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
@@ -61,7 +61,7 @@ describe("Machine choice pseudo-states", () => {
   it("rejects Effects returned by choice resolvers", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
     })
     expect(machine.handle).type.not.toBeCallableWith({
@@ -103,7 +103,7 @@ describe("Machine choice pseudo-states", () => {
 
     const base = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
     })
     const invalidHandlers = [
@@ -126,7 +126,7 @@ describe("Machine choice pseudo-states", () => {
   it("rejects void and undeclared choice results", () => {
     const base = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
     })
     expect(base.handle).type.not.toBeCallableWith({

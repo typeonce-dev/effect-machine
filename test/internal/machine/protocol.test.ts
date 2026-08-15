@@ -9,13 +9,37 @@ const PublicEvent = Schema.TaggedStruct("PublicEvent", { value: Schema.String })
 const InternalEvent = Schema.TaggedStruct("InternalEvent", { value: Schema.String })
 
 describe("machine protocols", () => {
+  it("rejects forged, misclassified, and overlapping event descriptors", () => {
+    const states = Machine.defineStates({ ProtocolIdle })
+    const initial = () => states.initial.ProtocolIdle(new ProtocolIdle({}))
+
+    assert.throws(
+      () => Machine.make({ states: states.states, events: [PublicEvent] as any, initial }),
+      /expected an event protocol/
+    )
+    assert.throws(
+      () => Machine.make({ states: states.states, events: Machine.internalEvents(PublicEvent) as any, initial }),
+      /expected a public event protocol/
+    )
+    assert.throws(
+      () =>
+        Machine.make({
+          states: states.states,
+          events: Machine.events(PublicEvent),
+          internalEvents: Machine.internalEvents(PublicEvent) as any,
+          initial
+        }),
+      /must be disjoint/
+    )
+  })
+
   it.effect("keeps the complete event protocol private across handler clones", () =>
     Effect.gen(function*() {
       const states = Machine.defineStates({ ProtocolIdle })
       const machine = Machine.make({
         states: states.states,
-        events: [PublicEvent],
-        internalEvents: [InternalEvent],
+        events: Machine.events(PublicEvent),
+        internalEvents: Machine.internalEvents(InternalEvent),
         initial: () => states.initial.ProtocolIdle(new ProtocolIdle({}))
       }).handle({})
 

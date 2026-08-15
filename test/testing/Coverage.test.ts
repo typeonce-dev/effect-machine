@@ -19,7 +19,7 @@ const CounterStates = Machine.defineStates({ count: Count, done: Done })
 
 const counterMachine = Machine.make({
   states: CounterStates.states,
-  events: [Add, Finish],
+  events: Machine.events(Add, Finish),
   initial: () => CounterStates.initial.count(new Count({ value: 0 }))
 }).handle({
   count: {
@@ -45,7 +45,7 @@ class Opaque extends Schema.TaggedClass<Opaque>("Opaque")("Opaque", {
 const OpaqueStates = Machine.defineStates({ opaque: Opaque })
 const opaqueMachine = Machine.make({
   states: OpaqueStates.states,
-  events: [],
+  events: Machine.events(),
   input: Schema.Any,
   initial: (payload) => OpaqueStates.initial.opaque(new Opaque({ payload }))
 })
@@ -53,7 +53,7 @@ const opaqueMachine = Machine.make({
 const StartupStates = Machine.defineStates({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
-  events: [Add],
+  events: Machine.events(Add),
   initial: () => StartupStates.initial.count(new Count({ value: 0 }))
 }).handle({
   count: {
@@ -76,7 +76,7 @@ const OpenEvent = Schema.Struct({ _tag: Schema.String })
 const EventStates = Machine.defineStates({ count: Count })
 const finiteEventMachine = Machine.make({
   states: EventStates.states,
-  events: [TickEvent, ChoiceEvent],
+  events: Machine.events(TickEvent, ChoiceEvent),
   initial: () => EventStates.initial.count(new Count({ value: 0 }))
 }).handle({
   count: {
@@ -89,7 +89,7 @@ const finiteEventMachine = Machine.make({
 })
 const openEventMachine = Machine.make({
   states: EventStates.states,
-  events: [OpenEvent],
+  events: Machine.events(OpenEvent),
   initial: () => EventStates.initial.count(new Count({ value: 0 }))
 }).handle({ count: {} })
 

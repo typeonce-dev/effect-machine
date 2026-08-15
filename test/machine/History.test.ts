@@ -122,7 +122,7 @@ const makeCheckoutMachine = (
 ) =>
   Machine.make({
     states: CheckoutStates.states,
-    events: [Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory],
+    events: Machine.events(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory),
     initial: () => initial
   }).handle({
     checkout: {
@@ -291,7 +291,7 @@ const activeWorkspace: Machine.Machine.Snapshot<typeof WorkspaceStates.states> =
 const makeWorkspaceMachine = (initialized: Array<string>) =>
   Machine.make({
     states: WorkspaceStates.states,
-    events: [LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep],
+    events: Machine.events(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
     initial: () => activeWorkspace
   }).handle({
     workspace: {
@@ -398,7 +398,7 @@ const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryState
 
 const nestedHistoryMachine = Machine.make({
   states: NestedHistoryStates.states,
-  events: [RestoreEditor, DefaultEditor],
+  events: Machine.events(RestoreEditor, DefaultEditor),
   initial: () =>
     NestedHistoryStates.initial.workspace(
       new Workspace({ id: "workspace-1" }),

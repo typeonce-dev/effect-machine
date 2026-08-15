@@ -72,7 +72,7 @@ describe("machine activity lifecycle model", () => {
             const states = Machine.defineStates({ Idle, Active })
             const machine = Machine.make({
               states: states.states,
-              events: [Enter, Leave, Restart],
+              events: Machine.events(Enter, Leave, Restart),
               initial: () => states.initial.Idle(new Idle({}))
             }).handle({
               Idle: {
@@ -146,8 +146,8 @@ describe("machine activity lifecycle model", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [],
-        internalEvents: [Completed],
+        events: Machine.events(),
+        internalEvents: Machine.internalEvents(Completed),
         initial: () => states.initial.Active(new Active({}))
       }).handle({
         Active: {
@@ -182,8 +182,8 @@ describe("machine activity lifecycle model", () => {
       const states = Machine.defineStates({ Active: EpochActive, Done })
       const machine = Machine.make({
         states: states.states,
-        events: [Restart, QueueBarrier],
-        internalEvents: [Completed],
+        events: Machine.events(Restart, QueueBarrier),
+        internalEvents: Machine.internalEvents(Completed),
         initial: () => states.initial.Active(new EpochActive({ acknowledged: 0 }))
       }).handle({
         Active: {
@@ -280,7 +280,7 @@ describe("machine activity lifecycle model", () => {
             }
           }
         },
-        events: [LeaveLeft],
+        events: Machine.events(LeaveLeft),
         initial: () => ({
           path: "Root" as const,
           value: new Root({}),
@@ -362,8 +362,8 @@ describe("machine activity lifecycle model", () => {
       const states = Machine.defineStates({ Idle, Active, Done })
       const machine = Machine.make({
         states: states.states,
-        events: [Leave],
-        internalEvents: [TimerFired],
+        events: Machine.events(Leave),
+        internalEvents: Machine.internalEvents(TimerFired),
         initial: () => states.initial.Active(new Active({}))
       }).handle({
         Idle: {},
@@ -409,7 +409,7 @@ describe("machine activity lifecycle model", () => {
       const states = Machine.defineStates({ Active })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Active(new Active({}))
       }).handle({
         Active: {
@@ -457,7 +457,7 @@ describe("machine activity lifecycle model", () => {
       const states = Machine.defineStates({ Active })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Active(new Active({}))
       }).handle({
         Active: {

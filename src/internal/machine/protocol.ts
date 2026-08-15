@@ -27,14 +27,27 @@ interface MachineProtocolSchemas {
   readonly trustedEvents: WeakSet<object>
 }
 
+interface EventProtocolDefinition {
+  readonly kind: Machine.EventProtocolKind
+  readonly schemas: ReadonlyArray<Machine.TaggedSchema>
+}
+
+const eventProtocolDefinitions = new WeakMap<object, EventProtocolDefinition>()
+
 export const EventConstructionTypeId: unique symbol = Symbol("effect/Machine/EventConstruction")
 
 interface EventConstruction {
   readonly [EventConstructionTypeId]: typeof EventConstructionTypeId
   readonly _tag: PropertyKey
+}
+
+interface EventConstructionDefinition {
   readonly schema: Machine.TaggedSchema
   readonly input: unknown
+  readonly inputError?: unknown
 }
+
+const eventConstructionDefinitions = new WeakMap<object, EventConstructionDefinition>()
 
 type BoundaryDecoder = (value: unknown) => Effect.Effect<unknown, Schema.SchemaError, unknown>
 
@@ -105,8 +118,40 @@ const collectEventConstructors = (
   return constructors
 }
 
+const getEventProtocolDefinition = (
+  protocol: Machine.EventProtocol.Any,
+  expectedKind?: Machine.EventProtocolKind
+): EventProtocolDefinition => {
+  const definition = eventProtocolDefinitions.get(protocol as object)
+  if (definition === undefined) {
+    throw new Error("Machine expected an event protocol created with Machine.events or Machine.internalEvents")
+  }
+  if (expectedKind !== undefined && definition.kind !== expectedKind) {
+    throw new Error(`Machine expected a ${expectedKind} event protocol`)
+  }
+  return definition
+}
+
+export const eventProtocolSchemas = <Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+  protocol: Machine.EventProtocol<Machine.EventProtocolKind, Schemas>
+): Schemas => getEventProtocolDefinition(protocol).schemas as Schemas
+
+export const inputEventSchemas = (machine: Machine.Any): ReadonlyArray<Machine.TaggedSchema> =>
+  getEventProtocolDefinition(machine.events, "public").schemas
+
+export const internalEventSchemas = (machine: Machine.Any): ReadonlyArray<Machine.TaggedSchema> =>
+  getEventProtocolDefinition(machine.internalEvents, "internal").schemas
+
 export const setProtocol = (machine: Machine.Any): void => {
-  const events = [...machine.events, ...machine.internalEvents]
+  const inputEvents = inputEventSchemas(machine)
+  const localEvents = internalEventSchemas(machine)
+  const publicTags = new Set(Reflect.ownKeys(machine.events))
+  for (const tag of Reflect.ownKeys(machine.internalEvents)) {
+    if (publicTags.has(tag)) {
+      throw new Error(`Public and internal machine event tags must be disjoint: ${String(tag)}`)
+    }
+  }
+  const events = [...inputEvents, ...localEvents]
   setProtocolSchemas(machine, {
     event: Schema.Union(events),
     emit: Schema.Union(machine.emits),
@@ -125,16 +170,33 @@ const makeEventConstruction = (
   schema: Machine.TaggedSchema,
   tag: PropertyKey,
   input: unknown
-): EventConstruction => ({
-  [EventConstructionTypeId]: EventConstructionTypeId,
-  _tag: tag,
-  schema,
-  input
-})
+): EventConstruction => {
+  let ownedInput = input
+  let inputError: unknown
+  if (typeof input === "object" && input !== null) {
+    try {
+      ownedInput = { ...input }
+    } catch (cause) {
+      ownedInput = undefined
+      inputError = cause
+    }
+  }
+  const construction: EventConstruction = {
+    [EventConstructionTypeId]: EventConstructionTypeId,
+    _tag: tag
+  }
+  eventConstructionDefinitions.set(construction, {
+    schema,
+    input: ownedInput,
+    ...(inputError === undefined ? {} : { inputError })
+  })
+  return Object.freeze(construction)
+}
 
-const isEventConstruction = (value: unknown): value is EventConstruction => hasProperty(value, EventConstructionTypeId)
+const isEventConstruction = (value: unknown): value is EventConstruction =>
+  typeof value === "object" && value !== null && eventConstructionDefinitions.has(value)
 
-export const eventConstructors = (
+const eventConstructors = (
   schemas: ReadonlyArray<Machine.TaggedSchema>
 ): Readonly<Record<PropertyKey, (...args: ReadonlyArray<unknown>) => EventConstruction>> => {
   const leaves: Array<Machine.TaggedSchema> = []
@@ -182,25 +244,33 @@ export const eventConstructors = (
   for (const schema of leaves) {
     const discriminants = schemaTags(schema)
     if (discriminants.length === 0) {
-      throw new Error("Machine event constructors require finite literal or unique symbol event tags")
+      continue
     }
     for (const tag of discriminants) {
       if (hasProperty(constructors, tag)) {
         throw new Error(`Duplicate machine event constructor tag: ${String(tag)}`)
       }
       Object.defineProperty(constructors, tag, {
-        value: (...args: ReadonlyArray<unknown>) => {
-          const fields = args.length === 0 ? {} : args[0]
-          const input = typeof fields === "object" && fields !== null
-            ? { ...fields, _tag: tag }
-            : { _tag: tag }
-          return makeEventConstruction(schema, tag, input)
-        },
+        value: (...args: ReadonlyArray<unknown>) =>
+          makeEventConstruction(schema, tag, args.length === 0 ? {} : args[0]),
         enumerable: true
       })
     }
   }
   return constructors
+}
+
+export const makeEventProtocol = <
+  Kind extends Machine.EventProtocolKind,
+  Schemas extends ReadonlyArray<Machine.TaggedSchema>
+>(
+  kind: Kind,
+  schemas: Schemas
+): Machine.EventProtocol<Kind, Schemas> => {
+  const ownedSchemas = Object.freeze(Array.from(schemas)) as unknown as Schemas
+  const protocol = eventConstructors(ownedSchemas) as Machine.EventProtocol<Kind, Schemas>
+  eventProtocolDefinitions.set(protocol as object, { kind, schemas: ownedSchemas })
+  return Object.freeze(protocol) as Machine.EventProtocol<Kind, Schemas>
 }
 
 export const decodeBoundary = <A>(
@@ -264,29 +334,6 @@ const makeBoundarySync = <A>(
   }
 }
 
-/** Constructs an event through one of the machine protocol's own schemas and
- * records the decoded value as trusted by that protocol. Machine clones share
- * the protocol record, while unrelated machines retain independent trust. */
-export const makeEvent = <Schema extends Machine.TaggedSchema>(
-  machine: Machine.Any,
-  schema: Schema,
-  input: unknown
-): Schema["Type"] => {
-  const protocol = getProtocolSchemas(machine)
-  if (!protocol.eventConstructors.has(schema as object)) {
-    throw new Error("Machine.event expected a schema from the machine event protocol")
-  }
-  const inputName = getEventName(input)
-  const event = makeBoundarySync<Schema["Type"]>(
-    machine,
-    schema,
-    input,
-    inputName === undefined ? { boundary: "event" } : { boundary: "event", event: inputName }
-  )
-  protocol.trustedEvents.add(event as object)
-  return event
-}
-
 const eventConstructionProtocolError = (
   machine: Machine.Any,
   construction: EventConstruction
@@ -298,22 +345,52 @@ const eventConstructionProtocolError = (
     cause: Cause.die(new Error("Constructed event schema does not belong to the machine event protocol"))
   })
 
+const eventConstructionInput = (
+  construction: EventConstruction,
+  definition: EventConstructionDefinition
+): unknown => {
+  if (definition.inputError !== undefined) throw definition.inputError
+  return typeof definition.input === "object" && definition.input !== null
+    ? { ...definition.input, _tag: construction._tag }
+    : { _tag: construction._tag }
+}
+
+const eventConstructionInputError = (
+  machine: Machine.Any,
+  construction: EventConstruction,
+  cause: unknown
+): MachineSchemaDecodeError =>
+  new MachineSchemaDecodeError({
+    machineId: machine.id,
+    boundary: "event",
+    event: String(construction._tag),
+    cause: Cause.die(cause)
+  })
+
 const decodeEventConstruction = (
   machine: Machine.Any,
   protocol: MachineProtocolSchemas,
   construction: EventConstruction
 ): Effect.Effect<unknown, MachineSchemaDecodeError> => {
-  if (!protocol.eventConstructors.has(construction.schema as object)) {
+  const definition = eventConstructionDefinitions.get(construction)
+  if (definition === undefined || !protocol.eventConstructors.has(definition.schema as object)) {
     return Effect.fail(eventConstructionProtocolError(machine, construction))
   }
-  return construction.schema.makeEffect(construction.input as never).pipe(
-    Effect.mapError((cause) =>
-      new MachineSchemaDecodeError({
-        machineId: machine.id,
-        boundary: "event",
-        event: String(construction._tag),
-        cause: new Schema.SchemaError(cause)
-      })
+  return Effect.try({
+    try: () => eventConstructionInput(construction, definition),
+    catch: (cause) => eventConstructionInputError(machine, construction, cause)
+  }).pipe(
+    Effect.flatMap((input) =>
+      definition.schema.makeEffect(input as never).pipe(
+        Effect.mapError((cause) =>
+          new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "event",
+            event: String(construction._tag),
+            cause: new Schema.SchemaError(cause)
+          })
+        )
+      )
     ),
     Effect.tap((event) => Effect.sync(() => protocol.trustedEvents.add(event as object)))
   )
@@ -324,10 +401,17 @@ const decodeEventConstructionSync = (
   protocol: MachineProtocolSchemas,
   construction: EventConstruction
 ): unknown => {
-  if (!protocol.eventConstructors.has(construction.schema as object)) {
+  const definition = eventConstructionDefinitions.get(construction)
+  if (definition === undefined || !protocol.eventConstructors.has(definition.schema as object)) {
     throw eventConstructionProtocolError(machine, construction)
   }
-  const event = makeBoundarySync(machine, construction.schema, construction.input, {
+  let input: unknown
+  try {
+    input = eventConstructionInput(construction, definition)
+  } catch (cause) {
+    throw eventConstructionInputError(machine, construction, cause)
+  }
+  const event = makeBoundarySync(machine, definition.schema, input, {
     boundary: "event",
     event: String(construction._tag)
   })

@@ -17,7 +17,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
 const machine = Machine.make({
   states: States.states,
-  events: [ReplaceInTeam],
+  events: Machine.events(ReplaceInTeam),
   initial: () => States.initial.Loading.from()
 }).handle({
   Loading: {

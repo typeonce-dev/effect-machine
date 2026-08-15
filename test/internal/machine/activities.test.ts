@@ -16,7 +16,7 @@ const childStates = Machine.defineStates({ ChildIdle })
 const childMachine = Machine.make({
   id: "document-worker",
   states: childStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => childStates.initial.ChildIdle(new ChildIdle({}))
 })
 const child = Machine.child("child", childMachine)
@@ -27,7 +27,7 @@ const activityStates = Machine.defineStates({ Loading, Dynamic })
 const activityMachine = Machine.make({
   id: "activity-inspection",
   states: activityStates.states,
-  events: [WorkSucceeded, WorkFailed, LoadTimedOut],
+  events: Machine.events(WorkSucceeded, WorkFailed, LoadTimedOut),
   initial: () => activityStates.initial.Loading(new Loading({}))
 }).handle({
   Loading: {
@@ -155,7 +155,7 @@ describe("machine activity metadata", () => {
         const id = `generated-timer-${idSuffix}`
         const generated = Machine.make({
           states: activityStates.states,
-          events: [LoadTimedOut],
+          events: Machine.events(LoadTimedOut),
           initial: () => activityStates.initial.Loading(new Loading({}))
         }).handle({
           Loading: {

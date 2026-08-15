@@ -43,7 +43,7 @@ const CounterStates = Machine.defineStates({
 
 const UnsupportedChildMachine = Machine.make({
   states: { Count },
-  events: [],
+  events: Machine.events(),
   initial: () => ({ path: "Count", value: new Count({ value: 0 }) })
 })
 const UnsupportedChild = Machine.child("unsupported", UnsupportedChildMachine)
@@ -58,7 +58,7 @@ const makeCounter = (state: {
   Machine.make({
     id: "Counter",
     states: CounterStates.states,
-    events: [Increment, Fail, Finish, RaiseFromAction, SpawnFromAction],
+    events: Machine.events(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
     emits: [Changed],
     initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
   }).handle({
@@ -561,7 +561,7 @@ describe("ClusterMachine", () => {
       const invoked = Machine.make({
         id: "Invoked",
         states: states.states,
-        events: [Increment],
+        events: Machine.events(Increment),
         initial: () => states.initial.Count(new Count({ value: 0 }))
       }).handle({
         Count: {

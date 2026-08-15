@@ -195,7 +195,7 @@ describe("Machine", () => {
     >()
   })
 
-  it("constructs exact public and internal event values from machine-owned schemas", () => {
+  it("constructs exact public and internal event instructions from protocol descriptors", () => {
     const Event = Schema.TaggedUnion({
       Tick: { amount: Schema.Number },
       Stop: {}
@@ -203,30 +203,28 @@ describe("Machine", () => {
     class Internal extends Schema.TaggedClass<Internal>("ConstructedInternal")("ConstructedInternal", {
       id: Schema.String
     }) {}
-    class Unknown extends Schema.TaggedClass<Unknown>("ConstructedUnknown")("ConstructedUnknown", {}) {}
-    class InvalidTick extends Schema.TaggedClass<InvalidTick>("InvalidTick")("Tick", {
-      amount: Schema.String
-    }) {}
     const State = Schema.TaggedStruct("ConstructedEventState", {})
     const States = Machine.defineStates({ State })
-    const machine = Machine.make({
+    const Events = Machine.events(Event)
+    const InternalEvents = Machine.internalEvents(Internal)
+    Machine.make({
       states: States.states,
-      events: [Event],
-      internalEvents: [Internal],
+      events: Events,
+      internalEvents: InternalEvents,
       initial: () => States.initial.State.from()
     })
 
-    expect(Machine.event(machine, Event.cases.Tick, { amount: 1 })).type.toBe<{
-      readonly _tag: "Tick"
-      readonly amount: number
-    }>()
-    expect(Machine.event(machine, Event.cases.Stop)).type.toBe<{ readonly _tag: "Stop" }>()
-    expect(Machine.event(machine, Internal, { id: "internal-1" })).type.toBe<Internal>()
-    expect(Machine.event).type.not.toBeCallableWith(machine, Event.cases.Tick)
-    expect(Machine.event).type.not.toBeCallableWith(machine, Event.cases.Tick, { amount: "1" })
-    expect(Machine.event).type.not.toBeCallableWith(machine, Internal, {})
-    expect(Machine.event).type.not.toBeCallableWith(machine, Unknown, {})
-    expect(Machine.event).type.not.toBeCallableWith(machine, InvalidTick, { amount: "1" })
+    expect(Events.Tick({ amount: 1 })).type.toBe<
+      Machine.Machine.EventConstruction<typeof Event.cases.Tick.Type>
+    >()
+    expect(Events.Stop()).type.toBe<Machine.Machine.EventConstruction<typeof Event.cases.Stop.Type>>()
+    expect(InternalEvents.ConstructedInternal({ id: "internal-1" })).type.toBe<
+      Machine.Machine.EventConstruction<Internal>
+    >()
+    expect<Machine.EventOf<typeof Events>>().type.toBe<typeof Event.Type>()
+    expect(Events.Tick).type.not.toBeCallableWith()
+    expect(Events.Tick).type.not.toBeCallableWith({ amount: "1" })
+    expect(InternalEvents.ConstructedInternal).type.not.toBeCallableWith({})
   })
 
   it("machine contexts expose type-safe parent state values", () => {
@@ -393,7 +391,7 @@ describe("Machine", () => {
   it("make accepts defined states", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -403,7 +401,7 @@ describe("Machine", () => {
   it("make rejects raw decoded initial states", () => {
     expect(Machine.make).type.not.toBeCallableWith({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => new Down({})
     })
   })
@@ -411,7 +409,7 @@ describe("Machine", () => {
   it("encodes and decodes snapshots with typed effects", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -432,7 +430,7 @@ describe("Machine", () => {
   it("planInitial is synchronous at the transition boundary", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
@@ -447,7 +445,7 @@ describe("Machine", () => {
 
     expect(Machine.make).type.not.toBeCallableWith({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => Effect.succeed(UpStates.initial.down(new Down({})))
     })
     expect(machine.handle).type.not.toBeCallableWith({
@@ -459,7 +457,7 @@ describe("Machine", () => {
     const worker = Machine.childAddress<SignIn>("worker")
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       emits: [SignInCompleted],
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
@@ -522,7 +520,7 @@ describe("Machine", () => {
   it("invoke handles one-shot outputs directly in the owning state", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -548,7 +546,7 @@ describe("Machine", () => {
   it("contextually types dynamic Effect sources on direct inline objects", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -573,7 +571,7 @@ describe("Machine", () => {
     const load = (userId: string) => Effect.fail(new LoadFailure()).pipe(Effect.as({ userId }))
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -602,7 +600,7 @@ describe("Machine", () => {
     }
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -701,8 +699,8 @@ describe("Machine", () => {
   it("separates public input events from the complete internal protocol", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
-      internalEvents: [SignInCompleted],
+      events: Machine.events(SignIn),
+      internalEvents: Machine.internalEvents(SignInCompleted),
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
@@ -735,23 +733,16 @@ describe("Machine", () => {
       UpStates.initial.down(new Down({})),
       new SignInCompleted({ userId: "user-1" })
     )
+    const publicEvents = Machine.events(SignIn)
+    const overlappingInternalEvents = Machine.internalEvents(SignIn)
     expect(Machine.make).type.not.toBeCallableWith({
       states: UpStates.states,
-      events: [SignIn],
-      internalEvents: [SignIn],
+      events: publicEvents,
+      internalEvents: overlappingInternalEvents,
       initial: () => UpStates.initial.down(new Down({}))
     })
-    expect(Machine.make).type.not.toBeCallableWith({
-      states: UpStates.states,
-      events: [SignIn, SignIn],
-      initial: () => UpStates.initial.down(new Down({}))
-    })
-    expect(Machine.make).type.not.toBeCallableWith({
-      states: UpStates.states,
-      events: [SignIn],
-      internalEvents: [SignInCompleted, SignInCompleted],
-      initial: () => UpStates.initial.down(new Down({}))
-    })
+    expect(Machine.events).type.not.toBeCallableWith(SignIn, SignIn)
+    expect(Machine.internalEvents).type.not.toBeCallableWith(SignInCompleted, SignInCompleted)
   })
 
   it("invoke requires only the lifecycle handlers reachable from the source type", () => {
@@ -759,8 +750,8 @@ describe("Machine", () => {
     const erasedFailure = failure as Effect.Effect<never, any>
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
-      internalEvents: [SignInCompleted],
+      events: Machine.events(SignIn),
+      internalEvents: Machine.internalEvents(SignInCompleted),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -828,7 +819,7 @@ describe("Machine", () => {
     })
     const child = Machine.make({
       states: childStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       emits: [SignIn],
       input: ChildInput,
       initial: () => childStates.initial.done(new Down({}))
@@ -842,7 +833,7 @@ describe("Machine", () => {
     expect(Machine.sendTo).type.not.toBeCallableWith(Child, new Down({}))
     const parent = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -867,7 +858,7 @@ describe("Machine", () => {
 
     const incompatibleEmits = Machine.make({
       states: childStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       emits: [Down],
       input: ChildInput,
       initial: () => childStates.initial.done(new Down({}))
@@ -909,7 +900,7 @@ describe("Machine", () => {
   it("types nested invocation output handlers against their owning state", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -972,7 +963,7 @@ describe("Machine", () => {
   it("start exposes machine infrastructure failure channels", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     }).handle({
       down: {
@@ -1010,7 +1001,7 @@ describe("Machine", () => {
   it("plan and getters require snapshots", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -1040,7 +1031,7 @@ describe("Machine", () => {
   it("handlers reject raw decoded state returns", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -1064,7 +1055,7 @@ describe("Machine", () => {
   it("handle accepts nested states through reserved states objects", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -1092,7 +1083,7 @@ describe("Machine", () => {
   it("handle accepts parent config and child config in the same object", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -1139,7 +1130,7 @@ describe("Machine", () => {
   it("onDone handlers receive typed state context without Effect requirements", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () =>
         UpStates.initial.up(
           new Up({ id: "up-1" }),
@@ -1196,7 +1187,7 @@ describe("Machine", () => {
   it("handle rejects old property and callback APIs", () => {
     const machine = Machine.make({
       states: UpStates.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => UpStates.initial.down(new Down({}))
     })
 
@@ -1216,7 +1207,7 @@ describe("Machine", () => {
           output: Schema.Void
         }
       },
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () =>
         Machine.defineStates({ down: { schema: Down, type: "final", output: Schema.Void } }).initial.down(
           new Down({})
@@ -1243,7 +1234,7 @@ describe("Machine", () => {
 
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.signedIn(new SignedIn({ userId: "user-1" }))
     }).handle({
       signedIn: {
@@ -1274,7 +1265,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.signedIn(new SignedIn({ userId: "user-1" }))
     })
     type ForgedCompleteMachine = Machine.Machine<
@@ -1336,7 +1327,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.active(new Down({}))
     }).handle({
       succeeded: {
@@ -1348,7 +1339,7 @@ describe("Machine", () => {
 
     const activeOnly = Machine.make({
       states: { active: Down },
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => Machine.defineStates({ active: Down }).initial.active(new Down({}))
     })
     const activeRef = Machine.start(activeOnly)
@@ -1374,7 +1365,7 @@ describe("Machine", () => {
 
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.auth(new Auth({ userId: "user-1" }), (auth) => auth.signedOut(new SignedOut({})))
     })
 
@@ -1410,7 +1401,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.auth(new Auth({ userId: "user-1" }), (auth) => auth.signedOut(new SignedOut({})))
     })
 
@@ -1449,7 +1440,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () => States.initial.payment(new Payment({}), (payment) => payment.pending(new PendingPayment({})))
     })
 
@@ -1520,7 +1511,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () =>
         States.initial.up(
           new Up({ id: "up-1" }),
@@ -1595,7 +1586,7 @@ describe("Machine", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [SignIn],
+      events: Machine.events(SignIn),
       initial: () =>
         States.initial.up(
           new Up({ id: "up-1" }),
@@ -2295,7 +2286,7 @@ describe("Machine", () => {
           }
         }
       },
-      events: [],
+      events: Machine.events(),
       initial: (): never => {
         throw new Error("unreachable")
       }

@@ -72,7 +72,7 @@ const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
 const machine = Machine.make({
   id: "inspection-example",
   states: States.states,
-  events: [Start, Disconnect, Refresh],
+  events: Machine.events(Start, Disconnect, Refresh),
   initial: () => initial
 }).handle({
   application: {
@@ -135,7 +135,7 @@ const LifecycleStates = Machine.defineStates({
 const lifecycleMachine = Machine.make({
   id: "lifecycle-inspection",
   states: LifecycleStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => LifecycleStates.initial.idle(new Idle({}))
 }).handle({
   idle: {
@@ -211,7 +211,7 @@ describe("Machine structural visualization", () => {
   it("describes reentry, eventless, and completion handlers", () => {
     const metadataMachine = Machine.make({
       states: { idle: Idle },
-      events: [Refresh],
+      events: Machine.events(Refresh),
       initial: () => ({ path: "idle", value: new Idle({}) })
     }).handle({
       idle: {

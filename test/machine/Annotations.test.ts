@@ -46,7 +46,7 @@ const States = Machine.defineStates({
 
 const machine = Machine.make({
   states: States.states,
-  events: [],
+  events: Machine.events(),
   initial: () => States.initial.Workflow(new Workflow({}), (workflow) => workflow.Idle(new Idle({})))
 })
 

@@ -9,7 +9,7 @@ class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) 
 const States = Machine.defineStates({ Loading, Dynamic })
 const machine = Machine.make({
   states: States.states,
-  events: [TimedOut],
+  events: Machine.events(TimedOut),
   initial: () => States.initial.Loading(new Loading({}))
 }).handle({
   Loading: {

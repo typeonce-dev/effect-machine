@@ -27,7 +27,7 @@ const States = Machine.defineStates({ Idle, Ready })
 const makeTraceMachine = (onAction: () => void) =>
   Machine.make({
     states: States.states,
-    events: [Start, Add],
+    events: Machine.events(Start, Add),
     input: TestInput,
     initial: ({ userId }) => States.initial.Ready(new Ready({ count: userId.length - userId.length }))
   }).handle({
@@ -96,7 +96,7 @@ describe("MachineTest", () => {
     })
     const machine = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       input: PositiveInput,
       initial: () => States.initial.Idle(new Idle({ userId: "user-1" }))
     })
@@ -115,7 +115,7 @@ describe("MachineTest", () => {
   it("rejects a non-empty minimum for machines without public events", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Idle(new Idle({ userId: "user-1" }))
     })
 
@@ -187,7 +187,7 @@ describe("MachineTest", () => {
       })
       const machine = Machine.make({
         states: ParallelStates.states,
-        events: [Stop],
+        events: Machine.events(Stop),
         initial: () =>
           ParallelStates.initial.app(
             new App({}),
@@ -244,7 +244,7 @@ describe("MachineTest", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle },
-        events: [Start],
+        events: Machine.events(Start),
         initial: () => ({ path: "Idle", value: new Idle({ userId: "user-1" }) })
       }).handle({
         Idle: {

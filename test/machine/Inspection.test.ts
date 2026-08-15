@@ -36,7 +36,7 @@ const States = Machine.defineStates({
 
 const machine = Machine.make({
   states: States.states,
-  events: [],
+  events: Machine.events(),
   initial: () =>
     States.initial.root(new Root({}), (root) =>
       root
@@ -57,7 +57,7 @@ const ChoiceStates = Machine.defineStates({
 
 const choiceMachine = Machine.make({
   states: ChoiceStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => ChoiceStates.initial.Flow(new ChoiceFlow({}), (flow) => flow.Routing())
 }).handle({
   Flow: {

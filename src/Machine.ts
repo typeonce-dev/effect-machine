@@ -50,6 +50,7 @@ export const TypeId: TypeId = "~effect/Machine"
 declare const MachineOutputStatesTypeId: unique symbol
 declare const MachineTypeId: unique symbol
 declare const EventConstructionTypeId: unique symbol
+declare const EventProtocolTypeId: unique symbol
 
 const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
 
@@ -158,7 +159,7 @@ export interface Machine<
    *
    * @since 0.4.0
    */
-  readonly events: InputEvents
+  readonly events: Machine.EventProtocol<"public", InputEvents>
 
   /**
    * Events reserved for raised events, child emissions, and other machine-local
@@ -166,7 +167,10 @@ export interface Machine<
    *
    * @since 0.4.0
    */
-  readonly internalEvents: ReadonlyArray<Machine.TaggedSchema>
+  readonly internalEvents: Machine.EventProtocol<
+    "internal",
+    Machine.InternalEventSchemas<Events, InputEvents>
+  >
 
   /**
    * Events that the machine may emit to its parent or external adapter.
@@ -676,8 +680,9 @@ type DuplicateEventTag<
   : Events extends readonly [
     infer Head extends Machine.TaggedSchema,
     ...infer Tail extends ReadonlyArray<Machine.TaggedSchema>
-  ] ? Machine.TagOf<Head> extends infer Tag extends PropertyKey ? Tag extends Seen ? Tag | DuplicateEventTag<Tail, Seen>
-      : DuplicateEventTag<Tail, Seen | Tag>
+  ] ? Machine.TagOf<Head> extends infer Tag extends PropertyKey ?
+        | Extract<Tag, Seen>
+        | DuplicateEventTag<Tail, Seen | Tag>
     : never
   : never
 
@@ -2040,8 +2045,8 @@ export declare namespace Machine {
     /** @internal */
     readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any, any>
     readonly states: StateSchemas
-    readonly events: ReadonlyArray<TaggedSchema>
-    readonly internalEvents: ReadonlyArray<TaggedSchema>
+    readonly events: EventProtocol.Any<"public">
+    readonly internalEvents: EventProtocol.Any<"internal">
     readonly emits: ReadonlyArray<TaggedSchema>
     readonly input: Schema.Top | undefined
     readonly id: string | undefined
@@ -2161,12 +2166,18 @@ export declare namespace Machine {
    */
   export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
 
-  /** Extracts the internal event schema tuple carried by a machine definition. */
-  export type InternalEvents<M extends Any> = Events<M> extends readonly [
-    ...InputEvents<M>,
+  /** Extracts an internal event schema tuple from the complete and public protocols. */
+  export type InternalEventSchemas<
+    Events extends ReadonlyArray<TaggedSchema>,
+    InputEvents extends ReadonlyArray<TaggedSchema>
+  > = Events extends readonly [
+    ...InputEvents,
     ...infer Internal extends ReadonlyArray<TaggedSchema>
-  ] ? Internal
+  ] ? readonly [...Internal]
     : readonly []
+
+  /** Extracts the internal event schema tuple carried by a machine definition. */
+  export type InternalEvents<M extends Any> = InternalEventSchemas<Events<M>, InputEvents<M>>
 
   /**
    * Extracts the complete event protocol handled inside a machine.
@@ -2204,6 +2215,9 @@ export declare namespace Machine {
   /** Event inputs accepted for a schema tuple at machine delivery boundaries. */
   export type EventInputOf<Events extends ReadonlyArray<TaggedSchema>> = EventInput<EventOf<Events>>
 
+  /** Identifies whether an event protocol is accepted publicly or only inside a machine. */
+  export type EventProtocolKind = "public" | "internal"
+
   type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
 
   type EventConstructor<
@@ -2212,6 +2226,11 @@ export declare namespace Machine {
   > = {} extends EventConstructorInput<EventSchema> ?
     (input?: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
     : (input: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
+
+  type FiniteEventTag<Tag extends PropertyKey> = string extends Tag ? never
+    : number extends Tag ? never
+    : symbol extends Tag ? never
+    : Tag
 
   type EventConstructorsForSchema<EventSchema extends TaggedSchema> = EventSchema extends {
     readonly cases: infer Cases extends Readonly<Record<PropertyKey, TaggedSchema>>
@@ -2222,7 +2241,7 @@ export declare namespace Machine {
     : EventSchema extends { readonly members: infer Members extends ReadonlyArray<TaggedSchema> } ?
       Types.UnionToIntersection<EventConstructorsForSchema<Members[number]>>
     : {
-      readonly [Tag in EventSchema["Type"]["_tag"]]: EventConstructor<EventSchema, Tag>
+      readonly [Tag in FiniteEventTag<EventSchema["Type"]["_tag"]>]: EventConstructor<EventSchema, Tag>
     }
 
   /** Protocol-bound constructors keyed by each configured event tag. */
@@ -2230,6 +2249,37 @@ export declare namespace Machine {
     readonly [Tag in keyof Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>]:
       Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>[Tag]
   }
+
+  /**
+   * A schema-backed event protocol exposing only deferred event constructors.
+   *
+   * The schema tuple is retained opaquely for machine runtime validation and
+   * type inference. It is not exposed as a runtime property.
+   *
+   * @since 0.10.0
+   */
+  export type EventProtocol<
+    Kind extends EventProtocolKind,
+    Schemas extends ReadonlyArray<TaggedSchema>
+  > = EventConstructors<Schemas> & {
+    readonly [EventProtocolTypeId]: {
+      readonly kind: Kind
+      readonly schemas: Schemas
+    }
+  }
+
+  export namespace EventProtocol {
+    /** An erased event protocol descriptor retaining its kind and schema carrier. */
+    export interface Any<Kind extends EventProtocolKind = EventProtocolKind> {
+      readonly [EventProtocolTypeId]: {
+        readonly kind: Kind
+        readonly schemas: ReadonlyArray<TaggedSchema>
+      }
+    }
+  }
+
+  /** @internal Extracts the schema tuple carried opaquely by an event protocol. */
+  export type EventProtocolSchemas<Protocol extends EventProtocol.Any> = Protocol[typeof EventProtocolTypeId]["schemas"]
 
   /**
    * Extracts the event protocol emitted by a machine.
@@ -5872,7 +5922,7 @@ export const isFinal: <
  *
  * Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.idle.from()
  * })
  * ```
@@ -5893,9 +5943,11 @@ type MakeConfig<
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
-  readonly events: InputEvents & ValidateInputEventProtocol<NoInfer<InputEvents>>
+  readonly events:
+    & Machine.EventProtocol<"public", InputEvents>
+    & ValidateInputEventProtocol<NoInfer<InputEvents>>
   readonly internalEvents?:
-    & InternalEvents
+    & Machine.EventProtocol<"internal", InternalEvents>
     & ValidateInternalEventProtocol<
       NoInfer<InputEvents>,
       NoInfer<InternalEvents>
@@ -5968,10 +6020,10 @@ interface Make {
  * `defineStates` or is passed inline. Call `handle` on the returned definition
  * to implement state behavior with ordinary TypeScript control flow.
  *
- * Schemas in `events` define the public input protocol. Schemas in
- * `internalEvents` are added to the complete handler protocol for raised
- * events, child emissions, and other machine-local deliveries. Their tags
- * must be disjoint.
+ * `Machine.events` defines the public input protocol. `Machine.internalEvents`
+ * adds events used for raised events, child emissions, and other machine-local
+ * deliveries. Both descriptors expose deferred constructors while retaining
+ * their schemas opaquely for runtime validation. Their tags must be disjoint.
  *
  * **Example** (Typed counter machine)
  *
@@ -5988,10 +6040,11 @@ interface Make {
  * }) {}
  *
  * const States = Machine.defineStates({ Count })
+ * const Events = Machine.events(Increment)
  *
  * const counter = Machine.make({
  *   states: States.states,
- *   events: [Increment],
+ *   events: Events,
  *   initial: () => States.initial.Count(new Count({ value: 0 }))
  * }).handle({
  *   Count: {
@@ -6009,60 +6062,19 @@ interface Make {
  */
 export const make: Make = internal.make
 
-type EventConstructorArgs<EventSchema extends Machine.TaggedSchema> = {} extends EventSchema["~type.make.in"] ?
-  [input?: EventSchema["~type.make.in"]]
-  : [input: EventSchema["~type.make.in"]]
-
 /**
- * Constructs an event from a schema owned by a machine's protocol.
+ * Extracts the decoded event union carried by an event protocol descriptor.
  *
- * **Details**
- *
- * The schema constructor runs exactly once. The resulting decoded event is
- * trusted by this machine and definitions derived from it with `handle`, so
- * repeated delivery does not decode the same already-constructed value again.
- * Events supplied through ordinary `send` and `plan` calls remain untrusted
- * and continue through full runtime schema validation.
- * Treat the returned event as immutable after construction.
- * This eager low-level constructor throws `MachineSchemaDecodeError` when
- * construction fails. Prefer {@link events} and {@link internalEvents} for
- * ordinary delivery so construction remains inside the machine error channel.
- *
- * The schema must be one of the machine's configured public or internal event
- * schemas, or a case schema belonging to a configured `Schema.TaggedUnion`.
- *
- * **Example**
- *
- * ```ts
- * import { Schema } from "effect"
- * import { Machine } from "@typeonce/effect-machine"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {
- *   by: Schema.Number
- * }) {}
- *
- * const States = Machine.defineStates({ Idle })
- * const counter = Machine.make({
- *   states: States.states,
- *   events: [Increment],
- *   initial: () => States.initial.Idle.from()
- * }).handle({ Idle: { on: { Increment: () => States.initial.Idle.from() } } })
- *
- * const increment = Machine.event(counter, Increment, { by: 1 })
- * ```
- *
- * @category constructors
- * @since 0.4.0
+ * @category utility types
+ * @since 0.10.0
  */
-export const event: <const M extends Machine.Any, const EventSchema extends Machine.TaggedSchema>(
-  machine: M,
-  schema: EventSchema & ([EventSchema["Type"]] extends [Machine.Event<M>] ? unknown : never),
-  ...args: EventConstructorArgs<EventSchema>
-) => EventSchema["Type"] = internal.event
+export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventOf<
+  Machine.EventProtocolSchemas<Protocol>
+>
 
 /**
- * Returns deferred constructors for every public event in a machine protocol.
+ * Defines a public event protocol and returns deferred constructors for every
+ * statically finite configured event tag.
  *
  * Constructor inputs retain their schema-derived required fields, defaults,
  * and transformations. Construction is deferred until delivery so failures
@@ -6072,31 +6084,42 @@ export const event: <const M extends Machine.Any, const EventSchema extends Mach
  * **Example**
  *
  * ```ts
- * const Event = Machine.events(counter)
- * yield* ref.send(Event.Increment({ by: 1 }))
+ * const Events = Machine.events(Increment, Reset)
+ * const machine = Machine.make({ events: Events, ... })
+ * yield* ref.send(Events.Increment({ by: 1 }))
  * ```
  *
  * @category constructors
- * @since 0.9.0
+ * @since 0.10.0
  */
-export const events: <const M extends Machine.Any>(
-  machine: M
-) => Machine.EventConstructors<Machine.InputEvents<M>> = internal.events
+export const events = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+  ...schemas: Schemas & ValidateInputEventProtocol<NoInfer<Schemas>>
+): Machine.EventProtocol<"public", readonly [...Schemas]> => internal.events<Schemas>(...(schemas as Schemas))
 
 /**
- * Returns deferred constructors for every internal event in a machine
- * protocol.
+ * Defines an internal event protocol and returns deferred constructors for
+ * every statically finite configured event tag.
  *
  * Use these constructors for raised events and other machine-local deliveries.
  * Construction failures are reported through the
  * owning machine's `MachineSchemaDecodeError` channel.
  *
+ * **Example**
+ *
+ * ```ts
+ * const InternalEvents = Machine.internalEvents(Loaded, Failed)
+ * const machine = Machine.make({ internalEvents: InternalEvents, ... })
+ *
+ * // Inside a transition callback:
+ * return [nextState, [raise(InternalEvents.Loaded({ value }))]]
+ * ```
+ *
  * @category constructors
- * @since 0.9.0
+ * @since 0.10.0
  */
-export const internalEvents: <const M extends Machine.Any>(
-  machine: M
-) => Machine.EventConstructors<Machine.InternalEvents<M>> = internal.internalEvents
+export const internalEvents = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+  ...schemas: Schemas & ValidateInternalEventProtocol<readonly [], NoInfer<Schemas>>
+): Machine.EventProtocol<"internal", readonly [...Schemas]> => internal.internalEvents<Schemas>(...(schemas as Schemas))
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.
@@ -6131,7 +6154,7 @@ export const internalEvents: <const M extends Machine.Any>(
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -6211,7 +6234,7 @@ export const encodeSnapshot: <
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -6641,7 +6664,7 @@ export const retag: <const Target extends Machine.TaggedSchema, const Source ext
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -6876,7 +6899,7 @@ export const enabled: <
  * const States = Machine.defineStates({ Off, On })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [Toggle],
+ *   events: Machine.events(Toggle),
  *   initial: () => States.initial.Off.from()
  * }).handle({ Off: { on: { Toggle: () => States.initial.On.from() } }, On: {} })
  *
@@ -7196,7 +7219,7 @@ export const watch: <State, Event, Error = never, Output = never>(
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -7303,7 +7326,7 @@ export const start: <
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *

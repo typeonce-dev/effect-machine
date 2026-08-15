@@ -46,7 +46,7 @@ describe("Machine transition snapshot context", () => {
       let captured: Machine.Machine.Snapshot<typeof States.states> | undefined
       const machine = Machine.make({
         states: States.states,
-        events: [BufferReady],
+        events: Machine.events(BufferReady),
         initial
       }).handle({
         System: {
@@ -85,7 +85,7 @@ describe("Machine transition snapshot context", () => {
       const captured: Array<Machine.Machine.Snapshot<typeof States.states>> = []
       const machine = Machine.make({
         states: States.states,
-        events: [Disconnect],
+        events: Machine.events(Disconnect),
         initial
       }).handle({
         System: {
@@ -134,7 +134,7 @@ describe("Machine transition snapshot context", () => {
       let captured: Machine.Machine.Snapshot<typeof States.states> | undefined
       const machine = Machine.make({
         states: States.states,
-        events: [],
+        events: Machine.events(),
         initial
       }).handle({
         System: {
@@ -193,7 +193,7 @@ describe("Machine transition snapshot context", () => {
       let captured: Machine.Machine.Snapshot<typeof completionStates.states> | undefined
       const machine = Machine.make({
         states: completionStates.states,
-        events: [],
+        events: Machine.events(),
         initial: () =>
           completionStates.initial.System(
             new System({}),
