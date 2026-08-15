@@ -8,7 +8,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
-import type { ActorRef, Machine } from "../../Machine.js"
+import type { Machine, MachineTarget } from "../../Machine.js"
 import { MachineSchemaDecodeError } from "./errors.js"
 import {
   decodeBoundary,
@@ -252,25 +252,25 @@ export interface ActiveConfiguration {
   readonly values: ReadonlyMap<string, unknown>
   readonly outputs: ReadonlyMap<string, unknown>
   readonly history: ReadonlyMap<string, HistoryRecord>
-  readonly actorScope?: PlanningActorScope
+  readonly machineReferences?: PlanningMachineReferences
 }
 
-export interface PlanningActorScope {
-  readonly self: ActorRef<any>
-  readonly parent: ActorRef<any> | undefined
+export interface PlanningMachineReferences {
+  readonly self: MachineTarget<any>
+  readonly parent: MachineTarget<any> | undefined
 }
 
-export const withActorScope = (
+export const withMachineReferences = (
   configuration: ActiveConfiguration,
-  actorScope: PlanningActorScope
+  machineReferences: PlanningMachineReferences
 ): ActiveConfiguration => ({
   ...configuration,
-  actorScope: { self: actorScope.self, parent: actorScope.parent }
+  machineReferences: { self: machineReferences.self, parent: machineReferences.parent }
 })
 
-export const getActorScope = (
+export const getMachineReferences = (
   configuration: ActiveConfiguration
-): PlanningActorScope | undefined => configuration.actorScope
+): PlanningMachineReferences | undefined => configuration.machineReferences
 
 export interface FinalCompletion {
   readonly path: string

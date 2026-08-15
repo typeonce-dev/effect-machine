@@ -175,18 +175,18 @@ export interface Machine<
   >
 
   /**
-   * Ephemeral outward notifications published to this actor's observers.
-   * Emissions are never delivered implicitly to an owning actor.
+   * Ephemeral outward notifications published to this machine's observers.
+   * Emissions are never delivered implicitly to an owning machine.
    *
    * @since 0.4.0
    */
   readonly emittedEvents: Machine.EventProtocol<"emitted", Emits>
 
   /**
-   * Public input events accepted by an owning actor when this machine is
+   * Public input events accepted by an owning machine when this machine is
    * running as a child.
    *
-   * The protocol types the optional `parent` actor reference exposed to
+   * The protocol types the optional `parent` machine target exposed to
    * handlers and is checked against a concrete parent's public events at
    * composition boundaries.
    *
@@ -387,7 +387,7 @@ export interface Runtime<in Events, in Emits> {
   readonly raise: (event: Machine.EventInput<Events>) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 
   /**
-   * Publishes an ephemeral notification to the running actor's observers.
+   * Publishes an ephemeral notification to the running machine's observers.
    *
    * @since 0.4.0
    */
@@ -397,37 +397,37 @@ export interface Runtime<in Events, in Emits> {
 }
 
 /**
- * Minimal typed reference accepted by targeted actor commands.
+ * Minimal typed target accepted by inter-machine send commands.
  *
  * @category models
- * @since 0.10.0
+ * @since 0.12.0
  */
-export interface ActorRef<in Event> {
+export interface MachineTarget<in Event> {
   readonly id: string
   readonly sessionId: string
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 }
 
 /**
- * Actor references available while evaluating machine behavior.
+ * Machine targets available while evaluating machine behavior.
  *
  * @category models
- * @since 0.10.0
+ * @since 0.12.0
  */
-export interface ActorContext<
+export interface MachineReferences<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
 > {
-  /** Reference to the current actor. Sending queues a later mailbox event. */
-  readonly self: ActorRef<Machine.EventInputOf<InputEvents>>
+  /** Target for the current machine. Sending queues a later mailbox event. */
+  readonly self: MachineTarget<Machine.EventInputOf<InputEvents>>
 
-  /** Reference to the owning actor, or `undefined` when running as a root. */
-  readonly parent: ActorRef<Machine.EventInputOf<ParentEvents>> | undefined
+  /** Target for the owning machine, or `undefined` when running as a root. */
+  readonly parent: MachineTarget<Machine.EventInputOf<ParentEvents>> | undefined
 }
 
 /**
  * Synchronous commands available while a machine transition is being
- * selected. Enqueuing only records statechart and actor operations; it never
+ * selected. Enqueuing only records statechart and machine operations; it never
  * executes an Effect.
  *
  * @category models
@@ -437,12 +437,12 @@ export interface Enqueue<in Events, in Emits> {
   /** Raises an event inside the current macrostep. */
   readonly raise: (event: Machine.EventInput<Events>) => void
 
-  /** Publishes an ephemeral notification to this actor's observers. */
+  /** Publishes an ephemeral notification to this machine's observers. */
   readonly emit: (event: Machine.EmittedEventInput<Emits>) => void
 
   /** Sends an event to an invoked child after the transition is selected. */
   readonly sendTo: {
-    <Event>(target: ActorRef<Event>, event: Event): void
+    <Event>(target: MachineTarget<Event>, event: Event): void
     <Child extends ChildMachine.Any>(child: Child, event: ChildMachine.Event<Child>): void
     <Address extends ChildAddress<never>>(child: Address, event: ChildAddress.Event<Address>): void
   }
@@ -455,7 +455,7 @@ export interface Enqueue<in Events, in Emits> {
 }
 
 /**
- * A closed actor command recorded by a synchronous machine transition.
+ * A closed machine command recorded by a synchronous transition.
  *
  * @category models
  * @since 0.4.0
@@ -463,7 +463,7 @@ export interface Enqueue<in Events, in Emits> {
 export type Command =
   | {
     readonly _tag: "SendTo"
-    readonly target: ActorRef<unknown> | ChildMachine.Any | ChildAddress<never>
+    readonly target: MachineTarget<unknown> | ChildMachine.Any | ChildAddress<never>
     readonly event: unknown
   }
   | {
@@ -1745,7 +1745,7 @@ export interface Prepared<out State, in Event, out Error, out Output, out Emitte
  * @since 0.4.0
  */
 export interface MachineRef<out State, in Event, out Error = never, out Output = never, out Emitted = never>
-  extends ActorRef<Event>
+  extends MachineTarget<Event>
 {
   /** Stable machine definition id, or a generated fallback when none was declared. */
   readonly id: string
@@ -1764,7 +1764,7 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
 
   /**
    * Streams ephemeral notifications published after subscription. Emissions
-   * are not retained or replayed; the stream completes when the actor stops.
+   * are not retained or replayed; the stream completes when the machine stops.
    */
   readonly emissions: Stream.Stream<Emitted>
 
@@ -1892,9 +1892,9 @@ export declare namespace Logic {
     /** Starts a child process owned by this scope. */
     readonly spawn: Spawn
 
-    /** Sends an event to an actor reference or typed parent-local child address. */
+    /** Sends an event to a machine target or typed parent-local child address. */
     readonly sendTo: {
-      <TargetEvent>(target: ActorRef<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+      <TargetEvent>(target: MachineTarget<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
       <Address extends ChildAddress<never>>(
         id: Address,
         event: ChildAddress.Event<Address>
@@ -2276,7 +2276,7 @@ export declare namespace Machine {
    */
   export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
 
-  /** Extracts the public input protocol required from an owning actor. */
+  /** Extracts the public input protocol required from an owning machine. */
   export type ParentEvents<M extends Any> = M[typeof MachineTypeId]["parentEvents"]
 
   /** Extracts an internal event schema tuple from the complete and public protocols. */
@@ -4011,7 +4011,7 @@ export declare namespace Machine {
     R,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4041,7 +4041,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4061,7 +4061,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4084,7 +4084,7 @@ export declare namespace Machine {
     Output,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4107,7 +4107,7 @@ export declare namespace Machine {
     Output,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4126,7 +4126,7 @@ export declare namespace Machine {
     Error,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4149,7 +4149,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4180,7 +4180,7 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4207,7 +4207,7 @@ export declare namespace Machine {
     ChoiceId extends ChoiceIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends ActorContext<InputEvents, ParentEvents> {
+  > extends MachineReferences<InputEvents, ParentEvents> {
     readonly containingState: StateByIdentifier<
       States,
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
@@ -6431,7 +6431,7 @@ interface Make {
  * adds raised events and other machine-local deliveries.
  * `Machine.emittedEvents` defines outward ephemeral notifications, while
  * `parentEvents` declares the inputs a child may explicitly send to its owning
- * actor. All descriptors expose deferred constructors while retaining their
+ * machine. All descriptors expose deferred constructors while retaining their
  * schemas opaquely for runtime validation. Public and internal tags must be
  * disjoint.
  *
@@ -6543,8 +6543,8 @@ export const internalEvents: {
 
 /**
  * Defines the ephemeral notifications a machine may publish to external
- * observers. Emitted events are separate from actor input and are never sent
- * implicitly to a parent actor. Observe them through `MachineRef.emissions` or
+ * observers. Emitted events are separate from machine input and are never sent
+ * implicitly to a parent machine. Observe them through `MachineRef.emissions` or
  * the AtomMachine emission stream adapters.
  *
  * @category constructors
@@ -7379,11 +7379,11 @@ export const invoke: {
     >
 } = ((config: unknown) => config) as any
 /**
- * Plans the initial state for a machine without executing actor commands.
+ * Plans the initial state for a machine without executing machine commands.
  *
  * **Details**
  *
- * The returned plan contains the settled initial snapshot, actor commands,
+ * The returned plan contains the settled initial snapshot, machine commands,
  * emitted events, optional final output, and every startup microstep. Planning
  * may evaluate transition logic and follow completion, eventless, and
  * raised-event steps. Transition callbacks are evaluated synchronously.
@@ -7392,8 +7392,8 @@ export const invoke: {
  *
  * **Gotchas**
  *
- * `start` executes the closed command list as part of the managed actor commit
- * protocol. Manual planners may inspect commands but need a running actor scope
+ * `start` executes the closed command list as part of the managed machine commit
+ * protocol. Manual planners may inspect commands but need running machine targets
  * to execute child-addressed operations.
  *
  * **Example**
@@ -7628,7 +7628,7 @@ export const enabled: <
  *
  * **Gotchas**
  *
- * `plan` returns data; it does not implement the actor commit protocol.
+ * `plan` returns data; it does not implement the managed machine commit protocol.
  * `start` executes child commands, publishes `next`, and then delivers
  * `emittedEvents`. Events with no enabled transition are ignored and produce
  * an unchanged plan.
@@ -8029,7 +8029,7 @@ export const prepare: <
  * **Details**
  *
  * For each accepted event the runtime plans the complete synchronous
- * macrostep, executes closed actor commands, stops invokes for exited states,
+ * macrostep, executes closed machine commands, stops invokes for exited states,
  * publishes the new state, delivers emitted events, and then starts invokes
  * for entered states.
  *

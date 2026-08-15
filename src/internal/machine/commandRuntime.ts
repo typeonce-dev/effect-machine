@@ -10,7 +10,9 @@ import type { RuntimeCommand } from "./command.js"
 import { decodeEmit, decodeEvent } from "./protocol.js"
 import type { ProcessScope } from "./runtime.js"
 
-const isActorRef = (target: unknown): target is { readonly send: (event: unknown) => Effect.Effect<void, unknown> } =>
+const isMachineTarget = (
+  target: unknown
+): target is { readonly send: (event: unknown) => Effect.Effect<void, unknown> } =>
   typeof target === "object" && target !== null && "send" in target && typeof target.send === "function"
 
 export const makeLiveRuntime = <Events, Emits>(
@@ -33,7 +35,7 @@ export const runCommands = <Event>(
 ) =>
   Effect.forEach(commands, (command) =>
     command._tag === "SendTo"
-      ? isActorRef(command.target)
+      ? isMachineTarget(command.target)
         ? command.target.send(command.event)
         : scope.sendTo(command.target as never, command.event)
       : scope.stopChild(command.child as never), { discard: true })

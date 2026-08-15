@@ -65,11 +65,11 @@ const publish = (next: CharacterSnapshot) => {
 }
 
 const program = Effect.gen(function*() {
-  const actor = yield* Machine.start(CharacterMachine)
-  deliver = (event) => Effect.runFork(actor.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void)))
-  publish(yield* actor.state)
-  for (const event of pending.splice(0)) yield* actor.send(event)
-  yield* Stream.runForEach(actor.changes, ({ state }) => Effect.sync(() => publish(state)))
+  const ref = yield* Machine.start(CharacterMachine)
+  deliver = (event) => Effect.runFork(ref.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void)))
+  publish(yield* ref.state)
+  for (const event of pending.splice(0)) yield* ref.send(event)
+  yield* Stream.runForEach(ref.changes, ({ state }) => Effect.sync(() => publish(state)))
 })
 
 const fiber = Effect.runFork(program)

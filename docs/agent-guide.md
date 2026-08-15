@@ -88,7 +88,7 @@ the deferred constructors preserve that identity after decoding.
 - Reuse an exported child descriptor for inline invocation, `sendTo`, and child
   lookup. Independently constructed descriptors are equivalent only when both
   their id and machine identity match.
-- `events` is the public actor-input protocol. `internalEvents` contains
+- `events` is the public machine-input protocol. `internalEvents` contains
   machine-local raised events. `parentEvents` describes the public events a
   child may send to its owner. `emittedEvents` describes outward ephemeral
   notifications and is never delivered implicitly to a parent.
@@ -114,7 +114,7 @@ its extra control is required:
   invocation is addressable only when `Machine.invoke` receives that
   address explicitly.
 - Use the callback's `enqueue` argument for `raise`, `emit`, `sendTo`, and
-  `stop`. These operations record closed actor commands and do not run Effects.
+  `stop`. These operations record closed machine commands and do not run Effects.
 
 ## Atomic, compound, parallel, and history states
 
@@ -321,7 +321,7 @@ the default.
 The machine's readiness type tracks missing defaults and shallow initializers.
 History is an overwriteable register, not a stack: restoration does not consume
 it, and the next parent exit replaces it. Entry actions and invokes run again;
-prior effects, actors, and timers are not rewound.
+prior effects, machine instances, and timers are not rewound.
 
 ## Choosing a target
 
@@ -407,7 +407,7 @@ only schema-backed paths; use `matches` or `getSnapshot` for any active path.
 `context.containingState` is the immediate typed state value (`undefined` at a
 root or when that state is schema-less). `context.ancestors` contains only
 valued structural ancestors. This is separate from `context.parent`, which is
-the owning actor reference or `undefined` for a root actor. Use full state paths
+the owning machine target or `undefined` for a root machine. Use full state paths
 when another ancestor value is needed:
 
 ```ts
@@ -491,7 +491,7 @@ are an upper bound on concrete destinations, not an exhaustive result set.
 `reenter: true` remains meaningful with `target.none()`: the source exits and
 enters again while its logical configuration is retained.
 
-Closed statechart and actor operations use `enqueue`:
+Closed statechart and machine operations use `enqueue`:
 
 ```ts
 Submit: ({ target }, enqueue) => {
@@ -500,7 +500,7 @@ Submit: ({ target }, enqueue) => {
 }
 ```
 
-Declare emission constructors separately from actor inputs:
+Declare emission constructors separately from machine inputs:
 
 ```ts
 const Emissions = Machine.emittedEvents(SaveRequested, AuditRecorded)
@@ -514,9 +514,9 @@ const definition = Machine.make({
 ```
 
 `enqueue.raise(...)` is a same-macrostep input to self. `enqueue.sendTo(...)`
-targets an actor mailbox and is processed later. `enqueue.emit(...)` is neither:
+targets a machine mailbox and is processed later. `enqueue.emit(...)` is neither:
 it publishes a one-off outward notification. Observe it with
-`ref.emissions`, a hot non-replayed `Stream` that completes with the actor.
+`ref.emissions`, a hot non-replayed `Stream` that completes with the machine.
 `ref.changes` is stateful and begins with the current lifecycle snapshot.
 Use `Machine.prepare(machine)` to obtain `changes` and `emissions` before
 initialization. Subscribe to the desired stream and then evaluate
@@ -564,10 +564,12 @@ const parent = Machine.make({
 Invoking the child under a parent that lacks any required `parentEvents` case
 is a type error. Within child handlers, `parent` accepts only that protocol.
 The same child may run as a root, where `parent` is `undefined`. `self` accepts
-the machine's public inputs. Neither actor reference is a structural state
-value; use `containingState` and `ancestors` for statechart ancestry.
+the machine's public inputs. Both are minimal `MachineTarget<Event>` values,
+provided by the shared `MachineReferences<InputEvents, ParentEvents>` handler
+context. Neither machine target is a structural state value; use
+`containingState` and `ancestors` for statechart ancestry.
 
-Atom-backed actors retain the same transient semantics. Use
+Atom-backed machines retain the same transient semantics. Use
 `AtomMachine.emissions(machineAtom)` for a root and
 `AtomMachine.childEmissions(childAtom)` for the currently active child. Both
 return streams requiring the corresponding `AtomRegistry`; emissions are not

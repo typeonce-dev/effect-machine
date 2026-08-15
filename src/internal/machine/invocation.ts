@@ -235,7 +235,7 @@ export const startAll = (
     .filter((path) => configuration.active.has(path))
     .flatMap((path) => {
       const context = {
-        ...(Configuration.getActorScope(configuration) ?? { self: scope.self, parent: scope.parent }),
+        ...(Configuration.getMachineReferences(configuration) ?? { self: scope.self, parent: scope.parent }),
         state: configuration.values.get(path),
         containingState: Configuration.getParentValue(machine, configuration, path),
         ancestors: Configuration.getParentValues(machine, configuration, path),

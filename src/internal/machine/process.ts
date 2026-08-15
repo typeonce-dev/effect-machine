@@ -459,7 +459,7 @@ const makeProcessLogic: <
   ) =>
     compiledInitial === undefined
       ? internalRuntime.provideMachineRuntime(
-        internalPlanner.planInitial(internalPlanner.withActorScope(machine, scope), ...initialArgs).pipe(
+        internalPlanner.planInitial(internalPlanner.withMachineReferences(machine, scope), ...initialArgs).pipe(
           Effect.flatMap((planned) => {
             const commands = planned.commands.length === 0
               ? undefined
@@ -540,7 +540,7 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  Configuration.withActorScope(
+                  Configuration.withMachineReferences(
                     configuration ?? Configuration.normalizeConfigurationSync(machine, current),
                     context
                   ),
@@ -651,7 +651,7 @@ const makeProcessLogic: <
               try {
                 planned = internalPlanner.planConfiguration(
                   machine,
-                  Configuration.withActorScope(
+                  Configuration.withMachineReferences(
                     configuration ?? Configuration.normalizeConfigurationSync(machine, current),
                     context
                   ),

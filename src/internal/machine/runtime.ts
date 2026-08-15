@@ -18,7 +18,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
-import type { ActorRef } from "../../Machine.js"
+import type { MachineTarget } from "../../Machine.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 
 type ChildDescriptor = {
@@ -325,7 +325,7 @@ interface ProcessAddress<in Event> {
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 }
 
-const isProcessAddress = (value: unknown): value is ActorRef<unknown> =>
+const isProcessAddress = (value: unknown): value is MachineTarget<unknown> =>
   typeof value === "object" && value !== null && "send" in value && typeof value.send === "function"
 
 export interface ProcessScope<Event> {
@@ -335,7 +335,7 @@ export interface ProcessScope<Event> {
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly emit: (event: unknown) => Effect.Effect<void>
   readonly sendTo: {
-    <TargetEvent>(target: ActorRef<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+    <TargetEvent>(target: MachineTarget<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
     (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError>
   }
   readonly stopChild: (child: ChildSelector) => Effect.Effect<void>
@@ -367,7 +367,7 @@ export interface ProcessContext<State, Event> extends ProcessScope<Event> {
  *
  * Unlike `ProcessContext`, synchronous mailbox and state operations do not
  * introduce an Effect boundary. The compiled drain still returns an Effect so
- * actor commands, invokes, observation callbacks, interruption, and the Effect
+ * machine commands, invokes, observation callbacks, interruption, and the Effect
  * scheduler remain explicit at their actual boundaries.
  *
  * @internal

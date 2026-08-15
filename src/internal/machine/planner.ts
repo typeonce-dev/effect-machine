@@ -7,7 +7,13 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
-import type { ActorContext, ActorRef, Enqueue, InitialEvent as MachineInitialEvent, Machine } from "../../Machine.js"
+import type {
+  Enqueue,
+  InitialEvent as MachineInitialEvent,
+  Machine,
+  MachineReferences,
+  MachineTarget
+} from "../../Machine.js"
 import { getTargetBuilder, makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -94,35 +100,35 @@ export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context
   enqueue: Enqueue<any, any>
 ) => Machine.HandlerResult<States, E, R>
 
-const rootActorScopes = new WeakMap<Machine.Any, ActorContext<any, any>>()
-const machineActorScopes = new WeakMap<Machine.Any, ActorContext<any, any>>()
+const rootMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
+const scopedMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
 
-export const withActorScope = (
+export const withMachineReferences = (
   machine: Machine.Any,
-  actorScope: ActorContext<any, any>
+  machineReferences: MachineReferences<any, any>
 ): Machine.Any => {
   const scoped = Object.create(machine) as Machine.Any
-  machineActorScopes.set(scoped, { self: actorScope.self, parent: actorScope.parent })
+  scopedMachineReferences.set(scoped, { self: machineReferences.self, parent: machineReferences.parent })
   return scoped
 }
 
-const getActorContext = (
+const resolveMachineReferences = (
   machine: Machine.Any,
   configuration: ActiveConfiguration
-): ActorContext<any, any> => {
-  const scope = configuration.actorScope
+): MachineReferences<any, any> => {
+  const scope = configuration.machineReferences
   if (scope !== undefined) return scope
-  const machineScope = machineActorScopes.get(machine)
+  const machineScope = scopedMachineReferences.get(machine)
   if (machineScope !== undefined) return machineScope
-  const cached = rootActorScopes.get(machine)
+  const cached = rootMachineReferences.get(machine)
   if (cached !== undefined) return cached
-  const self: ActorRef<unknown> = {
+  const self: MachineTarget<unknown> = {
     id: machine.id ?? "Machine",
     sessionId: "Machine.plan",
     send: () => Effect.fail(new StoppedError())
   }
   const root = { self, parent: undefined }
-  rootActorScopes.set(machine, root)
+  rootMachineReferences.set(machine, root)
   return root
 }
 
@@ -240,7 +246,7 @@ const completeHistoryConfiguration = (
           values,
           outputs: configuration.outputs,
           history: configuration.history,
-          actorScope: configuration.actorScope
+          machineReferences: configuration.machineReferences
         } as ActiveConfiguration
         active.add(child.path)
         if (child.schema !== undefined) {
@@ -249,7 +255,7 @@ const completeHistoryConfiguration = (
             throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
           }
           const initialized = collectStateInitializer(machine, initializer, {
-            ...getActorContext(machine, current),
+            ...resolveMachineReferences(machine, current),
             state: current.values.get(path),
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
@@ -271,14 +277,14 @@ const completeHistoryConfiguration = (
             values,
             outputs: configuration.outputs,
             history: configuration.history,
-            actorScope: configuration.actorScope
+            machineReferences: configuration.machineReferences
           } as ActiveConfiguration
           const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initial
           if (valuedMissing.length > 0 && initializer === undefined) {
             throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
           }
           const initialized = initializer === undefined ? undefined : collectStateInitializer(machine, initializer, {
-            ...getActorContext(machine, current),
+            ...resolveMachineReferences(machine, current),
             state: current.values.get(path),
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
@@ -542,7 +548,7 @@ const makeStateActionContext = <
   path: string,
   event: Machine.LifecycleEvent<Events>
 ): Machine.StateActionContext<States, Events, Emits, StateId> => ({
-  ...getActorContext(machine, configuration),
+  ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   ancestors: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
@@ -562,7 +568,7 @@ const makeTransitionContext = <
   event: Machine.EventByTag<Events, EventTag>,
   snapshot: Machine.Snapshot<States>
 ): Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any> => ({
-  ...getActorContext(machine, configuration),
+  ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   ancestors: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
@@ -584,7 +590,7 @@ const makeDoneContext = <
   output: unknown,
   snapshot: Machine.Snapshot<States>
 ): Machine.DoneContext<States, Events, Emits, StateId> => ({
-  ...getActorContext(machine, configuration),
+  ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   ancestors: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
@@ -679,7 +685,7 @@ const selectAlwaysTransitions = <
               Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>
             >,
             context: {
-              ...getActorContext(machine, configuration),
+              ...resolveMachineReferences(machine, configuration),
               state: configuration.values.get(path) as Machine.StateByIdentifier<
                 States,
                 Machine.StateIdentifier<States>
@@ -867,7 +873,7 @@ const selectInvocationTransition = <
   if (transition === undefined) return []
   const snapshot = snapshotFromConfiguration<States>(machine, configuration)
   const context = {
-    ...getActorContext(machine, configuration),
+    ...resolveMachineReferences(machine, configuration),
     state: configuration.values.get(event.path),
     containingState: getParentValue(machine, configuration, event.path),
     ancestors: getParentValues(machine, configuration, event.path),
@@ -1107,10 +1113,10 @@ const resolveChoiceTarget = (
         ]),
         outputs: configuration.outputs,
         history: configuration.history,
-        ...(configuration.actorScope === undefined ? {} : { actorScope: configuration.actorScope })
+        ...(configuration.machineReferences === undefined ? {} : { machineReferences: configuration.machineReferences })
       }
       const collected = collectTransition(machine, choice.transition, {
-        ...getActorContext(machine, provisional),
+        ...resolveMachineReferences(machine, provisional),
         containingState: getParentValue(machine, provisional, node.path),
         ancestors: getParentValues(machine, provisional, node.path),
         event,

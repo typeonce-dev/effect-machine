@@ -5,7 +5,7 @@ import { Machine } from "../../src/index.js"
 const collectNext = <A>(stream: Stream.Stream<A>) =>
   stream.pipe(Stream.take(1), Stream.runCollect, Effect.map(Array.from), Effect.forkChild({ startImmediately: true }))
 
-describe("actor event channels", () => {
+describe("machine reference event channels", () => {
   it.effect("observes initial emissions through a prepared machine", () =>
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("PreparedEmissionIdle")("Idle", {}) {}
@@ -144,7 +144,7 @@ describe("actor event channels", () => {
       assert.deepStrictEqual(Array.from(yield* Stream.runCollect(ref.emissions)), [])
     }))
 
-  it.effect("fails the actor with a typed machine error when an emission cannot be decoded", () =>
+  it.effect("fails the machine with a typed error when an emission cannot be decoded", () =>
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("InvalidEmissionIdle")("Idle", {}) {}
       class Publish extends Schema.TaggedClass<Publish>("InvalidEmissionPublish")("Publish", {}) {}

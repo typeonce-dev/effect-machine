@@ -600,7 +600,7 @@ describe("machine planner and runtime strategies", () => {
                   initial: "active",
                   run: ({ parent, sendTo, setState }) =>
                     parent === undefined ?
-                      Effect.die("worker expected an owning actor") :
+                      Effect.die("worker expected an owning machine") :
                       (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
                         Effect.andThen(Effect.never),
                         Effect.onInterrupt(() =>

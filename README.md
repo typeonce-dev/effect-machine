@@ -136,7 +136,7 @@ data, put it on their compound parent.
 
 ### Separate inputs, raised events, and emissions
 
-`events` is the public actor-input protocol. Events raised to the same machine
+`events` is the public machine-input protocol. Events raised to the same machine
 belong in `internalEvents`. Ephemeral outward notifications have their own
 `emittedEvents` protocol:
 
@@ -186,7 +186,7 @@ protocols but cannot expose a finite constructor set; pass a complete event
 object to `send` or `Machine.plan` for those events.
 
 `ref.emissions` is a hot `Stream`: it publishes only notifications produced
-after subscription, replays nothing, and completes when the actor terminates.
+after subscription, replays nothing, and completes when the machine terminates.
 Snapshots remain separate and stateful: `ref.changes` begins with the current
 lifecycle snapshot and then follows later changes. Use `Machine.prepare` when
 an observer must be installed before initial-entry actions run:
@@ -209,10 +209,10 @@ emission: the observer is simply subscribed before initialization begins.
 Invalid event and emission constructions fail the machine with a typed
 `MachineSchemaDecodeError`; they do not throw from the constructor call.
 
-### Send explicitly between actors
+### Send explicitly between machines
 
-`raise` targets the current machine in the same macrostep. `sendTo` targets an
-actor mailbox and is processed later. A child declares the subset of parent
+`raise` targets the current machine in the same macrostep. `sendTo` targets a
+machine mailbox and is processed later. A child declares the subset of parent
 inputs it may send with `parentEvents`:
 
 ```ts
@@ -244,15 +244,18 @@ const ParentInputs = Machine.events(Start, ParentEvents)
 The same child remains isolated and may be started as a root, where `parent` is
 `undefined`. When `Child` is invoked, the parent definition must accept every
 event in `parentEvents`; otherwise `.handle(...)` is a compile-time error.
-Inside the child, the parent reference accepts only those declared events.
-`emit` never sends to the parent: it only publishes on the emitting actor's
+Inside the child, the parent target accepts only those declared events.
+`emit` never sends to the parent: it only publishes on the emitting machine's
 `emissions` stream.
 
 Every handler also receives `self`, which can be targeted with `sendTo` when a
 later mailbox turn is required. Use `raise` instead for same-macrostep work.
+Both `self` and `parent` are minimal `Machine.MachineTarget<Event>` values. The
+shared `Machine.MachineReferences<InputEvents, ParentEvents>` context keeps
+their input protocols separate without exposing snapshot or lifecycle APIs.
 Structural state values use distinct names: `containingState` is the immediate
 valued state in the same statechart, while `ancestors` maps valued ancestor
-paths. `parent` always means the owning actor reference.
+paths. `parent` always means the owning machine target.
 
 ### Choose the target by scope
 
@@ -401,7 +404,7 @@ const childEmissions = AtomMachine.childEmissions(counterAtom.child(Worker))
 ```
 
 These streams require the same `AtomRegistry`, follow the currently mounted
-actor instance, and do not replay notifications from an earlier subscription
+machine instance, and do not replay notifications from an earlier subscription
 or child instance.
 
 ## Persistence

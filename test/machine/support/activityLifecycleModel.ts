@@ -83,7 +83,7 @@ export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(functi
       Machine.logic<ActivityState, never, void, ActivityFailure>({
         initial: () => initial(owner),
         run: ({ parent, sendTo, state }) =>
-          parent === undefined ? Effect.die("activity expected an owning actor") : state.pipe(
+          parent === undefined ? Effect.die("activity expected an owning machine") : state.pipe(
             Effect.flatMap(({ epoch, release }) => {
               switch (behavior._tag) {
                 case "Blocked":

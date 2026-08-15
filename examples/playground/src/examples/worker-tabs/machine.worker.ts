@@ -14,8 +14,8 @@ let deliver: ((event: SharedEvent) => void) | undefined
 const pendingEvents: Array<SharedEvent> = []
 
 const program = Effect.gen(function*() {
-  const actor = yield* Machine.start(SharedMachine)
-  const initial = yield* actor.snapshot
+  const ref = yield* Machine.start(SharedMachine)
+  const initial = yield* ref.snapshot
 
   if (initial.status === "error") {
     post({ _tag: "WorkerError", message: "The worker-hosted machine failed during startup." })
@@ -30,7 +30,7 @@ const program = Effect.gen(function*() {
 
   deliver = (event) => {
     Effect.runFork(
-      actor.send(event).pipe(
+      ref.send(event).pipe(
         Effect.catchTag(
           "StoppedError",
           () => Effect.sync(() => post({ _tag: "WorkerError", message: "The worker-hosted machine has stopped." }))
@@ -43,7 +43,7 @@ const program = Effect.gen(function*() {
 
   post({ _tag: "Ready" })
 
-  yield* Stream.runForEach(actor.changes, (snapshot) =>
+  yield* Stream.runForEach(ref.changes, (snapshot) =>
     Effect.sync(() => {
       if (snapshot.status === "error") {
         post({ _tag: "WorkerError", message: "The worker-hosted machine failed while processing an event." })
