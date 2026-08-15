@@ -1,5 +1,19 @@
 # @typeonce/effect-machine
 
+## 0.9.0
+
+### Minor Changes
+
+- d471d42: Add `Machine.events(machine)` and `Machine.internalEvents(machine)` as the standard way to construct protocol events.
+
+  The returned tag-keyed constructors preserve schema make inputs and defer decoding until machine delivery, so invalid values fail with `MachineSchemaDecodeError` through planning or the running machine instead of throwing at the construction call site.
+
+- 59580de: Replace `Machine.invokeEffect`, `Machine.after`, `Machine.invokeMachine`, and `Machine.effect` with one inline `invoke` lifecycle object API and a zero-runtime `Machine.invoke` inference helper.
+
+  Choose an `effect`, `after`, `logic`, or `child` source and handle typed outcomes directly with `onDone`, `onFailure`, and `onSnapshot`. Lifecycle handlers can now transition the owning state without routing results through mapped machine events.
+
+  State-dependent Effect sources infer their owner state, output, error, and service requirements together without a manual return annotation.
+
 ## 0.8.0
 
 ### Minor Changes
