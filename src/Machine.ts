@@ -3772,6 +3772,21 @@ export declare namespace Machine {
   }
 
   /**
+   * Opaque result returned by an explicitly targetless transition.
+   *
+   * The transition remains handled and retains its queued commands, raised
+   * events, and emitted events, but selects no concrete destination. Declared
+   * `targets` constrain only concrete destinations, so this result is always
+   * permitted from ordinary transition handlers.
+   *
+   * @category models
+   * @since 0.10.0
+   */
+  export interface NoTarget {
+    readonly [Topology.NoTargetTypeId]: typeof Topology.NoTargetTypeId
+  }
+
+  /**
    * Transition instruction that restores a history pseudo-state's parent.
    *
    * Unlike ordinary targets, history targets carry no state value. The
@@ -3877,9 +3892,9 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * `local` targets the nearest compound scope for the source state, `branch`
-   * targets descendants of the source root, and `full` builds complete
-   * snapshots for any root.
+   * `none()` handles without selecting a destination, `local` targets the
+   * nearest compound scope for the source state, `branch` targets descendants
+   * of the source root, and `full` builds complete snapshots for any root.
    *
    * These builders control how the next active configuration is assembled; they
    * do not directly control state re-entry. Exit and entry paths are derived
@@ -3895,6 +3910,18 @@ export declare namespace Machine {
     States extends StateSchemas,
     Source extends StateNodeIdentifier<States>
   > {
+    /**
+     * Selects an explicitly targetless transition.
+     *
+     * The event or lifecycle outcome is handled and queued operations are
+     * retained, while the current state configuration remains the transition
+     * result. This remains valid when the handler declares concrete `targets`,
+     * because those paths are an upper bound rather than an exhaustive result.
+     *
+     * @since 0.10.0
+     */
+    readonly none: () => NoTarget
+
     /**
      * Moves to another state in the same local group. The value of the state
      * containing that group, and values in other active branches, are kept.
@@ -4239,9 +4266,10 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * Handlers return snapshots for complete state replacement or target builder
-   * results for path-safe partial transitions. Raw decoded state values are not
-   * accepted at transition boundaries.
+   * Handlers return snapshots for complete state replacement, target builder
+   * results for path-safe partial transitions, or `target.none()` for an
+   * explicitly targetless transition. Raw decoded state values and `void` are
+   * not accepted at transition boundaries.
    *
    * @category utility types
    * @since 0.4.0
@@ -4257,7 +4285,7 @@ export declare namespace Machine {
       | HistoryTarget<States, HistoryIdentifier<States>>
       | ChoiceTarget<States, ChoiceIdentifier<States>>
     >
-    | void
+    | NoTarget
 
   /** A choice resolver must always select a typed target synchronously. */
   export type ChoiceResult<States extends StateSchemas, E, R> =
@@ -5058,7 +5086,7 @@ export declare namespace Machine {
           readonly reenter?: boolean
           /**
            * Upper bound of state or history paths this handler may target.
-           * Returning `void` is always permitted. Declaring a parent state also
+           * Returning `target.none()` is always permitted. Declaring a parent state also
            * permits concrete descendant targets below it.
            */
           readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
@@ -6825,57 +6853,6 @@ export const invoke: {
       Machine.EventOf<Machine.ParentEvents<Child["machine"]>>
     >
 } = ((config: unknown) => config) as any
-type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
-
-type RetagTargetCompatibility<Target extends Machine.TaggedSchema> = Target extends {
-  readonly fields: Schema.Struct.Fields
-} ? "_tag" extends keyof Target["~type.make.in"] ? {} extends Pick<Target["~type.make.in"], "_tag"> ? unknown : {
-      readonly "~effect/Machine/RetagTargetError": "Target schema must supply its discriminator when make is called"
-    }
-  : unknown
-  : {
-    readonly "~effect/Machine/RetagTargetError": "Target schema must be one tagged struct or tagged class"
-  }
-
-type RequiredKeys<A> = {
-  readonly [Key in keyof A]-?: {} extends Pick<A, Key> ? never : Key
-}[keyof A]
-
-type CompatibleSourceKeys<Fields, Source> = {
-  readonly [Key in Extract<keyof Fields, keyof Source>]: Source[Key] extends Fields[Key] ? Key : never
-}[Extract<keyof Fields, keyof Source>]
-
-type RetagPatch<Target extends Machine.TaggedSchema, Source> =
-  & Partial<RetagFields<Target>>
-  & Pick<
-    RetagFields<Target>,
-    Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
-  >
-
-type RetagArgs<Target extends Machine.TaggedSchema, Source> = [
-  Exclude<RequiredKeys<RetagFields<Target>>, CompatibleSourceKeys<RetagFields<Target>, Source>>
-] extends [never] ? [patch?: RetagPatch<Target, Source>]
-  : [patch: RetagPatch<Target, Source>]
-
-/**
- * Constructs another tagged case from compatible source fields.
- *
- * The target must be one tagged struct or tagged class whose discriminator is
- * supplied by its constructor. Union wrappers are rejected because their
- * `make` operation cannot select a member after the source discriminator has
- * been discarded. Missing or incompatible required target fields must be
- * supplied by the patch, and the target schema's normal `make` validation
- * remains authoritative at runtime.
- *
- * @category constructors
- * @since 0.4.0
- */
-export const retag: <const Target extends Machine.TaggedSchema, const Source extends { readonly _tag: PropertyKey }>(
-  target: Target & RetagTargetCompatibility<Target>,
-  source: Source,
-  ...args: RetagArgs<Target, Source>
-) => Target["Type"] = internal.retag
-
 /**
  * Plans the initial state for a machine without executing actor commands.
  *

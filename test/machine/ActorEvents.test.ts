@@ -27,7 +27,10 @@ describe("actor event channels", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: ({ event }, enqueue) => enqueue.emit(Emissions.Published({ value: event.value }))
+            Publish: ({ event, target }, enqueue) => {
+              enqueue.emit(Emissions.Published({ value: event.value }))
+              return target.none()
+            }
           }
         }
       })
@@ -74,7 +77,10 @@ describe("actor event channels", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: (_, enqueue) => enqueue.emit(Emissions.Published({ value: "invalid" } as never))
+            Publish: ({ target }, enqueue) => {
+              enqueue.emit(Emissions.Published({ value: "invalid" } as never))
+              return target.none()
+            }
           }
         }
       })

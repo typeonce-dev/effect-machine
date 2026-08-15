@@ -98,7 +98,7 @@ const machine = Machine.make({
     invoke: Machine.invoke({
       id: "deep-inline-invoke",
       effect: Effect.asVoid(ExternalService),
-      onDone: () => undefined
+      onDone: ({ target }) => target.none()
     }),
     on: {
       Begin: ({ target }) =>
@@ -117,15 +117,15 @@ const machine = Machine.make({
           Editing: {
             on: {
               Save: ({ event, target }) => target.local.Saving(State.cases.Saving.make({ value: event.value })),
-              Loaded: () => undefined
+              Loaded: ({ target }) => target.none()
             }
           },
           Saving: {
-            invoke: {
+            invoke: Machine.invoke({
               child: Child,
               input: ({ state }) => ({ value: state.value }),
-              onDone: () => undefined
-            },
+              onDone: ({ target }) => target.none()
+            }),
             on: {
               ChildNotice: ({ event, target }, enqueue) => {
                 enqueue.emit(Emissions.Notice({ value: event.value }))

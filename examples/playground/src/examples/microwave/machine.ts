@@ -57,7 +57,7 @@ export const MicrowaveMachine = definition.handle({
               PowerPressed: ({ snapshot, target }) =>
                 MicrowaveStates.matches(snapshot, "Oven.door.Closed")
                   ? target.local.Cooking.from({ elapsedSeconds: 0 })
-                  : undefined
+                  : target.none()
             }
           },
           Cooking: {

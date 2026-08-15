@@ -93,7 +93,7 @@ const machine = Machine.make({
               },
               Refresh: {
                 targets: [],
-                transition: () => undefined
+                transition: ({ target }) => target.none()
               }
             }
           },
@@ -218,16 +218,16 @@ describe("Machine structural visualization", () => {
         on: {
           Refresh: {
             reenter: true,
-            transition: () => undefined
+            transition: ({ target }) => target.none()
           }
         },
         always: {
           targets: ["idle"],
-          transition: () => undefined
+          transition: ({ target }) => target.none()
         },
         onDone: {
           targets: ["idle"],
-          transition: () => undefined
+          transition: ({ target }) => target.none()
         }
       }
     })
@@ -419,7 +419,7 @@ describe("Machine structural visualization", () => {
                     on: {
                       Start: {
                         targets: ["missing"] as any,
-                        transition: () => undefined
+                        transition: ({ target }) => target.none()
                       }
                     }
                   }
@@ -436,7 +436,7 @@ describe("Machine structural visualization", () => {
           idle: {
             always: {
               targets: ["missing"],
-              transition: () => undefined
+              transition: ({ target }: any) => target.none()
             }
           }
         } as any),
@@ -448,7 +448,7 @@ describe("Machine structural visualization", () => {
           workflow: {
             onDone: {
               targets: ["missing"],
-              transition: () => undefined
+              transition: ({ target }: any) => target.none()
             }
           }
         } as any),

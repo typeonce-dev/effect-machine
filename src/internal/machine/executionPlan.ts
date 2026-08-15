@@ -46,7 +46,7 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import { isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
@@ -427,7 +427,7 @@ const collectIndexedTransition = (
   let commands: Array<RuntimeCommand> | undefined
   let raisedEvents: Array<any> | undefined
   let emittedEvents: Array<unknown> | undefined
-  const state = transition(context, {
+  const result = transition(context, {
     raise: (event: unknown) => {
       ;(raisedEvents ??= []).push(decodeEventSync(machine, event))
     },
@@ -442,7 +442,7 @@ const collectIndexedTransition = (
     }
   })
   return {
-    state,
+    state: isNoTarget(result) ? undefined : result,
     commands: commands ?? emptyExecutionValues,
     raisedEvents: raisedEvents ?? emptyExecutionValues,
     emittedEvents: emittedEvents ?? emptyExecutionValues

@@ -85,7 +85,7 @@ describe("inline invoke", () => {
             effect: (): Effect.Effect<string> => {
               throw defect
             },
-            onDone: () => undefined
+            onDone: ({ target }) => target.none()
           })
         },
         Complete: {},

@@ -58,9 +58,9 @@ describe("Machine transition snapshot context", () => {
             },
             states: {
               LeftIdle: {
-                always: ({ snapshot }) => {
+                always: ({ snapshot, target }) => {
                   expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                  return undefined
+                  return target.none()
                 },
                 on: {
                   Advance: ({ snapshot, target }) => {

@@ -13,10 +13,10 @@ const machine = Machine.make({
   initial: () => States.initial.Loading(new Loading({}))
 }).handle({
   Loading: {
-    invoke: Machine.invoke({ id: "timeout", after: "1 second", onDone: () => undefined })
+    invoke: Machine.invoke({ id: "timeout", after: "1 second", onDone: ({ target }) => target.none() })
   },
   Dynamic: {
-    invoke: Machine.invoke({ id: "dynamic", after: () => "2 seconds" as const, onDone: () => undefined })
+    invoke: Machine.invoke({ id: "dynamic", after: () => "2 seconds" as const, onDone: ({ target }) => target.none() })
   }
 })
 

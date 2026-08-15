@@ -60,6 +60,7 @@ describe("pure planning and managed runtime differential", () => {
           on: {
             Cascade: (_, enqueue) => {
               enqueue.raise(new Increment({}))
+              return _.target.none()
             },
             Increment: ({ state, target }) => target.full.Count(new Count({ value: state.value + 1 })),
             Finish: ({ state, target }) => target.full.Done(new Done({ value: state.value }))
@@ -200,6 +201,7 @@ describe("pure planning and managed runtime differential", () => {
                     left: snapshot.states.Left.value.value,
                     right: snapshot.states.Right.value.value
                   })
+                  return context.target.none()
                 }
               }
             }
@@ -463,6 +465,7 @@ describe("pure planning and managed runtime differential", () => {
             RaisedOne: (_, enqueue) => {
               record("raised:one")
               enqueue.emit(new Notice({ label: "raised-one" }))
+              return _.target.none()
             },
             RaisedTwo: ({ target }, enqueue) => {
               record("raised:two")

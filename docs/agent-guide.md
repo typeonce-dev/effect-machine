@@ -426,7 +426,7 @@ microstep, before any selected transition is applied:
 BufferReady: ({ snapshot, target }) =>
   States.matches(snapshot, "Player.Network.Online")
     ? target.local.Playing.from()
-    : undefined
+    : target.none()
 ```
 
 Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
@@ -457,11 +457,19 @@ history definitions may declare an `annotations` object containing only
 they cannot change behavior, identity, or targeting. Visualization may show a
 title, while the structural path remains authoritative.
 
-Use `Machine.retag(TargetCase, source, patch?)` when sibling state payloads
-share fields. It removes the source discriminator, reuses only compatible
-fields, and requires a patch for every missing or incompatible required field.
-Prefer moving broadly shared data to the compound parent rather than retagging
-it through every phase.
+When sibling state payloads share fields, destructure away the source
+discriminator and construct the destination through its target builder:
+
+```ts
+Submit: ({ state, target }) => {
+  const { _tag: _, ...fields } = state
+  return target.local.Saving.from({ ...fields, attempt: 1 })
+}
+```
+
+The target schema remains responsible for defaults, transforms, refinements,
+and class identity. Prefer moving broadly shared data to the compound parent
+rather than copying it through every phase.
 
 ## Planning, actions, raised events, and emissions
 
@@ -469,8 +477,18 @@ A transition returns a target synchronously:
 
 ```ts
 Submit: ({ state, target }) =>
-  state.valid ? target.local.Saving.from({ draft: state.draft }) : undefined
+  state.valid ? target.local.Saving.from({ draft: state.draft }) : target.none()
 ```
+
+Every installed event, `always`, `onDone`, and invoke lifecycle handler must
+return a concrete target or `target.none()`. An absent event handler means the
+event is ignored. Returning `target.none()` means it was handled without a
+destination, so queued commands, raised events, and emitted events are still
+retained. It remains valid when a transition declares `targets`: those paths
+are an upper bound on concrete destinations, not an exhaustive result set.
+
+`reenter: true` remains meaningful with `target.none()`: the source exits and
+enters again while its logical configuration is retained.
 
 Closed statechart and actor operations use `enqueue`:
 

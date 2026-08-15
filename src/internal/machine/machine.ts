@@ -728,6 +728,7 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
   const history = makeHistoryTargetBuilder(states, "") as Machine.HistoryTargetBuilder<States>
   return <Source extends Machine.StateNodeIdentifier<States>>(source: Source): Machine.TargetBuilder<States, Source> =>
     ({
+      none: Topology.makeNoTarget,
       local: makeLocalTargetBuilder(states, stateNodes, source),
       branch: makeBranchTargetBuilder(states, stateNodes, source),
       full,
@@ -990,14 +991,6 @@ export const decodeSnapshot: <
   Machine.SnapshotDecodingServices<States>
 > = Serialization.decodeSnapshot as any
 
-export const retag = (
-  target: Machine.TaggedSchema,
-  source: { readonly _tag: PropertyKey },
-  patch?: unknown
-): any => {
-  const { _tag: _, ...fields } = source
-  return target.make({ ...fields, ...((patch ?? {}) as object) } as never)
-}
 export const planInitial: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,

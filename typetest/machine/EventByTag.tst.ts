@@ -39,19 +39,21 @@ describe("Machine.EventByTag", () => {
     }).handle({
       Idle: {
         on: {
-          Alpha: ({ event }) => {
+          Alpha: ({ event, target }) => {
             expect(event).type.toBe<{
               readonly _tag: "Alpha"
               readonly payload: string
               readonly count: number
             }>()
+            return target.none()
           },
-          Beta: ({ event }) => {
+          Beta: ({ event, target }) => {
             expect(event).type.toBe<{
               readonly _tag: "Beta"
               readonly payload: string
               readonly count: number
             }>()
+            return target.none()
           }
         }
       }

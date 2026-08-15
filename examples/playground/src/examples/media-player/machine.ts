@@ -34,9 +34,14 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
             invoke: Machine.invoke({
               id: "load-audio",
               effect: ({ state }) => loadAudio(state.url),
-              onDone: (_, enqueue) => enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded()),
-              onFailure: ({ error }, enqueue) =>
+              onDone: ({ target }, enqueue) => {
+                enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded())
+                return target.none()
+              },
+              onFailure: ({ error, target }, enqueue) => {
                 enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                return target.none()
+              }
             }),
             on: {
               LoadSucceeded: ({ target }) => target.local.Ready.from((ready) => ready.Paused.from(initialPlaybackData))
@@ -49,9 +54,11 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                 invoke: Machine.invoke({
                   id: "pause-audio",
                   effect: pauseAudio,
-                  onDone: () => undefined,
-                  onFailure: ({ error }, enqueue) =>
+                  onDone: ({ target }) => target.none(),
+                  onFailure: ({ error, target }, enqueue) => {
                     enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                    return target.none()
+                  }
                 }),
                 on: {
                   PlayRequested: ({ state, target }) =>
@@ -69,18 +76,21 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   Machine.invoke({
                     id: "play-audio",
                     effect: playAudio,
-                    onDone: () => undefined,
-                    onFailure: ({ error }, enqueue) =>
+                    onDone: ({ target }) => target.none(),
+                    onFailure: ({ error, target }, enqueue) => {
                       enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                      return target.none()
+                    }
                   }),
                   Machine.invoke({
                     id: "analyze-audio",
                     address: Machine.childAddress("analyze-audio"),
                     logic: analyzeAudio,
-                    onDone: () => undefined,
-                    onSnapshot: ({ snapshot }, enqueue) => {
+                    onDone: ({ target }) => target.none(),
+                    onSnapshot: ({ snapshot, target }, enqueue) => {
                       const event = loudnessEvent(snapshot.state)
                       if (event !== undefined) enqueue.raise(event)
+                      return target.none()
                     }
                   })
                 ],
@@ -136,9 +146,14 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                 invoke: Machine.invoke({
                   id: "restart-audio",
                   effect: restartAudio,
-                  onDone: (_, enqueue) => enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded()),
-                  onFailure: ({ error }, enqueue) =>
+                  onDone: ({ target }, enqueue) => {
+                    enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded())
+                    return target.none()
+                  },
+                  onFailure: ({ error, target }, enqueue) => {
                     enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                    return target.none()
+                  }
                 }),
                 on: {
                   RestartSucceeded: ({ target }) => target.local.Playing.from({ currentTime: 0, loudness: null }),
@@ -159,15 +174,15 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
           },
 
           Failed: {
-            invoke: {
+            invoke: Machine.invoke({
               id: "report-error",
               effect: ({ state }) =>
                 Effect.gen(function*() {
                   const mediaPlayer = yield* MediaPlayer
                   yield* mediaPlayer.reportError(state.message)
                 }),
-              onDone: () => undefined
-            }
+              onDone: ({ target }) => target.none()
+            })
           }
         }
       },
@@ -175,11 +190,11 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
       settings: {
         states: {
           Audible: {
-            invoke: {
+            invoke: Machine.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, false),
-              onDone: () => undefined
-            },
+              onDone: ({ target }) => target.none()
+            }),
             on: {
               VolumeChanged: {
                 reenter: true,
@@ -208,11 +223,11 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
           },
 
           Muted: {
-            invoke: {
+            invoke: Machine.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, true),
-              onDone: () => undefined
-            },
+              onDone: ({ target }) => target.none()
+            }),
             on: {
               VolumeChanged: {
                 reenter: true,

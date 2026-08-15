@@ -45,6 +45,7 @@ import {
   getNode,
   isChoiceTarget,
   isHistoryTarget,
+  isNoTarget,
   isSnapshot,
   isTarget,
   makeChoiceTarget,
@@ -187,9 +188,9 @@ const collectTransition = <
   context: Context
 ) => {
   const collected = makeCollector<Event>(machine)
-  const state = transition(context, collected.enqueue)
+  const result = transition(context, collected.enqueue)
   return {
-    state,
+    state: isNoTarget(result) ? undefined : result,
     commands: collected.commands,
     raisedEvents: collected.raisedEvents,
     emittedEvents: collected.emittedEvents

@@ -74,7 +74,7 @@ const counterParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: () => undefined })
+    invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: benchmarkApi.targetless })
   }
 })
 
@@ -87,8 +87,8 @@ const counterSnapshotParentMachine = Machine.make({
   Active: {
     invoke: benchmarkApi.invokeChild({
       child: CounterChild,
-      onDone: () => undefined,
-      onSnapshot: () => undefined
+      onDone: benchmarkApi.targetless,
+      onSnapshot: benchmarkApi.targetless
     })
   }
 })
@@ -308,7 +308,7 @@ const waitForCounterChild = (parent) =>
       }
       yield* Effect.yieldNow
     }
-    return yield* Effect.dieMessage("Effect Machine child did not become ready")
+    return yield* Effect.die(new Error("Effect Machine child did not become ready"))
   })
 
 export const startChildCounter = () =>
@@ -328,13 +328,13 @@ export const runChildCounterBurst = (parent, size) =>
       for (let index = 0; index < size; index += 1) {
         const child = yield* parent.child(CounterChild)
         if (Option.isNone(child)) {
-          return yield* Effect.dieMessage("Effect Machine child disappeared during the benchmark")
+          return yield* Effect.die(new Error("Effect Machine child disappeared during the benchmark"))
         }
         yield* child.value.send(incrementEvent)
       }
       const child = yield* parent.child(CounterChild)
       if (Option.isNone(child)) {
-        return yield* Effect.dieMessage("Effect Machine child disappeared before the terminal fence")
+        return yield* Effect.die(new Error("Effect Machine child disappeared before the terminal fence"))
       }
       yield* child.value.send(finishEvent)
       return yield* child.value.join
