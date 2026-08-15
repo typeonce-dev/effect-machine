@@ -1,10 +1,32 @@
 # Project guidance
 
-A core objective of the library is type safety and ease of use of the user-facing API, for both humans and agents.
+Effect Machine is intended to become part of the core `effect` library. Treat that as an architectural requirement: public APIs, failures, module boundaries, ownership, and implementation patterns must meet Effect's standards and fit its general API shape.
 
-The goal is eventually to merge this inside the core of the `effect` library, so plan changes according to the patterns and expectations of `effect`.
+## Product priorities
 
-Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+Apply these priorities in order:
+
+1. **Type safety.** Make invalid states, events, compositions, references, and capabilities unrepresentable at compile time whenever possible. Preserve typed Effect failures at runtime; validation must not escape as an accidental throw.
+2. **Explicit, opinionated semantics.** Similar concepts need distinct names and contracts. Do not hide a material semantic choice behind an omission, permissive overload, or ambiguous default. Convenience should come from builders and inference, not weaker boundaries.
+3. **Readable, concise models.** A human should be able to read a machine definition from top to bottom and understand its protocols, topology, behavior, and effects. Prefer declarative builders and eliminate raw schema plumbing, duplicated declarations, and incidental ceremony. Concision must not obscure intent.
+4. **Effect-core alignment.** Follow Effect naming, failure, `Scope`, `Stream`, service, module, and ownership conventions. Inspect analogous implementations under `references/effect` before designing a new abstraction.
+
+When compatibility, convenience, concision, and semantic clarity conflict, prefer type safety and semantic clarity. Then optimize the resulting API for readable models. Make architectural decisions for the long term; do not accept a stopgap intended to be replaced later.
+
+## Experimental versioning
+
+- The library is experimental and pre-1.0. Public additions and breaking API changes use a minor changeset; compatible fixes and implementation improvements use a patch changeset. Do not create major changesets before 1.0.
+- Backward compatibility is not currently a design goal. Change or remove an existing API whenever a clearer, safer, smaller long-term design replaces it.
+- Do not add deprecated aliases, compatibility wrappers, or parallel APIs solely to preserve an inferior existing design unless the user explicitly requests them.
+- Explain the resulting API and direct migration in changesets. Do not use changelog entries to credit an external library or narrate implementation history.
+
+## Effect and Cluster boundaries
+
+- Effect Machine owns declarative state modelling, typed machine protocols, local machine references, child lifecycles, execution, and observation.
+- Effect Cluster owns distributed identity, placement, discovery, transport, routing, delivery, sharding, and remote lifecycle semantics. Do not recreate those capabilities in the core machine API.
+- Before exporting a new name or capability, inspect Effect's public modules and the relevant implementation under `references/effect`, with explicit attention to Cluster. Avoid names that already carry a different Cluster meaning, especially actor-, entity-, shard-, node-, and distributed-reference terminology.
+- Reuse Cluster terminology only when the semantics genuinely match and the integration is intentional and documented. Do not introduce a local lookalike with a different contract.
+- Keep necessary Cluster integration behind an explicit adapter or integration module. Do not leak distributed concerns into the local machine model.
 
 ## Effect internal standards
 

@@ -2,6 +2,15 @@
 
 Run `pnpm changeset` for every user-facing change.
 
+## Pre-1.0 versioning
+
+Effect Machine is experimental and pre-1.0. Use only:
+
+- `minor` for a public addition or breaking API change;
+- `patch` for a compatible fix or implementation improvement that requires a changeset.
+
+Do not create a major changeset before 1.0. Backward compatibility is not a design goal during this phase: prefer the clearest long-term API and provide a direct migration instead of adding deprecated aliases or compatibility wrappers.
+
 ## Writing changelog entries
 
 Changeset descriptions are published directly on the documentation website. Write them for library users rather than repository maintainers.
@@ -12,6 +21,7 @@ Changeset descriptions are published directly on the documentation website. Writ
 - Use inline code for API names, types, and short expressions.
 - Include at most one small fenced TypeScript example when an API is added or its usage changes meaningfully.
 - For a breaking change, state what changed and show the replacement or migration directly.
+- Describe the resulting API rather than the external library that inspired it.
 - Omit commit hashes, pull request numbers, implementation history, test details, and internal refactoring unless they affect users.
 
 A typical API entry looks like:

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Effect Machine Release"
+  short_description: "Ship through the Changesets release PR"
+  default_prompt: "Use $effect-machine-release to implement this change, merge its pull request, and complete the Changesets release."
+policy:
+  allow_implicit_invocation: false

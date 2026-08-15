@@ -4,6 +4,21 @@ This is the model-facing reference for the currently published
 `@typeonce/effect-machine` API. Prefer these patterns over reconstructing the API
 from its internal implementation.
 
+## Design priorities
+
+Prefer, in order: compile-time type safety, explicit and opinionated semantics,
+readable and concise machine models, and alignment with Effect core. Convenience
+must come from builders and inference rather than ambiguous omissions or weaker
+contracts. The package is pre-1.0, so improve or remove an existing API when a
+clearer long-term design replaces it; do not preserve an inferior design with
+aliases by default.
+
+Keep the core machine model local. Before adding a public name or capability,
+check Effect's existing modules and especially Cluster. Distributed identity,
+placement, discovery, transport, routing, delivery, sharding, and remote
+lifecycle belong to Cluster; expose integration through an explicit adapter
+instead of creating a similar local abstraction with different semantics.
+
 ## Public imports
 
 ```ts
