@@ -37,9 +37,10 @@ The fitted heap slope is the primary idle-capacity metric. Compare adjacent
 profiles to attribute retained memory: raw process to idle statechart isolates
 statechart machinery, two independent machines to parent-with-child isolates
 relationship bookkeeping, while the two observed parent-child profiles isolate
-registry and invoked-snapshot observation. Invoked snapshot mapping uses a
-direct, state-scoped delivery path; its profile measures the retained callback
-and mapping state rather than a general `changes` stream subscription.
+registry and invoked-snapshot observation. Invoked snapshot handling uses a
+direct, state-scoped transition path; its profile measures the retained
+callback and lifecycle state rather than a general `changes` stream
+subscription.
 
 Resident memory is reported as a raw diagnostic because V8 and the
 operating-system allocator can reuse already committed pages. The
@@ -81,3 +82,7 @@ because hosted-runner and allocator behavior makes it substantially noisier.
 The implementation lives in `scripts/runtime-performance.mjs`, and the Effect
 Machine fixture is in `perf/runtime/counter.mjs`. Every scenario consumes and
 checks its result so the JavaScript engine cannot discard the measured work.
+Because the pull request fixture runs against multiple library revisions,
+public API compatibility is capability-based and centralized in
+`perf/runtime/effect-machine-compatibility.mjs`. Keep version adaptation there
+rather than branching inside individual benchmark scenarios.

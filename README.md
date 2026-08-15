@@ -201,32 +201,39 @@ State-scoped work starts on entry and is interrupted on exit:
 
 ```ts
 Loading: {
-  invoke: {
+  invoke: Machine.invoke({
     id: "save-document",
     effect: saveDocument,
     onDone: ({ output, target }) => target.full.Saved({ id: output.id }),
     onFailure: ({ error, target }) => target.full.Failed({ message: String(error) })
-  }
+  })
 }
 
 Waiting: {
-  invoke: {
+  invoke: Machine.invoke({
     id: "save-timeout",
     after: "3 seconds",
     onDone: ({ target }) => target.full.Failed({ message: "Timed out" })
-  }
+  })
 }
 ```
 
 Use `effect` for one Effect, `after` for a cancellable delay, `logic` for a
-reusable process, and `child` for a complete child statechart—all through the
-same inline `invoke` object. `Machine.invoke({...})` is also available as a
-zero-runtime identity helper when constructing an invocation separately. Reuse one exported
-`Machine.child(id, machine)` descriptor for invocation, `sendTo`, and child
-lookup.
+reusable process, and `child` for a complete child statechart—all through
+`Machine.invoke({...})`. The helper is an identity at runtime and preserves
+source-channel inference across lifecycle handlers. A direct `invoke: { ... }`
+object is also supported and supplies owner context to dynamic `effect`,
+`logic`, `after`, and child `input` functions when their lifecycle handlers do
+not consume typed context. When handlers need typed output or failure values,
+use `Machine.invoke` and annotate a dynamic source's return type. Reuse one
+exported `Machine.child(id, machine)` descriptor for invocation, `sendTo`, and
+child lookup.
 
-Typed failures must have an `onFailure` transition. Defects, interruption, and
-source-construction failures terminate the owning runtime.
+`onDone` is required for a non-`never` output, and `onFailure` is required for a
+non-`never` typed error; each handler is omitted when its channel is `never`.
+Defects, interruption, and source-construction failures terminate the owning
+runtime. `effect: Effect.sleep(...)` is valid, but `after` keeps timers explicit
+and makes static durations visible through activity inspection.
 
 ## Reactivity
 

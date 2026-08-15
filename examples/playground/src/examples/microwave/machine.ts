@@ -11,10 +11,6 @@ export const MicrowaveEvent = Schema.TaggedUnion({
   DoorClosed: {}
 })
 
-export const MicrowaveInternalEvent = Schema.TaggedUnion({
-  SecondElapsed: {}
-})
-
 export const MicrowaveStates = Machine.defineStates({
   Oven: {
     type: "parallel",
@@ -41,7 +37,6 @@ const definition = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: [MicrowaveEvent],
-  internalEvents: [MicrowaveInternalEvent],
   initial: () =>
     MicrowaveStates.initial.Oven.from((oven) =>
       oven
@@ -51,7 +46,6 @@ const definition = Machine.make({
 })
 
 export const MicrowaveEvents = Machine.events(definition)
-const InternalEvents = Machine.internalEvents(definition)
 export const MicrowaveMachine = definition.handle({
   Oven: {
     states: {

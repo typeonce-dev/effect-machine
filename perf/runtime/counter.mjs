@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { makeEffectMachineBenchmarkApi } from "./effect-machine-compatibility.mjs"
 
 const implementationRoot = resolve(
   process.env.EFFECT_MACHINE_BENCHMARK_ROOT ?? fileURLToPath(new URL("../..", import.meta.url))
@@ -11,6 +12,7 @@ const effectPackagePath = implementationRequire.resolve("effect/package.json")
 const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"))
 const effect = await import(pathToFileURL(resolve(dirname(effectPackagePath), effectPackage.exports["."])).href)
 const { Machine } = await import(pathToFileURL(join(implementationRoot, "dist/index.js")).href)
+const benchmarkApi = makeEffectMachineBenchmarkApi(Machine)
 const machineRuntimePath = [
   join(implementationRoot, "dist/internal/machine/runtime.js"),
   join(implementationRoot, "dist/internal/machineRuntime.js")
@@ -72,7 +74,7 @@ const counterParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: Machine.invoke({ child: CounterChild, onDone: () => undefined })
+    invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: () => undefined })
   }
 })
 
@@ -83,7 +85,7 @@ const counterSnapshotParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: Machine.invoke({
+    invoke: benchmarkApi.invokeChild({
       child: CounterChild,
       onDone: () => undefined,
       onSnapshot: () => undefined

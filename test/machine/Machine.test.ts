@@ -4844,7 +4844,7 @@ describe("Machine", () => {
       })
     }))
 
-  it.effect("start lets invoke snapshot mappers filter with undefined", () =>
+  it.effect("start lets invoke snapshot handlers filter with undefined", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
@@ -4906,7 +4906,7 @@ describe("Machine", () => {
       })
     }))
 
-  it.effect("start allows invoked children without a snapshot mapper", () =>
+  it.effect("start allows invoked children without a snapshot handler", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
         states: { Idle, Loading },

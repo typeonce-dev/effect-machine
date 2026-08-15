@@ -33,7 +33,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
           Loading: {
             invoke: Machine.invoke({
               id: "load-audio",
-              effect: ({ state }) => loadAudio(state.url),
+              effect: ({ state }): ReturnType<typeof loadAudio> => loadAudio(state.url),
               onDone: (_, enqueue) => enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded()),
               onFailure: ({ error }, enqueue) =>
                 enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))

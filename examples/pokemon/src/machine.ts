@@ -10,12 +10,6 @@ class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTea
   team: Schema.Array(Pokemon)
 }) {}
 
-class TeamLoaded extends Schema.TaggedClass<TeamLoaded>("TeamLoaded")("TeamLoaded", {
-  team: Schema.Array(Pokemon)
-}) {}
-
-class TeamLoadFailed extends Schema.TaggedClass<TeamLoadFailed>("TeamLoadFailed")("TeamLoadFailed", {}) {}
-
 export const States = Machine.defineStates({ Loading: {}, ActiveTeam, Failed: {} })
 
 export const SelectionChild = Machine.child("selection", SelectionMachine)
@@ -24,7 +18,6 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 const machine = Machine.make({
   states: States.states,
   events: [ReplaceInTeam],
-  internalEvents: [TeamLoaded, TeamLoadFailed],
   initial: () => States.initial.Loading.from()
 }).handle({
   Loading: {

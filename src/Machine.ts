@@ -161,7 +161,8 @@ export interface Machine<
   readonly events: InputEvents
 
   /**
-   * Events reserved for invokes, child emissions, and other machine-local work.
+   * Events reserved for raised events, child emissions, and other machine-local
+   * work.
    *
    * @since 0.4.0
    */
@@ -1770,7 +1771,8 @@ export declare namespace Logic {
    *
    * `sendParent` accepts `unknown` because process logic is independent from
    * the parent that eventually owns it. Prefer typed process output or an
-   * invoke snapshot mapper when either can represent the communication.
+   * invocation lifecycle transition when either can represent the
+   * communication.
    *
    * @category models
    * @since 0.4.0
@@ -1832,8 +1834,9 @@ type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
  * **Details**
  *
  * The descriptor carries the child's address and complete machine type. Pass
- * the same value to inline `invoke`, `sendTo`, and child lookup APIs so state,
- * event, error, and output types are inferred without separate annotations.
+ * a descriptor for the same id and machine to inline `invoke`, `sendTo`, and
+ * child lookup APIs so state, event, error, and output types are inferred
+ * without separate annotations.
  *
  * @category models
  * @since 0.4.0
@@ -3803,7 +3806,7 @@ export declare namespace Machine {
   }
 
   /**
-   * Context passed to an invoked child process source.
+   * Context passed to a function-valued invocation source.
    *
    * @category models
    * @since 0.4.0
@@ -3821,7 +3824,7 @@ export declare namespace Machine {
   }
 
   /**
-   * Context passed to an invoked child process active snapshot mapper.
+   * Context passed to an invocation's active-snapshot transition.
    *
    * @category models
    * @since 0.4.0
@@ -3844,7 +3847,7 @@ export declare namespace Machine {
   }
 
   /**
-   * Context passed to an invoked machine terminal output mapper.
+   * Context passed to an invocation's successful completion transition.
    *
    * @category models
    * @since 0.4.0
@@ -4261,16 +4264,6 @@ export declare namespace Machine {
   } ? Emitted
     : Invoke extends { readonly child: ChildMachine<string, infer M> } ? Emit<M>
     : never
-  /**
-   * Extracts events returned by an invoked child snapshot mapper.
-   *
-   * @category utility types
-   * @since 0.4.0
-   */
-  export type InvokeSnapshotEvent<Invoke> = Invoke extends { readonly onSnapshot?: infer Handler } ?
-    EventTransitionReturn<NonNullable<Handler>>
-    : never
-
   /** Extracts transition results returned by invocation lifecycle handlers. */
   export type InvokeOutcomeReturn<Invoke> = Invoke extends unknown ?
       | (Invoke extends { readonly onDone?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
@@ -5427,20 +5420,6 @@ export declare namespace Machine {
     }
     : unknown
 
-  type HandlerInvokeOutputValidation<
-    Events extends ReadonlyArray<TaggedSchema>,
-    StateId extends string,
-    Config
-  > = [InvokeReturn<Config>] extends [never] ? unknown
-    : [Exclude<InvokeOutput<InvokeReturn<Config>>, EventInput<EventOf<Events>> | void>] extends [never] ? unknown
-    : {
-      readonly invoke: HandlerValidationError<
-        "Invoked child output must be a machine event or void",
-        StateId,
-        Exclude<InvokeOutput<InvokeReturn<Config>>, EventInput<EventOf<Events>> | void>
-      >
-    }
-
   type HandlerInvokeEmitsValidation<
     Events extends ReadonlyArray<TaggedSchema>,
     StateId extends string,
@@ -5452,22 +5431,6 @@ export declare namespace Machine {
         "Invoked child emits events not accepted by the parent machine",
         StateId,
         Exclude<InvokeEmits<InvokeReturn<Config>>, EventOf<Events>>
-      >
-    }
-
-  type HandlerInvokeSnapshotValidation<
-    Events extends ReadonlyArray<TaggedSchema>,
-    StateId extends string,
-    Config
-  > = [InvokeReturn<Config>] extends [never] ? unknown
-    : IsAny<InvokeSnapshotEvent<InvokeReturn<Config>>> extends true ? unknown
-    : [Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventInput<EventOf<Events>> | undefined>] extends [never]
-      ? unknown
-    : {
-      readonly invoke: HandlerValidationError<
-        "Invoked child snapshot mapper must return a machine event or undefined",
-        StateId,
-        Exclude<InvokeSnapshotEvent<InvokeReturn<Config>>, EventInput<EventOf<Events>> | undefined>
       >
     }
 
@@ -5996,8 +5959,8 @@ interface Make {
  * to implement state behavior with ordinary TypeScript control flow.
  *
  * Schemas in `events` define the public input protocol. Schemas in
- * `internalEvents` are added to the complete handler protocol for invoke
- * results, child emissions, and other machine-local deliveries. Their tags
+ * `internalEvents` are added to the complete handler protocol for raised
+ * events, child emissions, and other machine-local deliveries. Their tags
  * must be disjoint.
  *
  * **Example** (Typed counter machine)
@@ -6291,17 +6254,22 @@ export const decodeSnapshot: <
 > = internal.decodeSnapshot
 
 /**
- * Defines state-owned work and its lifecycle transitions inline.
+ * Preserves inference for a state-owned invocation configuration.
  *
  * Use `effect` for one-shot work, `after` for a cancellable timer, `logic` for
  * reusable process logic, or `child` for a complete child machine. `onDone` is
  * required whenever the source can complete with an output, while `onFailure`
  * is required only when the source has a typed failure channel.
  *
- * Effects and durations may be supplied directly or derived from the owning
- * state's entry context. Logic invocations require both a lifecycle `id` and a
- * typed communication `address`. Child descriptors already own their identity,
- * so `id` and `address` must not be repeated.
+ * This constructor is an identity at runtime, but preserves lifecycle callback
+ * inference through published declarations. Effects and durations may be
+ * supplied directly or derived from the owning state's entry context. A direct
+ * object in the state handler gives function-valued sources and child inputs
+ * owner-context inference when lifecycle handlers do not consume typed context.
+ * Use this constructor and annotate a dynamic source's return type when sibling
+ * handlers need typed output or error values. Logic invocations require both a
+ * lifecycle `id` and a typed communication `address`. Child descriptors already
+ * own their identity, so `id` and `address` must not be repeated.
  *
  * ```ts
  * invoke: Machine.invoke({
@@ -6314,9 +6282,6 @@ export const decodeSnapshot: <
  *   onFailure: ({ error, target }) => target.full.Failed({ error })
  * })
  * ```
- *
- * The function is an identity helper at runtime; its purpose is to preserve
- * source/output/error inference across sibling properties in the object.
  *
  * @category constructors
  * @since 0.9.0
@@ -6526,32 +6491,6 @@ export const retag: <const Target extends Machine.TaggedSchema, const Source ext
   source: Source,
   ...args: RetagArgs<Target, Source>
 ) => Target["Type"] = internal.retag
-
-/**
- * Creates an invoked child process from a complete statechart machine.
- *
- * **When to use**
- *
- * Use when a state should own another statechart machine and communicate with
- * it through typed child events, emissions, snapshots, or terminal output.
- *
- * **Details**
- *
- * Child emissions are delivered directly to the parent as events. Active
- * snapshots and terminal output can be mapped to parent events. The owning
- * state controls the child lifetime.
- *
- * **Gotchas**
- *
- * Active invoked machines must have unique child addresses. A machine starts
- * after its owning state's entry actions, so those actions cannot send events
- * to a newly entered child. Unrecovered child failures fail the parent.
- *
- * @see {@link invoke} for invoking lower-level process logic.
- * @see {@link sendTo} for sending events to the invoked machine.
- * @category constructors
- * @since 0.4.0
- */
 
 /**
  * Plans the initial state for a machine without executing actor commands.
@@ -6923,7 +6862,7 @@ export const plan: <
  * This is the low-level process constructor. Parent messages sent directly
  * through its scope are intentionally `unknown` because the logic does not know
  * which machine will eventually own it. Prefer typed output, typed child
- * addresses, or invoke snapshot mapping when possible.
+ * addresses, or invocation lifecycle transitions when possible.
  *
  * Use an inline `invoke` with an `effect` source for one-shot work.
  * @see {@link transition} for event-driven state.
@@ -6974,7 +6913,7 @@ export const logic: <
  * )
  * ```
  *
- * @see {@link effect} for one-shot work.
+ * Use an inline `invoke` with an `effect` source for one-shot work.
  * @see {@link logic} for direct process lifecycle control.
  * @category constructors
  * @since 0.4.0
@@ -7219,8 +7158,8 @@ export const start: <
  * entry or transition actions, re-deliver raised or emitted events, or
  * re-evaluate historical completion and eventless transitions. Active-state
  * invokes start once in ancestor and document order with {@link InitialEvent};
- * delayed invokes restart their complete duration and invoked machines start
- * from their own initial state.
+ * timer invocations restart their complete duration and child-machine
+ * invocations start from their own initial state.
  *
  * Only logical state, completion, and history metadata are resumed. Queues,
  * scopes, subscriptions, fibers, spawned children, invoke progress, and prior

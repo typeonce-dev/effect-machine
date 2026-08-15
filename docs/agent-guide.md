@@ -83,8 +83,9 @@ the deferred constructors preserve that identity after decoding.
   builder.
 - Handle every typed invoked Effect failure with `onFailure`. Defects and
   interruption terminate the owning machine.
-- Reuse the exact child descriptor value for inline invocation, `sendTo`, and
-  child lookup.
+- Reuse an exported child descriptor for inline invocation, `sendTo`, and child
+  lookup. Independently constructed descriptors are equivalent only when both
+  their id and machine identity match.
 - `events` is the public input protocol. `internalEvents` contains machine-local
   deliveries such as raised events and invoked-child emissions. Handlers see
   both; typed public `send` and `Machine.plan` accept only `events`.
@@ -99,9 +100,12 @@ its extra control is required:
 - Bind a shared Atom runtime once with `AtomMachine.bind(runtime)`, then use the
   returned `make` or `resume`. Use `AtomMachine.make(machine)` and
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
-- Use one inline `Machine.invoke` object: `effect` for one-shot work, `after`
-  for a timer, `logic` for reusable process logic, and `child` for a complete
-  child statechart.
+- Use one invocation object: `effect` for one-shot work, `after` for a timer,
+  `logic` for reusable process logic, and `child` for a complete child
+  statechart. `Machine.invoke({...})` preserves source channels across sibling
+  lifecycle handlers. Use a direct object when a dynamic source or child input
+  primarily needs contextual owner-state inference and its lifecycle handlers
+  do not consume typed context.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. An
   logic invocation is addressable only when `Machine.invoke` receives that
@@ -553,17 +557,17 @@ across both configuration lists.
 
 ## Recoverable state-scoped work
 
-Use an inline `invoke` object with an `effect` for one-shot work. Lifecycle callbacks
+Use `Machine.invoke` with an `effect` for one-shot work. Lifecycle callbacks
 receive the typed Effect channels and can transition directly:
 
 ```ts
-invoke: {
+invoke: Machine.invoke({
   id: "save",
   effect: SaveService.save(draft),
   onDone: ({ output, target }) => target.full.Saved({ entry: output }),
   onFailure: ({ error, target }) =>
     target.full.SaveFailed({ message: error.message })
-}
+})
 ```
 
 The owning state scopes the child. Owner-driven interruption on state exit is
@@ -577,26 +581,28 @@ needs `state`, `parent`, `parents`, or the entry `event`. Source construction
 errors, defects, and interruption are machine failures rather than a second
 phase in `onFailure`.
 
-`Machine.invoke({...})` is a zero-runtime identity helper for preserving source
-channel inference when an invocation is constructed separately. Prefer the
-direct object inside a state when a dynamic source needs contextual owner-state
-inference.
+When a source function reads `state`, `parent`, `parents`, or the entry `event`,
+the direct object form supplies its owner context. If sibling handlers also
+need typed lifecycle context, wrap the object with `Machine.invoke` and annotate
+the returned Effect or Logic type.
 
 A cancellable timer uses the same object:
 
 ```ts
-invoke: {
+invoke: Machine.invoke({
   id: "clear-status",
   after: "3 seconds",
   onDone: ({ target }) => target.full.Clear()
-}
+})
 ```
 
 The timer starts on state entry and is interrupted on exit. Its `onDone` is
-always required. For reusable process logic, provide `logic`, a state-local
-lifecycle `id`, and a typed `address`. TypeScript checks the address protocol
-against the logic event protocol. Lifecycle ids and addresses serve different
-purposes and must both be explicit.
+always required. `effect: Effect.sleep(...)` has the same scoped cancellation
+behavior, but `after` records timer intent and exposes a static duration through
+`Machine.activityDefinitions`. For reusable process logic, provide `logic`, a
+state-local lifecycle `id`, and a typed `address`. TypeScript checks the address
+protocol against the logic event protocol. Lifecycle ids and addresses serve
+different purposes and must both be explicit.
 
 ## Invoked child statecharts
 
@@ -609,11 +615,11 @@ const Editor = Machine.child("editor", EditorMachine)
 Invoke it from its owning state:
 
 ```ts
-invoke: {
+invoke: Machine.invoke({
   child: Editor,
   input: editorInput,
   onDone: ({ output, target }) => target.full.EditorDone({ output })
-}
+})
 ```
 
 Use `Editor` for:
@@ -933,11 +939,6 @@ Wrap the initial builder result:
 initial: () => States.initial.Idle.from()
 ```
 
-### Invoked child output must be a machine event
-
-Add the output's tagged schema to the parent machine's `internalEvents` array,
-or map/ignore the output before it reaches the parent.
-
 ### Invoked child emits events not accepted by the parent
 
 Add the child's emitted schemas to the parent machine's `internalEvents` array:
@@ -950,9 +951,8 @@ internalEvents: [...ChildMachine.emits]
 ### An internal event is rejected by `send`
 
 This is intentional. Public input boundaries accept only schemas declared in
-`events`. Handle the event as an invoke result, child delivery, or raised event;
-move it to `events` only if external callers should genuinely be allowed to
-send it.
+`events`. Handle the event as a child delivery or raised event; move it to
+`events` only if external callers should genuinely be allowed to send it.
 
 ### Public and internal event tags overlap
 

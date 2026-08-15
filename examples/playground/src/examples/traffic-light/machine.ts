@@ -5,10 +5,6 @@ export const TrafficLightEvent = Schema.TaggedUnion({
   Reset: {}
 })
 
-export const TrafficLightInternalEvent = Schema.TaggedUnion({
-  TimerElapsed: {}
-})
-
 export const trafficLightDurations = {
   Red: 4_000,
   RedYellow: 1_000,
@@ -27,7 +23,6 @@ const definition = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: [TrafficLightEvent],
-  internalEvents: [TrafficLightInternalEvent],
   initial: () => TrafficLightStates.initial.Red.from()
 })
 
