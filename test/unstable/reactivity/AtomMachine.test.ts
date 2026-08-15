@@ -84,6 +84,38 @@ const makeCounterMachine = () =>
   })
 
 describe("AtomMachine", () => {
+  it.effect("observes initial emissions when the emission stream starts the machine", () =>
+    Effect.scoped(Effect.gen(function*() {
+      class Idle extends Schema.TaggedClass<Idle>("AtomPreparedIdle")("Idle", {}) {}
+      class ReadyEmission extends Schema.TaggedClass<ReadyEmission>("AtomPreparedReady")("ReadyEmission", {}) {}
+      const states = Machine.defineStates({ Idle })
+      const Emissions = Machine.emittedEvents(ReadyEmission)
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        emittedEvents: Emissions,
+        initial: () => states.initial.Idle(new Idle({}))
+      }).handle({
+        Idle: {
+          entry: (_, enqueue) => {
+            enqueue.emit(Emissions.ReadyEmission())
+            return undefined
+          }
+        }
+      })
+      const registry = yield* makeRegistry
+      const bridge = AtomMachine.make(machine)
+      const observed = yield* AtomMachine.emissions(bridge).pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.provideService(AtomRegistry.AtomRegistry, registry),
+        Effect.forkScoped({ startImmediately: true })
+      )
+
+      assert.deepStrictEqual(Array.from(yield* Fiber.join(observed)), [new ReadyEmission({})])
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, bridge.snapshot)).status, "active")
+    })))
+
   it.effect("resumes lazily once per registry and disposes the resumed runtime", () =>
     Effect.gen(function*() {
       let initialCalls = 0

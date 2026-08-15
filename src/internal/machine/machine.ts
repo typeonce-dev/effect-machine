@@ -104,6 +104,8 @@ const Proto = {
   }
 }
 
+const makeBoundInvoke = (config: unknown): unknown => config
+
 const cloneWithHandlers = (
   self: Machine.Any,
   handlers: Machine.StateConfigs<any, any, any, any, any, any, any>
@@ -121,6 +123,7 @@ const cloneWithHandlers = (
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
   machine.handle = makeHandle(machine)
+  machine.invoke = makeBoundInvoke
   Protocol.copyProtocol(self, machine)
   return machine
 }
@@ -879,6 +882,7 @@ export const make: Make = (<
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)
+  self.invoke = makeBoundInvoke
   Protocol.setProtocol(self)
   return self
 }) as Make
@@ -1357,6 +1361,8 @@ export const stopChild: {
 export const watch = <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
 ): Stream.Stream<RuntimeOutcome<State, Error, Output>> => internalRuntime.watch(ref)
+
+export const prepare = internalProcess.prepare
 
 export const start: <
   const States extends Machine.StateSchemas,
