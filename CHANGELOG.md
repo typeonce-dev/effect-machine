@@ -1,5 +1,58 @@
 # @typeonce/effect-machine
 
+## 0.10.0
+
+### Minor Changes
+
+- b7004c2: Make `Machine.events` and `Machine.internalEvents` definition-time protocol descriptors that are passed directly to `Machine.make`. The descriptors expose type-safe deferred constructors while retaining their schemas privately, so applications can export the event API without exporting schemas or reaching for throwing schema `.make` methods.
+
+  ```ts
+  const Events = Machine.events(PublicEvent)
+  const InternalEvents = Machine.internalEvents(InternalEvent)
+
+  const machine = Machine.make({
+    states: States.states,
+    events: Events,
+    internalEvents: InternalEvents,
+    initial: () => States.initial.Idle.from()
+  })
+  ```
+
+  Remove the eager schema-based `Machine.event` constructor. Pass complete decoded event objects directly to APIs that intentionally retain values, such as manual model-testing scenarios or transport messages.
+
+- cb137a7: Add `target.none()` for explicit targetless transitions. Every installed transition handler now returns a concrete target or `target.none()`; declared `targets` remain an upper bound on concrete destinations and never exclude `target.none()`.
+
+  Remove `Machine.retag`. To reuse compatible fields across sibling states, destructure away the source discriminator and construct the destination through its target builder:
+
+  ```ts
+  const { _tag: _, ...fields } = state
+  return target.local.Saving.from({ ...fields, attempt: 1 })
+  ```
+
+- 62e2281: Separate actor inputs from outward notifications. Declare emissions with `Machine.emittedEvents`, publish them with `emit`, and observe the hot, non-replaying `MachineRef.emissions` stream. Children declare the public inputs they expect from their owner through `parentEvents`, then communicate explicitly with the typed, optional `parent` actor reference:
+
+  ```ts
+  const Emissions = Machine.emittedEvents(Progress)
+  const ParentEvents = Machine.events(Completed)
+
+  const worker = Machine.make({
+    // ...
+    emittedEvents: Emissions,
+    parentEvents: ParentEvents
+  }).handle({
+    Working: {
+      entry: ({ parent }, enqueue) => {
+        enqueue.emit(Emissions.Progress({ value: 0.5 }))
+        if (parent !== undefined) {
+          enqueue.sendTo(parent, ParentEvents.Completed({ value: 42 }))
+        }
+      }
+    }
+  })
+  ```
+
+  Handler contexts also expose typed `self`; invoked-child composition checks that every `parentEvents` case is accepted by the parent. This release renames structural handler ancestry to `containingState` and `ancestors`, supports zero-payload event and emission constructors with `()`, and exposes root and child emission streams through AtomMachine.
+
 ## 0.9.0
 
 ### Minor Changes
