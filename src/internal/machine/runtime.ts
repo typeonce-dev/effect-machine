@@ -18,6 +18,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
+import type { ActorRef } from "../../Machine.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 
 type ChildDescriptor = {
@@ -284,12 +285,13 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
     readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "stopped" }>
   }
 
-export interface MachineRef<out State, in Event, out Error = never, out Output = never> {
+export interface MachineRef<out State, in Event, out Error = never, out Output = never, out Emitted = never> {
   readonly id: string
   readonly sessionId: string
   readonly state: Effect.Effect<State>
   readonly snapshot: Effect.Effect<RuntimeSnapshot<State, Error, Output>>
   readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>>
+  readonly emissions: Stream.Stream<Emitted>
   readonly join: Effect.Effect<Output, Error | StoppedError>
   readonly stop: Effect.Effect<void>
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
@@ -307,12 +309,19 @@ interface ProcessAddress<in Event> {
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
 }
 
+const isProcessAddress = (value: unknown): value is ActorRef<unknown> =>
+  typeof value === "object" && value !== null && "send" in value && typeof value.send === "function"
+
 export interface ProcessScope<Event> {
   readonly self: ProcessAddress<Event>
   readonly parent: ProcessAddress<unknown> | undefined
   readonly spawn: ProcessSpawn
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
-  readonly sendTo: (child: ChildSelector, event: unknown) => Effect.Effect<void, StoppedError>
+  readonly emit: (event: unknown) => Effect.Effect<void>
+  readonly sendTo: {
+    <TargetEvent>(target: ActorRef<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+    (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError>
+  }
   readonly stopChild: (child: ChildSelector) => Effect.Effect<void>
   /** @internal */
   readonly failCause: (cause: Cause.Cause<unknown>) => Effect.Effect<void>
@@ -708,6 +717,10 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         ownerPath: options.path,
         ownerActive: true
       })
+      const parent: ProcessAddress<unknown> = {
+        ...this.self,
+        send: (event) => options.sendParent(isCurrent, event)
+      }
       const startOptions: StartInternalOptions = {
         detached: true,
         id: options.id,
@@ -722,7 +735,7 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         },
         onStopSync: () => unregisterChild(this.registry, options.id, token),
         skipStoppedOutcome: true,
-        parent: this.self,
+        parent,
         runtime: this.runtime
       }
       const execution = logic.execution
@@ -785,6 +798,9 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
 
 const noChildChanges = Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never))
 const noParentSend = (_event: unknown): Effect.Effect<void, StoppedError> => Effect.void
+const EmissionsClosed: unique symbol = Symbol("effect/Machine/EmissionsClosed")
+
+type LazyEmissions = PubSub.PubSub<unknown> | typeof EmissionsClosed | undefined
 
 const childlessRuntime: ChildRuntime = {
   close: () => Effect.void,
@@ -1091,6 +1107,38 @@ const startGenericInternal: <
   const sessionId = yield* runtime.nextSessionId
   const id = requestedId ?? sessionId
   const queue = yield* Queue.unbounded<ProcessMessage<Event>>()
+  let emissions: LazyEmissions
+  const getOrCreateEmissions: Effect.Effect<PubSub.PubSub<unknown> | undefined> = Effect.suspend(() => {
+    const observed = emissions
+    if (observed === EmissionsClosed) return Effect.succeed(undefined)
+    if (observed !== undefined) return Effect.succeed(observed)
+    return PubSub.unbounded<unknown>().pipe(
+      Effect.flatMap((candidate) =>
+        Effect.sync(() => {
+          const latest = emissions
+          if (latest === EmissionsClosed) return [undefined, true] as const
+          if (latest !== undefined) return [latest, true] as const
+          emissions = candidate
+          return [candidate, false] as const
+        }).pipe(
+          Effect.flatMap(([selected, discard]) =>
+            discard ? PubSub.shutdown(candidate).pipe(Effect.as(selected)) : Effect.succeed(selected)
+          )
+        )
+      )
+    )
+  })
+  const closeEmissions = (): Effect.Effect<void> => {
+    const observed = emissions
+    emissions = EmissionsClosed
+    return observed === undefined || observed === EmissionsClosed ? Effect.void : PubSub.shutdown(observed)
+  }
+  const emit = (event: unknown): Effect.Effect<void> =>
+    Effect.suspend(() =>
+      emissions === undefined || emissions === EmissionsClosed
+        ? Effect.void
+        : PubSub.publish(emissions, event).pipe(Effect.asVoid)
+    )
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
@@ -1161,7 +1209,7 @@ const startGenericInternal: <
   }
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
-      ? closeChildren(exit)
+      ? closeChildren(exit).pipe(Effect.andThen(closeEmissions()))
       : Effect.void
   const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(onStopSync)
   const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
@@ -1171,7 +1219,11 @@ const startGenericInternal: <
     parent,
     spawn,
     sendParent,
-    sendTo,
+    emit,
+    sendTo: ((target: unknown, event: unknown) =>
+      isProcessAddress(target) ? target.send(event) : sendTo(target as ChildSelector, event)) as ProcessScope<
+        Event
+      >["sendTo"],
     stopChild,
     failCause: (cause) =>
       Deferred.succeed(termination, {
@@ -1209,7 +1261,9 @@ const startGenericInternal: <
       const runtimeSnapshot = snapshot.snapshot
       return runtimeSnapshot.status !== "active"
         ? publish
-        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(onSnapshot, runtimeSnapshot)))
+        : publish.pipe(Effect.tap(() =>
+          notifyActiveSnapshot(onSnapshot, runtimeSnapshot)
+        ))
     }
 
   const completeChanges = (
@@ -1348,6 +1402,7 @@ const startGenericInternal: <
         Effect.andThen(Queue.shutdown(queue)),
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
+        Effect.andThen(closeEmissions()),
         Effect.andThen(Effect.sync(() => {
           if (Exit.isFailure(exit)) {
             failAcknowledgedMessage(inFlightMessage, exit.cause)
@@ -1504,6 +1559,11 @@ const startGenericInternal: <
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
+    emissions: Stream.unwrap(
+      getOrCreateEmissions.pipe(
+        Effect.map((emissions) => emissions === undefined ? Stream.empty : Stream.fromPubSub(emissions))
+      )
+    ) as Stream.Stream<never>,
     join: Deferred.await(done),
     stop,
     send: self.send,
@@ -1657,6 +1717,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private interruptRequested = false
   private offerRevision = 0
   private inFlightMessage: ProcessMessage<unknown> | undefined
+  private emissionsPubSub: LazyEmissions
 
   constructor(
     private readonly logic: ProcessLogic<any, any, any, any, any, any>,
@@ -1690,7 +1751,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       parent,
       spawn: this.childRuntime.spawn,
       sendParent,
-      sendTo: this.childRuntime.sendTo,
+      emit: (event) => this.emitEvent(event),
+      sendTo: ((target: unknown, event: unknown) =>
+        isProcessAddress(target)
+          ? target.send(event)
+          : this.childRuntime.sendTo(target as ChildSelector, event)) as ProcessScope<unknown>["sendTo"],
       stopChild: this.childRuntime.stop,
       failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause)
     }
@@ -1743,7 +1808,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         parent,
         spawn: self.childRuntime.spawn,
         sendParent,
-        sendTo: self.childRuntime.sendTo,
+        emit: (event) => self.emitEvent(event),
+        sendTo: ((target: unknown, event: unknown) =>
+          isProcessAddress(target)
+            ? target.send(event)
+            : self.childRuntime.sendTo(target as ChildSelector, event)) as ProcessScope<unknown>["sendTo"],
         stopChild: self.childRuntime.stop,
         failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause)
       }
@@ -1836,6 +1905,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
 
   get changes(): Stream.Stream<RuntimeSnapshot<unknown, unknown, unknown>> {
     return this.changesStream()
+  }
+
+  get emissions(): Stream.Stream<never> {
+    return this.emissionsStream() as Stream.Stream<never>
   }
 
   get join(): Effect.Effect<unknown, unknown> {
@@ -2145,6 +2218,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         }).pipe(
           Effect.andThen(this.childRuntime.close(exit)),
           Effect.andThen(this.setAndPublishSnapshot(snapshot)),
+          Effect.andThen(this.closeEmissions()),
           Effect.andThen(Effect.sync(() => {
             if (requested._tag === "Failure") {
               failAcknowledgedMessage(this.inFlightMessage, requested.cause)
@@ -2191,6 +2265,55 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return snapshot.changes === undefined
       ? Effect.void
       : PubSub.publish(snapshot.changes, Exit.succeed<void>(undefined)).pipe(Effect.asVoid)
+  }
+
+  private emitEvent(event: unknown): Effect.Effect<void> {
+    return Effect.suspend(() =>
+      this.emissionsPubSub === undefined || this.emissionsPubSub === EmissionsClosed
+        ? Effect.void
+        : PubSub.publish(this.emissionsPubSub, event).pipe(Effect.asVoid)
+    )
+  }
+
+  shutdownEmissions(): Effect.Effect<void> {
+    return this.closeEmissions()
+  }
+
+  private closeEmissions(): Effect.Effect<void> {
+    const observed = this.emissionsPubSub
+    this.emissionsPubSub = EmissionsClosed
+    return observed === undefined || observed === EmissionsClosed ? Effect.void : PubSub.shutdown(observed)
+  }
+
+  private getOrCreateEmissions(): Effect.Effect<PubSub.PubSub<unknown> | undefined> {
+    return Effect.suspend(() => {
+      const observed = this.emissionsPubSub
+      if (observed === EmissionsClosed) return Effect.succeed(undefined)
+      if (observed !== undefined) return Effect.succeed(observed)
+      return PubSub.unbounded<unknown>().pipe(
+        Effect.flatMap((candidate) =>
+          Effect.sync(() => {
+            const latest = this.emissionsPubSub
+            if (latest === EmissionsClosed) return [undefined, true] as const
+            if (latest !== undefined) return [latest, true] as const
+            this.emissionsPubSub = candidate
+            return [candidate, false] as const
+          }).pipe(
+            Effect.flatMap(([selected, discard]) =>
+              discard ? PubSub.shutdown(candidate).pipe(Effect.as(selected)) : Effect.succeed(selected)
+            )
+          )
+        )
+      )
+    })
+  }
+
+  private emissionsStream(): Stream.Stream<unknown> {
+    return Stream.unwrap(
+      this.getOrCreateEmissions().pipe(
+        Effect.map((emissions) => emissions === undefined ? Stream.empty : Stream.fromPubSub(emissions))
+      )
+    )
   }
 
   private setAndPublishSnapshot(snapshot: RuntimeSnapshot<unknown, unknown, unknown>): Effect.Effect<void> {
@@ -2407,10 +2530,13 @@ const startCompactCompiledInternal: typeof startGenericInternal = Effect.fnUntra
   // A compiled initializer is synchronous by construction. Only startup
   // callbacks that themselves return Effects need the generic initialization
   // program; the compiled drain is still provided the complete service context.
-  return yield* execution.initialSync !== undefined &&
+  const initialize = execution.initialSync !== undefined &&
       options.onReady === undefined && options.onSnapshot === undefined
     ? process.initializeCompiledSync()
     : process.initialize()
+  return yield* initialize.pipe(
+    Effect.onExit((exit) => Exit.isFailure(exit) ? process.shutdownEmissions() : Effect.void)
+  )
 }) as typeof startGenericInternal
 
 const startLogicInternal: typeof startGenericInternal = ((

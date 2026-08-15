@@ -112,7 +112,8 @@ const cloneWithHandlers = (
   machine.states = self.states
   machine.events = self.events
   machine.internalEvents = self.internalEvents
-  machine.emits = self.emits
+  machine.emittedEvents = self.emittedEvents
+  machine.parentEvents = self.parentEvents
   machine.input = self.input
   machine.id = self.id
   machine.initial = self.initial
@@ -766,7 +767,8 @@ type MakeConfig<
   Input extends Schema.Top,
   InitialE,
   InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
@@ -779,7 +781,8 @@ type MakeConfig<
       NoInfer<InputEvents>,
       NoInfer<InternalEvents>
     >
-  readonly emits?: Emits
+  readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
+  readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
   readonly input?: Input
   readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
 }
@@ -791,7 +794,8 @@ type MakeResult<
   Input extends Schema.Top,
   InitialE,
   InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
 > = Machine<
   States,
   readonly [...InputEvents, ...InternalEvents],
@@ -805,7 +809,8 @@ type MakeResult<
   Machine.TerminalOutput<States>,
   Emits,
   never,
-  InputEvents
+  InputEvents,
+  ParentEvents
 >
 
 interface Make {
@@ -816,11 +821,12 @@ interface Make {
     const Input extends Schema.Top = typeof Schema.Void,
     InitialE = never,
     InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
-    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>,
+    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>,
     ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>
+  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -828,10 +834,11 @@ interface Make {
     const Input extends Schema.Top = typeof Schema.Void,
     InitialE = never,
     InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>, "states">
+      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>, "states">
       & { readonly states: InvalidDefinedStateTreeInput<States> }
   ): never
 }
@@ -843,24 +850,27 @@ export const make: Make = (<
   const Input extends Schema.Top = typeof Schema.Void,
   InitialE = never,
   InitialR = never,
-  const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   config: {
     readonly id?: string
     readonly states: States
     readonly events: Machine.EventProtocol<"public", InputEvents>
     readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
-    readonly emits?: Emits
+    readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
+    readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
     readonly input?: Input
     readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
   }
-): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents> => {
+): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents> => {
   StateDefinition.validateStateDefinitions(config.states, "Machine.make")
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
   self.internalEvents = config.internalEvents ?? Protocol.makeEventProtocol("internal", [] as const)
-  self.emits = config.emits ?? []
+  self.emittedEvents = config.emittedEvents ?? Protocol.makeEventProtocol("emitted", [] as const)
+  self.parentEvents = config.parentEvents ?? Protocol.makeEventProtocol("public", [] as const)
   self.input = config.input
   self.id = config.id
   self.initial = config.initial
@@ -872,15 +882,39 @@ export const make: Make = (<
   return self
 }) as Make
 
-export const events = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
-  ...schemas: Schemas
-): Machine.EventProtocol<"public", readonly [...Schemas]> =>
-  Protocol.makeEventProtocol<"public", readonly [...Schemas]>("public", schemas)
+const flattenEventProtocolInputs = <Kind extends Machine.EventProtocolKind>(
+  kind: Kind,
+  inputs: ReadonlyArray<Machine.EventProtocolInput<Kind>>
+): ReadonlyArray<Machine.TaggedSchema> =>
+  inputs.flatMap((input) =>
+    Protocol.isEventProtocol(input, kind)
+      ? Protocol.eventProtocolSchemas(input)
+      : [input as Machine.TaggedSchema]
+  )
 
-export const internalEvents = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
-  ...schemas: Schemas
-): Machine.EventProtocol<"internal", readonly [...Schemas]> =>
-  Protocol.makeEventProtocol<"internal", readonly [...Schemas]>("internal", schemas)
+export const events = <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"public">>>(
+  ...inputs: Inputs
+): Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>> =>
+  Protocol.makeEventProtocol(
+    "public",
+    flattenEventProtocolInputs("public", inputs)
+  ) as Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
+
+export const internalEvents = <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"internal">>>(
+  ...inputs: Inputs
+): Machine.EventProtocol<"internal", Machine.EventProtocolInputSchemasOf<"internal", Inputs>> =>
+  Protocol.makeEventProtocol(
+    "internal",
+    flattenEventProtocolInputs("internal", inputs)
+  ) as Machine.EventProtocol<"internal", Machine.EventProtocolInputSchemasOf<"internal", Inputs>>
+
+export const emittedEvents = <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"emitted">>>(
+  ...inputs: Inputs
+): Machine.EventProtocol<"emitted", Machine.EventProtocolInputSchemasOf<"emitted", Inputs>> =>
+  Protocol.makeEventProtocol(
+    "emitted",
+    flattenEventProtocolInputs("emitted", inputs)
+  ) as Machine.EventProtocol<"emitted", Machine.EventProtocolInputSchemasOf<"emitted", Inputs>>
 
 export const encodeSnapshot: <
   const States extends Machine.StateSchemas,
@@ -1373,7 +1407,8 @@ export const start: <
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
-    Output
+    Output,
+    Machine.EmittedEventOf<Emits>
   >,
   | InitialE
   | E
@@ -1431,7 +1466,8 @@ export const resume: <
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
-    Output
+    Output,
+    Machine.EmittedEventOf<Emits>
   >,
   MachineSchemaDecodeError,
   ExcludeCompatibleRuntime<

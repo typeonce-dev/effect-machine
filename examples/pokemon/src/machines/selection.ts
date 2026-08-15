@@ -1,6 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Option, Schema } from "effect"
-import { Pokemon, PokemonService, ReplaceInTeam } from "../pokemon.ts"
+import { Pokemon, PokemonService, TeamEvents } from "../pokemon.ts"
 
 class Search extends Schema.TaggedClass<Search>("Search")("Search", {
   searchText: Schema.String
@@ -72,7 +72,7 @@ export const SelectionEvents = Machine.events(SelectPokemon, UpdateSearchText, S
 export const SelectionMachine = Machine.make({
   states: SelectionStates.states,
   events: SelectionEvents,
-  emits: [ReplaceInTeam],
+  parentEvents: TeamEvents,
   initial: () =>
     SelectionStates.initial.form.from((form) =>
       form
@@ -93,8 +93,10 @@ export const SelectionMachine = Machine.make({
         states: {
           WithPokemon: {
             on: {
-              ReplacePokemon: ({ event, state, target }, enqueue) => {
-                enqueue.emit(new ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
+              ReplacePokemon: ({ event, parent, state, target }, enqueue) => {
+                if (parent !== undefined) {
+                  enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
+                }
                 return target.full.form.from((form) =>
                   form
                     .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
@@ -106,7 +108,7 @@ export const SelectionMachine = Machine.make({
           Searching: {
             invoke: Machine.invoke({
               id: "search",
-              effect: ({ parents }) => searchPokemon(parents["form.search"].searchText),
+              effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
               onDone: ({ output, target }) =>
                 output.result.pipe(
                   Option.match({

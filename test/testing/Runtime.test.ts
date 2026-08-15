@@ -427,6 +427,7 @@ describe("MachineTest runtime commands", () => {
         state: Effect.succeed(2),
         snapshot: Effect.succeed(second),
         changes: Stream.make(initial, first, second),
+        emissions: Stream.empty,
         join: Effect.never,
         stop: Effect.void,
         send: () => Effect.void,

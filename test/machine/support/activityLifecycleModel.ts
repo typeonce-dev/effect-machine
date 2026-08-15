@@ -82,8 +82,8 @@ export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(functi
     logic: (owner, behavior) =>
       Machine.logic<ActivityState, never, void, ActivityFailure>({
         initial: () => initial(owner),
-        run: ({ sendParent, state }) =>
-          state.pipe(
+        run: ({ parent, sendTo, state }) =>
+          parent === undefined ? Effect.die("activity expected an owning actor") : state.pipe(
             Effect.flatMap(({ epoch, release }) => {
               switch (behavior._tag) {
                 case "Blocked":
@@ -95,7 +95,7 @@ export const makeActivityProbe: Effect.Effect<ActivityProbe> = Effect.gen(functi
                 case "StaleOnCancel":
                   return Effect.never.pipe(
                     Effect.onInterrupt(() =>
-                      sendParent(behavior.event(epoch)).pipe(
+                      sendTo(parent, behavior.event(epoch)).pipe(
                         Effect.catchTag("StoppedError", () => Effect.void)
                       )
                     ),

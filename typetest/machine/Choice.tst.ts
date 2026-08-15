@@ -45,8 +45,8 @@ describe("Machine choice pseudo-states", () => {
               targets: ["Flow.Approved", "Flow.Rejected"],
               transition: (context) => {
                 expect(context).type.not.toHaveProperty("state")
-                expect(context.parent).type.toBe<Flow>()
-                expect(context.parents.Flow).type.toBe<Flow>()
+                expect(context.containingState).type.toBe<Flow>()
+                expect(context.ancestors.Flow).type.toBe<Flow>()
                 expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
                 return context.target.local.Approved(new Approved({}))
               }

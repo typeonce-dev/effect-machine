@@ -1900,9 +1900,9 @@ describe("Machine", () => {
           states: {
             entering: {
               on: {
-                Authorize: ({ event, parent, parents, target }) => {
-                  assert.deepStrictEqual(parent, payment)
-                  assert.deepStrictEqual(parents, { payment })
+                Authorize: ({ event, containingState, ancestors, target }) => {
+                  assert.deepStrictEqual(containingState, payment)
+                  assert.deepStrictEqual(ancestors, { payment })
                   return target.local.authorized(new AuthorizedPayment({ code: event.code }))
                 }
               }
@@ -1961,8 +1961,8 @@ describe("Machine", () => {
               }
             },
             authorized: {
-              output: ({ parents, state }) => {
-                assert.deepStrictEqual(parents, { payment })
+              output: ({ ancestors, state }) => {
+                assert.deepStrictEqual(ancestors, { payment })
                 return state.code
               }
             }
@@ -4513,7 +4513,7 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "loaded")
     }))
 
-  it.effect("routes sendParent from an active invoked machine", () =>
+  it.effect("routes sendTo(parent) from an active invoked machine", () =>
     Effect.gen(function*() {
       const childStarted = yield* Deferred.make<void>()
       const machine = Machine.make({
@@ -4527,11 +4527,13 @@ describe("Machine", () => {
             address: Machine.childAddress("request-parent"),
             logic: Machine.logic({
               initial: undefined,
-              run: ({ sendParent }) =>
-                Deferred.succeed(childStarted, void 0).pipe(
-                  Effect.andThen(sendParent(new RequestSucceeded({ value: "child" }))),
-                  Effect.andThen(Effect.never)
-                )
+              run: ({ parent, sendTo }) =>
+                parent === undefined ?
+                  Effect.die("child expected an owning actor") :
+                  Deferred.succeed(childStarted, void 0).pipe(
+                    Effect.andThen(sendTo(parent, new RequestSucceeded({ value: "child" }))),
+                    Effect.andThen(Effect.never)
+                  )
             }),
             onFailure: () => undefined
           }),
@@ -4550,7 +4552,7 @@ describe("Machine", () => {
       assert.strictEqual(yield* actor.join, "child")
     }))
 
-  it.effect("drops sendParent from a stale invoked machine finalizer", () =>
+  it.effect("drops sendTo(parent) from a stale invoked machine finalizer", () =>
     Effect.gen(function*() {
       const childStarted = yield* Deferred.make<void>()
       const machine = Machine.make({
@@ -4569,11 +4571,13 @@ describe("Machine", () => {
             address: Machine.childAddress("stale-request"),
             logic: Machine.logic({
               initial: undefined,
-              run: ({ sendParent }) =>
-                Deferred.succeed(childStarted, void 0).pipe(
-                  Effect.andThen(Effect.never),
-                  Effect.onInterrupt(() => sendParent(new RequestSucceeded({ value: "stale" })))
-                )
+              run: ({ parent, sendTo }) =>
+                parent === undefined ?
+                  Effect.die("child expected an owning actor") :
+                  Deferred.succeed(childStarted, void 0).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.onInterrupt(() => sendTo(parent, new RequestSucceeded({ value: "stale" })))
+                  )
             }),
             onFailure: () => undefined
           }),
@@ -4991,9 +4995,9 @@ describe("Machine", () => {
           }),
           states: {
             entering: {
-              entry: ({ parents, state }) => {
+              entry: ({ ancestors, state }) => {
                 assert.deepStrictEqual(state, entering)
-                assert.deepStrictEqual(parents, { payment })
+                assert.deepStrictEqual(ancestors, { payment })
               },
               invoke: Machine.invoke({
                 id: "request",

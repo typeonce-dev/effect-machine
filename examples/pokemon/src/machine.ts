@@ -4,7 +4,7 @@ import { Effect, Schema } from "effect"
 import { Atom } from "effect/unstable/reactivity"
 import { ReplaceMachine } from "./machines/replace.ts"
 import { SelectionMachine } from "./machines/selection.ts"
-import { Pokemon, PokemonService, ReplaceInTeam } from "./pokemon.ts"
+import { Pokemon, PokemonService, TeamEvents } from "./pokemon.ts"
 
 class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTeam", {
   team: Schema.Array(Pokemon)
@@ -17,7 +17,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
 const machine = Machine.make({
   states: States.states,
-  events: Machine.events(ReplaceInTeam),
+  events: TeamEvents,
   initial: () => States.initial.Loading.from()
 }).handle({
   Loading: {

@@ -7,6 +7,7 @@
 import type * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import type * as Stream from "effect/Stream"
 import type { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"
@@ -89,14 +90,14 @@ type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
  * @category models
  * @since 0.4.0
  */
-export interface MachineAtom<State, Event, Error = never, Output = never, StartError = never> {
+export interface MachineAtom<State, Event, Error = never, Output = never, StartError = never, Emitted = never> {
   /**
    * Atom containing the running machine handle once startup succeeds.
    *
    * @since 0.4.0
    */
   readonly ref: Atom.Atom<
-    AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output>, StartError>
+    AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>
   >
 
   /**
@@ -163,6 +164,32 @@ type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any> 
 type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any> ? Error : never
 
 type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output> ? Output : never
+type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer Emitted> ? Emitted : never
+
+/**
+ * Observes ephemeral notifications from the actor owned by a machine atom.
+ * The stream requires an `AtomRegistry` and does not replay earlier emissions.
+ *
+ * @category getters
+ * @since 0.10.0
+ */
+export const emissions: <State, Event, Error, Output, StartError, Emitted>(
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
+) => Stream.Stream<Emitted, StartError, AtomRegistry.AtomRegistry> = internal.emissions
+
+/**
+ * Observes emissions from each active instance selected by a child bridge.
+ *
+ * @category getters
+ * @since 0.10.0
+ */
+export const childEmissions: <Child extends Machine.ChildMachine.Any, StartError>(
+  self: ChildMachineAtom<Child, StartError>
+) => Stream.Stream<
+  RefEmitted<Machine.ChildMachine.Ref<Child>>,
+  StartError,
+  AtomRegistry.AtomRegistry
+> = internal.childEmissions
 
 /**
  * Reactive access to one invoked child machine selected by its descriptor.
@@ -546,7 +573,8 @@ type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
     Machine.Machine.InitialServices<M>,
     Machine.Machine.Services<M>,
     RuntimeError
-  >
+  >,
+  Machine.Machine.EmittedEvent<M>
 >
 
 type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
@@ -554,7 +582,8 @@ type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = Machine
   Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
   MachineRuntimeError<Machine.Machine.Error<M>, Machine.Machine.Services<M>>,
   Machine.Machine.Output<M>,
-  Machine.MachineSchemaDecodeError | RuntimeError
+  Machine.MachineSchemaDecodeError | RuntimeError,
+  Machine.Machine.EmittedEvent<M>
 >
 
 /**
@@ -631,7 +660,8 @@ export const make: {
     FinalStates extends Machine.Machine.StateIdentifier<States> = never,
     Output = never,
     OutputStates extends Machine.Machine.StateIdentifier<States> = never,
-    InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
+    InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = readonly []
   >(
     machine:
       & Machine.Machine<
@@ -647,7 +677,8 @@ export const make: {
         Output,
         Emits,
         OutputStates,
-        InputEvents
+        InputEvents,
+        ParentEvents
       >
       & EnsureNoExternalRequirements<
         MachineRequirements<
@@ -664,7 +695,8 @@ export const make: {
     Machine.Machine.EventInputOf<InputEvents>,
     MachineRuntimeError<E, R>,
     Output,
-    MachineStartError<InitialE, E, InitialR, R>
+    MachineStartError<InitialE, E, InitialR, R>,
+    Machine.Machine.EmittedEventOf<Emits>
   >
 } = internal.make
 

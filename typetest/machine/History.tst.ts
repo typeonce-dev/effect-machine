@@ -204,8 +204,8 @@ describe("Machine history states", () => {
       checkout: {
         history: {
           recent: {
-            default: ({ parent, target }) => {
-              expect(parent).type.toBe<"checkout">()
+            default: ({ owner, target }) => {
+              expect(owner).type.toBe<"checkout">()
               expect(target).type.toBe<
                 Machine.Machine.HistoryDefaultTargetBuilder<typeof States.states, "checkout">
               >()
@@ -225,10 +225,10 @@ describe("Machine history states", () => {
         },
         states: {
           payment: {
-            initial: ({ state, parent, parents }) => {
+            initial: ({ state, containingState, ancestors }) => {
               expect(state).type.toBe<Payment>()
-              expect(parent).type.toBe<Checkout>()
-              expect(parents).type.toBe<{ readonly checkout: Checkout }>()
+              expect(containingState).type.toBe<Checkout>()
+              expect(ancestors).type.toBe<{ readonly checkout: Checkout }>()
               return new CardEntry({ cardNumber: `attempt-${state.attempt}` })
             }
           }
@@ -295,8 +295,8 @@ describe("Machine history states", () => {
           Workspace: {
             history: {
               resume: {
-                default: ({ parent, target }) => {
-                  expect(parent).type.toBe<"App.Workspace">()
+                default: ({ owner, target }) => {
+                  expect(owner).type.toBe<"App.Workspace">()
                   expect(target).type.toBe<
                     Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
                   >()

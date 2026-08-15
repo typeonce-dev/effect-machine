@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest"
-import { Effect, Fiber, Stream } from "effect"
+import { Cause, Effect, Fiber, Stream } from "effect"
 import { isDeepStrictEqual } from "node:util"
 import { Machine } from "../../../src/index.js"
 import { MachineTest } from "../../../src/testing/index.js"
@@ -28,7 +28,11 @@ const assertRuntimeSnapshot = Effect.fn(function*(
   expected: DifferentialBoundary,
   label: string
 ) {
-  assert.notStrictEqual(actual.status, "error", `${label} unexpectedly failed`)
+  assert.notStrictEqual(
+    actual.status,
+    "error",
+    `${label} unexpectedly failed${actual.status === "error" ? `: ${Cause.pretty(actual.cause)}` : ""}`
+  )
   assert.notStrictEqual(actual.status, "stopped", `${label} unexpectedly stopped`)
   if (actual.status === "error" || actual.status === "stopped") return
   assert.strictEqual(actual.status, expected.done ? "done" : "active", `${label} status`)

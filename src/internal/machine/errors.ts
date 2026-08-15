@@ -25,7 +25,7 @@ export class MachineSchemaEncodeError extends Data.TaggedError("MachineSchemaEnc
  */
 export class MachineSchemaDecodeError extends Data.TaggedError("MachineSchemaDecodeError")<{
   readonly machineId: string | undefined
-  readonly boundary: "input" | "event" | "emit" | "state" | "output" | "history" | "configuration"
+  readonly boundary: "input" | "event" | "emission" | "state" | "output" | "history" | "configuration"
   readonly state?: string
   readonly event?: string
   readonly cause: Schema.SchemaError | Cause.Cause<unknown>

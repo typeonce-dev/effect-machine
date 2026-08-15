@@ -50,6 +50,7 @@ export const TypeId: TypeId = "~effect/Machine"
 declare const MachineOutputStatesTypeId: unique symbol
 declare const MachineTypeId: unique symbol
 declare const EventConstructionTypeId: unique symbol
+declare const EmittedEventConstructionTypeId: unique symbol
 declare const EventProtocolTypeId: unique symbol
 
 const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
@@ -125,7 +126,8 @@ export interface Machine<
   Output = never,
   Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 > extends Pipeable {
   readonly [TypeId]: TypeId
   /** @internal Stable type-level carrier for machine protocol extraction. */
@@ -142,7 +144,8 @@ export interface Machine<
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >
   /** @internal Prevents output implementation evidence from being widened. */
   readonly [MachineOutputStatesTypeId]: Readonly<Record<OutputStates, true>>
@@ -162,8 +165,7 @@ export interface Machine<
   readonly events: Machine.EventProtocol<"public", InputEvents>
 
   /**
-   * Events reserved for raised events, child emissions, and other machine-local
-   * work.
+   * Events reserved for raised events and other machine-local work.
    *
    * @since 0.4.0
    */
@@ -173,11 +175,24 @@ export interface Machine<
   >
 
   /**
-   * Events that the machine may emit to its parent or external adapter.
+   * Ephemeral outward notifications published to this actor's observers.
+   * Emissions are never delivered implicitly to an owning actor.
    *
    * @since 0.4.0
    */
-  readonly emits: Emits
+  readonly emittedEvents: Machine.EventProtocol<"emitted", Emits>
+
+  /**
+   * Public input events accepted by an owning actor when this machine is
+   * running as a child.
+   *
+   * The protocol types the optional `parent` actor reference exposed to
+   * handlers and is checked against a concrete parent's public events at
+   * composition boundaries.
+   *
+   * @since 0.10.0
+   */
+  readonly parentEvents: Machine.EventProtocol<"public", ParentEvents>
 
   /**
    * Optional schema used to decode the machine input before initialization.
@@ -227,7 +242,8 @@ export interface Machine<
     FinalStates,
     Output,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >
 
   /** @internal */
@@ -347,7 +363,8 @@ export type ExecutionServices<Requirements> =
   | Exclude<ActionServices<Requirements>, MachineRuntimeRequirement>
 
 /**
- * Managed runtime capability used to deliver raised and emitted events.
+ * Managed runtime capability used to deliver raised events and publish
+ * emitted notifications.
  *
  * @category models
  * @since 0.4.0
@@ -361,11 +378,42 @@ export interface Runtime<in Events, in Emits> {
   readonly raise: (event: Machine.EventInput<Events>) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
 
   /**
-   * Emits an event through the running machine's parent boundary.
+   * Publishes an ephemeral notification to the running actor's observers.
    *
    * @since 0.4.0
    */
-  readonly sendParent: (event: Emits) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+  readonly emit: (
+    event: Machine.EmittedEventInput<Emits>
+  ) => Effect.Effect<void, MachineSchemaDecodeError | StoppedError>
+}
+
+/**
+ * Minimal typed reference accepted by targeted actor commands.
+ *
+ * @category models
+ * @since 0.10.0
+ */
+export interface ActorRef<in Event> {
+  readonly id: string
+  readonly sessionId: string
+  readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+}
+
+/**
+ * Actor references available while evaluating machine behavior.
+ *
+ * @category models
+ * @since 0.10.0
+ */
+export interface ActorContext<
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
+> {
+  /** Reference to the current actor. Sending queues a later mailbox event. */
+  readonly self: ActorRef<Machine.EventInputOf<InputEvents>>
+
+  /** Reference to the owning actor, or `undefined` when running as a root. */
+  readonly parent: ActorRef<Machine.EventInputOf<ParentEvents>> | undefined
 }
 
 /**
@@ -380,11 +428,12 @@ export interface Enqueue<in Events, in Emits> {
   /** Raises an event inside the current macrostep. */
   readonly raise: (event: Machine.EventInput<Events>) => void
 
-  /** Emits an event through the machine's parent boundary. */
-  readonly emit: (event: Emits) => void
+  /** Publishes an ephemeral notification to this actor's observers. */
+  readonly emit: (event: Machine.EmittedEventInput<Emits>) => void
 
   /** Sends an event to an invoked child after the transition is selected. */
   readonly sendTo: {
+    <Event>(target: ActorRef<Event>, event: Event): void
     <Child extends ChildMachine.Any>(child: Child, event: ChildMachine.Event<Child>): void
     <Address extends ChildAddress<never>>(child: Address, event: ChildAddress.Event<Address>): void
   }
@@ -405,7 +454,7 @@ export interface Enqueue<in Events, in Emits> {
 export type Command =
   | {
     readonly _tag: "SendTo"
-    readonly child: ChildMachine.Any | ChildAddress<never>
+    readonly target: ActorRef<unknown> | ChildMachine.Any | ChildAddress<never>
     readonly event: unknown
   }
   | {
@@ -692,6 +741,12 @@ type ValidateInputEventProtocol<
 > = [DuplicateInput] extends [never] ? unknown
   : EventProtocolError<"Public event tags must be unique", DuplicateInput>
 
+type ValidateEmittedEventProtocol<
+  EmittedEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  DuplicateEmitted extends PropertyKey = DuplicateEventTag<EmittedEvents>
+> = [DuplicateEmitted] extends [never] ? unknown
+  : EventProtocolError<"Emitted event tags must be unique", DuplicateEmitted>
+
 type ValidateInternalEventProtocol<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -703,6 +758,14 @@ type ValidateInternalEventProtocol<
 > = [DuplicateInternal] extends [never] ? [Overlap] extends [never] ? unknown
   : EventProtocolError<"Public and internal event tags must be disjoint", Overlap>
   : EventProtocolError<"Internal event tags must be unique", DuplicateInternal>
+
+type ValidateEventProtocolBuilder<
+  Kind extends Machine.EventProtocolKind,
+  Inputs extends ReadonlyArray<Machine.EventProtocolInput<Kind>>,
+  Schemas extends ReadonlyArray<Machine.TaggedSchema> = Machine.EventProtocolInputSchemasOf<Kind, Inputs>,
+  Duplicate extends PropertyKey = DuplicateEventTag<Schemas>
+> = [Duplicate] extends [never] ? unknown
+  : EventProtocolError<"Event protocol tags must be unique", Duplicate>
 
 const SnapshotBuilderStateTypeId: typeof internal.SnapshotBuilderStateTypeId = internal.SnapshotBuilderStateTypeId
 const SnapshotBuilderConstructionTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderConstruction")
@@ -1645,7 +1708,9 @@ export type RuntimeOutcome<State, Error = never, Output = never> =
  * @category models
  * @since 0.4.0
  */
-export interface MachineRef<out State, in Event, out Error = never, out Output = never> {
+export interface MachineRef<out State, in Event, out Error = never, out Output = never, out Emitted = never>
+  extends ActorRef<Event>
+{
   /** Stable machine definition id, or a generated fallback when none was declared. */
   readonly id: string
 
@@ -1658,8 +1723,14 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   /** Reads the latest lifecycle snapshot. */
   readonly snapshot: Effect.Effect<RuntimeSnapshot<State, Error, Output>>
 
-  /** Streams lifecycle snapshots published after subscription. */
+  /** Streams the current lifecycle snapshot followed by later changes. */
   readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>>
+
+  /**
+   * Streams ephemeral notifications published after subscription. Emissions
+   * are not retained or replayed; the stream completes when the actor stops.
+   */
+  readonly emissions: Stream.Stream<Emitted>
 
   /** Waits for machine output or fails when execution fails or is stopped. */
   readonly join: Effect.Effect<Output, Error | StoppedError>
@@ -1772,13 +1843,6 @@ export declare namespace Logic {
   /**
    * Machine-local capabilities available while process logic initializes.
    *
-   * **Gotchas**
-   *
-   * `sendParent` accepts `unknown` because process logic is independent from
-   * the parent that eventually owns it. Prefer typed process output or an
-   * invocation lifecycle transition when either can represent the
-   * communication.
-   *
    * @category models
    * @since 0.4.0
    */
@@ -1792,14 +1856,14 @@ export declare namespace Logic {
     /** Starts a child process owned by this scope. */
     readonly spawn: Spawn
 
-    /** Sends an untyped event to the owning process. */
-    readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
-
-    /** Sends an event through a typed parent-local child address. */
-    readonly sendTo: <Address extends ChildAddress<never>>(
-      id: Address,
-      event: ChildAddress.Event<Address>
-    ) => Effect.Effect<void, StoppedError>
+    /** Sends an event to an actor reference or typed parent-local child address. */
+    readonly sendTo: {
+      <TargetEvent>(target: ActorRef<TargetEvent>, event: TargetEvent): Effect.Effect<void, StoppedError>
+      <Address extends ChildAddress<never>>(
+        id: Address,
+        event: ChildAddress.Event<Address>
+      ): Effect.Effect<void, StoppedError>
+    }
 
     /** Stops a child process selected by its parent-local address. */
     readonly stopChild: <Event>(id: ChildAddress<Event>) => Effect.Effect<void>
@@ -1888,7 +1952,8 @@ export declare namespace ChildMachine {
       | InfiniteTransitionError
       | MachineSchemaDecodeError
       | StoppedError,
-      Machine.Output<M>
+      Machine.Output<M>,
+      Machine.EmittedEvent<M>
     >
     : never
 
@@ -1898,7 +1963,8 @@ export declare namespace ChildMachine {
    * @category utility types
    * @since 0.4.0
    */
-  export type Event<Child> = Ref<Child> extends MachineRef<any, infer Event, any, any> ? Event : never
+  export type Event<Child> = Child extends ChildMachine<string, infer M> ? Machine.EventInput<Machine.InputEvent<M>>
+    : never
 }
 
 /**
@@ -2011,7 +2077,8 @@ export declare namespace Machine {
     Output,
     Emits extends ReadonlyArray<TaggedSchema>,
     OutputStates extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>
+    InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>
   > {
     readonly states: States
     readonly events: Events
@@ -2023,9 +2090,10 @@ export declare namespace Machine {
     readonly initialServices: InitialR
     readonly finalStates: FinalStates
     readonly output: Output
-    readonly emits: Emits
+    readonly emittedEvents: Emits
     readonly outputStates: OutputStates
     readonly inputEvents: InputEvents
+    readonly parentEvents: ParentEvents
   }
 
   /**
@@ -2043,11 +2111,12 @@ export declare namespace Machine {
   export interface Any extends Pipeable {
     readonly [TypeId]: TypeId
     /** @internal */
-    readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any, any>
+    readonly [MachineTypeId]: TypeCarrier<any, any, any, any, any, any, any, any, any, any, any, any, any, any>
     readonly states: StateSchemas
     readonly events: EventProtocol.Any<"public">
     readonly internalEvents: EventProtocol.Any<"internal">
-    readonly emits: ReadonlyArray<TaggedSchema>
+    readonly emittedEvents: EventProtocol.Any<"emitted">
+    readonly parentEvents: EventProtocol.Any<"public">
     readonly input: Schema.Top | undefined
     readonly id: string | undefined
     /** @internal */
@@ -2148,7 +2217,10 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type Emits<M extends Any> = M[typeof MachineTypeId]["emits"]
+  export type EmittedEvents<M extends Any> = M[typeof MachineTypeId]["emittedEvents"]
+
+  /** @deprecated Use {@link EmittedEvents}. */
+  export type Emits<M extends Any> = EmittedEvents<M>
 
   /**
    * Extracts state paths with implemented output handlers.
@@ -2165,6 +2237,9 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export type InputEvents<M extends Any> = M[typeof MachineTypeId]["inputEvents"]
+
+  /** Extracts the public input protocol required from an owning actor. */
+  export type ParentEvents<M extends Any> = M[typeof MachineTypeId]["parentEvents"]
 
   /** Extracts an internal event schema tuple from the complete and public protocols. */
   export type InternalEventSchemas<
@@ -2207,47 +2282,70 @@ export declare namespace Machine {
     readonly _tag: Event["_tag"]
   }
 
+  /** Opaque construction returned by {@link emittedEvents}. */
+  export interface EmittedEventConstruction<out Event extends { readonly _tag: PropertyKey }> {
+    readonly [EmittedEventConstructionTypeId]: Event
+    readonly _tag: Event["_tag"]
+  }
+
   /** A decoded event or a deferred machine-bound construction of that event. */
   export type EventInput<Event> =
     | Event
     | (Event extends { readonly _tag: PropertyKey } ? EventConstruction<Event> : never)
 
+  /** A decoded emitted event or a deferred emitted-event construction. */
+  export type EmittedEventInput<Event> =
+    | Event
+    | (Event extends { readonly _tag: PropertyKey } ? EmittedEventConstruction<Event> : never)
+
   /** Event inputs accepted for a schema tuple at machine delivery boundaries. */
   export type EventInputOf<Events extends ReadonlyArray<TaggedSchema>> = EventInput<EventOf<Events>>
 
   /** Identifies whether an event protocol is accepted publicly or only inside a machine. */
-  export type EventProtocolKind = "public" | "internal"
+  export type EventProtocolKind = "public" | "internal" | "emitted"
 
   type EventConstructorInput<EventSchema extends TaggedSchema> = Omit<EventSchema["~type.make.in"], "_tag">
 
   type EventConstructor<
     EventSchema extends TaggedSchema,
-    Tag extends EventSchema["Type"]["_tag"]
-  > = {} extends EventConstructorInput<EventSchema> ?
-    (input?: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
-    : (input: EventConstructorInput<EventSchema>) => EventConstruction<EventByTag<readonly [EventSchema], Tag>>
+    Tag extends EventSchema["Type"]["_tag"],
+    Kind extends EventProtocolKind
+  > = {} extends EventConstructorInput<EventSchema> ? (
+      input?: EventConstructorInput<EventSchema>
+    ) => Kind extends "emitted" ? EmittedEventConstruction<EventByTag<readonly [EventSchema], Tag>>
+      : EventConstruction<EventByTag<readonly [EventSchema], Tag>>
+    : (
+      input: EventConstructorInput<EventSchema>
+    ) => Kind extends "emitted" ? EmittedEventConstruction<EventByTag<readonly [EventSchema], Tag>>
+      : EventConstruction<EventByTag<readonly [EventSchema], Tag>>
 
   type FiniteEventTag<Tag extends PropertyKey> = string extends Tag ? never
     : number extends Tag ? never
     : symbol extends Tag ? never
     : Tag
 
-  type EventConstructorsForSchema<EventSchema extends TaggedSchema> = EventSchema extends {
+  type EventConstructorsForSchema<
+    EventSchema extends TaggedSchema,
+    Kind extends EventProtocolKind
+  > = EventSchema extends {
     readonly cases: infer Cases extends Readonly<Record<PropertyKey, TaggedSchema>>
   } ? {
-      readonly [Tag in keyof Cases]: Tag extends Cases[Tag]["Type"]["_tag"] ? EventConstructor<Cases[Tag], Tag>
+      readonly [Tag in keyof Cases]: Tag extends Cases[Tag]["Type"]["_tag"] ? EventConstructor<Cases[Tag], Tag, Kind>
         : never
     }
     : EventSchema extends { readonly members: infer Members extends ReadonlyArray<TaggedSchema> } ?
-      Types.UnionToIntersection<EventConstructorsForSchema<Members[number]>>
+      Types.UnionToIntersection<EventConstructorsForSchema<Members[number], Kind>>
     : {
-      readonly [Tag in FiniteEventTag<EventSchema["Type"]["_tag"]>]: EventConstructor<EventSchema, Tag>
+      readonly [Tag in FiniteEventTag<EventSchema["Type"]["_tag"]>]: EventConstructor<EventSchema, Tag, Kind>
     }
 
   /** Protocol-bound constructors keyed by each configured event tag. */
-  export type EventConstructors<Events extends ReadonlyArray<TaggedSchema>> = {
-    readonly [Tag in keyof Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>]:
-      Types.UnionToIntersection<EventConstructorsForSchema<Events[number]>>[Tag]
+  export type EventConstructors<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Kind extends EventProtocolKind = "public"
+  > = {
+    readonly [Tag in keyof Types.UnionToIntersection<EventConstructorsForSchema<Events[number], Kind>>]:
+      Types.UnionToIntersection<EventConstructorsForSchema<Events[number], Kind>>[Tag]
   }
 
   /**
@@ -2261,7 +2359,7 @@ export declare namespace Machine {
   export type EventProtocol<
     Kind extends EventProtocolKind,
     Schemas extends ReadonlyArray<TaggedSchema>
-  > = EventConstructors<Schemas> & {
+  > = EventConstructors<Schemas, Kind> & {
     readonly [EventProtocolTypeId]: {
       readonly kind: Kind
       readonly schemas: Schemas
@@ -2278,6 +2376,26 @@ export declare namespace Machine {
     }
   }
 
+  /** A schema or an existing protocol accepted by an event builder. */
+  export type EventProtocolInput<Kind extends EventProtocolKind> = TaggedSchema | EventProtocol.Any<Kind>
+
+  type EventProtocolInputSchemas<
+    Kind extends EventProtocolKind,
+    Input extends EventProtocolInput<Kind>
+  > = Input extends EventProtocol<Kind, infer Schemas> ? Schemas
+    : Input extends TaggedSchema ? readonly [Input]
+    : readonly []
+
+  /** Flattens schema and protocol inputs into one owned schema tuple. */
+  export type EventProtocolInputSchemasOf<
+    Kind extends EventProtocolKind,
+    Inputs extends ReadonlyArray<EventProtocolInput<Kind>>
+  > = Inputs extends readonly [
+    infer Head extends EventProtocolInput<Kind>,
+    ...infer Tail extends ReadonlyArray<EventProtocolInput<Kind>>
+  ] ? readonly [...EventProtocolInputSchemas<Kind, Head>, ...EventProtocolInputSchemasOf<Kind, Tail>]
+    : readonly []
+
   /** @internal Extracts the schema tuple carried opaquely by an event protocol. */
   export type EventProtocolSchemas<Protocol extends EventProtocol.Any> = Protocol[typeof EventProtocolTypeId]["schemas"]
 
@@ -2287,7 +2405,10 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type Emit<M extends Any> = EmitOf<Emits<M>>
+  export type EmittedEvent<M extends Any> = EmittedEventOf<Emits<M>>
+
+  /** @deprecated Use {@link EmittedEvent}. */
+  export type Emit<M extends Any> = EmittedEvent<M>
 
   /**
    * A schema whose decoded value contains a `_tag` discriminator.
@@ -3075,7 +3196,10 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type EmitOf<Emits extends ReadonlyArray<TaggedSchema>> = Emits[number]["Type"]
+  export type EmittedEventOf<Emits extends ReadonlyArray<TaggedSchema>> = Emits[number]["Type"]
+
+  /** @deprecated Use {@link EmittedEventOf}. */
+  export type EmitOf<Emits extends ReadonlyArray<TaggedSchema>> = EmittedEventOf<Emits>
 
   /**
    * Event values received by lifecycle callbacks.
@@ -3819,11 +3943,13 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     EventTag extends TagOf<Events[number]>,
     E,
-    R
-  > {
+    R,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
     readonly event: EventByTag<Events, EventTag>
@@ -3847,11 +3973,13 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
-  > {
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
   }
 
@@ -3865,11 +3993,13 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
-  > {
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
   }
 
@@ -3886,12 +4016,14 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>,
     State,
     Error,
-    Output
-  > {
+    Output,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly target: TargetBuilder<States, StateId>
     readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
   }
@@ -3907,12 +4039,14 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
-    Output
-  > {
+    Output,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly snapshot: Snapshot<States>
     readonly target: TargetBuilder<States, StateId>
     readonly output: Output
@@ -3924,12 +4058,14 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
-    Error
-  > {
+    Error,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly snapshot: Snapshot<States>
     readonly target: TargetBuilder<States, StateId>
     readonly error: Error
@@ -3945,11 +4081,13 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
-  > {
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
@@ -3974,11 +4112,13 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
-  > {
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
     readonly event: LifecycleEvent<Events>
@@ -3999,13 +4139,15 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    ChoiceId extends ChoiceIdentifier<States>
-  > {
-    readonly parent: StateByIdentifier<
+    ChoiceId extends ChoiceIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > extends ActorContext<InputEvents, ParentEvents> {
+    readonly containingState: StateByIdentifier<
       States,
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
     >
-    readonly parents: {
+    readonly ancestors: {
       readonly [Parent in Extract<ParentStateIdentifier<ChoiceId>, ValuedStateIdentifier<States>>]: StateByIdentifier<
         States,
         Parent
@@ -4027,8 +4169,8 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
   }
 
@@ -4062,8 +4204,8 @@ export declare namespace Machine {
     StateId extends StateIdentifier<States>
   > {
     readonly state: StateByIdentifier<States, StateId>
-    readonly parent: ParentStateValue<States, StateId>
-    readonly parents: ParentStateValues<States, StateId>
+    readonly containingState: ParentStateValue<States, StateId>
+    readonly ancestors: ParentStateValues<States, StateId>
     readonly event: LifecycleEvent<Events>
     readonly outputs: ParallelOutputRegions<States, StateId>
   }
@@ -4314,6 +4456,14 @@ export declare namespace Machine {
   } ? Emitted
     : Invoke extends { readonly child: ChildMachine<string, infer M> } ? Emit<M>
     : never
+
+  /** Public parent inputs required by an invoked child machine. */
+  export type InvokeParentEvents<Invoke> = Invoke extends {
+    readonly [InvokeTypeId]: { readonly parentEvents: Types.Covariant<infer ParentEvent> }
+  } ? ParentEvent
+    : IsAny<Invoke> extends true ? never
+    : Invoke extends { readonly child: ChildMachine<string, infer M> } ? EventOf<ParentEvents<M>>
+    : never
   /** Extracts transition results returned by invocation lifecycle handlers. */
   export type InvokeOutcomeReturn<Invoke> = Invoke extends unknown ?
       | (Invoke extends { readonly onDone?: infer Handler } ? EventTransitionReturn<NonNullable<Handler>> : never)
@@ -4423,13 +4573,14 @@ export declare namespace Machine {
   }
 
   /** Type evidence retained by {@link invoke} without affecting runtime data. */
-  export interface InvokeTyped<Output, Error, Requirements, InitialError, Emits = never> {
+  export interface InvokeTyped<Output, Error, Requirements, InitialError, Emits = never, ParentEvent = never> {
     readonly [InvokeTypeId]: {
       readonly output: Types.Covariant<Output>
       readonly error: Types.Covariant<Error>
       readonly requirements: Types.Covariant<Requirements>
       readonly initialError: Types.Covariant<InitialError>
       readonly emits: Types.Covariant<Emits>
+      readonly parentEvents: Types.Covariant<ParentEvent>
     }
   }
 
@@ -4858,47 +5009,49 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     E,
-    R
+    R,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = {
     readonly entry?: (
-      context: StateActionContext<States, Events, Emits, StateId>,
+      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
     ) => StateActionResult<any, any>
     readonly exit?: (
-      context: StateActionContext<States, Events, Emits, StateId>,
+      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
     ) => StateActionResult<any, any>
     readonly invoke?: InvokeDefinition<States, Events, Emits, StateId>
     readonly always?:
       | ((
-        context: AlwaysContext<States, Events, Emits, StateId>,
+        context: AlwaysContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
         enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
       ) => HandlerResult<States, any, any>)
       | {
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: AlwaysContext<States, Events, Emits, StateId>,
+          context: AlwaysContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
           enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>
       }
     readonly onDone?:
       | ((
-        context: DoneContext<States, Events, Emits, StateId>,
+        context: DoneContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
         enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
       ) => HandlerResult<States, any, any>)
       | {
         /** Statically declared upper bound of possible target paths. */
         readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
         readonly transition: (
-          context: DoneContext<States, Events, Emits, StateId>,
+          context: DoneContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
           enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>
       }
     readonly on?: {
       readonly [EventTag in TagOf<Events[number]>]?:
         | ((
-          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+          context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R, InputEvents, ParentEvents>,
           enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
         ) => HandlerResult<States, any, any>)
         | {
@@ -4910,12 +5063,12 @@ export declare namespace Machine {
            */
           readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
           readonly transition: (
-            context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
+            context: HandlerContext<States, Events, Emits, StateId, EventTag, E, R, InputEvents, ParentEvents>,
             enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
           ) => HandlerResult<States, any, any>
         }
     }
-    readonly initial?: StateInitialHandler<States, Events, Emits, StateId>
+    readonly initial?: StateInitialHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
   } & ActiveOutputHandlerConfig<States, Events, StateId>
 
   /** Values supplied when a statechart implicitly enters a state's initial children. */
@@ -4940,17 +5093,21 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
-  > = StateActionContext<States, Events, Emits, StateId>
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
+  > = StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
 
   /** Initial child value implementation for a compound or parallel state. */
   export type StateInitialHandler<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = (
-    context: StateInitialContext<States, Events, Emits, StateId>,
+    context: StateInitialContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
     enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
   ) => StateInitialValue<States, StateId>
 
@@ -4963,7 +5120,7 @@ export declare namespace Machine {
   > {
     readonly event: LifecycleEvent<Events>
     readonly target: HistoryDefaultTargetBuilder<States, ParentId>
-    readonly parent: ParentId
+    readonly owner: ParentId
   }
 
   /**
@@ -5003,13 +5160,15 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    ChoiceId extends ChoiceIdentifier<States>
+    ChoiceId extends ChoiceIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > {
     readonly choice: {
       /** Statically inspectable upper bound of every possible target. */
       readonly targets: readonly [StateNodeIdentifier<States>, ...ReadonlyArray<StateNodeIdentifier<States>>]
       readonly transition: (
-        context: ChoiceContext<States, Events, Emits, ChoiceId>,
+        context: ChoiceContext<States, Events, Emits, ChoiceId, InputEvents, ParentEvents>,
         enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
       ) => ChoiceResult<States, any, any>
     }
@@ -5033,10 +5192,12 @@ export declare namespace Machine {
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>
+    StateId extends StateIdentifier<States>,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = {
     readonly entry?: (
-      context: StateActionContext<States, Events, Emits, StateId>,
+      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
     ) => StateActionResult<any, any>
     readonly exit?: never
@@ -5057,10 +5218,12 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     E,
-    R
+    R,
+    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = NodeByIdentifier<States, StateId> extends { readonly type: "final" } ?
-    FinalStateConfig<States, Events, Emits, StateId>
-    : ActiveStateConfig<States, Events, Emits, StateId, E, R>
+    FinalStateConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    : ActiveStateConfig<States, Events, Emits, StateId, E, R, InputEvents, ParentEvents>
 
   type HandlerNodeConfig<
     States extends StateSchemas,
@@ -5068,9 +5231,11 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     Path extends StateNodeIdentifier<States>,
     E,
-    R
-  > = Path extends ChoiceIdentifier<States> ? ChoiceStateConfig<States, Events, Emits, Path>
-    : Path extends StateIdentifier<States> ? HandlerConfig<States, Events, Emits, Path, E, R>
+    R,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>
+  > = Path extends ChoiceIdentifier<States> ? ChoiceStateConfig<States, Events, Emits, Path, InputEvents, ParentEvents>
+    : Path extends StateIdentifier<States> ? HandlerConfig<States, Events, Emits, Path, E, R, InputEvents, ParentEvents>
     : never
 
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
@@ -5153,9 +5318,11 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     E,
     R,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<AllStates>
   > =
-    & HandlerNodeConfig<AllStates, Events, Emits, StateId, E, R>
+    & HandlerNodeConfig<AllStates, Events, Emits, StateId, E, R, InputEvents, ParentEvents>
     & (StateId extends ChoiceIdentifier<AllStates> ? {
         readonly states?: never
         readonly history?: never
@@ -5172,6 +5339,8 @@ export declare namespace Machine {
             Emits,
             E,
             R,
+            InputEvents,
+            ParentEvents,
             Extract<StateId, StateIdentifier<AllStates>>
           >
           readonly history?: HistoryDefaultConfig<
@@ -5194,6 +5363,8 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     E,
     R,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>,
     Prefix extends string
   > = {
     readonly [Key in ActiveStateKey<States> | ChoiceStateKey<States>]?: HandlerNode<
@@ -5203,6 +5374,8 @@ export declare namespace Machine {
       Emits,
       E,
       R,
+      InputEvents,
+      ParentEvents,
       HandlerNodeId<AllStates, JoinPath<Prefix, Key>>
     >
   }
@@ -5437,6 +5610,7 @@ export declare namespace Machine {
     AllStates extends StateSchemas,
     Node,
     Events extends ReadonlyArray<TaggedSchema>,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<AllStates>,
     Config,
@@ -5451,7 +5625,7 @@ export declare namespace Machine {
         & HandlerOnTargetValidation<StateId, Config>
         & HandlerDirectTargetValidation<StateId, Config, "always">
         & HandlerDirectTargetValidation<StateId, Config, "onDone">
-        & HandlerInvokeEmitsValidation<Events, StateId, Config>
+        & HandlerInvokeParentEventsValidation<InputEvents, StateId, Config>
         & HandlerChildrenValidation<Node, StateId, Config>
         & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
         & HandlerRuntimeValidation<Events, Emits, StateId, Config>
@@ -5480,17 +5654,17 @@ export declare namespace Machine {
     }
     : unknown
 
-  type HandlerInvokeEmitsValidation<
+  type HandlerInvokeParentEventsValidation<
     Events extends ReadonlyArray<TaggedSchema>,
     StateId extends string,
     Config
   > = [InvokeReturn<Config>] extends [never] ? unknown
-    : [Exclude<InvokeEmits<InvokeReturn<Config>>, EventOf<Events>>] extends [never] ? unknown
+    : [Exclude<InvokeParentEvents<InvokeReturn<Config>>, EventOf<Events>>] extends [never] ? unknown
     : {
       readonly invoke: HandlerValidationError<
-        "Invoked child emits events not accepted by the parent machine",
+        "Invoked child expects parent events not accepted by this machine",
         StateId,
-        Exclude<InvokeEmits<InvokeReturn<Config>>, EventOf<Events>>
+        Exclude<InvokeParentEvents<InvokeReturn<Config>>, EventOf<Events>>
       >
     }
 
@@ -5510,6 +5684,7 @@ export declare namespace Machine {
   type HandlerNodeValidationAtPath<
     AllStates extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>,
@@ -5520,6 +5695,7 @@ export declare namespace Machine {
       AllStates,
       HandlerNodeByPath<AllStates, StateId>,
       Events,
+      InputEvents,
       Emits,
       StateId,
       NodeConfig,
@@ -5531,6 +5707,7 @@ export declare namespace Machine {
   type HandlerTreeNodeValidations<
     AllStates extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>
@@ -5539,6 +5716,7 @@ export declare namespace Machine {
       StateId extends StateNodeIdentifier<AllStates> ? HandlerNodeValidationAtPath<
           AllStates,
           Events,
+          InputEvents,
           Emits,
           Config,
           AvailableOutputStates,
@@ -5551,12 +5729,13 @@ export declare namespace Machine {
   type HandlerTreeValidation<
     AllStates extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
+    InputEvents extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     Config,
     AvailableOutputStates extends StateIdentifier<AllStates>
   > =
     & HandlerUnknownStateKeyValidation<AllStates, "", Config>
-    & HandlerTreeNodeValidations<AllStates, Events, Emits, Config, AvailableOutputStates>
+    & HandlerTreeNodeValidations<AllStates, Events, InputEvents, Emits, Config, AvailableOutputStates>
 
   type HandlerHasRequiredInitial<
     AllStates extends StateSchemas,
@@ -5652,6 +5831,7 @@ export declare namespace Machine {
     Output,
     OutputStates extends StateIdentifier<AllStates>,
     InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>,
     Config
   > = Machine<
     AllStates,
@@ -5670,7 +5850,8 @@ export declare namespace Machine {
     Output,
     Emits,
     OutputStates | Extract<HandlerTreeEvidence<AllStates, Config>["outputState"], StateIdentifier<AllStates>>,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >
 
   /**
@@ -5692,15 +5873,29 @@ export declare namespace Machine {
     FinalStates extends StateIdentifier<States>,
     Output,
     OutputStates extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>
+    InputEvents extends ReadonlyArray<TaggedSchema>,
+    ParentEvents extends ReadonlyArray<TaggedSchema>
   > {
-    <const Config extends HandlerTree<States, States, Events, Emits, E, R, "">>(
+    <
+      const Config extends HandlerTree<
+        States,
+        States,
+        Events,
+        Emits,
+        E,
+        R,
+        InputEvents,
+        ParentEvents,
+        ""
+      >
+    >(
       config:
         & Config
         & HandlerInvokeContexts<States, Events, Emits, NoInfer<Config>>
         & HandlerTreeValidation<
           States,
           Events,
+          InputEvents,
           Emits,
           NoInfer<Config>,
           | OutputStates
@@ -5723,6 +5918,7 @@ export declare namespace Machine {
       Output,
       OutputStates,
       InputEvents,
+      ParentEvents,
       Config
     >
   }
@@ -5874,7 +6070,8 @@ export const isFinal: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine: Machine<
     States,
@@ -5889,10 +6086,11 @@ export const isFinal: <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   state: Machine.Snapshot<States>
-) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal
+) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal as any
 
 /**
  * Defines a state tree while preserving literal state paths.
@@ -5939,7 +6137,8 @@ type MakeConfig<
   Input extends Schema.Top,
   InitialE,
   InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
@@ -5952,7 +6151,8 @@ type MakeConfig<
       NoInfer<InputEvents>,
       NoInfer<InternalEvents>
     >
-  readonly emits?: Emits
+  readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
+  readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
   readonly input?: Input
   readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
 }
@@ -5964,7 +6164,8 @@ type MakeResult<
   Input extends Schema.Top,
   InitialE,
   InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
+  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
 > = Machine<
   States,
   readonly [...InputEvents, ...InternalEvents],
@@ -5978,7 +6179,8 @@ type MakeResult<
   Machine.TerminalOutput<States>,
   Emits,
   never,
-  InputEvents
+  InputEvents,
+  ParentEvents
 >
 
 interface Make {
@@ -5989,11 +6191,12 @@ interface Make {
     const Input extends Schema.Top = typeof Schema.Void,
     InitialE = never,
     InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
-    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>,
+    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>,
     ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>
+  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -6001,10 +6204,11 @@ interface Make {
     const Input extends Schema.Top = typeof Schema.Void,
     InitialE = never,
     InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents>, "states">
+      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>, "states">
       & { readonly states: InvalidDefinedStateTreeInput<States> }
   ): never
 }
@@ -6021,9 +6225,12 @@ interface Make {
  * to implement state behavior with ordinary TypeScript control flow.
  *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
- * adds events used for raised events, child emissions, and other machine-local
- * deliveries. Both descriptors expose deferred constructors while retaining
- * their schemas opaquely for runtime validation. Their tags must be disjoint.
+ * adds raised events and other machine-local deliveries.
+ * `Machine.emittedEvents` defines outward ephemeral notifications, while
+ * `parentEvents` declares the inputs a child may explicitly send to its owning
+ * actor. All descriptors expose deferred constructors while retaining their
+ * schemas opaquely for runtime validation. Public and internal tags must be
+ * disjoint.
  *
  * **Example** (Typed counter machine)
  *
@@ -6092,9 +6299,14 @@ export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventO
  * @category constructors
  * @since 0.10.0
  */
-export const events = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
-  ...schemas: Schemas & ValidateInputEventProtocol<NoInfer<Schemas>>
-): Machine.EventProtocol<"public", readonly [...Schemas]> => internal.events<Schemas>(...(schemas as Schemas))
+export const events: {
+  <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+    ...schemas: Schemas & ValidateInputEventProtocol<NoInfer<Schemas>>
+  ): Machine.EventProtocol<"public", readonly [...Schemas]>
+  <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"public">>>(
+    ...inputs: Inputs & ValidateEventProtocolBuilder<"public", Inputs>
+  ): Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
+} = internal.events as any
 
 /**
  * Defines an internal event protocol and returns deferred constructors for
@@ -6111,15 +6323,38 @@ export const events = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>
  * const machine = Machine.make({ internalEvents: InternalEvents, ... })
  *
  * // Inside a transition callback:
- * return [nextState, [raise(InternalEvents.Loaded({ value }))]]
+ * enqueue.raise(InternalEvents.Loaded({ value }))
  * ```
  *
  * @category constructors
  * @since 0.10.0
  */
-export const internalEvents = <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
-  ...schemas: Schemas & ValidateInternalEventProtocol<readonly [], NoInfer<Schemas>>
-): Machine.EventProtocol<"internal", readonly [...Schemas]> => internal.internalEvents<Schemas>(...(schemas as Schemas))
+export const internalEvents: {
+  <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+    ...schemas: Schemas & ValidateInternalEventProtocol<readonly [], NoInfer<Schemas>>
+  ): Machine.EventProtocol<"internal", readonly [...Schemas]>
+  <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"internal">>>(
+    ...inputs: Inputs & ValidateEventProtocolBuilder<"internal", Inputs>
+  ): Machine.EventProtocol<"internal", Machine.EventProtocolInputSchemasOf<"internal", Inputs>>
+} = internal.internalEvents as any
+
+/**
+ * Defines the ephemeral notifications a machine may publish to external
+ * observers. Emitted events are separate from actor input and are never sent
+ * implicitly to a parent actor. Observe them through `MachineRef.emissions` or
+ * the AtomMachine emission stream adapters.
+ *
+ * @category constructors
+ * @since 0.10.0
+ */
+export const emittedEvents: {
+  <const Schemas extends ReadonlyArray<Machine.TaggedSchema>>(
+    ...schemas: Schemas & ValidateEmittedEventProtocol<NoInfer<Schemas>>
+  ): Machine.EventProtocol<"emitted", readonly [...Schemas]>
+  <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"emitted">>>(
+    ...inputs: Inputs & ValidateEventProtocolBuilder<"emitted", Inputs>
+  ): Machine.EventProtocol<"emitted", Machine.EventProtocolInputSchemasOf<"emitted", Inputs>>
+} = internal.emittedEvents as any
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.
@@ -6181,7 +6416,8 @@ export const encodeSnapshot: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine: Machine<
     States,
@@ -6196,14 +6432,15 @@ export const encodeSnapshot: <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   snapshot: Machine.Snapshot<States>
 ) => Effect.Effect<
   Machine.EncodedSnapshot,
   MachineSchemaEncodeError,
   Machine.SnapshotEncodingServices<States>
-> = internal.encodeSnapshot
+> = internal.encodeSnapshot as any
 
 /**
  * Decodes a normalized data representation into a validated machine snapshot.
@@ -6262,7 +6499,8 @@ export const decodeSnapshot: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine: Machine<
     States,
@@ -6277,14 +6515,15 @@ export const decodeSnapshot: <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   encoded: unknown
 ) => Effect.Effect<
   Machine.Snapshot<States>,
   MachineSchemaDecodeError,
   Machine.SnapshotDecodingServices<States>
-> = internal.decodeSnapshot
+> = internal.decodeSnapshot as any
 
 type DynamicEffectInvokeSource<
   States extends Machine.StateSchemas,
@@ -6582,7 +6821,8 @@ export const invoke: {
       Machine.Error<Child["machine"]> | ActionError<Machine.Services<Child["machine"]>>,
       Machine.Services<Child["machine"]>,
       Machine.InitialError<Child["machine"]>,
-      Machine.Emit<Child["machine"]>
+      Machine.Emit<Child["machine"]>,
+      Machine.EventOf<Machine.ParentEvents<Child["machine"]>>
     >
 } = ((config: unknown) => config) as any
 type RetagFields<Target extends Machine.TaggedSchema> = Omit<Target["~type.make.in"], "_tag">
@@ -6689,7 +6929,8 @@ export const planInitial: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine:
     & Machine<
@@ -6705,7 +6946,8 @@ export const planInitial: <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
@@ -6746,7 +6988,7 @@ export const planInitial: <
   ),
   InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   never
-> = internal.planInitial
+> = internal.planInitial as any
 
 /**
  * Returns every compiled state node in definition order.
@@ -6850,7 +7092,8 @@ export const enabled: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine: Machine<
     States,
@@ -6865,10 +7108,11 @@ export const enabled: <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   state: Machine.Snapshot<States>
-) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled
+) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled as any
 
 /**
  * Plans the next state snapshot synchronously.
@@ -6927,7 +7171,8 @@ export const plan: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine:
     & Machine<
@@ -6943,7 +7188,8 @@ export const plan: <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   state: Machine.Snapshot<States>,
@@ -6983,7 +7229,7 @@ export const plan: <
   ),
   E | InfiniteTransitionError | MachineSchemaDecodeError,
   never
-> = internal.plan
+> = internal.plan as any
 
 /**
  * Creates advanced stateful process logic from explicit initialization and
@@ -7247,7 +7493,8 @@ export const start: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine:
     & Machine<
@@ -7263,7 +7510,8 @@ export const start: <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   ...args: [...Machine.InputArgs<Input>]
@@ -7276,7 +7524,8 @@ export const start: <
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
-    Output
+    Output,
+    Machine.EmittedEventOf<Emits>
   >,
   | InitialE
   | E
@@ -7290,7 +7539,7 @@ export const start: <
     Machine.EventOf<Events>,
     Machine.EmitOf<Emits>
   >
-> = internal.start
+> = internal.start as any
 
 /**
  * Starts a fresh managed runtime from a decoded logical snapshot.
@@ -7356,7 +7605,8 @@ export const resume: <
   FinalStates extends Machine.StateIdentifier<States> = never,
   Output = never,
   OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
 >(
   machine:
     & Machine<
@@ -7372,7 +7622,8 @@ export const resume: <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>,
   snapshot: Machine.Snapshot<States>
@@ -7385,7 +7636,8 @@ export const resume: <
     | InfiniteTransitionError
     | MachineSchemaDecodeError
     | StoppedError,
-    Output
+    Output,
+    Machine.EmittedEventOf<Emits>
   >,
   MachineSchemaDecodeError,
   ExcludeCompatibleRuntime<
@@ -7393,4 +7645,4 @@ export const resume: <
     Machine.EventOf<Events>,
     Machine.EmitOf<Emits>
   >
-> = internal.resume
+> = internal.resume as any

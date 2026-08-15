@@ -10,6 +10,9 @@ import type { RuntimeCommand } from "./command.js"
 import { decodeEmit, decodeEvent } from "./protocol.js"
 import type { ProcessScope } from "./runtime.js"
 
+const isActorRef = (target: unknown): target is { readonly send: (event: unknown) => Effect.Effect<void, unknown> } =>
+  typeof target === "object" && target !== null && "send" in target && typeof target.send === "function"
+
 export const makeLiveRuntime = <Events, Emits>(
   machine: Machine.Any,
   scope: ProcessScope<Events>
@@ -18,9 +21,9 @@ export const makeLiveRuntime = <Events, Emits>(
     decodeEvent(machine, event).pipe(
       Effect.flatMap((event) => scope.self.send(event as Events))
     ),
-  sendParent: (event) =>
+  emit: (event) =>
     decodeEmit(machine, event).pipe(
-      Effect.flatMap((event) => scope.sendParent(event))
+      Effect.flatMap((event) => scope.emit(event))
     )
 })
 
@@ -30,7 +33,9 @@ export const runCommands = <Event>(
 ) =>
   Effect.forEach(commands, (command) =>
     command._tag === "SendTo"
-      ? scope.sendTo(command.child as never, command.event)
+      ? isActorRef(command.target)
+        ? command.target.send(command.event)
+        : scope.sendTo(command.target as never, command.event)
       : scope.stopChild(command.child as never), { discard: true })
 
 export const runEmittedEvents = <Events, Emits>(
@@ -38,6 +43,6 @@ export const runEmittedEvents = <Events, Emits>(
   runtime: Runtime<Events, Emits>
 ) =>
   Effect.all(
-    Array.from(events, (event) => runtime.sendParent(event)),
+    Array.from(events, (event) => runtime.emit(event)),
     { discard: true }
   )

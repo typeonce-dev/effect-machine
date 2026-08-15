@@ -8,7 +8,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
-import type { Machine } from "../../Machine.js"
+import type { ActorRef, Machine } from "../../Machine.js"
 import { MachineSchemaDecodeError } from "./errors.js"
 import {
   decodeBoundary,
@@ -252,7 +252,25 @@ export interface ActiveConfiguration {
   readonly values: ReadonlyMap<string, unknown>
   readonly outputs: ReadonlyMap<string, unknown>
   readonly history: ReadonlyMap<string, HistoryRecord>
+  readonly actorScope?: PlanningActorScope
 }
+
+export interface PlanningActorScope {
+  readonly self: ActorRef<any>
+  readonly parent: ActorRef<any> | undefined
+}
+
+export const withActorScope = (
+  configuration: ActiveConfiguration,
+  actorScope: PlanningActorScope
+): ActiveConfiguration => ({
+  ...configuration,
+  actorScope: { self: actorScope.self, parent: actorScope.parent }
+})
+
+export const getActorScope = (
+  configuration: ActiveConfiguration
+): PlanningActorScope | undefined => configuration.actorScope
 
 export interface FinalCompletion {
   readonly path: string
@@ -1178,8 +1196,8 @@ export const resolveFinalOutputEffect: <
   const node = getNode(machine, path)
   const output = getStateConfigByPath(machine, path)?.output?.({
     state: configuration.values.get(path),
-    parent: getParentValue(machine, configuration, path),
-    parents: getParentValues(machine, configuration, path),
+    containingState: getParentValue(machine, configuration, path),
+    ancestors: getParentValues(machine, configuration, path),
     event,
     outputs
   } as any)
@@ -1331,8 +1349,8 @@ const resolveFinalOutputSync = <const Events extends ReadonlyArray<Machine.Tagge
   const node = getNode(machine, path)
   const output = getStateConfigByPath(machine, path)?.output?.({
     state: configuration.values.get(path),
-    parent: getParentValue(machine, configuration, path),
-    parents: getParentValues(machine, configuration, path),
+    containingState: getParentValue(machine, configuration, path),
+    ancestors: getParentValues(machine, configuration, path),
     event,
     outputs
   } as any)

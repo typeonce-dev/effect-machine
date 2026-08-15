@@ -52,6 +52,7 @@ describe("MachineTest probe", () => {
         state: ref.state,
         snapshot: ref.snapshot,
         changes: ref.changes,
+        emissions: ref.emissions,
         join: ref.join,
         stop: ref.stop,
         send: ref.send,

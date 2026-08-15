@@ -59,7 +59,7 @@ const makeCounter = (state: {
     id: "Counter",
     states: CounterStates.states,
     events: Machine.events(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
-    emits: [Changed],
+    emittedEvents: Machine.emittedEvents(Changed),
     initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
   }).handle({
     Count: {
