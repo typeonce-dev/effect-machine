@@ -201,29 +201,32 @@ State-scoped work starts on entry and is interrupted on exit:
 
 ```ts
 Loading: {
-  invoke: Machine.invokeEffect({
+  invoke: {
     id: "save-document",
     effect: saveDocument,
-    onSuccess: (entry) => InternalEvent.Saved({ id: entry.id }),
-    onFailure: (error) => InternalEvent.SaveFailed({ message: String(error) })
-  })
+    onDone: ({ output, target }) => target.full.Saved({ id: output.id }),
+    onFailure: ({ error, target }) => target.full.Failed({ message: String(error) })
+  }
 }
 
 Waiting: {
-  invoke: Machine.after(
-    "3 seconds",
-    InternalEvent.SaveFailed({ message: "Timed out" })
-  )
+  invoke: {
+    id: "save-timeout",
+    after: "3 seconds",
+    onDone: ({ target }) => target.full.Failed({ message: "Timed out" })
+  }
 }
 ```
 
-Use `Machine.invokeEffect` for one Effect, `Machine.after` for a cancellable
-delay, and lower-level `Machine.invoke` only for custom process behavior or
-snapshot mapping. Use one exported `Machine.child(id, machine)` descriptor for
-`invokeMachine`, `sendTo`, and child lookup.
+Use `effect` for one Effect, `after` for a cancellable delay, `logic` for a
+reusable process, and `child` for a complete child statechart—all through the
+same inline `invoke` object. `Machine.invoke({...})` is also available as a
+zero-runtime identity helper when constructing an invocation separately. Reuse one exported
+`Machine.child(id, machine)` descriptor for invocation, `sendTo`, and child
+lookup.
 
-Expected failures should become internal events. An unrecovered invoke or child
-failure terminates the owning runtime.
+Typed failures must have an `onFailure` transition. Defects, interruption, and
+source-construction failures terminate the owning runtime.
 
 ## Reactivity
 

@@ -52,8 +52,6 @@ const definition = Machine.make({
 
 export const MicrowaveEvents = Machine.events(definition)
 const InternalEvents = Machine.internalEvents(definition)
-const secondElapsed = InternalEvents.SecondElapsed()
-
 export const MicrowaveMachine = definition.handle({
   Oven: {
     states: {
@@ -68,15 +66,14 @@ export const MicrowaveMachine = definition.handle({
             }
           },
           Cooking: {
-            invoke: Machine.after("1 second", secondElapsed, { id: "cooking-second" }),
+            invoke: Machine.invoke({
+              id: "cooking-second",
+              after: "1 second",
+              onDone: ({ state, target }) => target.local.Cooking.from({ elapsedSeconds: state.elapsedSeconds + 1 })
+            }),
             on: {
               PowerPressed: ({ target }) => target.local.Idle.from(),
-              DoorOpened: ({ target }) => target.local.Idle.from(),
-              SecondElapsed: {
-                reenter: true,
-                transition: ({ state, target }) =>
-                  target.local.Cooking.from({ elapsedSeconds: state.elapsedSeconds + 1 })
-              }
+              DoorOpened: ({ target }) => target.local.Idle.from()
             }
           }
         }

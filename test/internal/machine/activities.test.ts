@@ -2,11 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
-import {
-  activityDefinitions,
-  ActivityMetadataTypeId,
-  type StaticActivityMetadata
-} from "../../../src/internal/machine/activities.js"
+import { activityDefinitions } from "../../../src/internal/machine/activities.js"
 import { makeTextRenderer } from "../../machine/visualization/text.js"
 
 class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
@@ -27,7 +23,6 @@ const child = Machine.child("child", childMachine)
 
 let dynamicFactoryEvaluations = 0
 const timerDuration = "10 seconds"
-const timerEvent = new LoadTimedOut({})
 const activityStates = Machine.defineStates({ Loading, Dynamic })
 const activityMachine = Machine.make({
   id: "activity-inspection",
@@ -39,26 +34,28 @@ const activityMachine = Machine.make({
     invoke: [
       Machine.invoke({
         id: "poll-server",
-        src: () => Machine.effect(Effect.void)
+        address: Machine.childAddress("poll-server"),
+        logic: Machine.logic({ initial: undefined, run: () => Effect.never })
       }),
-      Machine.invokeEffect({
+      Machine.invoke({
         id: "load-document",
         effect: Effect.fail("unavailable").pipe(Effect.as(1)),
-        onSuccess: () => new WorkSucceeded({}),
-        onFailure: () => new WorkFailed({})
+        onDone: () => undefined,
+        onFailure: () => undefined
       }),
-      Machine.after(timerDuration, timerEvent, { id: "load-timeout" }),
-      Machine.invokeMachine({ child })
+      Machine.invoke({ id: "load-timeout", after: timerDuration, onDone: () => undefined }),
+      Machine.invoke({ child })
     ]
   },
   Dynamic: {
-    invoke: () => {
-      dynamicFactoryEvaluations++
-      return Machine.invoke({
-        id: "context-owned",
-        src: () => Machine.effect(Effect.void)
-      })
-    }
+    invoke: Machine.invoke({
+      id: "context-owned",
+      address: Machine.childAddress("context-owned"),
+      logic: () => {
+        dynamicFactoryEvaluations++
+        return Machine.logic({ initial: undefined, run: () => Effect.never })
+      }
+    })
   }
 })
 
@@ -66,11 +63,6 @@ const renderActivityMachine = makeTextRenderer<
   typeof activityMachine,
   Machine.Machine.Snapshot<typeof activityStates.states>
 >(Machine)
-
-const descriptor = (id: string, metadata: StaticActivityMetadata) => ({
-  id,
-  [ActivityMetadataTypeId]: metadata
-})
 
 const machine = {
   stateNodes: {
@@ -85,25 +77,20 @@ const machine = {
   handlers: {
     Loading: {
       invoke: [
-        descriptor("load-document", {
-          type: "effect",
-          outcomes: { success: "dynamic", failure: "dynamic" }
-        }),
-        descriptor("load-timeout", {
-          type: "timer",
-          duration: "10s",
-          event: "LoadTimedOut"
-        })
+        {
+          id: "load-document",
+          effect: Effect.void,
+          onFailure: () => undefined,
+          type: "effect"
+        },
+        { id: "load-timeout", after: "10 seconds" }
       ]
     },
     "Parent.Active": {
-      invoke: descriptor("child", {
-        type: "machine",
-        child: { id: "child", machineId: "document-worker" }
-      })
+      invoke: { child }
     },
     Dynamic: {
-      invoke: () => descriptor("runtime-dependent", { type: "process" })
+      invoke: { id: "runtime-dependent", address: "runtime-dependent", logic: () => Effect.never }
     }
   }
 }
@@ -128,8 +115,7 @@ describe("machine activity metadata", () => {
         source: "Loading",
         id: "load-timeout",
         type: "timer",
-        duration: "10s",
-        event: "LoadTimedOut"
+        duration: "10s"
       },
       {
         source: "Loading",
@@ -139,7 +125,8 @@ describe("machine activity metadata", () => {
       },
       {
         source: "Dynamic",
-        type: "dynamic"
+        id: "context-owned",
+        type: "process"
       }
     ]
 
@@ -149,7 +136,6 @@ describe("machine activity metadata", () => {
     const timer = Machine.activityDefinitions(activityMachine).find(({ type }) => type === "timer")
     assert(timer?.type === "timer")
     assert.strictEqual(timer.duration, Duration.format(Duration.fromInputUnsafe(timerDuration)))
-    assert.strictEqual(timer.event, String(timerEvent._tag))
     assert.strictEqual(dynamicFactoryEvaluations, 0)
   })
 
@@ -173,7 +159,7 @@ describe("machine activity metadata", () => {
           initial: () => activityStates.initial.Loading(new Loading({}))
         }).handle({
           Loading: {
-            invoke: Machine.after(durationMillis, timerEvent, { id })
+            invoke: Machine.invoke({ id, after: durationMillis, onDone: () => undefined })
           }
         })
         const definition = Machine.activityDefinitions(generated)[0]
@@ -182,8 +168,7 @@ describe("machine activity metadata", () => {
           source: "Loading",
           id,
           type: "timer",
-          duration: Duration.format(Duration.fromInputUnsafe(durationMillis)),
-          event: "LoadTimedOut"
+          duration: Duration.format(Duration.fromInputUnsafe(durationMillis))
         })
         assert(Machine.stateNodes(generated).some(({ path }) => path === definition?.source))
       }),
@@ -202,8 +187,7 @@ describe("machine activity metadata", () => {
         source: "Loading",
         id: "load-timeout",
         type: "timer",
-        duration: "10s",
-        event: "LoadTimedOut"
+        duration: "10s"
       },
       {
         source: "Parent.Active",
@@ -211,29 +195,38 @@ describe("machine activity metadata", () => {
         type: "machine",
         child: { id: "child", machineId: "document-worker" }
       },
-      {
-        source: "Dynamic",
-        type: "dynamic"
-      }
+      { source: "Dynamic", id: "runtime-dependent", type: "process" }
     ])
   })
 
-  it("does not evaluate dynamic factories while inspecting", () => {
+  it("does not evaluate source factories while inspecting", () => {
     let evaluations = 0
     const dynamic = {
       stateNodes: { byPath: new Map([["Active", { path: "Active" }]]) },
       handlers: {
         Active: {
-          invoke: () => {
-            evaluations++
-            return descriptor("runtime-dependent", { type: "process" })
+          invoke: {
+            id: "runtime-dependent",
+            address: "runtime-dependent",
+            logic: () => {
+              evaluations++
+              return Effect.never
+            }
           }
         }
       }
     }
 
-    assert.deepStrictEqual(activityDefinitions(dynamic), [{ source: "Active", type: "dynamic" }])
-    assert.deepStrictEqual(activityDefinitions(dynamic), [{ source: "Active", type: "dynamic" }])
+    assert.deepStrictEqual(activityDefinitions(dynamic), [{
+      source: "Active",
+      id: "runtime-dependent",
+      type: "process"
+    }])
+    assert.deepStrictEqual(activityDefinitions(dynamic), [{
+      source: "Active",
+      id: "runtime-dependent",
+      type: "process"
+    }])
     assert.strictEqual(evaluations, 0)
   })
 
@@ -243,7 +236,7 @@ describe("machine activity metadata", () => {
       handlers: {
         ...machine.handlers,
         Missing: {
-          invoke: descriptor("orphan", { type: "process" })
+          invoke: { id: "orphan", address: "orphan", logic: Effect.never }
         }
       }
     }
@@ -263,12 +256,15 @@ describe("machine activity metadata", () => {
         "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)  ◆ activity",
         "",
         "├─ ● Loading",
+        "│  ├─ ◇ invoke load-document done",
+        "│  ├─ ◇ invoke load-document failure",
+        "│  ├─ ◇ invoke load-timeout done",
         "│  ├─ ◆ process: poll-server",
         "│  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
-        "│  ├─ ◆ timer: load-timeout [10s] → LoadTimedOut",
+        "│  ├─ ◆ timer: load-timeout [10s]",
         "│  └─ ◆ machine: child → document-worker",
         "└─ ○ Dynamic",
-        "   └─ ◆ activity: dynamic",
+        "   └─ ◆ process: context-owned",
         "",
         "Candidate events: none"
       ].join("\n")

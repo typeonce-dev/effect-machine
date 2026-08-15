@@ -65,7 +65,6 @@ interface IndexedExecutionDescriptor {
 
 const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
   "initial",
-  "invoke",
   "on",
   "output"
 ])

@@ -16,22 +16,16 @@ class Replaced extends Schema.TaggedClass<Replaced>("Replaced")("Replaced", {
   pokemon: Pokemon
 }) {}
 
-const ReplaceWithRandomMachine = Machine.invoke({
-  id: "replaceWithRandom",
-  src: () =>
-    Machine.effect(
-      Effect.sleep("500 millis").pipe(
-        Effect.andThen(
-          Effect.gen(function*() {
-            const pk = yield* PokemonService
-            const pokemon = yield* pk.getRandomPokemon()
-            return new Replaced({ pokemon })
-          })
-        ),
-        Effect.onInterrupt(() => Effect.log("Replace with random interrupted"))
-      )
-    )
-})
+const replaceWithRandom = Effect.sleep("500 millis").pipe(
+  Effect.andThen(
+    Effect.gen(function*() {
+      const pk = yield* PokemonService
+      const pokemon = yield* pk.getRandomPokemon()
+      return new Replaced({ pokemon })
+    })
+  ),
+  Effect.onInterrupt(() => Effect.log("Replace with random interrupted"))
+)
 
 export const ReplaceStates = Machine.defineStates({ Idle: {}, Replacing })
 
@@ -48,12 +42,14 @@ export const ReplaceMachine = Machine.make({
     }
   },
   Replacing: {
-    invoke: () => ReplaceWithRandomMachine,
-    on: {
-      Replaced: ({ event, target, state }, enqueue) => {
-        enqueue.emit(new ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
+    invoke: Machine.invoke({
+      id: "replaceWithRandom",
+      effect: replaceWithRandom,
+      onDone: ({ output, target, state }, enqueue) => {
+        enqueue.emit(new ReplaceInTeam({ id: state.id, pokemon: output.pokemon }))
         return target.full.Idle.from()
-      }
-    }
+      },
+      onFailure: ({ target }) => target.full.Idle.from()
+    })
   }
 })

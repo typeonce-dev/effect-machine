@@ -663,7 +663,7 @@ describe("Machine", () => {
         assert.strictEqual(snapshot.status, "error")
       }))
 
-    it.effect("delivers internal constructions from invokeEffect and after", () =>
+    it.effect("plans inline Effect and timer outcomes", () =>
       Effect.gen(function*() {
         const release = yield* Deferred.make<void>()
         const InternalEvent = Schema.TaggedUnion({ Loaded: {}, TimedOut: {} })
@@ -674,23 +674,20 @@ describe("Machine", () => {
           internalEvents: [InternalEvent],
           initial: () => states.initial.Loading.from()
         })
-        const internalEvents = Machine.internalEvents(definition)
         const machine = definition.handle({
           Loading: {
-            invoke: Machine.invokeEffect({
+            invoke: Machine.invoke({
               id: "load",
               effect: Deferred.await(release),
-              onSuccess: () => internalEvents.Loaded()
-            }),
-            on: {
-              Loaded: ({ target }) => target.full.Waiting.from()
-            }
+              onDone: ({ target }) => target.full.Waiting.from()
+            })
           },
           Waiting: {
-            invoke: Machine.after("1 second", internalEvents.TimedOut()),
-            on: {
-              TimedOut: ({ target }) => target.full.Done.from()
-            }
+            invoke: Machine.invoke({
+              id: "timeout",
+              after: "1 second",
+              onDone: ({ target }) => target.full.Done.from()
+            })
           },
           Done: {}
         })
@@ -4189,17 +4186,11 @@ describe("Machine", () => {
           }
         },
         Loading: {
-          invoke: ({ state }) =>
-            Machine.invoke({
-              id: "request",
-              src: () =>
-                Machine.effect(
-                  Effect.succeed(new RequestSucceeded({ value: `done:${state.requestId}` }))
-                )
-            }),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
-          }
+          invoke: Machine.invoke({
+            id: "request",
+            effect: Effect.succeed("done:request-1"),
+            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4236,17 +4227,11 @@ describe("Machine", () => {
           }
         },
         Loading: {
-          invoke: ({ state }) =>
-            Machine.invoke({
-              id: "request",
-              src: () =>
-                Machine.effect(
-                  Effect.succeed(new RequestSucceeded({ value: `done:${state.requestId}` }))
-                )
-            }),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
-          }
+          invoke: Machine.invoke({
+            id: "request",
+            effect: Effect.succeed("done:request-1"),
+            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4285,7 +4270,7 @@ describe("Machine", () => {
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeMachine({ child: Child })
+          invoke: Machine.invoke({ child: Child })
         }
       })
 
@@ -4335,7 +4320,7 @@ describe("Machine", () => {
         events: [],
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
-        Loading: { invoke: Machine.invokeMachine({ child: Child }) }
+        Loading: { invoke: Machine.invoke({ child: Child }) }
       })
 
       const parent = yield* Machine.start(parentMachine)
@@ -4373,7 +4358,7 @@ describe("Machine", () => {
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeMachine({ child: Child, input: { userId: "configured" } })
+          invoke: Machine.invoke({ child: Child, input: { userId: "configured" } })
         }
       })
 
@@ -4420,13 +4405,10 @@ describe("Machine", () => {
         initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeMachine({
+          invoke: Machine.invoke({
             child: Child,
-            onDone: ({ output }) => new ChildFinished({ output })
-          }),
-          on: {
-            ChildFinished: ({ event, target }) => target.full.Success(new Success({ requestId: event.output }))
-          }
+            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+          })
         },
         Success: { output: ({ state }) => state.requestId }
       })
@@ -4466,7 +4448,7 @@ describe("Machine", () => {
       yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
     }))
 
-  it.effect("invokeMachine rejects duplicate active child addresses", () =>
+  it.effect("child invocation rejects duplicate active child addresses", () =>
     Effect.gen(function*() {
       const childStates = Machine.defineStates({ Idle })
       const child = Machine.make({
@@ -4483,8 +4465,8 @@ describe("Machine", () => {
       }).handle({
         Loading: {
           invoke: [
-            Machine.invokeMachine({ child: Child }),
-            Machine.invokeMachine({ child: Child })
+            Machine.invoke({ child: Child }),
+            Machine.invoke({ child: Child })
           ]
         }
       })
@@ -4502,7 +4484,7 @@ describe("Machine", () => {
       let sourceEvaluations = 0
       const source = () => {
         sourceEvaluations += 1
-        return Machine.effect(Effect.never)
+        return Machine.logic({ initial: undefined, run: () => Effect.never })
       }
       const parentStates = Machine.defineStates({ Loading })
       const parent = Machine.make({
@@ -4515,12 +4497,12 @@ describe("Machine", () => {
             Machine.invoke({
               id: "worker",
               address: First,
-              src: source
+              logic: source
             }),
             Machine.invoke({
               id: "worker",
               address: Second,
-              src: source
+              logic: source
             })
           ]
         }
@@ -4551,16 +4533,9 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () =>
-              Machine.effect(
-                Effect.fail(error).pipe(
-                  Effect.catch((error) => Effect.succeed(new RequestFailed({ error, cause: Cause.fail(error) })))
-                )
-              )
-          }),
-          on: {
-            RequestFailed: ({ event }) => FlatInitial.Failed(new Failed({ message: event.error.message }))
-          }
+            effect: Effect.fail(error),
+            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+          })
         },
         Failed: {
           output: ({ state }) => state.message
@@ -4599,11 +4574,9 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => Machine.effect(Effect.succeed(new RequestSucceeded({ value: "loaded" })))
-          }),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
-          }
+            effect: Effect.succeed("loaded"),
+            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4627,15 +4600,16 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () =>
-              Machine.logic({
-                initial: undefined,
-                run: ({ sendParent }) =>
-                  Deferred.succeed(childStarted, void 0).pipe(
-                    Effect.andThen(sendParent(new RequestSucceeded({ value: "child" }))),
-                    Effect.andThen(Effect.never)
-                  )
-              })
+            address: Machine.childAddress("request-parent"),
+            logic: Machine.logic({
+              initial: undefined,
+              run: ({ sendParent }) =>
+                Deferred.succeed(childStarted, void 0).pipe(
+                  Effect.andThen(sendParent(new RequestSucceeded({ value: "child" }))),
+                  Effect.andThen(Effect.never)
+                )
+            }),
+            onFailure: () => undefined
           }),
           on: {
             RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
@@ -4668,15 +4642,16 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () =>
-              Machine.logic({
-                initial: undefined,
-                run: ({ sendParent }) =>
-                  Deferred.succeed(childStarted, void 0).pipe(
-                    Effect.andThen(Effect.never),
-                    Effect.onInterrupt(() => sendParent(new RequestSucceeded({ value: "stale" })))
-                  )
-              })
+            address: Machine.childAddress("stale-request"),
+            logic: Machine.logic({
+              initial: undefined,
+              run: ({ sendParent }) =>
+                Deferred.succeed(childStarted, void 0).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => sendParent(new RequestSucceeded({ value: "stale" })))
+                )
+            }),
+            onFailure: () => undefined
           }),
           on: {
             Resolve: () => FlatInitial.Idle(new Idle({ userId: "resolved" }))
@@ -4703,7 +4678,7 @@ describe("Machine", () => {
       yield* actor.stop
     }))
 
-  it.effect("invokeEffect maps typed failures without manual Effect recovery", () =>
+  it.effect("inline Effect invocation handles typed failures without manual recovery", () =>
     Effect.gen(function*() {
       const failure = new InvokeError({ message: "unavailable" })
       const machine = Machine.make({
@@ -4713,16 +4688,11 @@ describe("Machine", () => {
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeEffect({
+          invoke: Machine.invoke({
             id: "request",
             effect: Effect.fail(failure),
-            onSuccess: (value: string) => new RequestSucceeded({ value }),
-            onFailure: (error) => new RequestFailed({ error, cause: Cause.fail(error) })
-          }),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Failed(new Failed({ message: event.value })),
-            RequestFailed: ({ event }) => FlatInitial.Failed(new Failed({ message: event.error.message }))
-          }
+            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+          })
         },
         Failed: {
           output: ({ state }) => state.message
@@ -4746,14 +4716,11 @@ describe("Machine", () => {
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
-          invoke: Machine.invokeEffect({
+          invoke: Machine.invoke({
             id: "request",
             effect: requiredMessage,
-            onSuccess: (value: string) => new RequestSucceeded({ value })
-          }),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
-          }
+            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4779,10 +4746,11 @@ describe("Machine", () => {
         initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
       }).handle({
         Loading: {
-          invoke: Machine.after("1 hour", new RequestSucceeded({ value: "timeout" })),
-          on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
-          }
+          invoke: Machine.invoke({
+            id: "timeout",
+            after: "1 hour",
+            onDone: ({ target }) => target.full.Success(new Success({ requestId: "timeout" }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4812,13 +4780,11 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => Machine.logic({ initial: "pending", run: () => Effect.never }),
-            snapshot: ({ id, snapshot }) => new RequestProgress({ id, childState: snapshot.state })
-          }),
-          on: {
-            RequestProgress: ({ event }) =>
-              FlatInitial.Success(new Success({ requestId: `${event.id}:${event.childState}` }))
-          }
+            address: Machine.childAddress("progress-request"),
+            logic: Machine.logic({ initial: "pending", run: () => Effect.never }),
+            onSnapshot: ({ id, snapshot, target }) =>
+              target.full.Success(new Success({ requestId: `${id}:${snapshot.state}` }))
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4841,7 +4807,7 @@ describe("Machine", () => {
       })
     }))
 
-  it.effect("start fails the owning machine when an invoked effect failure is not recovered", () =>
+  it.effect("start fails the owning machine when an invoked effect defects", () =>
     Effect.gen(function*() {
       const error = new InvokeError({ message: "boom" })
       const machine = Machine.make({
@@ -4858,17 +4824,20 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => Machine.effect(Effect.fail(error))
+            effect: Effect.die(error)
           })
         }
       })
 
       const ref = yield* Machine.start(machine, { userId: "user-1" })
-      yield* ref.send(new Submit({ value: "hello" }))
-
-      assert.strictEqual(yield* Effect.flip(ref.join), error)
-      const snapshot = yield* ref.snapshot
+      const snapshot = yield* sendAndWaitForSnapshot(
+        ref,
+        new Submit({ value: "hello" }),
+        (snapshot) => snapshot.status === "error"
+      )
       assert.strictEqual(snapshot.status, "error")
+      if (snapshot.status !== "error") return assert.fail("expected an error snapshot")
+      assert.strictEqual(Cause.squash(snapshot.cause), error)
       assert.deepStrictEqual(snapshot.state, {
         path: "Loading",
         value: new Loading({ requestId: "request-1" })
@@ -4893,22 +4862,19 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () =>
-              Machine.logic({
-                initial: "pending",
-                run: ({ setState }) =>
-                  Deferred.succeed(started, void 0).pipe(
-                    Effect.andThen(Deferred.await(release)),
-                    Effect.andThen(setState("ready")),
-                    Effect.andThen(Effect.never)
-                  )
-              }),
-            snapshot: ({ id, snapshot }) =>
-              snapshot.state === "ready" ? new RequestProgress({ id, childState: snapshot.state }) : undefined
-          }),
-          on: {
-            RequestProgress: ({ event }) => FlatInitial.Success(new Success({ requestId: event.childState }))
-          }
+            address: Machine.childAddress("filtered-progress"),
+            logic: Machine.logic({
+              initial: "pending",
+              run: ({ setState }) =>
+                Deferred.succeed(started, void 0).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(setState("ready")),
+                  Effect.andThen(Effect.never)
+                )
+            }),
+            onSnapshot: ({ snapshot, target }) =>
+              snapshot.state === "ready" ? target.full.Success(new Success({ requestId: snapshot.state })) : undefined
+          })
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4956,11 +4922,12 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () =>
-              Machine.logic({
-                initial: "pending",
-                run: () => Effect.void
-              })
+            address: Machine.childAddress("void-request"),
+            logic: Machine.logic({
+              initial: "pending",
+              run: () => Effect.void
+            }),
+            onDone: () => undefined
           })
         }
       })
@@ -5010,7 +4977,8 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => childLogic
+            address: Machine.childAddress("stopping-request"),
+            logic: childLogic
           }),
           on: {
             Resolve: () => FlatInitial.Success(new Success({ requestId: "request-1" })),
@@ -5094,18 +5062,20 @@ describe("Machine", () => {
         payment: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => makeInvokeLogic("parent", parentStarted)
+            address: Machine.childAddress("payment-parent"),
+            logic: makeInvokeLogic("parent", parentStarted)
           }),
           states: {
             entering: {
-              invoke: ({ parents, state }) => {
+              entry: ({ parents, state }) => {
                 assert.deepStrictEqual(state, entering)
                 assert.deepStrictEqual(parents, { payment })
-                return Machine.invoke({
-                  id: "request",
-                  src: () => makeInvokeLogic("entering", enteringStarted)
-                })
               },
+              invoke: Machine.invoke({
+                id: "request",
+                address: Machine.childAddress("payment-entering"),
+                logic: makeInvokeLogic("entering", enteringStarted)
+              }),
               on: {
                 Authorize: ({ event, target }) => target.local.authorized(new AuthorizedPayment({ code: event.code }))
               }
@@ -5113,7 +5083,8 @@ describe("Machine", () => {
             authorized: {
               invoke: Machine.invoke({
                 id: "request",
-                src: () => makeInvokeLogic("authorized", authorizedStarted)
+                address: Machine.childAddress("payment-authorized"),
+                logic: makeInvokeLogic("authorized", authorizedStarted)
               })
             }
           }
@@ -5223,13 +5194,15 @@ describe("Machine", () => {
         fulfillment: {
           invoke: Machine.invoke({
             id: "request",
-            src: () => makeInvokeLogic(parentStarted, parentStopping)
+            address: Machine.childAddress("fulfillment-parent"),
+            logic: makeInvokeLogic(parentStarted, parentStopping)
           }),
           states: {
             inventory: {
               invoke: Machine.invoke({
                 id: "request",
-                src: () => makeInvokeLogic(inventoryStarted, inventoryStopping)
+                address: Machine.childAddress("fulfillment-inventory"),
+                logic: makeInvokeLogic(inventoryStarted, inventoryStopping)
               }),
               states: {
                 checking: {
@@ -5242,7 +5215,8 @@ describe("Machine", () => {
             shipping: {
               invoke: Machine.invoke({
                 id: "request",
-                src: () => makeInvokeLogic(shippingStarted, shippingStopping)
+                address: Machine.childAddress("fulfillment-shipping"),
+                logic: makeInvokeLogic(shippingStarted, shippingStopping)
               })
             }
           }

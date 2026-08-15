@@ -73,7 +73,7 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot, new Tick({}))
     expect(Machine.start).type.not.toBeCallableWith(choiceIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
-    expect(Machine.invokeMachine).type.not.toBeCallableWith({
+    expect(Machine.invoke).type.not.toBeCallableWith({
       child: Machine.child("choice", choiceIncomplete)
     })
     expect(MachineTest.run).type.not.toBeCallableWith(choiceIncomplete, { events: [] })
@@ -89,7 +89,7 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(historyIncomplete, historySnapshot, new Tick({}))
     expect(Machine.start).type.not.toBeCallableWith(historyIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
-    expect(Machine.invokeMachine).type.not.toBeCallableWith({
+    expect(Machine.invoke).type.not.toBeCallableWith({
       child: Machine.child("history", historyIncomplete)
     })
     expect(MachineTest.run).type.not.toBeCallableWith(historyIncomplete, { events: [] })
@@ -105,7 +105,7 @@ describe("executable machine readiness", () => {
     expect(Machine.plan).type.not.toBeCallableWith(outputIncomplete, outputSnapshot, new Tick({}))
     expect(Machine.start).type.not.toBeCallableWith(outputIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
-    expect(Machine.invokeMachine).type.not.toBeCallableWith({
+    expect(Machine.invoke).type.not.toBeCallableWith({
       child: Machine.child("output", outputIncomplete),
       onDone: () => undefined
     })
@@ -169,7 +169,7 @@ describe("executable machine readiness", () => {
     const planned = Machine.plan(complete, completeSnapshot, new Tick({}))
     const started = Machine.start(complete)
     const resumed = Machine.resume(complete, completeSnapshot)
-    const invocation = Machine.invokeMachine({
+    const invocation = Machine.invoke({
       child: Machine.child("complete", complete),
       onDone: () => undefined
     })
@@ -199,7 +199,7 @@ describe("executable machine readiness", () => {
     expect<Effect.Success<typeof resumed>["send"]>().type.toBe<
       (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
     >()
-    expect(invocation).type.toBeAssignableTo<Machine.Machine.AnyInvokeConfig>()
+    expect(invocation).type.toBeAssignableTo<Machine.Machine.InvokeConfig<any, any, any, any>>()
     expect<Effect.Success<typeof trace>>().type.toBe<MachineTest.Trace<typeof complete>>()
     expect<AtomChannels<typeof atom>>().type.toBe<
       readonly [

@@ -125,7 +125,7 @@ describe("AtomMachine", () => {
       initial: () => States.initial.Idle(new Idle({}))
     }).handle({
       Idle: {
-        invoke: Machine.invokeMachine({ child: Child })
+        invoke: Machine.invoke({ child: Child })
       }
     })
     const child = AtomMachine.make(parentMachine).child(Child)

@@ -70,7 +70,8 @@ the deferred constructors preserve that identity after decoding.
 - Return snapshots or typed target-builder results from transitions. Do not
   return raw decoded state values.
 - Transition and lifecycle callbacks are synchronous. Put asynchronous work in
-  an invoked Effect, actor, or child machine and map its result to an event.
+  an invoked Effect, logic process, or child machine and handle its lifecycle
+  with `onDone`, `onFailure`, and `onSnapshot`.
 - Put data on the narrowest state where it is valid. Put data shared by sibling
   phases on their compound parent.
 - Declare finality only in the state definition. Do not put `type: "final"` in
@@ -80,12 +81,12 @@ the deferred constructors preserve that identity after decoding.
 - `parents` keys are full dotted paths.
 - Invoke lifetimes follow state entry and exit, not the spelling of the target
   builder.
-- Recover expected invoked Effect failures into machine events. Unrecovered
-  child failures terminate the owning machine.
-- Reuse the exact child descriptor value for `invokeMachine`, `sendTo`, and
+- Handle every typed invoked Effect failure with `onFailure`. Defects and
+  interruption terminate the owning machine.
+- Reuse the exact child descriptor value for inline invocation, `sendTo`, and
   child lookup.
 - `events` is the public input protocol. `internalEvents` contains machine-local
-  deliveries such as invoke results and invoked-child emissions. Handlers see
+  deliveries such as raised events and invoked-child emissions. Handlers see
   both; typed public `send` and `Machine.plan` accept only `events`.
 - Event tags in `events` and `internalEvents` must be disjoint.
 - Event tags must also be unique within each protocol list.
@@ -98,13 +99,13 @@ its extra control is required:
 - Bind a shared Atom runtime once with `AtomMachine.bind(runtime)`, then use the
   returned `make` or `resume`. Use `AtomMachine.make(machine)` and
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
-- Use `Machine.invokeEffect` for a typed one-shot Effect and `Machine.after` for
-  a timer. Use `Machine.invoke` with `Machine.effect` only for custom child
-  process behavior or snapshot mapping.
+- Use one inline `Machine.invoke` object: `effect` for one-shot work, `after`
+  for a timer, `logic` for reusable process logic, and `child` for a complete
+  child statechart.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. An
-  invocation is addressable only when `Machine.invoke` receives that address
-  explicitly.
+  logic invocation is addressable only when `Machine.invoke` receives that
+  address explicitly.
 - Use the callback's `enqueue` argument for `raise`, `emit`, `sendTo`, and
   `stop`. These operations record closed actor commands and do not run Effects.
 
@@ -541,8 +542,8 @@ type AnyHandledEvent = Machine.Machine.Event<typeof definition>
 
 `MachineRef.send`, `machineAtom.send`, and `Machine.plan` accept decoded public
 events or constructions returned by `Machine.events`. Transition handlers
-receive only decoded events. Raised events, invoke results, and mapped child
-events additionally accept constructions from `Machine.internalEvents`. The
+receive only decoded events. Raised events and child emissions additionally
+accept constructions from `Machine.internalEvents`. The
 local planner and runtime intentionally share the complete decoder to support
 those internal deliveries, so JavaScript or `any` can bypass the local public
 distinction.
@@ -552,45 +553,50 @@ across both configuration lists.
 
 ## Recoverable state-scoped work
 
-Use `Machine.invokeEffect` for a one-shot Effect. Its callbacks preserve the
-typed success and failure channels while mapping both into machine events:
+Use an inline `invoke` object with an `effect` for one-shot work. Lifecycle callbacks
+receive the typed Effect channels and can transition directly:
 
 ```ts
-invoke: ({ state }) =>
-  Machine.invokeEffect({
-    id: "save",
-    effect: SaveService.save(state.draft),
-    onSuccess: (entry) => InternalEvents.Saved({ entry }),
-    onFailure: (error) => InternalEvents.SaveFailed({ message: error.message })
-  })
+invoke: {
+  id: "save",
+  effect: SaveService.save(draft),
+  onDone: ({ output, target }) => target.full.Saved({ entry: output }),
+  onFailure: ({ error, target }) =>
+    target.full.SaveFailed({ message: error.message })
+}
 ```
 
 The owning state scopes the child. Owner-driven interruption on state exit is
-normal cancellation and stale output is ignored. A child Effect that defects
-or self-interrupts fails the parent. Omit `onFailure` only when the Effect error
-type is `never`; defects and interruption are not mapped.
+normal cancellation and stale output is ignored. An Effect that defects or
+self-interrupts fails the parent. `onDone` is required when the output is not
+`never`; `onFailure` is required when the typed error is not `never`. Handlers
+are forbidden when their channel is `never`.
 
-Successful non-void output is delivered as a parent event. Include every
-possible mapped result schema in the parent machine's `internalEvents` array and
-add handlers for the relevant tags. Leave defects and interruption fatal;
-recover only expected typed failures.
+The source may also be a function of the owning state's entry context when it
+needs `state`, `parent`, `parents`, or the entry `event`. Source construction
+errors, defects, and interruption are machine failures rather than a second
+phase in `onFailure`.
 
-A cancellable timer uses `Machine.after`:
+`Machine.invoke({...})` is a zero-runtime identity helper for preserving source
+channel inference when an invocation is constructed separately. Prefer the
+direct object inside a state when a dynamic source needs contextual owner-state
+inference.
+
+A cancellable timer uses the same object:
 
 ```ts
-invoke: Machine.after("3 seconds", InternalEvents.ClearStatus(), {
-  id: "clear-status"
-})
+invoke: {
+  id: "clear-status",
+  after: "3 seconds",
+  onDone: ({ target }) => target.full.Clear()
+}
 ```
 
-The timer starts on state entry and is interrupted on exit. Supply an explicit
-id when more than one active timer could deliver the same event tag. Use
-lower-level `Machine.invoke` with `Machine.effect` when custom child logic or
-snapshot mapping is required. In that API, `id` is only the invocation's
-state-local lifecycle key. To communicate with the invocation, create a
-`Machine.childAddress<Event>("worker")` and pass it as `address`; TypeScript
-checks the address protocol against the child logic. Lifecycle ids must be
-unique among simultaneously active invokes owned by the same state.
+The timer starts on state entry and is interrupted on exit. Its `onDone` is
+always required. For reusable process logic, provide `logic`, a state-local
+lifecycle `id`, and a typed `address`. TypeScript checks the address protocol
+against the logic event protocol. Lifecycle ids and addresses serve different
+purposes and must both be explicit.
 
 ## Invoked child statecharts
 
@@ -603,11 +609,11 @@ const Editor = Machine.child("editor", EditorMachine)
 Invoke it from its owning state:
 
 ```ts
-invoke: Machine.invokeMachine({
+invoke: {
   child: Editor,
   input: editorInput,
-  onDone: ({ output }) => new EditorCompleted({ output })
-})
+  onDone: ({ output, target }) => target.full.EditorDone({ output })
+}
 ```
 
 Use `Editor` for:
@@ -618,9 +624,9 @@ parentRef.child(Editor)
 parentAtom.child(Editor)
 ```
 
-Child emissions, mapped snapshots, and mapped completion output are delivered as
-parent events and must be accepted by the parent's `internalEvents` list.
-Invoked child IDs must be unique while simultaneously active.
+Child emissions are delivered through the parent's internal protocol.
+`onSnapshot`, `onDone`, and `onFailure` are direct parent transitions. Invoked
+child IDs must be unique while simultaneously active.
 
 Descriptors with the same id and machine identity address the same child, even
 when independently constructed. The descriptor objects themselves are not
@@ -632,21 +638,18 @@ logic that does not have a complete machine descriptor.
 ### Inspecting state-owned activities
 
 Use `Machine.activityDefinitions(machine)` to inspect invokes without running
-them. Static `Machine.invoke`, `Machine.invokeEffect`, `Machine.after`, and
-`Machine.invokeMachine` descriptors expose serializable ownership metadata:
+them. Static inline `Machine.invoke` definitions expose serializable ownership
+metadata:
 
 ```ts
 Machine.activityDefinitions(machine)
 // [{ source: "Loading", id: "load-timeout", type: "timer",
-//    duration: "10s", event: "LoadTimedOut" }]
+//    duration: "10s" }]
 ```
 
-Effect success/failure mappers are closures and therefore appear as dynamic
-outcomes. Child machines expose descriptor identity, never their runtime or
-implementation. A function-valued `invoke` factory is represented as a dynamic
-activity because inspection must not evaluate user code. The existing invoke
-helpers remain the only execution API; this metadata does not add lifecycle
-configuration syntax or affect execution.
+Child machines expose descriptor identity, never their runtime or
+implementation. Function-valued sources and durations are represented as
+dynamic because inspection must not evaluate user code.
 
 ## AtomMachine and React
 
@@ -755,8 +758,8 @@ Encoding does not preserve:
 - completion and history records survive but do not retrigger `onDone`;
 - active-state invokes start once in ordinary ancestor/document order with
   `Machine.InitialEvent`;
-- `invokeEffect` restarts, `invokeMachine` creates a fresh child from its normal
-  initial state, and `Machine.after` restarts its complete duration;
+- inline Effects restart, child machines start fresh from their normal initial
+  state, and timers restart their complete duration;
 - inactive invokes, spawned children, child snapshots, elapsed timer time, and
   prior `RuntimeSnapshot` status/errors are not restored;
 - a final logical snapshot creates an immediately completed ref;
@@ -985,7 +988,7 @@ parents["Route.Ready"]
 
 ### Child descriptor types are unrelated
 
-Use the descriptor exported by the module that configured `invokeMachine`.
+Use the descriptor exported by the module that configured the child invocation.
 An independently created descriptor with the same id and machine identity also
 matches; the same id paired with a different machine remains a distinct child.
 
@@ -1009,6 +1012,6 @@ The current API does not include:
 - declarative first-class guards;
 - a complete inspectable graph for arbitrary transition Effects.
 
-Use ordinary TypeScript conditions for guards and `Machine.after` for
-state-scoped timers. Do not invent undocumented state-node properties such as
-`guard`.
+Use ordinary TypeScript conditions for guards and an inline `Machine.invoke`
+with `after` for state-scoped timers. Do not invent undocumented state-node
+properties such as `guard`.

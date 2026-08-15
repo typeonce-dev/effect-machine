@@ -44,5 +44,5 @@ public commands.
   synchronization state when a tab joins.
 
 `src/examples/examples.test.ts` covers the smaller machines, including virtual
-clock advancement for `Machine.after`. The media player keeps focused model and
+clock advancement for inline invocation timers. The media player keeps focused model and
 property coverage in its own directory.

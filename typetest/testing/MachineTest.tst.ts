@@ -100,12 +100,12 @@ describe("MachineTest", () => {
       initial: () => States.initial.idle(new Idle({}))
     }).handle({
       idle: {
-        invoke: Machine.invokeEffect({
+        invoke: Machine.invoke({
           id: "service-backed-invoke",
           effect: Effect.gen(function*() {
             yield* InvokeRequirement
           }),
-          onSuccess: () => undefined
+          onDone: () => undefined
         })
       }
     })

@@ -31,6 +31,11 @@ interface TransitionDefinition {
     | {
       readonly type: "choice"
     }
+    | {
+      readonly type: "invoke"
+      readonly id: string
+      readonly outcome: "done" | "failure" | "snapshot"
+    }
   readonly reenter: boolean
   readonly targets:
     | {
@@ -43,10 +48,6 @@ interface TransitionDefinition {
 }
 
 type ActivityDefinition =
-  | {
-    readonly source: string
-    readonly type: "dynamic"
-  }
   | {
     readonly source: string
     readonly id: string
@@ -65,8 +66,7 @@ type ActivityDefinition =
     readonly source: string
     readonly id: string
     readonly type: "timer"
-    readonly duration: string
-    readonly event: string
+    readonly duration: string | "dynamic"
   }
   | {
     readonly source: string
@@ -125,6 +125,8 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
       labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
     } else if (definition.trigger.type === "choice") {
       labels.push(`◇ choice${targets(definition)}`)
+    } else if (definition.trigger.type === "invoke") {
+      labels.push(`◇ invoke ${definition.trigger.id} ${definition.trigger.outcome}${targets(definition)}`)
     }
   }
   return labels
@@ -132,14 +134,12 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
 
 const activityLabel = (definition: ActivityDefinition): string => {
   switch (definition.type) {
-    case "dynamic":
-      return "◆ activity: dynamic"
     case "process":
       return `◆ process: ${definition.id}`
     case "effect":
       return `◆ effect: ${definition.id} [success: ${definition.outcomes.success}, failure: ${definition.outcomes.failure}]`
     case "timer":
-      return `◆ timer: ${definition.id} [${definition.duration}] → ${definition.event}`
+      return `◆ timer: ${definition.id} [${definition.duration}]`
     case "machine": {
       const identity = definition.child.machineId === null ? definition.child.id : definition.child.machineId
       return `◆ machine: ${definition.id} → ${identity}`

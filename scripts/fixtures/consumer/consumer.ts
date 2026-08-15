@@ -48,12 +48,16 @@ const invalidSelector = AtomMachine.select(atoms, "Missing")
 const cluster = ClusterMachine.make("ConsumerEntity", machine, {
   version: "1"
 })
-const invoked = Machine.invokeEffect({
+const invoked = Machine.invoke({
   id: "fixture-load",
   effect: Effect.succeed("ready"),
-  onSuccess: (value) => InternalEvent.cases.Loaded.make({ value })
+  onDone: () => undefined
 })
-const delayed = Machine.after("1 second", InternalEvent.cases.Loaded.make({ value: "late" }))
+const delayed = Machine.invoke({
+  id: "fixture-delay",
+  after: "1 second",
+  onDone: () => undefined
+})
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 
 type InputEvent = Machine.Machine.InputEvent<typeof machine>

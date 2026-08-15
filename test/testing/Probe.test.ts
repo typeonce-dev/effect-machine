@@ -149,9 +149,9 @@ describe("MachineTest probe", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "loader",
-            src: () => {
+            effect: () => {
               starts += 1
-              return Machine.effect(Effect.never)
+              return Effect.never
             }
           })
         }

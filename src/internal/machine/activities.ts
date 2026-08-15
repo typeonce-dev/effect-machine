@@ -4,8 +4,7 @@
  * @since 0.4.0
  */
 
-/** @internal */
-export const ActivityMetadataTypeId: unique symbol = Symbol.for("effect/Machine/ActivityMetadata")
+import * as Duration from "effect/Duration"
 
 /** @internal */
 export type StaticActivityMetadata =
@@ -21,8 +20,7 @@ export type StaticActivityMetadata =
   }
   | {
     readonly type: "timer"
-    readonly duration: string
-    readonly event: string
+    readonly duration: string | "dynamic"
   }
   | {
     readonly type: "machine"
@@ -33,20 +31,10 @@ export type StaticActivityMetadata =
   }
 
 /** @internal */
-export type ActivityDefinition<Source extends string = string> =
-  | ({
-    readonly source: Source
-    readonly id: string
-  } & StaticActivityMetadata)
-  | {
-    readonly source: Source
-    readonly type: "dynamic"
-  }
-
-interface ActivityDescriptor {
+export type ActivityDefinition<Source extends string = string> = {
+  readonly source: Source
   readonly id: string
-  readonly [ActivityMetadataTypeId]: StaticActivityMetadata
-}
+} & StaticActivityMetadata
 
 interface InspectableMachine {
   readonly handlers: unknown
@@ -62,31 +50,60 @@ const isObject = (value: unknown): value is object =>
 
 const getProperty = (value: unknown, key: PropertyKey): unknown => isObject(value) ? Reflect.get(value, key) : undefined
 
-const hasActivityMetadata = (value: unknown): value is ActivityDescriptor =>
-  isObject(value) && typeof getProperty(value, "id") === "string" &&
-  isObject(getProperty(value, ActivityMetadataTypeId))
-
 const appendStaticDefinition = (
   definitions: Array<ActivityDefinition>,
   source: string,
   descriptor: unknown
 ): void => {
-  if (!hasActivityMetadata(descriptor)) {
+  if (!isObject(descriptor)) return
+  const child = getProperty(descriptor, "child")
+  if (isObject(child)) {
+    const id = getProperty(child, "id")
+    if (typeof id !== "string") return
+    const machine = getProperty(child, "machine")
+    const machineId = getProperty(machine, "id")
+    definitions.push({
+      source,
+      id,
+      type: "machine",
+      child: { id, machineId: typeof machineId === "string" ? machineId : null }
+    })
     return
   }
-  definitions.push({
-    source,
-    id: descriptor.id,
-    ...descriptor[ActivityMetadataTypeId]
-  })
+  const id = getProperty(descriptor, "id")
+  if (typeof id !== "string") return
+  if (Reflect.has(descriptor, "effect")) {
+    definitions.push({
+      source,
+      id,
+      type: "effect",
+      outcomes: {
+        success: "dynamic",
+        failure: Reflect.has(descriptor, "onFailure") ? "dynamic" : "none"
+      }
+    })
+    return
+  }
+  if (Reflect.has(descriptor, "after")) {
+    const after = getProperty(descriptor, "after")
+    definitions.push({
+      source,
+      id,
+      type: "timer",
+      duration: typeof after === "function" ? "dynamic" : Duration.format(Duration.fromInputUnsafe(after as any))
+    })
+    return
+  }
+  if (Reflect.has(descriptor, "logic")) {
+    definitions.push({ source, id, type: "process" })
+  }
 }
 
 /**
  * Collects state-owned activity descriptions without executing user code.
  *
- * Function-valued invoke definitions depend on an entry context and are
- * therefore represented as dynamic. Static descriptors are returned in state
- * definition order and descriptor array order.
+ * Source factories are inspected without execution. Static descriptors are
+ * returned in state definition order and descriptor array order.
  *
  * @internal
  */
@@ -94,9 +111,7 @@ export const activityDefinitions = (machine: InspectableMachine): ReadonlyArray<
   const definitions: Array<ActivityDefinition> = []
   for (const node of machine.stateNodes.byPath.values()) {
     const invoke = getProperty(getProperty(machine.handlers, node.path), "invoke")
-    if (typeof invoke === "function") {
-      definitions.push({ source: node.path, type: "dynamic" })
-    } else if (Array.isArray(invoke)) {
+    if (Array.isArray(invoke)) {
       for (const descriptor of invoke) {
         appendStaticDefinition(definitions, node.path, descriptor)
       }

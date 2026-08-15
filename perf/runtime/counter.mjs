@@ -72,7 +72,7 @@ const counterParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: Machine.invokeMachine({ child: CounterChild })
+    invoke: Machine.invoke({ child: CounterChild, onDone: () => undefined })
   }
 })
 
@@ -83,9 +83,10 @@ const counterSnapshotParentMachine = Machine.make({
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
-    invoke: Machine.invokeMachine({
+    invoke: Machine.invoke({
       child: CounterChild,
-      snapshot: () => undefined
+      onDone: () => undefined,
+      onSnapshot: () => undefined
     })
   }
 })

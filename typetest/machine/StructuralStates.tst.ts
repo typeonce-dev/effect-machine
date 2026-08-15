@@ -138,12 +138,6 @@ describe("structural active state types", () => {
                 entry: ({ state }) => {
                   expect(state).type.toBe<undefined>()
                 },
-                invoke: ({ parent, parents, state }) => {
-                  expect(state).type.toBe<undefined>()
-                  expect(parent).type.toBe<undefined>()
-                  expect(parents).type.toBe<{}>()
-                  return []
-                },
                 on: {
                   Select: ({ parent, parents, state, target }) => {
                     expect(state).type.toBe<undefined>()

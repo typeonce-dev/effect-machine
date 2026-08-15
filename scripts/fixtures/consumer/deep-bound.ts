@@ -93,7 +93,8 @@ const machine = Machine.make({
   Idle: {
     invoke: Machine.invoke({
       id: "deep-inline-invoke",
-      src: () => Machine.effect(Effect.as(ExternalService, Internal.cases.Loaded.make({ value: "loaded" })))
+      effect: Effect.asVoid(ExternalService),
+      onDone: () => undefined
     }),
     on: {
       Begin: ({ target }) =>
@@ -116,12 +117,11 @@ const machine = Machine.make({
             }
           },
           Saving: {
-            invoke: ({ state }) =>
-              Machine.invokeMachine({
-                child: Child,
-                input: { value: state.value },
-                onDone: ({ output }) => Internal.cases.ChildCompleted.make({ value: output })
-              }),
+            invoke: {
+              child: Child,
+              input: ({ state }) => ({ value: state.value }),
+              onDone: () => undefined
+            },
             on: {
               ChildNotice: ({ event, target }, enqueue) => {
                 enqueue.emit(Emitted.cases.Notice.make({ value: event.value }))
