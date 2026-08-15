@@ -1,5 +1,17 @@
+import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
-import { SharedMachineEvent, type SharedSnapshot } from "./machine.ts"
+import type { SharedSnapshot } from "./machine.ts"
+
+const SharedMachineEvent = Schema.TaggedUnion({
+  Started: {},
+  Incremented: {},
+  Reset: {},
+  Stopped: {},
+  Synchronized: { active: Schema.Boolean, count: Schema.Number }
+})
+
+export const SharedMachineEvents = Machine.events(SharedMachineEvent)
+export type SharedEvent = Machine.EventOf<typeof SharedMachineEvents>
 
 export const WorkerRequestSchema = Schema.TaggedUnion({
   Ping: { requestId: Schema.String },

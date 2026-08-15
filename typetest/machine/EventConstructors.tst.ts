@@ -27,15 +27,14 @@ describe("Machine event constructor collections", () => {
   })
 
   const states = Machine.defineStates({ Idle: {} })
+  const events = Machine.events(PublicEvent, SetLabel, FiniteEvent)
+  const internalEvents = Machine.internalEvents(InternalEvent)
   const machine = Machine.make({
     states: states.states,
-    events: [PublicEvent, SetLabel, FiniteEvent],
-    internalEvents: [InternalEvent],
+    events,
+    internalEvents,
     initial: () => states.initial.Idle.from()
   })
-
-  const events = Machine.events(machine)
-  const internalEvents = Machine.internalEvents(machine)
 
   it("derives public constructors and their schema make inputs", () => {
     expect(events.Increment({ by: 1 })).type.toBe<
@@ -52,6 +51,10 @@ describe("Machine event constructor collections", () => {
     expect(events.SetLabel({})).type.toRaiseError()
     expect(events.Alpha({ _tag: "Beta", value: "alpha" })).type.toRaiseError()
     expect(events.Loaded).type.toRaiseError()
+    expect<Machine.EventOf<typeof events>>().type.toBe<
+      typeof PublicEvent.Type | SetLabel | typeof FiniteEvent.Type
+    >()
+    expect(machine.events).type.toBe<typeof events>()
   })
 
   it("keeps internal constructors separate from public constructors", () => {
@@ -64,6 +67,37 @@ describe("Machine event constructor collections", () => {
 
     expect(internalEvents.Increment).type.toRaiseError()
     expect(internalEvents.Loaded()).type.toRaiseError()
+    expect(machine.internalEvents).type.toBe<typeof internalEvents>()
+  })
+
+  it("keeps public and internal protocol descriptors nominally separate", () => {
+    expect(Machine.make).type.not.toBeCallableWith({
+      states: states.states,
+      events: internalEvents,
+      initial: () => states.initial.Idle.from()
+    })
+    expect(Machine.make).type.not.toBeCallableWith({
+      states: states.states,
+      events,
+      internalEvents: events,
+      initial: () => states.initial.Idle.from()
+    })
+
+    const Reset = Schema.TaggedStruct("Reset", {})
+    expect(Machine.events).type.not.toBeCallableWith(Reset, PublicEvent)
+  })
+
+  it("keeps open discriminator schemas in the protocol without inventing constructor keys", () => {
+    const OpenEvent = Schema.Struct({ _tag: Schema.String, value: Schema.Number })
+    const openEvents = Machine.events(OpenEvent)
+    const openMachine = Machine.make({
+      states: states.states,
+      events: openEvents,
+      initial: () => states.initial.Idle.from()
+    })
+
+    expect(openEvents.Dynamic).type.toRaiseError()
+    expect<Machine.Machine.InputEvent<typeof openMachine>>().type.toBe<typeof OpenEvent.Type>()
   })
 
   it("accepts public constructions at machine delivery boundaries", () => {

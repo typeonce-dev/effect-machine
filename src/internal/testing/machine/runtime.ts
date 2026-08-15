@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream"
 import { FastCheck, TestClock } from "effect/testing"
 import * as Machine from "../../../Machine.js"
 import type { CausalRuntimeEvidence, Probe, ProbeStep, RuntimeInvariant } from "../../../testing/MachineTest.js"
+import * as Protocol from "../../machine/protocol.js"
 import { type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
 import { assertRuntimeInvariants, type RuntimeInvariantError } from "./runtimeInvariant.js"
 
@@ -1523,7 +1524,7 @@ export const runtimeCommands = <M extends AnyMachine>(
 
   const reports: Array<SchemaArbitraryReport> = []
   const eventArbitraries = options.eventArbitrary === undefined
-    ? machine.events.map((schema) => {
+    ? Protocol.inputEventSchemas(machine).map((schema) => {
       const derived = toArbitraryWithReport(schema)
       reports.push(derived.report)
       return derived.value as FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>

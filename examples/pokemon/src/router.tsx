@@ -3,8 +3,8 @@ import { createRootRoute, createRoute, createRouter, Link, Outlet } from "@tanst
 import { Match, Option } from "effect"
 import { AsyncResult } from "effect/unstable/reactivity"
 import { machineAtom, replaceMachineAtom, selectionMachineAtom, States } from "./machine.js"
-import { ReplacePokemon, ReplaceStates } from "./machines/replace.ts"
-import { SelectionStates, SelectPokemon, UpdateSearchText } from "./machines/selection.ts"
+import { ReplaceEvents, ReplaceStates } from "./machines/replace.ts"
+import { SelectionEvents, SelectionStates } from "./machines/selection.ts"
 import type { Pokemon } from "./pokemon.ts"
 
 const rootRoute = createRootRoute({
@@ -72,7 +72,7 @@ function Selection() {
 
               <input
                 value={searchText}
-                onChange={(event) => send(new UpdateSearchText({ value: event.target.value }))}
+                onChange={(event) => send(SelectionEvents.UpdateSearchText({ value: event.target.value }))}
               />
 
               {SelectionStates.matches(state.value, "form.search.Searching") && <p>Searching…</p>}
@@ -84,7 +84,7 @@ function Selection() {
                     <article>
                       <h3>{pokemon.name}</h3>
                       <img src={pokemon.sprites.front_default} alt={pokemon.name} />
-                      <button type="button" onClick={() => send(new ReplacePokemon({ id }))}>
+                      <button type="button" onClick={() => send(SelectionEvents.ReplacePokemon({ id }))}>
                         Replace
                       </button>
                     </article>
@@ -174,7 +174,7 @@ function PokemonGrid({ team }: { team: readonly (typeof Pokemon.Type)[] }) {
               type="button"
               onClick={() =>
                 sendSelection(
-                  new SelectPokemon({
+                  SelectionEvents.SelectPokemon({
                     id: pokemon.id
                   })
                 )}
@@ -184,7 +184,7 @@ function PokemonGrid({ team }: { team: readonly (typeof Pokemon.Type)[] }) {
             <button
               type="button"
               disabled={isReplacing}
-              onClick={() => sendReplace(new ReplacePokemon({ id: pokemon.id }))}
+              onClick={() => sendReplace(ReplaceEvents.ReplacePokemon({ id: pokemon.id }))}
             >
               Replace with random
             </button>

@@ -12,7 +12,7 @@ type Snapshot = Machine.Machine.Snapshot<typeof States.states>
 
 const machine = Machine.make({
   states: States.states,
-  events: [Tick],
+  events: Machine.events(Tick),
   input: Schema.Struct({ seed: Schema.Number }),
   initial: (input) => States.initial.Idle(new Idle({ value: input.seed }))
 }).handle({

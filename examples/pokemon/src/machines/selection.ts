@@ -68,10 +68,10 @@ export const SelectionStates = Machine.defineStates({
   }
 })
 
-export { SelectPokemon, UpdateSearchText }
+export const SelectionEvents = Machine.events(SelectPokemon, UpdateSearchText, SearchResult, ReplacePokemon)
 export const SelectionMachine = Machine.make({
   states: SelectionStates.states,
-  events: [SelectPokemon, UpdateSearchText, SearchResult, ReplacePokemon],
+  events: SelectionEvents,
   emits: [ReplaceInTeam],
   initial: () =>
     SelectionStates.initial.form.from((form) =>

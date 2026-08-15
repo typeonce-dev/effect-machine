@@ -29,7 +29,7 @@ const NavigationStates = Machine.defineStates({
 
 const navigationMachine = Machine.make({
   states: NavigationStates.states,
-  events: [Go],
+  events: Machine.events(Go),
   initial: () => NavigationStates.initial.off(new Off({}))
 }).handle({
   off: {
@@ -44,7 +44,7 @@ const navigationMachine = Machine.make({
 
 const raisedNavigationMachine = Machine.make({
   states: NavigationStates.states,
-  events: [Go],
+  events: Machine.events(Go),
   initial: () => NavigationStates.initial.off(new Off({}))
 }).handle({
   off: {
@@ -59,7 +59,7 @@ const CounterStates = Machine.defineStates({ counter: Counter })
 
 const counterMachine = Machine.make({
   states: CounterStates.states,
-  events: [Increment, Noop],
+  events: Machine.events(Increment, Noop),
   initial: () => CounterStates.initial.counter(new Counter({ count: 0 }))
 }).handle({
   counter: {
@@ -72,7 +72,7 @@ const counterMachine = Machine.make({
 
 const reentryMachine = Machine.make({
   states: NavigationStates.states,
-  events: [Restart],
+  events: Machine.events(Restart),
   initial: () =>
     NavigationStates.initial.app(
       new App({}),
@@ -106,7 +106,7 @@ const ParallelStates = Machine.defineStates({
 
 const parallelMachine = Machine.make({
   states: ParallelStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () =>
     ParallelStates.initial.dashboard(
       new Dashboard({}),
@@ -148,7 +148,7 @@ const HistoryStates = Machine.defineStates({
 
 const historyMachine = Machine.make({
   states: HistoryStates.states,
-  events: [Leave],
+  events: Machine.events(Leave),
   initial: () =>
     HistoryStates.initial.workspace(
       new Workspace({}),
@@ -214,7 +214,7 @@ const structuralHistoryInitial = () =>
 
 const structuralHistoryMachine = Machine.make({
   states: StructuralHistoryStates.states,
-  events: [Leave],
+  events: Machine.events(Leave),
   initial: structuralHistoryInitial
 }).handle({
   workspace: {
@@ -239,7 +239,7 @@ const CompletionStates = Machine.defineStates({
 
 const completionMachine = Machine.make({
   states: CompletionStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => CompletionStates.initial.finished(new Finished({}))
 }).handle({
   finished: {
@@ -267,7 +267,7 @@ const DoneTransitionStates = Machine.defineStates({
 
 const doneTransitionMachine = Machine.make({
   states: DoneTransitionStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () =>
     DoneTransitionStates.initial.workflow(
       new Workflow({}),
@@ -286,7 +286,7 @@ const doneTransitionMachine = Machine.make({
 
 const nestedCompletionMachine = Machine.make({
   states: DoneTransitionStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () =>
     DoneTransitionStates.initial.workflow(
       new Workflow({}),

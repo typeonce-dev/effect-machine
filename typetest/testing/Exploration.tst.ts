@@ -12,8 +12,8 @@ describe("MachineTest exploration", () => {
   const States = Machine.defineStates({ counter: Counter })
   const machine = Machine.make({
     states: States.states,
-    events: [Increment],
-    internalEvents: [Internal],
+    events: Machine.events(Increment),
+    internalEvents: Machine.internalEvents(Internal),
     input: Input,
     initial: ({ seed }) => States.initial.counter(new Counter({ count: seed }))
   }).handle({
@@ -65,7 +65,7 @@ describe("MachineTest exploration", () => {
   it("forbids input for machines without an input schema", () => {
     const noInput = Machine.make({
       states: States.states,
-      events: [Increment],
+      events: Machine.events(Increment),
       initial: () => States.initial.counter(new Counter({ count: 0 }))
     }).handle({ counter: {} })
     type Options = MachineTest.ExploreOptions<typeof noInput, string>

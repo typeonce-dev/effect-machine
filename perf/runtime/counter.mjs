@@ -49,7 +49,7 @@ const CounterStates = Machine.defineStates({
 export const counterMachine = Machine.make({
   id: "RuntimeBenchmarkCounter",
   states: CounterStates.states,
-  events: [CounterEvent.cases.Increment, CounterEvent.cases.Finish],
+  events: benchmarkApi.events(CounterEvent.cases.Increment, CounterEvent.cases.Finish),
   initial: () => CounterStates.initial.Count.from({ value: 0 })
 }).handle({
   Count: {
@@ -70,7 +70,7 @@ const CounterChild = Machine.child("counter", counterMachine)
 const counterParentMachine = Machine.make({
   id: "RuntimeBenchmarkCounterParent",
   states: ParentStates.states,
-  events: [],
+  events: benchmarkApi.events(),
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
@@ -81,7 +81,7 @@ const counterParentMachine = Machine.make({
 const counterSnapshotParentMachine = Machine.make({
   id: "RuntimeBenchmarkSnapshotCounterParent",
   states: ParentStates.states,
-  events: [],
+  events: benchmarkApi.events(),
   initial: () => ParentStates.initial.Active.from()
 }).handle({
   Active: {
@@ -124,7 +124,7 @@ const HierarchicalStates = Machine.defineStates({
 const hierarchicalCounterMachine = Machine.make({
   id: "RuntimeBenchmarkHierarchicalCounter",
   states: HierarchicalStates.states,
-  events: [HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish],
+  events: benchmarkApi.events(HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish),
   initial: () =>
     HierarchicalStates.initial.Active.from(
       (active) => active.Count.from({ value: 0 })
@@ -173,11 +173,7 @@ const ParallelStates = Machine.defineStates({
 const parallelCounterMachine = Machine.make({
   id: "RuntimeBenchmarkParallelCounter",
   states: ParallelStates.states,
-  events: [
-    HierarchicalEvent.cases.IncrementLeft,
-    HierarchicalEvent.cases.IncrementRight,
-    HierarchicalEvent.cases.Finish
-  ],
+  events: benchmarkApi.events(HierarchicalEvent.cases.IncrementLeft, HierarchicalEvent.cases.IncrementRight, HierarchicalEvent.cases.Finish),
   initial: () =>
     ParallelStates.initial.Active.from(
       (active) =>
@@ -213,18 +209,13 @@ const parallelCounterMachine = Machine.make({
   }
 })
 
-// The pull-request harness evaluates this fixture against both the base and
-// candidate builds. Older base builds do not expose Machine.event yet.
-const makeEvent = (machine, schema) =>
-  typeof Machine.event === "function" ? Machine.event(machine, schema) : schema.make({})
-
-export const incrementEvent = makeEvent(counterMachine, CounterEvent.cases.Increment)
-const finishEvent = makeEvent(counterMachine, CounterEvent.cases.Finish)
-const hierarchicalIncrementEvent = makeEvent(hierarchicalCounterMachine, HierarchicalEvent.cases.Increment)
-const hierarchicalFinishEvent = makeEvent(hierarchicalCounterMachine, HierarchicalEvent.cases.Finish)
-const parallelIncrementLeftEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.IncrementLeft)
-const parallelIncrementRightEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.IncrementRight)
-const parallelFinishEvent = makeEvent(parallelCounterMachine, HierarchicalEvent.cases.Finish)
+export const incrementEvent = { _tag: "Increment" }
+const finishEvent = { _tag: "Finish" }
+const hierarchicalIncrementEvent = { _tag: "Increment" }
+const hierarchicalFinishEvent = { _tag: "Finish" }
+const parallelIncrementLeftEvent = { _tag: "IncrementLeft" }
+const parallelIncrementRightEvent = { _tag: "IncrementRight" }
+const parallelFinishEvent = { _tag: "Finish" }
 
 export const initialCounterSnapshot = Effect.runSync(
   Machine.planInitial(counterMachine).pipe(Effect.map((planned) => planned.state))

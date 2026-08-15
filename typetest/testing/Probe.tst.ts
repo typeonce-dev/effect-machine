@@ -13,8 +13,8 @@ describe("MachineTest probe", () => {
   const states = Machine.defineStates({ State })
   const machine = Machine.make({
     states: states.states,
-    events: [PublicEvent],
-    internalEvents: [InternalEvent],
+    events: Machine.events(PublicEvent),
+    internalEvents: Machine.internalEvents(InternalEvent),
     initial: () => states.initial.State(new State({ count: 0 }))
   }).handle({
     State: {

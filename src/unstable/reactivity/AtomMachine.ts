@@ -328,7 +328,7 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
  * const States = Machine.defineStates({ Count })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Count(new Count({ value: 0 }))
  * }).handle({ Count: {} })
  * const machineAtom = AtomMachine.make(machine)
@@ -439,7 +439,7 @@ export const selectSnapshotChild: <
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  * const machineAtom = AtomMachine.make(machine)
@@ -607,7 +607,7 @@ export interface Bound<Services, RuntimeError = never> {
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *

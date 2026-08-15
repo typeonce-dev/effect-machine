@@ -939,7 +939,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Local, Exit],
+        events: Machine.events(Local, Exit),
         initial: () =>
           states.initial.root({ _tag: "Root", version: 0 }, (regions) =>
             regions

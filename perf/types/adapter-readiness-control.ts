@@ -28,7 +28,7 @@ export const snapshot = States.initial.Ready(Ready.make({}))
 export const machine = Machine.make({
   id: "perf-readiness",
   states: States.states,
-  events: [],
+  events: Machine.events(),
   initial: () => snapshot
 }).handle({
   Flow: {

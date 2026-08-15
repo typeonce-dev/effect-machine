@@ -122,7 +122,7 @@ describe("structural active state types", () => {
   it("types structural handler contexts and targets without fake values", () => {
     Machine.make({
       states: States.states,
-      events: [Select, Loaded, Play],
+      events: Machine.events(Select, Loaded, Play),
       initial: () =>
         States.initial.player.from((player) =>
           player

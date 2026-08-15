@@ -45,7 +45,7 @@ const ChildStates = Machine.defineStates({
 })
 const childMachine = Machine.make({
   states: ChildStates.states,
-  events: [],
+  events: Machine.events(),
   emits: [Internal.cases.ChildNotice],
   input: Schema.Struct({ value: Schema.String }),
   initial: ({ value }) => ChildStates.initial.Done(ChildState.cases.Done.make({ value }))
@@ -84,8 +84,8 @@ const States = Machine.defineStates({
 
 const machine = Machine.make({
   states: States.states,
-  events: [Event.cases.Begin, Event.cases.Save],
-  internalEvents: [Internal.cases.Loaded, Internal.cases.ChildCompleted, ...childMachine.emits],
+  events: Machine.events(Event.cases.Begin, Event.cases.Save),
+  internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted, ...childMachine.emits),
   emits: [Emitted.cases.Notice],
   input: Schema.Struct({ seed: Schema.String }),
   initial: ({ seed: _seed }) => States.initial.Idle(State.cases.Idle.make({}))
@@ -221,7 +221,7 @@ const PackagedDeepStates = Machine.defineStates({
 })
 const packagedDeepMachine = Machine.make({
   states: PackagedDeepStates.states,
-  events: [],
+  events: Machine.events(),
   initial: (): never => {
     throw new Error("type-only packaged consumer fixture")
   }

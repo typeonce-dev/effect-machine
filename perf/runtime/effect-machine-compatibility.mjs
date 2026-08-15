@@ -6,6 +6,9 @@
  * capability boundary instead of leaking version checks into benchmark cases.
  */
 export const makeEffectMachineBenchmarkApi = (Machine) => ({
+  events: typeof Machine.event === "function"
+    ? (...schemas) => schemas
+    : (...schemas) => Machine.events(...schemas),
   invokeChild: typeof Machine.invokeMachine === "function"
     ? ({ onSnapshot, onFailure, ...config }) => {
       if (onFailure !== undefined) {

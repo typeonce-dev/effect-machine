@@ -25,7 +25,7 @@ const choiceStates = Machine.defineStates({
 
 const choiceIncomplete = Machine.make({
   states: choiceStates.states,
-  events: [Tick],
+  events: Machine.events(Tick),
   initial: () => choiceStates.initial.Ready(new Ready({}))
 })
 const choiceSnapshot = choiceStates.initial.Ready(new Ready({}))
@@ -44,7 +44,7 @@ const historyStates = Machine.defineStates({
 
 const historyIncomplete = Machine.make({
   states: historyStates.states,
-  events: [Tick],
+  events: Machine.events(Tick),
   initial: () => historyStates.initial.Ready(new Ready({}))
 })
 const historySnapshot = historyStates.initial.Ready(new Ready({}))
@@ -60,7 +60,7 @@ const outputStates = Machine.defineStates({
 
 const outputIncomplete = Machine.make({
   states: outputStates.states,
-  events: [Tick],
+  events: Machine.events(Tick),
   initial: () => outputStates.initial.Ready(new Ready({}))
 })
 const outputSnapshot = outputStates.initial.Ready(new Ready({}))
@@ -137,7 +137,7 @@ describe("executable machine readiness", () => {
     })
     const complete = Machine.make({
       states: completeStates.states,
-      events: [Tick],
+      events: Machine.events(Tick),
       initial: () => completeStates.initial.Ready(new Ready({}))
     }).handle({
       Flow: {

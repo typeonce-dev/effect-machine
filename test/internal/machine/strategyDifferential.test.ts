@@ -27,7 +27,7 @@ const makeFlatMachine = () => {
   })
   return Machine.make({
     states: states.states,
-    events: [Noop, Increment, Reenter, Finish],
+    events: Machine.events(Noop, Increment, Reenter, Finish),
     initial: () => states.initial.Count(new Count({ value: 0 }))
   }).handle({
     Count: {
@@ -88,7 +88,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Advance],
+        events: Machine.events(Advance),
         initial: () =>
           states.initial.Root(
             new Root({}),
@@ -178,7 +178,7 @@ describe("machine planner and runtime strategies", () => {
       const states = Machine.defineStates({ Idle, Ready })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: { always: ({ target }) => target.full.Ready(new Ready({})) },
@@ -199,7 +199,7 @@ describe("machine planner and runtime strategies", () => {
       const states = Machine.defineStates({ Idle: {} })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Idle.from()
       }).handle({ Idle: {} })
 
@@ -231,7 +231,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         input: Input,
         initial: (input) => states.initial.Complete(new Complete({ value: input.value }))
       }).handle({
@@ -283,10 +283,10 @@ describe("machine planner and runtime strategies", () => {
       const states = Machine.defineStates({ Count })
       const definition = Machine.make({
         states: states.states,
-        events: [Event],
+        events: Machine.events(Event),
         initial: () => states.initial.Count(new Count({ value: 0 }))
       })
-      const events = Machine.events(definition)
+      const events = definition.events
       const machine = definition.handle({
         Count: {
           on: {
@@ -397,7 +397,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Load, Loaded],
+        events: Machine.events(Load, Loaded),
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: {
@@ -442,7 +442,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Loading(new Loading({}))
       }).handle({
         Loading: {
@@ -483,7 +483,7 @@ describe("machine planner and runtime strategies", () => {
         const states = Machine.defineStates({ Loading, Failed })
         const machine = Machine.make({
           states: states.states,
-          events: [Reenter, Stale],
+          events: Machine.events(Reenter, Stale),
           initial: () => states.initial.Loading(new Loading({ epoch: 0 }))
         }).handle({
           Loading: {

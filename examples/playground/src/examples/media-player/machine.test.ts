@@ -3,24 +3,21 @@ import { Machine } from "@typeonce/effect-machine"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect, Graph } from "effect"
 import { MediaPlayerMachine } from "./machine.ts"
-import { MediaPlayerEvent } from "./schemas.ts"
 
-const everyPublicEvent = [
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.SourceSelected, {
-    url: "https://example.com/audio.mp3"
-  }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlayRequested),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PauseRequested),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.RestartRequested),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaWaiting),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaCanPlay),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlaybackEnded, { currentTime: 42 }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.TimeUpdated, { currentTime: 21 }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MediaFailed, { message: "unsupported codec" }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.VolumeChanged, { volume: 0.4 }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.PlaybackRateChanged, { playbackRate: 1.5 }),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MuteRequested),
-  Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.UnmuteRequested)
+const everyPublicEvent: ReadonlyArray<Machine.Machine.InputEvent<typeof MediaPlayerMachine>> = [
+  { _tag: "SourceSelected", url: "https://example.com/audio.mp3" },
+  { _tag: "PlayRequested" },
+  { _tag: "PauseRequested" },
+  { _tag: "RestartRequested" },
+  { _tag: "MediaWaiting" },
+  { _tag: "MediaCanPlay" },
+  { _tag: "PlaybackEnded", currentTime: 42 },
+  { _tag: "TimeUpdated", currentTime: 21 },
+  { _tag: "MediaFailed", message: "unsupported codec" },
+  { _tag: "VolumeChanged", volume: 0.4 },
+  { _tag: "PlaybackRateChanged", playbackRate: 1.5 },
+  { _tag: "MuteRequested" },
+  { _tag: "UnmuteRequested" }
 ]
 
 const generated = MachineTest.scenarios(MediaPlayerMachine, {
@@ -152,10 +149,8 @@ describe("media-player statechart model", () => {
           configuration.includes("Player.settings.Muted")
       )
       assert.deepStrictEqual(loadingAndMuted.trace.scenario.events, [
-        Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.SourceSelected, {
-          url: "https://example.com/audio.mp3"
-        }),
-        Machine.event(MediaPlayerMachine, MediaPlayerEvent.cases.MuteRequested)
+        { _tag: "SourceSelected", url: "https://example.com/audio.mp3" },
+        { _tag: "MuteRequested" }
       ])
 
       yield* MachineTest.assertUnreachable(

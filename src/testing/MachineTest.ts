@@ -230,7 +230,7 @@ export interface Scenarios<M extends AnyMachine> {
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [Reset],
+ *   events: Machine.events(Reset),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: { on: { Reset: () => States.initial.Idle.from() } } })
  *
@@ -479,7 +479,7 @@ export { ProbeUnavailableError } from "../internal/testing/machine/verification.
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -1089,7 +1089,7 @@ export const Invariant: {
  * const States = Machine.defineStates({ Count })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Count(new Count({ value: 0 }))
  * }).handle({ Count: {} })
  *
@@ -1407,7 +1407,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * const States = Machine.defineStates({ Count })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [Increment],
+ *   events: Machine.events(Increment),
  *   initial: () => States.initial.Count(new Count({ value: 0 }))
  * }).handle({
  *   Count: { on: { Increment: ({ state }) =>
@@ -1591,7 +1591,7 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -1818,7 +1818,7 @@ export interface Coverage<M extends AnyMachine> {
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *
@@ -2034,7 +2034,7 @@ export interface VerifyOptions {
  * const States = Machine.defineStates({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
- *   events: [],
+ *   events: Machine.events(),
  *   initial: () => States.initial.Idle.from()
  * }).handle({ Idle: {} })
  *

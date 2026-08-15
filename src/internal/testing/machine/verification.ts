@@ -35,6 +35,7 @@ import type {
   VerificationViolation,
   VerifyOptions
 } from "../../../testing/MachineTest.js"
+import * as Protocol from "../../machine/protocol.js"
 import { toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
@@ -167,6 +168,7 @@ export const scenarios = <M extends AnyMachine>(
   machine: M,
   options: ScenarioOptions<M> = {} as ScenarioOptions<M>
 ): Scenarios<M> => {
+  const eventSchemas = Protocol.inputEventSchemas(machine)
   const minEvents = options.minEvents ?? 0
   const maxEvents = options.maxEvents ?? 50
   if (options.eventsArbitrary === undefined) {
@@ -175,7 +177,7 @@ export const scenarios = <M extends AnyMachine>(
     if (minEvents > maxEvents) {
       throw new Error("MachineTest.scenarios expected minEvents to be less than or equal to maxEvents")
     }
-    if (machine.events.length === 0 && minEvents > 0) {
+    if (eventSchemas.length === 0 && minEvents > 0) {
       throw new Error(
         "MachineTest.scenarios cannot generate a non-empty event sequence for a machine without public events"
       )
@@ -184,7 +186,7 @@ export const scenarios = <M extends AnyMachine>(
 
   const diagnostics: Array<SchemaArbitraryDiagnostic> = []
   const eventArbitraries = options.eventsArbitrary === undefined
-    ? machine.events.map((schema, index) => {
+    ? eventSchemas.map((schema, index) => {
       const derived = toArbitraryWithReport(schema)
       diagnostics.push({
         boundary: "event",
@@ -524,7 +526,7 @@ const publicEventTags = <M extends AnyMachine>(machine: M): {
 } => {
   const tags: Array<Machine.Machine.TagOf<Machine.Machine.InputEvents<M>[number]>> = []
   const diagnostics: Array<{ readonly schemaIndex: number; readonly message: string }> = []
-  machine.events.forEach((schema, schemaIndex) => {
+  Protocol.inputEventSchemas(machine).forEach((schema, schemaIndex) => {
     const values = finiteTagValues(SchemaAST.toType(schema.ast))
     if (values === undefined) {
       diagnostics.push({

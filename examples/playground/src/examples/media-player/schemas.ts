@@ -62,7 +62,7 @@ export const MediaPlayerState = Schema.TaggedUnion({
   Muted: soundSettingsFields
 })
 
-export const MediaPlayerEvent = Schema.TaggedUnion({
+const MediaPlayerEvent = Schema.TaggedUnion({
   SourceSelected: { url: Schema.String },
   PlayRequested: {},
   PauseRequested: {},
@@ -78,7 +78,7 @@ export const MediaPlayerEvent = Schema.TaggedUnion({
   UnmuteRequested: {}
 })
 
-export const MediaPlayerInternalEvent = Schema.TaggedUnion({
+const MediaPlayerInternalEvent = Schema.TaggedUnion({
   LoadSucceeded: {},
   RestartSucceeded: {},
   LoudnessMeasured: {
@@ -88,6 +88,9 @@ export const MediaPlayerInternalEvent = Schema.TaggedUnion({
   },
   OperationFailed: { message: Schema.String }
 })
+
+export const MediaPlayerEvents = Machine.events(MediaPlayerEvent)
+export const MediaPlayerInternalEvents = Machine.internalEvents(MediaPlayerInternalEvent)
 
 export const MediaPlayerStates = Machine.defineStates({
   Player: {

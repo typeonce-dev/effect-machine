@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest"
 import { makeTextRenderer } from "../../../test/machine/visualization/text.ts"
 import {
   airJumpMode,
+  type CharacterEvent,
   CharacterEvents,
   CharacterMachine,
   type CharacterSnapshot,
-  Event,
   facingDirection,
   locomotionMode,
   wallContact
@@ -103,15 +103,17 @@ const laws = [
 
 // Exploration scenarios retain decoded events for trace inspection.
 const EventValue = {
-  Resume: () => Machine.event(CharacterMachine, Event.cases.Resume),
-  Pause: (fields: { readonly at: number }) => Machine.event(CharacterMachine, Event.cases.Pause, fields),
-  Reset: () => Machine.event(CharacterMachine, Event.cases.Reset),
-  JumpPressed: (fields: { readonly at: number; readonly y: number; readonly wall: -1 | 0 | 1 }) =>
-    Machine.event(CharacterMachine, Event.cases.JumpPressed, fields),
-  Landed: (fields: { readonly impact: number; readonly axis: -1 | 0 | 1; readonly at: number }) =>
-    Machine.event(CharacterMachine, Event.cases.Landed, fields),
-  ApexReached: (fields: { readonly y: number }) => Machine.event(CharacterMachine, Event.cases.ApexReached, fields),
-  DownPressed: (fields: { readonly at: number }) => Machine.event(CharacterMachine, Event.cases.DownPressed, fields)
+  Resume: (): CharacterEvent => ({ _tag: "Resume" }),
+  Pause: (fields: { readonly at: number }): CharacterEvent => ({ _tag: "Pause", ...fields }),
+  Reset: (): CharacterEvent => ({ _tag: "Reset" }),
+  JumpPressed: (
+    fields: { readonly at: number; readonly y: number; readonly wall: -1 | 0 | 1 }
+  ) => ({ _tag: "JumpPressed", ...fields } as const),
+  Landed: (
+    fields: { readonly impact: number; readonly axis: -1 | 0 | 1; readonly at: number }
+  ) => ({ _tag: "Landed", ...fields } as const),
+  ApexReached: (fields: { readonly y: number }) => ({ _tag: "ApexReached", ...fields } as const),
+  DownPressed: (fields: { readonly at: number }) => ({ _tag: "DownPressed", ...fields } as const)
 }
 
 const explorationEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof CharacterMachine>) => {

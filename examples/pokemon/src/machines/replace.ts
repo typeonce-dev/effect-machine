@@ -29,10 +29,10 @@ const replaceWithRandom = Effect.sleep("500 millis").pipe(
 
 export const ReplaceStates = Machine.defineStates({ Idle: {}, Replacing })
 
-export { ReplacePokemon }
+export const ReplaceEvents = Machine.events(ReplacePokemon, Replaced)
 export const ReplaceMachine = Machine.make({
   states: ReplaceStates.states,
-  events: [ReplacePokemon, Replaced],
+  events: ReplaceEvents,
   emits: [ReplaceInTeam],
   initial: () => ReplaceStates.initial.Idle.from()
 }).handle({

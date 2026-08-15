@@ -19,12 +19,14 @@ const InternalEvent = Schema.TaggedUnion({
 })
 
 const States = Machine.defineStates(State.cases)
+const PublicEvents = Machine.events(PublicEvent)
+const InternalEvents = Machine.internalEvents(InternalEvent)
 
 const machine = Machine.make({
   id: "Consumer",
   states: States.states,
-  events: [PublicEvent.cases.Start],
-  internalEvents: [InternalEvent.cases.Loaded],
+  events: PublicEvents,
+  internalEvents: InternalEvents,
   initial: () => States.initial.Idle(State.cases.Idle.make({}))
 }).handle({
   Idle: {
@@ -63,8 +65,10 @@ const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 type InputEvent = Machine.Machine.InputEvent<typeof machine>
 type HandledEvent = Machine.Machine.Event<typeof machine>
 
-const start: InputEvent = PublicEvent.cases.Start.make({})
-const loaded: HandledEvent = InternalEvent.cases.Loaded.make({ value: "ready" })
+const constructedStart = PublicEvents.Start()
+const constructedLoaded = InternalEvents.Loaded({ value: "ready" })
+const start: InputEvent = { _tag: "Start" }
+const loaded: HandledEvent = { _tag: "Loaded", value: "ready" }
 
 // @ts-expect-error Internal events cannot cross the public input boundary.
 const invalidInput: InputEvent = loaded
@@ -78,6 +82,8 @@ void [
   invoked,
   delayed,
   generated,
+  constructedStart,
+  constructedLoaded,
   start,
   loaded,
   invalidInput

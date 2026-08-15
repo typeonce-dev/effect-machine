@@ -78,7 +78,7 @@ describe("exact state definitions", () => {
           states: { Idle: { schema: Idle, nestedUnknown: true } }
         }
       },
-      events: [],
+      events: Machine.events(),
       initial: (): never => {
         throw new Error("unreachable")
       }

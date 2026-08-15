@@ -39,11 +39,12 @@ const Event = Schema.TaggedUnion({
 })
 
 const States = Machine.defineStates(State.cases)
+const CounterEvent = Machine.events(Event)
 
 const CounterDefinition = Machine.make({
   id: "Counter",
   states: States.states,
-  events: [Event],
+  events: CounterEvent,
   initial: () => States.initial.Idle.from()
 })
 
@@ -60,8 +61,6 @@ const Counter = CounterDefinition.handle({
     }
   }
 })
-
-const CounterEvent = Machine.events(Counter)
 
 const program = Effect.gen(function*() {
   const ref = yield* Machine.start(Counter)
@@ -80,9 +79,11 @@ Use this order to preserve inference and keep boundaries explicit:
 
 1. Define domain, state, public-event, internal-event, and emitted-event schemas.
 2. Declare topology with `Machine.defineStates`.
-3. Create the protocol and initializer with `Machine.make`.
-4. Implement every active state with `.handle(...)`.
-5. Add runtime, Atom, testing, or cluster adapters at the application boundary.
+3. Create public and internal event descriptors with `Machine.events` and
+   `Machine.internalEvents`.
+4. Create the machine protocol and initializer with `Machine.make`.
+5. Implement every active state with `.handle(...)`.
+6. Add runtime, Atom, testing, or cluster adapters at the application boundary.
 
 ### Construct state through builders
 
@@ -134,22 +135,24 @@ const Internal = Schema.TaggedUnion({
   SaveFailed: { message: Schema.String }
 })
 
+export const CommandEvent = Machine.events(Command)
+export type PublicCommandEvent = Machine.EventOf<typeof CommandEvent>
+const InternalEvent = Machine.internalEvents(Internal)
+
 const definition = Machine.make({
   states: States.states,
-  events: [Command],
-  internalEvents: [Internal],
+  events: CommandEvent,
+  internalEvents: InternalEvent,
   initial: () => States.initial.Idle.from()
 })
-
-const CommandEvent = Machine.events(definition)
-const InternalEvent = Machine.internalEvents(definition)
 ```
 
 Handlers see both protocols. Typed `send` and `Machine.plan` accept only public
 events. Event tags must be unique and public/internal tags must be disjoint.
 
-Use `Machine.events(machine)` and `Machine.internalEvents(machine)` as the
-standard constructors for their respective protocols:
+Export the descriptor returned by `Machine.events` instead of exporting its
+schemas. This keeps the deferred constructors as the standard way to create
+events without exposing schema `.make` methods:
 
 ```ts
 ref.send(CommandEvent.Save())
@@ -160,6 +163,9 @@ The returned constructors preserve each schema's make input, including required
 fields and constructor defaults. They defer schema construction until delivery,
 so invalid values fail planning or the running machine with
 `MachineSchemaDecodeError` instead of throwing at the call site.
+Schemas with an open discriminator such as `_tag: Schema.String` remain valid
+protocols but cannot expose a finite constructor set; pass a complete event
+object to `send` or `Machine.plan` for those events.
 
 ### Choose the target by scope
 
@@ -296,8 +302,8 @@ import { MachineTest } from "@typeonce/effect-machine/testing"
 
 const trace = yield* MachineTest.run(Counter, {
   events: [
-    Machine.event(Counter, Event.cases.Start),
-    Machine.event(Counter, Event.cases.Increment)
+    { _tag: "Start" },
+    { _tag: "Increment" }
   ]
 })
 
@@ -305,9 +311,9 @@ yield* MachineTest.verify(Counter, trace)
 ```
 
 `MachineTest` scenarios retain decoded event values for model inspection, so
-this is the main case for the eager `Machine.event` API. Pure planner tests do
-not execute invokes or time. Use a started machine and a probe when those
-semantics matter.
+pass complete decoded objects when defining scenarios manually. Pure planner
+tests do not execute invokes or time. Use a started machine and a probe when
+those semantics matter.
 
 ## Entrypoints
 

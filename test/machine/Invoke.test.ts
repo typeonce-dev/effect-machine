@@ -19,7 +19,7 @@ describe("inline invoke", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: States.states,
-        events: [],
+        events: Machine.events(),
         initial: () => States.initial.Loading.from()
       }).handle({
         Loading: {
@@ -49,7 +49,7 @@ describe("inline invoke", () => {
     Effect.gen(function*() {
       const machine = Machine.make({
         states: States.states,
-        events: [],
+        events: Machine.events(),
         initial: () => States.initial.Loading.from()
       }).handle({
         Loading: {
@@ -73,7 +73,7 @@ describe("inline invoke", () => {
       const defect = new Error("source defect")
       const machine = Machine.make({
         states: States.states,
-        events: [Start],
+        events: Machine.events(Start),
         initial: () => States.initial.Idle.from()
       }).handle({
         Idle: {
@@ -111,7 +111,7 @@ describe("inline invoke", () => {
       })
       const machine = Machine.make({
         states: States.states,
-        events: [Start],
+        events: Machine.events(Start),
         initial: () => States.initial.Idle.from()
       }).handle({
         Idle: {

@@ -49,13 +49,15 @@ const InternalEvent = Schema.TaggedUnion({
 })
 
 const States = Machine.defineStates(State.cases)
+const Events = Machine.events(Event)
+const InternalEvents = Machine.internalEvents(InternalEvent)
 ```
 
-After `Machine.make`, derive public constructors with `Machine.events(machine)`
-and internal constructors with `Machine.internalEvents(machine)`. Construct new
-state values through the target or initial builder's `.from(...)` method. Both
-event constructors and state `.from(...)` defer schema construction until
-planning, so validation failures remain typed machine errors. Use
+Pass these descriptors to `Machine.make` and export `Events` instead of the raw
+event schema. Construct new state values through the target or initial
+builder's `.from(...)` method. Both event constructors and state `.from(...)`
+defer schema construction until planning, so validation failures remain typed
+machine errors. Use
 `Schema.TaggedClass` when a case needs class methods or nominal class identity;
 the deferred constructors preserve that identity after decoding.
 
@@ -223,7 +225,7 @@ const States = Machine.defineStates({
 
 const machine = Machine.make({
   states: States.states,
-  events: [],
+  events: Machine.events(),
   initial: () => States.initial.Done.from()
 }).handle({
   Done: {
@@ -505,15 +507,15 @@ an event for the parent. Both operations validate their schemas.
 union handled inside the statechart:
 
 ```ts
+const Events = Machine.events(Event)
+const InternalEvents = Machine.internalEvents(InternalEvent)
+
 const definition = Machine.make({
   states: States.states,
-  events: [Event],
-  internalEvents: [InternalEvent],
+  events: Events,
+  internalEvents: InternalEvents,
   initial: () => States.initial.Idle.from()
 })
-
-const Events = Machine.events(definition)
-const InternalEvents = Machine.internalEvents(definition)
 ```
 
 Use the protocol-bound constructors at every machine delivery boundary:
@@ -532,9 +534,13 @@ fields are intentionally unavailable until the owning machine processes it.
 
 Invalid constructor input fails `Machine.plan` or the running machine with
 `MachineSchemaDecodeError`; creating the instruction itself never performs
-schema validation. `Machine.event(machine, schema, fields?)` remains available
-as an eager low-level constructor for callers that explicitly want an already
-decoded value and accept synchronous failure.
+schema validation. APIs that explicitly retain decoded events, such as manual
+model-testing scenarios or transport messages, can receive complete event
+objects directly.
+
+An open discriminator such as `_tag: Schema.String` cannot produce named
+constructors because its tag set is not finite. The schema still participates
+in the protocol; pass a complete event object at the delivery boundary.
 
 Use the exported utility types when another API must preserve the boundary:
 
@@ -951,11 +957,11 @@ initial: () => States.initial.Idle.from()
 
 ### Invoked child emits events not accepted by the parent
 
-Add the child's emitted schemas to the parent machine's `internalEvents` array:
+Create an internal descriptor from the child's emitted schemas:
 
 ```ts
-events: [Submit],
-internalEvents: [...ChildMachine.emits]
+events: Machine.events(Submit),
+internalEvents: Machine.internalEvents(...ChildMachine.emits)
 ```
 
 ### An internal event is rejected by `send`

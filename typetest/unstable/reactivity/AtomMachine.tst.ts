@@ -109,7 +109,7 @@ const StructuralNestedStates = Machine.defineStates({
 const makeMachine = () =>
   Machine.make({
     states: States.states,
-    events: [Tick],
+    events: Machine.events(Tick),
     initial: () => States.initial.Idle(new Idle({}))
   }).handle({
     Idle: {}
@@ -121,7 +121,7 @@ describe("AtomMachine", () => {
     const Child = Machine.child("child", childMachine)
     const parentMachine = Machine.make({
       states: States.states,
-      events: [],
+      events: Machine.events(),
       initial: () => States.initial.Idle(new Idle({}))
     }).handle({
       Idle: {
@@ -276,8 +276,8 @@ describe("AtomMachine", () => {
   it("only exposes public input events through atom send boundaries", () => {
     const machine = Machine.make({
       states: States.states,
-      events: [Tick],
-      internalEvents: [InternalTick],
+      events: Machine.events(Tick),
+      internalEvents: Machine.internalEvents(InternalTick),
       initial: () => States.initial.Idle(new Idle({}))
     }).handle({
       Idle: {
@@ -305,7 +305,7 @@ describe("AtomMachine", () => {
     })
     const incomplete = Machine.make({
       states: OutputStates.states,
-      events: [Tick],
+      events: Machine.events(Tick),
       initial: () => OutputStates.initial.Idle(new Idle({}))
     })
     const runtime = Atom.runtime(Layer.empty)

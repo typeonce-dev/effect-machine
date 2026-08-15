@@ -109,7 +109,7 @@ const initial = States.initial.n0(
 
 const machine = Machine.make({
   states: States.states,
-  events: [Advance],
+  events: Machine.events(Advance),
   initial: () => initial
 }).handle({
   n0: {

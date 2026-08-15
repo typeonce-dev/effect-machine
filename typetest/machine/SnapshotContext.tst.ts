@@ -36,7 +36,7 @@ describe("Machine transition snapshot context", () => {
   it("infers the complete machine snapshot for event, always, and onDone handlers", () => {
     Machine.make({
       states: States.states,
-      events: [Advance],
+      events: Machine.events(Advance),
       initial: () =>
         States.initial.Root(
           new Root({}),
@@ -92,7 +92,7 @@ describe("Machine transition snapshot context", () => {
     })
     Machine.make({
       states: choiceStates.states,
-      events: [],
+      events: Machine.events(),
       initial: () => choiceStates.initial.Flow(new Flow({}), (flow) => flow.Routing())
     }).handle({
       Flow: {

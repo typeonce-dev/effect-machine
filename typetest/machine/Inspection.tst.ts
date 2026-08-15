@@ -21,7 +21,7 @@ describe("Machine inspection", () => {
   const initial = States.initial.root(new Root({}), (root) => root.idle(new Idle({})))
   const machine = Machine.make({
     states: States.states,
-    events: [Reset],
+    events: Machine.events(Reset),
     initial: () => initial
   }).handle({
     root: {
@@ -112,7 +112,7 @@ describe("Machine inspection", () => {
     })
     const choiceMachine = Machine.make({
       states: ChoiceStates.states,
-      events: [],
+      events: Machine.events(),
       initial: () => ChoiceStates.initial.Flow(new Root({}), (flow) => flow.Routing())
     })
     const flow = Machine.stateNodes(choiceMachine).find((node) => node.type === "compound")!
@@ -151,7 +151,7 @@ describe("Machine inspection", () => {
     const FlatStates = Machine.defineStates({ idle: Idle, running: Running })
     const flat = Machine.make({
       states: FlatStates.states,
-      events: [Reset],
+      events: Machine.events(Reset),
       initial: () => FlatStates.initial.idle(new Idle({}))
     })
     const target = flat.makeTargetBuilder("idle")

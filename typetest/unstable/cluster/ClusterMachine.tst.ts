@@ -45,7 +45,7 @@ describe("ClusterMachine", () => {
   const machine = Machine.make({
     id: "Counter",
     states: states.states,
-    events: [Increment, Reset],
+    events: Machine.events(Increment, Reset),
     initial: () => states.initial.Count(new Count({ value: 0 }))
   }).handle({
     Count: {
@@ -65,8 +65,8 @@ describe("ClusterMachine", () => {
 
     const internalMachine = Machine.make({
       states: states.states,
-      events: [Increment],
-      internalEvents: [Reset],
+      events: Machine.events(Increment),
+      internalEvents: Machine.internalEvents(Reset),
       initial: () => states.initial.Count(new Count({ value: 0 }))
     })
     const internalBridge = ClusterMachine.make("InternalCounterEntity", internalMachine, {
@@ -87,7 +87,7 @@ describe("ClusterMachine", () => {
     const inputMachine = Machine.make({
       id: "InputCounter",
       states: states.states,
-      events: [Reset],
+      events: Machine.events(Reset),
       input: Input,
       initial: (input) => states.initial.Count(new Count({ value: input.value }))
     })
@@ -119,7 +119,7 @@ describe("ClusterMachine", () => {
     })
     const incomplete = Machine.make({
       states: outputStates.states,
-      events: [Reset],
+      events: Machine.events(Reset),
       initial: () => outputStates.initial.Done(new Done({ value: "done" }))
     })
 
@@ -158,7 +158,7 @@ describe("ClusterMachine", () => {
     const contextualStates = Machine.defineStates({ ContextualCount })
     const contextualMachine = Machine.make({
       states: contextualStates.states,
-      events: [Reset],
+      events: Machine.events(Reset),
       initial: () => contextualStates.initial.ContextualCount(new ContextualCount({ value: 0 }))
     })
     const layer = ClusterMachine.make("ContextualCounter", contextualMachine, { version: "1" }).toLayer()

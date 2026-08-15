@@ -21,8 +21,8 @@ const states = Machine.defineStates({ Counter })
 
 const machine = Machine.make({
   states: states.states,
-  events: [Increment, Noop, Ignored, Burst, Reenter],
-  internalEvents: [RaisedIncrement],
+  events: Machine.events(Increment, Noop, Ignored, Burst, Reenter),
+  internalEvents: Machine.internalEvents(RaisedIncrement),
   initial: () => states.initial.Counter(new Counter({ count: 0 }))
 }).handle({
   Counter: {
@@ -140,7 +140,7 @@ describe("MachineTest probe", () => {
       let starts = 0
       const invokeMachine = Machine.make({
         states: invokeStates.states,
-        events: [Load],
+        events: Machine.events(Load),
         initial: () => invokeStates.initial.Idle(new Idle({}))
       }).handle({
         Idle: {

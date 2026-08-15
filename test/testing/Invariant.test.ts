@@ -21,7 +21,7 @@ const States = Machine.defineStates({ account: Account })
 const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) =>
   Machine.make({
     states: States.states,
-    events: [Withdraw, Deposit],
+    events: Machine.events(Withdraw, Deposit),
     initial: () => States.initial.account(new Account({ balance: 10 }))
   }).handle({
     account: {

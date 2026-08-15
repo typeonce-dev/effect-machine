@@ -52,8 +52,8 @@ describe("pure planning and managed runtime differential", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Cascade, Ignore, Finish],
-        internalEvents: [Increment],
+        events: Machine.events(Cascade, Ignore, Finish),
+        internalEvents: Machine.internalEvents(Increment),
         initial: () => states.initial.Count(new Count({ value: 0 }))
       }).handle({
         Count: {
@@ -137,8 +137,8 @@ describe("pure planning and managed runtime differential", () => {
       }> = []
       const machine = Machine.make({
         states: states.states,
-        events: [Advance, Inspect, Finish],
-        internalEvents: [Bump],
+        events: Machine.events(Advance, Inspect, Finish),
+        internalEvents: Machine.internalEvents(Bump),
         initial: () =>
           states.initial.Running(
             new Running({}),
@@ -423,8 +423,8 @@ describe("pure planning and managed runtime differential", () => {
       })
       const machine = Machine.make({
         states: states.states,
-        events: [Begin],
-        internalEvents: [RaisedOne, RaisedTwo],
+        events: Machine.events(Begin),
+        internalEvents: Machine.internalEvents(RaisedOne, RaisedTwo),
         emits: [Notice],
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
@@ -534,7 +534,7 @@ describe("pure planning and managed runtime differential", () => {
       const states = Machine.defineStates({ Idle, Active })
       const machine = Machine.make({
         states: states.states,
-        events: [Ignore, Go],
+        events: Machine.events(Ignore, Go),
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: { on: { Go: () => states.initial.Active(new Active({})) } },

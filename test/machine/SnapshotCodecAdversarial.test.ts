@@ -53,7 +53,7 @@ const TopologyStates = Machine.defineStates({
 const topologyMachine = Machine.make({
   id: "codec-topology",
   states: TopologyStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => topologyActive()
 })
 
@@ -122,7 +122,7 @@ const HistoryStates = Machine.defineStates({
 const historyMachine = Machine.make({
   id: "codec-history",
   states: HistoryStates.states,
-  events: [],
+  events: Machine.events(),
   initial: () => HistoryStates.initial.Outside(new Outside({}))
 })
 
@@ -227,7 +227,7 @@ describe("snapshot codec adversarial boundaries", () => {
       const original = Machine.make({
         id: "codec-automatic-original",
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Before(new Before({}))
       }).handle({
         Before: { always: ({ target }) => target.full.Boundary(new Boundary({})) },
@@ -237,7 +237,7 @@ describe("snapshot codec adversarial boundaries", () => {
       const changed = Machine.make({
         id: "codec-automatic-changed",
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Before(new Before({}))
       }).handle({
         Before: {},

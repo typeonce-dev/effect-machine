@@ -10,7 +10,7 @@ describe("MachineTest.verify", () => {
   const States = Machine.defineStates({ idle: Idle })
   const machine = Machine.make({
     states: States.states,
-    events: [Tick],
+    events: Machine.events(Tick),
     initial: () => States.initial.idle(new Idle({}))
   }).handle({ idle: {} })
 

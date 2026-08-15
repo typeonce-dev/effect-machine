@@ -5,12 +5,18 @@ import { makeEffectMachineBenchmarkApi } from "../perf/runtime/effect-machine-co
 test("uses the current child invocation capability when available", () => {
   const calls = []
   const Machine = {
+    events: (...schemas) => ({ api: "current-events", schemas }),
     invoke: (config) => {
       calls.push(config)
       return { api: "current", config }
     }
   }
   const config = { child: "counter", onDone: () => undefined }
+
+  assert.deepEqual(makeEffectMachineBenchmarkApi(Machine).events("Increment", "Finish"), {
+    api: "current-events",
+    schemas: ["Increment", "Finish"]
+  })
 
   assert.deepEqual(makeEffectMachineBenchmarkApi(Machine).invokeChild(config), {
     api: "current",
@@ -24,11 +30,14 @@ test("adapts lifecycle names for the legacy child invocation capability", () => 
   const onDone = () => undefined
   const onSnapshot = () => undefined
   const Machine = {
+    event: () => undefined,
     invokeMachine: (config) => {
       calls.push(config)
       return { api: "legacy", config }
     }
   }
+
+  assert.deepEqual(makeEffectMachineBenchmarkApi(Machine).events("Increment", "Finish"), ["Increment", "Finish"])
 
   assert.deepEqual(
     makeEffectMachineBenchmarkApi(Machine).invokeChild({

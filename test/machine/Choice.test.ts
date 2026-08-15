@@ -22,7 +22,7 @@ const States = Machine.defineStates({
 
 const machine = Machine.make({
   states: States.states,
-  events: [Recheck],
+  events: Machine.events(Recheck),
   initial: () => States.initial.Flow(new Flow({ score: 80 }), (flow) => flow.Routing())
 }).handle({
   Flow: {
@@ -93,7 +93,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const chained = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Flow(new Flow({ score: 80 }), (flow) => flow.First())
       }).handle({
         Flow: {
@@ -146,7 +146,7 @@ describe("Machine choice pseudo-states", () => {
       const looping = Machine.make({
         id: "ChoiceLoopMachine",
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Flow(new Flow({ score: 80 }), (flow) => flow.First())
       }).handle({
         Flow: {
@@ -182,7 +182,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const alwaysMachine = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () =>
           states.initial.Flow(
             new Flow({ score: 10 }),
@@ -240,7 +240,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const completion = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Flow(new Flow({ score: 0 }), (flow) => flow.Done(new Done({})))
       }).handle({
         Flow: {
@@ -300,7 +300,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const parallel = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () =>
           states.initial.Board(
             new Board({}),
@@ -366,7 +366,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const history = Machine.make({
         states: states.states,
-        events: [Leave, Resume],
+        events: Machine.events(Leave, Resume),
         initial: () => states.initial.Flow(new Flow({ score: 1 }), (flow) => flow.Active(new Active({})))
       }).handle({
         Flow: {
@@ -420,7 +420,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const initialHistory = Machine.make({
         states: states.states,
-        events: [],
+        events: Machine.events(),
         initial: () => states.initial.Flow(new Flow({ score: 1 }), (flow) => flow.Routing())
       }).handle({
         Flow: {
@@ -467,7 +467,7 @@ describe("Machine choice pseudo-states", () => {
       })
       const historyChoice = Machine.make({
         states: states.states,
-        events: [Resume],
+        events: Machine.events(Resume),
         initial: () => states.initial.Outside(new Outside({}))
       }).handle({
         Flow: {
