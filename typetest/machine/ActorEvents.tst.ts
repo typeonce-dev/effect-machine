@@ -36,7 +36,7 @@ describe("machine actor event channels", () => {
   }).handle({
     Idle: {
       on: {
-        Ping: () => undefined
+        Ping: ({ target }) => target.none()
       }
     }
   })
@@ -53,7 +53,7 @@ describe("machine actor event channels", () => {
     }).handle({
       Idle: {
         on: {
-          Ping: ({ parent, self }, enqueue) => {
+          Ping: ({ parent, self, target }, enqueue) => {
             expect(self.send).type.toBeCallableWith(Events.Ping())
             expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
             expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
@@ -68,6 +68,7 @@ describe("machine actor event channels", () => {
             expect(enqueue.emit).type.toBeCallableWith(Emissions.Published())
             expect(enqueue.emit).type.toBeCallableWith(Emissions.ValuedPublished({ value: 1 }))
             expect(enqueue.emit).type.not.toBeCallableWith(Events.Ping())
+            return target.none()
           }
         }
       }
@@ -84,9 +85,9 @@ describe("machine actor event channels", () => {
       Idle: {
         invoke: {
           child: Child,
-          onDone: () => undefined,
-          onFailure: () => undefined,
-          onSnapshot: () => undefined
+          onDone: () => states.initial.Idle(new Idle({})),
+          onFailure: () => states.initial.Idle(new Idle({})),
+          onSnapshot: () => states.initial.Idle(new Idle({}))
         }
       }
     })
@@ -100,9 +101,9 @@ describe("machine actor event channels", () => {
       Idle: {
         invoke: {
           child: Child,
-          onDone: () => undefined,
-          onFailure: () => undefined,
-          onSnapshot: () => undefined
+          onDone: () => states.initial.Idle(new Idle({})),
+          onFailure: () => states.initial.Idle(new Idle({})),
+          onSnapshot: () => states.initial.Idle(new Idle({}))
         }
       }
     })

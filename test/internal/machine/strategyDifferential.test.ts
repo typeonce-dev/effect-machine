@@ -353,10 +353,11 @@ describe("machine planner and runtime strategies", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: ({ parent, self }, enqueue) => {
+            Publish: ({ parent, self, target }, enqueue) => {
               assert.strictEqual(parent, undefined)
               assert.ok(self.sessionId.startsWith("machine:"))
               enqueue.emit(Emissions.Published({ value } as never))
+              return target.none()
             }
           }
         }
