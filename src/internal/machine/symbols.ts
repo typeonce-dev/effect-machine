@@ -1,5 +1,5 @@
 /** @internal */
 export const InitialEventTypeId: unique symbol = Symbol("effect/Machine/InitialEvent")
 
-/** @internal Converts a child machine descriptor to process logic at entry time. */
+/** @internal Returns process logic for a child descriptor and optional input. */
 export const ChildMachineLogicTypeId: unique symbol = Symbol("effect/Machine/ChildMachineLogic")

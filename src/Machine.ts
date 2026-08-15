@@ -1851,7 +1851,7 @@ export interface ChildMachine<Id extends string, M extends Machine.Any> {
   readonly machine: M
 
   /** @internal */
-  readonly [ChildMachineLogicTypeId]: (input: unknown) => Logic<any, any, any, any, any, any>
+  readonly [ChildMachineLogicTypeId]: (input?: unknown) => Logic<any, any, any, any, any, any>
 }
 
 /**
@@ -4480,12 +4480,22 @@ export declare namespace Machine {
       readonly onSnapshot?: never
     }
     & InvokeDoneRequirement<
-      Effect.Success<Fx>,
-      InvokeTransition<States, Events, Emits, InvokeDoneContext<States, Events, Emits, StateId, Effect.Success<Fx>>>
+      Effect.Success<NoInfer<Fx>>,
+      InvokeTransition<
+        States,
+        Events,
+        Emits,
+        InvokeDoneContext<States, Events, Emits, StateId, Effect.Success<NoInfer<Fx>>>
+      >
     >
     & InvokeFailureRequirement<
-      Effect.Error<Fx>,
-      InvokeTransition<States, Events, Emits, InvokeFailureContext<States, Events, Emits, StateId, Effect.Error<Fx>>>
+      Effect.Error<NoInfer<Fx>>,
+      InvokeTransition<
+        States,
+        Events,
+        Emits,
+        InvokeFailureContext<States, Events, Emits, StateId, Effect.Error<NoInfer<Fx>>>
+      >
     >
 
   export type TimerInvokeArgs<
@@ -6253,6 +6263,67 @@ export const decodeSnapshot: <
   Machine.SnapshotDecodingServices<States>
 > = internal.decodeSnapshot
 
+type DynamicEffectInvokeSource<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateIdentifier<States>,
+  Source extends (
+    context: Machine.InvokeContext<States, Events, Emits, StateId>
+  ) => Effect.Effect<unknown, unknown, unknown>
+> = {
+  readonly id: InvokeLifecycleId
+  readonly effect: Source
+  readonly after?: never
+  readonly logic?: never
+  readonly child?: never
+  readonly address?: never
+  readonly onSnapshot?: never
+}
+
+type DynamicEffectDoneHandler<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateIdentifier<States>,
+  Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
+> = Machine.InvokeTransition<
+  States,
+  Events,
+  Emits,
+  Machine.InvokeDoneContext<States, Events, Emits, StateId, Effect.Success<ReturnType<NoInfer<Source>>>>
+>
+
+type DynamicEffectFailureHandler<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateIdentifier<States>,
+  Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
+> = Machine.InvokeTransition<
+  States,
+  Events,
+  Emits,
+  Machine.InvokeFailureContext<States, Events, Emits, StateId, Effect.Error<ReturnType<NoInfer<Source>>>>
+>
+
+type DynamicEffectInvokeResult<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateIdentifier<States>,
+  Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
+> =
+  & Machine.InvokeConfig<States, Events, Emits, StateId>
+  & Machine.InvokeTyped<
+    Effect.Success<ReturnType<Source>>,
+    Effect.Error<ReturnType<Source>>,
+    Effect.Services<ReturnType<Source>>,
+    never
+  >
+
+type InvokeChannelIsNever<Value> = IsAny<Value> extends true ? false : [Value] extends [never] ? true : false
+
 /**
  * Preserves inference for a state-owned invocation configuration.
  *
@@ -6263,11 +6334,9 @@ export const decodeSnapshot: <
  *
  * This constructor is an identity at runtime, but preserves lifecycle callback
  * inference through published declarations. Effects and durations may be
- * supplied directly or derived from the owning state's entry context. A direct
- * object in the state handler gives function-valued sources and child inputs
- * owner-context inference when lifecycle handlers do not consume typed context.
- * Use this constructor and annotate a dynamic source's return type when sibling
- * handlers need typed output or error values. Logic invocations require both a
+ * supplied directly or derived from the owning state's entry context. Dynamic
+ * Effect sources infer the owner context, output, error, and service channels
+ * together without a return annotation. Logic invocations require both a
  * lifecycle `id` and a typed communication `address`. Child descriptors already
  * own their identity, so `id` and `address` must not be repeated.
  *
@@ -6292,28 +6361,80 @@ export const invoke: {
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
-    Output,
-    Error,
-    Requirements
+    const Source extends (
+      context: Machine.InvokeContext<States, Events, Emits, StateId>
+    ) => Effect.Effect<unknown, unknown, unknown>
   >(
-    config: Machine.EffectInvokeArgs<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Effect.Effect<Output, Error, Requirements>,
-      (
-        context: Machine.InvokeContext<States, Events, Emits, StateId>
-      ) => Effect.Effect<Output, Error, Requirements>
-    >
-  ):
-    & Machine.InvokeConfig<States, Events, Emits, StateId>
-    & Machine.InvokeTyped<
-      Output,
-      Error,
-      Requirements,
-      never
-    >
+    config:
+      & DynamicEffectInvokeSource<States, Events, Emits, StateId, Source>
+      & {
+        readonly onDone: DynamicEffectDoneHandler<States, Events, Emits, StateId, Source>
+        readonly onFailure: DynamicEffectFailureHandler<States, Events, Emits, StateId, Source>
+      },
+    ..._validation: InvokeChannelIsNever<Effect.Success<ReturnType<Source>>> extends true ? [
+        "onDone must be omitted when the Effect output is never"
+      ]
+      : InvokeChannelIsNever<Effect.Error<ReturnType<Source>>> extends true ? [
+          "onFailure must be omitted when the Effect error is never"
+        ]
+      : []
+  ): DynamicEffectInvokeResult<States, Events, Emits, StateId, Source>
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    StateId extends Machine.StateIdentifier<States>,
+    const Source extends (
+      context: Machine.InvokeContext<States, Events, Emits, StateId>
+    ) => Effect.Effect<unknown, never, unknown>
+  >(
+    config:
+      & DynamicEffectInvokeSource<States, Events, Emits, StateId, Source>
+      & {
+        readonly onDone: DynamicEffectDoneHandler<States, Events, Emits, StateId, Source>
+        readonly onFailure?: never
+      },
+    ..._validation: InvokeChannelIsNever<Effect.Success<ReturnType<Source>>> extends true ? [
+        "onDone must be omitted when the Effect output is never"
+      ]
+      : []
+  ): DynamicEffectInvokeResult<States, Events, Emits, StateId, Source>
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    StateId extends Machine.StateIdentifier<States>,
+    const Source extends (
+      context: Machine.InvokeContext<States, Events, Emits, StateId>
+    ) => Effect.Effect<never, unknown, unknown>
+  >(
+    config:
+      & DynamicEffectInvokeSource<States, Events, Emits, StateId, Source>
+      & {
+        readonly onDone?: never
+        readonly onFailure: DynamicEffectFailureHandler<States, Events, Emits, StateId, Source>
+      },
+    ..._validation: InvokeChannelIsNever<Effect.Error<ReturnType<Source>>> extends true ? [
+        "onFailure must be omitted when the Effect error is never"
+      ]
+      : []
+  ): DynamicEffectInvokeResult<States, Events, Emits, StateId, Source>
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    StateId extends Machine.StateIdentifier<States>,
+    const Source extends (
+      context: Machine.InvokeContext<States, Events, Emits, StateId>
+    ) => Effect.Effect<never, never, unknown>
+  >(
+    config:
+      & DynamicEffectInvokeSource<States, Events, Emits, StateId, Source>
+      & {
+        readonly onDone?: never
+        readonly onFailure?: never
+      }
+  ): DynamicEffectInvokeResult<States, Events, Emits, StateId, Source>
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,

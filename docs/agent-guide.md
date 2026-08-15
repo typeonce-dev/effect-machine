@@ -102,13 +102,12 @@ its extra control is required:
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
 - Use one invocation object: `effect` for one-shot work, `after` for a timer,
   `logic` for reusable process logic, and `child` for a complete child
-  statechart. `Machine.invoke({...})` preserves source channels across sibling
-  lifecycle handlers. Use a direct object when a dynamic source or child input
-  primarily needs contextual owner-state inference and its lifecycle handlers
-  do not consume typed context.
+  statechart. `Machine.invoke({...})` preserves owner context and source
+  channels across sibling lifecycle handlers. Use a direct object only when its
+  lifecycle handlers do not need source-derived context.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
-  `Machine.childAddress<Event>(id)` for a low-level process address. An
-  logic invocation is addressable only when `Machine.invoke` receives that
+  `Machine.childAddress<Event>(id)` for a low-level process address. A logic
+  invocation is addressable only when `Machine.invoke` receives that
   address explicitly.
 - Use the callback's `enqueue` argument for `raise`, `emit`, `sendTo`, and
   `stop`. These operations record closed actor commands and do not run Effects.
@@ -582,9 +581,20 @@ errors, defects, and interruption are machine failures rather than a second
 phase in `onFailure`.
 
 When a source function reads `state`, `parent`, `parents`, or the entry `event`,
-the direct object form supplies its owner context. If sibling handlers also
-need typed lifecycle context, wrap the object with `Machine.invoke` and annotate
-the returned Effect or Logic type.
+`Machine.invoke` infers that owner context and the returned Effect's output,
+error, and service channels together. No return annotation is needed:
+
+```ts
+invoke: Machine.invoke({
+  id: "load",
+  effect: ({ state }) => LoadService.load(state.userId),
+  onDone: ({ output, target }) => target.full.Loaded({ user: output }),
+  onFailure: ({ error, target }) => target.full.LoadFailed({ error })
+})
+```
+
+A direct `invoke: { ... }` object remains available when lifecycle handlers do
+not need source-derived context.
 
 A cancellable timer uses the same object:
 

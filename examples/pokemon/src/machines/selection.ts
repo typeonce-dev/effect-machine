@@ -106,8 +106,7 @@ export const SelectionMachine = Machine.make({
           Searching: {
             invoke: Machine.invoke({
               id: "search",
-              effect: ({ parents }): ReturnType<typeof searchPokemon> =>
-                searchPokemon(parents["form.search"].searchText),
+              effect: ({ parents }) => searchPokemon(parents["form.search"].searchText),
               onDone: ({ output, target }) =>
                 output.result.pipe(
                   Option.match({

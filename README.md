@@ -221,13 +221,22 @@ Waiting: {
 Use `effect` for one Effect, `after` for a cancellable delay, `logic` for a
 reusable process, and `child` for a complete child statechart—all through
 `Machine.invoke({...})`. The helper is an identity at runtime and preserves
-source-channel inference across lifecycle handlers. A direct `invoke: { ... }`
-object is also supported and supplies owner context to dynamic `effect`,
-`logic`, `after`, and child `input` functions when their lifecycle handlers do
-not consume typed context. When handlers need typed output or failure values,
-use `Machine.invoke` and annotate a dynamic source's return type. Reuse one
-exported `Machine.child(id, machine)` descriptor for invocation, `sendTo`, and
-child lookup.
+owner-context and source-channel inference across lifecycle handlers, including
+for state-dependent Effects:
+
+```ts
+invoke: Machine.invoke({
+  id: "load-document",
+  effect: ({ state }) => loadDocument(state.documentId),
+  onDone: ({ output, target }) => target.full.Ready({ document: output }),
+  onFailure: ({ error, target }) => target.full.Failed({ message: error.message })
+})
+```
+
+A direct `invoke: { ... }` object is also supported when its lifecycle handlers
+do not need source-derived context. Reuse one exported
+`Machine.child(id, machine)` descriptor for invocation, `sendTo`, and child
+lookup.
 
 `onDone` is required for a non-`never` output, and `onFailure` is required for a
 non-`never` typed error; each handler is omitted when its channel is `never`.

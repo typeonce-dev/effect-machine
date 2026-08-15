@@ -75,6 +75,20 @@ const scenarios = [
     maxMarginalInstantiations: 19_000
   },
   {
+    id: "dynamic-invoke-control",
+    label: "dynamic Machine.invoke control",
+    file: "dynamic-invoke-control.ts",
+    hidden: true
+  },
+  {
+    id: "dynamic-invoke",
+    label: "Machine.invoke (state-dependent Effect)",
+    file: "dynamic-invoke.ts",
+    control: "dynamic-invoke-control",
+    maxInstantiations: 85_000,
+    maxMarginalInstantiations: 76_000
+  },
+  {
     id: "handle-depth-24-control",
     label: "machine.handle depth 24 control",
     file: "handle-depth-24-control.ts",

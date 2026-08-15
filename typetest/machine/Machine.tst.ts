@@ -566,6 +566,138 @@ describe("Machine", () => {
     })
   })
 
+  it("infers dynamic Machine.invoke Effect channels from the source return", () => {
+    class LoadFailure {
+      readonly _tag = "LoadFailure"
+    }
+    const load = (userId: string) => Effect.fail(new LoadFailure()).pipe(Effect.as({ userId }))
+    const machine = Machine.make({
+      states: UpStates.states,
+      events: [SignIn],
+      initial: () => UpStates.initial.down(new Down({}))
+    })
+
+    machine.handle({
+      down: {
+        invoke: Machine.invoke({
+          id: "dynamic",
+          effect: ({ state }) => {
+            expect(state).type.toBe<Down>()
+            return load(state._tag)
+          },
+          onDone: ({ output }) => {
+            expect(output).type.toBe<{ userId: string }>()
+          },
+          onFailure: ({ error }) => {
+            expect(error).type.toBe<LoadFailure>()
+          }
+        })
+      }
+    })
+  })
+
+  it("requires only reachable handlers for dynamic Machine.invoke Effects", () => {
+    class LoadFailure {
+      readonly _tag = "LoadFailure"
+    }
+    const machine = Machine.make({
+      states: UpStates.states,
+      events: [SignIn],
+      initial: () => UpStates.initial.down(new Down({}))
+    })
+
+    machine.handle({
+      down: {
+        invoke: [
+          Machine.invoke({
+            id: "success",
+            effect: ({ state }) => Effect.succeed(state._tag),
+            onDone: ({ output }) => {
+              expect(output).type.toBe<"Down">()
+            }
+          }),
+          Machine.invoke({
+            id: "failure",
+            effect: ({ state }) => Effect.fail(new LoadFailure()).pipe(Effect.annotateLogs("state", state._tag)),
+            onFailure: ({ error }) => {
+              expect(error).type.toBe<LoadFailure>()
+            }
+          }),
+          Machine.invoke({
+            id: "never",
+            effect: ({ state }) => Effect.never.pipe(Effect.annotateLogs("state", state._tag))
+          }),
+          Machine.invoke({
+            id: "requirements",
+            effect: ({ state }) => Effect.as(EntryRequirement, state._tag),
+            onDone: ({ output }) => {
+              expect(output).type.toBe<"Down">()
+            }
+          })
+        ]
+      }
+    })
+
+    const requirementsHandled = machine.handle({
+      down: {
+        invoke: Machine.invoke({
+          id: "requirements-only",
+          effect: ({ state }) => Effect.as(EntryRequirement, state._tag),
+          onDone: ({ output }) => {
+            expect(output).type.toBe<"Down">()
+          }
+        })
+      }
+    })
+
+    expect<Machine.Machine.Services<typeof requirementsHandled>>().type.not.toBe<any>()
+    expect<EntryRequirement>().type.toBeAssignableTo<Machine.Machine.Services<typeof requirementsHandled>>()
+    expect<unknown>().type.not.toBeAssignableTo<Machine.Machine.Services<typeof requirementsHandled>>()
+  })
+
+  it("rejects unreachable and missing handlers for dynamic Machine.invoke Effects", () => {
+    type Context = Machine.Machine.InvokeContext<
+      typeof UpStates.states,
+      readonly [typeof SignIn],
+      readonly [],
+      "down"
+    >
+    const success = (_: Context) => Effect.succeed("user-1")
+    const failure = (_: Context) => Effect.fail("unavailable" as const)
+    const pending = (_: Context) => Effect.never
+
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "missing-done",
+      effect: success
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "unreachable-failure",
+      effect: success,
+      onDone: () => undefined,
+      onFailure: () => undefined
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "missing-failure",
+      effect: failure
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "unreachable-done",
+      effect: failure,
+      onDone: () => undefined,
+      onFailure: () => undefined
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "pending-done",
+      effect: pending,
+      onDone: () => undefined
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "pending-failure",
+      effect: pending,
+      onFailure: () => undefined
+    })
+  })
+
   it("separates public input events from the complete internal protocol", () => {
     const machine = Machine.make({
       states: UpStates.states,
