@@ -7,11 +7,12 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import { AsyncResult, Atom, type AtomRegistry } from "effect/unstable/reactivity"
+import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import type * as Machine from "../../Machine.js"
 import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
@@ -72,6 +73,11 @@ type MachineStartError<InitialE, E, InitialR, R, RuntimeError = never> =
   | Machine.StoppedError
   | RuntimeError
 
+const preparedByMachineAtom = new WeakMap<
+  object,
+  Atom.Atom<AsyncResult.AsyncResult<Machine.Prepared<any, any, any, any, any, any, any>, any>>
+>()
+
 const runMachineAtomEffect = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   get: Atom.AtomContext,
   start: Effect.Effect<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError, Requirements>
@@ -83,53 +89,16 @@ const runMachineAtomEffect = <State, Event, Error, Output, Emitted, StartError, 
     )
   )
 
-const startMachineAtomEffect = <
-  const States extends Machine.Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.Machine.TaggedSchema> = any,
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.Machine.StateIdentifier<States> = Machine.Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events,
-  ParentEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = readonly []
->(
+const startPreparedMachineAtomEffect = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   get: Atom.AtomContext,
-  machine:
-    & Machine.Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents,
-      ParentEvents
+  prepared: Atom.Atom<
+    AsyncResult.AsyncResult<
+      Machine.Prepared<State, Event, Error, Output, Emitted, StartError, Requirements>,
+      never
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
-  args: [...Machine.Machine.InputArgs<Input>]
-): Effect.Effect<
-  Machine.MachineRef<
-    Machine.Machine.Snapshot<States>,
-    Machine.Machine.EventInputOf<InputEvents>,
-    MachineRuntimeError<E, R>,
-    Output,
-    Machine.Machine.EmittedEventOf<Emits>
-  >,
-  MachineStartError<InitialE, E, InitialR, R>,
-  MachineRequirements<InitialR, R, Machine.Machine.EventOf<Events>, Machine.Machine.EmitOf<Emits>>
-> => runMachineAtomEffect(get, internalMachine.start(machine as any, ...args) as any)
+  >
+): Effect.Effect<never, StartError, Requirements> =>
+  runMachineAtomEffect(get, get.result(prepared).pipe(Effect.flatMap((prepared) => prepared.start)))
 
 const resumeMachineAtomEffect = (
   get: Atom.AtomContext,
@@ -144,8 +113,31 @@ type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer 
 
 export const emissions = <State, Event, Error, Output, StartError, Emitted>(
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
-): Stream.Stream<Emitted, StartError, AtomRegistry.AtomRegistry> =>
-  Atom.toStreamResult(self.ref).pipe(Stream.flatMap((ref) => ref.emissions))
+): Stream.Stream<Emitted, StartError, AtomRegistry.AtomRegistry> => {
+  const prepared = preparedByMachineAtom.get(self as object)
+  if (prepared === undefined) {
+    return Atom.toStreamResult(self.ref).pipe(Stream.flatMap((ref) => ref.emissions))
+  }
+  return Stream.unwrap(
+    Effect.gen(function*() {
+      const registry = yield* AtomRegistry.AtomRegistry
+      const releasePrepared = yield* Effect.sync(() => registry.mount(prepared))
+      yield* Effect.addFinalizer(() => Effect.sync(releasePrepared))
+      const machine = yield* Atom.getResult(prepared)
+      const pull = yield* Stream.toPull(machine.emissions as Stream.Stream<Emitted>)
+      const firstPull = yield* pull.pipe(Effect.forkScoped({ startImmediately: true }))
+      const releaseRef = yield* Effect.sync(() => registry.mount(self.ref))
+      yield* Effect.addFinalizer(() => Effect.sync(releaseRef))
+      yield* Atom.getResult(self.ref)
+      let first = true
+      return Stream.fromPull(Effect.succeed(Effect.suspend(() => {
+        if (!first) return pull
+        first = false
+        return Fiber.join(firstPull)
+      })))
+    })
+  )
+}
 
 export const childEmissions = <Child extends Machine.ChildMachine.Any, StartError>(
   self: ChildMachineAtom<Child, StartError>
@@ -666,8 +658,11 @@ export const make: {
     Machine.Machine.EmittedEventOf<Emits>
   >
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
-  const ref = Atom.make((get) => startMachineAtomEffect(get, machine as any, args as []))
-  return makeFromRefAtom(ref as any)
+  const prepared = Atom.make(() => internalMachine.prepare(machine as any, ...(args as [])))
+  const ref = Atom.make((get) => startPreparedMachineAtomEffect(get, prepared as any))
+  const result = makeFromRefAtom(ref as any)
+  preparedByMachineAtom.set(result, prepared as any)
+  return result
 }) as any
 
 export const resume: {
@@ -688,8 +683,11 @@ const makeWithRuntime = (
   machine: Machine.Machine.Any,
   args: ReadonlyArray<unknown>
 ): MachineAtom<any, any, any, any, any> => {
-  const ref = runtime.atom((get) => startMachineAtomEffect(get, machine as any, args as []))
-  return makeFromRefAtom(ref as any)
+  const prepared = runtime.atom(() => internalMachine.prepare(machine as any, ...(args as [])))
+  const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
+  const result = makeFromRefAtom(ref as any)
+  preparedByMachineAtom.set(result, prepared as any)
+  return result
 }
 
 const resumeWithRuntime = (

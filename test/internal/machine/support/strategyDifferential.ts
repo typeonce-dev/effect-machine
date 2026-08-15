@@ -117,6 +117,17 @@ export const openWithRuntimeStrategy = (
 ): Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown> =>
   Process.startWithRuntimeStrategyForTesting(machine, strategy) as any
 
+export const prepareWithRuntimeStrategy = (
+  machine: Machine.Machine.Any,
+  strategy: "generic" | "compiled"
+): Effect.Effect<
+  {
+    readonly emissions: import("effect/Stream").Stream<unknown>
+    readonly start: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown>
+  },
+  unknown
+> => Process.prepareWithRuntimeStrategyForTesting(machine, strategy) as any
+
 export const resumeWithRuntimeStrategy = (
   machine: Machine.Machine.Any,
   snapshot: Machine.Machine.Snapshot<any>,

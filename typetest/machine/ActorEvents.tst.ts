@@ -110,6 +110,22 @@ describe("machine actor event channels", () => {
   })
 
   it("infers emitted streams through MachineRef and AtomMachine", () => {
+    const preparedEffect = Machine.prepare(childMachine)
+    type Prepared = Effect.Success<typeof preparedEffect>
+    expect<Prepared["emissions"]>().type.toBe<Stream.Stream<Published | ValuedPublished>>()
+    expect<Prepared["changes"]>().type.toBe<
+      Stream.Stream<
+        Machine.RuntimeSnapshot<
+          Machine.Machine.Snapshot<typeof states.states>,
+          Machine.InfiniteTransitionError | Machine.MachineSchemaDecodeError | Machine.StoppedError
+        >,
+        | Machine.InfiniteTransitionError
+        | Machine.MachineSchemaDecodeError
+        | Machine.StartupError
+        | Machine.StoppedError
+      >
+    >()
+
     const started = Machine.start(childMachine)
     type Ref = Effect.Success<typeof started>
     expect<Ref["emissions"]>().type.toBe<Stream.Stream<Published | ValuedPublished>>()
@@ -118,5 +134,56 @@ describe("machine actor event channels", () => {
     const atomEmissions = AtomMachine.emissions(atom)
     expect<Stream.Success<typeof atomEmissions>>().type.toBe<Published | ValuedPublished>()
     expect<Stream.Services<typeof atomEmissions>>().type.toBe<AtomRegistry.AtomRegistry>()
+  })
+
+  it("binds invocation self and parent references to the owning machine protocols", () => {
+    const definition = Machine.make({
+      states: states.states,
+      events: Events,
+      internalEvents: InternalEvents,
+      parentEvents: ParentEvents,
+      emittedEvents: Emissions,
+      initial: () => states.initial.Idle(new Idle({}))
+    })
+
+    definition.handle({
+      Idle: {
+        invoke: definition.invoke({
+          id: "notify-parent",
+          effect: ({ parent, self }) => {
+            expect(self.send).type.toBeCallableWith(Events.Ping())
+            expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
+            if (parent !== undefined) {
+              expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+              expect(parent.send).type.not.toBeCallableWith(Events.Ping())
+            }
+            return Effect.void
+          },
+          onDone: ({ parent, self, target }) => {
+            expect(self.send).type.toBeCallableWith(Events.Ping())
+            if (parent !== undefined) {
+              expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+            }
+            return target.none()
+          }
+        })
+      }
+    })
+
+    definition.handle({
+      Idle: {
+        invoke: Machine.invoke({
+          id: "owner-independent",
+          effect: ({ parent, self }) => {
+            expect(self.send).type.not.toBeCallableWith(Events.Ping())
+            if (parent !== undefined) {
+              expect(parent.send).type.not.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+            }
+            return Effect.void
+          },
+          onDone: ({ target }) => target.none()
+        })
+      }
+    })
   })
 })

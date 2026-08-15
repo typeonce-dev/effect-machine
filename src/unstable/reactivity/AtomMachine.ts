@@ -167,8 +167,10 @@ type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output
 type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer Emitted> ? Emitted : never
 
 /**
- * Observes ephemeral notifications from the actor owned by a machine atom.
- * The stream requires an `AtomRegistry` and does not replay earlier emissions.
+ * Observes ephemeral notifications from the running machine owned by a machine
+ * atom. When this stream activates a fresh bridge, it subscribes before machine
+ * initialization and observes initial-entry emissions. It never replays
+ * emissions from a machine that was already running.
  *
  * @category getters
  * @since 0.10.0

@@ -86,16 +86,17 @@ const States = Machine.defineStates({
 })
 
 const Emissions = Machine.emittedEvents(Emitted.cases.Notice)
-const machine = Machine.make({
+const definition = Machine.make({
   states: States.states,
   events: Machine.events(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
   internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
   emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
   initial: ({ seed: _seed }) => States.initial.Idle(State.cases.Idle.make({}))
-}).handle({
+})
+const machine = definition.handle({
   Idle: {
-    invoke: Machine.invoke({
+    invoke: definition.invoke({
       id: "deep-inline-invoke",
       effect: Effect.asVoid(ExternalService),
       onDone: ({ target }) => target.none()
@@ -121,7 +122,7 @@ const machine = Machine.make({
             }
           },
           Saving: {
-            invoke: Machine.invoke({
+            invoke: definition.invoke({
               child: Child,
               input: ({ state }) => ({ value: state.value }),
               onDone: ({ target }) => target.none()

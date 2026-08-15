@@ -825,6 +825,18 @@ export const startWithRuntimeStrategyForTesting = (
     machine.id === undefined ? undefined : { id: machine.id }
   )
 
+/** @internal Test-only prepared startup strategy selection for a fresh machine. */
+export const prepareWithRuntimeStrategyForTesting = (
+  machine: Machine.Any,
+  strategy: internalRuntime.ProcessRuntimeStrategy,
+  ...args: ReadonlyArray<unknown>
+): Effect.Effect<internalRuntime.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
+  internalRuntime.prepareProcessWithStrategyForTesting(
+    (toProcessLogic as any)(machine, ...args),
+    strategy,
+    machine.id === undefined ? undefined : { id: machine.id }
+  )
+
 /** @internal Test-only runtime strategy selection for a resumed machine. */
 export const resumeWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
@@ -877,6 +889,51 @@ export const start: <
   >
 > = (machine, ...args) =>
   internalRuntime.startProcess(
+    toProcessLogic(machine, ...args),
+    machine.id === undefined ? undefined : { id: machine.id }
+  ) as any
+
+export const prepare: <
+  const States extends Machine.StateSchemas,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>,
+  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  const Input extends Schema.Top = typeof Schema.Void,
+  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+  E = never,
+  R = never,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never
+>(
+  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+  ...args: [...Machine.InputArgs<Input>]
+) => Effect.Effect<
+  internalRuntime.PreparedProcess<
+    Machine.Snapshot<States>,
+    Machine.EventOf<Events>,
+    | E
+    | ActionError<R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StoppedError,
+    Output,
+    Machine.EmittedEventOf<Emits>,
+    | InitialE
+    | E
+    | ActionError<InitialR | R>
+    | InfiniteTransitionError
+    | MachineSchemaDecodeError
+    | StartupError
+    | StoppedError,
+    ExcludeCompatibleRuntime<
+      Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+      Machine.EventOf<Events>,
+      Machine.EmitOf<Emits>
+    >
+  >
+> = (machine, ...args) =>
+  internalRuntime.prepareProcess(
     toProcessLogic(machine, ...args),
     machine.id === undefined ? undefined : { id: machine.id }
   ) as any

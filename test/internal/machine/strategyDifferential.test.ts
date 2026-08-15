@@ -7,7 +7,11 @@ import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
 import { MachineTest } from "../../../src/testing/index.js"
 import type { DifferentialStep } from "../../machine/support/runtimeDifferential.js"
 import { verifyManagedExecution } from "../../machine/support/runtimeDifferential.js"
-import { openWithRuntimeStrategy, verifyPlannerStrategies } from "./support/strategyDifferential.js"
+import {
+  openWithRuntimeStrategy,
+  prepareWithRuntimeStrategy,
+  verifyPlannerStrategies
+} from "./support/strategyDifferential.js"
 
 class Count extends Schema.TaggedClass<Count>("StrategyCount")("Count", {
   value: Schema.Number
@@ -382,6 +386,39 @@ describe("machine planner and runtime strategies", () => {
         assert.instanceOf(error, Machine.MachineSchemaDecodeError)
         assert.strictEqual(error.boundary, "emission")
         assert.strictEqual(error.event, "Published")
+      }
+    }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("observes initial emissions from prepared generic and compiled runtimes", () =>
+    Effect.gen(function*() {
+      class Idle extends Schema.TaggedClass<Idle>("StrategyPreparedIdle")("Idle", {}) {}
+      class Ready extends Schema.TaggedClass<Ready>("StrategyPreparedReady")("Ready", {}) {}
+      const states = Machine.defineStates({ Idle })
+      const Emissions = Machine.emittedEvents(Ready)
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        emittedEvents: Emissions,
+        initial: () => states.initial.Idle(new Idle({}))
+      }).handle({
+        Idle: {
+          entry: (_, enqueue) => {
+            enqueue.emit(Emissions.Ready())
+            return undefined
+          }
+        }
+      })
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        const prepared = yield* prepareWithRuntimeStrategy(machine, strategy)
+        const observed = yield* prepared.emissions.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild({ startImmediately: true })
+        )
+        const ref = yield* prepared.start
+        assert.deepStrictEqual(Array.from(yield* Fiber.join(observed)), [new Ready({})])
+        yield* ref.stop
       }
     }) as Effect.Effect<void, unknown, any>)
 

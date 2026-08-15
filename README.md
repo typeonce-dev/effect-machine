@@ -188,13 +188,23 @@ object to `send` or `Machine.plan` for those events.
 `ref.emissions` is a hot `Stream`: it publishes only notifications produced
 after subscription, replays nothing, and completes when the actor terminates.
 Snapshots remain separate and stateful: `ref.changes` begins with the current
-lifecycle snapshot and then follows later changes. Because `Machine.start`
-returns only after initialization, startup emissions are not observable from
-the returned ref; represent startup facts in state when they must be retained.
+lifecycle snapshot and then follows later changes. Use `Machine.prepare` when
+an observer must be installed before initial-entry actions run:
 
 ```ts
-const next = ref.emissions.pipe(Stream.take(1), Stream.runHead)
+const prepared = yield * Machine.prepare(machine)
+
+yield * prepared.emissions.pipe(
+  Stream.runForEach(handleEmission),
+  Effect.forkScoped({ startImmediately: true })
+)
+
+const ref = yield * prepared.start
 ```
+
+`Machine.start(machine)` remains the one-step convenience for callers that do
+not observe startup emissions. Preparation does not retain or replay an
+emission: the observer is simply subscribed before initialization begins.
 
 Invalid event and emission constructions fail the machine with a typed
 `MachineSchemaDecodeError`; they do not throw from the constructor call.
@@ -319,6 +329,35 @@ invoke: Machine.invoke({
   effect: ({ state }) => loadDocument(state.documentId),
   onDone: ({ output, target }) => target.full.Ready({ document: output }),
   onFailure: ({ error, target }) => target.full.Failed({ message: error.message })
+})
+```
+
+The standalone `Machine.invoke(...)` constructor does not know the owning
+definition, so its `self` and `parent` references are non-sendable. When an
+invocation callback sends through either reference, construct it through the
+owning definition so those references use its exact public input and
+`parentEvents` protocols:
+
+```ts
+const definition = Machine.make({
+  events: Commands,
+  internalEvents: InternalEvents,
+  parentEvents: ParentEvents
+  // ...
+})
+
+const machine = definition.handle({
+  Saving: {
+    invoke: definition.invoke({
+      id: "notify-parent",
+      effect: ({ parent }) =>
+        parent === undefined
+          ? Effect.void
+          : parent.send(ParentEvents.SaveStarted()),
+      onDone: ({ target }) => target.none(),
+      onFailure: ({ target }) => target.none()
+    })
+  }
 })
 ```
 

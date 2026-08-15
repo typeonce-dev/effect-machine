@@ -105,9 +105,10 @@ its extra control is required:
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
 - Use one invocation object: `effect` for one-shot work, `after` for a timer,
   `logic` for reusable process logic, and `child` for a complete child
-  statechart. `Machine.invoke({...})` preserves owner context and source
-  channels across sibling lifecycle handlers. Use a direct object only when its
-  lifecycle handlers do not need source-derived context.
+  statechart. `Machine.invoke({...})` preserves owner state and source channels
+  across sibling lifecycle handlers. Use `definition.invoke({...})` when a
+  callback uses `self` or `parent`; the bound constructor preserves the
+  definition's exact public input and `parentEvents` protocols.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. A logic
   invocation is addressable only when `Machine.invoke` receives that
@@ -517,8 +518,20 @@ targets an actor mailbox and is processed later. `enqueue.emit(...)` is neither:
 it publishes a one-off outward notification. Observe it with
 `ref.emissions`, a hot non-replayed `Stream` that completes with the actor.
 `ref.changes` is stateful and begins with the current lifecycle snapshot.
-Startup emissions occur before `Machine.start` returns and therefore are not
-visible through the returned ref; use state for facts that must be retained.
+Use `Machine.prepare(machine)` to obtain `changes` and `emissions` before
+initialization. Subscribe to the desired stream and then evaluate
+`prepared.start`. `Machine.start(machine)` remains the one-step convenience
+when startup observation is unnecessary. Emissions are still never retained or
+replayed; state remains the representation for facts that must be retained.
+
+```ts
+const prepared = yield* Machine.prepare(machine)
+yield* prepared.emissions.pipe(
+  Stream.runForEach(handleEmission),
+  Effect.forkScoped({ startImmediately: true })
+)
+const ref = yield* prepared.start
+```
 
 For child-to-parent input, export a public builder protocol and reuse it at both
 composition boundaries:
@@ -682,6 +695,33 @@ invoke: Machine.invoke({
 })
 ```
 
+The standalone constructor cannot know the owning machine's input protocols,
+so its `self` and `parent` references are non-sendable. When a source sends
+through either reference, use the owning definition's bound constructor:
+
+```ts
+const definition = Machine.make({
+  events: Commands,
+  internalEvents: InternalEvents,
+  parentEvents: ParentEvents,
+  // ...
+})
+
+const machine = definition.handle({
+  Saving: {
+    invoke: definition.invoke({
+      id: "notify-parent",
+      effect: ({ parent }) =>
+        parent === undefined
+          ? Effect.void
+          : parent.send(ParentEvents.SaveStarted()),
+      onDone: ({ target }) => target.none(),
+      onFailure: ({ target }) => target.none()
+    })
+  }
+})
+```
+
 A direct `invoke: { ... }` object remains available when lifecycle handlers do
 not need source-derived context.
 
@@ -729,9 +769,11 @@ parentRef.child(Editor)
 parentAtom.child(Editor)
 ```
 
-Child emissions are delivered through the parent's internal protocol.
-`onSnapshot`, `onDone`, and `onFailure` are direct parent transitions. Invoked
-child IDs must be unique while simultaneously active.
+Child emissions remain on the child's hot `emissions` stream; they are never
+delivered implicitly to the parent. A child sends an input explicitly with
+`enqueue.sendTo(parent, ParentEvents.Example())`. `onSnapshot`, `onDone`, and
+`onFailure` are direct parent transitions. Invoked child IDs must be unique
+while simultaneously active.
 
 Descriptors with the same id and machine identity address the same child, even
 when independently constructed. The descriptor objects themselves are not

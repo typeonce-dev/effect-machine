@@ -302,6 +302,22 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   readonly childChanges: (child: any) => Stream.Stream<Option.Option<any>>
 }
 
+export interface PreparedProcess<
+  out State,
+  in Event,
+  out Error,
+  out Output,
+  out Emitted,
+  out StartError,
+  StartRequirements
+> {
+  readonly id: string
+  readonly sessionId: string
+  readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>, StartError>
+  readonly emissions: Stream.Stream<Emitted>
+  readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>
+}
+
 interface ProcessAddress<in Event> {
   readonly id: string
   readonly sessionId: string
@@ -609,6 +625,8 @@ const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
 interface StartInternalOptions {
   readonly detached?: boolean
   readonly id?: string
+  readonly sessionId?: string
+  readonly emissions?: EmissionRuntime
   readonly onOutcome?: (outcome: RuntimeOutcome<any, any, any>) => Effect.Effect<void>
   readonly onSnapshot?: (
     snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
@@ -801,6 +819,54 @@ const noParentSend = (_event: unknown): Effect.Effect<void, StoppedError> => Eff
 const EmissionsClosed: unique symbol = Symbol("effect/Machine/EmissionsClosed")
 
 type LazyEmissions = PubSub.PubSub<unknown> | typeof EmissionsClosed | undefined
+
+interface EmissionRuntime {
+  readonly emit: (event: unknown) => Effect.Effect<void>
+  readonly close: () => Effect.Effect<void>
+  readonly stream: Stream.Stream<unknown>
+}
+
+const makeEmissionRuntime = (): EmissionRuntime => {
+  let emissions: LazyEmissions
+  const getOrCreate: Effect.Effect<PubSub.PubSub<unknown> | undefined> = Effect.suspend(() => {
+    const observed = emissions
+    if (observed === EmissionsClosed) return Effect.succeed(undefined)
+    if (observed !== undefined) return Effect.succeed(observed)
+    return PubSub.unbounded<unknown>().pipe(
+      Effect.flatMap((candidate) =>
+        Effect.sync(() => {
+          const latest = emissions
+          if (latest === EmissionsClosed) return [undefined, true] as const
+          if (latest !== undefined) return [latest, true] as const
+          emissions = candidate
+          return [candidate, false] as const
+        }).pipe(
+          Effect.flatMap(([selected, discard]) =>
+            discard ? PubSub.shutdown(candidate).pipe(Effect.as(selected)) : Effect.succeed(selected)
+          )
+        )
+      )
+    )
+  })
+  return {
+    emit: (event) =>
+      Effect.suspend(() =>
+        emissions === undefined || emissions === EmissionsClosed
+          ? Effect.void
+          : PubSub.publish(emissions, event).pipe(Effect.asVoid)
+      ),
+    close: () => {
+      const observed = emissions
+      emissions = EmissionsClosed
+      return observed === undefined || observed === EmissionsClosed ? Effect.void : PubSub.shutdown(observed)
+    },
+    stream: Stream.unwrap(
+      getOrCreate.pipe(
+        Effect.map((emissions) => emissions === undefined ? Stream.empty : Stream.fromPubSub(emissions))
+      )
+    )
+  }
+}
 
 const childlessRuntime: ChildRuntime = {
   close: () => Effect.void,
@@ -1104,41 +1170,10 @@ const startGenericInternal: <
     | { readonly _tag: "Done"; readonly output: Output }
     | { readonly _tag: "Failure"; readonly cause: Cause.Cause<Error> }
 
-  const sessionId = yield* runtime.nextSessionId
+  const sessionId = options.sessionId ?? (yield* runtime.nextSessionId)
   const id = requestedId ?? sessionId
   const queue = yield* Queue.unbounded<ProcessMessage<Event>>()
-  let emissions: LazyEmissions
-  const getOrCreateEmissions: Effect.Effect<PubSub.PubSub<unknown> | undefined> = Effect.suspend(() => {
-    const observed = emissions
-    if (observed === EmissionsClosed) return Effect.succeed(undefined)
-    if (observed !== undefined) return Effect.succeed(observed)
-    return PubSub.unbounded<unknown>().pipe(
-      Effect.flatMap((candidate) =>
-        Effect.sync(() => {
-          const latest = emissions
-          if (latest === EmissionsClosed) return [undefined, true] as const
-          if (latest !== undefined) return [latest, true] as const
-          emissions = candidate
-          return [candidate, false] as const
-        }).pipe(
-          Effect.flatMap(([selected, discard]) =>
-            discard ? PubSub.shutdown(candidate).pipe(Effect.as(selected)) : Effect.succeed(selected)
-          )
-        )
-      )
-    )
-  })
-  const closeEmissions = (): Effect.Effect<void> => {
-    const observed = emissions
-    emissions = EmissionsClosed
-    return observed === undefined || observed === EmissionsClosed ? Effect.void : PubSub.shutdown(observed)
-  }
-  const emit = (event: unknown): Effect.Effect<void> =>
-    Effect.suspend(() =>
-      emissions === undefined || emissions === EmissionsClosed
-        ? Effect.void
-        : PubSub.publish(emissions, event).pipe(Effect.asVoid)
-    )
+  const emissions = options.emissions ?? makeEmissionRuntime()
   const termination = yield* Deferred.make<ProcessTermination>()
   const done = yield* Deferred.make<Output, Error | StoppedError>()
   const awaitCompletion = Deferred.await(done).pipe(Effect.exit, Effect.asVoid)
@@ -1209,7 +1244,7 @@ const startGenericInternal: <
   }
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
     Exit.isFailure(exit)
-      ? closeChildren(exit).pipe(Effect.andThen(closeEmissions()))
+      ? closeChildren(exit).pipe(Effect.andThen(emissions.close()))
       : Effect.void
   const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(onStopSync)
   const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
@@ -1219,7 +1254,7 @@ const startGenericInternal: <
     parent,
     spawn,
     sendParent,
-    emit,
+    emit: emissions.emit,
     sendTo: ((target: unknown, event: unknown) =>
       isProcessAddress(target) ? target.send(event) : sendTo(target as ChildSelector, event)) as ProcessScope<
         Event
@@ -1402,7 +1437,7 @@ const startGenericInternal: <
         Effect.andThen(Queue.shutdown(queue)),
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
-        Effect.andThen(closeEmissions()),
+        Effect.andThen(emissions.close()),
         Effect.andThen(Effect.sync(() => {
           if (Exit.isFailure(exit)) {
             failAcknowledgedMessage(inFlightMessage, exit.cause)
@@ -1559,11 +1594,7 @@ const startGenericInternal: <
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
-    emissions: Stream.unwrap(
-      getOrCreateEmissions.pipe(
-        Effect.map((emissions) => emissions === undefined ? Stream.empty : Stream.fromPubSub(emissions))
-      )
-    ) as Stream.Stream<never>,
+    emissions: emissions.stream as Stream.Stream<never>,
     join: Deferred.await(done),
     stop,
     send: self.send,
@@ -1717,6 +1748,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private interruptRequested = false
   private offerRevision = 0
   private inFlightMessage: ProcessMessage<unknown> | undefined
+  private readonly externalEmissions: EmissionRuntime | undefined
   private emissionsPubSub: LazyEmissions
 
   constructor(
@@ -1727,6 +1759,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   ) {
     this.sessionId = sessionId
     this.id = options.id ?? sessionId
+    this.externalEmissions = options.emissions
     this.send = (event) => this.offerMessage(event)
     this.address = {
       id: this.id,
@@ -1908,7 +1941,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   get emissions(): Stream.Stream<never> {
-    return this.emissionsStream() as Stream.Stream<never>
+    return (this.externalEmissions?.stream ?? this.emissionsStream()) as Stream.Stream<never>
   }
 
   get join(): Effect.Effect<unknown, unknown> {
@@ -2268,6 +2301,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private emitEvent(event: unknown): Effect.Effect<void> {
+    if (this.externalEmissions !== undefined) return this.externalEmissions.emit(event)
     return Effect.suspend(() =>
       this.emissionsPubSub === undefined || this.emissionsPubSub === EmissionsClosed
         ? Effect.void
@@ -2280,6 +2314,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private closeEmissions(): Effect.Effect<void> {
+    if (this.externalEmissions !== undefined) return this.externalEmissions.close()
     const observed = this.emissionsPubSub
     this.emissionsPubSub = EmissionsClosed
     return observed === undefined || observed === EmissionsClosed ? Effect.void : PubSub.shutdown(observed)
@@ -2523,7 +2558,7 @@ const startCompactCompiledInternal: typeof startGenericInternal = Effect.fnUntra
   logic: ProcessLogic<any, any, any, any, any, any>,
   options: StartInternalOptions
 ) {
-  const sessionId = yield* options.runtime.nextSessionId
+  const sessionId = options.sessionId ?? (yield* options.runtime.nextSessionId)
   const services = yield* Effect.context<any>()
   const execution = logic.execution as CompiledProcessExecution<any, any, any, any, any, any>
   const process = new CompiledProcess(logic, options, services, sessionId)
@@ -2636,3 +2671,97 @@ export const startProcess: <
       }
   )
 })
+
+const prepareProcessWithStrategy = Effect.fnUntraced(function*<
+  State,
+  Event,
+  Error,
+  Requirements,
+  Output,
+  InitialError,
+  Emitted
+>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  strategy: ProcessRuntimeStrategy,
+  options?: {
+    readonly id?: string
+  }
+) {
+  const runtime = yield* makeProcessRuntime
+  const sessionId = yield* runtime.nextSessionId
+  const emissions = makeEmissionRuntime()
+  const started = yield* Deferred.make<MachineRef<State, Event, Error, Output, Emitted>, InitialError>()
+  const internalOptions: StartInternalOptions = options === undefined
+    ? {
+      detached: true,
+      emissions,
+      runtime,
+      sessionId
+    }
+    : {
+      ...options,
+      detached: true,
+      emissions,
+      runtime,
+      sessionId
+    }
+  const initialize = strategy === "generic"
+    ? startGenericInternal(logic, internalOptions)
+    : strategy === "compiled"
+    ? logic.execution?._tag === "Compiled"
+      ? startCompactCompiledInternal(logic, internalOptions)
+      : Effect.die(new Error("Machine cannot force the compiled runtime for generic process logic"))
+    : startLogicInternal(logic, internalOptions)
+  const start = yield* Effect.cached(
+    initialize.pipe(
+      Effect.onExit((exit) => Deferred.done(started, exit))
+    ) as Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, InitialError, Requirements>
+  )
+  return {
+    id: options?.id ?? sessionId,
+    sessionId,
+    changes: Stream.unwrap(
+      Deferred.await(started).pipe(Effect.map((ref) => ref.changes))
+    ),
+    emissions: emissions.stream as Stream.Stream<Emitted>,
+    start
+  }
+})
+
+export const prepareProcess: <
+  State,
+  Event,
+  Error = never,
+  Requirements = never,
+  Output = never,
+  InitialError = never,
+  Emitted = never
+>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  options?: {
+    readonly id?: string
+  }
+) => Effect.Effect<
+  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements>
+> =
+  ((logic: ProcessLogic<any, any, any, any, any, any>, options?: { readonly id?: string }) =>
+    prepareProcessWithStrategy(logic, "auto", options)) as any
+
+/** @internal Test-only prepared startup strategy selection. */
+export const prepareProcessWithStrategyForTesting = <
+  State,
+  Event,
+  Error = never,
+  Requirements = never,
+  Output = never,
+  InitialError = never,
+  Emitted = never
+>(
+  logic: ProcessLogic<State, Event, Error, Requirements, Output, InitialError>,
+  strategy: ProcessRuntimeStrategy,
+  options?: {
+    readonly id?: string
+  }
+): Effect.Effect<
+  PreparedProcess<State, Event, Error, Output, Emitted, InitialError, Requirements>
+> => prepareProcessWithStrategy(logic, strategy, options) as any
