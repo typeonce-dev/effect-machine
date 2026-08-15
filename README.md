@@ -10,6 +10,27 @@ cluster adapter.
 > This is early-release software. Its API may change, and each release targets
 > one exact Effect beta.
 
+## Design principles
+
+- **Type-safe by construction:** reject invalid protocols, compositions, and
+  capabilities at compile time where possible, and preserve typed Effect
+  failures at runtime.
+- **Explicit and opinionated:** give different semantics different names and
+  contracts. Builders and inference remove ceremony without making behavior
+  depend on ambiguous omissions.
+- **Readable models:** keep schemas, topology, behavior, and effects concise
+  enough that a human can understand the complete model from its definition.
+- **Effect-native:** design toward eventual inclusion in Effect core and follow
+  its API shape, module boundaries, ownership, and failure conventions.
+
+The package is pre-1.0: a clearer or safer long-term API takes priority over
+backward compatibility. Breaking changes use minor releases, compatible fixes
+use patch releases, and compatibility aliases are not added by default.
+
+The core machine model remains local. Distributed identity, placement,
+transport, routing, delivery, and remote lifecycle semantics belong to Effect
+Cluster and are exposed only through explicit integration boundaries.
+
 ## Install
 
 ```sh

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Effect Machine PR"
+  short_description: "Implement, validate, and merge an Effect Machine PR"
+  default_prompt: "Use $effect-machine-pr to implement this change through a green, merged pull request."
+policy:
+  allow_implicit_invocation: false
