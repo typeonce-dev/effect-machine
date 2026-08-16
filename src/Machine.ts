@@ -841,6 +841,23 @@ type NodeMethod<
 > = Machine.NodeSchema<Node> extends never ? FromMethod<FromArguments, Result>
   : ((...args: Arguments) => Result) & FromMethod<FromArguments, Result>
 
+type NodeMethodWithInitial<
+  Node,
+  Arguments extends ReadonlyArray<unknown>,
+  Result,
+  FromArguments extends ReadonlyArray<unknown>,
+  Path extends string
+> = Machine.NodeSchema<Node> extends never ? {
+    readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
+    readonly initial: InitialTargetFactory<Node, Path>
+  }
+  :
+    & ((...args: Arguments) => Result)
+    & {
+      readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
+      readonly initial: InitialTargetFactory<Node, Path>
+    }
+
 interface InitialTargetMethod<
   Node,
   Path extends string
@@ -867,15 +884,19 @@ type NodeConstructionSelectorFromCallable<Node, Builder, Result> = Machine.NodeS
   }
   : ConstructionSelectorFromCallable<NodeMakeInput<Node>, Builder, Result>
 
-type NestedTargetMethod<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
+type NestedTargetMethod<Node, Builder, Result, Path extends string> = Machine.NodeSchema<Node> extends never ? {
     readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
+    readonly initial: InitialTargetFactory<Node, Path>
   }
   :
     & (<Selected extends ConstructionResult<Result>>(
       value: NodeValue<Node>,
       state: (builder: Builder) => Selected
     ) => Selected)
-    & { readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result> }
+    & {
+      readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
+      readonly initial: InitialTargetFactory<Node, Path>
+    }
 
 type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input ? {
     <Selected extends ConstructionResult<Result>>(
@@ -1408,33 +1429,33 @@ type LocalTargetMethod<
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-      & InitialTargetMethod<Node, Path>
-      & (Source extends Path | `${Path}.${string}` ? NestedTargetMethod<
-          Node,
-          LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-          LocalTargetResultWithPrefix<AllStates, Children, Path>
-        >
-        : NodeMethod<
-          Node,
-          WithNodeValue<Node, [
-            states: (
-              builder: FullParallelBuilder<Children, Path>
-            ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-          ]>,
-          Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-          WithNodeInput<Node, [
-            states: (
-              builder: FullParallelBuilder<Children, Path>
-            ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-          ]>
-        >)
-  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      & InitialTargetMethod<Node, Path>
-      & NestedTargetMethod<
+    Source extends Path | `${Path}.${string}` ? NestedTargetMethod<
         Node,
         LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        LocalTargetResultWithPrefix<AllStates, Children, Path>
+        LocalTargetResultWithPrefix<AllStates, Children, Path>,
+        Path
       >
+    : NodeMethodWithInitial<
+      Node,
+      WithNodeValue<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
+      ]>,
+      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+      WithNodeInput<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
+      ]>,
+      Path
+    >
+  : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? NestedTargetMethod<
+      Node,
+      LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+      LocalTargetResultWithPrefix<AllStates, Children, Path>,
+      Path
+    >
   : NodeMethod<
     Node,
     WithNodeValue<Node, []>,
@@ -1524,34 +1545,35 @@ type BranchTargetMethod<
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = States[StateId] extends infer Node ?
   Node extends { readonly type: "parallel"; readonly states: infer Children extends Machine.StateSchemas } ?
-      & InitialTargetMethod<Node, Path>
-      & (Source extends Path | `${Path}.${string}` ?
-          & NestedTargetMethod<
-            Node,
-            BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-            BranchTargetResultWithPrefix<AllStates, Children, Path>
-          >
-          & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-        : NodeMethod<
+    Source extends Path | `${Path}.${string}` ?
+        & NestedTargetMethod<
           Node,
-          WithNodeValue<Node, [
-            states: (
-              builder: FullParallelBuilder<Children, Path>
-            ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
-          ]>,
-          Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
-          WithNodeInput<Node, [
-            states: (
-              builder: FullParallelBuilder<Children, Path>
-            ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-          ]>
-        >)
+          BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
+          BranchTargetResultWithPrefix<AllStates, Children, Path>,
+          Path
+        >
+        & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
+    : NodeMethodWithInitial<
+      Node,
+      WithNodeValue<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>>
+      ]>,
+      Machine.Target<AllStates, StateIdentifierFromPath<AllStates, Path>>,
+      WithNodeInput<Node, [
+        states: (
+          builder: FullParallelBuilder<Children, Path>
+        ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
+      ]>,
+      Path
+    >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
-      & InitialTargetMethod<Node, Path>
       & NestedTargetMethod<
         Node,
         BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        BranchTargetResultWithPrefix<AllStates, Children, Path>
+        BranchTargetResultWithPrefix<AllStates, Children, Path>,
+        Path
       >
       & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
   : NodeMethod<

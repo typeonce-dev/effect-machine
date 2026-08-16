@@ -141,7 +141,7 @@ const scenarios = [
     label: "machine.handle (4 successive calls)",
     file: "successive-handle.ts",
     control: "successive-handle-control",
-    maxInstantiations: 168_000,
+    maxInstantiations: 166_000,
     maxMarginalInstantiations: 147_000
   },
   {
@@ -155,8 +155,8 @@ const scenarios = [
     label: "machine exact input/output/error/services",
     file: "exact-channels.ts",
     control: "exact-channels-control",
-    maxInstantiations: 143_000,
-    maxMarginalInstantiations: 127_000
+    maxInstantiations: 138_000,
+    maxMarginalInstantiations: 123_000
   },
   {
     id: "adapter-readiness-control",
