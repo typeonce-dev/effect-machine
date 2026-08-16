@@ -19,6 +19,8 @@ export const StateConstructionTypeId: unique symbol = Symbol("effect/Machine/Sta
 
 export const HistoryTargetTypeId: unique symbol = Symbol("effect/Machine/HistoryTarget")
 
+export const InitialTargetTypeId: unique symbol = Symbol("effect/Machine/InitialTarget")
+
 export const ChoiceTargetTypeId: unique symbol = Symbol("effect/Machine/ChoiceTarget")
 
 export const NoTargetTypeId: unique symbol = Symbol("effect/Machine/NoTarget")
@@ -34,6 +36,17 @@ export interface HistoryTarget {
   readonly [HistoryTargetTypeId]: typeof HistoryTargetTypeId
   readonly path: string
   readonly parent: string
+}
+
+/** Internal instruction that enters the selected state's declared initial
+ * configuration. The planner supplies implicit child values through the
+ * owning states' `initialize` handlers. */
+export interface InitialTarget {
+  readonly [InitialTargetTypeId]: typeof InitialTargetTypeId
+  readonly _tag: "InitialTarget"
+  readonly path: string
+  readonly value: unknown
+  readonly values?: Readonly<Record<string, unknown>>
 }
 
 /** Internal target produced by a choice target builder. */
@@ -64,6 +77,20 @@ export const makeHistoryTarget = (path: string, parent: string): HistoryTarget =
 })
 
 export const isHistoryTarget = (u: unknown): u is HistoryTarget => hasProperty(u, HistoryTargetTypeId)
+
+export const makeInitialTarget = (
+  path: string,
+  value: unknown,
+  values?: Readonly<Record<string, unknown>>
+): InitialTarget => ({
+  [InitialTargetTypeId]: InitialTargetTypeId,
+  _tag: "InitialTarget",
+  path,
+  value,
+  ...(values === undefined ? {} : { values })
+})
+
+export const isInitialTarget = (u: unknown): u is InitialTarget => hasProperty(u, InitialTargetTypeId)
 
 export const makeChoiceTarget = (
   path: string,

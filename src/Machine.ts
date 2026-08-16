@@ -841,6 +841,42 @@ type NodeMethod<
 > = Machine.NodeSchema<Node> extends never ? FromMethod<FromArguments, Result>
   : ((...args: Arguments) => Result) & FromMethod<FromArguments, Result>
 
+type NodeMethodWithInitial<
+  Node,
+  Arguments extends ReadonlyArray<unknown>,
+  Result,
+  FromArguments extends ReadonlyArray<unknown>,
+  Path extends string
+> = Machine.NodeSchema<Node> extends never ? {
+    readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
+    readonly initial: InitialTargetFactory<Node, Path>
+  }
+  :
+    & ((...args: Arguments) => Result)
+    & {
+      readonly from: FromCallable<FromArguments, Machine.StateConstruction<Result>>
+      readonly initial: InitialTargetFactory<Node, Path>
+    }
+
+interface InitialTargetMethod<
+  Node,
+  Path extends string
+> {
+  /** Enters this state through its declared initial configuration. */
+  readonly initial: InitialTargetFactory<Node, Path>
+}
+
+interface InitialTargetFactory<
+  Node,
+  Path extends string
+> {
+  (...args: WithNodeValue<Node, readonly []>): Machine.InitialTarget<Path>
+  readonly from: FromCallable<
+    WithNodeInput<Node, readonly []>,
+    Machine.StateConstruction<Machine.InitialTarget<Path>>
+  >
+}
+
 type NodeConstructionSelectorFromCallable<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
     <Selected extends ConstructionResult<Result>>(
       state: (builder: Builder) => Selected
@@ -848,15 +884,19 @@ type NodeConstructionSelectorFromCallable<Node, Builder, Result> = Machine.NodeS
   }
   : ConstructionSelectorFromCallable<NodeMakeInput<Node>, Builder, Result>
 
-type NestedTargetMethod<Node, Builder, Result> = Machine.NodeSchema<Node> extends never ? {
+type NestedTargetMethod<Node, Builder, Result, Path extends string> = Machine.NodeSchema<Node> extends never ? {
     readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
+    readonly initial: InitialTargetFactory<Node, Path>
   }
   :
     & (<Selected extends ConstructionResult<Result>>(
       value: NodeValue<Node>,
       state: (builder: Builder) => Selected
     ) => Selected)
-    & { readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result> }
+    & {
+      readonly from: NodeConstructionSelectorFromCallable<Node, Builder, Result>
+      readonly initial: InitialTargetFactory<Node, Path>
+    }
 
 type ConstructionSelectorFromCallable<Input, Builder, Result> = {} extends Input ? {
     <Selected extends ConstructionResult<Result>>(
@@ -1093,6 +1133,14 @@ type FullSnapshotResult<
   Prefix extends string,
   Path extends string = Machine.JoinPath<Prefix, StateId>
 > = Machine.SnapshotByIdentifierWithPath<States, StateId, Path>
+
+type InitialEntryStateKey<States extends Machine.StateSchemas> = {
+  readonly [Key in ActiveStateKey<States>]: States[Key] extends { readonly states: Machine.StateSchemas } ? Key : never
+}[ActiveStateKey<States>]
+
+type FullInitialTargetBuilder<States extends Machine.StateSchemas> = {
+  readonly [Key in InitialEntryStateKey<States>]: InitialTargetMethod<States[Key], Key>
+}
 
 type FullParallelBuilder<
   States extends Machine.StateSchemas,
@@ -1384,9 +1432,10 @@ type LocalTargetMethod<
     Source extends Path | `${Path}.${string}` ? NestedTargetMethod<
         Node,
         LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        LocalTargetResultWithPrefix<AllStates, Children, Path>
+        LocalTargetResultWithPrefix<AllStates, Children, Path>,
+        Path
       >
-    : NodeMethod<
+    : NodeMethodWithInitial<
       Node,
       WithNodeValue<Node, [
         states: (
@@ -1398,12 +1447,14 @@ type LocalTargetMethod<
         states: (
           builder: FullParallelBuilder<Children, Path>
         ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-      ]>
+      ]>,
+      Path
     >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ? NestedTargetMethod<
       Node,
       LocalTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-      LocalTargetResultWithPrefix<AllStates, Children, Path>
+      LocalTargetResultWithPrefix<AllStates, Children, Path>,
+      Path
     >
   : NodeMethod<
     Node,
@@ -1498,10 +1549,11 @@ type BranchTargetMethod<
         & NestedTargetMethod<
           Node,
           BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-          BranchTargetResultWithPrefix<AllStates, Children, Path>
+          BranchTargetResultWithPrefix<AllStates, Children, Path>,
+          Path
         >
         & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
-    : NodeMethod<
+    : NodeMethodWithInitial<
       Node,
       WithNodeValue<Node, [
         states: (
@@ -1513,13 +1565,15 @@ type BranchTargetMethod<
         states: (
           builder: FullParallelBuilder<Children, Path>
         ) => SnapshotBuilderComplete<Machine.SnapshotRegionsWithPrefix<Children, Path>, boolean>
-      ]>
+      ]>,
+      Path
     >
   : Node extends { readonly states: infer Children extends Machine.StateSchemas } ?
       & NestedTargetMethod<
         Node,
         BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>,
-        BranchTargetResultWithPrefix<AllStates, Children, Path>
+        BranchTargetResultWithPrefix<AllStates, Children, Path>,
+        Path
       >
       & BranchTargetBuilderWithPrefix<AllStates, Children, Path, Source>
   : NodeMethod<
@@ -4033,6 +4087,23 @@ export declare namespace Machine {
     readonly parent: Extract<ParentPath<HistoryId>, StateIdentifier<States>>
   }
 
+  /**
+   * Transition instruction that enters a compound or parallel state through
+   * its declared initial configuration.
+   *
+   * @category models
+   * @since 0.13.0
+   */
+  export interface InitialTarget<StateId extends string> {
+    readonly [Topology.TargetTypeId]: typeof Topology.TargetTypeId
+    readonly [Topology.TargetSnapshotTypeId]?: never
+    readonly [Topology.InitialTargetTypeId]: typeof Topology.InitialTargetTypeId
+    readonly _tag: "InitialTarget"
+    readonly path: StateId
+    readonly value: never
+    readonly values?: never
+  }
+
   /** Branded transient target instruction used while constructing initial states. */
   export interface ChoiceTargetInstruction<ChoiceId extends string = string> {
     readonly [Topology.ChoiceTargetTypeId]: typeof Topology.ChoiceTargetTypeId
@@ -4063,7 +4134,9 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type FullTargetBuilder<States extends StateSchemas> = FullSnapshotBuilderWithPrefix<States>
+  export type FullTargetBuilder<States extends StateSchemas> = [InitialEntryStateKey<States>] extends [never] ?
+    FullSnapshotBuilderWithPrefix<States>
+    : FullSnapshotBuilderWithPrefix<States> & FullInitialTargetBuilder<States>
 
   /**
    * Builder for a complete fallback configuration containing a history owner.
@@ -4566,8 +4639,8 @@ export declare namespace Machine {
     ? NonNullable<Config[Key]> extends (...args: any) => infer Ret ? Ret : never
     : never
   /** Extracts the return value from an implicit initial child implementation. */
-  export type StateInitialReturn<Config> = Config extends { readonly initial?: infer Initial }
-    ? NonNullable<Initial> extends (...args: any) => infer Ret ? Ret : never
+  export type StateInitializeReturn<Config> = Config extends { readonly initialize?: infer Initialize }
+    ? NonNullable<Initialize> extends (...args: any) => infer Ret ? Ret : never
     : never
   /** Extracts the return values from a state's history defaults. */
   export type HistoryDefaultReturn<Config> = Config extends { readonly history?: infer History } ? {
@@ -4792,7 +4865,6 @@ export declare namespace Machine {
     | Effect.Services<DoneReturn<Config>>
     | Effect.Services<StateActionReturn<Config, "entry">>
     | Effect.Services<StateActionReturn<Config, "exit">>
-    | Effect.Services<StateInitialReturn<Config>>
     | Effect.Services<HistoryDefaultReturn<Config>>
     | Effect.Services<ChoiceReturn<Config>>
     | InvokeRequirements<Config>
@@ -4803,12 +4875,12 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     Context
   > =
-    | ((context: Context, enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>) => HandlerResult<States, any, any>)
+    | ((context: NoInfer<Context>, enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>) => HandlerResult<States, any, any>)
     | {
       readonly reenter?: boolean
       readonly targets?: ReadonlyArray<StateNodeIdentifier<States>>
       readonly transition: (
-        context: Context,
+        context: NoInfer<Context>,
         enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
       ) => HandlerResult<States, any, any>
     }
@@ -5392,11 +5464,16 @@ export declare namespace Machine {
           ) => HandlerResult<States, any, any>
         }
     }
-    readonly initial?: StateInitialHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    readonly initialize?: StateInitializeHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
   } & ActiveOutputHandlerConfig<States, Events, StateId>
 
-  /** Values supplied when a statechart implicitly enters a state's initial children. */
-  export type StateInitialValue<
+  /**
+   * Values constructed for a state's schema-valued direct initial children.
+   *
+   * @category utility types
+   * @since 0.13.0
+   */
+  export type StateInitializeValue<
     States extends StateSchemas,
     StateId extends StateIdentifier<States>
   > = NodeByIdentifier<States, StateId> extends infer Node ?
@@ -5407,23 +5484,92 @@ export declare namespace Machine {
       }
     : Node extends { readonly states: infer Children extends StateSchemas; readonly initial: infer Initial } ?
       Initial extends ActiveStateKey<Children> ? NodeSchema<Children[Initial]> extends never ? never
-        : NodeValue<Children[Initial]>
+        : { readonly [Key in Initial]: NodeValue<Children[Initial]> }
       : never
     : never
     : never
 
-  /** Context passed to an implicit child-state initializer. */
-  export type StateInitialContext<
+  type StateInitializeCompoundBuilder<Node, Initial extends PropertyKey> = Node extends {
+    readonly states: infer Children extends StateSchemas
+  } ? Initial extends ActiveStateKey<Children> ? NodeSchema<Children[Initial]> extends never ? never
+      : NodeBuilderMethod<
+        Children[Initial],
+        readonly [value: NodeValue<Children[Initial]>],
+        SnapshotBuilderComplete<{ readonly [Key in Initial]: NodeValue<Children[Initial]> }>,
+        readonly [input: NodeMakeInput<Children[Initial]>],
+        SnapshotBuilderComplete<{ readonly [Key in Initial]: NodeValue<Children[Initial]> }, true>
+      >
+    : never
+    : never
+
+  type StateInitializeParallelBuilder<
+    Children extends StateSchemas,
+    Remaining extends ActiveStateKey<Children> = {
+      readonly [Key in ActiveStateKey<Children>]: NodeSchema<Children[Key]> extends never ? never : Key
+    }[ActiveStateKey<Children>],
+    Values = {},
+    Constructed extends boolean = false
+  > =
+    & SnapshotBuilderComplete<Values, Constructed>
+    & {
+      readonly [Key in Remaining]: NodeBuilderMethod<
+        Children[Key],
+        readonly [value: NodeValue<Children[Key]>],
+        StateInitializeParallelBuilder<
+          Children,
+          Exclude<Remaining, Key>,
+          Values & { readonly [Region in Key]: NodeValue<Children[Key]> },
+          Constructed
+        >,
+        readonly [input: NodeMakeInput<Children[Key]>],
+        StateInitializeParallelBuilder<
+          Children,
+          Exclude<Remaining, Key>,
+          Values & { readonly [Region in Key]: NodeValue<Children[Key]> },
+          true
+        >
+      >
+    }
+
+  /**
+   * Builder bound to the direct initial child or regions owned by a state.
+   *
+   * @category utility types
+   * @since 0.13.0
+   */
+  export type StateInitializeBuilder<
+    States extends StateSchemas,
+    StateId extends StateIdentifier<States>,
+    Node = NodeByIdentifier<States, StateId>
+  > = Node extends { readonly type: "parallel"; readonly states: infer Children extends StateSchemas } ?
+    StateInitializeParallelBuilder<Children>
+    : Node extends { readonly initial: infer Initial } ? StateInitializeCompoundBuilder<Node, Initial & PropertyKey>
+    : never
+
+  /**
+   * Context passed to an implicit child-state initializer.
+   *
+   * @category models
+   * @since 0.13.0
+   */
+  export type StateInitializeContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > = StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+  > = StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents> & {
+    readonly builder: StateInitializeBuilder<States, StateId>
+  }
 
-  /** Initial child value implementation for a compound or parallel state. */
-  export type StateInitialHandler<
+  /**
+   * Initial child value implementation for a compound or parallel state.
+   *
+   * @category models
+   * @since 0.13.0
+   */
+  export type StateInitializeHandler<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -5431,9 +5577,9 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = (
-    context: StateInitialContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
+    context: StateInitializeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
     enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
-  ) => StateInitialValue<States, StateId>
+  ) => SnapshotBuilderComplete<StateInitializeValue<States, StateId>, boolean>
 
   /** Context used only when a history node has no previously captured record. */
   export interface HistoryDefaultContext<
@@ -5503,7 +5649,7 @@ export declare namespace Machine {
     readonly on?: never
     readonly onDone?: never
     readonly output?: never
-    readonly initial?: never
+    readonly initialize?: never
   }
 
   /**
@@ -5726,7 +5872,7 @@ export declare namespace Machine {
     | "entry"
     | "exit"
     | "history"
-    | "initial"
+    | "initialize"
     | "invoke"
     | "on"
     | "onDone"
@@ -5839,6 +5985,75 @@ export declare namespace Machine {
     : Result extends { readonly path: infer Path extends string } ? Path
     : never
 
+  type TransitionResultInitialTargetPath<Result> = IsAny<Result> extends true ? never
+    : Result extends Effect.Effect<infer Success, any, any> ? TransitionResultInitialTargetPath<Success>
+    : Result extends StateConstruction<infer Constructed> ? TransitionResultInitialTargetPath<Constructed>
+    : Result extends {
+      readonly [Topology.InitialTargetTypeId]: typeof Topology.InitialTargetTypeId
+      readonly _tag: "InitialTarget"
+    } ? Result extends { readonly path: infer Path extends string } ? Path : never
+    : never
+
+  type HandlerConfigInitialTargetPath<Config> = TransitionResultInitialTargetPath<
+    | EventHandlerReturn<Config>
+    | AlwaysReturn<Config>
+    | DoneReturn<Config>
+    | ChoiceReturn<Config>
+    | InvokeOutcomeReturn<InvokeReturn<Config>>
+  >
+
+  type RequiredInitializersForTargetPath<
+    AllStates extends StateSchemas,
+    Path
+  > = string extends Path ? never : Path extends StateIdentifier<AllStates> ? InitializerClosureForNode<
+      AllStates,
+      NodeByIdentifier<AllStates, Path>,
+      Path
+    >
+  : never
+
+  type HandlerInitializeValidationAtPath<Config, Path extends string> = HandlerConfigAtPath<Config, Path> extends
+    infer StateConfig ? [StateConfig] extends [never] ? HandlerValidationAtPath<Path, {
+        readonly initialize: HandlerValidationError<
+          "State requires initialize because a transition enters its declared initial configuration",
+          Path
+        >
+      }>
+    : "initialize" extends keyof StateConfig ? never
+    : HandlerValidationAtPath<Path, {
+      readonly initialize: HandlerValidationError<
+        "State requires initialize because a transition enters its declared initial configuration",
+        Path
+      >
+    }>
+    : never
+
+  type HandlerInitialTargetValidationForPaths<
+    AllStates extends StateSchemas,
+    Config,
+    Required
+  > = Types.UnionToIntersection<
+    Required extends string ? HandlerInitializeValidationAtPath<Config, Required> : unknown
+  >
+
+  type HandlerTreeInitialTargetPath<Config> = string extends keyof Config ? never
+    : Config extends object ? {
+        readonly [Key in keyof Config]:
+          | HandlerConfigInitialTargetPath<HandlerConfigPart<Config[Key]>>
+          | (Config[Key] extends { readonly states: infer Children } ? HandlerTreeInitialTargetPath<Children> : never)
+      }[keyof Config]
+    : never
+
+  type HandlerInitialTargetValidation<
+    AllStates extends StateSchemas,
+    Config
+  > = HandlerTreeInitialTargetPath<Config> extends infer TargetPath ? HandlerInitialTargetValidationForPaths<
+      AllStates,
+      Config,
+      RequiredInitializersForTargetPath<AllStates, TargetPath>
+    >
+    : unknown
+
   type DeclaredTransitionTarget<Transition> = Transition extends {
     readonly targets: infer Targets extends ReadonlyArray<string>
   } ? Targets[number]
@@ -5946,6 +6161,19 @@ export declare namespace Machine {
       : unknown
       : unknown)
 
+  type HandlerRequiredHistoryInitializeValidation<
+    AllStates extends StateSchemas,
+    StateId extends StateIdentifier<AllStates>,
+    Config
+  > = [HistoryIdentifier<AllStates>] extends [never] ? unknown
+    : StateId extends RequiredHistoryInitializers<AllStates> ? "initialize" extends keyof Config ? unknown : {
+        readonly initialize: HandlerValidationError<
+          "State requires initialize for shallow history restoration",
+          StateId
+        >
+      }
+    : unknown
+
   type HandlerNodeValidation<
     AllStates extends StateSchemas,
     Node,
@@ -5968,6 +6196,7 @@ export declare namespace Machine {
         & HandlerInvokeParentEventsValidation<InputEvents, StateId, Config>
         & HandlerChildrenValidation<Node, StateId, Config>
         & HandlerOutputRequirementValidation<AllStates, StateId, AvailableOutputStates, Config>
+        & HandlerRequiredHistoryInitializeValidation<AllStates, StateId, Config>
         & HandlerRuntimeValidation<Events, Emits, StateId, Config>
     : unknown
 
@@ -6081,7 +6310,7 @@ export declare namespace Machine {
     AllStates extends StateSchemas,
     StateId extends StateIdentifier<AllStates>,
     Config
-  > = StateId extends RequiredHistoryInitializers<AllStates> ? "initial" extends keyof Config ? true : false : true
+  > = StateId extends RequiredHistoryInitializers<AllStates> ? "initialize" extends keyof Config ? true : false : true
 
   type HandlerHasRequiredHistoryDefaults<Node, Config> = Node extends {
     readonly states: infer Children extends StateSchemas
@@ -6121,7 +6350,6 @@ export declare namespace Machine {
     | Effect.Error<DoneReturn<Config>>
     | Effect.Error<StateActionReturn<Config, "entry">>
     | Effect.Error<StateActionReturn<Config, "exit">>
-    | Effect.Error<StateInitialReturn<Config>>
     | Effect.Error<HistoryDefaultReturn<Config>>
     | Effect.Error<ChoiceReturn<Config>>
     | InvokeError<Config>
@@ -6244,6 +6472,11 @@ export declare namespace Machine {
             StateIdentifier<States>
           >
         >
+        & ([StateIdentifier<States>] extends [UnhandledStates] ? HandlerInitialTargetValidation<
+            States,
+            NoInfer<Config>
+          >
+          : unknown)
     ): HandleTreeResult<
       States,
       Events,

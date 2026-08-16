@@ -38,6 +38,7 @@ import {
   normalizeTransition,
   planConfiguration,
   removeConflictingTransitions,
+  resolveInitialTarget,
   type SelectedTransition,
   sortEntryPaths,
   sortEvaluatedTransitions,
@@ -46,7 +47,7 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import { isInitialTarget, isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
@@ -91,7 +92,7 @@ const resolveMachineReferences = (
     : { self: machineReferences.self, parent: machineReferences.parent }
 
 const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
-  "initial",
+  "initialize",
   "invoke",
   "on",
   "output"
@@ -531,13 +532,22 @@ const collectIndexedEvaluatedTransition = (
   selection: IndexedSelectedTransition
 ): IndexedEvaluatedTransition => {
   const transitionResult = collectIndexedTransition(machine, selection.transition.transition, selection.context)
-  const target = transitionResult.state
+  const unresolvedTarget = transitionResult.state
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
     selection.transition.targets,
-    target
+    unresolvedTarget
   )
+  const initialResolution = unresolvedTarget !== undefined && isInitialTarget(unresolvedTarget)
+    ? resolveInitialTarget(
+      machine,
+      activeConfigurationFromIndexedState(descriptor, state),
+      unresolvedTarget,
+      (selection.context as any).event
+    )
+    : undefined
+  const target = initialResolution?.target ?? unresolvedTarget
   if (target !== undefined && !isTarget(target) && !isSnapshot(target)) {
     throw new Error("Machine expected indexed transition target to be a snapshot or target builder result")
   }
@@ -548,16 +558,16 @@ const collectIndexedEvaluatedTransition = (
   if (!changed) {
     return {
       selection,
-      unresolvedTarget: target as any,
+      unresolvedTarget: unresolvedTarget as any,
       target: target as any,
       next,
-      commands: transitionResult.commands,
-      raisedEvents: transitionResult.raisedEvents,
-      emittedEvents: transitionResult.emittedEvents,
+      commands: [...transitionResult.commands, ...(initialResolution?.commands ?? [])],
+      raisedEvents: [...transitionResult.raisedEvents, ...(initialResolution?.raisedEvents ?? [])],
+      emittedEvents: [...transitionResult.emittedEvents, ...(initialResolution?.emittedEvents ?? [])],
       changed: false,
       exitPaths: [],
       entryPaths: [],
-      choiceTransitions: []
+      choiceTransitions: initialResolution?.transitions ?? []
     }
   }
 
@@ -571,16 +581,16 @@ const collectIndexedEvaluatedTransition = (
     : naturalBoundary
   return {
     selection,
-    unresolvedTarget: target as any,
+    unresolvedTarget: unresolvedTarget as any,
     target: target as any,
     next,
-    commands: transitionResult.commands,
-    raisedEvents: transitionResult.raisedEvents,
-    emittedEvents: transitionResult.emittedEvents,
+    commands: [...transitionResult.commands, ...(initialResolution?.commands ?? [])],
+    raisedEvents: [...transitionResult.raisedEvents, ...(initialResolution?.raisedEvents ?? [])],
+    emittedEvents: [...transitionResult.emittedEvents, ...(initialResolution?.emittedEvents ?? [])],
     changed: true,
     exitPaths: getExitPaths(machine, activeConfigurationFromIndexedState(descriptor, state), boundary),
     entryPaths: getEntryPaths(machine, activeConfigurationFromIndexedState(descriptor, next), boundary),
-    choiceTransitions: []
+    choiceTransitions: initialResolution?.transitions ?? []
   }
 }
 

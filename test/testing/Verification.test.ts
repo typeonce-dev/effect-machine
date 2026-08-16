@@ -189,7 +189,7 @@ const historyMachine = Machine.make({
     },
     states: {
       editor: {
-        initial: () => new Editing({ revision: 0 })
+        initialize: ({ builder }) => builder(new Editing({ revision: 0 }))
       }
     }
   }

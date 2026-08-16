@@ -225,11 +225,11 @@ describe("Machine history states", () => {
         },
         states: {
           payment: {
-            initial: ({ state, containingState, ancestors }) => {
+            initialize: ({ state, containingState, ancestors, builder }) => {
               expect(state).type.toBe<Payment>()
               expect(containingState).type.toBe<Checkout>()
               expect(ancestors).type.toBe<{ readonly checkout: Checkout }>()
-              return new CardEntry({ cardNumber: `attempt-${state.attempt}` })
+              return builder(new CardEntry({ cardNumber: `attempt-${state.attempt}` }))
             }
           }
         }
@@ -259,11 +259,14 @@ describe("Machine history states", () => {
       }
     })
 
-    expect(machine.handle).type.not.toBeCallableWith({
+    machine.handle({
       checkout: {
         states: {
           payment: {
-            initial: () => new Verifying({ challengeId: "wrong-child" })
+            initialize: ({ builder }) => {
+              expect(builder).type.not.toBeCallableWith(new Verifying({ challengeId: "wrong-child" }))
+              return builder(new CardEntry({ cardNumber: "" }))
+            }
           }
         }
       }
@@ -461,7 +464,7 @@ describe("Machine history states", () => {
       checkout: {
         states: {
           payment: {
-            initial: ({ state }) => new CardEntry({ cardNumber: String(state.attempt) })
+            initialize: ({ state, builder }) => builder(new CardEntry({ cardNumber: String(state.attempt) }))
           }
         }
       }
@@ -572,12 +575,11 @@ describe("Machine history states", () => {
         },
         states: {
           all: {
-            initial: ({ state }) => {
+            initialize: ({ state, builder }) => {
               expect(state).type.toBe<Payment>()
-              return {
-                shipping: new Shipping({ address: `attempt-${state.attempt}` }),
-                card: new CardEntry({ cardNumber: "" })
-              }
+              return builder
+                .shipping(new Shipping({ address: `attempt-${state.attempt}` }))
+                .card(new CardEntry({ cardNumber: "" }))
             }
           }
         }
@@ -589,9 +591,12 @@ describe("Machine history states", () => {
       outer: {
         states: {
           all: {
-            initial: () => ({
-              shipping: new Shipping({ address: "missing-card" })
-            })
+            initialize: ({ builder }: Machine.Machine.StateInitializeContext<
+              typeof ParallelStates.states,
+              readonly [typeof Resume],
+              readonly [],
+              "outer.all"
+            >) => builder.shipping(new Shipping({ address: "missing-card" }))
           }
         }
       }

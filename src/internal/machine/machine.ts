@@ -33,7 +33,7 @@ import type { EnsureExecutable } from "./readiness.js"
 import * as internalRuntime from "./runtime.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
-import { ChildMachineLogicTypeId } from "./symbols.js"
+import { ChildMachineLogicTypeId, SnapshotBuilderStateTypeId } from "./symbols.js"
 import * as Topology from "./topology.js"
 
 export {
@@ -45,10 +45,9 @@ export {
   StartupError,
   StoppedError
 } from "./errors.js"
-export { ChildMachineLogicTypeId, InitialEventTypeId } from "./symbols.js"
+export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId } from "./symbols.js"
 
 const TypeId = "~effect/Machine"
-export const SnapshotBuilderStateTypeId: unique symbol = Symbol("effect/Machine/SnapshotBuilderState")
 export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type IsAny<A> = 0 extends 1 & A ? true : false
@@ -300,6 +299,24 @@ const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) =
   return method as Method & { readonly from: (...args: ReadonlyArray<any>) => unknown }
 }
 
+const withInitial = <Builder extends object>(
+  builder: Builder,
+  path: string,
+  valued: boolean,
+  values?: Readonly<Record<string, unknown>>
+): Builder => {
+  const initial = withFrom(
+    (value: unknown) => Topology.makeInitialTarget(path, value, values),
+    "leaf",
+    valued
+  )
+  Object.defineProperty(builder, "initial", {
+    value: initial,
+    enumerable: false
+  })
+  return builder
+}
+
 const makeSnapshotBuilder = (
   states: Machine.StateTree,
   options: SnapshotBuilderOptions
@@ -317,12 +334,15 @@ const makeSnapshotBuilder = (
       continue
     }
     const node = Topology.getStateNodeDefinition(path, definition)
-    builder[key] = withFrom(
+    const method = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) =>
         makeSnapshotForNode(definition, key, value, selector, options),
       node.states === undefined ? "leaf" : "nested",
       node.schema !== undefined
     )
+    builder[key] = node.states === undefined || options.mode !== "full" || options.prefix !== ""
+      ? method
+      : withInitial(method, path, node.schema !== undefined)
   }
   return builder
 }
@@ -348,7 +368,7 @@ const makeParallelSnapshotBuilder = (
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
     const node = Topology.getStateNodeDefinition(path, definition)
-    builder[key] = withFrom(
+    const method = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) => {
         const nextRegions: Record<string, unknown> = {}
         for (const regionKey of Object.keys(regions)) {
@@ -360,6 +380,7 @@ const makeParallelSnapshotBuilder = (
       node.states === undefined ? "leaf" : "nested",
       node.schema !== undefined
     )
+    builder[key] = method
   }
   return builder
 }
@@ -538,7 +559,7 @@ const makeLocalTargetChildBuilder = (
       builder[child.key] = () => Topology.makeChoiceTarget(child.path, parent.path, values)
       continue
     }
-    builder[child.key] = withFrom(
+    const method = withFrom(
       (value: unknown, selector?: (builder: unknown) => unknown) => {
         if (child.type === "atomic" || child.type === "final") {
           return makeTargetWithValues(child.path, value, values)
@@ -572,6 +593,9 @@ const makeLocalTargetChildBuilder = (
       child.type === "atomic" || child.type === "final" ? "leaf" : "nested",
       child.schema !== undefined
     )
+    builder[child.key] = child.type === "atomic" || child.type === "final"
+      ? method
+      : withInitial(method, child.path, child.schema !== undefined, values)
   }
   return builder
 }
@@ -677,6 +701,7 @@ const makeBranchTargetNodeBuilder = (
     "nested",
     node.schema !== undefined
   ) as unknown as Record<string, unknown>
+  withInitial(builder, node.path, node.schema !== undefined, values)
   if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
     addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
   }
