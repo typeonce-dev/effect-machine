@@ -18,8 +18,9 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
-import type { MachineTarget } from "../../Machine.js"
+import type { Inspection, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
+import * as InspectionRuntime from "./inspectionRuntime.js"
 
 type ChildDescriptor = {
   readonly id: string
@@ -69,7 +70,8 @@ const AcknowledgedMessageTypeId: unique symbol = Symbol("effect/Machine/Acknowle
 export interface AcknowledgedMessage<Event> {
   readonly [AcknowledgedMessageTypeId]: true
   readonly event: Event
-  readonly deferred: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+  readonly deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+  readonly inspection?: InspectedDelivery
 }
 
 /** @internal */
@@ -90,7 +92,10 @@ const succeedAcknowledgedMessage = <State>(
   delivery: AcknowledgedDelivery<State>
 ): void => {
   if (message !== undefined && isAcknowledgedMessage(message)) {
-    Deferred.doneUnsafe(message.deferred, Effect.succeed(delivery as AcknowledgedDelivery<unknown>))
+    if (message.deferred !== undefined) {
+      Deferred.doneUnsafe(message.deferred, Effect.succeed(delivery as AcknowledgedDelivery<unknown>))
+    }
+    message.inspection?.complete(delivery as AcknowledgedDelivery<unknown>)
   }
 }
 
@@ -99,15 +104,31 @@ const failAcknowledgedMessage = (
   cause: Cause.Cause<unknown>
 ): void => {
   if (message !== undefined && isAcknowledgedMessage(message)) {
-    Deferred.doneUnsafe(message.deferred, Effect.failCause(cause))
+    if (message.deferred !== undefined) Deferred.doneUnsafe(message.deferred, Effect.failCause(cause))
   }
 }
 
 const stopAcknowledgedMessage = (message: ProcessMessage<unknown> | undefined): void => {
   if (message !== undefined && isAcknowledgedMessage(message)) {
-    Deferred.doneUnsafe(message.deferred, Effect.fail(new StoppedError()))
+    if (message.deferred !== undefined) Deferred.doneUnsafe(message.deferred, Effect.fail(new StoppedError()))
   }
 }
+
+interface InspectedDelivery {
+  readonly deliveryId: number
+  readonly macrostepId: number
+  readonly source: Inspection.Subject | undefined
+  readonly event: unknown
+  readonly causedBy: Inspection.Causation | undefined
+  readonly complete: (delivery: AcknowledgedDelivery<unknown>) => void
+}
+
+type InspectedOffer<Event> = (
+  event: Event,
+  source: Inspection.Subject | undefined,
+  causedBy: Inspection.Causation | undefined,
+  deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+) => Effect.Effect<void, StoppedError>
 
 type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
 type ChildObservationBatch = [ChildObservation, ...Array<ChildObservation>]
@@ -295,6 +316,10 @@ export interface MachineRef<out State, in Event, out Error = never, out Output =
   readonly join: Effect.Effect<Output, Error | StoppedError>
   readonly stop: Effect.Effect<void>
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+  /** @internal */
+  readonly inspectionSubject?: Inspection.Subject
+  /** @internal */
+  readonly sendInspected?: ProcessAddress<Event>["sendInspected"]
   readonly [acknowledgedSend]?: (
     event: Event
   ) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
@@ -315,18 +340,35 @@ export interface PreparedProcess<
   readonly sessionId: string
   readonly changes: Stream.Stream<RuntimeSnapshot<State, Error, Output>, StartError>
   readonly emissions: Stream.Stream<Emitted>
+  readonly inspection: Stream.Stream<Inspection.Event>
   readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>
 }
 
 interface ProcessAddress<in Event> {
   readonly id: string
   readonly sessionId: string
+  readonly inspectionSubject?: Inspection.Subject
   readonly stop: Effect.Effect<void>
   readonly send: (event: Event) => Effect.Effect<void, StoppedError>
+  readonly sendInspected?: (
+    event: Event,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ) => Effect.Effect<void, StoppedError>
 }
 
-const isProcessAddress = (value: unknown): value is MachineTarget<unknown> =>
+const isMachineTarget = (value: unknown): value is MachineTarget<unknown> =>
   typeof value === "object" && value !== null && "send" in value && typeof value.send === "function"
+
+const sendMachineTarget = (
+  target: MachineTarget<unknown>,
+  event: unknown,
+  source: Inspection.Subject | undefined,
+  causedBy: Inspection.Causation | undefined
+): Effect.Effect<void, StoppedError> =>
+  "inspectionSubject" in target && "sendInspected" in target && typeof target.sendInspected === "function"
+    ? target.sendInspected(event, source, causedBy)
+    : target.send(event)
 
 export interface ProcessScope<Event> {
   readonly self: ProcessAddress<Event>
@@ -341,6 +383,11 @@ export interface ProcessScope<Event> {
   readonly stopChild: (child: ChildSelector) => Effect.Effect<void>
   /** @internal */
   readonly failCause: (cause: Cause.Cause<unknown>) => Effect.Effect<void>
+  /** @internal */
+  readonly inspectInitial: (
+    initialEntryPaths: ReadonlyArray<string>,
+    microsteps?: ReadonlyArray<unknown>
+  ) => void
 }
 
 export interface ProcessContext<State, Event> extends ProcessScope<Event> {
@@ -493,6 +540,11 @@ export interface ProcessLogic<
 > {
   /** @internal */
   readonly execution?: ProcessExecution<State, Event, Error, Requirements, Output, InitialError>
+  /** @internal */
+  readonly inspection?: {
+    readonly kind: Inspection.Subject["kind"]
+    readonly definition?: MachineDefinition.Any
+  }
   initial(scope: ProcessScope<Event>): Effect.Effect<State, InitialError, Requirements>
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
@@ -613,6 +665,7 @@ export const watch = <State, Event, Error = never, Output = never>(
 
 interface ProcessRuntime {
   readonly nextSessionId: Effect.Effect<string>
+  inspection?: InspectionRuntime.Runtime
 }
 
 const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
@@ -621,6 +674,85 @@ const makeProcessRuntime: Effect.Effect<ProcessRuntime> = Effect.sync(() => {
     nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`)
   }
 })
+
+const inspectionSubject = (
+  logic: ProcessLogic<any, any, any, any, any, any>,
+  id: string,
+  sessionId: string
+): Inspection.Subject => ({
+  id,
+  sessionId,
+  kind: logic.inspection?.kind ?? "Logic"
+})
+
+const messageCausation = (
+  message: ProcessMessage<unknown> | undefined,
+  initializing: boolean
+): Inspection.Causation | undefined =>
+  initializing
+    ? { _tag: "Initialization" }
+    : message !== undefined && isAcknowledgedMessage(message) && message.inspection !== undefined
+    ? { _tag: "Macrostep", macrostepId: message.inspection.macrostepId }
+    : undefined
+
+const makeInspectedMessage = <Event>(
+  inspection: InspectionRuntime.Runtime,
+  subject: Inspection.Subject,
+  event: Event,
+  source: Inspection.Subject | undefined,
+  causedBy: Inspection.Causation | undefined,
+  deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+): AcknowledgedMessage<Event> => {
+  const deliveryId = inspection.nextDeliveryId()
+  const macrostepId = inspection.nextMacrostepId()
+  const inspected: InspectedDelivery = {
+    deliveryId,
+    macrostepId,
+    source,
+    event,
+    causedBy,
+    complete: (delivery) => {
+      const microsteps = InspectionRuntime.microsteps(delivery.plan)
+      inspection.publishUnsafe({
+        _tag: "EventProcessed",
+        subject,
+        macrostepId,
+        deliveryId,
+        source,
+        event,
+        before: { status: "active", state: delivery.before },
+        after: { status: "active", state: delivery.after },
+        handled: microsteps.some((microstep) => microstep.transitions.length > 0),
+        configurationChanged: microsteps.some((microstep) => microstep.changed),
+        microsteps
+      })
+    }
+  }
+  return {
+    [AcknowledgedMessageTypeId]: true,
+    event,
+    ...(deferred === undefined ? undefined : { deferred }),
+    inspection: inspected
+  }
+}
+
+const publishInspectedSent = (
+  inspection: InspectionRuntime.Runtime,
+  subject: Inspection.Subject,
+  message: ProcessMessage<unknown>
+): void => {
+  if (!isAcknowledgedMessage(message) || message.inspection === undefined) return
+  const delivery = message.inspection
+  inspection.publishUnsafe({
+    _tag: "EventSent",
+    subject,
+    deliveryId: delivery.deliveryId,
+    source: delivery.source,
+    target: InspectionRuntime.endpoint(subject),
+    event: delivery.event,
+    causedBy: delivery.causedBy
+  })
+}
 
 interface StartInternalOptions {
   readonly detached?: boolean
@@ -642,6 +774,14 @@ interface StartInternalOptions {
   readonly parent?: ProcessAddress<unknown>
   readonly runtime: ProcessRuntime
   readonly sendParent?: (event: unknown) => Effect.Effect<void, StoppedError>
+  readonly origin?: Inspection.Origin
+  readonly activity?: {
+    readonly id: string
+    readonly owner: Inspection.Subject
+    readonly ownerPath: string
+    readonly kind: Inspection.Activity["kind"]
+  }
+  readonly inspectionRoot?: boolean
 }
 
 /** @internal */
@@ -653,7 +793,8 @@ export interface OwnedChildSpawnOptions {
   readonly descriptor?: ChildDescriptor
   readonly onOutcome: (
     isCurrent: () => boolean,
-    outcome: RuntimeOutcome<any, any, any>
+    outcome: RuntimeOutcome<any, any, any>,
+    activitySessionId: string | undefined
   ) => Effect.Effect<void>
   readonly onSnapshot?: (
     isCurrent: () => boolean,
@@ -663,6 +804,7 @@ export interface OwnedChildSpawnOptions {
     isCurrent: () => boolean,
     event: unknown
   ) => Effect.Effect<void, StoppedError>
+  readonly activityKind?: Inspection.Activity["kind"]
 }
 
 /** @internal */
@@ -684,7 +826,12 @@ interface ChildRuntime {
   readonly changes: <ChildState, ChildEvent, ChildError, ChildOutput>(
     child: ChildSelector
   ) => Stream.Stream<Option.Option<MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>>>
-  readonly sendTo: (child: ChildSelector, event: unknown) => Effect.Effect<void, StoppedError>
+  readonly sendTo: (
+    child: ChildSelector,
+    event: unknown,
+    source?: Inspection.Subject,
+    causedBy?: Inspection.Causation
+  ) => Effect.Effect<void, StoppedError>
   readonly stop: (child: ChildSelector) => Effect.Effect<void>
   readonly owned: OwnedChildRuntime
 }
@@ -737,13 +884,15 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
       })
       const parent: ProcessAddress<unknown> = {
         ...this.self,
-        send: (event) => options.sendParent(isCurrent, event)
+        send: (event) => options.sendParent(isCurrent, event),
+        sendInspected: (event, source, causedBy) =>
+          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void
       }
       const startOptions: StartInternalOptions = {
         detached: true,
         id: options.id,
         sendParent: (event) => options.sendParent(isCurrent, event),
-        onOutcome: (outcome) => options.onOutcome(isCurrent, outcome),
+        onOutcome: (outcome) => options.onOutcome(isCurrent, outcome, startedChild?.sessionId),
         ...(options.onSnapshot === undefined
           ? undefined
           : { onSnapshot: (snapshot) => options.onSnapshot!(isCurrent, snapshot) }),
@@ -754,7 +903,19 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         onStopSync: () => unregisterChild(this.registry, options.id, token),
         skipStoppedOutcome: true,
         parent,
-        runtime: this.runtime
+        runtime: this.runtime,
+        origin: { _tag: "Invoke", ownerPath: options.path, invokeId: options.duplicateId },
+        ...(options.activityKind === undefined || this.runtime.inspection === undefined ||
+            this.self.inspectionSubject === undefined
+          ? undefined
+          : {
+            activity: {
+              id: options.duplicateId,
+              owner: this.self.inspectionSubject,
+              ownerPath: options.path,
+              kind: options.activityKind
+            }
+          })
       }
       const execution = logic.execution
       const synchronous = this.services !== undefined && options.onSnapshot === undefined &&
@@ -816,6 +977,8 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
 
 const noChildChanges = Stream.succeed(Option.none()).pipe(Stream.concat(Stream.never))
 const noParentSend = (_event: unknown): Effect.Effect<void, StoppedError> => Effect.void
+const noInspectInitial = (_paths: ReadonlyArray<string>, _microsteps?: ReadonlyArray<unknown>): void => {}
+const noCausation = (): Inspection.Causation | undefined => undefined
 const EmissionsClosed: unique symbol = Symbol("effect/Machine/EmissionsClosed")
 
 type LazyEmissions = PubSub.PubSub<unknown> | typeof EmissionsClosed | undefined
@@ -996,7 +1159,12 @@ const makeChildRuntimeSync = (
     )
   }
 
-  const sendTo = (child: ChildSelector, event: unknown): Effect.Effect<void, StoppedError> => {
+  const sendTo = (
+    child: ChildSelector,
+    event: unknown,
+    source?: Inspection.Subject,
+    causedBy?: Inspection.Causation
+  ): Effect.Effect<void, StoppedError> => {
     const id = typeof child === "string" ? child : child.id
     return Effect.suspend(() => {
       if (registry.closed) {
@@ -1004,7 +1172,7 @@ const makeChildRuntimeSync = (
       }
       const entry = registry.children.get(id)
       return entry !== undefined && matchesChild(entry, child)
-        ? entry.ref.send(event)
+        ? sendMachineTarget(entry.ref, event, source, causedBy)
         : Effect.void
     })
   }
@@ -1100,7 +1268,8 @@ const makeChildRuntimeSync = (
           ),
         onStop: unregister(key, token),
         parent: self,
-        runtime
+        runtime,
+        origin: { _tag: "Spawn", address: spawnOptions?.id }
       }).pipe(
         Effect.onExit((exit) =>
           Exit.isFailure(exit)
@@ -1172,6 +1341,13 @@ const startGenericInternal: <
 
   const sessionId = options.sessionId ?? (yield* runtime.nextSessionId)
   const id = requestedId ?? sessionId
+  const inspector = runtime.inspection
+  const subject = inspector === undefined ? undefined : inspectionSubject(logic, id, sessionId)
+  const activity: Inspection.Activity | undefined = inspector === undefined || options.activity === undefined
+    ? undefined
+    : { ...options.activity, sessionId }
+  let initialEntryPaths: ReadonlyArray<string> | undefined
+  let initialMicrosteps: ReadonlyArray<unknown> | undefined
   const queue = yield* Queue.unbounded<ProcessMessage<Event>>()
   const emissions = options.emissions ?? makeEmissionRuntime()
   const termination = yield* Deferred.make<ProcessTermination>()
@@ -1180,6 +1356,26 @@ const startGenericInternal: <
   let initializing = true
   let inFlightMessage: ProcessMessage<Event> | undefined
   const requestStop = Deferred.succeed(termination, { _tag: "Stopped" }).pipe(Effect.asVoid)
+  const offerDirect = (message: ProcessMessage<Event>): Effect.Effect<void, StoppedError> =>
+    Queue.offer(queue, message).pipe(
+      Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
+    )
+  const offerInspected: InspectedOffer<Event> | undefined = inspector === undefined ? undefined : (
+    event,
+    source,
+    causedBy,
+    deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+  ) =>
+    Effect.suspend(() => {
+      const message: ProcessMessage<Event> = inspector.isActive()
+        ? makeInspectedMessage(inspector, subject!, event, source, causedBy, deferred)
+        : deferred === undefined
+        ? event
+        : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
+      return offerDirect(message).pipe(
+        Effect.tap(() => Effect.sync(() => publishInspectedSent(inspector, subject!, message)))
+      )
+    })
   const self: ProcessAddress<Event> = {
     id,
     sessionId,
@@ -1193,10 +1389,12 @@ const startGenericInternal: <
         ? requestStop
         : requestStop.pipe(Effect.andThen(Effect.never))
     ),
-    send: (event: Event) =>
-      Queue.offer(queue, event).pipe(
-        Effect.flatMap((accepted) => accepted ? Effect.void : Effect.fail(new StoppedError()))
-      )
+    send: inspector === undefined
+      ? (event) => offerDirect(event)
+      : (event) => offerInspected!(event, undefined, undefined),
+    ...(inspector === undefined
+      ? undefined
+      : { inspectionSubject: subject!, sendInspected: offerInspected! })
   }
   const sendAcknowledged:
     | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
@@ -1205,19 +1403,12 @@ const startGenericInternal: <
       : (event) =>
         Effect.uninterruptibleMask((restore) =>
           Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
-            Effect.flatMap((deferred) =>
-              Queue.offer(queue, {
-                [AcknowledgedMessageTypeId]: true as const,
-                event,
-                deferred
-              }).pipe(
-                Effect.flatMap((accepted) =>
-                  accepted
-                    ? restore(Deferred.await(deferred))
-                    : Effect.fail(new StoppedError())
-                )
-              )
-            ),
+            Effect.flatMap((deferred) => {
+              const offered = inspector === undefined
+                ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
+                : offerInspected!(event, undefined, undefined, deferred)
+              return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
+            }),
             Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
           )
         ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
@@ -1242,29 +1433,87 @@ const startGenericInternal: <
       stop: stopChild
     } = yield* makeChildRuntime(self, runtime))
   }
-  const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
-    Exit.isFailure(exit)
-      ? closeChildren(exit).pipe(Effect.andThen(emissions.close()))
-      : Effect.void
+  const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> => {
+    if (Exit.isSuccess(exit)) return Effect.void
+    if (inspector !== undefined) {
+      inspector.publishUnsafe(
+        activity === undefined
+          ? { _tag: "StartFailed", subject: subject!, cause: exit.cause }
+          : { _tag: "ActivityStopped", subject: activity.owner, activity, exit }
+      )
+    }
+    return closeChildren(exit).pipe(
+      Effect.andThen(emissions.close()),
+      Effect.andThen(options.inspectionRoot === true && inspector !== undefined ? inspector.close : Effect.void)
+    )
+  }
   const cleanup = onStopSync === undefined ? onStop ?? Effect.void : Effect.sync(onStopSync)
-  const sendParent = overrideSendParent ?? (parent === undefined ? noParentSend : parent.send)
+  const currentCausation = inspector === undefined
+    ? noCausation
+    : (): Inspection.Causation | undefined => messageCausation(inFlightMessage, initializing)
+  const sendParent = overrideSendParent ?? (parent === undefined
+    ? noParentSend
+    : inspector === undefined
+    ? parent.send
+    : (event) => sendMachineTarget(parent, event, subject, currentCausation()))
+  const emit = inspector === undefined
+    ? emissions.emit
+    : (event: unknown) =>
+      emissions.emit(event).pipe(
+        Effect.tap(() =>
+          Effect.sync(() =>
+            inspector.publishUnsafe({
+              _tag: "Emitted",
+              subject: subject!,
+              emission: event,
+              causedBy: currentCausation()
+            })
+          )
+        )
+      )
+  const sendToTarget: ProcessScope<Event>["sendTo"] = inspector === undefined
+    ? ((target: unknown, event: unknown) =>
+      isMachineTarget(target) ? target.send(event) : sendTo(target as ChildSelector, event)) as ProcessScope<
+        Event
+      >["sendTo"]
+    : ((target: unknown, event: unknown) =>
+      isMachineTarget(target)
+        ? sendMachineTarget(target, event, subject, currentCausation())
+        : sendTo(target as ChildSelector, event, subject, currentCausation())) as ProcessScope<Event>["sendTo"]
 
   const scope: ProcessScope<Event> = {
     self,
     parent,
     spawn,
     sendParent,
-    emit: emissions.emit,
-    sendTo: ((target: unknown, event: unknown) =>
-      isProcessAddress(target) ? target.send(event) : sendTo(target as ChildSelector, event)) as ProcessScope<
-        Event
-      >["sendTo"],
+    emit,
+    sendTo: sendToTarget,
     stopChild,
     failCause: (cause) =>
       Deferred.succeed(termination, {
         _tag: "Failure",
         cause: cause as Cause.Cause<Error>
-      }).pipe(Effect.asVoid)
+      }).pipe(Effect.asVoid),
+    inspectInitial: inspector === undefined
+      ? noInspectInitial
+      : (paths, microsteps = []) => {
+        initialEntryPaths = paths
+        initialMicrosteps = microsteps
+      }
+  }
+
+  if (inspector !== undefined) {
+    inspector.publishUnsafe(
+      activity === undefined
+        ? {
+          _tag: "Created",
+          subject: subject!,
+          parent: parent?.inspectionSubject,
+          origin: options.origin ?? { _tag: "Root" },
+          definition: logic.inspection?.definition
+        }
+        : { _tag: "ActivityStarted", subject: activity.owner, activity }
+    )
   }
 
   const initial = yield* logic.initial(scope).pipe(
@@ -1282,6 +1531,15 @@ const startGenericInternal: <
       state: initial
     }
   })
+  if (activity === undefined) {
+    inspector?.publishUnsafe({
+      _tag: "Initialized",
+      subject: subject!,
+      snapshot: { status: "active", state: initial },
+      initialEntryPaths: initialEntryPaths ?? [],
+      microsteps: InspectionRuntime.microsteps({ microsteps: initialMicrosteps ?? [] })
+    })
+  }
   const publishSnapshot: (
     snapshot: VersionedSnapshot<State, Error, Output>
   ) => Effect.Effect<VersionedSnapshot<State, Error, Output>> = onSnapshot === undefined
@@ -1296,9 +1554,7 @@ const startGenericInternal: <
       const runtimeSnapshot = snapshot.snapshot
       return runtimeSnapshot.status !== "active"
         ? publish
-        : publish.pipe(Effect.tap(() =>
-          notifyActiveSnapshot(onSnapshot, runtimeSnapshot)
-        ))
+        : publish.pipe(Effect.tap(() => notifyActiveSnapshot(onSnapshot, runtimeSnapshot)))
     }
 
   const completeChanges = (
@@ -1402,7 +1658,7 @@ const startGenericInternal: <
       Effect.asVoid
     )
 
-  const setActiveState = (state: State) =>
+  const setActiveStateDirect = (state: State) =>
     updateSnapshot((snapshot) =>
       Effect.succeed(
         snapshot.status === "active"
@@ -1413,6 +1669,40 @@ const startGenericInternal: <
           : undefined
       )
     ).pipe(Effect.asVoid)
+
+  const setActiveState = inspector === undefined ?
+    setActiveStateDirect :
+    (state: State) =>
+      SynchronizedRef.get(current).pipe(
+        Effect.flatMap((before) =>
+          updateSnapshot((snapshot) =>
+            Effect.succeed(
+              snapshot.status === "active"
+                ? {
+                  status: "active",
+                  state
+                }
+                : undefined
+            )
+          ).pipe(
+            Effect.tap((after) =>
+              Effect.sync(() => {
+                if (logic.inspection?.kind === "Machine" || after === undefined) return
+                inspector.publishUnsafe({
+                  _tag: "StateChanged",
+                  subject: subject!,
+                  before: before.snapshot.state,
+                  after: state,
+                  causedByDeliveryId: inFlightMessage !== undefined && isAcknowledgedMessage(inFlightMessage)
+                    ? inFlightMessage.inspection?.deliveryId
+                    : undefined
+                })
+              })
+            )
+          )
+        ),
+        Effect.asVoid
+      )
 
   const terminalizeWith = (
     snapshot: RuntimeSnapshot<State, Error, Output>,
@@ -1426,6 +1716,22 @@ const startGenericInternal: <
           Effect.exit,
           Effect.asVoid
         )
+    const closeEmissionsAndInspect = inspector === undefined
+      ? emissions.close()
+      : emissions.close().pipe(
+        Effect.andThen(Effect.sync(() =>
+          inspector.publishUnsafe(
+            activity === undefined
+              ? { _tag: "Terminated", subject: subject!, snapshot }
+              : {
+                _tag: "ActivityStopped",
+                subject: activity.owner,
+                activity,
+                exit: snapshot.status === "stopped" ? Exit.interrupt() : exit
+              }
+          )
+        ))
+      )
     return Effect.uninterruptible(
       Effect.sync(() => {
         while (true) {
@@ -1437,7 +1743,7 @@ const startGenericInternal: <
         Effect.andThen(Queue.shutdown(queue)),
         Effect.andThen(closeChildren(exit)),
         Effect.andThen(setAndPublishSnapshot(snapshot)),
-        Effect.andThen(emissions.close()),
+        Effect.andThen(closeEmissionsAndInspect),
         Effect.andThen(Effect.sync(() => {
           if (Exit.isFailure(exit)) {
             failAcknowledgedMessage(inFlightMessage, exit.cause)
@@ -1448,6 +1754,7 @@ const startGenericInternal: <
         })),
         Effect.andThen(notifyOutcome),
         Effect.andThen(cleanup),
+        Effect.andThen(options.inspectionRoot === true && inspector !== undefined ? inspector.close : Effect.void),
         Effect.andThen(completeDone)
       )
     )
@@ -1530,25 +1837,79 @@ const startGenericInternal: <
         inFlightMessage = undefined
       }
     }
+  const receive = inspector === undefined || logic.execution?._tag === "Compiled"
+    ? Queue.take(queue).pipe(Effect.map(messageEvent))
+    : Queue.take(queue).pipe(
+      Effect.tap((message) =>
+        Effect.sync(() => {
+          inFlightMessage = message
+        })
+      ),
+      Effect.map(messageEvent)
+    )
+  const poll = inspector === undefined || logic.execution?._tag === "Compiled"
+    ? Queue.poll(queue).pipe(Effect.map(Option.map(messageEvent)))
+    : Queue.poll(queue).pipe(
+      Effect.tap((message) =>
+        Effect.sync(() => {
+          if (Option.isSome(message)) inFlightMessage = message.value
+        })
+      ),
+      Effect.map(Option.map(messageEvent))
+    )
+  const updateStateDirect = <E2, R2>(f: (state: State) => Effect.Effect<State, E2, R2>) =>
+    updateSnapshot((snapshot) =>
+      snapshot.status === "active"
+        ? f(snapshot.state).pipe(
+          Effect.map((state) => ({
+            status: "active" as const,
+            state
+          }))
+        )
+        : Effect.succeed(undefined)
+    ).pipe(Effect.asVoid)
+  const updateState: ProcessContext<State, Event>["updateState"] = inspector === undefined
+    ? updateStateDirect
+    : (f) =>
+      SynchronizedRef.get(current).pipe(
+        Effect.flatMap((before) =>
+          updateSnapshot((snapshot) =>
+            snapshot.status === "active"
+              ? f(snapshot.state).pipe(
+                Effect.map((state) => ({
+                  status: "active" as const,
+                  state
+                }))
+              )
+              : Effect.succeed(undefined)
+          ).pipe(
+            Effect.tap((after) =>
+              Effect.sync(() => {
+                if (logic.inspection?.kind === "Machine" || after?.status !== "active") return
+                inspector.publishUnsafe({
+                  _tag: "StateChanged",
+                  subject: subject!,
+                  before: before.snapshot.state,
+                  after: after.state,
+                  causedByDeliveryId: inFlightMessage !== undefined && isAcknowledgedMessage(inFlightMessage)
+                    ? inFlightMessage.inspection?.deliveryId
+                    : undefined
+                })
+              })
+            )
+          )
+        ),
+        Effect.asVoid
+      )
   const context: ProcessContext<State, Event> = {
     ...scope,
     ...(logic.execution?._tag === "Compiled" && !logic.execution.childless ? { ownedChildren } : undefined),
     ...acknowledgedContext,
-    receive: Queue.take(queue).pipe(Effect.map(messageEvent)),
-    poll: Queue.poll(queue).pipe(Effect.map(Option.map(messageEvent))),
+    receive,
+    poll,
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     setState: setActiveState,
-    updateState: (f) =>
-      updateSnapshot((snapshot) =>
-        snapshot.status === "active"
-          ? f(snapshot.state).pipe(
-            Effect.map((state) => ({
-              status: "active" as const,
-              state
-            }))
-          )
-          : Effect.succeed(undefined)
-      ).pipe(Effect.asVoid)
+    updateState
   }
 
   const getOrCreateChanges = SynchronizedRef.modifyEffect(
@@ -1591,6 +1952,9 @@ const startGenericInternal: <
   const ref: MachineRef<State, Event, Error, Output> = {
     id,
     sessionId,
+    ...(inspector === undefined
+      ? undefined
+      : { inspectionSubject: subject!, sendInspected: offerInspected! }),
     state: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot.state)),
     snapshot: SynchronizedRef.get(current).pipe(Effect.map((current) => current.snapshot)),
     changes: changesStream,
@@ -1715,7 +2079,15 @@ type CompiledRunState = "Initializing" | "Idle" | "Draining"
 class CompiledProcess implements MachineRef<any, any, any, any> {
   readonly id: string
   readonly sessionId: string
-  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>;
+  readonly inspectionSubject?: Inspection.Subject
+  readonly send: (event: unknown) => Effect.Effect<void, StoppedError>
+  sendInspected(
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined
+  ): Effect.Effect<void, StoppedError> {
+    return this.offerEvent(event, source, causedBy)
+  }
   [acknowledgedSend](
     event: unknown
   ): Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError> {
@@ -1750,6 +2122,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   private inFlightMessage: ProcessMessage<unknown> | undefined
   private readonly externalEmissions: EmissionRuntime | undefined
   private emissionsPubSub: LazyEmissions
+  private readonly activity?: Inspection.Activity
+  private initialEntryPaths?: ReadonlyArray<string>
+  private initialMicrosteps?: ReadonlyArray<unknown>
+  private initializing?: boolean
 
   constructor(
     private readonly logic: ProcessLogic<any, any, any, any, any, any>,
@@ -1759,14 +2135,89 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   ) {
     this.sessionId = sessionId
     this.id = options.id ?? sessionId
+    const inspector = options.runtime.inspection
+    if (inspector !== undefined) {
+      this.inspectionSubject = inspectionSubject(logic, this.id, sessionId)
+      this.initializing = true
+      if (options.activity !== undefined) this.activity = { ...options.activity, sessionId }
+    }
     this.externalEmissions = options.emissions
-    this.send = (event) => this.offerMessage(event)
+    this.send = inspector === undefined
+      ? (event) => this.offerMessage(event)
+      : (event) => this.offerEvent(event, undefined, undefined)
     this.address = {
       id: this.id,
       sessionId,
       stop: Effect.suspend(() => this.stopFromProcess()),
-      send: this.send
+      send: this.send,
+      ...(inspector === undefined
+        ? undefined
+        : {
+          inspectionSubject: this.inspectionSubject!,
+          sendInspected: (
+            event: unknown,
+            source: Inspection.Subject | undefined,
+            causedBy: Inspection.Causation | undefined
+          ) => this.offerEvent(event, source, causedBy)
+        })
     }
+  }
+
+  private get inspector(): InspectionRuntime.Runtime | undefined {
+    return this.options.runtime.inspection
+  }
+
+  private causation(): Inspection.Causation | undefined {
+    return messageCausation(this.inFlightMessage, this.initializing === true)
+  }
+
+  private publishCreated(): void {
+    const inspector = this.inspector
+    const subject = this.inspectionSubject
+    if (inspector === undefined || subject === undefined) return
+    inspector.publishUnsafe(
+      this.activity === undefined
+        ? {
+          _tag: "Created",
+          subject,
+          parent: this.options.parent?.inspectionSubject,
+          origin: this.options.origin ?? { _tag: "Root" },
+          definition: this.logic.inspection?.definition
+        }
+        : { _tag: "ActivityStarted", subject: this.activity.owner, activity: this.activity }
+    )
+  }
+
+  private publishInitialized(state: unknown): void {
+    this.initializing = false
+    if (this.activity !== undefined) return
+    const inspector = this.inspector
+    const subject = this.inspectionSubject
+    if (inspector === undefined || subject === undefined) return
+    inspector.publishUnsafe({
+      _tag: "Initialized",
+      subject,
+      snapshot: { status: "active", state },
+      initialEntryPaths: this.initialEntryPaths ?? [],
+      microsteps: InspectionRuntime.microsteps({ microsteps: this.initialMicrosteps ?? [] })
+    })
+  }
+
+  private publishStartFailed(cause: Cause.Cause<unknown>): void {
+    this.initializing = false
+    const inspector = this.inspector
+    const subject = this.inspectionSubject
+    if (inspector === undefined || subject === undefined) return
+    inspector.publishUnsafe(
+      this.activity === undefined
+        ? { _tag: "StartFailed", subject, cause }
+        : {
+          _tag: "ActivityStopped",
+          subject: this.activity.owner,
+          activity: this.activity,
+          exit: Exit.failCause(cause)
+        }
+    )
   }
 
   private get execution(): CompiledProcessExecution<any, any, any, any, any, any> {
@@ -1774,11 +2225,16 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   initializeCompiledSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
+    this.publishCreated()
     if (!this.execution.childless) {
       this.childRuntime = makeChildRuntimeSync(this.address, this.options.runtime, this.services)
     }
     const parent = this.options.parent
-    const sendParent = this.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
+    const sendParent = this.options.sendParent ?? (parent === undefined
+      ? noParentSend
+      : this.inspector === undefined
+      ? parent.send
+      : (event: unknown) => sendMachineTarget(parent, event, this.inspectionSubject, this.causation()))
     this.processScope = {
       self: this.address,
       parent,
@@ -1786,11 +2242,24 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       sendParent,
       emit: (event) => this.emitEvent(event),
       sendTo: ((target: unknown, event: unknown) =>
-        isProcessAddress(target)
-          ? target.send(event)
-          : this.childRuntime.sendTo(target as ChildSelector, event)) as ProcessScope<unknown>["sendTo"],
+        isMachineTarget(target)
+          ? this.inspector === undefined
+            ? target.send(event)
+            : sendMachineTarget(target, event, this.inspectionSubject, this.causation())
+          : this.childRuntime.sendTo(
+            target as ChildSelector,
+            event,
+            this.inspectionSubject,
+            this.causation()
+          )) as ProcessScope<unknown>["sendTo"],
       stopChild: this.childRuntime.stop,
-      failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause)
+      failCause: (cause: Cause.Cause<unknown>) => this.failCause(cause),
+      inspectInitial: this.inspector === undefined
+        ? noInspectInitial
+        : (paths, microsteps = []) => {
+          this.initialEntryPaths = paths
+          this.initialMicrosteps = microsteps
+        }
     }
     const compiledInitial = this.execution.initialSync!
     let initialized: CompiledInitialized
@@ -1798,6 +2267,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       initialized = compiledInitial(this.processScope)
     } catch (error) {
       this.runState = "Idle"
+      this.publishStartFailed(Cause.fail(error))
       return Effect.fail(error)
     }
     this.runState = "Idle"
@@ -1807,6 +2277,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       changes: undefined,
       snapshot: { status: "active", state: initialized.state }
     }
+    this.publishInitialized(initialized.state)
     this.compiledContext = new CompiledProcessContextImpl(this.processScope, this.childRuntime.owned, this)
     if ("executionState" in initialized) {
       this.compiledContext.executionState = initialized.executionState
@@ -1831,11 +2302,16 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   initialize(): Effect.Effect<MachineRef<any, any, any, any>, unknown, any> {
     const self = this
     return Effect.gen(function*() {
+      self.publishCreated()
       if (!self.execution.childless) {
         self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime, self.services)
       }
       const parent = self.options.parent
-      const sendParent = self.options.sendParent ?? (parent === undefined ? noParentSend : parent.send)
+      const sendParent = self.options.sendParent ?? (parent === undefined
+        ? noParentSend
+        : self.inspector === undefined
+        ? parent.send
+        : (event: unknown) => sendMachineTarget(parent, event, self.inspectionSubject, self.causation()))
       self.processScope = {
         self: self.address,
         parent,
@@ -1843,11 +2319,24 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         sendParent,
         emit: (event) => self.emitEvent(event),
         sendTo: ((target: unknown, event: unknown) =>
-          isProcessAddress(target)
-            ? target.send(event)
-            : self.childRuntime.sendTo(target as ChildSelector, event)) as ProcessScope<unknown>["sendTo"],
+          isMachineTarget(target)
+            ? self.inspector === undefined
+              ? target.send(event)
+              : sendMachineTarget(target, event, self.inspectionSubject, self.causation())
+            : self.childRuntime.sendTo(
+              target as ChildSelector,
+              event,
+              self.inspectionSubject,
+              self.causation()
+            )) as ProcessScope<unknown>["sendTo"],
         stopChild: self.childRuntime.stop,
-        failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause)
+        failCause: (cause: Cause.Cause<unknown>) => self.failCause(cause),
+        inspectInitial: self.inspector === undefined
+          ? noInspectInitial
+          : (paths, microsteps = []) => {
+            self.initialEntryPaths = paths
+            self.initialMicrosteps = microsteps
+          }
       }
 
       const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> =>
@@ -1867,7 +2356,10 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         )
         : compiledInitial(self.processScope)
       const initialized = yield* initializeEffect.pipe(
-        Effect.onExit(cleanupStartupFailure),
+        Effect.onExit((exit) => {
+          if (Exit.isFailure(exit)) self.publishStartFailed(exit.cause)
+          return cleanupStartupFailure(exit)
+        }),
         Effect.ensuring(Effect.sync(() => {
           self.runState = "Idle"
         }))
@@ -1879,6 +2371,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
         changes: undefined,
         snapshot: { status: "active", state: initial }
       }
+      self.publishInitialized(initial)
       if (self.execution.drain._tag === "Process") {
         self.processContext = {
           ...self.processScope,
@@ -2022,16 +2515,37 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return Effect.uninterruptibleMask((restore) =>
       Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
         Effect.flatMap((deferred) =>
-          this.offerMessage({
-            [AcknowledgedMessageTypeId]: true as const,
-            event,
-            deferred
-          }).pipe(
+          this.offerEvent(event, undefined, undefined, deferred).pipe(
             Effect.andThen(restore(Deferred.await(deferred)))
           )
         )
       )
     )
+  }
+
+  private offerEvent(
+    event: unknown,
+    source: Inspection.Subject | undefined,
+    causedBy: Inspection.Causation | undefined,
+    deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
+  ): Effect.Effect<void, StoppedError> {
+    return Effect.suspend(() => {
+      const inspector = this.inspector
+      const subject = this.inspectionSubject
+      const message: ProcessMessage<unknown> = inspector?.isActive() === true && subject !== undefined
+        ? makeInspectedMessage(
+          inspector,
+          subject,
+          event,
+          source,
+          causedBy,
+          deferred
+        )
+        : deferred === undefined
+        ? event
+        : { [AcknowledgedMessageTypeId]: true as const, event, deferred }
+      return this.offerMessage(message)
+    })
   }
 
   private offerMessage(message: ProcessMessage<unknown>): Effect.Effect<void, StoppedError> {
@@ -2041,6 +2555,9 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           return Effect.fail(new StoppedError())
         }
         offerCompactMailbox(this.mailbox, message)
+        const inspector = this.inspector
+        const subject = this.inspectionSubject
+        if (inspector !== undefined && subject !== undefined) publishInspectedSent(inspector, subject, message)
         this.offerRevision += 1
         if (this.runState === "Draining") {
           return Effect.void
@@ -2096,6 +2613,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       this.lifecycle !== "Active" ||
       (this.options.onOutcome !== undefined && this.options.skipStoppedOutcome !== true) ||
       this.options.onStop !== undefined ||
+      this.inspector !== undefined ||
       this.current.changes !== undefined ||
       this.current.terminalizing || this.current.snapshot.status !== "active"
     ) {
@@ -2245,13 +2763,31 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           Effect.exit,
           Effect.asVoid
         )
+      const inspector = this.inspector
+      const subject = this.inspectionSubject
+      const closeEmissionsAndInspect = inspector === undefined || subject === undefined
+        ? this.closeEmissions()
+        : this.closeEmissions().pipe(
+          Effect.andThen(Effect.sync(() =>
+            inspector.publishUnsafe(
+              this.activity === undefined
+                ? { _tag: "Terminated", subject, snapshot }
+                : {
+                  _tag: "ActivityStopped",
+                  subject: this.activity.owner,
+                  activity: this.activity,
+                  exit: snapshot.status === "stopped" ? Exit.interrupt() : exit
+                }
+            )
+          ))
+        )
       return Effect.uninterruptible(
         Effect.sync(() => {
           closeCompactMailbox(this.mailbox)
         }).pipe(
           Effect.andThen(this.childRuntime.close(exit)),
           Effect.andThen(this.setAndPublishSnapshot(snapshot)),
-          Effect.andThen(this.closeEmissions()),
+          Effect.andThen(closeEmissionsAndInspect),
           Effect.andThen(Effect.sync(() => {
             if (requested._tag === "Failure") {
               failAcknowledgedMessage(this.inFlightMessage, requested.cause)
@@ -2262,6 +2798,11 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
           })),
           Effect.andThen(notifyOutcome),
           Effect.andThen(this.options.onStop ?? Effect.void),
+          Effect.andThen(
+            this.options.inspectionRoot === true && this.inspector !== undefined
+              ? this.inspector.close
+              : Effect.void
+          ),
           Effect.andThen(Effect.sync(() => {
             this.options.onStopSync?.()
             this.runState = "Idle"
@@ -2301,12 +2842,26 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   }
 
   private emitEvent(event: unknown): Effect.Effect<void> {
-    if (this.externalEmissions !== undefined) return this.externalEmissions.emit(event)
-    return Effect.suspend(() =>
-      this.emissionsPubSub === undefined || this.emissionsPubSub === EmissionsClosed
-        ? Effect.void
-        : PubSub.publish(this.emissionsPubSub, event).pipe(Effect.asVoid)
-    )
+    const publish = this.externalEmissions !== undefined ?
+      this.externalEmissions.emit(event) :
+      Effect.suspend(() =>
+        this.emissionsPubSub === undefined || this.emissionsPubSub === EmissionsClosed
+          ? Effect.void
+          : PubSub.publish(this.emissionsPubSub, event).pipe(Effect.asVoid)
+      )
+    const inspector = this.inspector
+    const subject = this.inspectionSubject
+    if (inspector === undefined || subject === undefined) return publish
+    return publish.pipe(Effect.tap(() =>
+      Effect.sync(() =>
+        inspector.publishUnsafe({
+          _tag: "Emitted",
+          subject,
+          emission: event,
+          causedBy: this.causation()
+        })
+      )
+    ))
   }
 
   shutdownEmissions(): Effect.Effect<void> {
@@ -2570,7 +3125,17 @@ const startCompactCompiledInternal: typeof startGenericInternal = Effect.fnUntra
     ? process.initializeCompiledSync()
     : process.initialize()
   return yield* initialize.pipe(
-    Effect.onExit((exit) => Exit.isFailure(exit) ? process.shutdownEmissions() : Effect.void)
+    Effect.onExit((exit) =>
+      Exit.isFailure(exit)
+        ? process.shutdownEmissions().pipe(
+          Effect.andThen(
+            options.inspectionRoot === true && options.runtime.inspection !== undefined
+              ? options.runtime.inspection.close
+              : Effect.void
+          )
+        )
+        : Effect.void
+    )
   )
 }) as typeof startGenericInternal
 
@@ -2689,6 +3254,8 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
 ) {
   const runtime = yield* makeProcessRuntime
   const sessionId = yield* runtime.nextSessionId
+  const inspection = yield* InspectionRuntime.make(sessionId)
+  runtime.inspection = inspection
   const emissions = makeEmissionRuntime()
   const started = yield* Deferred.make<MachineRef<State, Event, Error, Output, Emitted>, InitialError>()
   const internalOptions: StartInternalOptions = options === undefined
@@ -2696,14 +3263,18 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
       detached: true,
       emissions,
       runtime,
-      sessionId
+      sessionId,
+      inspectionRoot: true,
+      origin: { _tag: "Root" }
     }
     : {
       ...options,
       detached: true,
       emissions,
       runtime,
-      sessionId
+      sessionId,
+      inspectionRoot: true,
+      origin: { _tag: "Root" }
     }
   const initialize = strategy === "generic"
     ? startGenericInternal(logic, internalOptions)
@@ -2724,6 +3295,7 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
       Deferred.await(started).pipe(Effect.map((ref) => ref.changes))
     ),
     emissions: emissions.stream as Stream.Stream<Emitted>,
+    inspection: inspection.stream,
     start
   }
 })

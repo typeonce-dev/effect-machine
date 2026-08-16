@@ -139,6 +139,32 @@ export const emissions = <State, Event, Error, Output, StartError, Emitted>(
   )
 }
 
+export const inspection = <State, Event, Error, Output, StartError, Emitted>(
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
+): Stream.Stream<Machine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> => {
+  const prepared = preparedByMachineAtom.get(self as object)
+  if (prepared === undefined) return Stream.empty
+  return Stream.unwrap(
+    Effect.gen(function*() {
+      const registry = yield* AtomRegistry.AtomRegistry
+      const releasePrepared = yield* Effect.sync(() => registry.mount(prepared))
+      yield* Effect.addFinalizer(() => Effect.sync(releasePrepared))
+      const machine = yield* Atom.getResult(prepared)
+      const pull = yield* Stream.toPull(machine.inspection)
+      const firstPull = yield* pull.pipe(Effect.forkScoped({ startImmediately: true }))
+      const releaseRef = yield* Effect.sync(() => registry.mount(self.ref))
+      yield* Effect.addFinalizer(() => Effect.sync(releaseRef))
+      yield* Atom.getResult(self.ref)
+      let first = true
+      return Stream.fromPull(Effect.succeed(Effect.suspend(() => {
+        if (!first) return pull
+        first = false
+        return Fiber.join(firstPull)
+      })))
+    })
+  )
+}
+
 export const childEmissions = <Child extends Machine.ChildMachine.Any, StartError>(
   self: ChildMachineAtom<Child, StartError>
 ): Stream.Stream<RefEmitted<Machine.ChildMachine.Ref<Child>>, StartError, AtomRegistry.AtomRegistry> =>

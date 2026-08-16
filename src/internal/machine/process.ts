@@ -73,8 +73,7 @@ const acknowledgedPlan = (
   commands: planned.commands,
   emittedEvents: planned.emittedEvents,
   microsteps: planned.microsteps.map((microstep) => {
-    const { transitions: _, ...evidence } = microstep
-    return { ...evidence, next: snapshot(microstep.next) }
+    return { ...microstep, transitions: microstep.transitions ?? [], next: snapshot(microstep.next) }
   }),
   done: planned.done,
   output: planned.output
@@ -433,6 +432,7 @@ const makeProcessLogic: <
   ) => {
     try {
       const planned = compiledInitial(initialArgs, scope)
+      scope.inspectInitial(planned.initialEntryPaths)
       const result = {
         state: planned.state as Machine.Snapshot<States>,
         done: planned.done,
@@ -461,6 +461,7 @@ const makeProcessLogic: <
       ? internalRuntime.provideMachineRuntime(
         internalPlanner.planInitial(internalPlanner.withMachineReferences(machine, scope), ...initialArgs).pipe(
           Effect.flatMap((planned) => {
+            scope.inspectInitial(planned.initialEntryPaths, planned.microsteps)
             const commands = planned.commands.length === 0
               ? undefined
               : CommandRuntime.runCommands(planned.commands, scope)
@@ -486,6 +487,7 @@ const makeProcessLogic: <
       )
       : Effect.try({ try: () => makeCompiledInitial!(scope), catch: (error) => error as any })
   return ({
+    inspection: { kind: "Machine", definition: machine },
     execution: {
       _tag: "Compiled",
       childless: !hasInvokes,
