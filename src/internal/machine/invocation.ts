@@ -48,7 +48,7 @@ const resolveOne = (
     return {
       id: String(raw.id),
       src: () =>
-        oneShot(resolveValue(raw.effect, context) as Effect.Effect<any, any, any>) as unknown as Runtime.ProcessLogic<
+        oneShot(raw.effect(context) as Effect.Effect<any, any, any>) as unknown as Runtime.ProcessLogic<
           any,
           any,
           any,

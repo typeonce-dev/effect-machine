@@ -533,7 +533,7 @@ describe("machine planner and runtime strategies", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Effect.succeed(new Loaded({ value: "complete" })),
+            effect: () => Effect.succeed(new Loaded({ value: "complete" })),
             onDone: ({ output }) => states.initial.Success(new Success({ value: output.value }))
           })
         },
@@ -575,7 +575,7 @@ describe("machine planner and runtime strategies", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Effect.fail("unavailable"),
+            effect: () => Effect.fail("unavailable"),
             onFailure: ({ error, target }) => target.full.Failed(new Failed({ error }))
           })
         },

@@ -730,7 +730,7 @@ describe("Machine", () => {
           Loading: {
             invoke: Machine.invoke({
               id: "load",
-              effect: Deferred.await(release),
+              effect: () => Deferred.await(release),
               onDone: ({ target }) => target.full.Waiting.from()
             })
           },
@@ -4142,7 +4142,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.succeed("done:request-1"),
+            effect: () => Effect.succeed("done:request-1"),
             onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
           })
         },
@@ -4183,7 +4183,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.succeed("done:request-1"),
+            effect: () => Effect.succeed("done:request-1"),
             onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
           })
         },
@@ -4487,7 +4487,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.fail(error),
+            effect: () => Effect.fail(error),
             onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
           })
         },
@@ -4528,7 +4528,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.succeed("loaded"),
+            effect: () => Effect.succeed("loaded"),
             onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
           })
         },
@@ -4648,7 +4648,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.fail(failure),
+            effect: () => Effect.fail(failure),
             onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
           })
         },
@@ -4676,7 +4676,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: requiredMessage,
+            effect: () => requiredMessage,
             onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
           })
         },
@@ -4782,7 +4782,7 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "request",
-            effect: Effect.die(error)
+            effect: () => Effect.die(error)
           })
         }
       })

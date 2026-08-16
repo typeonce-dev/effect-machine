@@ -731,7 +731,7 @@ receive the typed Effect channels and can transition directly:
 ```ts
 invoke: Machine.invoke({
   id: "save",
-  effect: SaveService.save(draft),
+  effect: () => SaveService.save(draft),
   onDone: ({ output, target }) => target.full.Saved({ entry: output }),
   onFailure: ({ error, target }) =>
     target.full.SaveFailed({ message: error.message })
@@ -803,12 +803,13 @@ invoke: Machine.invoke({
 ```
 
 The timer starts on state entry and is interrupted on exit. Its `onDone` is
-always required. `effect: Effect.sleep(...)` has the same scoped cancellation
-behavior, but `after` records timer intent and exposes a static duration through
-`Machine.activityDefinitions`. For reusable process logic, provide `logic`, a
-state-local lifecycle `id`, and a typed `address`. TypeScript checks the address
-protocol against the logic event protocol. Lifecycle ids and addresses serve
-different purposes and must both be explicit.
+always required. `effect: () => Effect.sleep(...)` has the same scoped
+cancellation behavior, but `after` records timer intent and exposes a static
+duration through `Machine.activityDefinitions`. Effect sources are always
+factories evaluated when their state is entered. For reusable process logic,
+provide `logic`, a state-local lifecycle `id`, and a typed `address`. TypeScript
+checks the address protocol against the logic event protocol. Lifecycle ids and
+addresses serve different purposes and must both be explicit.
 
 ## Invoked child statecharts
 

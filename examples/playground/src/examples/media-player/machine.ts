@@ -53,7 +53,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
               Paused: {
                 invoke: Machine.invoke({
                   id: "pause-audio",
-                  effect: pauseAudio,
+                  effect: () => pauseAudio,
                   onDone: ({ target }) => target.none(),
                   onFailure: ({ error, target }, enqueue) => {
                     enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
@@ -75,7 +75,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                 invoke: [
                   Machine.invoke({
                     id: "play-audio",
-                    effect: playAudio,
+                    effect: () => playAudio,
                     onDone: ({ target }) => target.none(),
                     onFailure: ({ error, target }, enqueue) => {
                       enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
@@ -145,7 +145,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
               Restarting: {
                 invoke: Machine.invoke({
                   id: "restart-audio",
-                  effect: restartAudio,
+                  effect: () => restartAudio,
                   onDone: ({ target }, enqueue) => {
                     enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded())
                     return target.none()

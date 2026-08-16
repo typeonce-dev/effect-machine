@@ -39,7 +39,7 @@ const activityMachine = Machine.make({
       }),
       Machine.invoke({
         id: "load-document",
-        effect: Effect.fail("unavailable").pipe(Effect.as(1)),
+        effect: () => Effect.fail("unavailable").pipe(Effect.as(1)),
         onDone: ({ target }) => target.none(),
         onFailure: ({ target }) => target.none()
       }),
@@ -79,7 +79,7 @@ const machine = {
       invoke: [
         {
           id: "load-document",
-          effect: Effect.void,
+          effect: () => Effect.void,
           onFailure: () => undefined,
           type: "effect"
         },

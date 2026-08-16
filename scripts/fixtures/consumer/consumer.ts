@@ -52,7 +52,7 @@ const cluster = ClusterMachine.make("ConsumerEntity", machine, {
 })
 const invoked = Machine.invoke({
   id: "fixture-load",
-  effect: Effect.succeed("ready"),
+  effect: () => Effect.succeed("ready"),
   onDone: ({ target }) => target.none()
 })
 const delayed = Machine.invoke({

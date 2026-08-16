@@ -46,7 +46,7 @@ export const ReplaceMachine = Machine.make({
   Replacing: {
     invoke: Machine.invoke({
       id: "replaceWithRandom",
-      effect: replaceWithRandom,
+      effect: () => replaceWithRandom,
       onDone: ({ output, target }, enqueue) => {
         enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon }))
         return target.none()

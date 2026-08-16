@@ -517,7 +517,7 @@ describe("Machine", () => {
     })
   })
 
-  it("invoke handles one-shot outputs directly in the owning state", () => {
+  it("invoke infers one-shot outputs from factories in the owning state", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
@@ -528,7 +528,7 @@ describe("Machine", () => {
       down: {
         invoke: Machine.invoke({
           id: "valid",
-          effect: Effect.succeed(1),
+          effect: () => Effect.succeed(1),
           onDone: ({ output, state, target }) => {
             expect(output).type.toBe<number>()
             expect(state).type.toBe<Down>()
@@ -539,7 +539,12 @@ describe("Machine", () => {
     })
     expect(Machine.invoke).type.not.toBeCallableWith({
       id: "invalid",
-      effect: Effect.succeed(1)
+      effect: () => Effect.succeed(1)
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "direct-effect",
+      effect: Effect.succeed(1),
+      onDone: () => undefined
     })
   })
 
@@ -754,8 +759,8 @@ describe("Machine", () => {
   })
 
   it("invoke requires only the lifecycle handlers reachable from the source type", () => {
-    const failure = Effect.fail("unavailable" as const)
-    const erasedFailure = failure as Effect.Effect<never, any>
+    const failure = () => Effect.fail("unavailable" as const)
+    const erasedFailure = () => Effect.fail("unavailable" as const) as Effect.Effect<never, any>
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
@@ -769,7 +774,7 @@ describe("Machine", () => {
     })
     expect(Machine.invoke).type.not.toBeCallableWith({
       id: "unreachable-failure",
-      effect: Effect.succeed("user-1"),
+      effect: () => Effect.succeed("user-1"),
       onDone: () => undefined,
       onFailure: () => undefined
     })
@@ -918,7 +923,7 @@ describe("Machine", () => {
               signedOut: {
                 invoke: Machine.invoke({
                   id: "nested",
-                  effect: Effect.succeed(Option.some(1)),
+                  effect: () => Effect.succeed(Option.some(1)),
                   onDone: ({ output, state, target }) => {
                     expect(output).type.toBe<Option.Option<number>>()
                     expect(state).type.toBe<SignedOut>()

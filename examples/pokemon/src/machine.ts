@@ -23,10 +23,11 @@ const machine = Machine.make({
   Loading: {
     invoke: Machine.invoke({
       id: "load-team",
-      effect: Effect.gen(function*() {
-        const service = yield* PokemonService
-        return yield* service.getRandomTeam()
-      }),
+      effect: () =>
+        Effect.gen(function*() {
+          const service = yield* PokemonService
+          return yield* service.getRandomTeam()
+        }),
       onDone: ({ output, target }) => target.full.ActiveTeam.from({ team: output }),
       onFailure: ({ target }) => target.full.Failed.from()
     })
