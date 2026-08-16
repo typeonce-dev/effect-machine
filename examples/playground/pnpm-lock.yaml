@@ -5,26 +5,26 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  effect: 4.0.0-rc.108
-  '@effect/atom-react': 4.0.0-rc.108
-  '@effect/vitest': 4.0.0-rc.108
+  effect: 4.0.0-rc.109
+  '@effect/atom-react': 4.0.0-rc.109
+  '@effect/vitest': 4.0.0-rc.109
 
 importers:
 
   .:
     dependencies:
       '@effect/atom-react':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(react@19.2.7)(scheduler@0.27.0)
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.7)(scheduler@0.27.0)
       '@tanstack/react-router':
         specifier: 1.170.18
         version: 1.170.18(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@typeonce/effect-machine':
         specifier: file:../..
-        version: file:../..(effect@4.0.0-rc.108)
+        version: file:../..(effect@4.0.0-rc.109)
       effect:
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
       react:
         specifier: 19.2.7
         version: 19.2.7
@@ -36,8 +36,8 @@ importers:
         version: 0.27.0
     devDependencies:
       '@effect/vitest':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))
       '@types/react':
         specifier: 19.2.17
         version: 19.2.17
@@ -59,17 +59,17 @@ importers:
 
 packages:
 
-  '@effect/atom-react@4.0.0-rc.108':
-    resolution: {integrity: sha512-GNHQ4ildpnI00AdyL3cKRBo387aEpoY6tIIfwPrrZoNbMGCVNupiAIReoD6dBwWIgOEIASd/YLwx1DR42Jqx7g==}
+  '@effect/atom-react@4.0.0-rc.109':
+    resolution: {integrity: sha512-pMx01t0DnS9rPAR3aFOIoPUmuJjxflxw081ofTzXBlG81+hIaenJTdVJ+X+miRCGbcf00XEn15dHGoM3UjpIZQ==}
     peerDependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
       react: '>=19.2.7 <20.0.0'
       scheduler: '>=0.27.0 <0.28.0'
 
-  '@effect/vitest@4.0.0-rc.108':
-    resolution: {integrity: sha512-XD2GP1JATN28wnIeFGsBqYMuQDCHIodKKgFulGyG91GvuHqgf2gz+WxR2LPdyNoKMtr7lsbRzVj07niSYtIKzA==}
+  '@effect/vitest@4.0.0-rc.109':
+    resolution: {integrity: sha512-vu5ZkidJ/gM/+a0M07Jnq1PV4duFlYc+4Vj9TsJysK4Us7LL5bwV6uXiT7mi1/IM/3HgfAwc7Q9ROj8M65G4pA==}
     peerDependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
       vitest: '>=4.1.0 <5.0.0'
 
   '@emnapi/core@1.11.1':
@@ -256,7 +256,7 @@ packages:
     resolution: {directory: ../.., type: directory}
     engines: {node: '>=20'}
     peerDependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
 
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
@@ -338,8 +338,8 @@ packages:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
 
-  effect@4.0.0-rc.108:
-    resolution: {integrity: sha512-KmI3DlKZWPvCL4QQ2FMaPOuxMt/7DrKMENCY/gQ+MkDR5QYw25wgU5Zmh/wVLboNjIci1gNOgNCFe4xqgxli3A==}
+  effect@4.0.0-rc.109:
+    resolution: {integrity: sha512-6ubcOCtfdbmFO5+vgcT2HsTw5s+n3aMUj4eAIbVpUxP7+VYCwXxxcBHgiWgizOrGO1eGmuOBFek3mM0dFcwaWA==}
 
   es-module-lexer@2.3.1:
     resolution: {integrity: sha512-shc1dbU90Yl/xq1QrC7QRtfcwURZuVRfPhZbDoldJ1cn1gzDvBaBWlv0eFolj5+0znnPJz5TXLxsN77X/12KTA==}
@@ -372,9 +372,6 @@ packages:
   isbot@5.2.1:
     resolution: {integrity: sha512-dJ+LpKyClQZ7NG+j3OensC/mAZkGpukE9YUrgPYvAZj2doVL0edfDgywTUh5CXa0o+nW9a1V9e5+CJTX8+SxRw==}
     engines: {node: '>=18'}
-
-  kubernetes-types@1.30.0:
-    resolution: {integrity: sha512-Dew1okvhM/SQcIa2rcgujNndZwU8VnSapDgdxlYoB84ZlpAD43U6KLAFqYo17ykSFGHNPrg0qry0bP+GJd9v7Q==}
 
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
@@ -558,10 +555,6 @@ packages:
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  uuid@14.0.1:
-    resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
-    hasBin: true
-
   vite@8.1.5:
     resolution: {integrity: sha512-7ULLwsCdYx/nRyrpiEwvqb5TFHrMVZyBt+rg/OAXT7rgj/z+DtTDyKFeLAdDkubDVDKD8jOsndmy7m55XcfUsw==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -658,15 +651,15 @@ packages:
 
 snapshots:
 
-  '@effect/atom-react@4.0.0-rc.108(effect@4.0.0-rc.108)(react@19.2.7)(scheduler@0.27.0)':
+  '@effect/atom-react@4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
       react: 19.2.7
       scheduler: 0.27.0
 
-  '@effect/vitest@4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))':
+  '@effect/vitest@4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10(vite@8.1.5(yaml@2.9.0)))':
     dependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
       vitest: 4.1.10(vite@8.1.5(yaml@2.9.0))
 
   '@emnapi/core@1.11.1':
@@ -799,9 +792,9 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@typeonce/effect-machine@file:../..(effect@4.0.0-rc.108)':
+  '@typeonce/effect-machine@file:../..(effect@4.0.0-rc.109)':
     dependencies:
-      effect: 4.0.0-rc.108
+      effect: 4.0.0-rc.109
 
   '@types/chai@5.2.3':
     dependencies:
@@ -878,13 +871,11 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  effect@4.0.0-rc.108:
+  effect@4.0.0-rc.109:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      kubernetes-types: 1.30.0
       msgpackr: 2.0.5
-      uuid: 14.0.1
 
   es-module-lexer@2.3.1: {}
 
@@ -906,8 +897,6 @@ snapshots:
     optional: true
 
   isbot@5.2.1: {}
-
-  kubernetes-types@1.30.0: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true
@@ -1064,8 +1053,6 @@ snapshots:
   use-sync-external-store@1.6.0(react@19.2.7):
     dependencies:
       react: 19.2.7
-
-  uuid@14.0.1: {}
 
   vite@8.1.5(yaml@2.9.0):
     dependencies:
