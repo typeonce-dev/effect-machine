@@ -25,7 +25,7 @@ describe("inline invoke", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Effect.succeed("ready"),
+            effect: () => Effect.succeed("ready"),
             onDone: ({ output, target }) => target.full.Complete(new Complete({ value: output }))
           })
         },
@@ -55,7 +55,7 @@ describe("inline invoke", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Effect.fail("offline"),
+            effect: () => Effect.fail("offline"),
             onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error }))
           })
         },

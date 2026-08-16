@@ -127,7 +127,7 @@ describe("Machine live inspection", () => {
         initial: () => states.initial.Idle(new Idle({}))
       }).handle({
         Idle: {
-          invoke: Machine.invoke({ id: "worker", effect: Effect.never })
+          invoke: Machine.invoke({ id: "worker", effect: () => Effect.never })
         }
       })
       const prepared = yield* Machine.prepare(active)

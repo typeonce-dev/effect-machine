@@ -338,7 +338,7 @@ describe("Machine.resume", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
+            effect: () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
             onDone: ({ output, target }) => target.full.Loaded(new Loaded({ value: output }))
           })
         },
@@ -373,9 +373,10 @@ describe("Machine.resume", () => {
         Loading: {
           invoke: Machine.invoke({
             id: "load",
-            effect: Ref.update(runs, (n) => n + 1).pipe(
-              Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
-            ),
+            effect: () =>
+              Ref.update(runs, (n) => n + 1).pipe(
+                Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
+              ),
             onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
           })
         },

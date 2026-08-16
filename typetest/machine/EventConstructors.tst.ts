@@ -112,7 +112,7 @@ describe("Machine event constructor collections", () => {
           invoke: [
             Machine.invoke({
               id: "load",
-              effect: Effect.succeed("ready"),
+              effect: () => Effect.succeed("ready"),
               onDone: ({ output, target }, enqueue) => {
                 enqueue.raise(internalEvents.Loaded({ value: output }))
                 return target.none()

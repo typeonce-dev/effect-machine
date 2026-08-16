@@ -98,7 +98,7 @@ const machine = definition.handle({
   Idle: {
     invoke: definition.invoke({
       id: "deep-inline-invoke",
-      effect: Effect.asVoid(ExternalService),
+      effect: () => Effect.asVoid(ExternalService),
       onDone: ({ target }) => target.none()
     }),
     on: {

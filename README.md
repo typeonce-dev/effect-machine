@@ -376,7 +376,7 @@ State-scoped work starts on entry and is interrupted on exit:
 Loading: {
   invoke: Machine.invoke({
     id: "save-document",
-    effect: saveDocument,
+    effect: () => saveDocument,
     onDone: ({ output, target }) => target.full.Saved({ id: output.id }),
     onFailure: ({ error, target }) => target.full.Failed({ message: String(error) })
   })
@@ -443,8 +443,10 @@ lookup.
 `onDone` is required for a non-`never` output, and `onFailure` is required for a
 non-`never` typed error; each handler is omitted when its channel is `never`.
 Defects, interruption, and source-construction failures terminate the owning
-runtime. `effect: Effect.sleep(...)` is valid, but `after` keeps timers explicit
-and makes static durations visible through activity inspection.
+runtime. Effect sources are always factories evaluated when their state is
+entered. Use `effect: () => Effect.sleep(...)` for a generic Effect, while
+`after` keeps timers explicit and makes static durations visible through
+activity inspection.
 
 ## Reactivity
 

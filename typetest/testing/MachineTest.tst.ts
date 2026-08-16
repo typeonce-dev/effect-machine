@@ -102,9 +102,10 @@ describe("MachineTest", () => {
       idle: {
         invoke: Machine.invoke({
           id: "service-backed-invoke",
-          effect: Effect.gen(function*() {
-            yield* InvokeRequirement
-          }),
+          effect: () =>
+            Effect.gen(function*() {
+              yield* InvokeRequirement
+            }),
           onDone: ({ target }) => target.none()
         })
       }
