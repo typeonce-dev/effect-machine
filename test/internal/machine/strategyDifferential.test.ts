@@ -73,7 +73,7 @@ describe("machine planner and runtime strategies", () => {
       assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Count"])
     }))
 
-  it.effect("keeps indexed execution microsteps narrower than diagnostic planner microsteps", () =>
+  it.effect("retains indexed execution microstep evidence without widening frozen execution values", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()
       const initial = yield* Machine.planInitial(machine)
@@ -421,6 +421,30 @@ describe("machine planner and runtime strategies", () => {
         yield* ref.stop
       }
     }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("publishes equivalent live inspection records from generic and compiled runtimes", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const machine = makeFlatMachine()
+      const results: Array<ReadonlyArray<unknown>> = []
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        const prepared = yield* prepareWithRuntimeStrategy(machine, strategy)
+        const observed = yield* prepared.inspection.pipe(
+          Stream.runCollect,
+          Effect.forkScoped({ startImmediately: true })
+        )
+        yield* Effect.yieldNow
+        const ref = yield* prepared.start
+        for (const event of [new Noop({}), new Increment({}), new Reenter({}), new Finish({})]) {
+          yield* ref.send(event)
+          yield* Effect.yieldNow
+        }
+        yield* ref.join
+        results.push(Array.from(yield* Fiber.join(observed)))
+      }
+
+      assert.deepStrictEqual(results[0], results[1])
+    }) as Effect.Effect<void, unknown, any>))
 
   it.effect("matches acknowledged probe delivery in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {

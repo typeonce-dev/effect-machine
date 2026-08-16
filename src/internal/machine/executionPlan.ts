@@ -402,6 +402,7 @@ const emptyExecutionValues: ReadonlyArray<never> = Object.freeze([])
 export interface ExecutionMicrostep<State = unknown> {
   readonly next: State
   readonly event: unknown
+  readonly transitions?: ReadonlyArray<Machine.RetainedTransition>
   readonly commands: ReadonlyArray<RuntimeCommand>
   readonly raisedEvents: ReadonlyArray<unknown>
   readonly emittedEvents: ReadonlyArray<unknown>
@@ -588,13 +589,22 @@ const indexedMicrostep = (
   descriptor: IndexedExecutionDescriptor,
   state: OwnedIndexedState,
   event: any,
-  selections: ReadonlyArray<IndexedSelectedTransition>
+  selections: ReadonlyArray<IndexedSelectedTransition>,
+  retainTransitions: boolean
 ): ExecutionMicrostep<OwnedIndexedState> => {
+  const retain = (transition: IndexedEvaluatedTransition): Machine.RetainedTransition => ({
+    source: transition.selection.sourcePath,
+    trigger: transition.selection.trigger,
+    reenter: transition.selection.transition.reenter,
+    target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
+    resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
+  })
   if (selections.length === 1) {
     const transition = collectIndexedEvaluatedTransition(machine, descriptor, state, selections[0]!)
     return {
       next: transition.next,
       event,
+      ...(retainTransitions ? { transitions: [retain(transition)] } : undefined),
       commands: transition.commands,
       raisedEvents: transition.raisedEvents,
       emittedEvents: transition.emittedEvents,
@@ -645,6 +655,7 @@ const indexedMicrostep = (
   return {
     next,
     event,
+    ...(retainTransitions ? { transitions: transitions.map(retain) } : undefined),
     commands,
     raisedEvents,
     emittedEvents,
@@ -762,6 +773,17 @@ const planIndexedFlatState = (
       const step: ExecutionMicrostep<OwnedIndexedState> = {
         next,
         event,
+        ...(retainMicrosteps
+          ? {
+            transitions: [{
+              source: sourcePath,
+              trigger: { type: "event", event: event._tag },
+              reenter: transition.reenter,
+              target: target === undefined ? undefined : getTargetNodePath(target as any),
+              resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any)
+            }]
+          }
+          : undefined),
         commands: transitionResult.commands,
         raisedEvents: transitionResult.raisedEvents,
         emittedEvents: transitionResult.emittedEvents,
@@ -828,6 +850,7 @@ const planIndexedState = (
       microsteps: planned.microsteps.map((step) => ({
         next: ownedIndexedStateFromActive(descriptor, step.next),
         event: step.event,
+        transitions: step.transitions,
         commands: step.commands,
         raisedEvents: step.raisedEvents,
         emittedEvents: step.emittedEvents,
@@ -874,7 +897,7 @@ const planIndexedState = (
     }
   }
 
-  const first = indexedMicrostep(machine, descriptor, configuration, decoded, selections)
+  const first = indexedMicrostep(machine, descriptor, configuration, decoded, selections, retainMicrosteps)
   let current = first.next
   let currentEvent: any = decoded
   const commands = [...first.commands]
@@ -932,7 +955,7 @@ const planIndexedState = (
     currentEvent = raised
     const raisedSelections = selectIndexedEventTransitions(machine, descriptor, current, raised, machineReferences)
     if (raisedSelections.length === 0) continue
-    const step = indexedMicrostep(machine, descriptor, current, raised, raisedSelections)
+    const step = indexedMicrostep(machine, descriptor, current, raised, raisedSelections, retainMicrosteps)
     current = step.next
     commands.push(...step.commands)
     raisedEvents.push(...step.raisedEvents)

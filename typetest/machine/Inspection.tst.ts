@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 
@@ -29,6 +29,30 @@ describe("Machine inspection", () => {
         Reset: ({ target }) => target.none()
       }
     }
+  })
+
+  it("exposes one closed operational protocol from prepared machines", () => {
+    const FlatStates = Machine.defineStates({ Idle })
+    const executable = Machine.make({
+      states: FlatStates.states,
+      events: Machine.events(Reset),
+      initial: () => FlatStates.initial.Idle(new Idle({}))
+    }).handle({ Idle: { on: { Reset: ({ target }) => target.none() } } })
+    Effect.gen(function*() {
+      const prepared = yield* Machine.prepare(executable)
+      expect(prepared.inspection).type.toBe<Stream.Stream<Machine.Inspection.Event>>()
+      const event = yield* prepared.inspection.pipe(Stream.runHead)
+      if (event._tag === "Some") {
+        switch (event.value._tag) {
+          case "Created":
+            expect(event.value.definition).type.toBe<Machine.Machine.Any | undefined>()
+            break
+          case "EventProcessed":
+            expect(event.value.microsteps).type.toBe<ReadonlyArray<Machine.Inspection.Microstep>>()
+            break
+        }
+      }
+    })
   })
 
   it("preserves state paths for structural inspection", () => {

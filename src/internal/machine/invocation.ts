@@ -6,7 +6,7 @@
 
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import type { ChildMachine, Logic, Machine } from "../../Machine.js"
+import type { ChildMachine, Inspection, Logic, Machine } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InvocationEvent from "./invocationEvent.js"
@@ -23,6 +23,7 @@ export interface AnyConfig {
   readonly onDone?: unknown
   readonly onFailure?: unknown
   readonly onSnapshot?: unknown
+  readonly activityKind?: Inspection.Activity["kind"]
 }
 
 /** @internal */
@@ -57,7 +58,8 @@ const resolveOne = (
         >,
       onDone: raw.onDone,
       onFailure: raw.onFailure,
-      onSnapshot: raw.onSnapshot
+      onSnapshot: raw.onSnapshot,
+      activityKind: "Effect"
     }
   }
   if ("after" in raw) {
@@ -72,7 +74,8 @@ const resolveOne = (
           any,
           any
         >,
-      onDone: raw.onDone
+      onDone: raw.onDone,
+      activityKind: "Timer"
     }
   }
   if ("logic" in raw) {
@@ -115,8 +118,18 @@ const runSequentialDiscard = <E, R>(
 
 const sendLifecycle = (
   scope: Runtime.ProcessScope<any>,
-  event: InvocationEvent.InvocationEvent
-): Effect.Effect<void> => scope.self.send(event).pipe(Effect.catchTag("StoppedError", () => Effect.void))
+  event: InvocationEvent.InvocationEvent,
+  activitySessionId?: string
+): Effect.Effect<void> =>
+  (activitySessionId === undefined
+    ? scope.self.send(event)
+    : scope.self.sendInspected === undefined
+    ? scope.self.send(event)
+    : scope.self.sendInspected(
+      event,
+      scope.self.inspectionSubject,
+      { _tag: "Activity", activitySessionId }
+    )).pipe(Effect.catchTag("StoppedError", () => Effect.void))
 
 const isFrameworkFailure = (error: unknown): boolean =>
   error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError || error instanceof StoppedError
@@ -131,7 +144,8 @@ const startResolved = (
   src: () => Runtime.ProcessLogic<any, any, any, any, any, any>,
   onDone: unknown,
   onFailure: unknown,
-  onSnapshot: unknown
+  onSnapshot: unknown,
+  activityKind?: Inspection.Activity["kind"]
 ): Effect.Effect<void, any, any> =>
   Effect.suspend(() => {
     const key = makeKey(path, invokeId)
@@ -141,8 +155,9 @@ const startResolved = (
       id: childId,
       duplicateId: invokeId,
       ...(descriptor === undefined ? undefined : { descriptor }),
+      ...(activityKind === undefined ? undefined : { activityKind }),
       sendParent: (isCurrent, event) => isCurrent() ? scope.self.send(event) : Effect.void,
-      onOutcome: (isCurrent, outcome) => {
+      onOutcome: (isCurrent, outcome, activitySessionId) => {
         if (outcome._tag === "Stopped" || !isCurrent()) return Effect.void
         if (outcome._tag === "Done") {
           if (onDone === undefined) {
@@ -152,14 +167,22 @@ const startResolved = (
               )
             ))
           }
-          return sendLifecycle(scope, InvocationEvent.done(path, invokeId, outcome.output))
+          return sendLifecycle(
+            scope,
+            InvocationEvent.done(path, invokeId, outcome.output),
+            activityKind === undefined ? undefined : activitySessionId
+          )
         }
         if (
           outcome._tag === "Failure" &&
           onFailure !== undefined &&
           (descriptor === undefined || !isFrameworkFailure(outcome.error))
         ) {
-          return sendLifecycle(scope, InvocationEvent.failure(path, invokeId, outcome.error))
+          return sendLifecycle(
+            scope,
+            InvocationEvent.failure(path, invokeId, outcome.error),
+            activityKind === undefined ? undefined : activitySessionId
+          )
         }
         return scope.failCause(outcome.cause)
       },
@@ -189,7 +212,8 @@ const start = (
     config.src,
     config.onDone,
     config.onFailure,
-    config.onSnapshot
+    config.onSnapshot,
+    config.activityKind
   )
 }
 
@@ -213,7 +237,8 @@ const startStaticChild = (
     descriptor[ChildMachineLogicTypeId],
     raw.onDone,
     raw.onFailure,
-    raw.onSnapshot
+    raw.onSnapshot,
+    undefined
   )
 }
 

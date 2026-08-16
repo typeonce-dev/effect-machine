@@ -227,6 +227,56 @@ const ref = yield * prepared.start
 not observe startup emissions. Preparation does not retain or replay an
 emission: the observer is simply subscribed before initialization begins.
 
+### Inspect a live machine tree
+
+`Machine.prepare(machine).inspection` is the operational counterpart to the
+domain-facing `changes` and `emissions` streams. It observes the prepared root
+and every locally owned child, `Logic` process, Effect, and timer in one total
+publication order:
+
+```ts
+const prepared = yield * Machine.prepare(checkout)
+
+yield * prepared.inspection.pipe(
+  Stream.runForEach((record) => Console.log(record.sequence, record.subject.id, record._tag)),
+  Effect.forkScoped({ startImmediately: true })
+)
+
+const checkoutRef = yield * prepared.start
+```
+
+For a handled input, the stream may expose values such as:
+
+```ts
+{ _tag: "EventSent", sequence: 2, deliveryId: 0,
+  subject: { id: "checkout", sessionId: "machine:0", kind: "Machine" },
+  source: undefined, target: { id: "checkout", sessionId: "machine:0" },
+  event: CheckoutEvents.Submit(), causedBy: undefined }
+
+{ _tag: "EventProcessed", sequence: 4, macrostepId: 0,
+  deliveryId: 0, handled: true, configurationChanged: true,
+  before: { status: "active", state: /* ... */ },
+  after: { status: "active", state: /* ... */ }, microsteps: [/* ... */] }
+```
+
+The closed `Machine.Inspection.Event` union also reports creation,
+initialization and startup failure, direct `Logic` state updates, outward
+emissions, Effect/timer activity lifecycles, and termination. Records erase
+unrelated child protocols to `unknown`; application-level observation remains
+typed through each reference's `changes` and `emissions`.
+
+The stream is hot, non-replayed, never fails, and completes after the root
+terminates. Subscribe before `prepared.start` to capture initialization. Local
+session ids are unique only inside that prepared ownership tree: `machine:0`
+is the root and later ids identify its descendants. They are intentionally not
+distributed identities. Cluster placement, routing, and correlation continue
+to use Cluster entity, runner, and request identities at the integration
+boundary.
+
+`AtomMachine.inspection(machineAtom)` provides the same root-scoped stream and
+starts a fresh atom-backed machine only after its inspection subscription is
+installed.
+
 Invalid event and emission constructions fail the machine with a typed
 `MachineSchemaDecodeError`; they do not throw from the constructor call.
 

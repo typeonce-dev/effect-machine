@@ -7,6 +7,7 @@
 import type * as Cause from "effect/Cause"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
+import type * as Exit from "effect/Exit"
 import type * as Option from "effect/Option"
 import type { Pipeable } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
@@ -1665,6 +1666,187 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
   }
 
 /**
+ * Live, root-scoped records describing one prepared machine tree.
+ *
+ * Inspection records deliberately erase machine-specific values to `unknown`:
+ * one stream may contain unrelated root, child-machine, and `Logic` protocols.
+ * The record structure remains a closed discriminated union, while typed
+ * application observation continues through `changes` and `emissions`.
+ *
+ * @category models
+ * @since 0.13.0
+ */
+export declare namespace Inspection {
+  /** Read-only identity of a local machine endpoint. */
+  export interface Endpoint {
+    readonly id: string
+    readonly sessionId: string
+  }
+
+  /** Read-only identity of a runtime represented in the inspection tree. */
+  export interface Subject extends Endpoint {
+    readonly kind: "Machine" | "Logic"
+  }
+
+  /** Causal origin of an inspected runtime. */
+  export type Origin =
+    | { readonly _tag: "Root" }
+    | {
+      readonly _tag: "Invoke"
+      readonly ownerPath: string
+      readonly invokeId: string
+    }
+    | {
+      readonly _tag: "Spawn"
+      readonly address: string | undefined
+    }
+
+  /** Causal owner of a send or emission. */
+  export type Causation =
+    | { readonly _tag: "Initialization" }
+    | { readonly _tag: "Macrostep"; readonly macrostepId: number }
+    | { readonly _tag: "Activity"; readonly activitySessionId: string }
+
+  /** Closed command projection safe for observation. */
+  export type Command =
+    | {
+      readonly _tag: "SendTo"
+      readonly target: Endpoint | { readonly id: string }
+      readonly event: unknown
+    }
+    | {
+      readonly _tag: "Stop"
+      readonly target: Endpoint | { readonly id: string }
+    }
+
+  /** One statechart microstep in a committed macrostep. */
+  export interface Microstep {
+    readonly event: unknown
+    readonly transitions: ReadonlyArray<Machine.RetainedTransition>
+    readonly raisedEvents: ReadonlyArray<unknown>
+    readonly emittedEvents: ReadonlyArray<unknown>
+    readonly commands: ReadonlyArray<Command>
+    readonly exitPaths: ReadonlyArray<string>
+    readonly entryPaths: ReadonlyArray<string>
+    readonly changed: boolean
+  }
+
+  /** Common ordering and identity fields for every record. */
+  export interface Base {
+    /** Total publication order within this prepared root. */
+    readonly sequence: number
+    /** Session id of the prepared root that owns this inspection stream. */
+    readonly rootSessionId: string
+    /** Runtime instance described by this record. */
+    readonly subject: Subject
+  }
+
+  /** Announces allocation of a root or owned process identity. */
+  export interface Created extends Base {
+    readonly _tag: "Created"
+    readonly parent: Subject | undefined
+    readonly origin: Origin
+    /** Compiled statechart definition; absent for generic `Logic`. */
+    readonly definition: Machine.Any | undefined
+  }
+
+  /** Announces successful initialization. */
+  export interface Initialized extends Base {
+    readonly _tag: "Initialized"
+    readonly snapshot: RuntimeSnapshot<unknown, unknown, unknown>
+    readonly initialEntryPaths: ReadonlyArray<string>
+    readonly microsteps: ReadonlyArray<Microstep>
+  }
+
+  /** Announces failure before an initial runtime snapshot exists. */
+  export interface StartFailed extends Base {
+    readonly _tag: "StartFailed"
+    readonly cause: Cause.Cause<unknown>
+  }
+
+  /** Announces acceptance of an event by a local mailbox. */
+  export interface EventSent extends Base {
+    readonly _tag: "EventSent"
+    readonly deliveryId: number
+    readonly source: Subject | undefined
+    readonly target: Endpoint
+    readonly event: unknown
+    readonly causedBy: Causation | undefined
+  }
+
+  /** Announces complete processing of one statechart mailbox event. */
+  export interface EventProcessed extends Base {
+    readonly _tag: "EventProcessed"
+    readonly macrostepId: number
+    readonly deliveryId: number
+    readonly source: Subject | undefined
+    readonly event: unknown
+    readonly before: RuntimeSnapshot<unknown, unknown, unknown>
+    readonly after: RuntimeSnapshot<unknown, unknown, unknown>
+    readonly handled: boolean
+    readonly configurationChanged: boolean
+    readonly microsteps: ReadonlyArray<Microstep>
+  }
+
+  /** Announces a direct state update made by generic `Logic`. */
+  export interface StateChanged extends Base {
+    readonly _tag: "StateChanged"
+    readonly before: unknown
+    readonly after: unknown
+    readonly causedByDeliveryId: number | undefined
+  }
+
+  /** Announces actual publication on a machine's domain emission stream. */
+  export interface Emitted extends Base {
+    readonly _tag: "Emitted"
+    readonly emission: unknown
+    readonly causedBy: Causation | undefined
+  }
+
+  /** Identity of one Effect or timer invocation run. */
+  export interface Activity {
+    readonly id: string
+    readonly sessionId: string
+    readonly owner: Subject
+    readonly ownerPath: string
+    readonly kind: "Effect" | "Timer"
+  }
+
+  /** Announces an Effect or timer invocation starting. */
+  export interface ActivityStarted extends Base {
+    readonly _tag: "ActivityStarted"
+    readonly activity: Activity
+  }
+
+  /** Announces an Effect or timer invocation outcome. */
+  export interface ActivityStopped extends Base {
+    readonly _tag: "ActivityStopped"
+    readonly activity: Activity
+    /** Success or failure from the invoke; interruption means its owner stopped it. */
+    readonly exit: Exit.Exit<unknown, unknown>
+  }
+
+  /** Announces a terminal local runtime snapshot. */
+  export interface Terminated extends Base {
+    readonly _tag: "Terminated"
+    readonly snapshot: RuntimeSnapshot<unknown, unknown, unknown>
+  }
+
+  /** Complete live inspection protocol. */
+  export type Event =
+    | Created
+    | Initialized
+    | StartFailed
+    | EventSent
+    | EventProcessed
+    | StateChanged
+    | Emitted
+    | ActivityStarted
+    | ActivityStopped
+    | Terminated
+}
+
+/**
  * Represents a classified terminal outcome derived from a runtime snapshot.
  *
  * @category models
@@ -1725,6 +1907,14 @@ export interface Prepared<out State, in Event, out Error, out Output, out Emitte
 
   /** Streams ephemeral notifications published after subscription. */
   readonly emissions: Stream.Stream<Emitted>
+
+  /**
+   * Streams ordered operational records for this root and every locally owned
+   * descendant. The stream is hot, non-replayed, never fails, and completes
+   * after the prepared root terminates. Subscribe before evaluating `start` to
+   * observe initialization.
+   */
+  readonly inspection: Stream.Stream<Inspection.Event>
 
   /** Initializes this machine once and returns its running reference. */
   readonly start: Effect.Effect<MachineRef<State, Event, Error, Output, Emitted>, StartError, StartRequirements>

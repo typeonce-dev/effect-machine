@@ -180,6 +180,18 @@ export const emissions: <State, Event, Error, Output, StartError, Emitted>(
 ) => Stream.Stream<Emitted, StartError, AtomRegistry.AtomRegistry> = internal.emissions
 
 /**
+ * Observes the ordered local inspection records for the machine atom's root
+ * ownership tree. The stream starts before machine initialization, is hot and
+ * non-replayed, and completes with the root machine.
+ *
+ * @category getters
+ * @since 0.13.0
+ */
+export const inspection: <State, Event, Error, Output, StartError, Emitted>(
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>
+) => Stream.Stream<Machine.Inspection.Event, StartError, AtomRegistry.AtomRegistry> = internal.inspection
+
+/**
  * Observes emissions from each active instance selected by a child bridge.
  *
  * @category getters

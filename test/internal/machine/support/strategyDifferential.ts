@@ -123,6 +123,7 @@ export const prepareWithRuntimeStrategy = (
 ): Effect.Effect<
   {
     readonly emissions: import("effect/Stream").Stream<unknown>
+    readonly inspection: import("effect/Stream").Stream<Machine.Inspection.Event>
     readonly start: Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown>
   },
   unknown

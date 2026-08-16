@@ -84,6 +84,22 @@ const makeCounterMachine = () =>
   })
 
 describe("AtomMachine", () => {
+  it.effect("observes prepared live inspection before atom startup", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const bridge = AtomMachine.make(makeCounterMachine())
+      const observed = yield* AtomMachine.inspection(bridge).pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.provideService(AtomRegistry.AtomRegistry, registry),
+        Effect.forkScoped({ startImmediately: true })
+      )
+
+      const records = Array.from(yield* Fiber.join(observed))
+      assert.deepStrictEqual(records.map(({ _tag }) => _tag), ["Created", "Initialized"])
+      assert.ok(records.every(({ rootSessionId }) => rootSessionId === "machine:0"))
+    })))
+
   it.effect("observes initial emissions when the emission stream starts the machine", () =>
     Effect.scoped(Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("AtomPreparedIdle")("Idle", {}) {}

@@ -548,6 +548,51 @@ yield* prepared.emissions.pipe(
 const ref = yield* prepared.start
 ```
 
+`prepared.inspection` is a third, operational stream. It covers the root and
+its complete local ownership tree rather than one machine protocol. Subscribe
+before `prepared.start` when creation and initialization records matter:
+
+```ts
+const prepared = yield* Machine.prepare(machine)
+yield* prepared.inspection.pipe(
+  Stream.runForEach((event) => Console.log(event.sequence, event.subject.id, event._tag)),
+  Effect.forkScoped({ startImmediately: true })
+)
+const ref = yield* prepared.start
+```
+
+`Machine.Inspection.Event` is a closed union:
+
+- `Created`, `Initialized`, and `StartFailed` describe process startup;
+- `EventSent` records accepted mailbox delivery and `EventProcessed` records
+  the committed macrostep, including retained transitions, raised events,
+  emissions, commands, and entry/exit paths for each microstep;
+- `StateChanged` describes direct updates made by generic `Logic`;
+- `Emitted` records actual outward notification publication;
+- `ActivityStarted` and `ActivityStopped` describe Effect and timer invokes;
+- `Terminated` carries the final `done`, `error`, or `stopped` snapshot.
+
+Every record has a root-local `sequence`, `rootSessionId`, and `subject`.
+`deliveryId` correlates acceptance with processing; `macrostepId` correlates
+work caused by one statechart input. `source` is present for sends originating
+inside the inspected tree. `origin` distinguishes a root, state-owned invoke,
+and explicit spawn. Child machine and generic process protocols are erased to
+`unknown` because one stream can contain unrelated types.
+
+Inspection is hot, non-replayed, never fails, and completes with the prepared
+root. It is not a replacement for `changes`, which retains the latest lifecycle
+snapshot, or `emissions`, which remains the typed domain-notification channel.
+Invalid decoded inputs or emissions still fail the owning machine through its
+typed `MachineSchemaDecodeError`; inspection never turns validation into a
+throw or a stream failure.
+
+Session ids are deterministic and unique only inside one prepared local tree
+(`machine:0`, `machine:1`, ...). Do not persist them as globally unique actor
+ids. Distributed identity, placement, delivery, and request correlation belong
+to Effect Cluster and its entity, runner, shard, and request identifiers. A
+Cluster adapter may translate local inspection records into telemetry, but the
+core machine stream does not claim cross-node identity or ordering.
+
 For child-to-parent input, export a public builder protocol and reuse it at both
 composition boundaries:
 
@@ -589,6 +634,11 @@ Atom-backed machines retain the same transient semantics. Use
 `AtomMachine.childEmissions(childAtom)` for the currently active child. Both
 return streams requiring the corresponding `AtomRegistry`; emissions are not
 stored as atom state.
+
+Use `AtomMachine.inspection(machineAtom)` for root-scoped operational records.
+It installs the subscription before a fresh bridge starts, so initialization,
+owned children, and activities are visible without storing inspection records
+in atom state.
 
 For asynchronous validation or persistence, invoke an Effect or child machine
 from the state and handle its typed success or failure event in a later

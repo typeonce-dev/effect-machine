@@ -10,18 +10,13 @@ import type { RuntimeCommand } from "./command.js"
 import { decodeEmit, decodeEvent } from "./protocol.js"
 import type { ProcessScope } from "./runtime.js"
 
-const isMachineTarget = (
-  target: unknown
-): target is { readonly send: (event: unknown) => Effect.Effect<void, unknown> } =>
-  typeof target === "object" && target !== null && "send" in target && typeof target.send === "function"
-
 export const makeLiveRuntime = <Events, Emits>(
   machine: Machine.Any,
   scope: ProcessScope<Events>
 ): Runtime<Events, Emits> => ({
   raise: (event) =>
     decodeEvent(machine, event).pipe(
-      Effect.flatMap((event) => scope.self.send(event as Events))
+      Effect.flatMap((event) => scope.sendTo(scope.self, event as Events))
     ),
   emit: (event) =>
     decodeEmit(machine, event).pipe(
@@ -35,9 +30,7 @@ export const runCommands = <Event>(
 ) =>
   Effect.forEach(commands, (command) =>
     command._tag === "SendTo"
-      ? isMachineTarget(command.target)
-        ? command.target.send(command.event)
-        : scope.sendTo(command.target as never, command.event)
+      ? scope.sendTo(command.target as never, command.event)
       : scope.stopChild(command.child as never), { discard: true })
 
 export const runEmittedEvents = <Events, Emits>(
