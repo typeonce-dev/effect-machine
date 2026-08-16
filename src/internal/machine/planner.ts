@@ -22,6 +22,7 @@ import {
   completeConfigurationEffect,
   completeConfigurationSync,
   configurationFromHistoryRecord,
+  configurationFromInitialTargetSync,
   getActiveLeafPathFrom,
   getActiveLeafPaths,
   getHistoryRecord,
@@ -44,13 +45,16 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
+import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
 import {
   getNode,
+  type InitialTarget as InitialTargetInstruction,
   isChoiceTarget,
   isHistoryTarget,
+  isInitialTarget,
   isNoTarget,
   isSnapshot,
   isTarget,
@@ -230,6 +234,7 @@ const completeHistoryConfiguration = (
   const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<unknown> = []
   const emittedEvents: Array<unknown> = []
+  const transitions: Array<ResolvedChoiceTransition> = []
 
   let changed = true
   while (changed) {
@@ -248,9 +253,47 @@ const completeHistoryConfiguration = (
           history: configuration.history,
           machineReferences: configuration.machineReferences
         } as ActiveConfiguration
+        if (child.type === "choice") {
+          const choice = resolveChoiceTarget(
+            machine,
+            current,
+            makeChoiceTarget(child.path, path, Object.fromEntries(values)),
+            event
+          )
+          let next = current
+          for (const routed of [choice.target, ...choice.additionalTargets]) {
+            if (routed === undefined || isHistoryTarget(routed)) {
+              throw new Error(`Machine initial choice "${child.path}" must resolve to an active state target`)
+            }
+            const resolved = isInitialTarget(routed)
+              ? resolveInitialTarget(machine, next, routed, event)
+              : undefined
+            next = normalizeTargetConfigurationSync(
+              machine,
+              next,
+              (resolved?.target ?? routed) as Machine.Snapshot<any> | Machine.Target<any, any>
+            )
+            if (resolved !== undefined) {
+              commands.push(...resolved.commands)
+              raisedEvents.push(...resolved.raisedEvents)
+              emittedEvents.push(...resolved.emittedEvents)
+              transitions.push(...resolved.transitions)
+            }
+          }
+          active.clear()
+          values.clear()
+          for (const activePath of next.active) active.add(activePath)
+          for (const [valuePath, stateValue] of next.values) values.set(valuePath, stateValue)
+          commands.push(...choice.commands)
+          raisedEvents.push(...choice.raisedEvents)
+          emittedEvents.push(...choice.emittedEvents)
+          transitions.push(...choice.transitions)
+          changed = true
+          continue
+        }
         active.add(child.path)
         if (child.schema !== undefined) {
-          const initializer = machine.handlers[path]?.initial
+          const initializer = machine.handlers[path]?.initialize
           if (initializer === undefined) {
             throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
           }
@@ -259,9 +302,11 @@ const completeHistoryConfiguration = (
             state: current.values.get(path),
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
-            event
+            event,
+            builder: makeStateInitializeBuilder(machine, path)
           })
-          values.set(child.path, decodeStateValueSync(machine, child, initialized.value))
+          const initializedValues = getStateInitializeValues(path, initialized.value)
+          values.set(child.path, decodeStateValueSync(machine, child, initializedValues[child.key]))
           commands.push(...initialized.commands)
           raisedEvents.push(...initialized.raisedEvents)
           emittedEvents.push(...initialized.emittedEvents)
@@ -279,7 +324,7 @@ const completeHistoryConfiguration = (
             history: configuration.history,
             machineReferences: configuration.machineReferences
           } as ActiveConfiguration
-          const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initial
+          const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initialize
           if (valuedMissing.length > 0 && initializer === undefined) {
             throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
           }
@@ -288,24 +333,25 @@ const completeHistoryConfiguration = (
             state: current.values.get(path),
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
-            event
+            event,
+            builder: makeStateInitializeBuilder(machine, path)
           })
-          if (initialized !== undefined && (typeof initialized.value !== "object" || initialized.value === null)) {
-            throw new Error(`Machine parallel state initializer for "${path}" must return its region values`)
-          }
+          const initializedValues = initialized === undefined
+            ? undefined
+            : getStateInitializeValues(path, initialized.value)
           for (const childPath of missing) {
             const child = getNode(machine, childPath)
             active.add(child.path)
             if (child.schema !== undefined) {
               if (
                 initialized === undefined ||
-                !Object.prototype.hasOwnProperty.call(initialized.value as object, child.key)
+                initializedValues === undefined || !Object.prototype.hasOwnProperty.call(initializedValues, child.key)
               ) {
                 throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
               }
               values.set(
                 child.path,
-                decodeStateValueSync(machine, child, (initialized.value as Record<string, unknown>)[child.key])
+                decodeStateValueSync(machine, child, initializedValues[child.key])
               )
             }
           }
@@ -328,16 +374,38 @@ const completeHistoryConfiguration = (
     } as ActiveConfiguration,
     commands,
     raisedEvents,
-    emittedEvents
+    emittedEvents,
+    transitions
   }
 }
 
-const resolveHistoryTarget = (
+export function resolveInitialTarget(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  target: InitialTargetInstruction,
+  event: unknown
+) {
+  const partial = configurationFromInitialTargetSync(machine, configuration, target)
+  const completed = completeHistoryConfiguration(machine, partial, event)
+  const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.path)
+  return {
+    target: makeTarget(target.path as any, snapshot.value as any, {
+      snapshot: snapshot as any,
+      values: Object.fromEntries(completed.configuration.values) as any
+    }),
+    commands: completed.commands,
+    raisedEvents: completed.raisedEvents,
+    emittedEvents: completed.emittedEvents,
+    transitions: completed.transitions
+  }
+}
+
+function resolveHistoryTarget(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   target: { readonly path: string; readonly parent: string },
   event: unknown
-) => {
+) {
   const node = getNode(machine, target.path)
   if (node.type !== "history" || node.parent !== target.parent) {
     throw new Error(`Machine expected history target "${target.path}" to resolve to its declared parent`)
@@ -359,7 +427,7 @@ const resolveHistoryTarget = (
       commands: completed.commands,
       raisedEvents: completed.raisedEvents,
       emittedEvents: completed.emittedEvents,
-      transitions: []
+      transitions: completed.transitions
     }
   }
 
@@ -1065,12 +1133,12 @@ interface ResolvedChoiceTransition {
   readonly resolvedTarget: string
 }
 
-const resolveChoiceTarget = (
+function resolveChoiceTarget(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   initialTarget: unknown,
   event: unknown
-) => {
+) {
   const pending: Array<unknown> = [initialTarget]
   const resolvedTargets: Array<unknown> = []
   const commands: Array<RuntimeCommand> = []
@@ -1141,7 +1209,7 @@ const resolveChoiceTarget = (
       emittedEvents.push(...collected.emittedEvents)
     }
 
-    if (!isTarget(current) && !isSnapshot(current) && !isHistoryTarget(current)) {
+    if (!isTarget(current) && !isSnapshot(current) && !isHistoryTarget(current) && !isInitialTarget(current)) {
       throw new Error("Machine choice resolver must return a concrete typed target")
     }
     resolvedTargets.push(current)
@@ -1196,6 +1264,10 @@ const collectEvaluatedTransition = <
       (selection.context as any).event
     )
   const choiceResolvedTarget = choiceResolution?.target ?? unresolvedTarget
+  const initialResolution = choiceResolvedTarget !== undefined && isInitialTarget(choiceResolvedTarget)
+    ? resolveInitialTarget(machine, state, choiceResolvedTarget, (selection.context as any).event)
+    : undefined
+  const routedTarget = initialResolution?.target ?? choiceResolvedTarget
   let historyResolution: {
     readonly target: unknown
     readonly commands: ReadonlyArray<RuntimeCommand>
@@ -1203,50 +1275,64 @@ const collectEvaluatedTransition = <
     readonly emittedEvents: ReadonlyArray<unknown>
     readonly transitions: ReadonlyArray<ResolvedChoiceTransition>
   } | undefined
-  const reenteredHistoryTarget = isHistoryTarget(choiceResolvedTarget) && selection.transition.reenter &&
-      state.active.has(choiceResolvedTarget.parent)
-    ? choiceResolvedTarget
+  const reenteredHistoryTarget = isHistoryTarget(routedTarget) && selection.transition.reenter &&
+      state.active.has(routedTarget.parent)
+    ? routedTarget
     : undefined
-  if (choiceResolvedTarget !== undefined && isHistoryTarget(choiceResolvedTarget)) {
+  if (routedTarget !== undefined && isHistoryTarget(routedTarget)) {
     // A reentering transition may exit the history node's own parent. SCXML
     // history observes that same exit, so resolve against a provisional
     // capture rather than an older record (or the default).
     const provisionalBoundary = selection.transition.reenter
       ? getNode(machine, selection.sourcePath).parent
-      : getLeastCommonAncestor(machine, stateIdentifier, choiceResolvedTarget.parent)
+      : getLeastCommonAncestor(machine, stateIdentifier, routedTarget.parent)
     const provisionalExitPaths = reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
-        Array.from(state.active).filter((path) => isPathInSubtree(path, choiceResolvedTarget.parent))
+        Array.from(state.active).filter((path) => isPathInSubtree(path, routedTarget.parent))
       )
       : getExitPaths(machine, state, provisionalBoundary)
-    const stateAtHistoryResolution = provisionalExitPaths.includes(choiceResolvedTarget.parent)
+    const stateAtHistoryResolution = provisionalExitPaths.includes(routedTarget.parent)
       ? captureHistory(machine, state, state, provisionalExitPaths)
       : state
     historyResolution = resolveHistoryTarget(
       machine,
       stateAtHistoryResolution,
-      choiceResolvedTarget,
+      routedTarget,
       (selection.context as any).event
     )
   }
   const target: Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>> | undefined =
     historyResolution === undefined
-      ? choiceResolvedTarget as
+      ? routedTarget as
         | Machine.Snapshot<States>
         | Machine.Target<States, Machine.StateIdentifier<States>>
         | undefined
       : historyResolution.target as
         | Machine.Snapshot<States>
         | Machine.Target<States, Machine.StateIdentifier<States>>
-  const additionalHistoryActions: Array<RuntimeCommand> = []
-  const additionalHistoryRaisedEvents: Array<unknown> = []
-  const additionalHistoryEmittedEvents: Array<unknown> = []
-  const additionalHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
+  const additionalTargetActions: Array<RuntimeCommand> = []
+  const additionalTargetRaisedEvents: Array<unknown> = []
+  const additionalTargetEmittedEvents: Array<unknown> = []
+  const additionalTargetChoiceTransitions: Array<ResolvedChoiceTransition> = []
   const additionalChoiceTargets: Array<
     Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
   > = []
   for (const additionalTarget of choiceResolution?.additionalTargets ?? []) {
+    if (isInitialTarget(additionalTarget)) {
+      const resolved = resolveInitialTarget(
+        machine,
+        state,
+        additionalTarget,
+        (selection.context as any).event
+      )
+      additionalChoiceTargets.push(resolved.target as any)
+      additionalTargetActions.push(...resolved.commands)
+      additionalTargetRaisedEvents.push(...resolved.raisedEvents)
+      additionalTargetEmittedEvents.push(...resolved.emittedEvents)
+      additionalTargetChoiceTransitions.push(...resolved.transitions)
+      continue
+    }
     if (!isHistoryTarget(additionalTarget)) {
       additionalChoiceTargets.push(additionalTarget as any)
       continue
@@ -1258,10 +1344,10 @@ const collectEvaluatedTransition = <
       (selection.context as any).event
     )
     additionalChoiceTargets.push(resolved.target as any)
-    additionalHistoryActions.push(...resolved.commands)
-    additionalHistoryRaisedEvents.push(...resolved.raisedEvents)
-    additionalHistoryEmittedEvents.push(...resolved.emittedEvents)
-    additionalHistoryChoiceTransitions.push(...resolved.transitions)
+    additionalTargetActions.push(...resolved.commands)
+    additionalTargetRaisedEvents.push(...resolved.raisedEvents)
+    additionalTargetEmittedEvents.push(...resolved.emittedEvents)
+    additionalTargetChoiceTransitions.push(...resolved.transitions)
   }
   const targetPath = target === undefined
     ? undefined
@@ -1288,28 +1374,32 @@ const collectEvaluatedTransition = <
       commands: [
         ...transitionResult.commands,
         ...(choiceResolution?.commands ?? []),
+        ...(initialResolution?.commands ?? []),
         ...(historyResolution?.commands ?? []),
-        ...additionalHistoryActions
+        ...additionalTargetActions
       ],
       raisedEvents: [
         ...transitionResult.raisedEvents,
         ...(choiceResolution?.raisedEvents ?? []),
+        ...(initialResolution?.raisedEvents ?? []),
         ...(historyResolution?.raisedEvents ?? []),
-        ...additionalHistoryRaisedEvents
+        ...additionalTargetRaisedEvents
       ],
       emittedEvents: [
         ...transitionResult.emittedEvents,
         ...(choiceResolution?.emittedEvents ?? []),
+        ...(initialResolution?.emittedEvents ?? []),
         ...(historyResolution?.emittedEvents ?? []),
-        ...additionalHistoryEmittedEvents
+        ...additionalTargetEmittedEvents
       ],
       changed,
       exitPaths: [],
       entryPaths: [],
       choiceTransitions: [
         ...(choiceResolution?.transitions ?? []),
+        ...(initialResolution?.transitions ?? []),
         ...(historyResolution?.transitions ?? []),
-        ...additionalHistoryChoiceTransitions
+        ...additionalTargetChoiceTransitions
       ]
     } as EvaluatedTransition<States, Event, E, R, Context>
   }
@@ -1329,20 +1419,23 @@ const collectEvaluatedTransition = <
     commands: [
       ...transitionResult.commands,
       ...(choiceResolution?.commands ?? []),
+      ...(initialResolution?.commands ?? []),
       ...(historyResolution?.commands ?? []),
-      ...additionalHistoryActions
+      ...additionalTargetActions
     ],
     raisedEvents: [
       ...transitionResult.raisedEvents,
       ...(choiceResolution?.raisedEvents ?? []),
+      ...(initialResolution?.raisedEvents ?? []),
       ...(historyResolution?.raisedEvents ?? []),
-      ...additionalHistoryRaisedEvents
+      ...additionalTargetRaisedEvents
     ],
     emittedEvents: [
       ...transitionResult.emittedEvents,
       ...(choiceResolution?.emittedEvents ?? []),
+      ...(initialResolution?.emittedEvents ?? []),
       ...(historyResolution?.emittedEvents ?? []),
-      ...additionalHistoryEmittedEvents
+      ...additionalTargetEmittedEvents
     ],
     changed,
     exitPaths: reenteredHistoryTarget !== undefined
@@ -1359,8 +1452,9 @@ const collectEvaluatedTransition = <
       : getEntryPaths(machine, stateAfterTransition, boundary),
     choiceTransitions: [
       ...(choiceResolution?.transitions ?? []),
+      ...(initialResolution?.transitions ?? []),
       ...(historyResolution?.transitions ?? []),
-      ...additionalHistoryChoiceTransitions
+      ...additionalTargetChoiceTransitions
     ]
   } as EvaluatedTransition<States, Event, E, R, Context>
 }

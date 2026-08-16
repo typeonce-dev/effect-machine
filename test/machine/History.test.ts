@@ -171,9 +171,9 @@ const makeCheckoutMachine = (
           exit: () => {
             lifecycle?.push("exit:payment")
           },
-          initial: ({ state }) => {
+          initialize: ({ state, builder }) => {
             onInitialize?.()
-            return new CardEntry({ cardNumber: `fresh-${state.attempt}` })
+            return builder(new CardEntry({ cardNumber: `fresh-${state.attempt}` }))
           },
           states: {
             verifying: {
@@ -334,15 +334,15 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
       },
       states: {
         editor: {
-          initial: ({ state }) => {
+          initialize: ({ state, builder }) => {
             initialized.push("editor")
-            return new Writing({ draft: `fresh:${state.documentId}` })
+            return builder(new Writing({ draft: `fresh:${state.documentId}` }))
           }
         },
         sidebar: {
-          initial: ({ state }) => {
+          initialize: ({ state, builder }) => {
             initialized.push("sidebar")
-            return new Files({ directory: `/fresh/${state.width}` })
+            return builder(new Files({ directory: `/fresh/${state.width}` }))
           }
         }
       }

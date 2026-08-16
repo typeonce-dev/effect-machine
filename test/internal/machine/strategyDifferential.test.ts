@@ -138,6 +138,43 @@ describe("machine planner and runtime strategies", () => {
       })
     }))
 
+  it.effect("matches generic and indexed-hierarchical planning for declared initial entry", () =>
+    Effect.gen(function*() {
+      class Outside extends Schema.TaggedClass<Outside>("StrategyInitialOutside")("Outside", {}) {}
+      class Opened extends Schema.TaggedClass<Opened>("StrategyInitialOpened")("Opened", {}) {}
+      class Idle extends Schema.TaggedClass<Idle>("StrategyInitialIdle")("Idle", { value: Schema.Number }) {}
+      class Enter extends Schema.TaggedClass<Enter>("StrategyInitialEnter")("Enter", {}) {}
+      const states = Machine.defineStates({
+        Outside,
+        Opened: {
+          schema: Opened,
+          initial: "Idle",
+          states: { Idle }
+        }
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Enter),
+        initial: () => states.initial.Outside(new Outside({}))
+      }).handle({
+        Outside: {
+          on: {
+            Enter: ({ target }) => target.full.Opened.initial(new Opened({}))
+          }
+        },
+        Opened: {
+          initialize: ({ builder }) => builder.from({ value: 1 })
+        }
+      })
+
+      yield* verifyPlannerStrategies({
+        machine,
+        events: [new Enter({})],
+        expected: "indexed-hierarchical",
+        label: "declared initial entry"
+      })
+    }))
+
   it.effect("preserves value-only updates beside control-changing simultaneous transitions", () =>
     Effect.gen(function*() {
       const model: MachineTest.FiniteModel = {

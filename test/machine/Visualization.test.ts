@@ -98,7 +98,7 @@ const machine = Machine.make({
             }
           },
           running: {
-            initial: () => new Editing({})
+            initialize: ({ builder }) => builder(new Editing({}))
           }
         }
       },

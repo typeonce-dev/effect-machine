@@ -17,7 +17,14 @@ import {
   decodeStateValue,
   decodeStateValueSync
 } from "./protocol.js"
-import { getNode, getStateNodeSchema, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import {
+  getNode,
+  getStateNodeSchema,
+  type InitialTarget as InitialTargetInstruction,
+  isSnapshot,
+  isTarget,
+  TargetSnapshotTypeId
+} from "./topology.js"
 
 export interface HistoryRecord {
   readonly mode: "shallow" | "deep"
@@ -952,7 +959,8 @@ const configurationFromTargetPathSync = (
   current: ActiveConfiguration,
   path: string,
   value: unknown,
-  providedValues: Readonly<Record<string, unknown>> | undefined
+  providedValues: Readonly<Record<string, unknown>> | undefined,
+  allowIncomplete = false
 ): ActiveConfiguration => {
   const node = getNode(machine, path)
   const active = new Set<string>()
@@ -998,11 +1006,28 @@ const configurationFromTargetPathSync = (
     }
   }
 
-  if (node.type === "compound" || node.type === "parallel") {
+  if (!allowIncomplete && (node.type === "compound" || node.type === "parallel")) {
     throw new Error(`Machine target "${node.path}" must include an active child state`)
   }
   return { active, values, outputs, history: current.history }
 }
+
+/** Builds the selected path and its ancestors without requiring nested active
+ * children. The planner completes those children through declared initial
+ * topology and `initialize` handlers before normalization continues. */
+export const configurationFromInitialTargetSync = (
+  machine: Machine.Any,
+  current: ActiveConfiguration,
+  target: InitialTargetInstruction
+): ActiveConfiguration =>
+  configurationFromTargetPathSync(
+    machine,
+    current,
+    target.path,
+    target.value,
+    target.values as Readonly<Record<string, unknown>> | undefined,
+    true
+  )
 
 const configurationFromTargetSnapshotSync = (
   machine: Machine.Any,

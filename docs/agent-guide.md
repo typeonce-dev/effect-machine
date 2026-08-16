@@ -254,6 +254,47 @@ const machine = Machine.make({
 Do not repeat `type: "final"` in `handle`. Execution APIs reject a machine
 until every declared output schema has an implementation.
 
+Enter a compound or parallel state through its declared initial configuration
+with `.initial`. This is available on top-level state methods under
+`target.full` and compatible nested state methods under `target.local` and
+`target.branch`; atomic and final state methods do not expose it:
+
+```ts
+Open: ({ target }) => target.full.opened.initial.from({ teamId: "team-1" })
+```
+
+The selected state's own value is passed directly to `initial(value)` or
+constructed inside planning with `initial.from(input)`. A structural selected
+state uses `initial()`.
+
+When a declared initial child owns a schema, its parent implements
+`initialize`. The context's `builder` is already bound to that child, so it
+cannot accidentally select a state that differs from the definition:
+
+```ts
+opened: {
+  initialize: ({ state, builder }) =>
+    builder.from({ requestId: state.requestId })
+}
+```
+
+A parallel initializer supplies every schema-valued direct region with a
+fluent completion builder. Structural regions are omitted:
+
+```ts
+dashboard: {
+  initialize: ({ builder }) =>
+    builder.filters.from({ query: "" }).results.from({ page: 1 })
+}
+```
+
+Default entry then continues recursively. Nested compound and parallel owners
+provide their own `initialize` implementations. Missing implementations and
+incomplete parallel builders are reported at `handle(...)`. Builder `.from`
+inputs are decoded by the machine, so schema failures remain typed machine
+failures. An explicit snapshot target that manually selects all children does
+not use `initialize`.
+
 Declare a history pseudo-state below the active parent whose configuration it
 should remember. It has no schema, is excluded from active state identifiers,
 and is addressed only through `target.history`:
@@ -302,11 +343,12 @@ Resume: ({ target }) => target.history.checkout.exact()
 Deep history restores the complete remembered subtree and its decoded values.
 Shallow history restores only parent and direct-child values. If the remembered
 child is compound, its configured initial child needs a freshly constructed
-value, so implement `initial` only on paths required by shallow history:
+value, so implement `initialize` only on paths required by shallow history:
 
 ```ts
 payment: {
-  initial: ({ state }) => new CardEntry({ attempt: state.attempt, cardNumber: "" })
+  initialize: ({ state, builder }) =>
+    builder.from({ cardNumber: `attempt-${state.attempt}` })
 }
 ```
 

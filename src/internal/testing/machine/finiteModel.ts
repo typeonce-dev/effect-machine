@@ -1449,15 +1449,16 @@ const makeHandlers = (
           ...(Object.keys(history).length === 0 ? {} : { history }),
           ...(node._tag === "Compound"
             ? {
-              initial: () => stateValue(byPath.get(`${path}.${node.initial}`)!)
+              initialize: ({ builder }: any) => builder(stateValue(byPath.get(`${path}.${node.initial}`)!))
             }
             : {
-              initial: () =>
-                Object.fromEntries(
-                  node.states
-                    .filter((child) => child._tag !== "History" && child._tag !== "Choice")
-                    .map((child) => [child.key, stateValue(byPath.get(`${path}.${child.key}`)!)])
-                )
+              initialize: ({ builder }: any) =>
+                node.states
+                  .filter((child) => child._tag !== "History" && child._tag !== "Choice")
+                  .reduce(
+                    (current: any, child) => current[child.key](stateValue(byPath.get(`${path}.${child.key}`)!)),
+                    builder
+                  )
             }),
           states: makeHandlers(node.states, path, byPath, transitions)
         }
