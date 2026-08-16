@@ -2,8 +2,8 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-rc.108
-  "@effect/atom-react": 4.0.0-rc.108
+  effect: 4.0.0-rc.109
+  "@effect/atom-react": 4.0.0-rc.109
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
