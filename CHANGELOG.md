@@ -1,5 +1,46 @@
 # @typeonce/effect-machine
 
+## 0.13.0
+
+### Minor Changes
+
+- 0ca9134: Upgrade the exact Effect peer dependency and companion Effect packages to `4.0.0-rc.109`.
+- aa4947f: Require every `Machine.invoke` `effect` source to be a factory evaluated when its owning state is entered. This gives lifecycle callbacks immediate output and failure inference while making Effect construction timing explicit.
+
+  Wrap previously direct Effects in a zero-argument function:
+
+  ```ts
+  Machine.invoke({
+    id: "load",
+    effect: () => load,
+    onDone: ({ output, target }) => target.none()
+  })
+  ```
+
+- 34a9a26: Add typed declared-initial entry to compound and parallel transition targets.
+
+  Use `target.full.opened.initial()`, `initial(value)`, or `initial.from(input)` to enter the initial configuration declared by `Machine.defineStates`; the same operation is available through compatible `local` and `branch` target scopes. Schema-valued implicit children are constructed by `initialize: ({ builder }) => ...`, including fluent completion of every valued parallel region. Missing initializers are reported at `handle(...)`, and `.from` validation remains a typed `MachineSchemaDecodeError` during planning.
+
+  State handler `initial` and its `StateInitial*` utility types have been replaced by `initialize` and `StateInitialize*`. Migrate compound initializers from `initial: () => new Child(...)` to `initialize: ({ builder }) => builder(new Child(...))`, and parallel initializers from returned value records to chained region builders.
+
+- c8728e5: Add live, root-scoped machine inspection through `Machine.prepare(machine).inspection` and `AtomMachine.inspection(machineAtom)`.
+
+  The hot Effect `Stream` observes ordered creation, initialization, mailbox delivery and processing, state changes, emissions, Effect and timer activities, and termination for a prepared root and all locally owned descendants:
+
+  ```ts
+  const prepared = yield * Machine.prepare(machine)
+
+  yield *
+    prepared.inspection.pipe(
+      Stream.runForEach((event) => Console.log(event.sequence, event.subject.id, event._tag)),
+      Effect.forkScoped({ startImmediately: true })
+    )
+
+  const ref = yield * prepared.start
+  ```
+
+  Inspection is non-replayed, never fails, and completes with the root. Its session ids and ordering are local to one prepared ownership tree; distributed identity and delivery remain an Effect Cluster concern.
+
 ## 0.12.0
 
 ### Minor Changes
