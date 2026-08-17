@@ -69,7 +69,7 @@ export const SelectionStates = Machine.defineStates({
 })
 
 export const SelectionEvents = Machine.events(SelectPokemon, UpdateSearchText, SearchResult, ReplacePokemon)
-const definition = Machine.make({
+export const SelectionMachine = Machine.make({
   states: SelectionStates.states,
   events: SelectionEvents,
   parentEvents: TeamEvents,
@@ -82,9 +82,7 @@ const definition = Machine.make({
           .selection.from((selection) => selection.Unselected.from())
       )
   }
-})
-
-export const SelectionMachine = definition.handle({
+}).handle({
   form: {
     states: {
       search: {
@@ -115,7 +113,7 @@ export const SelectionMachine = definition.handle({
             }
           },
           Searching: {
-            invoke: definition.invoke({
+            invoke: Machine.invoke({
               id: "search",
               effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
               onDone: Machine.transition({

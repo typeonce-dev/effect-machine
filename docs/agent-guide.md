@@ -35,15 +35,13 @@ currently coupled to the exact Effect peer version listed in its `package.json`.
 Use this order so inference has all schemas available when handlers are
 declared:
 
-1. Domain schemas used by state and event fields.
-2. Tagged schemas for states that own data.
-3. Tagged public-event, internal-event, parent-event, and emitted-event schemas.
-4. `Machine.defineStates`.
-5. `Machine.make`, including input, `events`, `internalEvents`, `parentEvents`,
-   `emittedEvents`, and the initial function.
-6. One or more `.handle(...)` calls.
-7. Child descriptors.
-8. Runtime, Atom, or Cluster adapters.
+1. Domain schemas used by state, and by event fields when they are shared.
+2. `Machine.defineStates`, using a tagged state union and `.cases` when state
+   schemas need to be reused.
+3. `Machine.events`, `Machine.internalEvents`, `Machine.emittedEvents`, and
+   `parentEvents`; pass `Schema.TaggedUnion({...})` or tagged classes directly.
+4. `Machine.make({...}).handle({...})`.
+5. Child descriptors, then runtime, Atom, or Cluster adapters.
 
 `Schema.TaggedUnion` avoids one class declaration per case:
 
@@ -54,22 +52,23 @@ const State = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const Event = Schema.TaggedUnion({
-  Save: {}
-})
-
-const InternalEvent = Schema.TaggedUnion({
-  Saved: { id: Schema.String },
-  SaveFailed: { message: Schema.String }
-})
-
 const States = Machine.defineStates(State.cases)
-const Events = Machine.events(Event)
-const InternalEvents = Machine.internalEvents(InternalEvent)
+export const Event = Machine.events(
+  Schema.TaggedUnion({
+    Save: {}
+  })
+)
+export const Internal = Machine.internalEvents(
+  Schema.TaggedUnion({
+    Saved: { id: Schema.String },
+    SaveFailed: { message: Schema.String }
+  })
+)
 ```
 
-Pass these descriptors to `Machine.make` and export `Events` instead of the raw
-event schema. Construct new state values through the target or initial
+Pass these descriptors to `Machine.make`; the event descriptor is the public
+handle, so do not introduce a tagged-union binding used only by an event helper.
+Construct new state values through the target or initial
 builder's `.from(...)` method. Both event constructors and state `.from(...)`
 defer schema construction until planning, so validation failures remain typed
 machine errors. Use
@@ -121,9 +120,9 @@ its extra control is required:
 - Use one invocation object: `effect` for one-shot work, `after` for a timer,
   `logic` for reusable process logic, and `child` for a complete child
   statechart. `Machine.invoke({...})` preserves owner state and source channels
-  across sibling lifecycle handlers. Use `definition.invoke({...})` when a
-  callback uses `self` or `parent`; the bound constructor preserves the
-  definition's exact public input and `parentEvents` protocols.
+  across sibling lifecycle handlers. Inside `.handle(...)`, `self` and `parent`
+  use the owning definition's exact public input and `parentEvents` protocols.
+  The bound `definition.invoke({...})` form is equivalent, not required.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. A logic
   invocation is addressable only when `Machine.invoke` receives that
@@ -764,8 +763,17 @@ an event for the parent. Both operations validate their schemas.
 union handled inside the statechart:
 
 ```ts
-const Events = Machine.events(Event)
-const InternalEvents = Machine.internalEvents(InternalEvent)
+const Events = Machine.events(
+  Schema.TaggedUnion({
+    Save: {}
+  })
+)
+const InternalEvents = Machine.internalEvents(
+  Schema.TaggedUnion({
+    Saved: { id: Schema.String },
+    SaveFailed: { message: Schema.String }
+  })
+)
 
 const definition = Machine.make({
   states: States.states,
@@ -871,29 +879,30 @@ invoke: Machine.invoke({
 })
 ```
 
-The standalone constructor cannot know the owning machine's input protocols,
-so its `self` and `parent` references are non-sendable. When a source sends
-through either reference, use the owning definition's bound constructor:
+Inside `.handle(...)`, the constructor receives the owning machine's public
+input and `parentEvents` protocols contextually. Sources and lifecycle handlers
+can send through `self` and `parent` without naming the definition:
 
 ```ts
-const definition = Machine.make({
+const machine = Machine.make({
   events: Commands,
   internalEvents: InternalEvents,
   parentEvents: ParentEvents,
   // ...
-})
-
-const machine = definition.handle({
+}).handle({
   Saving: {
-    invoke: definition.invoke({
+    invoke: Machine.invoke({
       id: "notify-parent",
-      effect: ({ parent }) =>
-        parent === undefined
-          ? Effect.void
-          : parent.send(ParentEvents.SaveStarted()),
+      effect: () => saveDocument,
       onDone: Machine.transition({
         target: (to) => to.none(),
-        resolve: () => undefined
+        resolve: ({ parent, self }, enqueue) => {
+          enqueue.sendTo(self, Commands.Save())
+          if (parent !== undefined) {
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+          }
+          return undefined
+        }
       }),
       onFailure: Machine.transition({
         target: (to) => to.none(),
@@ -904,8 +913,9 @@ const machine = definition.handle({
 })
 ```
 
-A direct `invoke: { ... }` object remains available when lifecycle handlers do
-not need source-derived context.
+The machine-bound `definition.invoke(...)` form remains equivalent when the
+definition is already named. A direct `invoke: { ... }` object remains available
+when lifecycle handlers do not need source-derived context.
 
 A cancellable timer uses the same object:
 

@@ -1,11 +1,11 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
-const TrafficLightEvent = Schema.TaggedUnion({
-  Reset: {}
-})
-
-export const TrafficLightEvents = Machine.events(TrafficLightEvent)
+export const TrafficLightEvents = Machine.events(
+  Schema.TaggedUnion({
+    Reset: {}
+  })
+)
 
 export const trafficLightDurations = {
   Red: 4_000,
@@ -21,7 +21,7 @@ export const TrafficLightStates = Machine.defineStates({
   Yellow: {}
 })
 
-const definition = Machine.make({
+export const TrafficLightMachine = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: TrafficLightEvents,
@@ -29,9 +29,7 @@ const definition = Machine.make({
     target: (to) => to.Red(),
     resolve: ({ target }) => target.from()
   }
-})
-
-export const TrafficLightMachine = definition.handle({
+}).handle({
   Red: {
     invoke: Machine.invoke({
       id: "red-timer",

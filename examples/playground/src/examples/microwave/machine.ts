@@ -5,13 +5,13 @@ export const MicrowaveState = Schema.TaggedUnion({
   Cooking: { elapsedSeconds: Schema.Number }
 })
 
-const MicrowaveEvent = Schema.TaggedUnion({
-  PowerPressed: {},
-  DoorOpened: {},
-  DoorClosed: {}
-})
-
-export const MicrowaveEvents = Machine.events(MicrowaveEvent)
+export const MicrowaveEvents = Machine.events(
+  Schema.TaggedUnion({
+    PowerPressed: {},
+    DoorOpened: {},
+    DoorClosed: {}
+  })
+)
 
 export const MicrowaveStates = Machine.defineStates({
   Oven: {
@@ -35,7 +35,7 @@ export const MicrowaveStates = Machine.defineStates({
   }
 })
 
-const definition = Machine.make({
+export const MicrowaveMachine = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: MicrowaveEvents,
@@ -48,9 +48,7 @@ const definition = Machine.make({
           .door.from((door) => door.Closed.from())
       )
   }
-})
-
-export const MicrowaveMachine = definition.handle({
+}).handle({
   Oven: {
     states: {
       engine: {

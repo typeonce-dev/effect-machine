@@ -15,18 +15,16 @@ export const States = Machine.defineStates({ Loading: {}, ActiveTeam, Failed: {}
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
-const definition = Machine.make({
+const machine = Machine.make({
   states: States.states,
   events: TeamEvents,
   initial: {
     target: (to) => to.Loading(),
     resolve: ({ target }) => target.from()
   }
-})
-
-const machine = definition.handle({
+}).handle({
   Loading: {
-    invoke: definition.invoke({
+    invoke: Machine.invoke({
       id: "load-team",
       effect: () =>
         Effect.gen(function*() {
@@ -45,7 +43,7 @@ const machine = definition.handle({
   },
   ActiveTeam: {
     invoke: [
-      definition.invoke({
+      Machine.invoke({
         child: SelectionChild,
         onDone: Machine.transition({
           target: (to) => to.none(),
@@ -56,7 +54,7 @@ const machine = definition.handle({
           resolve: ({ target }) => target.from()
         })
       }),
-      definition.invoke({
+      Machine.invoke({
         child: ReplaceChild,
         onFailure: Machine.transition({
           target: (to) => to.full.Failed(),

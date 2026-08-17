@@ -18,29 +18,30 @@ const State = Schema.TaggedUnion({
 })
 
 // Inputs and physics facts are one runtime-decoded, statically typed protocol.
-const Event = Schema.TaggedUnion({
-  Move: { axis: Axis, at: Schema.Number },
-  JumpPressed: { at: Schema.Number, y: Schema.Number, wall: Axis },
-  WallContact: { wall: Axis },
-  DownPressed: { at: Schema.Number },
-  DownReleased: { axis: Axis, at: Schema.Number },
-  ApexReached: { y: Schema.Number },
-  Landed: { impact: Schema.Number, axis: Axis, at: Schema.Number },
-  Pause: { at: Schema.Number },
-  Resume: {},
-  Reset: {}
-})
+export const CharacterEvents = Machine.events(
+  Schema.TaggedUnion({
+    Move: { axis: Axis, at: Schema.Number },
+    JumpPressed: { at: Schema.Number, y: Schema.Number, wall: Axis },
+    WallContact: { wall: Axis },
+    DownPressed: { at: Schema.Number },
+    DownReleased: { axis: Axis, at: Schema.Number },
+    ApexReached: { y: Schema.Number },
+    Landed: { impact: Schema.Number, axis: Axis, at: Schema.Number },
+    Pause: { at: Schema.Number },
+    Resume: {},
+    Reset: {}
+  })
+)
 
-const InternalEvent = Schema.TaggedUnion({
-  LandingSettled: {},
-  AirJumpUnlocked: {},
-  TryAirJump: { at: Schema.Number },
-  DoubleJump: { at: Schema.Number },
-  WallJump: { at: Schema.Number, push: Axis }
-})
-
-export const CharacterEvents = Machine.events(Event)
-const InternalEvents = Machine.internalEvents(InternalEvent)
+const InternalEvents = Machine.internalEvents(
+  Schema.TaggedUnion({
+    LandingSettled: {},
+    AirJumpUnlocked: {},
+    TryAirJump: { at: Schema.Number },
+    DoubleJump: { at: Schema.Number },
+    WallJump: { at: Schema.Number, push: Axis }
+  })
+)
 
 const awayFrom = (wall: Axis): Axis => (wall === -1 ? 1 : wall === 1 ? -1 : 0)
 
@@ -114,7 +115,7 @@ export const CharacterStates = Machine.defineStates({
   }
 })
 
-const definition = Machine.make({
+export const CharacterMachine = Machine.make({
   id: "PlatformerCharacter",
   states: CharacterStates.states,
   events: CharacterEvents,
@@ -131,9 +132,7 @@ const definition = Machine.make({
           .contact.from((contact) => contact.NoWall.from())
       )
   }
-})
-
-export const CharacterMachine = definition.handle({
+}).handle({
   Character: {
     on: {
       Reset: Machine.transition({
@@ -261,7 +260,7 @@ export const CharacterMachine = definition.handle({
                     }
                   },
                   Landing: {
-                    invoke: definition.invoke({
+                    invoke: Machine.invoke({
                       id: "landing-settle",
                       after: "140 millis",
                       onDone: Machine.transition({
