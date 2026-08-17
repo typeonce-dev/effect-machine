@@ -7,7 +7,7 @@ export class LoadError {
 
 export const Loading = Schema.TaggedStruct("Loading", { userId: Schema.String })
 
-export const States = Machine.defineStates({ Loading })
+export const States = Machine.states({ Loading })
 
 export const loadUser = (userId: string) => Effect.fail(new LoadError()).pipe(Effect.as({ id: userId, name: "Ada" }))
 

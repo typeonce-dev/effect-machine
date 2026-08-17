@@ -9,7 +9,7 @@ export const SharedMachineState = Schema.TaggedUnion({
   Active: { count: Schema.Number }
 })
 
-export const SharedMachineStates = Machine.defineStates(SharedMachineState.cases)
+export const SharedMachineStates = Machine.states(SharedMachineState.cases)
 
 // Worker and BroadcastChannel messages need decoded, cloneable data rather
 // than the opaque instructions returned by Machine.events.

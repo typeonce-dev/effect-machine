@@ -105,7 +105,7 @@ describe("Machine", () => {
     Effect.gen(function*() {
       class Stable extends Schema.TaggedClass<Stable>("Stable")("Stable", {}) {}
       class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
-      const states = Machine.defineStates({ Stable })
+      const states = Machine.states({ Stable })
       const transition = Machine.transition({
         target: (to) => to.none(),
         resolve: () => undefined,
@@ -303,7 +303,7 @@ describe("Machine", () => {
 
   it.effect("make constructs the initial state from input", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
@@ -321,7 +321,7 @@ describe("Machine", () => {
     }))
 
   it("isMachine requires the machine brand value, not only its property key", () => {
-    const states = Machine.defineStates({ Idle })
+    const states = Machine.states({ Idle })
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
@@ -338,7 +338,7 @@ describe("Machine", () => {
   it.effect("constructs a sibling target by destructuring the source value", () =>
     Effect.gen(function*() {
       class Convert extends Schema.TaggedClass<Convert>("Convert")("Convert", {}) {}
-      const states = Machine.defineStates({ Submit, RequestSucceeded })
+      const states = Machine.states({ Submit, RequestSucceeded })
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Convert),
@@ -371,7 +371,7 @@ describe("Machine", () => {
     }))
 
   it("make stores the machine id", () => {
-    const states = Machine.defineStates({ Idle, Loading })
+    const states = Machine.states({ Idle, Loading })
     const machine = Machine.make({
       id: "UserMachine",
       states: states.states,
@@ -402,10 +402,10 @@ describe("Machine", () => {
     assert.strictEqual(Machine.isInitialEvent(new Submit({ value: "request-1" })), false)
   })
 
-  it.effect("defineStates returns states accepted by make", () =>
+  it.effect("states returns states accepted by make", () =>
     Effect.gen(function*() {
       const states = { idle: Idle, loading: Loading }
-      const defined = Machine.defineStates(states)
+      const defined = Machine.states(states)
       const machine = Machine.make({
         states: defined.states,
         events: Machine.events(Submit),
@@ -417,13 +417,15 @@ describe("Machine", () => {
 
       const planned = yield* Machine.planInitial(machine)
 
-      assert.strictEqual(defined.states, states)
+      assert.notStrictEqual(defined.states, states)
+      assert.deepStrictEqual(defined.states, states)
+      assert.isTrue(Object.isFrozen(defined.states))
       assert.strictEqual(planned.state.path, "idle")
       assert.deepStrictEqual(planned.state.value, new Idle({ userId: "user-1" }))
     }))
 
-  it("defineStates selects active compound and parallel state paths", () => {
-    const states = Machine.defineStates({
+  it("states selects active compound and parallel state paths", () => {
+    const states = Machine.states({
       fulfillment: {
         schema: Fulfillment,
         type: "parallel",
@@ -517,7 +519,7 @@ describe("Machine", () => {
 
   it.effect("initial builder constructs compound initial snapshots", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         payment: {
           schema: Payment,
           initial: "entering",
@@ -552,7 +554,7 @@ describe("Machine", () => {
 
   it.effect("initial builder constructs parallel initial snapshots", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         fulfillment: {
           schema: Fulfillment,
           type: "parallel",
@@ -648,7 +650,7 @@ describe("Machine", () => {
           TimedOut: {}
         })
         const State = Schema.TaggedStruct("DeferredEventState", { value: Schema.String })
-        const states = Machine.defineStates({ Active: State })
+        const states = Machine.states({ Active: State })
         const events = Machine.events(PublicEvent, Defaulted, FiniteEvent)
         const internalEvents = Machine.internalEvents(InternalEvent)
         const definition = Machine.make({
@@ -744,7 +746,7 @@ describe("Machine", () => {
         const Event = Schema.TaggedUnion({
           Submit: { value: Schema.NonEmptyString }
         })
-        const states = Machine.defineStates({ Idle: {} })
+        const states = Machine.states({ Idle: {} })
         const definition = Machine.make({
           id: "deferred-event-failure",
           states: states.states,
@@ -801,7 +803,7 @@ describe("Machine", () => {
       Effect.gen(function*() {
         const release = yield* Deferred.make<void>()
         const InternalEvent = Schema.TaggedUnion({ Loaded: {}, TimedOut: {} })
-        const states = Machine.defineStates({ Loading: {}, Waiting: {}, Done: {} })
+        const states = Machine.states({ Loading: {}, Waiting: {}, Done: {} })
         const definition = Machine.make({
           states: states.states,
           events: Machine.events(),
@@ -856,7 +858,7 @@ describe("Machine", () => {
       Effect.gen(function*() {
         const FirstEvent = Schema.TaggedUnion({ Submit: { value: Schema.String } })
         const SecondEvent = Schema.TaggedUnion({ Submit: { value: Schema.String } })
-        const states = Machine.defineStates({ Idle: {} })
+        const states = Machine.states({ Idle: {} })
         const first = Machine.make({
           states: states.states,
           events: Machine.events(FirstEvent),
@@ -896,7 +898,7 @@ describe("Machine", () => {
   describe("state builder from", () => {
     it.effect("constructs TaggedClass initial state and applies constructor defaults", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ idle: DefaultedIdle })
+        const states = Machine.states({ idle: DefaultedIdle })
         const machine = Machine.make({
           id: "from-default",
           states: states.states,
@@ -922,7 +924,7 @@ describe("Machine", () => {
         const Event = Schema.TaggedUnion({
           Submit: { requestId: Schema.String }
         })
-        const states = Machine.defineStates({
+        const states = Machine.states({
           Idle: State.cases.Idle,
           Done: {
             schema: State.cases.Done,
@@ -968,7 +970,7 @@ describe("Machine", () => {
             Schema.withConstructorDefault(Effect.succeed("default-label"))
           )
         }) {}
-        const states = Machine.defineStates({ DefaultOnly })
+        const states = Machine.states({ DefaultOnly })
         const machine = Machine.make({
           id: "from-default-only",
           states: states.states,
@@ -1002,7 +1004,7 @@ describe("Machine", () => {
           Full: {},
           Finish: {}
         })
-        const states = Machine.defineStates({
+        const states = Machine.states({
           Flow: {
             schema: State.cases.Flow,
             initial: "Idle",
@@ -1103,7 +1105,7 @@ describe("Machine", () => {
           Right: {},
           RightIdle: {}
         })
-        const states = Machine.defineStates({
+        const states = Machine.states({
           Parallel: {
             schema: State.cases.Parallel,
             type: "parallel",
@@ -1155,7 +1157,7 @@ describe("Machine", () => {
         const Blocked = State.cases.Blocked.check(
           Schema.makeFilter(() => "blocked state cannot be entered")
         )
-        const states = Machine.defineStates({ Blocked })
+        const states = Machine.states({ Blocked })
         const machine = Machine.make({
           id: "from-empty-refinement",
           states: states.states,
@@ -1174,7 +1176,7 @@ describe("Machine", () => {
 
     it.effect("fails invalid refinement input through MachineSchemaDecodeError without throwing in the builder", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           id: "from-refinement",
           states: states.states,
@@ -1193,7 +1195,7 @@ describe("Machine", () => {
 
     it.effect("fails invalid transition construction in the typed machine error channel", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle, NonEmptyLoading })
+        const states = Machine.states({ NonEmptyIdle, NonEmptyLoading })
         const machine = Machine.make({
           id: "from-transition-refinement",
           states: states.states,
@@ -1228,7 +1230,7 @@ describe("Machine", () => {
 
     it.effect("constructs complete compound and parallel targets from schema input", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           idle: Idle,
           fulfillment: {
             schema: Fulfillment,
@@ -1309,7 +1311,7 @@ describe("Machine", () => {
 
     it.effect("constructs local parent replacement and leaf targets from schema input", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           payment: {
             schema: Payment,
             initial: "entering",
@@ -1360,7 +1362,7 @@ describe("Machine", () => {
 
     it.effect("constructs cross-branch ancestor and leaf values from schema input", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           workflow: {
             schema: Payment,
             initial: "idle",
@@ -1427,7 +1429,7 @@ describe("Machine", () => {
   describe("runtime schema contracts", () => {
     it.effect("decodes input before initial state construction", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1445,7 +1447,7 @@ describe("Machine", () => {
 
     it.effect("decodes initial state snapshots before accepting them", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1462,7 +1464,7 @@ describe("Machine", () => {
 
     it.effect("decodes incoming events before handler selection", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1494,7 +1496,7 @@ describe("Machine", () => {
 
     it.effect("surfaces sent event decode failures through the machine lifecycle", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1535,7 +1537,7 @@ describe("Machine", () => {
 
     it.effect("decodes transition target values before accepting them", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle, NonEmptyLoading })
+        const states = Machine.states({ NonEmptyIdle, NonEmptyLoading })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1567,7 +1569,7 @@ describe("Machine", () => {
 
     it.effect("decodes same-state atomic snapshot targets in the compiled runtime", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1600,7 +1602,7 @@ describe("Machine", () => {
 
     it.effect("decodes final state output before caching it", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           NonEmptyIdle,
           done: {
             schema: NonEmptyDone,
@@ -1642,7 +1644,7 @@ describe("Machine", () => {
 
     it.effect("decodes parallel state output before caching it", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           all: {
             schema: ParallelRoot,
             type: "parallel",
@@ -1686,7 +1688,7 @@ describe("Machine", () => {
 
     it.effect("reports malformed snapshots as configuration boundary errors", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
@@ -1712,7 +1714,7 @@ describe("Machine", () => {
   describe("snapshot encoding", () => {
     it.effect("round-trips schema encoded state values", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ count: EncodedCount })
+        const states = Machine.states({ count: EncodedCount })
         const machine = Machine.make({
           id: "Counter",
           states: states.states,
@@ -1740,7 +1742,7 @@ describe("Machine", () => {
 
     it.effect("round-trips compound and parallel configurations", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           fulfillment: {
             schema: Fulfillment,
             type: "parallel",
@@ -1802,7 +1804,7 @@ describe("Machine", () => {
 
     it.effect("encodes and decodes partial completion outputs", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           all: {
             schema: ParallelRoot,
             type: "parallel",
@@ -1850,7 +1852,7 @@ describe("Machine", () => {
 
     it.effect("round-trips void completion outputs through JSON", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           all: {
             schema: ParallelRoot,
             type: "parallel",
@@ -1895,7 +1897,7 @@ describe("Machine", () => {
 
     it.effect("rejects state values that cannot be encoded", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
@@ -1915,7 +1917,7 @@ describe("Machine", () => {
 
     it.effect("rejects invalid completion metadata during encoding", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
@@ -1936,7 +1938,7 @@ describe("Machine", () => {
 
     it.effect("rejects encoded values that do not match their state schema", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({ NonEmptyIdle })
+        const states = Machine.states({ NonEmptyIdle })
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
@@ -1959,7 +1961,7 @@ describe("Machine", () => {
 
     it.effect("rejects encoded configurations with invalid state relationships", () =>
       Effect.gen(function*() {
-        const states = Machine.defineStates({
+        const states = Machine.states({
           payment: {
             schema: Payment,
             initial: "entering",
@@ -2340,7 +2342,7 @@ describe("Machine", () => {
 
   it.effect("uses target.full to enter an inactive parallel root", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         idle: Idle,
         fulfillment: {
           schema: Fulfillment,
@@ -2438,7 +2440,7 @@ describe("Machine", () => {
   it.effect("uses target.local to enter an inactive nested parallel state", () =>
     Effect.gen(function*() {
       const workflow = new Payment({ id: "workflow-1" })
-      const states = Machine.defineStates({
+      const states = Machine.states({
         workflow: {
           schema: Payment,
           initial: "idle",
@@ -2554,7 +2556,7 @@ describe("Machine", () => {
       const app = new Fulfillment({ id: "app-1" })
       const flow = new Payment({ id: "flow-1" })
       const monitor = new QuotingShipping({ postalCode: "12345" })
-      const states = Machine.defineStates({
+      const states = Machine.states({
         app: {
           schema: Fulfillment,
           type: "parallel",
@@ -2653,7 +2655,7 @@ describe("Machine", () => {
 
   it.effect("uses target.local to preserve parent and sibling parallel region values", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         fulfillment: {
           schema: Fulfillment,
           type: "parallel",
@@ -2746,7 +2748,7 @@ describe("Machine", () => {
 
   it.effect("uses target.local.with to replace the local compound value", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         fulfillment: {
           schema: Fulfillment,
           type: "parallel",
@@ -2843,7 +2845,7 @@ describe("Machine", () => {
 
   it.effect("uses target.branch to replace one parallel region while preserving siblings", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         fulfillment: {
           schema: Fulfillment,
           type: "parallel",
@@ -2941,7 +2943,7 @@ describe("Machine", () => {
 
   it.effect("uses target.branch to replace root and nested region values", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         fulfillment: {
           schema: Fulfillment,
           type: "parallel",
@@ -3044,7 +3046,7 @@ describe("Machine", () => {
 
   it.effect("uses target.branch from a compound descendant to a sibling descendant", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         payment: {
           schema: Payment,
           initial: "inventory",
@@ -4733,7 +4735,7 @@ describe("Machine", () => {
 
   it.effect("isolates invoked children across concurrent zero-input starts", () =>
     Effect.gen(function*() {
-      const childStates = Machine.defineStates({ Idle })
+      const childStates = Machine.states({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
@@ -4743,7 +4745,7 @@ describe("Machine", () => {
         }
       })
       const Child = Machine.child("shared-child", childMachine)
-      const parentStates = Machine.defineStates({ Loading })
+      const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
@@ -4790,7 +4792,7 @@ describe("Machine", () => {
 
   it.effect("stops an idle compiled invoked child with its parent", () =>
     Effect.gen(function*() {
-      const childStates = Machine.defineStates({ Idle })
+      const childStates = Machine.states({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
@@ -4800,7 +4802,7 @@ describe("Machine", () => {
         }
       }).handle({ Idle: {} })
       const Child = Machine.child("owned-child", childMachine)
-      const parentStates = Machine.defineStates({ Loading })
+      const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
@@ -4829,7 +4831,7 @@ describe("Machine", () => {
   it.effect("evaluates precompiled input-bearing invoked children for every start", () =>
     Effect.gen(function*() {
       let starts = 0
-      const childStates = Machine.defineStates({ Idle })
+      const childStates = Machine.states({ Idle })
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
@@ -4843,7 +4845,7 @@ describe("Machine", () => {
         }
       }).handle({ Idle: {} })
       const Child = Machine.child("input-child", childMachine)
-      const parentStates = Machine.defineStates({ Loading })
+      const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
@@ -4879,7 +4881,7 @@ describe("Machine", () => {
       class ChildFinished extends Schema.TaggedClass<ChildFinished>("ChildFinished")("ChildFinished", {
         output: Schema.String
       }) {}
-      const childStates = Machine.defineStates({
+      const childStates = Machine.states({
         Success: { schema: Success, type: "final", output: Schema.String }
       })
       const childMachine = Machine.make({
@@ -4893,7 +4895,7 @@ describe("Machine", () => {
         Success: { output: ({ state }) => state.requestId }
       })
       const Child = Machine.child("final-child", childMachine)
-      const parentStates = Machine.defineStates({
+      const parentStates = Machine.states({
         Loading,
         Success: { schema: Success, type: "final", output: Schema.String }
       })
@@ -4924,7 +4926,7 @@ describe("Machine", () => {
 
   it.effect("keeps input-bearing process descriptors instance-specific", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -4957,7 +4959,7 @@ describe("Machine", () => {
 
   it.effect("child invocation rejects duplicate active child addresses", () =>
     Effect.gen(function*() {
-      const childStates = Machine.defineStates({ Idle })
+      const childStates = Machine.states({ Idle })
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(),
@@ -4967,7 +4969,7 @@ describe("Machine", () => {
         }
       })
       const Child = Machine.child("child-machine", child)
-      const parentStates = Machine.defineStates({ Loading })
+      const parentStates = Machine.states({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
@@ -4999,7 +5001,7 @@ describe("Machine", () => {
         sourceEvaluations += 1
         return Machine.logic({ initial: undefined, run: () => Effect.never })
       }
-      const parentStates = Machine.defineStates({ Loading })
+      const parentStates = Machine.states({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
@@ -5948,7 +5950,7 @@ describe("Machine", () => {
 
   it.effect("wraps initial configuration validation defects consistently", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         payment: {
           schema: Payment,
           initial: "entering",
@@ -6064,7 +6066,7 @@ describe("Machine", () => {
 
   it.effect("fails when completion transitions do not stabilize", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         idle: Idle,
         flow: {
           schema: Loading,
@@ -6139,7 +6141,7 @@ describe("Machine", () => {
 
   class ConcurrentPing extends Schema.TaggedClass<ConcurrentPing>("ConcurrentPing")("ConcurrentPing", {}) {}
 
-  const ParallelCounterStates = Machine.defineStates({
+  const ParallelCounterStates = Machine.states({
     running: {
       schema: CounterRunning,
       type: "parallel",
@@ -6186,7 +6188,7 @@ describe("Machine", () => {
     })
 
   const makeConcurrentMachine = () => {
-    const states = Machine.defineStates({ ConcurrentIdle })
+    const states = Machine.states({ ConcurrentIdle })
     return Machine.make({
       states: states.states,
       events: Machine.events(ConcurrentPing),

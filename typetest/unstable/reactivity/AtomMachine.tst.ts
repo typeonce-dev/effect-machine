@@ -62,9 +62,9 @@ interface RuntimeFailure {
   readonly _tag: "RuntimeFailure"
 }
 
-const States = Machine.defineStates({ Idle })
+const States = Machine.states({ Idle })
 
-const NestedStates = Machine.defineStates({
+const NestedStates = Machine.states({
   Dormant,
   Ready: {
     schema: Ready,
@@ -90,7 +90,7 @@ const NestedStates = Machine.defineStates({
   }
 })
 
-const StructuralNestedStates = Machine.defineStates({
+const StructuralNestedStates = Machine.states({
   Ready: {
     type: "parallel",
     states: {
@@ -202,6 +202,8 @@ describe("AtomMachine", () => {
     const leaf = AtomMachine.select(parent, "Ready.editor.Editing")
     const leafSnapshot = AtomMachine.selectSnapshot(parent, "Ready.editor.Editing")
     const matched = AtomMachine.matches(parent, "Ready.network.Online")
+    const boundLeafPath = NestedStates.path("Ready.editor.Editing")
+    const boundLeaf = AtomMachine.select(parent, boundLeafPath)
     const path = null as unknown as "Dormant" | "Ready.editor.Editing"
     const selectedUnion = AtomMachine.select(parent, path)
     const widenedPath: string = "Ready"
@@ -216,6 +218,7 @@ describe("AtomMachine", () => {
       Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor.Editing">>
     >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
+    expect<Atom.Success<typeof boundLeaf>>().type.toBe<Option.Option<Editing>>()
     expect<Atom.Success<typeof selectedUnion>>().type.toBe<Option.Option<Dormant | Editing>>()
     expect<Atom.Failure<typeof leaf>>().type.toBe<StartFailure | RuntimeFailure>()
     expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready.editor.Missing")
@@ -310,7 +313,7 @@ describe("AtomMachine", () => {
   })
 
   it("requires output implementations and preserves exact terminal output", () => {
-    const OutputStates = Machine.defineStates({
+    const OutputStates = Machine.states({
       Idle,
       Done: {
         schema: Done,

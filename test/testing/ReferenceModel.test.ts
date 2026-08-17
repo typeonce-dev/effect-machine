@@ -963,7 +963,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const Outside = Schema.TaggedStruct("Outside", { version: Schema.Number })
       const Local = Schema.TaggedStruct("Local", {})
       const Exit = Schema.TaggedStruct("Exit", {})
-      const states = Machine.defineStates({
+      const states = Machine.states({
         root: {
           schema: Root,
           type: "parallel",

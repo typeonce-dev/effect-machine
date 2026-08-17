@@ -25,7 +25,7 @@ class Loaded extends Schema.TaggedClass<Loaded>("StructuralTypeLoaded")("Loaded"
 }) {}
 class Play extends Schema.TaggedClass<Play>("StructuralTypePlay")("Play", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   player: {
     type: "parallel",
     states: {
@@ -203,13 +203,13 @@ describe("structural active state types", () => {
   })
 
   it("rejects malformed structural declarations", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       invalid: { states: { child: {} } }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       invalid: { type: "parallel" }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       invalid: { schema: undefined }
     })
   })

@@ -12,7 +12,7 @@ describe("MachineTest", () => {
   }) {}
   class InternalEvent extends Schema.TaggedClass<InternalEvent>("InternalEvent")("InternalEvent", {}) {}
 
-  const States = Machine.defineStates({ idle: Idle })
+  const States = Machine.states({ idle: Idle })
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(PublicEvent),

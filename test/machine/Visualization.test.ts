@@ -18,7 +18,7 @@ class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 class Disconnect extends Schema.TaggedClass<Disconnect>("Disconnect")("Disconnect", {}) {}
 class Refresh extends Schema.TaggedClass<Refresh>("Refresh")("Refresh", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   application: {
     schema: Application,
     type: "parallel",
@@ -127,7 +127,7 @@ const machine = Machine.make({
 const renderMachine = makeTextRenderer<typeof machine, typeof initial>(Machine)
 const renderMermaidMachine = makeMermaidRenderer<typeof machine, typeof initial>(Machine)
 
-const LifecycleStates = Machine.defineStates({
+const LifecycleStates = Machine.states({
   idle: Idle,
   workflow: {
     schema: Workflow,

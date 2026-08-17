@@ -25,7 +25,7 @@ class EnterFlow extends Schema.TaggedClass<EnterFlow>("InitialEntryEnterFlow")("
 class OpenLocal extends Schema.TaggedClass<OpenLocal>("InitialEntryOpenLocal")("OpenLocal", {}) {}
 class OpenBranch extends Schema.TaggedClass<OpenBranch>("InitialEntryOpenBranch")("OpenBranch", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   closed: Closed,
   opened: {
     schema: Opened,
@@ -63,7 +63,7 @@ const makeMachine = () =>
     }
   })
 
-const ParallelStates = Machine.defineStates({
+const ParallelStates = Machine.states({
   outside: Outside,
   dashboard: {
     schema: Dashboard,
@@ -106,7 +106,7 @@ const makeParallelMachine = () =>
     }
   })
 
-const ChoiceStates = Machine.defineStates({
+const ChoiceStates = Machine.states({
   outside: Outside,
   flow: {
     schema: Flow,
@@ -147,7 +147,7 @@ const makeChoiceMachine = () =>
     }
   })
 
-const StructuralStates = Machine.defineStates({
+const StructuralStates = Machine.states({
   outside: Outside,
   group: {
     initial: "idle",
@@ -174,7 +174,7 @@ const makeStructuralMachine = () =>
     }
   })
 
-const NestedStates = Machine.defineStates({
+const NestedStates = Machine.states({
   root: {
     initial: "closed",
     states: {

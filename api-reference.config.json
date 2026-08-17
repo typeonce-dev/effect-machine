@@ -27,7 +27,6 @@
       "barrel": ".",
       "examples": [
         "decodeSnapshot",
-        "defineStates",
         "encodeSnapshot",
         "events",
         "internalEvents",
@@ -36,7 +35,9 @@
         "plan",
         "planInitial",
         "resume",
+        "state",
         "start",
+        "states",
         "transition"
       ]
     },

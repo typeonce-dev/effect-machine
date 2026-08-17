@@ -312,7 +312,7 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),

@@ -16,7 +16,7 @@ const burstSize = 512
 describe("machine scheduling", () => {
   it.effect("drains a large synchronous raised-event burst without growing the stack", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ SchedulingActive })
+      const states = Machine.states({ SchedulingActive })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(StartBurst),

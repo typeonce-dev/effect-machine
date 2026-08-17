@@ -7,7 +7,7 @@ describe("MachineTest.verify", () => {
   class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
   class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-  const States = Machine.defineStates({ idle: Idle })
+  const States = Machine.states({ idle: Idle })
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Tick),

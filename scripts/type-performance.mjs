@@ -46,7 +46,7 @@ const scenarios = [
   },
   {
     id: "define-states",
-    label: "Machine.defineStates (3 states)",
+    label: "Machine.states (3 states)",
     file: "define-states.ts",
     control: "import-only",
     maxInstantiations: 3_800,

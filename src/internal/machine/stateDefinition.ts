@@ -18,7 +18,7 @@ export type AllowedStateNodeProperty<Kind extends StateNodeKind> = (typeof State
 
 export type AllowedPseudoStateAnnotationProperty = (typeof PseudoStateAnnotationProperties)[number]
 
-export type StateDefinitionBoundary = "Machine.defineStates" | "Machine.make"
+export type StateDefinitionBoundary = "Machine.state" | "Machine.states" | "Machine.make"
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key)
 
@@ -279,3 +279,43 @@ export const validateStateDefinitions = (
   states: unknown,
   boundary: StateDefinitionBoundary
 ): void => validateStateTree(boundary, states, "", false)
+
+const captureAnnotations = (annotations: unknown): unknown =>
+  typeof annotations === "object" && annotations !== null
+    ? Object.freeze({ ...annotations })
+    : annotations
+
+const captureStateTree = (states: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> => {
+  const captured: Record<string, unknown> = {}
+  for (const key of Object.keys(states)) {
+    const node = states[key]
+    if (Schema.isSchema(node)) {
+      Object.defineProperty(captured, key, {
+        value: node,
+        enumerable: true,
+        configurable: false,
+        writable: false
+      })
+      continue
+    }
+    const config = node as Readonly<Record<string, unknown>>
+    const copy: Record<string, unknown> = { ...config }
+    if ("states" in config) {
+      copy.states = captureStateTree(config.states as Readonly<Record<string, unknown>>)
+    }
+    if ("annotations" in config) {
+      copy.annotations = captureAnnotations(config.annotations)
+    }
+    Object.defineProperty(captured, key, {
+      value: Object.freeze(copy),
+      enumerable: true,
+      configurable: false,
+      writable: false
+    })
+  }
+  return Object.freeze(captured)
+}
+
+/** Captures caller-owned structural containers while preserving schema identity. */
+export const captureStateDefinitions = <States>(states: States): States =>
+  captureStateTree(states as Readonly<Record<string, unknown>>) as States

@@ -44,7 +44,7 @@ const searchPokemon = (searchText: string) =>
     Effect.onInterrupt(() => Effect.log("Search interrupted"))
   )
 
-export const SelectionStates = Machine.defineStates({
+export const SelectionStates = Machine.states({
   form: {
     type: "parallel",
     states: {

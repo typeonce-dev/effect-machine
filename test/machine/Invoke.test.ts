@@ -12,7 +12,7 @@ class Failed extends Schema.TaggedClass<Failed>("InvokeFailed")("Failed", {
 class Idle extends Schema.TaggedClass<Idle>("InvokeIdle")("Idle", {}) {}
 class Start extends Schema.TaggedClass<Start>("InvokeStart")("Start", {}) {}
 
-const States = Machine.defineStates({ Idle, Loading, Complete, Failed })
+const States = Machine.states({ Idle, Loading, Complete, Failed })
 
 describe("inline invoke", () => {
   it.effect("plans a successful Effect outcome directly", () =>

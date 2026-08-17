@@ -22,7 +22,7 @@ const InternalEvent = Schema.TaggedUnion({
   Loaded: { value: Schema.String }
 })
 
-const States = Machine.defineStates(State.cases)
+const States = Machine.states(State.cases)
 const PublicEvents = Machine.events(PublicEvent)
 const InternalEvents = Machine.internalEvents(InternalEvent)
 

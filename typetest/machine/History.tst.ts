@@ -44,7 +44,7 @@ class Editor extends Schema.TaggedClass<Editor>("Editor")("Editor", {}) {}
 class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {}) {}
 class Sidebar extends Schema.TaggedClass<Sidebar>("Sidebar")("Sidebar", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   checkout: {
     schema: Checkout,
     initial: "shipping",
@@ -70,7 +70,7 @@ const States = Machine.defineStates({
   support: Support
 })
 
-const NestedStates = Machine.defineStates({
+const NestedStates = Machine.states({
   App: {
     schema: App,
     initial: "Workspace",
@@ -520,7 +520,7 @@ describe("Machine history states", () => {
   })
 
   it("does not require nested initializers for deep-only history", () => {
-    const DeepOnlyStates = Machine.defineStates({
+    const DeepOnlyStates = Machine.states({
       checkout: {
         schema: Checkout,
         initial: "payment",
@@ -575,7 +575,7 @@ describe("Machine history states", () => {
   })
 
   it("requires an exact region-value map when shallow restoration descends through a parallel state", () => {
-    const ParallelStates = Machine.defineStates({
+    const ParallelStates = Machine.states({
       outer: {
         schema: Checkout,
         initial: "all",
@@ -654,12 +654,12 @@ describe("Machine history states", () => {
   })
 
   it("rejects root history nodes and active-state properties on history nodes", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       rootHistory: {
         type: "history"
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       checkout: {
         schema: Checkout,
         initial: "shipping",
@@ -672,7 +672,7 @@ describe("Machine history states", () => {
         }
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       checkout: {
         schema: Checkout,
         initial: "shipping",
@@ -687,7 +687,7 @@ describe("Machine history states", () => {
         }
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       checkout: {
         schema: Checkout,
         initial: "history",
@@ -699,7 +699,7 @@ describe("Machine history states", () => {
         }
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       checkout: {
         schema: Checkout,
         initial: "shipping",

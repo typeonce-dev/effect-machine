@@ -1509,7 +1509,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const flattened = validateModel(model)
   const byPath = new Map(flattened.map((state) => [state.path, state]))
   const stateTree = makeStateTree(model.roots, undefined)
-  const defined = Machine.defineStates(stateTree as any)
+  const defined = Machine.states(stateTree as any)
   const eventSchemas = model.events.map((event) => Schema.TaggedStruct(event, {}))
   const initial = byPath.get(model.initial)!
   const machine = Machine.make({

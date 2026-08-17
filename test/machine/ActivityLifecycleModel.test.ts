@@ -69,7 +69,7 @@ describe("machine activity lifecycle model", () => {
         (commands) =>
           Effect.gen(function*() {
             const probe = yield* makeActivityProbe
-            const states = Machine.defineStates({ Idle, Active })
+            const states = Machine.states({ Idle, Active })
             const machine = Machine.make({
               states: states.states,
               events: Machine.events(Enter, Leave, Restart),
@@ -156,7 +156,7 @@ describe("machine activity lifecycle model", () => {
   it.effect("records immediate invoke completion and cleanup exactly once", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Active,
         Done: { schema: Done, type: "final", output: Schema.Number }
       })
@@ -204,7 +204,7 @@ describe("machine activity lifecycle model", () => {
       class EpochActive extends Schema.TaggedClass<EpochActive>("ActivityEpochActive")("EpochActive", {
         acknowledged: Schema.Number
       }) {}
-      const states = Machine.defineStates({ Active: EpochActive, Done })
+      const states = Machine.states({ Active: EpochActive, Done })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Restart, QueueBarrier),
@@ -416,7 +416,7 @@ describe("machine activity lifecycle model", () => {
   it.effect("cancels a state-owned timer before virtual time advances", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.defineStates({ Idle, Active, Done })
+      const states = Machine.states({ Idle, Active, Done })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Leave),
@@ -478,7 +478,7 @@ describe("machine activity lifecycle model", () => {
   it.effect("cleans sibling activities when an invoked child fails", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.defineStates({ Active })
+      const states = Machine.states({ Active })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -541,7 +541,7 @@ describe("machine activity lifecycle model", () => {
   it.effect("waits for every activity cleanup before parent stop completes", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.defineStates({ Active })
+      const states = Machine.states({ Active })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),

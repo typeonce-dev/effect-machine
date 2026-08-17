@@ -26,7 +26,7 @@ describe("Machine event constructor collections", () => {
     value: Schema.String
   })
 
-  const states = Machine.defineStates({ Idle: {} })
+  const states = Machine.states({ Idle: {} })
   const events = Machine.events(PublicEvent, SetLabel, FiniteEvent)
   const internalEvents = Machine.internalEvents(InternalEvent)
   const machine = Machine.make({

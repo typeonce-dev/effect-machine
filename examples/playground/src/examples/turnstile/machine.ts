@@ -8,7 +8,7 @@ export const TurnstileEvents = Machine.events(
   })
 )
 
-export const TurnstileStates = Machine.defineStates({
+export const TurnstileStates = Machine.states({
   Locked: {},
   Unlocked: {}
 })

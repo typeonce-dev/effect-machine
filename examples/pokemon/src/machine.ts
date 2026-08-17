@@ -10,7 +10,7 @@ class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTea
   team: Schema.Array(Pokemon)
 }) {}
 
-export const States = Machine.defineStates({ Loading: {}, ActiveTeam, Failed: {} })
+export const States = Machine.states({ Loading: {}, ActiveTeam, Failed: {} })
 
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)

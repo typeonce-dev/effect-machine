@@ -45,7 +45,7 @@ const InternalEvents = Machine.internalEvents(
 
 const awayFrom = (wall: Axis): Axis => (wall === -1 ? 1 : wall === 1 ? -1 : 0)
 
-export const CharacterStates = Machine.defineStates({
+export const CharacterStates = Machine.states({
   Character: {
     type: "parallel",
     states: {

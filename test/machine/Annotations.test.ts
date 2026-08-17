@@ -18,7 +18,7 @@ const AnnotatedIdle = Idle.annotate({
   description: "No persistence work is active"
 })
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Workflow: {
     schema: AnnotatedWorkflow,
     initial: "Idle",

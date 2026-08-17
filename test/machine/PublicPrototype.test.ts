@@ -6,7 +6,7 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 
 it("uses the public pipeable and inspectable prototypes", () => {
-  const states = Machine.defineStates({ Idle })
+  const states = Machine.states({ Idle })
   const machine = Machine.make({
     states: states.states,
     events: Machine.events(Start),

@@ -14,7 +14,7 @@ export const trafficLightDurations = {
   Yellow: 1_500
 } as const
 
-export const TrafficLightStates = Machine.defineStates({
+export const TrafficLightStates = Machine.states({
   Red: {},
   RedYellow: {},
   Green: {},

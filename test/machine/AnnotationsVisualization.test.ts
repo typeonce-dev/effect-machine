@@ -11,7 +11,7 @@ class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
 const AnnotatedWorkflow = Workflow.annotate({ title: "Document workflow" })
 const AnnotatedIdle = Idle.annotate({ title: "Waiting for edits" })
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Workflow: {
     schema: AnnotatedWorkflow,
     initial: "Idle",

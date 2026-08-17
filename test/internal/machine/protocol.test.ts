@@ -10,7 +10,7 @@ const InternalEvent = Schema.TaggedStruct("InternalEvent", { value: Schema.Strin
 
 describe("machine protocols", () => {
   it("rejects forged, misclassified, and overlapping event descriptors", () => {
-    const states = Machine.defineStates({ ProtocolIdle })
+    const states = Machine.states({ ProtocolIdle })
     const initial = {
       target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.ProtocolIdle(),
       resolve: () => ({ path: "ProtocolIdle" as const, value: new ProtocolIdle({}) })
@@ -38,7 +38,7 @@ describe("machine protocols", () => {
 
   it.effect("keeps the complete event protocol private across handler clones", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ ProtocolIdle })
+      const states = Machine.states({ ProtocolIdle })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(PublicEvent),

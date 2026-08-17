@@ -250,7 +250,7 @@ describe("machine operation totality", () => {
       const Value = Schema.TaggedStruct("Value", { amount: Schema.NumberFromString })
       const Done = Schema.TaggedStruct("Done", {})
       const Finish = Schema.TaggedStruct("Finish", {})
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Value,
         Done: { schema: Done, type: "final", output: Schema.NumberFromString }
       })

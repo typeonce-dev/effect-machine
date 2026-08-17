@@ -10,7 +10,7 @@ describe("MachineTest coverage and observed graph", () => {
   class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
   class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 
-  const States = Machine.defineStates({ idle: Idle, done: Done })
+  const States = Machine.states({ idle: Idle, done: Done })
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Start),

@@ -11,7 +11,7 @@ describe("machine reference event channels", () => {
       class Idle extends Schema.TaggedClass<Idle>("PreparedEmissionIdle")("Idle", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("PreparedEmissionReady")("Ready", {}) {}
 
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Emissions = Machine.emittedEvents(Ready)
       let initializations = 0
       const machine = Machine.make({
@@ -67,7 +67,7 @@ describe("machine reference event channels", () => {
       class Published extends Schema.TaggedClass<Published>("PreparedInvalidPublished")("Published", {
         value: Schema.Number
       }) {}
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Emissions = Machine.emittedEvents(Published)
       const machine = Machine.make({
         states: states.states,
@@ -108,7 +108,7 @@ describe("machine reference event channels", () => {
         value: Schema.Number
       }) {}
 
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Events = Machine.events(Publish)
       const Emissions = Machine.emittedEvents(Published)
       const machine = Machine.make({
@@ -164,7 +164,7 @@ describe("machine reference event channels", () => {
         value: Schema.Number
       }) {}
 
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Events = Machine.events(Publish)
       const Emissions = Machine.emittedEvents(Published)
       const machine = Machine.make({
@@ -223,7 +223,7 @@ describe("machine reference event channels", () => {
       const ParentEvents = Machine.events(ChildReported)
       const ChildEvents = Machine.events(Trigger)
       const ChildEmissions = Machine.emittedEvents(Notice)
-      const childStates = Machine.defineStates({ Waiting, Reported })
+      const childStates = Machine.states({ Waiting, Reported })
       let rootHadParent = true
       const childMachine = Machine.make({
         states: childStates.states,
@@ -266,7 +266,7 @@ describe("machine reference event channels", () => {
       yield* root.stop
 
       const Child = Machine.child("reporter", childMachine)
-      const parentStates = Machine.defineStates({
+      const parentStates = Machine.states({
         Awaiting,
         Finished: { schema: Finished, type: "final", output: Schema.String }
       })
@@ -315,7 +315,7 @@ describe("machine reference event channels", () => {
       class ChildReady extends Schema.TaggedClass<ChildReady>("BoundInvokeChildReady")("ChildReady", {}) {}
 
       const ParentEvents = Machine.events(ChildReady)
-      const childStates = Machine.defineStates({ ChildIdle })
+      const childStates = Machine.states({ ChildIdle })
       const childDefinition = Machine.make({
         states: childStates.states,
         events: Machine.events(),
@@ -342,7 +342,7 @@ describe("machine reference event channels", () => {
         }
       })
       const Child = Machine.child("bound-invoke-child", childMachine)
-      const parentStates = Machine.defineStates({
+      const parentStates = Machine.states({
         ParentWaiting,
         ParentDone: { schema: ParentDone, type: "final", output: Schema.Void }
       })

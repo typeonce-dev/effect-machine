@@ -15,7 +15,7 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
 }) {}
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 
-const CounterStates = Machine.defineStates({ count: Count, done: Done })
+const CounterStates = Machine.states({ count: Count, done: Done })
 
 const counterMachine = Machine.make({
   states: CounterStates.states,
@@ -42,7 +42,7 @@ class Opaque extends Schema.TaggedClass<Opaque>("Opaque")("Opaque", {
   payload: Schema.Any
 }) {}
 
-const OpaqueStates = Machine.defineStates({ opaque: Opaque })
+const OpaqueStates = Machine.states({ opaque: Opaque })
 const opaqueMachine = Machine.make({
   states: OpaqueStates.states,
   events: Machine.events(),
@@ -53,7 +53,7 @@ const opaqueMachine = Machine.make({
   }
 })
 
-const StartupStates = Machine.defineStates({ count: Count })
+const StartupStates = Machine.states({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Add),
@@ -122,7 +122,7 @@ const ChoiceEvent = Schema.Struct({
   _tag: Schema.Union([Schema.Literal("Alpha"), Schema.Literal("Beta")])
 })
 const OpenEvent = Schema.Struct({ _tag: Schema.String })
-const EventStates = Machine.defineStates({ count: Count })
+const EventStates = Machine.states({ count: Count })
 const finiteEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(TickEvent, ChoiceEvent),

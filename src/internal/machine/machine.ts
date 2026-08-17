@@ -79,7 +79,14 @@ type ValidateDefinedStates<States extends Machine.StateSchemas> = [States] exten
 type InvalidDefinedStateTreeInput<States extends Machine.StateSchemas> = [States] extends
   [Machine.ValidateStateSchemas<States>] ? never
   : States & Machine.ValidateStateSchemas<States>
-interface DefineStates {
+type ReusableStateNodeConfig =
+  | Machine.AtomicStateNodeConfig
+  | Machine.CompoundStateNodeConfig
+  | Machine.ParallelStateNodeConfig
+interface StateConstructor {
+  <const Node extends ReusableStateNodeConfig>(node: Node): Node
+}
+interface StatesConstructor {
   <const States extends Machine.StateSchemas>(
     states: States,
     ..._validation: ValidateDefinedStates<NoInfer<States>>
@@ -1141,12 +1148,19 @@ const compileInitial = (
   }
 }
 
-export const defineStates: DefineStates = (<const States extends Machine.StateSchemas>(
+export const state: StateConstructor = (<const Node extends ReusableStateNodeConfig>(node: Node): Node => {
+  StateDefinition.validateStateDefinitions({ state: node }, "Machine.state")
+  return StateDefinition.captureStateDefinitions({ state: node }).state
+}) as StateConstructor
+
+export const states: StatesConstructor = (<const States extends Machine.StateSchemas>(
   states: States
 ): Machine.DefinedStates<States> => {
-  StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
+  StateDefinition.validateStateDefinitions(states, "Machine.states")
+  const captured = StateDefinition.captureStateDefinitions(states)
   return {
-    states,
+    states: captured,
+    path: ((path: string) => path) as Machine.DefinedStates<States>["path"],
     get:
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
         Topology.getSnapshotByPath(snapshot, path).pipe(
@@ -1163,7 +1177,7 @@ export const defineStates: DefineStates = (<const States extends Machine.StateSc
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
         Option.isSome(Topology.getSnapshotByPath(snapshot, path))) as Machine.DefinedStates<States>["matches"]
   }
-}) as DefineStates
+}) as StatesConstructor
 
 type MakeConfig<
   States extends Machine.StateSchemas,

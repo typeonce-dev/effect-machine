@@ -10,7 +10,7 @@ const source = `
 import { Effect, Option } from "effect"
 import { Machine } from "./src/index.js"
 
-const States = Machine.defineStates({ Loading: {}, Done: {}, Failed: {} })
+const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
 const definition = Machine.make({
   states: States.states,
   events: Machine.events(),

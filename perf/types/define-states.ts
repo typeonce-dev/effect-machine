@@ -7,6 +7,6 @@ const State = Schema.TaggedUnion({
   Done: { value: Schema.String }
 })
 
-const States = Machine.defineStates(State.cases)
+const States = Machine.states(State.cases)
 
 void States

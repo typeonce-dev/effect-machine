@@ -12,7 +12,7 @@ class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 class BufferReady extends Schema.TaggedClass<BufferReady>("BufferReady")("BufferReady", {}) {}
 class Disconnect extends Schema.TaggedClass<Disconnect>("Disconnect")("Disconnect", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   System: {
     schema: System,
     type: "parallel",
@@ -202,7 +202,7 @@ describe("Machine transition snapshot context", () => {
       class Restarted extends Schema.TaggedClass<Restarted>("Restarted")("Restarted", {}) {}
       class Monitor extends Schema.TaggedClass<Monitor>("Monitor")("Monitor", {}) {}
       class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {}
-      const completionStates = Machine.defineStates({
+      const completionStates = Machine.states({
         System: {
           schema: System,
           type: "parallel",

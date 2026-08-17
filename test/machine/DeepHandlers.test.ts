@@ -7,7 +7,7 @@ class DeepIdle extends Schema.TaggedClass<DeepIdle>("DeepIdle")("DeepIdle", { va
 class DeepDone extends Schema.TaggedClass<DeepDone>("DeepDone")("DeepDone", { value: Schema.String }) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", { value: Schema.String }) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   n0: {
     schema: NodeState,
     initial: "n1",
