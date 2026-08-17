@@ -1,5 +1,45 @@
 # @typeonce/effect-machine
 
+## 0.14.0
+
+### Minor Changes
+
+- 4554c4d: Make `MachineTest.coverage` report transition definitions and their exact branches separately. Read definition coverage through `coverage.transitions.definitions` and conditional branch coverage through `coverage.transitions.branches`.
+
+  Replace the `targetBounds` verification law group with `definitions`. The new laws validate the declared startup root, transition registration, retained `branchIndex`, and the selected branch's exact target kind and scope.
+
+- a4cd309: Add exact `transitionCoverage` to `MachineTest.Exploration`. Coverage includes startup and every concretely planned event, including state-limit candidates, while unplanned depth- and transition-limit frontiers remain misses.
+- 324ae69: Retain exact static and runtime transition evidence for testing and visualization. Transition branch inspection now includes the selected target kind and scope, retained planner transitions identify the zero-based branch that executed, and `Machine.initialDefinition` exposes the root startup selection without executing its resolver.
+
+  Use `branchIndex` to associate a retained transition with the corresponding entry in `Machine.transitionDefinitions(machine).branches`. Direct transitions use index `0`; conditional cases retain their declaration index and `otherwise` follows the final case.
+
+- 2c67924: Require `Machine.transition` for every machine transition and capture each possible target as static machine topology. Direct transitions declare `target` and `resolve`; conditional transitions declare titled `cases` whose `when` functions return `Option`, plus an explicit `otherwise` branch. The selected target builder and conditional match value are inferred in each resolver.
+
+  Initial state construction now uses the same `target` and `resolve` shape, restricted to the machine's declared initial state. Replace process logic previously created with `Machine.transition` by `Machine.logic`, and replace function handlers, target upper-bound lists, and `States.initial` construction with the explicit transition and initial target selectors.
+
+- 944cdb5: Allow conditional `Machine.transition` definitions to infer any number of heterogeneous cases. Define `cases` with its locally supplied `branch` constructor so each predicate match and selected target remain exact in the corresponding resolver:
+
+  ```ts
+  Machine.transition({
+    cases: (branch) => [
+      branch({
+        title: "cached",
+        when: ({ event }) => event.cached,
+        target: (to) => to.full.Ready(),
+        resolve: ({ match, target }) => target.from({ data: match })
+      })
+    ],
+    otherwise: {
+      target: (to) => to.full.Loading(),
+      resolve: ({ target }) => target.from()
+    }
+  })
+  ```
+
+  Replace each object previously written directly in the `cases` array with `branch({ ... })` inside the `cases: (branch) => [...]` factory. Direct transitions and `otherwise` keep their existing shape.
+
+- 64094df: Make `MachineTest.verify` accept startup roots reached through exact retained initial-choice routes and reject retained targets whose choice, initial, or history resolution is inconsistent with their selected static branch. Resolution failures are reported as `definitions.resolution`.
+
 ## 0.13.0
 
 ### Minor Changes
