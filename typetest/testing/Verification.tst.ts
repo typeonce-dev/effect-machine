@@ -38,4 +38,8 @@ describe("MachineTest.verify", () => {
     }
     expect(options.laws).type.toBe<ReadonlyArray<MachineTest.VerificationLawGroup> | undefined>()
   })
+
+  it("exposes exact transition resolution violations", () => {
+    expect<"definitions.resolution">().type.toBeAssignableTo<MachineTest.VerificationLaw>()
+  })
 })

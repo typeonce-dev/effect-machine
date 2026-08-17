@@ -2050,6 +2050,7 @@ export type VerificationLaw =
   | "definitions.transition"
   | "definitions.branchIndex"
   | "definitions.selection"
+  | "definitions.resolution"
 
 /**
  * One independently observed violation in a planner trace.
@@ -2087,8 +2088,9 @@ export interface VerifyOptions {
 /**
  * Verifies an executed trace using only public machine inspection and raw
  * snapshot data. Retained transitions are checked against their exact static
- * branch and target selection, and startup is checked against the declared
- * initial root. The verifier deliberately does not reuse planner
+ * branch, target selection, and resolved route. Startup is checked against
+ * the declared initial root or an exact retained initial-choice route. The
+ * verifier deliberately does not reuse planner
  * normalization, encoding, finality, or other internal helpers.
  *
  * Every selected law is evaluated and returned in one structured error so a

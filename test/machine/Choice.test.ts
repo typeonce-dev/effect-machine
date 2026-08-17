@@ -501,6 +501,8 @@ describe("Machine choice pseudo-states", () => {
       assert.strictEqual(resumed.next.path, "Flow")
       if (resumed.next.path === "Flow") assert.strictEqual(resumed.next.state.path, "Flow.Active")
       assert.deepStrictEqual(resumed.microsteps[0]?.transitions.map(({ trigger }) => trigger.type), ["event", "choice"])
+      const trace = yield* MachineTest.run(history, { events: [new Leave({}), new Resume({})] })
+      yield* MachineTest.verify(history, trace, { laws: ["definitions"] })
     }))
 
   it.effect("uses a history default when an initial choice targets history", () =>
@@ -548,6 +550,8 @@ describe("Machine choice pseudo-states", () => {
 
       const plan = yield* Machine.planInitial(initialHistory)
       assert.strictEqual(plan.state.state.path, "Flow.Active")
+      const trace = yield* MachineTest.run(initialHistory, { events: [] })
+      yield* MachineTest.verify(initialHistory, trace, { laws: ["definitions"] })
     }))
 
   it.effect("resolves a nested choice inside a first-use history fallback", () =>
