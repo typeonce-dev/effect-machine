@@ -54,6 +54,15 @@ describe("MachineTest exploration", () => {
       | MachineTest.InvariantError<typeof machine>
     >()
     expect<Effect.Services<typeof explored>>().type.toBe<never>()
+
+    type Exploration = Effect.Success<typeof explored>
+    expect<Exploration["transitionCoverage"]["definitions"]["hits"][number]["source"]>().type.toBe<"counter">()
+    expect<Exploration["transitionCoverage"]["branches"]["hits"][number]["trigger"]>().type.toBe<
+      Machine.Machine.TransitionTrigger<"Increment" | "Internal">
+    >()
+    expect<Exploration["transitionCoverage"]["branches"]["hits"][number]["branch"]>().type.toBe<
+      Machine.Machine.TransitionBranch<"counter">
+    >()
   })
 
   it("keeps reachability witnesses and errors machine-specific", () => {

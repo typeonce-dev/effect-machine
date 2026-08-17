@@ -549,7 +549,8 @@ The testing entrypoint provides complementary layers:
 - `MachineTest.run` and `verify` inspect pure planner traces;
 - `coverage` reports exact transition-definition and conditional-branch hits;
 - invariants and generated scenarios check application laws;
-- `explore` performs bounded breadth-first state-space exploration;
+- `explore` performs bounded breadth-first state-space exploration and retains
+  exact transition-definition and branch coverage for every plan it computes;
 - `probe` causally acknowledges live runtime commands;
 - runtime command models cover timers, invokes, bursts, and scheduling.
 

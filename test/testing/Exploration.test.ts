@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -10,6 +10,9 @@ class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
 class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
 class Corrupt extends Schema.TaggedClass<Corrupt>("Corrupt")("Corrupt", {}) {}
+class Select extends Schema.TaggedClass<Select>("ExplorationSelect")("Select", {
+  value: Schema.Int
+}) {}
 class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 
 const States = Machine.defineStates({ counter: Counter })
@@ -42,6 +45,37 @@ const machine = Machine.make({
 
 const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof machine>) =>
   snapshot.value.count < 2 ? [new Increment({})] : [new Reset({})]
+
+const branchMachine = Machine.make({
+  states: States.states,
+  events: Machine.events(Select),
+  initial: {
+    target: (to) => to.counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
+}).handle({
+  counter: {
+    on: {
+      Select: Machine.transition({
+        cases: (branch) => [
+          branch({
+            title: "negative",
+            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.none(),
+            resolve: () => undefined
+          }),
+          branch({
+            title: "zero",
+            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.none(),
+            resolve: () => undefined
+          })
+        ],
+        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+      })
+    }
+  }
+})
 
 describe("MachineTest bounded exploration", () => {
   it.effect("builds a complete breadth-first graph with shortest traces", () =>
@@ -87,6 +121,118 @@ describe("MachineTest bounded exploration", () => {
         "counter three",
         ({ snapshot }) => snapshot.value.count === 3
       )
+    }))
+
+  it.effect("retains exact branch coverage when outcomes collapse to one state", () =>
+    Effect.gen(function*() {
+      const explored = yield* MachineTest.explore(branchMachine, {
+        events: () => [new Select({ value: -1 }), new Select({ value: 0 }), new Select({ value: 1 })],
+        stateKey: ({ snapshot }) => snapshot.value.count
+      })
+
+      assert.strictEqual(explored.nodes.length, 1)
+      assert.strictEqual(explored.stats.plannedTransitions, 3)
+      assert.strictEqual(explored.stats.retainedEdges, 3)
+      assert.strictEqual(explored.transitionCoverage.definitions.hit, 1)
+      assert.deepStrictEqual(
+        explored.transitionCoverage.branches.hits.map(({ branch, branchIndex }) => ({
+          branchIndex,
+          title: branch.type === "case" ? branch.title : undefined,
+          type: branch.type
+        })),
+        [
+          { branchIndex: 0, title: "negative", type: "case" },
+          { branchIndex: 1, title: "zero", type: "case" },
+          { branchIndex: 2, title: undefined, type: "otherwise" }
+        ]
+      )
+    }))
+
+  it.effect("includes startup choices and simultaneous planner transitions", () =>
+    Effect.gen(function*() {
+      const startupMachine = MachineTest.compileModel({
+        roots: [{
+          _tag: "Compound",
+          key: "flow",
+          value: 0,
+          initial: "route",
+          states: [
+            {
+              _tag: "Choice",
+              key: "route",
+              targets: ["flow.ready"],
+              selected: "flow.ready"
+            },
+            { _tag: "Atomic", key: "ready", value: 1 }
+          ]
+        }],
+        initial: "flow",
+        events: ["Unused"],
+        transitions: []
+      })
+      const startup = yield* MachineTest.explore(startupMachine, {
+        events: () => [],
+        stateKey: ({ configuration }) => configuration.join("|")
+      })
+      assert.strictEqual(startup.stats.plannedTransitions, 0)
+      assert.deepStrictEqual(
+        startup.transitionCoverage.definitions.hits.map(({ source, trigger }) => ({ source, trigger: trigger.type })),
+        [{ source: "flow.route", trigger: "choice" }]
+      )
+
+      const parallelMachine = MachineTest.compileModel({
+        roots: [{
+          _tag: "Parallel",
+          key: "workflow",
+          value: 0,
+          output: "done",
+          states: [
+            {
+              _tag: "Compound",
+              key: "left",
+              value: 1,
+              initial: "idle",
+              states: [
+                { _tag: "Atomic", key: "idle", value: 2 },
+                { _tag: "Atomic", key: "done", value: 3 }
+              ]
+            },
+            {
+              _tag: "Compound",
+              key: "right",
+              value: 4,
+              initial: "idle",
+              states: [
+                { _tag: "Atomic", key: "idle", value: 5 },
+                { _tag: "Atomic", key: "done", value: 6 }
+              ]
+            }
+          ]
+        }],
+        initial: "workflow",
+        events: ["Advance"],
+        transitions: [
+          {
+            source: "workflow.left.idle",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.left.done",
+            reenter: false
+          },
+          {
+            source: "workflow.right.idle",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.right.done",
+            reenter: false
+          }
+        ]
+      })
+      const parallel = yield* MachineTest.explore(parallelMachine, {
+        events: ({ depth }) => depth === 0 ? [{ _tag: "Advance" }] : [],
+        stateKey: ({ configuration }) => configuration.join("|")
+      })
+      assert.strictEqual(parallel.stats.plannedTransitions, 1)
+      assert.strictEqual(parallel.transitionCoverage.definitions.hit, 2)
+      assert.strictEqual(parallel.transitionCoverage.branches.hit, 2)
     }))
 
   it.effect("checks invariants against the shortest discovered counterexample", () =>
@@ -169,6 +315,45 @@ describe("MachineTest bounded exploration", () => {
         assert.deepStrictEqual(transitionLimited.completeness.reasons, ["transitions"])
         assert.strictEqual(transitionLimited.completeness.frontier[0]?._tag, "TransitionLimit")
       }
+    }))
+
+  it.effect("counts only limit-boundary events that were concretely planned", () =>
+    Effect.gen(function*() {
+      const boundaryEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof machine>) =>
+        snapshot.value.count === 0 ? [new Increment({})] : [new Corrupt({})]
+      const eventHits = (explored: MachineTest.Exploration<typeof machine, number>) =>
+        explored.transitionCoverage.definitions.hits.flatMap(({ trigger }) =>
+          trigger.type === "event" ? [trigger.event] : []
+        )
+
+      const stateLimited = yield* MachineTest.explore(machine, {
+        events: boundaryEvents,
+        stateKey: ({ snapshot }) => snapshot.value.count,
+        limits: { maxStates: 2 }
+      })
+      assert.deepStrictEqual(eventHits(stateLimited), ["Increment", "Corrupt"])
+      assert.strictEqual(stateLimited.stats.plannedTransitions, 2)
+      assert.strictEqual(stateLimited.stats.retainedEdges, 1)
+      assert.strictEqual(stateLimited.completeness._tag, "Truncated")
+      if (stateLimited.completeness._tag === "Truncated") {
+        assert.strictEqual(stateLimited.completeness.frontier[0]?._tag, "StateLimit")
+      }
+
+      const depthLimited = yield* MachineTest.explore(machine, {
+        events: boundaryEvents,
+        stateKey: ({ snapshot }) => snapshot.value.count,
+        limits: { maxDepth: 1 }
+      })
+      assert.deepStrictEqual(eventHits(depthLimited), ["Increment"])
+      assert.strictEqual(depthLimited.stats.plannedTransitions, 1)
+
+      const transitionLimited = yield* MachineTest.explore(machine, {
+        events: boundaryEvents,
+        stateKey: ({ snapshot }) => snapshot.value.count,
+        limits: { maxTransitions: 1 }
+      })
+      assert.deepStrictEqual(eventHits(transitionLimited), ["Increment"])
+      assert.strictEqual(transitionLimited.stats.plannedTransitions, 1)
     }))
 
   it.effect("treats state-key collisions as an explicit exploration abstraction", () =>
