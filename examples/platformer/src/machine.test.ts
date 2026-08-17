@@ -164,7 +164,12 @@ describe("platformer history integration", () => {
         reenter: true,
         branches: [{
           type: "direct",
-          target: "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"
+          target: "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock",
+          selection: {
+            path: "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock",
+            kind: "state",
+            scope: "local"
+          }
         }]
       })
       expect(definitions.every(({ branches }) => branches.length > 0)).toBe(true)

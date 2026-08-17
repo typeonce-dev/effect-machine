@@ -70,6 +70,7 @@ export type MicrostepPlan<State, Event, E, R> = {
     readonly source: string
     readonly trigger: Machine.TransitionTrigger
     readonly reenter: boolean
+    readonly branchIndex: number
     readonly target: string | undefined
     readonly resolvedTarget: string | undefined
   }>
@@ -103,6 +104,16 @@ export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context
   context: Context,
   enqueue: Enqueue<any, any>
 ) => Machine.HandlerResult<States, E, R>
+
+type TransitionEvaluation<States extends Machine.StateSchemas, E, R> = {
+  readonly result: Machine.HandlerResult<States, E, R>
+  readonly branchIndex: number
+}
+
+type TransitionEvaluator<States extends Machine.StateSchemas, E, R, Context> = (
+  context: Context,
+  enqueue: Enqueue<any, any>
+) => TransitionEvaluation<States, E, R>
 
 const rootMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
 const scopedMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
@@ -142,12 +153,14 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
     readonly reenter?: boolean
     readonly targets?: ReadonlyArray<string>
     readonly transition: TransitionHandler<States, E, R, Context>
+    readonly evaluate?: TransitionEvaluator<States, E, R, Context>
   }
 
 export type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
   readonly targets: ReadonlyArray<string> | undefined
   readonly transition: TransitionHandler<States, E, R, Context>
+  readonly evaluate: TransitionEvaluator<States, E, R, Context> | undefined
 }
 
 export const normalizeTransition = <States extends Machine.StateSchemas, E, R, Context>(
@@ -157,11 +170,12 @@ export const normalizeTransition = <States extends Machine.StateSchemas, E, R, C
     return undefined
   }
   return typeof transition === "function"
-    ? { reenter: false, targets: undefined, transition }
+    ? { reenter: false, targets: undefined, transition, evaluate: undefined }
     : {
       reenter: transition.reenter === true,
       targets: transition.targets,
-      transition: transition.transition
+      transition: transition.transition,
+      evaluate: transition.evaluate
     }
 }
 
@@ -195,12 +209,16 @@ const collectTransition = <
 >(
   machine: Machine.Any,
   transition: TransitionHandler<States, E, R, Context>,
-  context: Context
+  context: Context,
+  evaluate?: TransitionEvaluator<States, E, R, Context>
 ) => {
   const collected = makeCollector<Event>(machine)
-  const result = transition(context, collected.enqueue)
+  const evaluated = evaluate === undefined
+    ? { result: transition(context, collected.enqueue), branchIndex: 0 }
+    : evaluate(context, collected.enqueue)
   return {
-    state: isNoTarget(result) ? undefined : result,
+    state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
+    branchIndex: evaluated.branchIndex,
     commands: collected.commands,
     raisedEvents: collected.raisedEvents,
     emittedEvents: collected.emittedEvents
@@ -504,6 +522,7 @@ export type SelectedTransition<States extends Machine.StateSchemas, E, R, Contex
 
 export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Context> = {
   readonly selection: SelectedTransition<States, E, R, Context>
+  readonly branchIndex: number
   readonly unresolvedTarget:
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
@@ -524,6 +543,7 @@ export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R
     readonly source: string
     readonly trigger: Machine.TransitionTrigger
     readonly reenter: false
+    readonly branchIndex: number
     readonly target: string
     readonly resolvedTarget: string
   }>
@@ -1129,6 +1149,7 @@ interface ResolvedChoiceTransition {
   readonly source: string
   readonly trigger: Machine.TransitionTrigger
   readonly reenter: false
+  readonly branchIndex: number
   readonly target: string
   readonly resolvedTarget: string
 }
@@ -1183,13 +1204,18 @@ function resolveChoiceTarget(
         history: configuration.history,
         ...(configuration.machineReferences === undefined ? {} : { machineReferences: configuration.machineReferences })
       }
-      const collected = collectTransition(machine, choice.transition, {
-        ...resolveMachineReferences(machine, provisional),
-        containingState: getParentValue(machine, provisional, node.path),
-        ancestors: getParentValues(machine, provisional, node.path),
-        event,
-        target: getTargetBuilder(machine, node.path)
-      })
+      const collected = collectTransition(
+        machine,
+        choice.transition,
+        {
+          ...resolveMachineReferences(machine, provisional),
+          containingState: getParentValue(machine, provisional, node.path),
+          ancestors: getParentValues(machine, provisional, node.path),
+          event,
+          target: getTargetBuilder(machine, node.path)
+        },
+        choice.evaluate
+      )
       if (collected.state === undefined) {
         throw new Error(`Machine choice resolver for "${node.path}" must return a target`)
       }
@@ -1201,6 +1227,7 @@ function resolveChoiceTarget(
         source: node.path,
         trigger: { type: "choice" },
         reenter: false,
+        branchIndex: collected.branchIndex,
         target: returnedPath,
         resolvedTarget: nested?.target.path ?? returnedPath
       })
@@ -1240,7 +1267,8 @@ const collectEvaluatedTransition = <
   const transitionResult = collectTransition<States, Event, E, R, Context>(
     machine,
     selection.transition.transition,
-    selection.context
+    selection.context,
+    selection.transition.evaluate
   )
   const unresolvedTarget = transitionResult.state === undefined
     ? undefined
@@ -1369,6 +1397,7 @@ const collectEvaluatedTransition = <
   if (!changed) {
     return {
       selection,
+      branchIndex: transitionResult.branchIndex,
       unresolvedTarget,
       target,
       commands: [
@@ -1414,6 +1443,7 @@ const collectEvaluatedTransition = <
 
   return {
     selection,
+    branchIndex: transitionResult.branchIndex,
     unresolvedTarget,
     target,
     commands: [
@@ -1768,6 +1798,7 @@ const microstep = <
       source: transition.selection.sourcePath,
       trigger: transition.selection.trigger,
       reenter: transition.selection.transition.reenter,
+      branchIndex: transition.branchIndex,
       target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
       resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
     },

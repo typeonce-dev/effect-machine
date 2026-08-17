@@ -87,6 +87,7 @@ describe("Machine live inspection", () => {
           source: "Idle",
           trigger: { type: "event", event: "Increment" },
           reenter: false,
+          branchIndex: 0,
           target: "Idle",
           resolvedTarget: "Idle"
         }])

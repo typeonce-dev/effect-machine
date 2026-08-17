@@ -119,6 +119,7 @@ const cloneWithHandlers = (
   machine.input = self.input
   machine.id = self.id
   machine.initial = self.initial
+  machine.initialDefinition = self.initialDefinition
   machine.stateNodes = self.stateNodes
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
@@ -138,6 +139,15 @@ type DefinitionBranch = {
 type CapturedBranch = DefinitionBranch & {
   readonly selection: Topology.TargetSelection
 }
+
+const transitionTargetSelection = (
+  selection: Topology.TargetSelection
+): Machine.TransitionTargetSelection =>
+  Object.freeze({
+    path: selection.path,
+    kind: selection.kind,
+    scope: selection.scope
+  })
 
 const makeSelectionMethod = (
   kind: Topology.TargetSelectionKind,
@@ -349,6 +359,27 @@ const captureTransition = (
       return captured
     })
     const otherwise = captureDefinitionBranch(definition.otherwise, selector, path, trigger)
+    const evaluate = (context: Record<string, any>, enqueue: unknown) => {
+      const predicateContext = { ...context }
+      delete predicateContext.target
+      for (let branchIndex = 0; branchIndex < cases.length; branchIndex++) {
+        const branch = cases[branchIndex]!
+        const result = branch.when!(predicateContext)
+        if (!Option.isOption(result)) {
+          throw new Error(`Machine conditional transition case "${branch.title}" must return Option`)
+        }
+        if (Option.isSome(result)) {
+          return {
+            result: runCapturedBranch(branch, context, enqueue, stateNodes, path, { value: result.value }),
+            branchIndex
+          }
+        }
+      }
+      return {
+        result: runCapturedBranch(otherwise, context, enqueue, stateNodes, path),
+        branchIndex: cases.length
+      }
+    }
     return {
       reenter,
       targets: [
@@ -357,32 +388,37 @@ const captureTransition = (
         )
       ],
       branches: [
-        ...cases.map((branch) => ({ type: "case" as const, title: branch.title!, target: branch.selection.path })),
-        { type: "otherwise" as const, target: otherwise.selection.path }
-      ],
-      transition: (context: Record<string, any>, enqueue: unknown) => {
-        const predicateContext = { ...context }
-        delete predicateContext.target
-        for (const branch of cases) {
-          const result = branch.when!(predicateContext)
-          if (!Option.isOption(result)) {
-            throw new Error(`Machine conditional transition case "${branch.title}" must return Option`)
-          }
-          if (Option.isSome(result)) {
-            return runCapturedBranch(branch, context, enqueue, stateNodes, path, { value: result.value })
-          }
+        ...cases.map((branch) => ({
+          type: "case" as const,
+          title: branch.title!,
+          target: branch.selection.path,
+          selection: transitionTargetSelection(branch.selection)
+        })),
+        {
+          type: "otherwise" as const,
+          target: otherwise.selection.path,
+          selection: transitionTargetSelection(otherwise.selection)
         }
-        return runCapturedBranch(otherwise, context, enqueue, stateNodes, path)
-      }
+      ],
+      evaluate,
+      transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
     }
   }
   const branch = captureDefinitionBranch(transition, selector, path, trigger)
+  const evaluate = (context: Record<string, any>, enqueue: unknown) => ({
+    result: runCapturedBranch(branch, context, enqueue, stateNodes, path),
+    branchIndex: 0
+  })
   return {
     reenter,
     targets: branch.selection.path === undefined ? [] : [branch.selection.path],
-    branches: [{ type: "direct" as const, target: branch.selection.path }],
-    transition: (context: Record<string, any>, enqueue: unknown) =>
-      runCapturedBranch(branch, context, enqueue, stateNodes, path)
+    branches: [{
+      type: "direct" as const,
+      target: branch.selection.path,
+      selection: transitionTargetSelection(branch.selection)
+    }],
+    evaluate,
+    transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
   }
 }
 
@@ -1067,19 +1103,28 @@ const compileInitial = (
   definition: unknown,
   states: Machine.StateTree,
   stateNodes: Machine.StateNodes
-): (input?: unknown) => unknown => {
+): {
+  readonly initial: (input?: unknown) => unknown
+  readonly definition: Machine.InitialDefinition
+} => {
   if (typeof definition !== "object" || definition === null) {
     throw new Error("Machine initial definition must be an object")
   }
   const selector = makeInitialSelector(stateNodes)
   const initialBuilder = makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Record<string, any>
   const branch = captureInitialBranch(definition, selector, initialBuilder)
-  return (input?: unknown) => {
-    const result = branch.resolve === undefined
-      ? branch.builder()
-      : branch.resolve({ input, target: branch.builder }, undefined)
-    validateInitialSelection(result, branch.selection)
-    return result
+  return {
+    initial: (input?: unknown) => {
+      const result = branch.resolve === undefined
+        ? branch.builder()
+        : branch.resolve({ input, target: branch.builder }, undefined)
+      validateInitialSelection(result, branch.selection)
+      return result
+    },
+    definition: Object.freeze({
+      target: branch.selection.path!,
+      selection: transitionTargetSelection(branch.selection) as Machine.InitialDefinition["selection"]
+    })
   }
 }
 
@@ -1221,7 +1266,9 @@ export const make: Make = (<
   self.input = config.input
   self.id = config.id
   self.stateNodes = Topology.compileStateNodes(config.states)
-  self.initial = compileInitial(config.initial, config.states, self.stateNodes)
+  const compiledInitial = compileInitial(config.initial, config.states, self.stateNodes)
+  self.initial = compiledInitial.initial
+  self.initialDefinition = compiledInitial.definition
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)
@@ -1425,6 +1472,15 @@ export const stateNodes = <M extends Machine.Any>(
       Machine.HistoryIdentifier<Machine.States<M>>,
       Machine.ChoiceIdentifier<Machine.States<M>>
     >
+  >
+
+export const initialDefinition = <M extends Machine.Any>(
+  machine: M
+): Machine.InitialDefinition<
+  Machine.RootStateIdentifier<Machine.StateIdentifier<Machine.States<M>>>
+> =>
+  machine.initialDefinition as Machine.InitialDefinition<
+    Machine.RootStateIdentifier<Machine.StateIdentifier<Machine.States<M>>>
   >
 
 export const transitionDefinitions = <M extends Machine.Any>(

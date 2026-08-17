@@ -259,6 +259,7 @@ describe("MachineTest", () => {
         source: "app.left.idle",
         trigger: { type: "event", event: "Stop" },
         reenter: false,
+        branchIndex: 0,
         target: "disabled",
         resolvedTarget: "disabled"
       }])

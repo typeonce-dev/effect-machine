@@ -131,7 +131,11 @@ describe("Machine", () => {
         source: "Stable",
         trigger: { type: "event", event: "Ping" },
         reenter: false,
-        branches: [{ type: "direct", target: undefined }]
+        branches: [{
+          type: "direct",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }]
       }])
 
       const initial = yield* Machine.planInitial(machine)

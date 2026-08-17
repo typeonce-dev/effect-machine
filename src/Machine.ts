@@ -259,6 +259,8 @@ export interface Machine<
 
   /** @internal */
   readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
+  /** @internal */
+  readonly initialDefinition: Machine.InitialDefinition
 }
 
 export {
@@ -2413,6 +2415,8 @@ export declare namespace Machine {
     readonly invoke: any
     /** @internal */
     readonly initial: any
+    /** @internal */
+    readonly initialDefinition: InitialDefinition
   }
 
   /**
@@ -3157,21 +3161,41 @@ export declare namespace Machine {
       readonly outcome: "done" | "failure" | "snapshot"
     }
 
+  /** Static topology selected by a transition branch. */
+  export interface TransitionTargetSelection<
+    Path extends string | undefined = string | undefined,
+    Kind extends Topology.TargetSelectionKind = Topology.TargetSelectionKind,
+    Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
+  > {
+    readonly path: Path
+    readonly kind: Kind
+    readonly scope: Scope
+  }
+
   /** One statically captured branch of a transition definition. */
   export type TransitionBranch<Path extends string = string> =
     | {
       readonly type: "direct"
       readonly target: Path | undefined
+      readonly selection: TransitionTargetSelection<Path | undefined>
     }
     | {
       readonly type: "case"
       readonly title: string
       readonly target: Path | undefined
+      readonly selection: TransitionTargetSelection<Path | undefined>
     }
     | {
       readonly type: "otherwise"
       readonly target: Path | undefined
+      readonly selection: TransitionTargetSelection<Path | undefined>
     }
+
+  /** The statically selected root entry for machine startup. */
+  export interface InitialDefinition<Path extends string = string> {
+    readonly target: Path
+    readonly selection: TransitionTargetSelection<Path, "state" | "initial", "initial">
+  }
 
   /**
    * Inspectable registration for a transition handler.
@@ -3223,6 +3247,8 @@ export declare namespace Machine {
     readonly source: SourcePath
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
+    /** Zero-based index of the selected static branch. */
+    readonly branchIndex: number
     /** Path returned by the handler, including a history pseudo-state. */
     readonly target: TargetPath | undefined
     /** Concrete path used after resolving history, otherwise equal to `target`. */
@@ -8231,6 +8257,20 @@ export const stateNodes: <M extends Machine.Any>(machine: M) => ReadonlyArray<
     Machine.ChoiceIdentifier<Machine.States<M>>
   >
 > = internal.stateNodes
+
+/**
+ * Returns the statically selected root entry used during machine startup.
+ *
+ * This function does not execute the initial resolver or require machine
+ * input. `kind: "initial"` means that the selected root enters its declared
+ * initial configuration.
+ *
+ * @category getters
+ * @since 0.14.0
+ */
+export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.InitialDefinition<
+  Machine.RootStateIdentifier<Machine.StateIdentifier<Machine.States<M>>>
+> = internal.initialDefinition
 
 /**
  * Returns every registered transition handler in state definition order.

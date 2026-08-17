@@ -169,6 +169,25 @@ const renderLifecycleMachine = makeTextRenderer<
 >(Machine)
 
 describe("Machine structural visualization", () => {
+  it("exposes the static root initial selection without executing the resolver", () => {
+    const inspectOnly = Machine.make({
+      states: States.states,
+      events: Machine.events(),
+      input: Schema.String,
+      initial: {
+        target: (to) => to.application.initial(),
+        resolve: () => {
+          throw new Error("initial resolver unexpectedly executed during inspection")
+        }
+      }
+    })
+
+    assert.deepStrictEqual(Machine.initialDefinition(inspectOnly), {
+      target: "application",
+      selection: { path: "application", kind: "initial", scope: "initial" }
+    })
+  })
+
   it("exposes every state node in definition order", () => {
     assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
       { path: "application" as const, type: "parallel" },
@@ -201,19 +220,31 @@ describe("Machine structural visualization", () => {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Start" },
         reenter: false,
-        branches: [{ type: "direct", target: "application.workflow.running" }]
+        branches: [{
+          type: "direct",
+          target: "application.workflow.running",
+          selection: { path: "application.workflow.running", kind: "state", scope: "local" }
+        }]
       },
       {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: false,
-        branches: [{ type: "direct", target: undefined }]
+        branches: [{
+          type: "direct",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }]
       },
       {
         source: "application.connection.online",
         trigger: { type: "event", event: "Disconnect" },
         reenter: false,
-        branches: [{ type: "direct", target: "application.connection.offline" }]
+        branches: [{
+          type: "direct",
+          target: "application.connection.offline",
+          selection: { path: "application.connection.offline", kind: "state", scope: "local" }
+        }]
       }
     ])
   })
@@ -241,19 +272,31 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: true,
-        branches: [{ type: "direct", target: undefined }]
+        branches: [{
+          type: "direct",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }]
       },
       {
         source: "idle",
         trigger: { type: "always" },
         reenter: false,
-        branches: [{ type: "direct", target: undefined }]
+        branches: [{
+          type: "direct",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }]
       },
       {
         source: "idle",
         trigger: { type: "done" },
         reenter: false,
-        branches: [{ type: "direct", target: undefined }]
+        branches: [{
+          type: "direct",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }]
       }
     ])
   })
@@ -270,13 +313,21 @@ describe("Machine structural visualization", () => {
           source: "idle",
           trigger: { type: "always" },
           reenter: false,
-          branches: [{ type: "direct", target: "workflow" }]
+          branches: [{
+            type: "direct",
+            target: "workflow",
+            selection: { path: "workflow", kind: "state", scope: "full" }
+          }]
         },
         {
           source: "workflow",
           trigger: { type: "done" },
           reenter: false,
-          branches: [{ type: "direct", target: "disabled" }]
+          branches: [{
+            type: "direct",
+            target: "disabled",
+            selection: { path: "disabled", kind: "state", scope: "full" }
+          }]
         }
       ])
       assert.strictEqual(

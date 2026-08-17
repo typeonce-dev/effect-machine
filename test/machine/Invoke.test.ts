@@ -43,7 +43,11 @@ describe("inline invoke", () => {
         source: "Loading",
         trigger: { type: "invoke", id: "load", outcome: "done" },
         reenter: false,
-        branches: [{ type: "direct", target: "Complete" }]
+        branches: [{
+          type: "direct",
+          target: "Complete",
+          selection: { path: "Complete", kind: "state", scope: "full" }
+        }]
       }])
 
       const ref = yield* Machine.start(machine)

@@ -287,12 +287,14 @@ describe("declared initial entry", () => {
         source: "outside",
         trigger: { type: "event", event: "EnterFlow" },
         reenter: false,
+        branchIndex: 0,
         target: "flow",
         resolvedTarget: "flow"
       }, {
         source: "flow.routing",
         trigger: { type: "choice" },
         reenter: false,
+        branchIndex: 0,
         target: "flow.approved",
         resolvedTarget: "flow.approved"
       }])

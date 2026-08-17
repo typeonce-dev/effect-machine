@@ -185,6 +185,12 @@ describe("Machine inspection", () => {
   })
 
   it("preserves source paths and event tags for transition inspection", () => {
+    const initialDefinition = Machine.initialDefinition(machine)
+    expect(initialDefinition.target).type.toBe<"root">()
+    expect(initialDefinition.selection.path).type.toBe<"root">()
+    expect(initialDefinition.selection.kind).type.toBe<"state" | "initial">()
+    expect(initialDefinition.selection.scope).type.toBe<"initial">()
+
     const definition = Machine.transitionDefinitions(machine)[0]!
     expect(definition.source).type.toBe<"root" | "root.idle" | "root.recent">()
     if (definition.trigger.type === "event") {
@@ -193,6 +199,7 @@ describe("Machine inspection", () => {
     expect(definition.branches).type.toBe<
       ReadonlyArray<Machine.Machine.TransitionBranch<"root" | "root.idle" | "root.recent">>
     >()
+    expect(definition.branches[0]!.selection.path).type.toBe<"root" | "root.idle" | "root.recent" | undefined>()
   })
 
   it("requires statically selected transitions", () => {
