@@ -12,7 +12,7 @@ const Event = Schema.TaggedUnion({
   Finish: { value: Schema.String }
 })
 
-const States = Machine.defineStates(State.cases)
+const States = Machine.states(State.cases)
 
 void Event
 void States

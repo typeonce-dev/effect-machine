@@ -366,7 +366,7 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
  * }) {}
- * const States = Machine.defineStates({ Count })
+ * const States = Machine.states({ Count })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -480,7 +480,7 @@ export const selectSnapshotChild: <
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -653,7 +653,7 @@ export interface Bound<Services, RuntimeError = never> {
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),

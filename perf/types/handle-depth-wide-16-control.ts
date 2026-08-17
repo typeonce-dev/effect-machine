@@ -3,7 +3,7 @@ import { Schema } from "effect"
 
 export const NodeState = Schema.TaggedStruct("Node", {})
 
-export const States = Machine.defineStates({
+export const States = Machine.states({
   n0: {
     schema: NodeState,
     initial: "n1",

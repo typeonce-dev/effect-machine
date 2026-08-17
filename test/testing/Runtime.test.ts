@@ -20,7 +20,7 @@ class Noop extends Schema.TaggedClass<Noop>("RuntimeNoop")("Noop", {}) {}
 class Ignored extends Schema.TaggedClass<Ignored>("RuntimeIgnored")("Ignored", {}) {}
 class Burst extends Schema.TaggedClass<Burst>("RuntimeBurst")("Burst", {}) {}
 
-const CounterStates = Machine.defineStates({ Counter })
+const CounterStates = Machine.states({ Counter })
 
 const makeCounterMachine = () =>
   Machine.make({
@@ -253,7 +253,7 @@ describe("MachineTest runtime commands", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {}
-      const states = Machine.defineStates({ Waiting, TimedOut })
+      const states = Machine.states({ Waiting, TimedOut })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -740,7 +740,7 @@ describe("MachineTest causal runtime commands", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("CausalWaiting")("Waiting", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("CausalTimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {}
-      const states = Machine.defineStates({ Waiting, TimedOut })
+      const states = Machine.states({ Waiting, TimedOut })
       const timerMachine = Machine.make({
         states: states.states,
         events: Machine.events(),

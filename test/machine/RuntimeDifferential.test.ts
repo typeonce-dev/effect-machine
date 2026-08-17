@@ -46,7 +46,7 @@ describe("pure planning and managed runtime differential", () => {
       class Ignore extends Schema.TaggedClass<Ignore>("FlatDifferentialIgnore")("Ignore", {}) {}
       class Finish extends Schema.TaggedClass<Finish>("FlatDifferentialFinish")("Finish", {}) {}
 
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Count,
         Done: { schema: Done, type: "final", output: Schema.Number }
       })
@@ -133,7 +133,7 @@ describe("pure planning and managed runtime differential", () => {
       class Finish extends Schema.TaggedClass<Finish>("HierarchicalDifferentialFinish")("Finish", {}) {}
       class Bump extends Schema.TaggedClass<Bump>("HierarchicalDifferentialBump")("Bump", {}) {}
 
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Running: {
           schema: Running,
           type: "parallel",
@@ -457,7 +457,7 @@ describe("pure planning and managed runtime differential", () => {
       const record = (label: string) => {
         actions.push(label)
       }
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Idle,
         Working,
         Finished: { schema: Finished, type: "final", output: Schema.String }
@@ -585,7 +585,7 @@ describe("pure planning and managed runtime differential", () => {
       class Active extends Schema.TaggedClass<Active>("DifferentialNoopActive")("Active", {}) {}
       class Ignore extends Schema.TaggedClass<Ignore>("DifferentialIgnore")("Ignore", {}) {}
       class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {}
-      const states = Machine.defineStates({ Idle, Active })
+      const states = Machine.states({ Idle, Active })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ignore, Go),

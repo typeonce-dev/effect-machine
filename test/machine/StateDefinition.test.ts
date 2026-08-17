@@ -18,7 +18,7 @@ const OpaqueState = Schema.declare<OpaqueState>((input): input is OpaqueState =>
 
 const expectDefinitionError = (
   run: () => unknown,
-  boundary: "Machine.defineStates" | "Machine.make",
+  boundary: "Machine.state" | "Machine.states" | "Machine.make",
   path: string,
   detail: string
 ): void => {
@@ -41,8 +41,49 @@ const makeFromUnknownStates = (states: unknown): unknown =>
   })
 
 describe("exact state-definition runtime validation", () => {
+  it("captures reusable state definitions independently at each mount", () => {
+    const TradingSlot = Machine.state({
+      initial: "Idle",
+      states: {
+        Idle: {},
+        InSession: Idle,
+        Applying: Done
+      }
+    })
+    const states = Machine.states({
+      trading: {
+        type: "parallel",
+        states: {
+          slot1: TradingSlot,
+          slot2: TradingSlot
+        }
+      }
+    })
+
+    assert.notStrictEqual(states.states.trading.states.slot1, TradingSlot)
+    assert.notStrictEqual(states.states.trading.states.slot1, states.states.trading.states.slot2)
+    assert.deepStrictEqual(states.states.trading.states.slot1, TradingSlot)
+    assert.isTrue(Object.isFrozen(TradingSlot))
+    assert.isTrue(Object.isFrozen(states.states.trading.states.slot1))
+    assert.strictEqual(states.states.trading.states.slot1.states.InSession, Idle)
+    assert.strictEqual(states.path("trading.slot2.InSession"), "trading.slot2.InSession")
+  })
+
+  it("reports reusable state errors at the Machine.state boundary", () => {
+    expectDefinitionError(
+      () =>
+        Machine.state({
+          initial: "Missing",
+          states: { Idle: {} }
+        } as never),
+      "Machine.state",
+      "state.initial",
+      "does not exist"
+    )
+  })
+
   it("accepts schema-less active states without confusing them with pseudo-states", () => {
-    const states = Machine.defineStates({
+    const states = Machine.states({
       Idle: {
         annotations: { title: "Idle", description: "No state-local data" }
       },
@@ -86,7 +127,7 @@ describe("exact state-definition runtime validation", () => {
       title: "Idle",
       arbitrarySchemaAnnotation: { owner: "machine-team" }
     })
-    const states = Machine.defineStates({ Idle: AnnotatedIdle })
+    const states = Machine.states({ Idle: AnnotatedIdle })
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
@@ -98,13 +139,13 @@ describe("exact state-definition runtime validation", () => {
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Idle")
 
-    const prototypeNamed = Machine.defineStates({ constructor: Idle, toString: Done })
+    const prototypeNamed = Machine.states({ constructor: Idle, toString: Done })
     assert.strictEqual(prototypeNamed.states.constructor, Idle)
     assert.strictEqual(prototypeNamed.states.toString, Done)
   })
 
   it("accepts an opaque declaration whose Type satisfies TaggedSchema", () => {
-    const states = Machine.defineStates({ Opaque: OpaqueState })
+    const states = Machine.states({ Opaque: OpaqueState })
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
@@ -123,8 +164,8 @@ describe("exact state-definition runtime validation", () => {
     for (const schema of [Schema.String, UntaggedStruct]) {
       for (const [node, path] of [[schema, "Invalid"], [{ schema }, "Invalid.schema"]] as const) {
         expectDefinitionError(
-          () => Machine.defineStates({ Invalid: node } as unknown as Machine.Machine.StateSchemas),
-          "Machine.defineStates",
+          () => Machine.states({ Invalid: node } as unknown as Machine.Machine.StateSchemas),
+          "Machine.states",
           path,
           "required PropertyKey _tag"
         )
@@ -170,8 +211,8 @@ describe("exact state-definition runtime validation", () => {
 
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
-        () => Machine.defineStates(states as Machine.Machine.StateSchemas),
-        "Machine.defineStates",
+        () => Machine.states(states as Machine.Machine.StateSchemas),
+        "Machine.states",
         path,
         detail
       )
@@ -231,8 +272,8 @@ describe("exact state-definition runtime validation", () => {
 
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
-        () => Machine.defineStates(states as Machine.Machine.StateSchemas),
-        "Machine.defineStates",
+        () => Machine.states(states as Machine.Machine.StateSchemas),
+        "Machine.states",
         path,
         detail
       )
@@ -249,7 +290,7 @@ describe("exact state-definition runtime validation", () => {
   it("rejects unknown or non-string pseudo-state annotations", () => {
     expectDefinitionError(
       () =>
-        Machine.defineStates({
+        Machine.states({
           Root: {
             schema: Root,
             initial: "Idle",
@@ -262,13 +303,13 @@ describe("exact state-definition runtime validation", () => {
             }
           }
         }),
-      "Machine.defineStates",
+      "Machine.states",
       "Root.Choice.annotations",
       "executable"
     )
     expectDefinitionError(
       () =>
-        Machine.defineStates({
+        Machine.states({
           Root: {
             schema: Root,
             initial: "Idle",
@@ -281,7 +322,7 @@ describe("exact state-definition runtime validation", () => {
             }
           }
         }),
-      "Machine.defineStates",
+      "Machine.states",
       "Root.History.annotations.title",
       "must be strings"
     )
@@ -306,8 +347,8 @@ describe("exact state-definition runtime validation", () => {
 
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
-        () => Machine.defineStates(states as Machine.Machine.StateSchemas),
-        "Machine.defineStates",
+        () => Machine.states(states as Machine.Machine.StateSchemas),
+        "Machine.states",
         path,
         detail
       )

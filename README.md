@@ -53,7 +53,7 @@ const State = Schema.TaggedUnion({
   Running: { count: Schema.Number }
 })
 
-const States = Machine.defineStates(State.cases)
+const States = Machine.states(State.cases)
 const CounterEvent = Machine.events(
   Schema.TaggedUnion({
     Start: {},
@@ -111,7 +111,7 @@ const program = Effect.gen(function*() {
 Use this order to preserve inference and keep boundaries explicit:
 
 1. Define domain schemas used by state and by shared event fields.
-2. Declare topology with `Machine.defineStates`, naming a tagged state union
+2. Declare topology with `Machine.states`, naming a tagged state union
    when its `.cases` are reused.
 3. Create event descriptors with `Machine.events`, `Machine.internalEvents`,
    and `Machine.emittedEvents`, passing tagged unions or tagged classes directly.
@@ -119,6 +119,12 @@ Use this order to preserve inference and keep boundaries explicit:
    `Machine.make({...}).handle({...})`.
 5. Add child descriptors, then runtime, Atom, testing, or cluster adapters at
    the application boundary.
+
+Keep one-off topology inline in `Machine.states`. Use `Machine.state` only when
+the same active state definition is mounted more than once; tagged schemas are
+already reusable without it. For repeated finite regions, derive names with
+`States.path(...)` so every literal in the path family is checked against the
+complete tree. Type full-snapshot helpers as `Machine.Snapshot<typeof States>`.
 
 ### Construct state through builders
 
@@ -149,7 +155,7 @@ Submit: Machine.transition({
 Omit `schema` when a state represents control flow but owns no data:
 
 ```ts
-const States = Machine.defineStates({
+const States = Machine.states({
   Form: {
     initial: "Editing",
     states: {
@@ -378,7 +384,7 @@ change; use `{ reenter: true, transition }` when the source must restart. With
 
 ## Statechart capabilities
 
-`Machine.defineStates` supports:
+`Machine.states` supports:
 
 - atomic states;
 - compound states with one active child;
@@ -388,7 +394,7 @@ change; use `{ reenter: true, transition }` when the source must restart. With
 - shallow and deep history states.
 
 Declare topology—including finality, output schemas, choices, and history—only
-in `defineStates`. Handlers implement behavior and output computation without
+in `states`. Handlers implement behavior and output computation without
 repeating structural metadata. Final children complete their parent, so
 `onDone` belongs on that compound or parallel parent.
 

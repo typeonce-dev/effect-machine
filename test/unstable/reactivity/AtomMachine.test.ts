@@ -36,7 +36,7 @@ class Online extends Schema.TaggedClass<Online>("Online")("Online", {}) {}
 
 class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 
-const CounterStates = Machine.defineStates({
+const CounterStates = Machine.states({
   Count,
   Done: { schema: Done, type: "final" }
 })
@@ -105,7 +105,7 @@ describe("AtomMachine", () => {
     Effect.scoped(Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("AtomPreparedIdle")("Idle", {}) {}
       class ReadyEmission extends Schema.TaggedClass<ReadyEmission>("AtomPreparedReady")("ReadyEmission", {}) {}
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Emissions = Machine.emittedEvents(ReadyEmission)
       const machine = Machine.make({
         states: states.states,
@@ -378,7 +378,7 @@ describe("AtomMachine", () => {
 
   it.effect("selects compound and parallel state paths from the bridge snapshot", () =>
     Effect.scoped(Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Ready: {
           schema: Ready,
           type: "parallel",

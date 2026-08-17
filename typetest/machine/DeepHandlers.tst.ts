@@ -19,7 +19,7 @@ class DeepActionService extends Context.Service<DeepActionService, string>()("ty
 class DeepFailure extends Data.TaggedError("DeepFailure")<{}> {}
 class DeepActionFailure extends Data.TaggedError("DeepActionFailure")<{}> {}
 
-const DeepStates = Machine.defineStates({
+const DeepStates = Machine.states({
   Root: {
     schema: Root,
     initial: "L1",
@@ -253,7 +253,7 @@ describe("deep handler trees", () => {
     class NarrowService extends Context.Service<NarrowService, string>()("types/deep/NarrowService") {}
     class NarrowFailure extends Data.TaggedError("NarrowFailure")<{}> {}
 
-    const States = Machine.defineStates({
+    const States = Machine.states({
       n0: {
         schema: NarrowNode,
         initial: "n1",

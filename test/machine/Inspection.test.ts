@@ -13,7 +13,7 @@ class Ready extends Schema.TaggedClass<Ready>("InspectionReady")("InspectionRead
 const RootOutput = Schema.String
 const DoneOutput = Schema.Number
 
-const States = Machine.defineStates({
+const States = Machine.states({
   root: {
     schema: Root,
     type: "parallel",
@@ -47,7 +47,7 @@ const machine = Machine.make({
   }
 })
 
-const ChoiceStates = Machine.defineStates({
+const ChoiceStates = Machine.states({
   Flow: {
     schema: ChoiceFlow,
     initial: "Routing",

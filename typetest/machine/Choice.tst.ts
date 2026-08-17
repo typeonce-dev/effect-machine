@@ -6,7 +6,7 @@ class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", { score: Schema.Numb
 class Approved extends Schema.TaggedClass<Approved>("Approved")("Approved", {}) {}
 class Rejected extends Schema.TaggedClass<Rejected>("Rejected")("Rejected", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Flow: {
     schema: Flow,
     initial: "Routing",
@@ -91,7 +91,7 @@ describe("Machine choice pseudo-states", () => {
       { type: "choice", output: Schema.String }
     ] as const
     for (const choice of invalidDefinitions) {
-      expect(Machine.defineStates).type.not.toBeCallableWith({
+      expect(Machine.states).type.not.toBeCallableWith({
         Flow: {
           schema: Flow,
           initial: "Approved",

@@ -14,7 +14,7 @@ describe("local compound target selection", () => {
         UpdateQuery: { query: Schema.String },
         Reset: {}
       })
-      const states = Machine.defineStates({
+      const states = Machine.states({
         search: {
           schema: State.cases.Search,
           initial: "Idle",
@@ -104,7 +104,7 @@ describe("local compound target selection", () => {
         Searching: {},
         Updated: {}
       })
-      const states = Machine.defineStates({
+      const states = Machine.states({
         search: {
           schema: State.cases.Search,
           initial: "Searching",
@@ -165,7 +165,7 @@ describe("local compound target selection", () => {
 
   it("does not install local.with for a schema-less compound scope", () => {
     const Event = Schema.TaggedUnion({ Advance: {} })
-    const states = Machine.defineStates({
+    const states = Machine.states({
       flow: {
         initial: "Idle",
         states: {

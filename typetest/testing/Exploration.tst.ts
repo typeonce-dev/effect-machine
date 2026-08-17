@@ -9,7 +9,7 @@ describe("MachineTest exploration", () => {
   class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
   class Internal extends Schema.TaggedClass<Internal>("Internal")("Internal", {}) {}
 
-  const States = Machine.defineStates({ counter: Counter })
+  const States = Machine.states({ counter: Counter })
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Increment),

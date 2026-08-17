@@ -8,7 +8,7 @@ class Approved extends Schema.TaggedClass<Approved>("Approved")("Approved", {}) 
 class Rejected extends Schema.TaggedClass<Rejected>("Rejected")("Rejected", {}) {}
 class Recheck extends Schema.TaggedClass<Recheck>("Recheck")("Recheck", { score: Schema.Number }) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Flow: {
     schema: Flow,
     initial: "Routing",
@@ -152,7 +152,7 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("stabilizes chained choices and attributes every resolver microstep", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "First",
@@ -204,7 +204,7 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("uses the existing infinite-transition protection for choice loops", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "First",
@@ -244,7 +244,7 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("enters a choice from an always transition", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Approved",
@@ -308,7 +308,7 @@ describe("Machine choice pseudo-states", () => {
   it.effect("enters a choice from a completion transition", () =>
     Effect.gen(function*() {
       class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Done",
@@ -361,7 +361,7 @@ describe("Machine choice pseudo-states", () => {
       class Ready extends Schema.TaggedClass<Ready>("Ready")("Ready", {}) {}
       class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
       class RightReady extends Schema.TaggedClass<RightReady>("RightReady")("RightReady", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Board: {
           schema: Board,
           type: "parallel",
@@ -442,7 +442,7 @@ describe("Machine choice pseudo-states", () => {
       class Outside extends Schema.TaggedClass<Outside>("Outside")("Outside", {}) {}
       class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
       class Resume extends Schema.TaggedClass<Resume>("Resume")("Resume", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Active",
@@ -508,7 +508,7 @@ describe("Machine choice pseudo-states", () => {
   it.effect("uses a history default when an initial choice targets history", () =>
     Effect.gen(function*() {
       class Active extends Schema.TaggedClass<Active>("InitialHistoryActive")("InitialHistoryActive", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Routing",
@@ -559,7 +559,7 @@ describe("Machine choice pseudo-states", () => {
       class Active extends Schema.TaggedClass<Active>("FallbackChoiceActive")("FallbackChoiceActive", {}) {}
       class Outside extends Schema.TaggedClass<Outside>("FallbackChoiceOutside")("FallbackChoiceOutside", {}) {}
       class Resume extends Schema.TaggedClass<Resume>("FallbackChoiceResume")("FallbackChoiceResume", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Active",

@@ -7,7 +7,7 @@ import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", { value: Schema.Number }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-const States = Machine.defineStates({ Idle })
+const States = Machine.states({ Idle })
 type Snapshot = Machine.Machine.Snapshot<typeof States.states>
 
 const machine = Machine.make({

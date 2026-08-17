@@ -8,7 +8,7 @@ export const State = Schema.TaggedUnion({
 })
 
 export const Route = Schema.TaggedStruct("Route", { value: Schema.String })
-export const States = Machine.defineStates(State.cases)
+export const States = Machine.states(State.cases)
 
 export const machine = Machine.make({
   states: States.states,

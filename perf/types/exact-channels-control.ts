@@ -8,7 +8,7 @@ export const Loaded = Schema.TaggedStruct("Loaded", { value: Schema.String })
 export const Notice = Schema.TaggedStruct("Notice", { value: Schema.String })
 export const Input = Schema.Struct({ seed: Schema.Number })
 
-export const States = Machine.defineStates({
+export const States = Machine.states({
   Idle,
   Done: {
     schema: Done,

@@ -8,7 +8,7 @@ class Idle extends Schema.TaggedClass<Idle>("InitialTypeIdle")("Idle", { count: 
 class Loading extends Schema.TaggedClass<Loading>("InitialTypeLoading")("Loading", {}) {}
 class Open extends Schema.TaggedClass<Open>("InitialTypeOpen")("Open", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   closed: Closed,
   opened: {
     schema: Opened,

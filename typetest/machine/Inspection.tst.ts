@@ -8,7 +8,7 @@ describe("Machine inspection", () => {
   class Running extends Schema.TaggedClass<Running>("Running")("Running", {}) {}
   class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
 
-  const States = Machine.defineStates({
+  const States = Machine.states({
     root: {
       schema: Root,
       initial: "idle",
@@ -42,7 +42,7 @@ describe("Machine inspection", () => {
   })
 
   it("exposes one closed operational protocol from prepared machines", () => {
-    const FlatStates = Machine.defineStates({ Idle })
+    const FlatStates = Machine.states({ Idle })
     const executable = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
@@ -146,7 +146,7 @@ describe("Machine inspection", () => {
   })
 
   it("keeps choice initial paths while configuration remains active-only", () => {
-    const ChoiceStates = Machine.defineStates({
+    const ChoiceStates = Machine.states({
       Flow: {
         schema: Root,
         initial: "Routing",
@@ -203,7 +203,7 @@ describe("Machine inspection", () => {
   })
 
   it("requires statically selected transitions", () => {
-    const FlatStates = Machine.defineStates({ idle: Idle, running: Running })
+    const FlatStates = Machine.states({ idle: Idle, running: Running })
     const flat = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),

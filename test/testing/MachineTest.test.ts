@@ -22,7 +22,7 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
   amount: Schema.Int
 }) {}
 
-const States = Machine.defineStates({ Idle, Ready })
+const States = Machine.states({ Idle, Ready })
 
 const makeTraceMachine = (onAction: () => void) =>
   Machine.make({
@@ -181,7 +181,7 @@ describe("MachineTest", () => {
       class Disabled extends Schema.TaggedClass<Disabled>("Disabled")("Disabled", {}) {}
       class Stop extends Schema.TaggedClass<Stop>("Stop")("Stop", {}) {}
 
-      const ParallelStates = Machine.defineStates({
+      const ParallelStates = Machine.states({
         app: {
           schema: App,
           type: "parallel",

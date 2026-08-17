@@ -19,7 +19,7 @@ class Select extends Schema.TaggedClass<Select>("VerificationSelect")("Select", 
   value: Schema.Int
 }) {}
 
-const NavigationStates = Machine.defineStates({
+const NavigationStates = Machine.states({
   off: Off,
   app: {
     schema: App,
@@ -71,7 +71,7 @@ const raisedNavigationMachine = Machine.make({
   }
 })
 
-const CounterStates = Machine.defineStates({ counter: Counter })
+const CounterStates = Machine.states({ counter: Counter })
 
 const counterMachine = Machine.make({
   states: CounterStates.states,
@@ -153,7 +153,7 @@ const invokedMachine = Machine.make({
 class StartupA extends Schema.TaggedClass<StartupA>("StartupA")("StartupA", {}) {}
 class StartupB extends Schema.TaggedClass<StartupB>("StartupB")("StartupB", {}) {}
 
-const RoutedStartupStates = Machine.defineStates({
+const RoutedStartupStates = Machine.states({
   a: {
     schema: StartupA,
     initial: "route",
@@ -196,7 +196,7 @@ class ChoiceFlow extends Schema.TaggedClass<ChoiceFlow>("ChoiceFlow")("ChoiceFlo
 class ChoiceReady extends Schema.TaggedClass<ChoiceReady>("ChoiceReady")("ChoiceReady", {}) {}
 class ChoiceRouted extends Schema.TaggedClass<ChoiceRouted>("ChoiceRouted")("ChoiceRouted", {}) {}
 
-const ChoiceResolutionStates = Machine.defineStates({
+const ChoiceResolutionStates = Machine.states({
   flow: {
     schema: ChoiceFlow,
     initial: "ready",
@@ -271,7 +271,7 @@ class Dashboard extends Schema.TaggedClass<Dashboard>("Dashboard")("Dashboard", 
 class Left extends Schema.TaggedClass<Left>("Left")("Left", {}) {}
 class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
 
-const ParallelStates = Machine.defineStates({
+const ParallelStates = Machine.states({
   dashboard: {
     schema: Dashboard,
     type: "parallel",
@@ -304,7 +304,7 @@ class Away extends Schema.TaggedClass<Away>("Away")("Away", {}) {}
 class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
 class Resume extends Schema.TaggedClass<Resume>("Resume")("Resume", {}) {}
 
-const HistoryStates = Machine.defineStates({
+const HistoryStates = Machine.states({
   workspace: {
     schema: Workspace,
     initial: "editor",
@@ -391,7 +391,7 @@ const historyMachine = Machine.make({
   }
 })
 
-const StructuralHistoryStates = Machine.defineStates({
+const StructuralHistoryStates = Machine.states({
   workspace: {
     initial: "editor",
     states: {
@@ -438,7 +438,7 @@ const structuralHistoryMachine = Machine.make({
 
 class Finished extends Schema.TaggedClass<Finished>("Finished")("Finished", {}) {}
 
-const CompletionStates = Machine.defineStates({
+const CompletionStates = Machine.states({
   finished: {
     schema: Finished,
     type: "final",
@@ -462,7 +462,7 @@ const completionMachine = Machine.make({
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
 class Archived extends Schema.TaggedClass<Archived>("Archived")("Archived", {}) {}
 
-const DoneTransitionStates = Machine.defineStates({
+const DoneTransitionStates = Machine.states({
   workflow: {
     schema: Workflow,
     initial: "finished",

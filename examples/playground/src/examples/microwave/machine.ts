@@ -13,7 +13,7 @@ export const MicrowaveEvents = Machine.events(
   })
 )
 
-export const MicrowaveStates = Machine.defineStates({
+export const MicrowaveStates = Machine.states({
   Oven: {
     type: "parallel",
     states: {

@@ -5,7 +5,7 @@ export const Flow = Schema.TaggedStruct("Flow", {})
 export const Idle = Schema.TaggedStruct("Idle", {})
 export const Ready = Schema.TaggedStruct("Ready", {})
 
-export const States = Machine.defineStates({
+export const States = Machine.states({
   Flow: {
     schema: Flow,
     initial: "Idle",

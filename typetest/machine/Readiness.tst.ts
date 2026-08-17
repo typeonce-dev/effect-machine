@@ -11,7 +11,7 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", { value: Schema.String }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-const choiceStates = Machine.defineStates({
+const choiceStates = Machine.states({
   Ready,
   Flow: {
     schema: Flow,
@@ -33,7 +33,7 @@ const choiceIncomplete = Machine.make({
 })
 const choiceSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
-const historyStates = Machine.defineStates({
+const historyStates = Machine.states({
   Ready,
   Flow: {
     schema: Flow,
@@ -55,7 +55,7 @@ const historyIncomplete = Machine.make({
 })
 const historySnapshot = { path: "Ready" as const, value: new Ready({}) }
 
-const outputStates = Machine.defineStates({
+const outputStates = Machine.states({
   Ready,
   Done: {
     schema: Done,
@@ -127,7 +127,7 @@ describe("executable machine readiness", () => {
   })
 
   it("accepts a complete machine and preserves its exact channels through every adapter", () => {
-    const completeStates = Machine.defineStates({
+    const completeStates = Machine.states({
       Ready,
       Flow: {
         schema: Flow,

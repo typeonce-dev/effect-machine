@@ -15,7 +15,7 @@ class Select extends Schema.TaggedClass<Select>("ExplorationSelect")("Select", {
 }) {}
 class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 
-const States = Machine.defineStates({ counter: Counter })
+const States = Machine.states({ counter: Counter })
 
 const machine = Machine.make({
   states: States.states,

@@ -40,7 +40,7 @@ describe("ClusterMachine", () => {
     "test/ClusterMachine/SnapshotEncoding"
   ) {}
 
-  const states = Machine.defineStates({ Count })
+  const states = Machine.states({ Count })
 
   const machine = Machine.make({
     id: "Counter",
@@ -125,7 +125,7 @@ describe("ClusterMachine", () => {
   })
 
   it("requires declared output implementations", () => {
-    const outputStates = Machine.defineStates({
+    const outputStates = Machine.states({
       Done: {
         schema: Done,
         type: "final",
@@ -173,7 +173,7 @@ describe("ClusterMachine", () => {
     class ContextualCount extends Schema.TaggedClass<ContextualCount>("ContextualCount")("ContextualCount", {
       value: ContextualNumber
     }) {}
-    const contextualStates = Machine.defineStates({ ContextualCount })
+    const contextualStates = Machine.states({ ContextualCount })
     const contextualMachine = Machine.make({
       states: contextualStates.states,
       events: Machine.events(Reset),

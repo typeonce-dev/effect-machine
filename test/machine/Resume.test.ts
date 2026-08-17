@@ -48,7 +48,7 @@ describe("Machine.resume", () => {
           initial: () => Ref.update(starts, (labels) => [...labels, label]).pipe(Effect.as(label)),
           run: () => Effect.never
         })
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Root: {
           schema: Root,
           type: "parallel",
@@ -158,7 +158,7 @@ describe("Machine.resume", () => {
       class RightA extends Schema.TaggedClass<RightA>("RightA")("RightA", {}) {}
       class RightB extends Schema.TaggedClass<RightB>("RightB")("RightB", {}) {}
       class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Root: {
           schema: Root,
           type: "parallel",
@@ -249,7 +249,7 @@ describe("Machine.resume", () => {
 
   it.effect("resumes terminal snapshots as completed refs with current output", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Count,
         Done: { schema: Done, type: "final", output: Schema.Number }
       })
@@ -285,7 +285,7 @@ describe("Machine.resume", () => {
       class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
       class Finished extends Schema.TaggedClass<Finished>("Finished")("Finished", {}) {}
       class Next extends Schema.TaggedClass<Next>("Next")("Next", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Flow: {
           schema: Flow,
           initial: "Finished",
@@ -330,7 +330,7 @@ describe("Machine.resume", () => {
     Effect.gen(function*() {
       class A extends Schema.TaggedClass<A>("A")("A", {}) {}
       class B extends Schema.TaggedClass<B>("B")("B", {}) {}
-      const states = Machine.defineStates({ A, B })
+      const states = Machine.states({ A, B })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
@@ -361,7 +361,7 @@ describe("Machine.resume", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
       class Cancelled extends Schema.TaggedClass<Cancelled>("Cancelled")("Cancelled", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
-      const states = Machine.defineStates({ Waiting, Cancelled, TimedOut })
+      const states = Machine.states({ Waiting, Cancelled, TimedOut })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Cancel),
@@ -413,7 +413,7 @@ describe("Machine.resume", () => {
         value: Schema.String
       }) {}
       const runs = yield* Ref.make(0)
-      const states = Machine.defineStates({ Loading, Loaded })
+      const states = Machine.states({ Loading, Loaded })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -454,7 +454,7 @@ describe("Machine.resume", () => {
         message: Schema.String
       }) {}
       const runs = yield* Ref.make(0)
-      const states = Machine.defineStates({ Loading, Failed })
+      const states = Machine.states({ Loading, Failed })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -496,7 +496,7 @@ describe("Machine.resume", () => {
       class ChildOutput extends Schema.TaggedClass<ChildOutput>("ChildOutput")("ChildOutput", {
         value: Schema.Number
       }) {}
-      const childStates = Machine.defineStates({
+      const childStates = Machine.states({
         ChildIdle,
         ChildDone: { schema: ChildDone, type: "final", output: Schema.Number }
       })
@@ -519,7 +519,7 @@ describe("Machine.resume", () => {
         ChildDone: { output: ({ state }) => state.value }
       })
       const Child = Machine.child("child", child)
-      const states = Machine.defineStates({ Parent, ChildOutput })
+      const states = Machine.states({ Parent, ChildOutput })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ChildOutput),
@@ -560,7 +560,7 @@ describe("Machine.resume", () => {
       class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
       class Region extends Schema.TaggedClass<Region>("Region")("Region", {}) {}
       class Leaf extends Schema.TaggedClass<Leaf>("Leaf")("Leaf", { value: Schema.Number }) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Root: {
           schema: Root,
           type: "parallel",
@@ -624,7 +624,7 @@ describe("Machine.resume", () => {
 
   it.effect("obeys bounded encode/decode continuation equivalence", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ Count })
+      const states = Machine.states({ Count })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Add),

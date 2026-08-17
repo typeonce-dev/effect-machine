@@ -93,7 +93,7 @@ export const MediaPlayerInternalEvents = Machine.internalEvents(
   })
 )
 
-export const MediaPlayerStates = Machine.defineStates({
+export const MediaPlayerStates = Machine.states({
   Player: {
     type: "parallel",
     states: {

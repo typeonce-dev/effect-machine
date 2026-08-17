@@ -12,7 +12,7 @@ const AnnotatedWorkflow = Workflow.annotate({
   designOwner: "editor-platform"
 })
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Workflow: {
     schema: AnnotatedWorkflow,
     initial: "Idle",
@@ -56,7 +56,7 @@ describe("Machine state annotations", () => {
   })
 
   it("limits pseudo-state annotations to descriptive metadata", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       Workflow: {
         schema: Workflow,
         initial: "Idle",
@@ -66,7 +66,7 @@ describe("Machine state annotations", () => {
         }
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       Workflow: {
         schema: Workflow,
         initial: "Idle",
@@ -79,7 +79,7 @@ describe("Machine state annotations", () => {
   })
 
   it("keeps schema-backed APIs unavailable to annotated pseudo-states", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       Workflow: {
         schema: Workflow,
         initial: "Idle",
@@ -93,7 +93,7 @@ describe("Machine state annotations", () => {
         }
       }
     })
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       Workflow: {
         schema: Workflow,
         initial: "Idle",

@@ -10,7 +10,7 @@ class Notice extends Schema.TaggedClass<Notice>("LiveInspectionNotice")("Notice"
   value: Schema.Number
 }) {}
 
-const states = Machine.defineStates({ Idle })
+const states = Machine.states({ Idle })
 const Events = Machine.events(Increment)
 const Emissions = Machine.emittedEvents(Notice)
 
@@ -190,7 +190,7 @@ describe("Machine live inspection", () => {
 
       const ParentEvents = Machine.events(ChildReady)
       const ChildEvents = Machine.events(Trigger)
-      const childStates = Machine.defineStates({ ChildIdle })
+      const childStates = Machine.states({ ChildIdle })
       const childMachine = Machine.make({
         id: "child-machine",
         states: childStates.states,
@@ -214,7 +214,7 @@ describe("Machine live inspection", () => {
         }
       })
       const Child = Machine.child("child", childMachine)
-      const parentStates = Machine.defineStates({
+      const parentStates = Machine.states({
         ParentIdle,
         ParentDone: { schema: ParentDone, type: "final" }
       })

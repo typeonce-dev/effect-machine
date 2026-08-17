@@ -38,7 +38,7 @@ class Editing extends Schema.TaggedClass<Editing>("StructuralEditing")("Editing"
   draft: Schema.String
 }) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   player: {
     type: "parallel",
     annotations: { title: "Player" },
@@ -141,7 +141,7 @@ const makeMachine = () =>
     }
   })
 
-const HistoryStates = Machine.defineStates({
+const HistoryStates = Machine.states({
   flow: {
     initial: "section",
     states: {
@@ -217,7 +217,7 @@ const historyMachine = Machine.make({
   }
 })
 
-const FinalStates = Machine.defineStates({
+const FinalStates = Machine.states({
   Done: {
     type: "final",
     output: Schema.String

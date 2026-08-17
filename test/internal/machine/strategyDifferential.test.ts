@@ -28,7 +28,7 @@ class Select extends Schema.TaggedClass<Select>("StrategySelect")("Select", {
 }) {}
 
 const makeFlatMachine = () => {
-  const states = Machine.defineStates({
+  const states = Machine.states({
     Count,
     Done: { schema: Done, type: "final", output: Schema.Number }
   })
@@ -68,7 +68,7 @@ describe("machine planner and runtime strategies", () => {
     }))
 
   it.effect("retains the selected conditional branch across generic and indexed-flat planning", () => {
-    const states = Machine.defineStates({ Count })
+    const states = Machine.states({ Count })
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(Select),
@@ -153,7 +153,7 @@ describe("machine planner and runtime strategies", () => {
       class Left extends Schema.TaggedClass<Left>("StrategyLeft")("Left", { value: Schema.Number }) {}
       class Right extends Schema.TaggedClass<Right>("StrategyRight")("Right", { value: Schema.Number }) {}
       class Advance extends Schema.TaggedClass<Advance>("StrategyAdvance")("Advance", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Root: {
           schema: Root,
           type: "parallel",
@@ -208,7 +208,7 @@ describe("machine planner and runtime strategies", () => {
       class Opened extends Schema.TaggedClass<Opened>("StrategyInitialOpened")("Opened", {}) {}
       class Idle extends Schema.TaggedClass<Idle>("StrategyInitialIdle")("Idle", { value: Schema.Number }) {}
       class Enter extends Schema.TaggedClass<Enter>("StrategyInitialEnter")("Enter", {}) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Outside,
         Opened: {
           schema: Opened,
@@ -301,7 +301,7 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("StrategyFallbackIdle")("Idle", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("StrategyFallbackReady")("Ready", {}) {}
-      const states = Machine.defineStates({ Idle, Ready })
+      const states = Machine.states({ Idle, Ready })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -330,7 +330,7 @@ describe("machine planner and runtime strategies", () => {
 
   it.effect("fails closed to the generic planner for schema-less active states", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ Idle: {} })
+      const states = Machine.states({ Idle: {} })
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
@@ -363,7 +363,7 @@ describe("machine planner and runtime strategies", () => {
       class Complete extends Schema.TaggedClass<Complete>("StrategyComplete")("Complete", {
         value: Schema.Number
       }) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Complete: { schema: Complete, type: "final", output: Schema.Number }
       })
       const machine = Machine.make({
@@ -420,7 +420,7 @@ describe("machine planner and runtime strategies", () => {
   it.effect("decodes deferred event constructions in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const Event = Schema.TaggedUnion({ Set: { value: Schema.NonEmptyString } })
-      const states = Machine.defineStates({ Count })
+      const states = Machine.states({ Count })
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Event),
@@ -472,7 +472,7 @@ describe("machine planner and runtime strategies", () => {
       class Published extends Schema.TaggedClass<Published>("StrategyEmissionPublished")("Published", {
         value: Schema.Number
       }) {}
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Events = Machine.events(Publish)
       const Emissions = Machine.emittedEvents(Published)
       let value: unknown = 1
@@ -526,7 +526,7 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("StrategyPreparedIdle")("Idle", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("StrategyPreparedReady")("Ready", {}) {}
-      const states = Machine.defineStates({ Idle })
+      const states = Machine.states({ Idle })
       const Emissions = Machine.emittedEvents(Ready)
       const machine = Machine.make({
         states: states.states,
@@ -653,7 +653,7 @@ describe("machine planner and runtime strategies", () => {
       class Loaded extends Schema.TaggedClass<Loaded>("StrategyInvokeLoaded")("Loaded", {
         value: Schema.String
       }) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Idle,
         Loading,
         Success: { schema: Success, type: "final", output: Schema.String }
@@ -710,7 +710,7 @@ describe("machine planner and runtime strategies", () => {
       class Failed extends Schema.TaggedClass<Failed>("StrategyInvokeFailureFailed")("Failed", {
         error: Schema.String
       }) {}
-      const states = Machine.defineStates({
+      const states = Machine.states({
         Loading,
         Failed: { schema: Failed, type: "final", output: Schema.String }
       })
@@ -760,7 +760,7 @@ describe("machine planner and runtime strategies", () => {
       for (const strategy of ["generic", "compiled"] as const) {
         const firstStarted = yield* Deferred.make<void>()
         let generation = 0
-        const states = Machine.defineStates({ Loading, Failed })
+        const states = Machine.states({ Loading, Failed })
         const definition = Machine.make({
           states: states.states,
           events: Machine.events(Reenter, Stale),

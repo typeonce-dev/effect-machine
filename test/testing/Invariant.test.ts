@@ -16,7 +16,7 @@ class Deposit extends Schema.TaggedClass<Deposit>("Deposit")("Deposit", {
   amount: Schema.Int
 }) {}
 
-const States = Machine.defineStates({ account: Account })
+const States = Machine.states({ account: Account })
 
 const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) =>
   Machine.make({

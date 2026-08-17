@@ -25,7 +25,7 @@ describe("machine reference event channels", () => {
   const Events = Machine.events(Ping)
   const InternalEvents = Machine.internalEvents(Local)
   const Emissions = Machine.emittedEvents(Published, ValuedPublished)
-  const states = Machine.defineStates({ Idle })
+  const states = Machine.states({ Idle })
   const childMachine = Machine.make({
     states: states.states,
     events: Events,

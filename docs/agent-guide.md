@@ -36,7 +36,7 @@ Use this order so inference has all schemas available when handlers are
 declared:
 
 1. Domain schemas used by state, and by event fields when they are shared.
-2. `Machine.defineStates`, using a tagged state union and `.cases` when state
+2. `Machine.states`, using a tagged state union and `.cases` when state
    schemas need to be reused.
 3. `Machine.events`, `Machine.internalEvents`, `Machine.emittedEvents`, and
    `parentEvents`; pass `Schema.TaggedUnion({...})` or tagged classes directly.
@@ -52,7 +52,7 @@ const State = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const States = Machine.defineStates(State.cases)
+const States = Machine.states(State.cases)
 export const Event = Machine.events(
   Schema.TaggedUnion({
     Save: {}
@@ -132,11 +132,88 @@ its extra control is required:
 
 ## Atomic, compound, parallel, and history states
 
+### Inline topology by default; extract only repeated states
+
+Prefer writing the complete topology inline in `Machine.states`. A one-off
+compound or parallel area is easier to understand in place, and extracting it
+does not improve its types. Use `Machine.state` only when the same active state
+definition is mounted more than once. Tagged schemas are already reusable and
+do not need `Machine.state`.
+
+```ts
+type TeamSlot = 1 | 2 | 3 | 4 | 5 | 6
+
+const TradingSlot = Machine.state({
+  initial: "Idle",
+  states: {
+    Idle: {},
+    InSession: State.cases.InSession,
+    Applying: State.cases.Applying
+  }
+})
+
+const States = Machine.states({
+  root: {
+    type: "parallel",
+    states: {
+      trading: {
+        type: "parallel",
+        states: {
+          slot1: TradingSlot,
+          slot2: TradingSlot,
+          slot3: TradingSlot,
+          slot4: TradingSlot,
+          slot5: TradingSlot,
+          slot6: TradingSlot
+        }
+      },
+      // Other explicit regions stay visible here.
+    }
+  }
+})
+```
+
+`Machine.state` accepts one active atomic, compound, or parallel node. It
+checks child keys and the compound `initial` at the reusable definition. It is
+not a second model builder, does not define handlers, and does not accept
+history or choice nodes as roots. `Machine.states` remains the complete model
+boundary and captures every mount independently.
+
+For a finite family of paths, bind the template to that definition instead of
+maintaining a parallel string table:
+
+```ts
+const inSessionPath = <const Slot extends TeamSlot>(slot: Slot) =>
+  States.path(`root.trading.slot${slot}.InSession`)
+
+States.matches(snapshot, inSessionPath(slot))
+AtomMachine.matches(machineAtom, inSessionPath(slot))
+```
+
+`States.path` is a compile-time identity helper. It accepts a literal or a
+finite template-literal union only when every member is an active path in this
+tree. Renaming a slot or child therefore breaks the path helper at its
+definition rather than leaving a stale catalog.
+
+Use the definition-bound snapshot type when a query genuinely needs the full
+machine snapshot:
+
+```ts
+const offeredIfSlot = (
+  snapshot: Machine.Snapshot<typeof States>,
+  slot: TeamSlot
+) =>
+  !States.matches(snapshot, inSessionPath(slot))
+```
+
+Do not derive this type with `Parameters<typeof States.get>[0]`; that depends
+on overload order and does not express ownership by the state definition.
+
 An active state does not need a schema unless it owns data. Omit `schema` for
 control-only atomic, compound, parallel, and final states:
 
 ```ts
-const States = Machine.defineStates({
+const States = Machine.states({
   Idle: {},
   Form: {
     initial: "Editing",
@@ -189,7 +266,7 @@ Use a compound state when exactly one child phase is active. It must declare an
 ```ts
 const FormState = Schema.TaggedUnion({ Saving: { draft: Schema.String } })
 
-const FormStates = Machine.defineStates({
+const FormStates = Machine.states({
   Form: {
     initial: "Editing",
     states: {
@@ -203,7 +280,7 @@ const FormStates = Machine.defineStates({
 Use a parallel state when every direct region is active:
 
 ```ts
-const ParallelStates = Machine.defineStates({
+const ParallelStates = Machine.states({
   Screen: {
     type: "parallel",
     states: {
@@ -230,13 +307,13 @@ Every parallel region needs an active state in initial and full snapshot
 builders. The same rule applies when a local or branch target enters an
 inactive nested parallel state.
 
-Use `type: "final"` for a terminal leaf in `Machine.defineStates`. A final
+Use `type: "final"` for a terminal leaf in `Machine.states`. A final
 child completes its compound parent. Put `onDone` on that completed parent,
 never on the final leaf. The definition owns the output schema and the handler
 computes its value:
 
 ```ts
-const States = Machine.defineStates({
+const States = Machine.states({
   Done: {
     schema: State.cases.Done,
     type: "final",
@@ -310,7 +387,7 @@ should remember. It has no schema, is excluded from active state identifiers,
 and is addressed only through `target.history`:
 
 ```ts
-const States = Machine.defineStates({
+const States = Machine.states({
   checkout: {
     schema: Checkout,
     initial: "shipping",
@@ -454,7 +531,7 @@ through `schema.makeEffect`, including refinements.
 
 ## Reading state and structural ancestors
 
-`Machine.defineStates` returns typed helpers:
+`Machine.states` returns typed helpers:
 
 ```ts
 States.get(snapshot, "Route.Ready")
@@ -1324,7 +1401,7 @@ repeat the final marker in this handler.
 
 ### `type: "final"` is rejected by `handle`
 
-Move it to `Machine.defineStates`. Definitions own statechart topology;
+Move it to `Machine.states`. Definitions own statechart topology;
 handlers own behavior.
 
 ### Parent property does not exist

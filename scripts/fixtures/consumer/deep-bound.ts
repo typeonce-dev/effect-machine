@@ -36,7 +36,7 @@ const ChildState = Schema.TaggedUnion({
   Done: { value: Schema.String }
 })
 
-const ChildStates = Machine.defineStates({
+const ChildStates = Machine.states({
   Done: {
     schema: ChildState.cases.Done,
     type: "final",
@@ -65,7 +65,7 @@ const childMachine = Machine.make({
 })
 const Child = Machine.child("child", childMachine)
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Idle: State.cases.Idle,
   Ready: {
     schema: State.cases.Ready,
@@ -163,7 +163,7 @@ const machine = definition.handle({
 })
 
 const PackagedDeepState = Schema.TaggedStruct("PackagedDeepState", {})
-const PackagedDeepStates = Machine.defineStates({
+const PackagedDeepStates = Machine.states({
   n0: {
     schema: PackagedDeepState,
     initial: "n1",

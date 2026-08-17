@@ -36,7 +36,7 @@ class Changed extends Schema.TaggedClass<Changed>("Changed")("Changed", {
   value: Schema.Number
 }) {}
 
-const CounterStates = Machine.defineStates({
+const CounterStates = Machine.states({
   Count,
   Done: { schema: Done, type: "final" }
 })
@@ -590,7 +590,7 @@ describe("ClusterMachine", () => {
 
   it.effect("rejects machines with invoke configurations", () =>
     Effect.gen(function*() {
-      const states = Machine.defineStates({ Count })
+      const states = Machine.states({ Count })
       const invoked = Machine.make({
         id: "Invoked",
         states: states.states,

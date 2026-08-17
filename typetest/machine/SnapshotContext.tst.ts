@@ -10,7 +10,7 @@ class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
 class RightIdle extends Schema.TaggedClass<RightIdle>("RightIdle")("RightIdle", {}) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", {}) {}
 
-const States = Machine.defineStates({
+const States = Machine.states({
   Root: {
     schema: Root,
     type: "parallel",
@@ -91,7 +91,7 @@ describe("Machine transition snapshot context", () => {
   it("does not expose a fabricated snapshot to choices or state actions", () => {
     class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
     class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {}
-    const choiceStates = Machine.defineStates({
+    const choiceStates = Machine.states({
       Flow: {
         schema: Flow,
         initial: "Routing",

@@ -17,7 +17,7 @@ class RightWorking extends Schema.TaggedClass<RightWorking>("CodecRightWorking")
 }) {}
 class RightDone extends Schema.TaggedClass<RightDone>("CodecRightDone")("CodecRightDone", {}) {}
 
-const TopologyStates = Machine.defineStates({
+const TopologyStates = Machine.states({
   Root: {
     schema: Root,
     type: "parallel",
@@ -110,7 +110,7 @@ class Preview extends Schema.TaggedClass<Preview>("CodecPreview")("CodecPreview"
 }) {}
 class Outside extends Schema.TaggedClass<Outside>("CodecOutside")("CodecOutside", {}) {}
 
-const HistoryStates = Machine.defineStates({
+const HistoryStates = Machine.states({
   Workspace: {
     schema: Workspace,
     initial: "Editor",
@@ -237,7 +237,7 @@ describe("snapshot codec adversarial boundaries", () => {
       class Before extends Schema.TaggedClass<Before>("CodecAutomaticBefore")("CodecAutomaticBefore", {}) {}
       class Boundary extends Schema.TaggedClass<Boundary>("CodecAutomaticBoundary")("CodecAutomaticBoundary", {}) {}
       class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {}
-      const states = Machine.defineStates({ Before, Boundary, After })
+      const states = Machine.states({ Before, Boundary, After })
       const original = Machine.make({
         id: "codec-automatic-original",
         states: states.states,

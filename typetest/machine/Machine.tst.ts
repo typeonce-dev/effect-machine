@@ -70,7 +70,7 @@ describe("Machine", () => {
     readonly deferredMessage: string
   }>()("test/Machine/DeferredRequirement") {}
 
-  const UpStates = Machine.defineStates({
+  const UpStates = Machine.states({
     up: {
       schema: Up,
       type: "parallel",
@@ -96,7 +96,7 @@ describe("Machine", () => {
     down: Down
   })
 
-  const NestedParallelStates = Machine.defineStates({
+  const NestedParallelStates = Machine.states({
     root: {
       schema: Up,
       initial: "idle",
@@ -189,7 +189,7 @@ describe("Machine", () => {
     never
   >
 
-  it("defineStates preserves literal state paths", () => {
+  it("states preserves literal state paths", () => {
     expect<Machine.Machine.StateIdentifier<typeof UpStates.states>>().type.toBe<
       | "up"
       | "up.auth"
@@ -211,7 +211,7 @@ describe("Machine", () => {
       id: Schema.String
     }) {}
     const State = Schema.TaggedStruct("ConstructedEventState", {})
-    const States = Machine.defineStates({ State })
+    const States = Machine.states({ State })
     const Events = Machine.events(Event)
     const InternalEvents = Machine.internalEvents(Internal)
     Machine.make({
@@ -320,7 +320,7 @@ describe("Machine", () => {
     >().type.toBe<Auth | undefined>()
   })
 
-  it("defineStates selects state values and snapshots with type-safe paths", () => {
+  it("states selects state values and snapshots with type-safe paths", () => {
     const snapshot = UpInitial(
       new Up({ id: "up-1" }),
       (up) =>
@@ -393,7 +393,7 @@ describe("Machine", () => {
     expect(UpStates.getWithParents).type.not.toBeCallableWith(other, "up")
   })
 
-  it("defineStates preserves declared compound initial keys", () => {
+  it("states preserves declared compound initial keys", () => {
     expect<typeof UpStates.states.up.states.auth.initial>().type.toBe<"signedOut">()
     expect<typeof UpStates.states.up.states.sync.initial>().type.toBe<"idle">()
   })
@@ -859,7 +859,7 @@ describe("Machine", () => {
   })
 
   it("constructs sibling targets from destructured source fields", () => {
-    const states = Machine.defineStates({ source: Up, target: RetaggedUp })
+    const states = Machine.states({ source: Up, target: RetaggedUp })
     Machine.make({
       states: states.states,
       events: Machine.events(SignIn),
@@ -887,7 +887,7 @@ describe("Machine", () => {
 
   it("child invocation composes complete machines with type-safe protocols", () => {
     const ChildInput = Schema.Struct({ userId: Schema.String })
-    const childStates = Machine.defineStates({
+    const childStates = Machine.states({
       done: {
         schema: Down,
         type: "final",
@@ -1498,7 +1498,7 @@ describe("Machine", () => {
   })
 
   it("final output callbacks conform to declared output schemas", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       signedIn: {
         schema: SignedIn,
         type: "final",
@@ -1533,7 +1533,7 @@ describe("Machine", () => {
   })
 
   it("requires one definition-led final output contract before execution", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       signedIn: {
         schema: SignedIn,
         type: "final",
@@ -1593,7 +1593,7 @@ describe("Machine", () => {
   })
 
   it("keeps only legitimate undefined values in terminal output", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       active: Down,
       succeeded: {
         schema: SignedIn,
@@ -1633,7 +1633,7 @@ describe("Machine", () => {
   })
 
   it("compound onDone receives the declared child final output type", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       auth: {
         schema: Auth,
         initial: "signedOut",
@@ -1677,7 +1677,7 @@ describe("Machine", () => {
   })
 
   it("rejects compound onDone when declared child output is not implemented", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       auth: {
         schema: Auth,
         initial: "signedOut",
@@ -1708,7 +1708,7 @@ describe("Machine", () => {
   })
 
   it("multiple final children produce a discriminated completion output union", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       payment: {
         schema: Payment,
         initial: "pending",
@@ -1775,7 +1775,7 @@ describe("Machine", () => {
   })
 
   it("parallel output callbacks receive typed region outputs and conform to declared output schemas", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       up: {
         schema: Up,
         type: "parallel",
@@ -1869,7 +1869,7 @@ describe("Machine", () => {
   })
 
   it("rejects parallel output callbacks that do not match declared output schemas", () => {
-    const States = Machine.defineStates({
+    const States = Machine.states({
       up: {
         schema: Up,
         type: "parallel",
@@ -2120,7 +2120,7 @@ describe("Machine", () => {
         Schema.withConstructorDefault(Effect.succeed("default"))
       )
     }) {}
-    const States = Machine.defineStates({
+    const States = Machine.states({
       Flow: {
         schema: State.cases.Flow,
         initial: "Idle",
@@ -2143,7 +2143,7 @@ describe("Machine", () => {
       Required: State.cases.Required,
       DefaultOnly
     })
-    const ParallelStates = Machine.defineStates({
+    const ParallelStates = Machine.states({
       Parallel: {
         schema: State.cases.Parallel,
         type: "parallel",
@@ -2323,7 +2323,7 @@ describe("Machine", () => {
       Idle: {},
       Active: { requestId: Schema.String }
     })
-    const States = Machine.defineStates({
+    const States = Machine.states({
       Idle: State.cases.Idle,
       Active: State.cases.Active
     })
@@ -2589,7 +2589,7 @@ describe("Machine", () => {
   })
 
   it("rejects invalid compound initial keys", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       up: {
         schema: Up,
         initial: "missing",
@@ -2601,7 +2601,7 @@ describe("Machine", () => {
   })
 
   it("rejects initial keys on parallel states", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       up: {
         schema: Up,
         type: "parallel",
@@ -2614,7 +2614,7 @@ describe("Machine", () => {
   })
 
   it("rejects invalid nested state definitions", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       up: {
         schema: Up,
         type: "parallel",
@@ -2650,7 +2650,7 @@ describe("Machine", () => {
   })
 
   it("rejects child states on final states", () => {
-    expect(Machine.defineStates).type.not.toBeCallableWith({
+    expect(Machine.states).type.not.toBeCallableWith({
       down: {
         schema: Down,
         type: "final",

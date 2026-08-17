@@ -15,7 +15,7 @@ export const WorkspaceOutput = Schema.Struct({
   Sync: Schema.Number
 })
 
-export const States = Machine.defineStates({
+export const States = Machine.states({
   App: {
     schema: App,
     initial: "Workspace",

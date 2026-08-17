@@ -31,7 +31,7 @@ describe("Machine.EventByTag", () => {
   })
 
   it("narrows handler contexts for every finite tag", () => {
-    const states = Machine.defineStates({ Idle })
+    const states = Machine.states({ Idle })
     Machine.make({
       states: states.states,
       events: Machine.events(FiniteUnion),

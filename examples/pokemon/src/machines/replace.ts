@@ -27,7 +27,7 @@ const replaceWithRandom = Effect.sleep("500 millis").pipe(
   Effect.onInterrupt(() => Effect.log("Replace with random interrupted"))
 )
 
-export const ReplaceStates = Machine.defineStates({ Idle: {}, Replacing })
+export const ReplaceStates = Machine.states({ Idle: {}, Replacing })
 
 export const ReplaceEvents = Machine.events(ReplacePokemon)
 const ReplaceInternalEvents = Machine.internalEvents(Replaced)

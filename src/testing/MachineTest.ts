@@ -227,7 +227,7 @@ export interface Scenarios<M extends AnyMachine> {
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
  * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(Reset),
@@ -488,7 +488,7 @@ export { ProbeUnavailableError } from "../internal/testing/machine/verification.
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -1101,7 +1101,7 @@ export const Invariant: {
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
  * }) {}
- * const States = Machine.defineStates({ Count })
+ * const States = Machine.states({ Count })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -1436,7 +1436,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *   value: Schema.Number
  * }) {}
  * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
- * const States = Machine.defineStates({ Count })
+ * const States = Machine.states({ Count })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(Increment),
@@ -1629,7 +1629,7 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -1893,7 +1893,7 @@ export interface Coverage<M extends AnyMachine> {
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
@@ -2118,7 +2118,7 @@ export interface VerifyOptions {
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.defineStates({ Idle })
+ * const States = Machine.states({ Idle })
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),

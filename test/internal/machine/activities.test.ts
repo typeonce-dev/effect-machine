@@ -13,7 +13,7 @@ class WorkSucceeded extends Schema.TaggedClass<WorkSucceeded>("WorkSucceeded")("
 class WorkFailed extends Schema.TaggedClass<WorkFailed>("WorkFailed")("WorkFailed", {}) {}
 class LoadTimedOut extends Schema.TaggedClass<LoadTimedOut>("LoadTimedOut")("LoadTimedOut", {}) {}
 
-const childStates = Machine.defineStates({ ChildIdle })
+const childStates = Machine.states({ ChildIdle })
 const childMachine = Machine.make({
   id: "document-worker",
   states: childStates.states,
@@ -27,7 +27,7 @@ const child = Machine.child("child", childMachine)
 
 let dynamicFactoryEvaluations = 0
 const timerDuration = "10 seconds"
-const activityStates = Machine.defineStates({ Loading, Dynamic })
+const activityStates = Machine.states({ Loading, Dynamic })
 const activityMachine = Machine.make({
   id: "activity-inspection",
   states: activityStates.states,

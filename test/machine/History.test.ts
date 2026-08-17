@@ -65,7 +65,7 @@ class ResumeWorkspaceDeep extends Schema.TaggedClass<ResumeWorkspaceDeep>("Resum
 class RestoreEditor extends Schema.TaggedClass<RestoreEditor>("RestoreEditor")("RestoreEditor", {}) {}
 class DefaultEditor extends Schema.TaggedClass<DefaultEditor>("DefaultEditor")("DefaultEditor", {}) {}
 
-const CheckoutStates = Machine.defineStates({
+const CheckoutStates = Machine.states({
   checkout: {
     schema: Checkout,
     initial: "shipping",
@@ -259,7 +259,7 @@ const sendAndWaitForPath = <State, Event, Error, Output>(
     return yield* Fiber.join(observer)
   })
 
-const WorkspaceStates = Machine.defineStates({
+const WorkspaceStates = Machine.states({
   workspace: {
     schema: Workspace,
     type: "parallel",
@@ -398,7 +398,7 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
     }
   })
 
-const NestedHistoryStates = Machine.defineStates({
+const NestedHistoryStates = Machine.states({
   workspace: {
     schema: Workspace,
     type: "parallel",

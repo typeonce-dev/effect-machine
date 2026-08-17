@@ -17,7 +17,7 @@ class Burst extends Schema.TaggedClass<Burst>("ProbeBurst")("Burst", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {}) {}
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
 
-const states = Machine.defineStates({ Counter })
+const states = Machine.states({ Counter })
 
 const machine = Machine.make({
   states: states.states,
@@ -153,7 +153,7 @@ describe("MachineTest probe", () => {
       class Idle extends Schema.TaggedClass<Idle>("ProbeInvokeIdle")("Idle", {}) {}
       class Loading extends Schema.TaggedClass<Loading>("ProbeInvokeLoading")("Loading", {}) {}
       class Load extends Schema.TaggedClass<Load>("ProbeInvokeLoad")("Load", {}) {}
-      const invokeStates = Machine.defineStates({ Idle, Loading })
+      const invokeStates = Machine.states({ Idle, Loading })
       let starts = 0
       const invokeMachine = Machine.make({
         states: invokeStates.states,

@@ -12,6 +12,8 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   const targetless = ({ target }) => typeof target.none === "function" ? target.none() : undefined
 
   return {
+    states: (definitions) =>
+      typeof Machine.states === "function" ? Machine.states(definitions) : Machine.defineStates(definitions),
     events: typeof Machine.event === "function"
       ? (...schemas) => schemas
       : (...schemas) => Machine.events(...schemas),

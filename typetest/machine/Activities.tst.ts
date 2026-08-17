@@ -6,7 +6,7 @@ class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
 class Dynamic extends Schema.TaggedClass<Dynamic>("Dynamic")("Dynamic", {}) {}
 class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
 
-const States = Machine.defineStates({ Loading, Dynamic })
+const States = Machine.states({ Loading, Dynamic })
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(TimedOut),
