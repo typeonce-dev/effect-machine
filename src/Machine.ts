@@ -3249,9 +3249,12 @@ export declare namespace Machine {
     readonly reenter: boolean
     /** Zero-based index of the selected static branch. */
     readonly branchIndex: number
-    /** Path returned by the handler, including a history pseudo-state. */
+    /** Path returned by the handler, including a choice or history pseudo-state. */
     readonly target: TargetPath | undefined
-    /** Concrete path used after resolving history, otherwise equal to `target`. */
+    /**
+     * Concrete path used after resolving choice, initial, or history routing.
+     * Choice microsteps retain each intermediate pseudo-state edge separately.
+     */
     readonly resolvedTarget: TargetPath | undefined
   }
 

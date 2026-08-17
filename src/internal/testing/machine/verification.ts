@@ -1538,11 +1538,24 @@ export const verify = <M extends AnyMachine>(
       return direction === "entry" ? leftOrder - rightOrder : rightOrder - leftOrder
     })
 
+  const transitionBranch = (
+    transition: Microstep<M>["transitions"][number]
+  ): Machine.Machine.TransitionBranch | undefined => {
+    const definition = definitions.find((candidate) =>
+      candidate.source === transition.source && candidate.reenter === transition.reenter &&
+      sameTransitionTrigger(candidate.trigger, transition.trigger)
+    )
+    return definition === undefined || !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
+        transition.branchIndex >= definition.branches.length
+      ? undefined
+      : definition.branches[transition.branchIndex]
+  }
+
   const validateTransitionDefinition = (
     transition: Microstep<M>["transitions"][number],
     location: VerificationLocation
-  ): void => {
-    if (!selected.has("definitions")) return
+  ): Machine.Machine.TransitionBranch | undefined => {
+    if (!selected.has("definitions")) return undefined
     const definition = definitions.find((candidate) =>
       candidate.source === transition.source && candidate.reenter === transition.reenter &&
       sameTransitionTrigger(candidate.trigger, transition.trigger)
@@ -1554,7 +1567,7 @@ export const verify = <M extends AnyMachine>(
         `retained transition from "${transition.source}" has no public definition`,
         transition.source
       )
-      return
+      return undefined
     }
     if (
       !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
@@ -1566,7 +1579,7 @@ export const verify = <M extends AnyMachine>(
         `retained transition from "${transition.source}" selected invalid branch index ${transition.branchIndex}`,
         transition.source
       )
-      return
+      return undefined
     }
     const branch = definition.branches[transition.branchIndex]!
     if (!targetWithinSelection(transition.target, branch, byPath)) {
@@ -1581,6 +1594,141 @@ export const verify = <M extends AnyMachine>(
         transition.target === undefined ? transition.source : String(transition.target)
       )
     }
+    return branch
+  }
+
+  const validateTransitionResolutions = (
+    transitions: Microstep<M>["transitions"],
+    branches: ReadonlyArray<Machine.Machine.TransitionBranch | undefined>,
+    location: VerificationLocation
+  ): void => {
+    if (!selected.has("definitions")) return
+
+    const choiceResolution = (
+      start: string,
+      afterIndex: number,
+      nested: boolean
+    ): { readonly found: boolean; readonly target: string | undefined } => {
+      const seen = new Set<string>()
+      let choice = start
+      let cursor = afterIndex + 1
+      let first = true
+      while (!seen.has(choice)) {
+        seen.add(choice)
+        let choiceIndex = -1
+        for (let index = cursor; index < transitions.length; index++) {
+          const candidate = transitions[index]!
+          if (
+            candidate.trigger.type === "choice" &&
+            (candidate.source === choice || first && nested && isDescendantOrSelf(String(candidate.source), choice))
+          ) {
+            choiceIndex = index
+            break
+          }
+        }
+        if (choiceIndex === -1) return { found: false, target: undefined }
+        const transition = transitions[choiceIndex]!
+        if (branches[choiceIndex] === undefined) return { found: false, target: undefined }
+        const target = transition.target === undefined ? undefined : String(transition.target)
+        if (target === undefined) return { found: true, target: undefined }
+        const targetNode = byPath.get(target)
+        if (targetNode?.type === "choice") {
+          choice = target
+          cursor = choiceIndex + 1
+          first = false
+          continue
+        }
+        return {
+          found: true,
+          target: targetNode?.type === "history" ? targetNode.parent : target
+        }
+      }
+      return { found: false, target: undefined }
+    }
+
+    transitions.forEach((transition, index) => {
+      if (branches[index] === undefined) return
+      const target = transition.target === undefined ? undefined : String(transition.target)
+      const resolvedTarget = transition.resolvedTarget === undefined ? undefined : String(transition.resolvedTarget)
+      const targetNode = target === undefined ? undefined : byPath.get(target)
+      let expected = target
+      let explanation = target === undefined ? "an unresolved targetless transition" : `target "${target}"`
+
+      if (transition.trigger.type === "choice") {
+        explanation = target === undefined ? "a targetless choice edge" : `choice edge target "${target}"`
+      } else if (targetNode?.type === "history") {
+        expected = targetNode.parent
+        explanation = `history owner "${String(targetNode.parent)}"`
+      } else if (targetNode?.type === "choice") {
+        const resolution = choiceResolution(targetNode.path, index, false)
+        if (!resolution.found) {
+          add(
+            "definitions.resolution",
+            location,
+            `transition from "${transition.source}" targets choice "${target}" without an exact retained route`,
+            target
+          )
+          return
+        }
+        expected = resolution.target
+        explanation = expected === undefined ?
+          `targetless route from choice "${target}"` :
+          `choice route from "${target}" to "${expected}"`
+      } else if (
+        resolvedTarget !== target &&
+        (targetNode?.type === "compound" || targetNode?.type === "parallel")
+      ) {
+        const resolution = choiceResolution(targetNode.path, index, true)
+        if (resolution.found) {
+          expected = resolution.target
+          explanation = expected === undefined ?
+            `targetless nested choice route from "${target}"` :
+            `nested choice route from "${target}" to "${expected}"`
+        }
+      }
+
+      if (resolvedTarget !== expected) {
+        add(
+          "definitions.resolution",
+          location,
+          `transition branch ${transition.branchIndex} from "${transition.source}" resolved to ` +
+            `"${String(transition.resolvedTarget)}" instead of ${explanation}`,
+          resolvedTarget ?? target ?? String(transition.source)
+        )
+      }
+    })
+  }
+
+  const initialChoiceRouteRoot = (): string | undefined => {
+    const routing = trace.initial.plan.microsteps[0]
+    if (
+      routing === undefined || routing.changed ||
+      routing.transitions.length === 0 ||
+      !routing.transitions.every((transition) => transition.trigger.type === "choice")
+    ) {
+      return undefined
+    }
+
+    const reachableScopes: Array<string> = [initialDefinition.target]
+    let terminalRoot: string | undefined
+    for (const transition of routing.transitions) {
+      const source = String(transition.source)
+      const branch = transitionBranch(transition)
+      if (
+        branch === undefined || !targetWithinSelection(transition.target, branch, byPath) ||
+        !reachableScopes.some((scope) => isDescendantOrSelf(source, scope))
+      ) {
+        return undefined
+      }
+      const target = transition.target === undefined ? undefined : String(transition.target)
+      if (target === undefined) return undefined
+      const targetNode = byPath.get(target)
+      const scope = targetNode?.type === "history" ? targetNode.parent : target
+      if (scope === undefined) return undefined
+      reachableScopes.push(scope)
+      terminalRoot = ancestors(scope)[0]
+    }
+    return terminalRoot
   }
 
   const validateMicrostep = (
@@ -1735,7 +1883,8 @@ export const verify = <M extends AnyMachine>(
         }
       }
     }
-    for (const transition of microstep.transitions) validateTransitionDefinition(transition, location)
+    const branches = microstep.transitions.map((transition) => validateTransitionDefinition(transition, location))
+    validateTransitionResolutions(microstep.transitions, branches, location)
   }
 
   const validatePlanCompletion = (
@@ -1773,11 +1922,17 @@ export const verify = <M extends AnyMachine>(
   const starting = inspectSnapshot(trace.initial.startingState, initialLocation, "initial starting state")
   if (selected.has("definitions")) {
     const startingRoots = starting.paths.filter((path) => byPath.get(path)?.parent === undefined)
-    if (startingRoots.length !== 1 || startingRoots[0] !== initialDefinition.target) {
+    const routedRoot = startingRoots.length === 1 && startingRoots[0] !== initialDefinition.target
+      ? initialChoiceRouteRoot()
+      : undefined
+    if (
+      startingRoots.length !== 1 ||
+      startingRoots[0] !== initialDefinition.target && startingRoots[0] !== routedRoot
+    ) {
       add(
         "definitions.initial",
         initialLocation,
-        `initial starting state selected roots [${startingRoots.join(", ")}] instead of ` +
+        `initial starting state selected roots [${startingRoots.join(", ")}] without an exact route from ` +
           `declared root "${initialDefinition.target}"`,
         startingRoots[0] ?? initialDefinition.target
       )

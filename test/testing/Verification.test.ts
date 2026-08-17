@@ -14,6 +14,7 @@ class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
 class Noop extends Schema.TaggedClass<Noop>("Noop")("Noop", {}) {}
 class Restart extends Schema.TaggedClass<Restart>("Restart")("Restart", {}) {}
+class Route extends Schema.TaggedClass<Route>("VerificationRoute")("Route", {}) {}
 class Select extends Schema.TaggedClass<Select>("VerificationSelect")("Select", {
   value: Schema.Int
 }) {}
@@ -149,6 +150,100 @@ const invokedMachine = Machine.make({
   }
 })
 
+class StartupA extends Schema.TaggedClass<StartupA>("StartupA")("StartupA", {}) {}
+class StartupB extends Schema.TaggedClass<StartupB>("StartupB")("StartupB", {}) {}
+
+const RoutedStartupStates = Machine.defineStates({
+  a: {
+    schema: StartupA,
+    initial: "route",
+    states: {
+      route: { type: "choice" },
+      second: { type: "choice" }
+    }
+  },
+  b: StartupB
+})
+
+const routedStartupMachine = Machine.make({
+  states: RoutedStartupStates.states,
+  events: Machine.events(),
+  initial: {
+    target: (to) => to.a.initial(),
+    resolve: ({ target }) => target(new StartupA({}), (a) => a.route())
+  }
+}).handle({
+  a: {
+    states: {
+      route: {
+        choice: Machine.transition({
+          target: (to) => to.local.second(),
+          resolve: ({ target }) => target()
+        })
+      },
+      second: {
+        choice: Machine.transition({
+          target: (to) => to.full.b(),
+          resolve: ({ target }) => target(new StartupB({}))
+        })
+      }
+    }
+  },
+  b: {}
+})
+
+class ChoiceFlow extends Schema.TaggedClass<ChoiceFlow>("ChoiceFlow")("ChoiceFlow", {}) {}
+class ChoiceReady extends Schema.TaggedClass<ChoiceReady>("ChoiceReady")("ChoiceReady", {}) {}
+class ChoiceRouted extends Schema.TaggedClass<ChoiceRouted>("ChoiceRouted")("ChoiceRouted", {}) {}
+
+const ChoiceResolutionStates = Machine.defineStates({
+  flow: {
+    schema: ChoiceFlow,
+    initial: "ready",
+    states: {
+      ready: ChoiceReady,
+      first: { type: "choice" },
+      second: { type: "choice" },
+      routed: ChoiceRouted
+    }
+  }
+})
+
+const choiceResolutionMachine = Machine.make({
+  states: ChoiceResolutionStates.states,
+  events: Machine.events(Route),
+  initial: {
+    target: (to) => to.flow.initial(),
+    resolve: ({ target }) => target(new ChoiceFlow({}), (flow) => flow.ready(new ChoiceReady({})))
+  }
+}).handle({
+  flow: {
+    states: {
+      ready: {
+        on: {
+          Route: Machine.transition({
+            target: (to) => to.local.first(),
+            resolve: ({ target }) => target()
+          })
+        }
+      },
+      first: {
+        choice: Machine.transition({
+          target: (to) => to.local.second(),
+          resolve: ({ target }) => target()
+        })
+      },
+      second: {
+        choice: Machine.transition({
+          target: (to) => to.local.routed(),
+          resolve: ({ target }) => target(new ChoiceRouted({}))
+        })
+      },
+      routed: {}
+    }
+  }
+})
+
 const reentryMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Restart),
@@ -207,6 +302,7 @@ class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {
 }) {}
 class Away extends Schema.TaggedClass<Away>("Away")("Away", {}) {}
 class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
+class Resume extends Schema.TaggedClass<Resume>("Resume")("Resume", {}) {}
 
 const HistoryStates = Machine.defineStates({
   workspace: {
@@ -234,7 +330,7 @@ const HistoryStates = Machine.defineStates({
 
 const historyMachine = Machine.make({
   states: HistoryStates.states,
-  events: Machine.events(Leave),
+  events: Machine.events(Leave, Resume),
   initial: {
     target: (to) => to.workspace.initial(),
     resolve: ({ target }) =>
@@ -283,6 +379,14 @@ const historyMachine = Machine.make({
       editor: {
         initialize: ({ builder }) => builder(new Editing({ revision: 0 }))
       }
+    }
+  },
+  away: {
+    on: {
+      Resume: Machine.transition({
+        target: (to) => to.history.workspace.exact(),
+        resolve: ({ target }) => target()
+      })
     }
   }
 })
@@ -867,7 +971,27 @@ describe("MachineTest.verify", () => {
       assert.include(laws(branchError), "definitions.selection")
     }))
 
-  it.effect("binds startup to the statically selected root", () =>
+  it.effect("accepts an exact initial choice route to another root", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(routedStartupMachine, { events: [] })
+
+      assert.deepStrictEqual(trace.initial.startingConfiguration, ["b"])
+      assert.deepStrictEqual(
+        trace.initial.plan.microsteps[0]?.transitions.map(({ branchIndex, source, target, trigger }) => ({
+          branchIndex,
+          source: String(source),
+          target,
+          trigger: trigger.type
+        })),
+        [
+          { branchIndex: 0, source: "a.route", target: "a.second", trigger: "choice" },
+          { branchIndex: 0, source: "a.second", target: "b", trigger: "choice" }
+        ]
+      )
+      yield* MachineTest.verify(routedStartupMachine, trace, { laws: ["definitions"] })
+    }))
+
+  it.effect("rejects a startup root without an exact initial choice route", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
       const corrupted = {
@@ -884,6 +1008,195 @@ describe("MachineTest.verify", () => {
       const violation = error.violations.find(({ law }) => law === "definitions.initial")
       assert.strictEqual(violation?.eventIndex, undefined)
       assert.strictEqual(violation?.path, "app")
+    }))
+
+  it.effect("binds resolved targets to direct and chained choice evidence", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(choiceResolutionMachine, { events: [new Route({})] })
+      const step = trace.steps[0]!
+      const microstep = step.plan.microsteps[0]!
+      assert.deepStrictEqual(
+        microstep.transitions.map(({ resolvedTarget, source, target }) => ({
+          resolvedTarget,
+          source: String(source),
+          target
+        })),
+        [
+          { source: "flow.ready", target: "flow.first", resolvedTarget: "flow.routed" },
+          { source: "flow.first", target: "flow.second", resolvedTarget: "flow.second" },
+          { source: "flow.second", target: "flow.routed", resolvedTarget: "flow.routed" }
+        ]
+      )
+      yield* MachineTest.verify(choiceResolutionMachine, trace, { laws: ["definitions"] })
+
+      const transition = microstep.transitions[0]!
+      const corrupted = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, resolvedTarget: "flow" }, ...microstep.transitions.slice(1)]
+            }]
+          }
+        }]
+      } as typeof trace
+      const error = yield* MachineTest.verify(choiceResolutionMachine, corrupted, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(error), "definitions.resolution")
+
+      const missingRoute = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{ ...microstep, transitions: [transition] }]
+          }
+        }]
+      } as typeof trace
+      const missingRouteError = yield* MachineTest.verify(choiceResolutionMachine, missingRoute, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.ok(missingRouteError.violations.some(({ law, message }) =>
+        law === "definitions.resolution" && message.includes("without an exact retained route")
+      ))
+    }))
+
+  it.effect("rejects a wrong active descendant as a resolved state target", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
+      const step = trace.steps[0]!
+      const microstep = step.plan.microsteps[0]!
+      const transition = microstep.transitions[0]!
+      const corrupted = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, resolvedTarget: "app.one" }]
+            }]
+          }
+        }]
+      } as typeof trace
+
+      const error = yield* MachineTest.verify(navigationMachine, corrupted, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      const violation = error.violations.find(({ law }) => law === "definitions.resolution")
+      assert.strictEqual(violation?.path, "app.one")
+    }))
+
+  it.effect("validates every simultaneous transition resolution independently", () =>
+    Effect.gen(function*() {
+      const machine = MachineTest.compileModel({
+        roots: [{
+          _tag: "Parallel",
+          key: "workflow",
+          value: 0,
+          output: "done",
+          states: [
+            {
+              _tag: "Compound",
+              key: "left",
+              value: 1,
+              initial: "idle",
+              states: [
+                { _tag: "Atomic", key: "idle", value: 2 },
+                { _tag: "Atomic", key: "done", value: 3 }
+              ]
+            },
+            {
+              _tag: "Compound",
+              key: "right",
+              value: 4,
+              initial: "idle",
+              states: [
+                { _tag: "Atomic", key: "idle", value: 5 },
+                { _tag: "Atomic", key: "done", value: 6 }
+              ]
+            }
+          ]
+        }],
+        initial: "workflow",
+        events: ["Advance"],
+        transitions: [
+          {
+            source: "workflow.left.idle",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.left.done",
+            reenter: false
+          },
+          {
+            source: "workflow.right.idle",
+            trigger: { type: "event", event: "Advance" },
+            target: "workflow.right.done",
+            reenter: false
+          }
+        ]
+      })
+      const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Advance" }] })
+      const step = trace.steps[0]!
+      const microstep = step.plan.microsteps[0]!
+      assert.strictEqual(microstep.transitions.length, 2)
+
+      const corrupted = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [
+                { ...microstep.transitions[0]!, resolvedTarget: "workflow.left" },
+                microstep.transitions[1]!
+              ]
+            }]
+          }
+        }]
+      } as typeof trace
+      const error = yield* MachineTest.verify(machine, corrupted, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(error), "definitions.resolution")
+    }))
+
+  it.effect("binds history resolution to the declared owner", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(historyMachine, { events: [new Leave({}), new Resume({})] })
+      const step = trace.steps[1]!
+      const microstep = step.plan.microsteps[0]!
+      const transition = microstep.transitions[0]!
+      assert.deepStrictEqual(
+        { target: transition.target, resolvedTarget: transition.resolvedTarget },
+        { target: "workspace.exact", resolvedTarget: "workspace" }
+      )
+      yield* MachineTest.verify(historyMachine, trace, { laws: ["definitions"] })
+
+      const corrupted = {
+        ...trace,
+        steps: [trace.steps[0]!, {
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, resolvedTarget: "workspace.editor" }]
+            }]
+          }
+        }]
+      } as typeof trace
+      const error = yield* MachineTest.verify(historyMachine, corrupted, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(error), "definitions.resolution")
     }))
 
   it.effect("distinguishes invoke definitions by lifecycle id and outcome", () =>
