@@ -1,5 +1,23 @@
 # @typeonce/effect-machine
 
+## 0.15.0
+
+### Minor Changes
+
+- b94fee1: Make `handle` a one-shot implementation boundary. `Machine.make(...)` now returns a `Machine.Definition`; calling `handle(...)` returns a `Machine` without another `handle` method.
+
+  To create multiple implementations, call `handle` independently on the original definition. Migrate chained calls by combining their state configurations into one handler tree.
+
+- 1d44195: Add `Machine.state` for topology that is genuinely reused at multiple mounts, plus definition-bound `States.path(...)` and `Machine.Snapshot<typeof States>` helpers for checked finite path families and snapshot queries.
+
+  Rename `Machine.defineStates` to `Machine.states`. Migrate by replacing `Machine.defineStates({...})` with `Machine.states({...})`; one-off topology should remain inline in that complete state definition. The returned state tree is now an immutable structural capture, so repeated mounts do not retain shared caller-owned configuration objects.
+
+### Patch Changes
+
+- 4dd8d24: Fix `Machine.invoke(...)` inside `.handle(...)` so invocation sources and lifecycle handlers receive the owning machine's typed `self` and `parent` protocols.
+
+  Event protocol examples now pass tagged unions directly to `Machine.events`, `Machine.internalEvents`, and `Machine.emittedEvents`, avoiding throwaway schema bindings.
+
 ## 0.14.1
 
 ### Patch Changes
