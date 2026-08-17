@@ -29,8 +29,6 @@ import type {
   StateCoverageItem,
   Trace,
   TraceStep,
-  TransitionBranchCoverageItem,
-  TransitionDefinitionCoverageItem,
   VerificationLaw,
   VerificationLawGroup,
   VerificationViolation,
@@ -41,6 +39,7 @@ import { toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
 import { rawConfigurationPaths, run } from "./trace.js"
+import { makeTransitionCoverageCollector, sameTransitionTrigger } from "./transitionCoverage.js"
 
 export {
   advanceCommand,
@@ -470,18 +469,6 @@ const normalizeTraces = <M extends AnyMachine>(
 ): ReadonlyArray<Trace<M>> =>
   Array.isArray(traceOrTraces) ? traceOrTraces as ReadonlyArray<Trace<M>> : [traceOrTraces as Trace<M>]
 
-const sameTransitionTrigger = (
-  left: Machine.Machine.TransitionTrigger,
-  right: Machine.Machine.TransitionTrigger
-): boolean => {
-  if (left.type !== right.type) return false
-  if (left.type === "event") return right.type === "event" && left.event === right.event
-  if (left.type === "invoke") {
-    return right.type === "invoke" && left.id === right.id && left.outcome === right.outcome
-  }
-  return true
-}
-
 const targetWithinSelection = (
   target: string | undefined,
   branch: Machine.Machine.TransitionBranch,
@@ -576,48 +563,7 @@ export const coverage = <M extends AnyMachine>(
   const entryHits = new Set<number>()
   const exitHits = new Set<number>()
 
-  const definitions = Machine.transitionDefinitions(machine).map(
-    (
-      definition,
-      index
-    ): TransitionDefinitionCoverageItem<
-      StateNodePath<M>,
-      Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
-      StateNodePath<M>
-    > => ({
-      id: `transition:${index}`,
-      index,
-      source: definition.source,
-      trigger: definition.trigger,
-      reenter: definition.reenter,
-      branches: definition.branches
-    })
-  )
-  const transitionHits = new Set<number>()
-  const branchOffsets: Array<number> = []
-  const branches: Array<
-    TransitionBranchCoverageItem<
-      StateNodePath<M>,
-      Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
-      StateNodePath<M>
-    >
-  > = []
-  for (let definitionIndex = 0; definitionIndex < definitions.length; definitionIndex++) {
-    branchOffsets.push(branches.length)
-    const definition = definitions[definitionIndex]!
-    definition.branches.forEach((branch, branchIndex) => {
-      branches.push({
-        id: `transition:${definitionIndex}:branch:${branchIndex}`,
-        definitionIndex,
-        branchIndex,
-        source: definition.source,
-        trigger: definition.trigger,
-        reenter: definition.reenter,
-        branch
-      })
-    })
-  }
-  const branchHits = new Set<number>()
+  const transitionCoverage = makeTransitionCoverageCollector(machine)
 
   const declaredEvents = publicEventTags(machine)
   const declaredEventTags = declaredEvents.tags
@@ -675,6 +621,7 @@ export const coverage = <M extends AnyMachine>(
   }
 
   const observeMicrostep = (microstep: Microstep<M, any>): void => {
+    transitionCoverage.observeMicrostep(microstep)
     microsteps += 1
     if (microstep.changed) changedMicrosteps += 1
     raisedEvents += microstep.raisedEvents.length
@@ -691,20 +638,6 @@ export const coverage = <M extends AnyMachine>(
       if (retained.target !== undefined && nodeByPath.get(retained.target)?.type === "history") {
         historyTargets += 1
         if (retained.resolvedTarget !== undefined) resolvedHistoryTargets += 1
-      }
-      const definitionIndex = definitions.findIndex((definition) =>
-        definition.source === retained.source &&
-        definition.reenter === retained.reenter &&
-        sameTransitionTrigger(definition.trigger, retained.trigger)
-      )
-      if (definitionIndex === -1) continue
-      transitionHits.add(definitionIndex)
-      const definition = definitions[definitionIndex]!
-      if (
-        Number.isSafeInteger(retained.branchIndex) && retained.branchIndex >= 0 &&
-        retained.branchIndex < definition.branches.length
-      ) {
-        branchHits.add(branchOffsets[definitionIndex]! + retained.branchIndex)
       }
     }
   }
@@ -745,10 +678,7 @@ export const coverage = <M extends AnyMachine>(
       entry: coverageSummary(activeNodes, entryHits),
       exit: coverageSummary(activeNodes, exitHits)
     },
-    transitions: {
-      definitions: coverageSummary(definitions, transitionHits),
-      branches: coverageSummary(branches, branchHits)
-    },
+    transitions: transitionCoverage.summary(),
     events: declaredEvents.diagnostics.length === 0
       ? {
         available: true,

@@ -30,6 +30,7 @@ import type {
 import type { EnsureExecutable } from "../../machine/readiness.js"
 import { assertInvariants, type InvariantError } from "./invariant.js"
 import { appendTrace, run } from "./trace.js"
+import { makeTransitionCoverageCollector } from "./transitionCoverage.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -119,6 +120,10 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
 
     const initialContext = stateContext(machine, initialTrace)
     const initialKey = validateKey(options.stateKey(initialContext))
+    const transitionCoverage = makeTransitionCoverageCollector<M>(machine)
+    for (const microstep of initialTrace.initial.plan.microsteps) {
+      transitionCoverage.observeMicrostep(microstep)
+    }
     const nodes: Array<ExplorationNode<M, Key>> = [{ ...initialContext, key: initialKey }]
     const nodeDraftsByKey = new Map<Key, number>([[initialKey, 0]])
     const edges: Array<ExplorationEdgeDraft<M>> = []
@@ -165,6 +170,8 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
         const scenario = scenarioWithEvent(source.trace, event)
         const targetTrace = yield* appendTrace(machine, source.trace, event, scenario)
         plannedTransitions += 1
+        const step = targetTrace.steps[targetTrace.steps.length - 1]!
+        for (const microstep of step.plan.microsteps) transitionCoverage.observeMicrostep(microstep)
         if (invariants.length > 0) {
           yield* assertInvariants(machine, targetTrace, invariants)
         }
@@ -178,7 +185,7 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
             target: existing,
             edge: {
               event,
-              step: targetTrace.steps[targetTrace.steps.length - 1]!,
+              step,
               discovered: false
             }
           })
@@ -207,7 +214,7 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
           target: targetIndex,
           edge: {
             event,
-            step: targetTrace.steps[targetTrace.steps.length - 1]!,
+            step,
             discovered: true
           }
         })
@@ -243,6 +250,7 @@ export const explore = <M extends AnyMachine, Key extends ExplorationKey>(
         retainedEdges: edges.length,
         maxDepth: nodes.reduce((maximum, node) => Math.max(maximum, node.depth), 0)
       },
+      transitionCoverage: transitionCoverage.summary(),
       completeness
     }
   })

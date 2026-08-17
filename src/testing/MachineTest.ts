@@ -1375,6 +1375,17 @@ export interface Exploration<M extends AnyMachine, Key extends ExplorationKey = 
   readonly start: Graph.NodeIndex
   readonly limits: ResolvedExplorationLimits
   readonly stats: ExplorationStats
+  /**
+   * Exact declared transition branches witnessed by concretely planned work.
+   * This is observed evidence, not a claim that every reachable branch was
+   * explored. Startup and state-limit plans count; unplanned depth- and
+   * transition-limit frontiers do not.
+   */
+  readonly transitionCoverage: TransitionCoverage<
+    StateNodePath<M>,
+    Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
+    StateNodePath<M>
+  >
   readonly completeness: ExplorationCompleteness<M, Key>
 }
 
@@ -1409,7 +1420,10 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *
  * Invariants are checked against startup and every concretely planned edge,
  * so a failure retains a shortest discovered counterexample. Staged actions
- * and runtime activities are not executed.
+ * and runtime activities are not executed. `transitionCoverage` includes
+ * startup and every event plan that was actually computed, including a plan
+ * retained at a state-limit frontier. Depth- and transition-limit frontiers
+ * have no plan and therefore contribute no transition hits.
  *
  * **Example**
  *
