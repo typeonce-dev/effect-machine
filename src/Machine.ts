@@ -249,9 +249,9 @@ export interface Machine<
   >
 
   /**
-   * Preserves invocation inference with this machine's public input and parent
-   * protocols. Prefer this bound constructor when an invocation source or
-   * lifecycle handler uses `self` or `parent`.
+   * Machine-bound equivalent of {@link invoke}. Both forms preserve this
+   * machine's public input and parent protocols in invocation callbacks;
+   * `Machine.invoke(...)` inside `handle(...)` is the canonical inline form.
    *
    * @since 0.11.0
    */
@@ -7104,9 +7104,14 @@ export type EventOf<Protocol extends Machine.EventProtocol.Any> = Machine.EventO
  * **Example**
  *
  * ```ts
- * const Events = Machine.events(Increment, Reset)
- * const machine = Machine.make({ events: Events, ... })
- * yield* ref.send(Events.Increment({ by: 1 }))
+ * export const Event = Machine.events(
+ *   Schema.TaggedUnion({
+ *     Increment: { by: Schema.Number },
+ *     Reset: {}
+ *   })
+ * )
+ * const machine = Machine.make({ events: Event, ... })
+ * yield* ref.send(Event.Increment({ by: 1 }))
  * ```
  *
  * @category constructors
@@ -7132,11 +7137,16 @@ export const events: {
  * **Example**
  *
  * ```ts
- * const InternalEvents = Machine.internalEvents(Loaded, Failed)
- * const machine = Machine.make({ internalEvents: InternalEvents, ... })
+ * const Internal = Machine.internalEvents(
+ *   Schema.TaggedUnion({
+ *     Loaded: { value: Schema.String },
+ *     Failed: { message: Schema.String }
+ *   })
+ * )
+ * const machine = Machine.make({ internalEvents: Internal, ... })
  *
  * // Inside a transition callback:
- * enqueue.raise(InternalEvents.Loaded({ value }))
+ * enqueue.raise(Internal.Loaded({ value }))
  * ```
  *
  * @category constructors
@@ -7156,6 +7166,17 @@ export const internalEvents: {
  * observers. Emitted events are separate from machine input and are never sent
  * implicitly to a parent machine. Observe them through `MachineRef.emissions` or
  * the AtomMachine emission stream adapters.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const Emitted = Machine.emittedEvents(
+ *   Schema.TaggedUnion({
+ *     Saved: { id: Schema.String }
+ *   })
+ * )
+ * const machine = Machine.make({ emittedEvents: Emitted, ... })
+ * ```
  *
  * @category constructors
  * @since 0.10.0
@@ -7348,9 +7369,11 @@ type EffectInvokeSource<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>,
   StateId extends Machine.StateIdentifier<States>,
   Source extends (
-    context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>
+    context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
   ) => Effect.Effect<unknown, unknown, unknown>
 > = {
   readonly id: InvokeLifecycleId
@@ -7366,6 +7389,8 @@ type EffectDoneHandler<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>,
   StateId extends Machine.StateIdentifier<States>,
   Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
 > = Machine.InvokeTransition<
@@ -7379,8 +7404,8 @@ type EffectDoneHandler<
     Emits,
     StateId,
     Effect.Success<ReturnType<NoInfer<Source>>>,
-    readonly [],
-    readonly []
+    InputEvents,
+    ParentEvents
   >
 >
 
@@ -7388,6 +7413,8 @@ type EffectFailureHandler<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>,
   StateId extends Machine.StateIdentifier<States>,
   Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
 > = Machine.InvokeTransition<
@@ -7401,8 +7428,8 @@ type EffectFailureHandler<
     Emits,
     StateId,
     Effect.Error<ReturnType<NoInfer<Source>>>,
-    readonly [],
-    readonly []
+    InputEvents,
+    ParentEvents
   >
 >
 
@@ -7410,10 +7437,12 @@ type EffectInvokeResult<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>,
   StateId extends Machine.StateIdentifier<States>,
   Source extends (...args: ReadonlyArray<never>) => Effect.Effect<unknown, unknown, unknown>
 > =
-  & Machine.InvokeConfig<States, Events, Emits, StateId, readonly [], readonly []>
+  & Machine.InvokeConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>
   & Machine.InvokeTyped<
     Effect.Success<ReturnType<Source>>,
     Effect.Error<ReturnType<Source>>,
@@ -7897,11 +7926,10 @@ export interface Invoker<
  * `address`. Child descriptors already own their identity, so `id` and
  * `address` must not be repeated.
  *
- * Owner references are intentionally non-sendable here because this standalone
- * constructor does not know the owning definition. When a callback sends to
- * `self` or `parent`, use the bound constructor on the owning definition
- * (`definition.invoke(...)`) so the exact public input and `parentEvents`
- * protocols are available.
+ * Inside `handle(...)`, the owning definition contextually supplies its public
+ * input and `parentEvents` protocols. Invocation sources and lifecycle handlers
+ * can therefore send through `self` and `parent` without naming the definition.
+ * The bound `definition.invoke(...)` constructor remains an equivalent form.
  *
  * ```ts
  * invoke: Machine.invoke({
@@ -7932,14 +7960,16 @@ export const invoke: {
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
     const Source extends (
-      context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>
-    ) => Effect.Effect<unknown, unknown, unknown>
+      context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    ) => Effect.Effect<unknown, unknown, unknown>,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & EffectInvokeSource<States, Events, Emits, StateId, Source>
+      & EffectInvokeSource<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       & {
-        readonly onDone: EffectDoneHandler<States, Events, Emits, StateId, Source>
-        readonly onFailure: EffectFailureHandler<States, Events, Emits, StateId, Source>
+        readonly onDone: EffectDoneHandler<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
+        readonly onFailure: EffectFailureHandler<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       },
     ..._validation: InvokeChannelIsNever<Effect.Success<ReturnType<Source>>> extends true ? [
         "onDone must be omitted when the Effect output is never"
@@ -7948,71 +7978,79 @@ export const invoke: {
           "onFailure must be omitted when the Effect error is never"
         ]
       : []
-  ): EffectInvokeResult<States, Events, Emits, StateId, Source>
+  ): EffectInvokeResult<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
     const Source extends (
-      context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>
-    ) => Effect.Effect<unknown, never, unknown>
+      context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    ) => Effect.Effect<unknown, never, unknown>,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & EffectInvokeSource<States, Events, Emits, StateId, Source>
+      & EffectInvokeSource<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       & {
-        readonly onDone: EffectDoneHandler<States, Events, Emits, StateId, Source>
+        readonly onDone: EffectDoneHandler<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
         readonly onFailure?: never
       },
     ..._validation: InvokeChannelIsNever<Effect.Success<ReturnType<Source>>> extends true ? [
         "onDone must be omitted when the Effect output is never"
       ]
       : []
-  ): EffectInvokeResult<States, Events, Emits, StateId, Source>
+  ): EffectInvokeResult<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
     const Source extends (
-      context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>
-    ) => Effect.Effect<never, unknown, unknown>
+      context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    ) => Effect.Effect<never, unknown, unknown>,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & EffectInvokeSource<States, Events, Emits, StateId, Source>
+      & EffectInvokeSource<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       & {
         readonly onDone?: never
-        readonly onFailure: EffectFailureHandler<States, Events, Emits, StateId, Source>
+        readonly onFailure: EffectFailureHandler<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       },
     ..._validation: InvokeChannelIsNever<Effect.Error<ReturnType<Source>>> extends true ? [
         "onFailure must be omitted when the Effect error is never"
       ]
       : []
-  ): EffectInvokeResult<States, Events, Emits, StateId, Source>
+  ): EffectInvokeResult<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
     const Source extends (
-      context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>
-    ) => Effect.Effect<never, never, unknown>
+      context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    ) => Effect.Effect<never, never, unknown>,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
-      & EffectInvokeSource<States, Events, Emits, StateId, Source>
+      & EffectInvokeSource<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
       & {
         readonly onDone?: never
         readonly onFailure?: never
       }
-  ): EffectInvokeResult<States, Events, Emits, StateId, Source>
+  ): EffectInvokeResult<States, Events, Emits, InputEvents, ParentEvents, StateId, Source>
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
-    const Config extends object
+    const Config extends object,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
-    config: Config & Machine.TimerInvokeArgs<States, Events, Emits, StateId, readonly [], readonly []>
+    config: Config & Machine.TimerInvokeArgs<States, Events, Emits, StateId, InputEvents, ParentEvents>
   ): Config & Machine.InvokeOwned<States, Events, Emits, StateId> & Machine.InvokeTyped<void, never, never, never>
   <
     const States extends Machine.StateSchemas,
@@ -8025,7 +8063,9 @@ export const invoke: {
     ChildRequirements,
     ChildOutput,
     ChildInitialError,
-    Address extends ChildAddress<never>
+    Address extends ChildAddress<never>,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config: Machine.LogicInvokeArgs<
       States,
@@ -8039,7 +8079,7 @@ export const invoke: {
       ChildOutput,
       ChildInitialError,
       Address,
-      (context: Machine.InvokeContext<States, Events, Emits, StateId, readonly [], readonly []>) => Logic<
+      (context: Machine.InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>) => Logic<
         ChildState,
         ChildEvent,
         ChildError,
@@ -8047,11 +8087,11 @@ export const invoke: {
         ChildOutput,
         ChildInitialError
       >,
-      readonly [],
-      readonly []
+      InputEvents,
+      ParentEvents
     >
   ):
-    & Machine.InvokeConfig<States, Events, Emits, StateId, readonly [], readonly []>
+    & Machine.InvokeConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>
     & Machine.InvokeTyped<
       ChildOutput,
       ChildError,
@@ -8070,7 +8110,9 @@ export const invoke: {
     ChildOutput,
     ChildInitialError,
     Address extends ChildAddress<never>,
-    const Config extends object
+    const Config extends object,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
       & Config
@@ -8087,8 +8129,8 @@ export const invoke: {
         ChildInitialError,
         Address,
         Logic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
-        readonly [],
-        readonly []
+        InputEvents,
+        ParentEvents
       >
   ):
     & Config
@@ -8105,11 +8147,13 @@ export const invoke: {
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateIdentifier<States>,
     const Child extends ChildMachine.Any,
-    const Config extends object
+    const Config extends object,
+    const InputEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
       & Config
-      & Machine.ChildInvokeArgs<States, Events, Emits, StateId, Child["machine"], Child, readonly [], readonly []>
+      & Machine.ChildInvokeArgs<States, Events, Emits, StateId, Child["machine"], Child, InputEvents, ParentEvents>
   ):
     & Config
     & Machine.InvokeOwned<States, Events, Emits, StateId>

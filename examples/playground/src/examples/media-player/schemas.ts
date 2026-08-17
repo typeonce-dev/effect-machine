@@ -62,35 +62,36 @@ export const MediaPlayerState = Schema.TaggedUnion({
   Muted: soundSettingsFields
 })
 
-const MediaPlayerEvent = Schema.TaggedUnion({
-  SourceSelected: { url: Schema.String },
-  PlayRequested: {},
-  PauseRequested: {},
-  RestartRequested: {},
-  MediaWaiting: {},
-  MediaCanPlay: {},
-  PlaybackEnded: { currentTime: Schema.Number },
-  TimeUpdated: { currentTime: Schema.Number },
-  MediaFailed: { message: Schema.String },
-  VolumeChanged: { volume: Schema.Number },
-  PlaybackRateChanged: { playbackRate: Schema.Number },
-  MuteRequested: {},
-  UnmuteRequested: {}
-})
+export const MediaPlayerEvents = Machine.events(
+  Schema.TaggedUnion({
+    SourceSelected: { url: Schema.String },
+    PlayRequested: {},
+    PauseRequested: {},
+    RestartRequested: {},
+    MediaWaiting: {},
+    MediaCanPlay: {},
+    PlaybackEnded: { currentTime: Schema.Number },
+    TimeUpdated: { currentTime: Schema.Number },
+    MediaFailed: { message: Schema.String },
+    VolumeChanged: { volume: Schema.Number },
+    PlaybackRateChanged: { playbackRate: Schema.Number },
+    MuteRequested: {},
+    UnmuteRequested: {}
+  })
+)
 
-const MediaPlayerInternalEvent = Schema.TaggedUnion({
-  LoadSucceeded: {},
-  RestartSucceeded: {},
-  LoudnessMeasured: {
-    rms: Schema.Number,
-    peak: Schema.Number,
-    decibels: Schema.Number
-  },
-  OperationFailed: { message: Schema.String }
-})
-
-export const MediaPlayerEvents = Machine.events(MediaPlayerEvent)
-export const MediaPlayerInternalEvents = Machine.internalEvents(MediaPlayerInternalEvent)
+export const MediaPlayerInternalEvents = Machine.internalEvents(
+  Schema.TaggedUnion({
+    LoadSucceeded: {},
+    RestartSucceeded: {},
+    LoudnessMeasured: {
+      rms: Schema.Number,
+      peak: Schema.Number,
+      decibels: Schema.Number
+    },
+    OperationFailed: { message: Schema.String }
+  })
+)
 
 export const MediaPlayerStates = Machine.defineStates({
   Player: {

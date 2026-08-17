@@ -53,14 +53,14 @@ const State = Schema.TaggedUnion({
   Running: { count: Schema.Number }
 })
 
-const Event = Schema.TaggedUnion({
-  Start: {},
-  Increment: {},
-  Stop: {}
-})
-
 const States = Machine.defineStates(State.cases)
-const CounterEvent = Machine.events(Event)
+const CounterEvent = Machine.events(
+  Schema.TaggedUnion({
+    Start: {},
+    Increment: {},
+    Stop: {}
+  })
+)
 
 const CounterDefinition = Machine.make({
   id: "Counter",
@@ -110,13 +110,15 @@ const program = Effect.gen(function*() {
 
 Use this order to preserve inference and keep boundaries explicit:
 
-1. Define domain, state, public-event, internal-event, and emitted-event schemas.
-2. Declare topology with `Machine.defineStates`.
-3. Create public and internal event descriptors with `Machine.events` and
-   `Machine.internalEvents`.
-4. Create the machine protocol and initializer with `Machine.make`.
-5. Implement every active state with `.handle(...)`.
-6. Add runtime, Atom, testing, or cluster adapters at the application boundary.
+1. Define domain schemas used by state and by shared event fields.
+2. Declare topology with `Machine.defineStates`, naming a tagged state union
+   when its `.cases` are reused.
+3. Create event descriptors with `Machine.events`, `Machine.internalEvents`,
+   and `Machine.emittedEvents`, passing tagged unions or tagged classes directly.
+4. Create the machine and implement every active state with
+   `Machine.make({...}).handle({...})`.
+5. Add child descriptors, then runtime, Atom, testing, or cluster adapters at
+   the application boundary.
 
 ### Construct state through builders
 
@@ -178,19 +180,21 @@ belong in `internalEvents`. Ephemeral outward notifications have their own
 `emittedEvents` protocol:
 
 ```ts
-const Command = Schema.TaggedUnion({ Save: {} })
-const Internal = Schema.TaggedUnion({
-  Saved: { id: Schema.String },
-  SaveFailed: { message: Schema.String }
-})
-const Emitted = Schema.TaggedUnion({
-  SaveObserved: { id: Schema.String }
-})
-
-export const CommandEvent = Machine.events(Command)
+export const CommandEvent = Machine.events(
+  Schema.TaggedUnion({ Save: {} })
+)
 export type PublicCommandEvent = Machine.EventOf<typeof CommandEvent>
-const InternalEvent = Machine.internalEvents(Internal)
-const Emissions = Machine.emittedEvents(Emitted)
+const InternalEvent = Machine.internalEvents(
+  Schema.TaggedUnion({
+    Saved: { id: Schema.String },
+    SaveFailed: { message: Schema.String }
+  })
+)
+const Emissions = Machine.emittedEvents(
+  Schema.TaggedUnion({
+    SaveObserved: { id: Schema.String }
+  })
+)
 
 const definition = Machine.make({
   states: States.states,
@@ -446,31 +450,31 @@ invoke: Machine.invoke({
 })
 ```
 
-The standalone `Machine.invoke(...)` constructor does not know the owning
-definition, so its `self` and `parent` references are non-sendable. When an
-invocation callback sends through either reference, construct it through the
-owning definition so those references use its exact public input and
-`parentEvents` protocols:
+Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
+public input and `parentEvents` protocols contextually. Its source and lifecycle
+callbacks can send through `self` and `parent` while retaining the invoked
+Effect's output and error inference:
 
 ```ts
-const definition = Machine.make({
+const machine = Machine.make({
   events: Commands,
   internalEvents: InternalEvents,
   parentEvents: ParentEvents
   // ...
-})
-
-const machine = definition.handle({
+}).handle({
   Saving: {
-    invoke: definition.invoke({
+    invoke: Machine.invoke({
       id: "notify-parent",
-      effect: ({ parent }) =>
-        parent === undefined
-          ? Effect.void
-          : parent.send(ParentEvents.SaveStarted()),
+      effect: () => saveDocument,
       onDone: Machine.transition({
         target: (to) => to.none(),
-        resolve: () => undefined
+        resolve: ({ parent, self }, enqueue) => {
+          enqueue.sendTo(self, Commands.Save())
+          if (parent !== undefined) {
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+          }
+          return undefined
+        }
       }),
       onFailure: Machine.transition({
         target: (to) => to.none(),
@@ -480,6 +484,9 @@ const machine = definition.handle({
   }
 })
 ```
+
+The machine-bound `definition.invoke(...)` form remains equivalent when a
+definition is already named; it is not required for `self` or `parent` typing.
 
 A direct `invoke: { ... }` object is also supported when its lifecycle handlers
 do not need source-derived context. Reuse one exported

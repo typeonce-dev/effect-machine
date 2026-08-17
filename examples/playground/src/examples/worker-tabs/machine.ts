@@ -11,16 +11,6 @@ export const SharedMachineState = Schema.TaggedUnion({
 
 export const SharedMachineStates = Machine.defineStates(SharedMachineState.cases)
 
-const definition = Machine.make({
-  id: "WorkerHostedMachine",
-  states: SharedMachineStates.states,
-  events: SharedMachineEvents,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from({ count: 0 })
-  }
-})
-
 // Worker and BroadcastChannel messages need decoded, cloneable data rather
 // than the opaque instructions returned by Machine.events.
 export const SharedTransportEvents = {
@@ -34,7 +24,15 @@ export const SharedTransportEvents = {
   })
 }
 
-export const SharedMachine = definition.handle({
+export const SharedMachine = Machine.make({
+  id: "WorkerHostedMachine",
+  states: SharedMachineStates.states,
+  events: SharedMachineEvents,
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from({ count: 0 })
+  }
+}).handle({
   Idle: {
     on: {
       Started: Machine.transition({
