@@ -103,7 +103,8 @@ describe("media-player statechart model", () => {
 
       assert.strictEqual(coverage.events.hit, everyPublicEvent.length)
       assert.strictEqual(coverage.events.missing, 0)
-      assert.strictEqual(coverage.transitions.hit > 0, true)
+      assert.strictEqual(coverage.transitions.definitions.hit > 0, true)
+      assert.strictEqual(coverage.transitions.branches.hit > 0, true)
 
       const activated = new Set(coverage.states.activation.hits.map(({ path }) => path))
       assert.strictEqual(activated.has("Player.transport.Empty"), true)

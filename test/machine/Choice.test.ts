@@ -677,6 +677,14 @@ describe("Machine choice pseudo-states", () => {
       const trace = yield* MachineTest.run(machine, { events: [new Recheck({ score: 10 })] })
       const coverage = MachineTest.coverage(machine, trace)
       assert.strictEqual(coverage.microsteps.choiceTriggered, 2)
+      const choiceBranches = coverage.transitions.branches.hits.filter(({ trigger }) => trigger.type === "choice")
+      assert.deepStrictEqual(choiceBranches.map(({ branchIndex }) => branchIndex), [3, 4])
+      assert.deepStrictEqual(
+        coverage.transitions.branches.misses
+          .filter(({ trigger }) => trigger.type === "choice")
+          .map(({ branchIndex }) => branchIndex),
+        [0, 1, 2]
+      )
       assert.deepStrictEqual(
         [trace.initial.plan, ...trace.steps.map(({ plan }) => plan)]
           .flatMap(({ microsteps }) => microsteps)

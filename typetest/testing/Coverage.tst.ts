@@ -37,8 +37,13 @@ describe("MachineTest coverage and observed graph", () => {
     expect(result).type.toBe<MachineTest.Coverage<typeof machine>>()
     if (result.events.available) expect(result.events.hits[0]!.tag).type.toBe<"Start">()
     expect(result.states.activation.hits[0]!.path).type.toBe<"idle" | "done">()
-    expect(result.transitions.hits[0]!.source).type.toBe<"idle" | "done">()
-    expect(result.transitions.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
+    expect(result.transitions.definitions.hits[0]!.source).type.toBe<"idle" | "done">()
+    expect(result.transitions.definitions.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
+    expect(result.transitions.branches.hits[0]!.source).type.toBe<"idle" | "done">()
+    expect(result.transitions.branches.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
+    expect(result.transitions.branches.hits[0]!.branch).type.toBe<
+      Machine.Machine.TransitionBranch<"idle" | "done">
+    >()
   })
 
   it("returns an Effect graph with typed nodes and concrete edge evidence", () => {

@@ -29,7 +29,8 @@ import type {
   StateCoverageItem,
   Trace,
   TraceStep,
-  TransitionCoverageItem,
+  TransitionBranchCoverageItem,
+  TransitionDefinitionCoverageItem,
   VerificationLaw,
   VerificationLawGroup,
   VerificationViolation,
@@ -469,21 +470,33 @@ const normalizeTraces = <M extends AnyMachine>(
 ): ReadonlyArray<Trace<M>> =>
   Array.isArray(traceOrTraces) ? traceOrTraces as ReadonlyArray<Trace<M>> : [traceOrTraces as Trace<M>]
 
-const sameCoverageTrigger = (
+const sameTransitionTrigger = (
   left: Machine.Machine.TransitionTrigger,
   right: Machine.Machine.TransitionTrigger
-): boolean =>
-  left.type === right.type && (left.type !== "event" || right.type === "event" && left.event === right.event)
+): boolean => {
+  if (left.type !== right.type) return false
+  if (left.type === "event") return right.type === "event" && left.event === right.event
+  if (left.type === "invoke") {
+    return right.type === "invoke" && left.id === right.id && left.outcome === right.outcome
+  }
+  return true
+}
 
-const targetWithinDeclaredBranches = (
+const targetWithinSelection = (
   target: string | undefined,
-  branches: ReadonlyArray<Machine.Machine.TransitionBranch>
-): boolean =>
-  branches.some((branch) =>
-    branch.target === undefined ?
-      target === undefined
-      : target !== undefined && (target === branch.target || target.startsWith(`${branch.target}.`))
-  )
+  branch: Machine.Machine.TransitionBranch,
+  nodeByPath: ReadonlyMap<string, Machine.Machine.StateNode>
+): boolean => {
+  const selection = branch.selection
+  if (selection.kind === "none") return target === undefined
+  if (target === undefined || selection.path === undefined) return false
+  if (target === selection.path) return true
+  const selectedNode = nodeByPath.get(selection.path)
+  return selection.kind === "state" &&
+    (selection.scope === "local" || selection.scope === "branch") &&
+    (selectedNode?.type === "compound" || selectedNode?.type === "parallel") &&
+    target.startsWith(`${selection.path}.`)
+}
 
 const finiteTagValues = (ast: SchemaAST.AST): ReadonlyArray<PropertyKey> | undefined => {
   if (SchemaAST.isLiteral(ast)) {
@@ -567,12 +580,12 @@ export const coverage = <M extends AnyMachine>(
     (
       definition,
       index
-    ): TransitionCoverageItem<
+    ): TransitionDefinitionCoverageItem<
       StateNodePath<M>,
       Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
       StateNodePath<M>
     > => ({
-      id: `transition:${index}:${formatValue(definition)}`,
+      id: `transition:${index}`,
       index,
       source: definition.source,
       trigger: definition.trigger,
@@ -581,6 +594,30 @@ export const coverage = <M extends AnyMachine>(
     })
   )
   const transitionHits = new Set<number>()
+  const branchOffsets: Array<number> = []
+  const branches: Array<
+    TransitionBranchCoverageItem<
+      StateNodePath<M>,
+      Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
+      StateNodePath<M>
+    >
+  > = []
+  for (let definitionIndex = 0; definitionIndex < definitions.length; definitionIndex++) {
+    branchOffsets.push(branches.length)
+    const definition = definitions[definitionIndex]!
+    definition.branches.forEach((branch, branchIndex) => {
+      branches.push({
+        id: `transition:${definitionIndex}:branch:${branchIndex}`,
+        definitionIndex,
+        branchIndex,
+        source: definition.source,
+        trigger: definition.trigger,
+        reenter: definition.reenter,
+        branch
+      })
+    })
+  }
+  const branchHits = new Set<number>()
 
   const declaredEvents = publicEventTags(machine)
   const declaredEventTags = declaredEvents.tags
@@ -658,10 +695,17 @@ export const coverage = <M extends AnyMachine>(
       const definitionIndex = definitions.findIndex((definition) =>
         definition.source === retained.source &&
         definition.reenter === retained.reenter &&
-        sameCoverageTrigger(definition.trigger, retained.trigger) &&
-        targetWithinDeclaredBranches(retained.target, definition.branches)
+        sameTransitionTrigger(definition.trigger, retained.trigger)
       )
-      if (definitionIndex !== -1) transitionHits.add(definitionIndex)
+      if (definitionIndex === -1) continue
+      transitionHits.add(definitionIndex)
+      const definition = definitions[definitionIndex]!
+      if (
+        Number.isSafeInteger(retained.branchIndex) && retained.branchIndex >= 0 &&
+        retained.branchIndex < definition.branches.length
+      ) {
+        branchHits.add(branchOffsets[definitionIndex]! + retained.branchIndex)
+      }
     }
   }
 
@@ -701,7 +745,10 @@ export const coverage = <M extends AnyMachine>(
       entry: coverageSummary(activeNodes, entryHits),
       exit: coverageSummary(activeNodes, exitHits)
     },
-    transitions: coverageSummary(definitions, transitionHits),
+    transitions: {
+      definitions: coverageSummary(definitions, transitionHits),
+      branches: coverageSummary(branches, branchHits)
+    },
     events: declaredEvents.diagnostics.length === 0
       ? {
         available: true,
@@ -969,12 +1016,6 @@ const sameValue = (left: unknown, right: unknown): boolean => formatValue(left) 
 const samePaths = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
   left.length === right.length && left.every((path, index) => path === right[index])
 
-const sameTrigger = (
-  left: Machine.Machine.TransitionTrigger,
-  right: Machine.Machine.TransitionTrigger
-): boolean =>
-  left.type === right.type && (left.type !== "event" || right.type === "event" && left.event === right.event)
-
 const makeNodeUtilities = (nodes: ReadonlyArray<PublicStateNode>) => {
   const byPath = new Map(nodes.map((node) => [node.path, node]))
   const depth = (path: string): number => {
@@ -1018,9 +1059,10 @@ export const verify = <M extends AnyMachine>(
   options: VerifyOptions = {}
 ): Effect.Effect<void, VerificationError> => {
   const selected = new Set<VerificationLawGroup>(
-    options.laws ?? ["configuration", "microsteps", "completion", "history", "targetBounds"]
+    options.laws ?? ["configuration", "microsteps", "completion", "history", "definitions"]
   )
   const nodes = Machine.stateNodes(machine) as ReadonlyArray<PublicStateNode>
+  const initialDefinition = Machine.initialDefinition(machine)
   const definitions = Machine.transitionDefinitions(machine)
   const { ancestors, byPath, depth, isDescendantOrSelf } = makeNodeUtilities(nodes)
   const violations: Array<VerificationViolation> = []
@@ -1496,33 +1538,47 @@ export const verify = <M extends AnyMachine>(
       return direction === "entry" ? leftOrder - rightOrder : rightOrder - leftOrder
     })
 
-  const validateTransitionBounds = (
+  const validateTransitionDefinition = (
     transition: Microstep<M>["transitions"][number],
     location: VerificationLocation
   ): void => {
-    if (!selected.has("targetBounds")) return
+    if (!selected.has("definitions")) return
     const definition = definitions.find((candidate) =>
       candidate.source === transition.source && candidate.reenter === transition.reenter &&
-      sameTrigger(candidate.trigger, transition.trigger)
+      sameTransitionTrigger(candidate.trigger, transition.trigger)
     )
     if (definition === undefined) {
       add(
-        "targetBounds.definition",
+        "definitions.transition",
         location,
         `retained transition from "${transition.source}" has no public definition`,
         transition.source
       )
       return
     }
-    if (targetWithinDeclaredBranches(transition.target, definition.branches)) return
-    const targets = definition.branches.flatMap((branch) => branch.target === undefined ? [] : [branch.target])
-    if (!targets.some((bound) => isDescendantOrSelf(String(transition.target), String(bound)))) {
+    if (
+      !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
+      transition.branchIndex >= definition.branches.length
+    ) {
       add(
-        "targetBounds.target",
+        "definitions.branchIndex",
         location,
-        `transition target "${String(transition.target)}" is outside declared bounds ` +
-          `[${targets.join(", ")}]`,
-        String(transition.target)
+        `retained transition from "${transition.source}" selected invalid branch index ${transition.branchIndex}`,
+        transition.source
+      )
+      return
+    }
+    const branch = definition.branches[transition.branchIndex]!
+    if (!targetWithinSelection(transition.target, branch, byPath)) {
+      const expected = branch.selection.kind === "none"
+        ? "an explicitly targetless result"
+        : `selection ${branch.selection.kind}:${branch.selection.scope}:${String(branch.selection.path)}`
+      add(
+        "definitions.selection",
+        location,
+        `transition branch ${transition.branchIndex} from "${transition.source}" returned ` +
+          `target "${String(transition.target)}" outside ${expected}`,
+        transition.target === undefined ? transition.source : String(transition.target)
       )
     }
   }
@@ -1679,7 +1735,7 @@ export const verify = <M extends AnyMachine>(
         }
       }
     }
-    for (const transition of microstep.transitions) validateTransitionBounds(transition, location)
+    for (const transition of microstep.transitions) validateTransitionDefinition(transition, location)
   }
 
   const validatePlanCompletion = (
@@ -1715,6 +1771,18 @@ export const verify = <M extends AnyMachine>(
 
   const initialLocation: VerificationLocation = { eventIndex: undefined }
   const starting = inspectSnapshot(trace.initial.startingState, initialLocation, "initial starting state")
+  if (selected.has("definitions")) {
+    const startingRoots = starting.paths.filter((path) => byPath.get(path)?.parent === undefined)
+    if (startingRoots.length !== 1 || startingRoots[0] !== initialDefinition.target) {
+      add(
+        "definitions.initial",
+        initialLocation,
+        `initial starting state selected roots [${startingRoots.join(", ")}] instead of ` +
+          `declared root "${initialDefinition.target}"`,
+        startingRoots[0] ?? initialDefinition.target
+      )
+    }
+  }
   validateSnapshotMetadata(starting, initialLocation, "initial starting state")
   validateTraceConfiguration(
     starting,
@@ -1849,6 +1917,7 @@ const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Micros
       source: transition.source,
       trigger: transition.trigger,
       reenter: transition.reenter,
+      branchIndex: transition.branchIndex,
       target: transition.target,
       resolvedTarget: transition.resolvedTarget
     }))

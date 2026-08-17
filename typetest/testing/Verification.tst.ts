@@ -34,7 +34,7 @@ describe("MachineTest.verify", () => {
 
   it("accepts only canonical law groups", () => {
     const options: MachineTest.VerifyOptions = {
-      laws: ["configuration", "microsteps", "completion", "history", "targetBounds"]
+      laws: ["configuration", "microsteps", "completion", "history", "definitions"]
     }
     expect(options.laws).type.toBe<ReadonlyArray<MachineTest.VerificationLawGroup> | undefined>()
   })
