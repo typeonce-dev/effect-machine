@@ -496,15 +496,17 @@ microstep, before any selected transition is applied:
 
 ```ts
 BufferReady: Machine.transition({
-  cases: [{
-    title: "online",
-    when: ({ snapshot }) =>
-      States.matches(snapshot, "Player.Network.Online")
-        ? Option.some(undefined)
-        : Option.none(),
-    target: (to) => to.local.Playing(),
-    resolve: ({ target }) => target.from()
-  }],
+  cases: (branch) => [
+    branch({
+      title: "online",
+      when: ({ snapshot }) =>
+        States.matches(snapshot, "Player.Network.Online")
+          ? Option.some(undefined)
+          : Option.none(),
+      target: (to) => to.local.Playing(),
+      resolve: ({ target }) => target.from()
+    })
+  ],
   otherwise: {
     target: (to) => to.none(),
     resolve: () => undefined
@@ -564,12 +566,14 @@ synchronously:
 
 ```ts
 Submit: Machine.transition({
-  cases: [{
-    title: "valid",
-    when: ({ state }) => state.valid ? Option.some(state.draft) : Option.none(),
-    target: (to) => to.local.Saving(),
-    resolve: ({ match, target }) => target.from({ draft: match })
-  }],
+  cases: (branch) => [
+    branch({
+      title: "valid",
+      when: ({ state }) => state.valid ? Option.some(state.draft) : Option.none(),
+      target: (to) => to.local.Saving(),
+      resolve: ({ match, target }) => target.from({ draft: match })
+    })
+  ],
   otherwise: {
     target: (to) => to.none(),
     resolve: () => undefined
@@ -580,9 +584,12 @@ Submit: Machine.transition({
 Every installed event, `always`, `onDone`, choice, and invoke lifecycle handler
 must use `Machine.transition`. Each direct branch declares one `target`; a
 conditional transition declares ordered `cases` and a required `otherwise`.
-`when` returns `Option.some(match)` to select a case and infer `match` in its
-resolver. Selecting `to.none()` handles the transition without a destination,
-while retaining queued commands, raised events, and emitted events.
+Construct each case with the locally supplied `branch` function. Every call
+independently infers its `when` match and target, so a transition may declare
+any number of heterogeneous cases without losing resolver inference. `when`
+returns `Option.some(match)` to select a case and expose `match` in its resolver.
+Selecting `to.none()` handles the transition without a destination, while
+retaining queued commands, raised events, and emitted events.
 
 `reenter: true` remains meaningful with `to.none()`: the source exits and
 enters again while its logical configuration is retained.

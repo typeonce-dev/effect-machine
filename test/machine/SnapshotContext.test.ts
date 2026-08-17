@@ -69,7 +69,7 @@ describe("Machine transition snapshot context", () => {
                 Buffering: {
                   on: {
                     BufferReady: Machine.transition({
-                      cases: [{
+                      cases: (branch) => [branch({
                         title: "network is online",
                         when: ({ snapshot }) => {
                           captured = snapshot
@@ -79,7 +79,7 @@ describe("Machine transition snapshot context", () => {
                         },
                         target: (to) => to.local.Playing(),
                         resolve: ({ target }) => target(new Playing({}))
-                      }],
+                      })],
                       otherwise: { target: (to) => to.none(), resolve: () => undefined }
                     })
                   }
@@ -170,7 +170,7 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   always: Machine.transition({
-                    cases: [{
+                    cases: (branch) => [branch({
                       title: "network is online",
                       when: ({ snapshot }) => {
                         captured = snapshot
@@ -178,7 +178,7 @@ describe("Machine transition snapshot context", () => {
                       },
                       target: (to) => to.local.Playing(),
                       resolve: ({ target }) => target(new Playing({}))
-                    }],
+                    })],
                     otherwise: { target: (to) => to.none(), resolve: () => undefined }
                   })
                 }

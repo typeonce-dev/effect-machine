@@ -132,12 +132,12 @@ export const SelectionMachine = definition.handle({
             }),
             on: {
               SearchResult: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "found",
                   when: ({ event }) => event.result,
                   target: (to) => to.local.WithPokemon(),
                   resolve: ({ match, target }) => target.from({ pokemon: match })
-                }],
+                })],
                 otherwise: {
                   target: (to) => to.local.NoPokemon(),
                   resolve: ({ target }) => target.from()
@@ -160,12 +160,12 @@ export const SelectionMachine = definition.handle({
           Selected: {
             on: {
               SelectPokemon: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "already selected",
                   when: ({ event, state }) => state.id === event.id ? Option.some(undefined) : Option.none(),
                   target: (to) => to.local.Unselected(),
                   resolve: ({ target }) => target.from()
-                }],
+                })],
                 otherwise: {
                   target: (to) => to.local.Selected(),
                   resolve: ({ event, target }) => target.from({ id: event.id })

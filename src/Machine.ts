@@ -53,6 +53,7 @@ declare const MachineTypeId: unique symbol
 declare const EventConstructionTypeId: unique symbol
 declare const EmittedEventConstructionTypeId: unique symbol
 declare const EventProtocolTypeId: unique symbol
+declare const TransitionCaseTypeId: unique symbol
 
 const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
 
@@ -5128,12 +5129,12 @@ export declare namespace Machine {
     StateId extends StateNodeIdentifier<States>,
     Context,
     Reenter extends boolean,
-    Cases extends readonly [object, ...ReadonlyArray<object>],
+    Cases extends readonly [TransitionCaseTyped, ...ReadonlyArray<TransitionCaseTyped>],
     OtherwiseSelection extends TargetSelection<any, any, any>
   > = {
     readonly target?: never
     readonly resolve?: never
-    readonly cases: Cases
+    readonly cases: (branch: TransitionCaseConstructor<States, Events, Emits, StateId, Context>) => Cases
     readonly otherwise: TransitionDirectInput<
       States,
       Events,
@@ -7478,6 +7479,29 @@ type BoundEffectInvokeResult<
     never
   >
 
+/** Type evidence retained for a case created by a conditional transition's local builder. */
+interface TransitionCaseTyped {
+  readonly [TransitionCaseTypeId]: true
+}
+
+/** Locally bound constructor that preserves each conditional transition case independently. */
+interface TransitionCaseConstructor<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateNodeIdentifier<States>,
+  Context
+> {
+  <
+    const Selection extends Machine.TargetSelection<any, any, any>,
+    const Match
+  >(
+    config: Machine.TransitionCaseInput<States, Events, Emits, StateId, Context, Selection, Match>
+  ):
+    & Machine.TransitionCaseInput<States, Events, Emits, StateId, Context, Selection, Match>
+    & TransitionCaseTyped
+}
+
 /**
  * Captures one exact transition topology while preserving handler inference.
  *
@@ -7491,37 +7515,27 @@ type ConditionalTransitionResult<
   StateId extends Machine.StateNodeIdentifier<States>,
   Context,
   Reenter extends boolean,
-  Cases extends readonly [object, ...ReadonlyArray<object>],
+  Cases extends readonly [
+    TransitionCaseTyped,
+    ...ReadonlyArray<TransitionCaseTyped>
+  ],
   OtherwiseSelection extends Machine.TargetSelection<any, any, any>
 > =
-  & Machine.TransitionConditionalInput<
-    States,
-    Events,
-    Emits,
-    StateId,
-    Context,
-    Reenter,
-    Cases,
-    OtherwiseSelection
-  >
-  & Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter>
-
-type OptionValue<Value> = Value extends Option.Option<infer Match> ? Match : never
-
-type TransitionCaseFromWhen<
-  States extends Machine.StateSchemas,
-  Events extends ReadonlyArray<Machine.TaggedSchema>,
-  Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  StateId extends Machine.StateNodeIdentifier<States>,
-  Context,
-  Selection extends Machine.TargetSelection<any, any, any>,
-  When extends (context: Omit<Context, "target">) => any
-> =
   & Omit<
-    Machine.TransitionCaseInput<States, Events, Emits, StateId, Context, Selection, OptionValue<ReturnType<When>>>,
-    "when"
+    Machine.TransitionConditionalInput<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      Cases,
+      OtherwiseSelection
+    >,
+    "cases"
   >
-  & { readonly when: When }
+  & { readonly cases: Cases }
+  & Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter>
 
 /**
  * Contextually types direct and conditional transition definitions.
@@ -7550,86 +7564,10 @@ export interface TransitionConstructor {
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateNodeIdentifier<States>,
     Context,
-    const Selection1 extends Machine.TargetSelection<any, any, any>,
-    const When1 extends (context: Omit<Context, "target">) => any,
-    const OtherwiseSelection extends Machine.TargetSelection<any, any, any>,
-    Reenter extends boolean = never
-  >(
-    config: Machine.TransitionConditionalInput<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      readonly [TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>],
-      OtherwiseSelection
-    >,
-    ..._validation: ReturnType<When1> extends Option.Option<unknown> ? [] : ["when must return Option"]
-  ): ConditionalTransitionResult<
-    States,
-    Events,
-    Emits,
-    StateId,
-    Context,
-    Reenter,
-    readonly [TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>],
-    OtherwiseSelection
-  >
-  <
-    const States extends Machine.StateSchemas,
-    const Events extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-    StateId extends Machine.StateNodeIdentifier<States>,
-    Context,
-    const Selection1 extends Machine.TargetSelection<any, any, any>,
-    const When1 extends (context: Omit<Context, "target">) => any,
-    const Selection2 extends Machine.TargetSelection<any, any, any>,
-    const When2 extends (context: Omit<Context, "target">) => any,
-    const OtherwiseSelection extends Machine.TargetSelection<any, any, any>,
-    Reenter extends boolean = never
-  >(
-    config: Machine.TransitionConditionalInput<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      readonly [
-        TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>,
-        TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection2, When2>
-      ],
-      OtherwiseSelection
-    >,
-    ..._validation: ReturnType<When1> extends Option.Option<unknown> ?
-      ReturnType<When2> extends Option.Option<unknown> ? [] : ["when must return Option"]
-      : ["when must return Option"]
-  ): ConditionalTransitionResult<
-    States,
-    Events,
-    Emits,
-    StateId,
-    Context,
-    Reenter,
-    readonly [
-      TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>,
-      TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection2, When2>
+    const Cases extends readonly [
+      TransitionCaseTyped,
+      ...ReadonlyArray<TransitionCaseTyped>
     ],
-    OtherwiseSelection
-  >
-  <
-    const States extends Machine.StateSchemas,
-    const Events extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-    StateId extends Machine.StateNodeIdentifier<States>,
-    Context,
-    const Selection1 extends Machine.TargetSelection<any, any, any>,
-    const When1 extends (context: Omit<Context, "target">) => any,
-    const Selection2 extends Machine.TargetSelection<any, any, any>,
-    const When2 extends (context: Omit<Context, "target">) => any,
-    const Selection3 extends Machine.TargetSelection<any, any, any>,
-    const When3 extends (context: Omit<Context, "target">) => any,
     const OtherwiseSelection extends Machine.TargetSelection<any, any, any>,
     Reenter extends boolean = never
   >(
@@ -7640,18 +7578,9 @@ export interface TransitionConstructor {
       StateId,
       Context,
       Reenter,
-      readonly [
-        TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>,
-        TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection2, When2>,
-        TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection3, When3>
-      ],
+      Cases,
       OtherwiseSelection
-    >,
-    ..._validation: ReturnType<When1> extends Option.Option<unknown> ?
-      ReturnType<When2> extends Option.Option<unknown> ?
-        ReturnType<When3> extends Option.Option<unknown> ? [] : ["when must return Option"]
-      : ["when must return Option"]
-      : ["when must return Option"]
+    >
   ): ConditionalTransitionResult<
     States,
     Events,
@@ -7659,11 +7588,7 @@ export interface TransitionConstructor {
     StateId,
     Context,
     Reenter,
-    readonly [
-      TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection1, When1>,
-      TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection2, When2>,
-      TransitionCaseFromWhen<States, Events, Emits, StateId, Context, Selection3, When3>
-    ],
+    Cases,
     OtherwiseSelection
   >
 }
@@ -7671,21 +7596,44 @@ export interface TransitionConstructor {
 /**
  * Defines a statically inspectable transition.
  *
- * This constructor is an identity at runtime. It is required for every event,
- * lifecycle, choice, and invocation transition so the destination selected by
- * `target` can contextually type the corresponding resolver.
+ * It is required for every event, lifecycle, choice, and invocation transition
+ * so the destination selected by `target` can contextually type the
+ * corresponding resolver. Conditional transitions use the locally bound
+ * `branch` constructor so every case independently infers its matched value and
+ * selected destination, with no limit on the number of cases.
  *
  * ```ts
  * Machine.transition({
  *   target: (to) => to.full.Ready(),
  *   resolve: ({ target }) => target.from()
  * })
+ *
+ * Machine.transition({
+ *   cases: (branch) => [
+ *     branch({
+ *       title: "has cached data",
+ *       when: ({ event }) => event.cached,
+ *       target: (to) => to.full.Ready(),
+ *       resolve: ({ match, target }) => target.from({ data: match })
+ *     })
+ *   ],
+ *   otherwise: {
+ *     target: (to) => to.full.Loading(),
+ *     resolve: ({ target }) => target.from()
+ *   }
+ * })
  * ```
  *
  * @category constructors
  * @since 0.14.0
  */
-export const transition: TransitionConstructor = ((config: unknown) => config) as TransitionConstructor
+export const transition: TransitionConstructor = ((config: unknown) => {
+  if (!hasProperty(config, "cases") || typeof config.cases !== "function") return config
+  return {
+    ...config,
+    cases: config.cases(<Case extends object>(branch: Case): Case => branch)
+  }
+}) as TransitionConstructor
 
 /**
  * Machine-bound invocation constructor that preserves the owning machine's

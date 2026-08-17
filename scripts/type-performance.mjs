@@ -77,6 +77,20 @@ const scenarios = [
     maxMarginalInstantiations: 56_000
   },
   {
+    id: "conditional-cases-control",
+    label: "conditional transition control",
+    file: "conditional-cases-control.ts",
+    hidden: true
+  },
+  {
+    id: "conditional-cases",
+    label: "Machine.transition (10 conditional cases)",
+    file: "conditional-cases.ts",
+    control: "conditional-cases-control",
+    maxInstantiations: 160_000,
+    maxMarginalInstantiations: 145_000
+  },
+  {
     id: "dynamic-invoke-control",
     label: "dynamic Machine.invoke control",
     file: "dynamic-invoke-control.ts",

@@ -46,12 +46,12 @@ export const SharedMachine = definition.handle({
         resolve: ({ target }) => target.from({ count: 0 })
       }),
       Synchronized: Machine.transition({
-        cases: [{
+        cases: (branch) => [branch({
           title: "active",
           when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
           target: (to) => to.full.Active(),
           resolve: ({ match, target }) => target.from({ count: match })
-        }],
+        })],
         otherwise: {
           target: (to) => to.full.Idle(),
           resolve: ({ event, target }) => target.from({ count: event.count })
@@ -74,12 +74,12 @@ export const SharedMachine = definition.handle({
         resolve: ({ state, target }) => target.from({ count: state.count })
       }),
       Synchronized: Machine.transition({
-        cases: [{
+        cases: (branch) => [branch({
           title: "active",
           when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
           target: (to) => to.full.Active(),
           resolve: ({ match, target }) => target.from({ count: match })
-        }],
+        })],
         otherwise: {
           target: (to) => to.full.Idle(),
           resolve: ({ event, target }) => target.from({ count: event.count })

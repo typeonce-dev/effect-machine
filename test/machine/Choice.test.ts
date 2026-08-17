@@ -20,6 +20,8 @@ const States = Machine.defineStates({
   }
 })
 
+let caseFactoryCalls = 0
+
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Recheck),
@@ -32,14 +34,38 @@ const machine = Machine.make({
     states: {
       Routing: {
         choice: Machine.transition({
-          cases: [
-            {
-              title: "score is at least 70",
-              when: ({ containingState }) => containingState.score >= 70 ? Option.some(containingState) : Option.none(),
-              target: (to) => to.local.Approved(),
-              resolve: ({ target }) => target(new Approved({}))
-            }
-          ],
+          cases: (branch) => {
+            caseFactoryCalls += 1
+            return [
+              branch({
+                title: "score is perfect",
+                when: ({ containingState }) =>
+                  containingState.score === 100 ? Option.some(containingState) : Option.none(),
+                target: (to) => to.local.Approved(),
+                resolve: ({ target }) => target(new Approved({}))
+              }),
+              branch({
+                title: "score is negative",
+                when: ({ containingState }) =>
+                  containingState.score < 0 ? Option.some(containingState.score) : Option.none(),
+                target: (to) => to.local.Rejected(),
+                resolve: ({ target }) => target(new Rejected({}))
+              }),
+              branch({
+                title: "score is zero",
+                when: ({ containingState }) => containingState.score === 0 ? Option.some(undefined) : Option.none(),
+                target: (to) => to.local.Rejected(),
+                resolve: ({ target }) => target(new Rejected({}))
+              }),
+              branch({
+                title: "score is at least 70",
+                when: ({ containingState }) =>
+                  containingState.score >= 70 ? Option.some(containingState) : Option.none(),
+                target: (to) => to.local.Approved(),
+                resolve: ({ target }) => target(new Approved({}))
+              })
+            ]
+          },
           otherwise: {
             target: (to) => to.local.Rejected(),
             resolve: ({ target }) => target(new Rejected({}))
@@ -70,6 +96,15 @@ describe("Machine choice pseudo-states", () => {
       ])
       assert.strictEqual(plan.microsteps[0]?.transitions[0]?.source, "Flow.Routing")
       assert.strictEqual(Machine.isInitialEvent(plan.microsteps[0]!.event), true)
+      assert.strictEqual(caseFactoryCalls, 1)
+      const choice = Machine.transitionDefinitions(machine).find(({ source }) => source === "Flow.Routing")
+      assert.deepStrictEqual(choice?.branches, [
+        { type: "case", title: "score is perfect", target: "Flow.Approved" },
+        { type: "case", title: "score is negative", target: "Flow.Rejected" },
+        { type: "case", title: "score is zero", target: "Flow.Rejected" },
+        { type: "case", title: "score is at least 70", target: "Flow.Approved" },
+        { type: "otherwise", target: "Flow.Rejected" }
+      ])
       assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
         { path: "Flow" as const, type: "compound" },
         { path: "Flow.Routing" as const, type: "choice" },
@@ -560,6 +595,9 @@ describe("Machine choice pseudo-states", () => {
         trigger: { type: "choice" },
         reenter: false,
         branches: [
+          { type: "case", title: "score is perfect", target: "Flow.Approved" },
+          { type: "case", title: "score is negative", target: "Flow.Rejected" },
+          { type: "case", title: "score is zero", target: "Flow.Rejected" },
           { type: "case", title: "score is at least 70", target: "Flow.Approved" },
           { type: "otherwise", target: "Flow.Rejected" }
         ]

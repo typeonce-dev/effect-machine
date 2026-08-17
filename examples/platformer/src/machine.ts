@@ -207,12 +207,12 @@ export const CharacterMachine = definition.handle({
                   Standing: {
                     on: {
                       Move: Machine.transition({
-                        cases: [{
+                        cases: (branch) => [branch({
                           title: "moving",
                           when: ({ event }) => event.axis === 0 ? Option.none() : Option.some(event),
                           target: (to) => to.local.Running(),
                           resolve: ({ match, target }) => target.from({ startedAt: match.at })
-                        }],
+                        })],
                         otherwise: {
                           target: (to) => to.none(),
                           resolve: () => undefined
@@ -227,12 +227,12 @@ export const CharacterMachine = definition.handle({
                   Running: {
                     on: {
                       Move: Machine.transition({
-                        cases: [{
+                        cases: (branch) => [branch({
                           title: "stopped",
                           when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
                           target: (to) => to.local.Standing(),
                           resolve: ({ target }) => target.from()
-                        }],
+                        })],
                         otherwise: {
                           target: (to) => to.none(),
                           resolve: () => undefined
@@ -247,12 +247,12 @@ export const CharacterMachine = definition.handle({
                   Ducking: {
                     on: {
                       DownReleased: Machine.transition({
-                        cases: [{
+                        cases: (branch) => [branch({
                           title: "stopped",
                           when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
                           target: (to) => to.local.Standing(),
                           resolve: ({ target }) => target.from()
-                        }],
+                        })],
                         otherwise: {
                           target: (to) => to.local.Running(),
                           resolve: ({ event, target }) => target.from({ startedAt: event.at })
@@ -274,12 +274,12 @@ export const CharacterMachine = definition.handle({
                     }),
                     on: {
                       LandingSettled: Machine.transition({
-                        cases: [{
+                        cases: (branch) => [branch({
                           title: "stopped",
                           when: ({ state }) => state.resumeAxis === 0 ? Option.some(undefined) : Option.none(),
                           target: (to) => to.local.Standing(),
                           resolve: ({ target }) => target.from()
-                        }],
+                        })],
                         otherwise: {
                           target: (to) => to.local.Running(),
                           resolve: ({ state, target }) => target.from({ startedAt: state.landedAt + 140 })
@@ -423,21 +423,21 @@ export const CharacterMachine = definition.handle({
           Left: {
             on: {
               Move: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "right",
                   when: ({ event }) => event.axis === 1 ? Option.some(undefined) : Option.none(),
                   target: (to) => to.local.Right(),
                   resolve: ({ target }) => target.from()
-                }],
+                })],
                 otherwise: { target: (to) => to.none(), resolve: () => undefined }
               }),
               WallJump: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "right",
                   when: ({ event }) => event.push === 1 ? Option.some(undefined) : Option.none(),
                   target: (to) => to.local.Right(),
                   resolve: ({ target }) => target.from()
-                }],
+                })],
                 otherwise: { target: (to) => to.none(), resolve: () => undefined }
               })
             }
@@ -445,21 +445,21 @@ export const CharacterMachine = definition.handle({
           Right: {
             on: {
               Move: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "left",
                   when: ({ event }) => event.axis === -1 ? Option.some(undefined) : Option.none(),
                   target: (to) => to.local.Left(),
                   resolve: ({ target }) => target.from()
-                }],
+                })],
                 otherwise: { target: (to) => to.none(), resolve: () => undefined }
               }),
               WallJump: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "left",
                   when: ({ event }) => event.push === -1 ? Option.some(undefined) : Option.none(),
                   target: (to) => to.local.Left(),
                   resolve: ({ target }) => target.from()
-                }],
+                })],
                 otherwise: { target: (to) => to.none(), resolve: () => undefined }
               })
             }
@@ -469,17 +469,20 @@ export const CharacterMachine = definition.handle({
       contact: {
         on: {
           WallContact: Machine.transition({
-            cases: [{
-              title: "left wall",
-              when: ({ event }) => event.wall === -1 ? Option.some(undefined) : Option.none(),
-              target: (to) => to.local.LeftWall(),
-              resolve: ({ target }) => target.from()
-            }, {
-              title: "right wall",
-              when: ({ event }) => event.wall === 1 ? Option.some(undefined) : Option.none(),
-              target: (to) => to.local.RightWall(),
-              resolve: ({ target }) => target.from()
-            }],
+            cases: (branch) => [
+              branch({
+                title: "left wall",
+                when: ({ event }) => event.wall === -1 ? Option.some(undefined) : Option.none(),
+                target: (to) => to.local.LeftWall(),
+                resolve: ({ target }) => target.from()
+              }),
+              branch({
+                title: "right wall",
+                when: ({ event }) => event.wall === 1 ? Option.some(undefined) : Option.none(),
+                target: (to) => to.local.RightWall(),
+                resolve: ({ target }) => target.from()
+              })
+            ],
             otherwise: {
               target: (to) => to.local.NoWall(),
               resolve: ({ target }) => target.from()

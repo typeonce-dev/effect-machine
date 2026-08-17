@@ -2,7 +2,11 @@ import { Machine } from "@typeonce/effect-machine"
 import { ClusterMachine } from "@typeonce/effect-machine/cluster"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { MachineTest } from "@typeonce/effect-machine/testing"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
+
+type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends <Type>() => Type extends Right ? 1 : 2 ? true
+  : false
+type Expect<Type extends true> = Type
 
 const State = Schema.TaggedUnion({
   Idle: {},
@@ -35,8 +39,52 @@ const machine = Machine.make({
   Idle: {
     on: {
       Start: Machine.transition({
-        target: (to) => to.full.Loading(),
-        resolve: ({ target }) => target(State.cases.Loading.make({}))
+        cases: (branch) => [
+          branch({
+            title: "cached",
+            when: () => Option.some({ source: "cache" as const }),
+            target: (to) => to.full.Loading(),
+            resolve: ({ match, target }) => {
+              type MatchIsExact = Expect<Equal<typeof match, { source: "cache" }>>
+              void (true as MatchIsExact)
+              return target(State.cases.Loading.make({}))
+            }
+          }),
+          branch({
+            title: "measured",
+            when: () => Option.some(1),
+            target: (to) => to.none(),
+            resolve: ({ match }) => {
+              type MatchIsExact = Expect<Equal<typeof match, number>>
+              void (true as MatchIsExact)
+              return undefined
+            }
+          }),
+          branch({
+            title: "named",
+            when: () => Option.some("ready"),
+            target: (to) => to.full.Done(),
+            resolve: ({ match, target }) => {
+              type MatchIsExact = Expect<Equal<typeof match, string>>
+              void (true as MatchIsExact)
+              return target(State.cases.Done.make({ value: match }))
+            }
+          }),
+          branch({
+            title: "confirmed",
+            when: () => Option.some(true),
+            target: (to) => to.full.Idle(),
+            resolve: ({ match, target }) => {
+              type MatchIsExact = Expect<Equal<typeof match, boolean>>
+              void (true as MatchIsExact)
+              return target(State.cases.Idle.make({}))
+            }
+          })
+        ],
+        otherwise: {
+          target: (to) => to.full.Loading(),
+          resolve: ({ target }) => target(State.cases.Loading.make({}))
+        }
       })
     }
   },
