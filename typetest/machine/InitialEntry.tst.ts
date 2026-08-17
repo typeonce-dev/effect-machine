@@ -20,7 +20,10 @@ const States = Machine.defineStates({
 const base = Machine.make({
   states: States.states,
   events: Machine.events(Open),
-  initial: () => States.initial.closed(new Closed({}))
+  initial: {
+    target: (to) => to.closed(),
+    resolve: ({ target }) => (target(new Closed({})))
+  }
 })
 
 type Events = readonly [typeof Open]
@@ -33,6 +36,14 @@ type ClosedContext = Machine.Machine.HandlerContext<
   never,
   never
 >
+type ClosedTransition = Machine.Machine.TransitionConfig<
+  typeof States.states,
+  Events,
+  readonly [],
+  "closed",
+  ClosedContext,
+  true
+>
 type OpenedInitializeContext = Machine.Machine.StateInitializeContext<
   typeof States.states,
   Events,
@@ -42,19 +53,27 @@ type OpenedInitializeContext = Machine.Machine.StateInitializeContext<
 
 describe("declared initial entry types", () => {
   it("requires initialize at the handle call that returns an initial target", () => {
+    const invalid = Machine.transition({
+      target: (to) => to.full.opened.initial(),
+      resolve: ({ target }) => target(new Opened({ id: "team-1" }))
+    }) satisfies ClosedTransition
     expect(base.handle).type.not.toBeCallableWith({
       closed: {
         on: {
-          Open: ({ target }: ClosedContext) => target.full.opened.initial(new Opened({ id: "team-1" }))
+          Open: invalid
         }
       },
       opened: {}
     })
 
+    const initial = Machine.transition({
+      target: (to) => to.full.opened.initial(),
+      resolve: ({ target }) => target.from({ id: "team-1" })
+    }) satisfies ClosedTransition
     expect(base.handle).type.toBeCallableWith({
       closed: {
         on: {
-          Open: ({ target }: ClosedContext) => target.full.opened.initial.from({ id: "team-1" })
+          Open: initial
         }
       },
       opened: {
@@ -62,14 +81,18 @@ describe("declared initial entry types", () => {
       }
     })
 
+    const explicit = Machine.transition({
+      target: (to) => to.full.opened(),
+      resolve: ({ target }) =>
+        target(
+          new Opened({ id: "team-1" }),
+          (opened) => opened.loading(new Loading({}))
+        )
+    }) satisfies ClosedTransition
     expect(base.handle).type.toBeCallableWith({
       closed: {
         on: {
-          Open: ({ target }: ClosedContext) =>
-            target.full.opened(
-              new Opened({ id: "team-1" }),
-              (opened) => opened.loading(new Loading({}))
-            )
+          Open: explicit
         }
       },
       opened: {}
@@ -80,17 +103,19 @@ describe("declared initial entry types", () => {
     base.handle({
       closed: {
         on: {
-          Open: ({ target }) => {
-            expect(target.full.closed).type.not.toHaveProperty("initial")
-            expect(target.full.opened).type.toHaveProperty("initial")
-            expect(target.full.opened.initial).type.not.toBeCallableWith()
-            expect(target.full.opened.initial).type.toBeCallableWith(new Opened({ id: "team-1" }))
-            expect(target.full.opened.initial.from).type.toBeCallableWith({ id: "team-1" })
-            return target.full.opened(
-              new Opened({ id: "team-1" }),
-              (opened) => opened.loading(new Loading({}))
-            )
-          }
+          Open: Machine.transition({
+            target: (to) => to.full.opened(),
+            resolve: ({ target }) => {
+              expect(target).type.toHaveProperty("initial")
+              expect(target.initial).type.not.toBeCallableWith()
+              expect(target.initial).type.toBeCallableWith(new Opened({ id: "team-1" }))
+              expect(target.initial.from).type.toBeCallableWith({ id: "team-1" })
+              return target(
+                new Opened({ id: "team-1" }),
+                (opened) => opened.loading(new Loading({}))
+              )
+            }
+          })
         }
       }
     })

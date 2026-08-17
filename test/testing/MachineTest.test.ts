@@ -29,22 +29,31 @@ const makeTraceMachine = (onAction: () => void) =>
     states: States.states,
     events: Machine.events(Start, Add),
     input: TestInput,
-    initial: ({ userId }) => States.initial.Ready(new Ready({ count: userId.length - userId.length }))
+    initial: {
+      target: (to) => to.Ready(),
+      resolve: ({ input, target }) => target(new Ready({ count: input.userId.length - input.userId.length }))
+    }
   }).handle({
     Idle: {
       on: {
-        Start: ({ target }) => {
-          onAction()
-          return target.full.Ready(new Ready({ count: 0 }))
-        }
+        Start: Machine.transition({
+          target: (to) => to.full.Ready(),
+          resolve: ({ target }) => {
+            onAction()
+            return target(new Ready({ count: 0 }))
+          }
+        })
       }
     },
     Ready: {
       on: {
-        Add: ({ event, state, target }) => {
-          onAction()
-          return target.full.Ready(new Ready({ count: state.count + event.amount }))
-        }
+        Add: Machine.transition({
+          target: (to) => to.full.Ready(),
+          resolve: ({ event, state, target }) => {
+            onAction()
+            return target(new Ready({ count: state.count + event.amount }))
+          }
+        })
       }
     }
   })
@@ -98,7 +107,10 @@ describe("MachineTest", () => {
       states: States.states,
       events: Machine.events(),
       input: PositiveInput,
-      initial: () => States.initial.Idle(new Idle({ userId: "user-1" }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+      }
     })
 
     const generated = MachineTest.scenarios(machine)
@@ -116,7 +128,10 @@ describe("MachineTest", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: () => States.initial.Idle(new Idle({ userId: "user-1" }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+      }
     })
 
     assert.throws(
@@ -188,14 +203,17 @@ describe("MachineTest", () => {
       const machine = Machine.make({
         states: ParallelStates.states,
         events: Machine.events(Stop),
-        initial: () =>
-          ParallelStates.initial.app(
-            new App({}),
-            (app) =>
-              app
-                .left(new Left({}), (left) => left.idle(new LeftIdle({})))
-                .right(new Right({}), (right) => right.idle(new RightIdle({})))
-          )
+        initial: {
+          target: (to) => to.app.initial(),
+          resolve: ({ target }) =>
+            target(
+              new App({}),
+              (app) =>
+                app
+                  .left(new Left({}), (left) => left.idle(new LeftIdle({})))
+                  .right(new Right({}), (right) => right.idle(new RightIdle({})))
+            )
+        }
       }).handle({
         app: {
           states: {
@@ -203,7 +221,10 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: ({ target }) => target.full.disabled(new Disabled({}))
+                    Stop: Machine.transition({
+                      target: (to) => to.full.disabled(),
+                      resolve: ({ target }) => target(new Disabled({}))
+                    })
                   }
                 }
               }
@@ -212,7 +233,10 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: ({ target }) => target.full.disabled(new Disabled({}))
+                    Stop: Machine.transition({
+                      target: (to) => to.full.disabled(),
+                      resolve: ({ target }) => target(new Disabled({}))
+                    })
                   }
                 }
               }
@@ -245,14 +269,14 @@ describe("MachineTest", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(Start),
-        initial: () => ({ path: "Idle", value: new Idle({ userId: "user-1" }) })
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: () => ({ path: "Idle" as const, value: new Idle({ userId: "user-1" }) })
+        }
       }).handle({
         Idle: {
           on: {
-            Start: {
-              targets: ["Idle"],
-              transition: ({ target }) => target.none()
-            }
+            Start: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
           }
         }
       })

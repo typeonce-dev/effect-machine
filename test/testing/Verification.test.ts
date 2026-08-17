@@ -30,14 +30,17 @@ const NavigationStates = Machine.defineStates({
 const navigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: () => NavigationStates.initial.off(new Off({}))
+  initial: {
+    target: (to) => to.off(),
+    resolve: ({ target }) => target(new Off({}))
+  }
 }).handle({
   off: {
     on: {
-      Go: {
-        targets: ["app"],
-        transition: ({ target }) => target.full.app(new App({}), (app) => app.two(new Two({})))
-      }
+      Go: Machine.transition({
+        target: (to) => to.full.app(),
+        resolve: ({ target }) => target(new App({}), (app) => app.two(new Two({})))
+      })
     }
   }
 })
@@ -45,12 +48,21 @@ const navigationMachine = Machine.make({
 const raisedNavigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: () => NavigationStates.initial.off(new Off({}))
+  initial: {
+    target: (to) => to.off(),
+    resolve: ({ target }) => target(new Off({}))
+  }
 }).handle({
   off: {
-    always: ({ target }) => target.full.app(new App({}), (app) => app.one(new One({}))),
+    always: Machine.transition({
+      target: (to) => to.full.app(),
+      resolve: ({ target }) => target(new App({}), (app) => app.one(new One({})))
+    }),
     on: {
-      Go: ({ target }) => target.full.app(new App({}), (app) => app.one(new One({})))
+      Go: Machine.transition({
+        target: (to) => to.full.app(),
+        resolve: ({ target }) => target(new App({}), (app) => app.one(new One({})))
+      })
     }
   }
 })
@@ -60,12 +72,21 @@ const CounterStates = Machine.defineStates({ counter: Counter })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Increment, Noop),
-  initial: () => CounterStates.initial.counter(new Counter({ count: 0 }))
+  initial: {
+    target: (to) => to.counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
 }).handle({
   counter: {
     on: {
-      Increment: ({ state, target }) => target.full.counter(new Counter({ count: state.count + 1 })),
-      Noop: ({ target }) => target.none()
+      Increment: Machine.transition({
+        target: (to) => to.full.counter(),
+        resolve: ({ state, target }) => target(new Counter({ count: state.count + 1 }))
+      }),
+      Noop: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
     }
   }
 })
@@ -73,18 +94,22 @@ const counterMachine = Machine.make({
 const reentryMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Restart),
-  initial: () =>
-    NavigationStates.initial.app(
-      new App({}),
-      (app) => app.one(new One({}))
-    )
+  initial: {
+    target: (to) => to.app.initial(),
+    resolve: ({ target }) =>
+      target(
+        new App({}),
+        (app) => app.one(new One({}))
+      )
+  }
 }).handle({
   app: {
     on: {
-      Restart: {
-        reenter: true,
-        transition: ({ target }) => target.full.app(new App({}), (app) => app.one(new One({})))
-      }
+      Restart: Machine.transition({
+        target: (to) => to.full.app(),
+        resolve: ({ target }) => target(new App({}), (app) => app.one(new One({}))),
+        reenter: true
+      })
     }
   }
 })
@@ -107,11 +132,14 @@ const ParallelStates = Machine.defineStates({
 const parallelMachine = Machine.make({
   states: ParallelStates.states,
   events: Machine.events(),
-  initial: () =>
-    ParallelStates.initial.dashboard(
-      new Dashboard({}),
-      (dashboard) => dashboard.left(new Left({})).right(new Right({}))
-    )
+  initial: {
+    target: (to) => to.dashboard.initial(),
+    resolve: ({ target }) =>
+      target(
+        new Dashboard({}),
+        (dashboard) => dashboard.left(new Left({})).right(new Right({}))
+      )
+  }
 }).handle({ dashboard: {} })
 
 class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {}) {}
@@ -149,21 +177,24 @@ const HistoryStates = Machine.defineStates({
 const historyMachine = Machine.make({
   states: HistoryStates.states,
   events: Machine.events(Leave),
-  initial: () =>
-    HistoryStates.initial.workspace(
-      new Workspace({}),
-      (workspace) =>
-        workspace.editor(
-          new Editor({}),
-          (editor) => editor.editing(new Editing({ revision: 1 }))
-        )
-    )
+  initial: {
+    target: (to) => to.workspace.initial(),
+    resolve: ({ target }) =>
+      target(
+        new Workspace({}),
+        (workspace) =>
+          workspace.editor(
+            new Editor({}),
+            (editor) => editor.editing(new Editing({ revision: 1 }))
+          )
+      )
+  }
 }).handle({
   workspace: {
     history: {
       recent: {
-        default: () =>
-          HistoryStates.initial.workspace(
+        default: ({ target }) =>
+          target.workspace(
             new Workspace({}),
             (workspace) =>
               workspace.editor(
@@ -173,8 +204,8 @@ const historyMachine = Machine.make({
           )
       },
       exact: {
-        default: () =>
-          HistoryStates.initial.workspace(
+        default: ({ target }) =>
+          target.workspace(
             new Workspace({}),
             (workspace) =>
               workspace.editor(
@@ -185,7 +216,10 @@ const historyMachine = Machine.make({
       }
     },
     on: {
-      Leave: ({ target }) => target.full.away(new Away({}))
+      Leave: Machine.transition({
+        target: (to) => to.full.away(),
+        resolve: ({ target }) => target(new Away({}))
+      })
     },
     states: {
       editor: {
@@ -209,20 +243,33 @@ const StructuralHistoryStates = Machine.defineStates({
   away: {}
 })
 
-const structuralHistoryInitial = () =>
-  StructuralHistoryStates.initial.workspace.from((workspace) => workspace.editor.from((editor) => editor.idle.from()))
+const structuralHistoryInitial = () => ({
+  path: "workspace" as const,
+  value: undefined,
+  state: {
+    path: "workspace.editor" as const,
+    value: undefined,
+    state: { path: "workspace.editor.idle" as const, value: undefined }
+  }
+})
 
 const structuralHistoryMachine = Machine.make({
   states: StructuralHistoryStates.states,
   events: Machine.events(Leave),
-  initial: structuralHistoryInitial
+  initial: {
+    target: (to) => to.workspace.initial(),
+    resolve: ({ target }) => target.from((workspace) => workspace.editor.from((editor) => editor.idle.from()))
+  }
 }).handle({
   workspace: {
     history: {
       exact: { default: structuralHistoryInitial }
     },
     on: {
-      Leave: ({ target }) => target.full.away.from()
+      Leave: Machine.transition({
+        target: (to) => to.full.away(),
+        resolve: ({ target }) => target.from()
+      })
     }
   }
 })
@@ -240,7 +287,10 @@ const CompletionStates = Machine.defineStates({
 const completionMachine = Machine.make({
   states: CompletionStates.states,
   events: Machine.events(),
-  initial: () => CompletionStates.initial.finished(new Finished({}))
+  initial: {
+    target: (to) => to.finished(),
+    resolve: ({ target }) => target(new Finished({}))
+  }
 }).handle({
   finished: {
     output: () => "complete"
@@ -268,14 +318,20 @@ const DoneTransitionStates = Machine.defineStates({
 const doneTransitionMachine = Machine.make({
   states: DoneTransitionStates.states,
   events: Machine.events(),
-  initial: () =>
-    DoneTransitionStates.initial.workflow(
-      new Workflow({}),
-      (workflow) => workflow.finished(new Finished({}))
-    )
+  initial: {
+    target: (to) => to.workflow.initial(),
+    resolve: ({ target }) =>
+      target(
+        new Workflow({}),
+        (workflow) => workflow.finished(new Finished({}))
+      )
+  }
 }).handle({
   workflow: {
-    onDone: ({ target }) => target.full.archived(new Archived({})),
+    onDone: Machine.transition({
+      target: (to) => to.full.archived(),
+      resolve: ({ target }) => target(new Archived({}))
+    }),
     states: {
       finished: {
         output: () => "workflow-output"
@@ -287,11 +343,14 @@ const doneTransitionMachine = Machine.make({
 const nestedCompletionMachine = Machine.make({
   states: DoneTransitionStates.states,
   events: Machine.events(),
-  initial: () =>
-    DoneTransitionStates.initial.workflow(
-      new Workflow({}),
-      (workflow) => workflow.finished(new Finished({}))
-    )
+  initial: {
+    target: (to) => to.workflow.initial(),
+    resolve: ({ target }) =>
+      target(
+        new Workflow({}),
+        (workflow) => workflow.finished(new Finished({}))
+      )
+  }
 }).handle({
   workflow: {
     states: {
@@ -508,7 +567,7 @@ describe("MachineTest.verify", () => {
         ...trace,
         final: {
           ...workspace,
-          state: { path: "workspace.missing", value: new Editing({ revision: 1 }) }
+          state: { path: "workspace.missing" as const, value: new Editing({ revision: 1 }) }
         }
       } as typeof trace
       const unknownError = yield* MachineTest.verify(historyMachine, unknown, {
@@ -520,7 +579,7 @@ describe("MachineTest.verify", () => {
         ...trace,
         final: {
           ...workspace,
-          state: { path: "workspace.recent", value: new Editing({ revision: 1 }) }
+          state: { path: "workspace.recent" as const, value: new Editing({ revision: 1 }) }
         }
       } as typeof trace
       const historyError = yield* MachineTest.verify(historyMachine, activeHistory, {

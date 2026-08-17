@@ -56,13 +56,22 @@ const States = Machine.defineStates({
   disabled: Disabled
 })
 
-const initial = States.initial.application(
-  new Application({}),
-  (application) =>
-    application
-      .workflow(new Workflow({}), (workflow) => workflow.idle(new Idle({})))
-      .connection(new Connection({}), (connection) => connection.online(new Online({})))
-)
+const initial = {
+  path: "application" as const,
+  value: new Application({}),
+  states: {
+    workflow: {
+      path: "application.workflow" as const,
+      value: new Workflow({}),
+      state: { path: "application.workflow.idle" as const, value: new Idle({}) }
+    },
+    connection: {
+      path: "application.connection" as const,
+      value: new Connection({}),
+      state: { path: "application.connection.online" as const, value: new Online({}) }
+    }
+  }
+}
 
 const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
   typeof States.states,
@@ -73,7 +82,7 @@ const machine = Machine.make({
   id: "inspection-example",
   states: States.states,
   events: Machine.events(Start, Disconnect, Refresh),
-  initial: () => initial
+  initial: { target: (to) => to.application.initial(), resolve: () => initial }
 }).handle({
   application: {
     states: {
@@ -86,15 +95,11 @@ const machine = Machine.make({
         states: {
           idle: {
             on: {
-              Start: {
-                targets: ["application.workflow.running"],
-                transition: ({ target }) =>
-                  target.local.running(new Running({}), (running) => running.editing(new Editing({})))
-              },
-              Refresh: {
-                targets: [],
-                transition: ({ target }) => target.none()
-              }
+              Start: Machine.transition({
+                target: (to) => to.local.running(),
+                resolve: ({ target }) => target(new Running({}), (running) => running.editing(new Editing({})))
+              }),
+              Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
             }
           },
           running: {
@@ -106,7 +111,10 @@ const machine = Machine.make({
         states: {
           online: {
             on: {
-              Disconnect: ({ target }) => target.local.offline(new Offline({}))
+              Disconnect: Machine.transition({
+                target: (to) => to.local.offline(),
+                resolve: ({ target }) => target(new Offline({}))
+              })
             }
           }
         }
@@ -136,20 +144,22 @@ const lifecycleMachine = Machine.make({
   id: "lifecycle-inspection",
   states: LifecycleStates.states,
   events: Machine.events(),
-  initial: () => LifecycleStates.initial.idle(new Idle({}))
+  initial: {
+    target: (to) => to.idle(),
+    resolve: ({ target }) => target(new Idle({}))
+  }
 }).handle({
   idle: {
-    always: {
-      targets: ["workflow"],
-      transition: ({ target }) =>
-        target.full.workflow(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
-    }
+    always: Machine.transition({
+      target: (to) => to.full.workflow(),
+      resolve: ({ target }) => target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
+    })
   },
   workflow: {
-    onDone: {
-      targets: ["disabled"],
-      transition: ({ target }) => target.full.disabled(new Disabled({}))
-    }
+    onDone: Machine.transition({
+      target: (to) => to.full.disabled(),
+      resolve: ({ target }) => target(new Disabled({}))
+    })
   }
 })
 
@@ -161,17 +171,17 @@ const renderLifecycleMachine = makeTextRenderer<
 describe("Machine structural visualization", () => {
   it("exposes every state node in definition order", () => {
     assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
-      { path: "application", type: "parallel" },
-      { path: "application.workflow", type: "compound" },
-      { path: "application.workflow.idle", type: "atomic" },
-      { path: "application.workflow.running", type: "compound" },
-      { path: "application.workflow.running.editing", type: "atomic" },
-      { path: "application.workflow.running.complete", type: "final" },
-      { path: "application.workflow.recent", type: "history" },
-      { path: "application.connection", type: "compound" },
-      { path: "application.connection.online", type: "atomic" },
-      { path: "application.connection.offline", type: "atomic" },
-      { path: "disabled", type: "atomic" }
+      { path: "application" as const, type: "parallel" },
+      { path: "application.workflow" as const, type: "compound" },
+      { path: "application.workflow.idle" as const, type: "atomic" },
+      { path: "application.workflow.running" as const, type: "compound" },
+      { path: "application.workflow.running.editing" as const, type: "atomic" },
+      { path: "application.workflow.running.complete" as const, type: "final" },
+      { path: "application.workflow.recent" as const, type: "history" },
+      { path: "application.connection" as const, type: "compound" },
+      { path: "application.connection.online" as const, type: "atomic" },
+      { path: "application.connection.offline" as const, type: "atomic" },
+      { path: "disabled" as const, type: "atomic" }
     ])
   })
 
@@ -191,19 +201,19 @@ describe("Machine structural visualization", () => {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Start" },
         reenter: false,
-        targets: { type: "declared", paths: ["application.workflow.running"] }
+        branches: [{ type: "direct", target: "application.workflow.running" }]
       },
       {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: false,
-        targets: { type: "declared", paths: [] }
+        branches: [{ type: "direct", target: undefined }]
       },
       {
         source: "application.connection.online",
         trigger: { type: "event", event: "Disconnect" },
         reenter: false,
-        targets: { type: "dynamic" }
+        branches: [{ type: "direct", target: "application.connection.offline" }]
       }
     ])
   })
@@ -212,23 +222,17 @@ describe("Machine structural visualization", () => {
     const metadataMachine = Machine.make({
       states: { idle: Idle },
       events: Machine.events(Refresh),
-      initial: () => ({ path: "idle", value: new Idle({}) })
+      initial: {
+        target: (to) => to.idle(),
+        resolve: () => ({ path: "idle" as const, value: new Idle({}) })
+      }
     }).handle({
       idle: {
         on: {
-          Refresh: {
-            reenter: true,
-            transition: ({ target }) => target.none()
-          }
+          Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined, reenter: true })
         },
-        always: {
-          targets: ["idle"],
-          transition: ({ target }) => target.none()
-        },
-        onDone: {
-          targets: ["idle"],
-          transition: ({ target }) => target.none()
-        }
+        always: Machine.transition({ target: (to) => to.none(), resolve: () => undefined }),
+        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
       }
     })
 
@@ -237,19 +241,19 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: true,
-        targets: { type: "dynamic" }
+        branches: [{ type: "direct", target: undefined }]
       },
       {
         source: "idle",
         trigger: { type: "always" },
         reenter: false,
-        targets: { type: "declared", paths: ["idle"] }
+        branches: [{ type: "direct", target: undefined }]
       },
       {
         source: "idle",
         trigger: { type: "done" },
         reenter: false,
-        targets: { type: "declared", paths: ["idle"] }
+        branches: [{ type: "direct", target: undefined }]
       }
     ])
   })
@@ -266,20 +270,20 @@ describe("Machine structural visualization", () => {
           source: "idle",
           trigger: { type: "always" },
           reenter: false,
-          targets: { type: "declared", paths: ["workflow"] }
+          branches: [{ type: "direct", target: "workflow" }]
         },
         {
           source: "workflow",
           trigger: { type: "done" },
           reenter: false,
-          targets: { type: "declared", paths: ["disabled"] }
+          branches: [{ type: "direct", target: "disabled" }]
         }
       ])
       assert.strictEqual(
         renderLifecycleMachine(lifecycleMachine, planned.state),
         [
           "lifecycle-inspection",
-          "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
+          "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
           "",
           "├─ ○ idle",
           "│  └─ ◇ always → workflow",
@@ -298,7 +302,7 @@ describe("Machine structural visualization", () => {
       renderMachine(machine, initial),
       [
         "inspection-example",
-        "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
+        "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
         "",
         "├─ ● application [parallel]",
         "│  ├─ ● workflow [compound, initial: idle]",
@@ -310,7 +314,7 @@ describe("Machine structural visualization", () => {
         "│  │  └─ ○ recent [history, shallow]",
         "│  └─ ● connection [compound, initial: online]",
         "│     ├─ ● online",
-        "│     │  └─ ◇ on: Disconnect",
+        "│     │  └─ ◇ on: Disconnect → offline",
         "│     └─ ○ offline",
         "└─ ○ disabled",
         "",
@@ -342,14 +346,11 @@ describe("Machine structural visualization", () => {
               states: {
                 idle: {
                   on: {
-                    Start: {
-                      targets: ["application.workflow.idle"],
-                      transition: ({ target }) =>
-                        target.full.disabled(new Disabled({})) as unknown as Machine.Machine.Target<
-                          typeof States.states,
-                          "application.workflow.idle"
-                        >
-                    }
+                    Start: Machine.transition({
+                      target: (to) => to.full.disabled(),
+                      resolve: ({ target }) =>
+                        ({ ...target(new Disabled({})), path: "application.workflow.idle" }) as any
+                    })
                   }
                 }
               }
@@ -362,7 +363,7 @@ describe("Machine structural visualization", () => {
       assert.strictEqual(exit._tag, "Failure")
       if (exit._tag === "Failure") {
         assert(Cause.hasDies(exit.cause))
-        assert.include(Cause.pretty(exit.cause), "returned target \"disabled\" outside declared targets")
+        assert.include(Cause.pretty(exit.cause), "selected \"disabled\" but constructed \"application.workflow.idle\"")
       }
     }))
 
@@ -370,89 +371,36 @@ describe("Machine structural visualization", () => {
     Effect.gen(function*() {
       const unsafeAlways = lifecycleMachine.handle({
         idle: {
-          always: {
-            targets: ["idle"],
-            transition: ({ target }) =>
-              target.full.workflow(
-                new Workflow({}),
-                (workflow) => workflow.complete(new Complete({}))
-              ) as unknown as Machine.Machine.Target<typeof LifecycleStates.states, "idle">
-          }
+          always: Machine.transition({
+            target: (to) => to.full.workflow(),
+            resolve: ({ target }) =>
+              ({
+                ...target(new Workflow({}), (workflow) => workflow.complete(new Complete({}))),
+                path: "idle"
+              }) as any
+          })
         }
       })
       const alwaysExit = yield* Effect.exit(Machine.planInitial(unsafeAlways))
 
       assert.strictEqual(alwaysExit._tag, "Failure")
       if (alwaysExit._tag === "Failure") {
-        assert.include(Cause.pretty(alwaysExit.cause), "on \"always\" returned target \"workflow\"")
+        assert.include(Cause.pretty(alwaysExit.cause), "selected \"workflow\" but constructed \"idle\"")
       }
 
       const unsafeDone = lifecycleMachine.handle({
         workflow: {
-          onDone: {
-            targets: ["workflow"],
-            transition: ({ target }) =>
-              target.full.disabled(new Disabled({})) as unknown as Machine.Machine.Target<
-                typeof LifecycleStates.states,
-                "workflow"
-              >
-          }
+          onDone: Machine.transition({
+            target: (to) => to.full.disabled(),
+            resolve: ({ target }) => ({ ...target(new Disabled({})), path: "workflow" }) as any
+          })
         }
       })
       const doneExit = yield* Effect.exit(Machine.planInitial(unsafeDone))
 
       assert.strictEqual(doneExit._tag, "Failure")
       if (doneExit._tag === "Failure") {
-        assert.include(Cause.pretty(doneExit.cause), "on \"done\" returned target \"disabled\"")
+        assert.include(Cause.pretty(doneExit.cause), "selected \"disabled\" but constructed \"workflow\"")
       }
     }))
-
-  it("rejects a declared path that is not a machine state", () => {
-    assert.throws(
-      () =>
-        machine.handle({
-          application: {
-            states: {
-              workflow: {
-                states: {
-                  idle: {
-                    on: {
-                      Start: {
-                        targets: ["missing"] as any,
-                        transition: ({ target }) => target.none()
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }),
-      /declares unknown target "missing"/
-    )
-    assert.throws(
-      () =>
-        lifecycleMachine.handle({
-          idle: {
-            always: {
-              targets: ["missing"],
-              transition: ({ target }: any) => target.none()
-            }
-          }
-        } as any),
-      /on "always" declares unknown target "missing"/
-    )
-    assert.throws(
-      () =>
-        lifecycleMachine.handle({
-          workflow: {
-            onDone: {
-              targets: ["missing"],
-              transition: ({ target }: any) => target.none()
-            }
-          }
-        } as any),
-      /on "done" declares unknown target "missing"/
-    )
-  })
 })

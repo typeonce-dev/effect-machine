@@ -2,6 +2,30 @@ import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { makeEffectMachineBenchmarkApi } from "../perf/runtime/effect-machine-compatibility.mjs"
 
+test("adapts static transition definitions only when the new capability is present", () => {
+  const calls = []
+  const Machine = {
+    logic: () => undefined,
+    transition: (definition) => {
+      calls.push(definition)
+      return { static: definition }
+    },
+    invoke: (config) => config,
+    events: (...schemas) => schemas
+  }
+  const api = makeEffectMachineBenchmarkApi(Machine)
+  const definition = { target: "selected", resolve: "resolved" }
+  const legacy = () => undefined
+
+  assert.equal(api.initial(definition, legacy), definition)
+  assert.deepEqual(api.transition(definition, legacy), { static: definition })
+  assert.equal(typeof api.targetless.static.target, "function")
+  assert.equal(typeof api.targetless.static.resolve, "function")
+  assert.equal(api.targetless.static.target({ none: () => "none" }), "none")
+  assert.equal(api.targetless.static.resolve(), undefined)
+  assert.equal(calls.length, 2)
+})
+
 test("uses the current child invocation capability when available", () => {
   const calls = []
   const noTarget = Symbol("no-target")
@@ -33,6 +57,9 @@ test("adapts lifecycle names for the legacy child invocation capability", () => 
   const onSnapshot = () => undefined
   const Machine = {
     event: () => undefined,
+    transition: (_initial, _transition) => {
+      throw new Error("legacy process constructor must not capture state transitions")
+    },
     invokeMachine: (config) => {
       calls.push(config)
       return { api: "legacy", config }
@@ -40,6 +67,8 @@ test("adapts lifecycle names for the legacy child invocation capability", () => 
   }
 
   assert.deepEqual(makeEffectMachineBenchmarkApi(Machine).events("Increment", "Finish"), ["Increment", "Finish"])
+  assert.equal(makeEffectMachineBenchmarkApi(Machine).initial("static", onDone), onDone)
+  assert.equal(makeEffectMachineBenchmarkApi(Machine).transition("static", onDone), onDone)
 
   assert.deepEqual(
     makeEffectMachineBenchmarkApi(Machine).invokeChild({

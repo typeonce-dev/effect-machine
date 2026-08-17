@@ -17,16 +17,25 @@ const States = Machine.defineStates(State.cases)
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Event.cases.Start, Event.cases.Finish),
-  initial: () => States.initial.Idle(State.cases.Idle.make({}))
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target(State.cases.Idle.make({}))
+  }
 }).handle({
   Idle: {
     on: {
-      Start: ({ target }) => target.full.Running(State.cases.Running.make({}))
+      Start: Machine.transition({
+        target: (to) => to.full.Running(),
+        resolve: ({ target }) => target(State.cases.Running.make({}))
+      })
     }
   },
   Running: {
     on: {
-      Finish: ({ event, target }) => target.full.Done(State.cases.Done.make({ value: event.value }))
+      Finish: Machine.transition({
+        target: (to) => to.full.Done(),
+        resolve: ({ event, target }) => target(State.cases.Done.make({ value: event.value }))
+      })
     }
   },
   Done: {}

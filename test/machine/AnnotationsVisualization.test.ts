@@ -33,7 +33,10 @@ const States = Machine.defineStates({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: () => States.initial.Workflow(new Workflow({}), (workflow) => workflow.Idle(new Idle({})))
+  initial: {
+    target: (to) => to.Workflow.initial(),
+    resolve: ({ target }) => target(new Workflow({}), (workflow) => workflow.Idle(new Idle({})))
+  }
 })
 
 const renderMachine = makeTextRenderer<
@@ -47,7 +50,7 @@ describe("Machine annotation visualization", () => {
       renderMachine(machine),
       [
         "Machine",
-        "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)",
+        "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
         "",
         "└─ ○ Document workflow (Workflow) [compound, initial: Idle]",
         "   ├─ ○ Waiting for edits (Idle)",

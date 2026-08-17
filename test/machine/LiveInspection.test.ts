@@ -19,14 +19,20 @@ const machine = Machine.make({
   states: states.states,
   events: Events,
   emittedEvents: Emissions,
-  initial: () => states.initial.Idle(new Idle({}))
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target(new Idle({}))
+  }
 }).handle({
   Idle: {
     on: {
-      Increment: ({ event, target }, enqueue) => {
-        enqueue.emit(Emissions.Notice({ value: event.by }))
-        return target.full.Idle(new Idle({}))
-      }
+      Increment: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ event, target }, enqueue) => {
+          enqueue.emit(Emissions.Notice({ value: event.by }))
+          return target(new Idle({}))
+        }
+      })
     }
   }
 })
@@ -99,8 +105,11 @@ describe("Machine live inspection", () => {
       const invalid = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () => {
-          throw new Error("boom")
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: () => {
+            throw new Error("boom")
+          }
         }
       }).handle({ Idle: {} })
       const prepared = yield* Machine.prepare(invalid)
@@ -124,7 +133,10 @@ describe("Machine live inspection", () => {
         id: "activity-root",
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Idle(new Idle({}))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
       }).handle({
         Idle: {
           invoke: Machine.invoke({ id: "worker", effect: () => Effect.never })
@@ -183,14 +195,20 @@ describe("Machine live inspection", () => {
         states: childStates.states,
         events: ChildEvents,
         parentEvents: ParentEvents,
-        initial: () => childStates.initial.ChildIdle(new ChildIdle({}))
+        initial: {
+          target: (to) => to.ChildIdle(),
+          resolve: ({ target }) => target(new ChildIdle({}))
+        }
       }).handle({
         ChildIdle: {
           on: {
-            Trigger: ({ parent, target }, enqueue) => {
-              if (parent !== undefined) enqueue.sendTo(parent, ParentEvents.ChildReady())
-              return target.none()
-            }
+            Trigger: Machine.transition({
+              target: (to) => to.none(),
+              resolve: ({ parent }, enqueue) => {
+                if (parent !== undefined) enqueue.sendTo(parent, ParentEvents.ChildReady())
+                return undefined
+              }
+            })
           }
         }
       })
@@ -203,12 +221,18 @@ describe("Machine live inspection", () => {
         id: "parent-machine",
         states: parentStates.states,
         events: Machine.events(ParentEvents),
-        initial: () => parentStates.initial.ParentIdle(new ParentIdle({}))
+        initial: {
+          target: (to) => to.ParentIdle(),
+          resolve: ({ target }) => target(new ParentIdle({}))
+        }
       }).handle({
         ParentIdle: {
           invoke: Machine.invoke({ child: Child }),
           on: {
-            ChildReady: ({ target }) => target.full.ParentDone(new ParentDone({}))
+            ChildReady: Machine.transition({
+              target: (to) => to.full.ParentDone(),
+              resolve: ({ target }) => target(new ParentDone({}))
+            })
           }
         },
         ParentDone: {}

@@ -36,11 +36,6 @@ class Online extends Schema.TaggedClass<Online>("Online")("Online", {}) {}
 
 class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 
-const MachineInitial = Machine.defineStates({
-  Count,
-  Done: { schema: Done, type: "final" },
-  ValueRead: { schema: ValueRead, type: "final" }
-}).initial
 const CounterStates = Machine.defineStates({
   Count,
   Done: { schema: Done, type: "final" }
@@ -73,11 +68,17 @@ const makeCounterMachine = () =>
   Machine.make({
     states: CounterStates.states,
     events: Machine.events(Finish),
-    initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
+    initial: {
+      target: (to) => to.Count(),
+      resolve: ({ target }) => target(new Count({ value: 0 }))
+    }
   }).handle({
     Count: {
       on: {
-        Finish: ({ state, event }) => MachineInitial.Count(new Count({ value: state.value + event.by }))
+        Finish: Machine.transition({
+          target: (to) => to.full.Count(),
+          resolve: ({ state, event, target }) => target(new Count({ value: state.value + event.by }))
+        })
       }
     },
     Done: {}
@@ -110,7 +111,10 @@ describe("AtomMachine", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: () => states.initial.Idle(new Idle({}))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -140,9 +144,12 @@ describe("AtomMachine", () => {
       const machine = Machine.make({
         states: CounterStates.states,
         events: Machine.events(Finish),
-        initial: () => {
-          initialCalls += 1
-          return CounterStates.initial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => {
+            initialCalls += 1
+            return target(new Count({ value: 0 }))
+          }
         }
       }).handle({
         Count: {
@@ -155,12 +162,15 @@ describe("AtomMachine", () => {
             })
           }),
           on: {
-            Finish: ({ event, state, target }) => target.full.Count(new Count({ value: state.value + event.by }))
+            Finish: Machine.transition({
+              target: (to) => to.full.Count(),
+              resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.by }))
+            })
           }
         },
         Done: {}
       })
-      const bridge = AtomMachine.resume(machine, CounterStates.initial.Count(new Count({ value: 5 })))
+      const bridge = AtomMachine.resume(machine, { path: "Count" as const, value: new Count({ value: 5 }) })
       const firstRegistry = AtomRegistry.make()
       const secondRegistry = AtomRegistry.make()
 
@@ -171,7 +181,7 @@ describe("AtomMachine", () => {
       assert.strictEqual(first, firstAgain)
       assert.notStrictEqual(first, second)
       assert.deepStrictEqual(yield* AtomRegistry.getResult(firstRegistry, bridge.state), {
-        path: "Count",
+        path: "Count" as const,
         value: new Count({ value: 5 })
       })
       assert.strictEqual(initialCalls, 0)
@@ -198,17 +208,32 @@ describe("AtomMachine", () => {
       const parent = Machine.make({
         states: { Count, ValueRead },
         events: Machine.events(Finish, ReadValue),
-        initial: () => MachineInitial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 0 }))
+        }
       }).handle({
         Count: {
           on: {
-            Finish: () => MachineInitial.ValueRead(new ValueRead({ value: "active" }))
+            Finish: Machine.transition({
+              target: (to) => to.full.ValueRead(),
+              resolve: ({ target }) => target(new ValueRead({ value: "active" }))
+            })
           }
         },
         ValueRead: {
-          invoke: Machine.invoke({ child: Child, onDone: ({ target }) => target.none() }),
+          invoke: Machine.invoke({
+            child: Child,
+            onDone: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
+          }),
           on: {
-            ReadValue: () => MachineInitial.Count(new Count({ value: 0 }))
+            ReadValue: Machine.transition({
+              target: (to) => to.full.Count(),
+              resolve: ({ target }) => target(new Count({ value: 0 }))
+            })
           }
         }
       })
@@ -257,7 +282,7 @@ describe("AtomMachine", () => {
       const selectedInitialSnapshot = yield* waitForResult(registry, selectedCountSnapshot, Option.isSome)
       assert(Option.isSome(selectedInitialSnapshot))
       assert.deepStrictEqual(selectedInitialSnapshot.value, {
-        path: "Count",
+        path: "Count" as const,
         value: new Count({ value: 0 })
       })
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), true)
@@ -302,7 +327,7 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(initial, {
         status: "active",
         state: {
-          path: "Count",
+          path: "Count" as const,
           value: new Count({ value: 0 })
         }
       })
@@ -311,7 +336,7 @@ describe("AtomMachine", () => {
 
       const state = yield* waitForResult(registry, bridge.state, (state) => state.value.value === 2)
       assert.deepStrictEqual(state, {
-        path: "Count",
+        path: "Count" as const,
         value: new Count({ value: 2 })
       })
     })))
@@ -380,11 +405,14 @@ describe("AtomMachine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () =>
-          states.initial.Ready(new Ready({}), (ready) =>
-            ready
-              .editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
-              .network(new Network({}), (network) => network.Online(new Online({}))))
+        initial: {
+          target: (to) => to.Ready.initial(),
+          resolve: ({ target }) =>
+            target(new Ready({}), (ready) =>
+              ready
+                .editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
+                .network(new Network({}), (network) => network.Online(new Online({}))))
+        }
       }).handle({
         Ready: {
           states: {
@@ -466,7 +494,7 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(snapshot, {
         status: "stopped",
         state: {
-          path: "Count",
+          path: "Count" as const,
           value: new Count({ value: 0 })
         }
       })
@@ -513,11 +541,17 @@ describe("AtomMachine", () => {
           }
         },
         events: Machine.events(Finish),
-        initial: () => MachineInitial.Count(new Count({ value: 1 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 1 }))
+        }
       }).handle({
         Count: {
           on: {
-            Finish: ({ state, event }) => MachineInitial.Done(new Done({ value: state.value + event.by }))
+            Finish: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ state, event, target }) => target(new Done({ value: state.value + event.by }))
+            })
           }
         },
         Done: {
@@ -533,9 +567,9 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(snapshot, {
         status: "done",
         state: {
-          path: "Done",
+          path: "Done" as const,
           value: new Done({ value: 4 }),
-          completed: [{ path: "Done", output: 4 }]
+          completed: [{ path: "Done" as const, output: 4 }]
         },
         output: 4
       })

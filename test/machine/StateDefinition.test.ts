@@ -37,9 +37,7 @@ const makeFromUnknownStates = (states: unknown): unknown =>
   Machine.make({
     states: states as Machine.Machine.StateSchemas,
     events: Machine.events(),
-    initial: (): never => {
-      throw new Error("unreachable")
-    }
+    initial: {} as any
   })
 
 describe("exact state-definition runtime validation", () => {
@@ -66,7 +64,10 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: () => states.initial.Idle.from()
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target.from()
+      }
     })
 
     const nodes = Machine.stateNodes(machine)
@@ -89,16 +90,17 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: () => states.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target(new Idle({}))
+      }
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Idle")
 
     const prototypeNamed = Machine.defineStates({ constructor: Idle, toString: Done })
-    assert.deepStrictEqual(prototypeNamed.initial.constructor(new Idle({})), {
-      path: "constructor",
-      value: new Idle({})
-    })
+    assert.strictEqual(prototypeNamed.states.constructor, Idle)
+    assert.strictEqual(prototypeNamed.states.toString, Done)
   })
 
   it("accepts an opaque declaration whose Type satisfies TaggedSchema", () => {
@@ -106,7 +108,10 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: () => states.initial.Opaque({ _tag: "OpaqueState", value: 1 })
+      initial: {
+        target: (to) => to.Opaque(),
+        resolve: ({ target }) => target({ _tag: "OpaqueState", value: 1 })
+      }
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Opaque")

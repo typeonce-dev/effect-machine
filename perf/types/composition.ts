@@ -5,7 +5,6 @@ import {
   Editing,
   Editor,
   EditorDone,
-  initialWorkspace,
   machine,
   States,
   Sync,
@@ -31,7 +30,15 @@ const handled = machine.handle({
       Workspace: {
         history: {
           recent: {
-            default: () => initialWorkspace()
+            default: ({ target }) =>
+              target.App(App.make({}), (app) =>
+                app.Workspace(
+                  Workspace.make({}),
+                  (workspace) =>
+                    workspace
+                      .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
+                      .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
+                ))
           }
         },
         output: ({ outputs }) => ({
@@ -60,10 +67,10 @@ const handled = machine.handle({
         }
       },
       Route: {
-        choice: {
-          targets: ["App"],
-          transition: ({ target }) =>
-            target.full.App(App.make({}), (app) =>
+        choice: Machine.transition({
+          target: (to) => to.full.App(),
+          resolve: ({ target }) =>
+            target(App.make({}), (app) =>
               app.Workspace(
                 Workspace.make({}),
                 (workspace) =>
@@ -71,7 +78,7 @@ const handled = machine.handle({
                     .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
                     .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
               ))
-        }
+        })
       }
     }
   }

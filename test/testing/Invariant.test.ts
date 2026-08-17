@@ -22,14 +22,21 @@ const makeAccountMachine = (withdraw: (balance: number, amount: number) => numbe
   Machine.make({
     states: States.states,
     events: Machine.events(Withdraw, Deposit),
-    initial: () => States.initial.account(new Account({ balance: 10 }))
+    initial: {
+      target: (to) => to.account(),
+      resolve: ({ target }) => target(new Account({ balance: 10 }))
+    }
   }).handle({
     account: {
       on: {
-        Withdraw: ({ event, state, target }) =>
-          target.full.account(new Account({ balance: withdraw(state.balance, event.amount) })),
-        Deposit: ({ event, state, target }) =>
-          target.full.account(new Account({ balance: state.balance + event.amount }))
+        Withdraw: Machine.transition({
+          target: (to) => to.full.account(),
+          resolve: ({ event, state, target }) => target(new Account({ balance: withdraw(state.balance, event.amount) }))
+        }),
+        Deposit: Machine.transition({
+          target: (to) => to.full.account(),
+          resolve: ({ event, state, target }) => target(new Account({ balance: state.balance + event.amount }))
+        })
       }
     }
   })

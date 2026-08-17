@@ -15,12 +15,21 @@ describe("MachineTest exploration", () => {
     events: Machine.events(Increment),
     internalEvents: Machine.internalEvents(Internal),
     input: Input,
-    initial: ({ seed }) => States.initial.counter(new Counter({ count: seed }))
+    initial: {
+      target: (to) => to.counter(),
+      resolve: ({ input, target }) => target(new Counter({ count: input.seed }))
+    }
   }).handle({
     counter: {
       on: {
-        Increment: ({ target }) => target.none(),
-        Internal: ({ target }) => target.none()
+        Increment: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        }),
+        Internal: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
       }
     }
   })
@@ -66,7 +75,10 @@ describe("MachineTest exploration", () => {
     const noInput = Machine.make({
       states: States.states,
       events: Machine.events(Increment),
-      initial: () => States.initial.counter(new Counter({ count: 0 }))
+      initial: {
+        target: (to) => to.counter(),
+        resolve: ({ target }) => (target(new Counter({ count: 0 })))
+      }
     }).handle({ counter: {} })
     type Options = MachineTest.ExploreOptions<typeof noInput, string>
     expect<Options["input"]>().type.toBe<undefined>()

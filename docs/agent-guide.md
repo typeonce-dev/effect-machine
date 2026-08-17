@@ -148,8 +148,10 @@ const States = Machine.defineStates({
   }
 })
 
-States.initial.Idle.from()
-States.initial.Form.from((form) => form.Editing.from())
+initial: {
+  target: (to) => to.Form.initial(),
+  resolve: ({ target }) => target((form) => form.Editing.from())
+}
 ```
 
 Schema-less states have the same control semantics as schema-backed states:
@@ -159,10 +161,13 @@ in snapshots. They do not have a state value:
 ```ts
 Idle: {
   on: {
-    Start: ({ state, target }) => {
-      // state: undefined
-      return target.full.Form.from((form) => form.Editing.from())
-    }
+    Start: Machine.transition({
+      target: (to) => to.full.Form.initial(),
+      resolve: ({ state, target }) => {
+        // state: undefined
+        return target.from((form) => form.Editing.from())
+      }
+    })
   }
 }
 
@@ -243,7 +248,10 @@ const States = Machine.defineStates({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: () => States.initial.Done.from()
+  initial: {
+    target: (to) => to.Done(),
+    resolve: ({ target }) => target.from()
+  }
 }).handle({
   Done: {
     output: () => "done"
@@ -260,7 +268,10 @@ with `.initial`. This is available on top-level state methods under
 `target.branch`; atomic and final state methods do not expose it:
 
 ```ts
-Open: ({ target }) => target.full.opened.initial.from({ teamId: "team-1" })
+Open: Machine.transition({
+  target: (to) => to.full.opened.initial(),
+  resolve: ({ target }) => target.from({ teamId: "team-1" })
+})
 ```
 
 The selected state's own value is passed directly to `initial(value)` or
@@ -337,7 +348,10 @@ checkout: {
 Target it without a value:
 
 ```ts
-Resume: ({ target }) => target.history.checkout.exact()
+Resume: Machine.transition({
+  target: (to) => to.history.checkout.exact(),
+  resolve: ({ target }) => target()
+})
 ```
 
 Deep history restores the complete remembered subtree and its decoded values.
@@ -400,11 +414,11 @@ sets. A `target.full` result with the same active paths can update values withou
 exiting shared states. To force the source to exit and enter again:
 
 ```ts
-Refresh: {
+Refresh: Machine.transition({
+  target: (to) => to.full.Ready(),
   reenter: true,
-  transition: ({ state, target }) =>
-    target.full.Ready.from({ value: state.value })
-}
+  resolve: ({ state, target }) => target.from({ value: state.value })
+})
 ```
 
 Do not use `target.full` merely because it is easiest to discover. Prefer the
@@ -413,8 +427,8 @@ narrowest builder that expresses the intended configuration change.
 Every state builder method has two construction forms:
 
 ```ts
-target.local.Ready(decodedReady)
-target.local.Ready.from({ value: event.value })
+target(decodedReady)
+target.from({ value: event.value })
 ```
 
 The direct call accepts the schema's decoded `Type`. `.from` accepts its
@@ -429,8 +443,8 @@ builders.
 If `{}` satisfies the schema's constructor input, omit it:
 
 ```ts
-target.local.Idle.from()
-target.local.Flow.from((flow) => flow.Idle.from())
+target.from()
+target.from((flow) => flow.Idle.from())
 ```
 
 This shorthand also applies to schemas whose constructor fields are all
@@ -481,10 +495,21 @@ Event, `always`, and `onDone` transition contexts include a fully typed
 microstep, before any selected transition is applied:
 
 ```ts
-BufferReady: ({ snapshot, target }) =>
-  States.matches(snapshot, "Player.Network.Online")
-    ? target.local.Playing.from()
-    : target.none()
+BufferReady: Machine.transition({
+  cases: [{
+    title: "online",
+    when: ({ snapshot }) =>
+      States.matches(snapshot, "Player.Network.Online")
+        ? Option.some(undefined)
+        : Option.none(),
+    target: (to) => to.local.Playing(),
+    resolve: ({ target }) => target.from()
+  }],
+  otherwise: {
+    target: (to) => to.none(),
+    resolve: () => undefined
+  }
+})
 ```
 
 Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
@@ -519,10 +544,13 @@ When sibling state payloads share fields, destructure away the source
 discriminator and construct the destination through its target builder:
 
 ```ts
-Submit: ({ state, target }) => {
-  const { _tag: _, ...fields } = state
-  return target.local.Saving.from({ ...fields, attempt: 1 })
-}
+Submit: Machine.transition({
+  target: (to) => to.local.Saving(),
+  resolve: ({ state, target }) => {
+    const { _tag: _, ...fields } = state
+    return target.from({ ...fields, attempt: 1 })
+  }
+})
 ```
 
 The target schema remains responsible for defaults, transforms, refinements,
@@ -531,30 +559,44 @@ rather than copying it through every phase.
 
 ## Planning, actions, raised events, and emissions
 
-A transition returns a target synchronously:
+A transition declares every possible branch and resolves the selected target
+synchronously:
 
 ```ts
-Submit: ({ state, target }) =>
-  state.valid ? target.local.Saving.from({ draft: state.draft }) : target.none()
+Submit: Machine.transition({
+  cases: [{
+    title: "valid",
+    when: ({ state }) => state.valid ? Option.some(state.draft) : Option.none(),
+    target: (to) => to.local.Saving(),
+    resolve: ({ match, target }) => target.from({ draft: match })
+  }],
+  otherwise: {
+    target: (to) => to.none(),
+    resolve: () => undefined
+  }
+})
 ```
 
-Every installed event, `always`, `onDone`, and invoke lifecycle handler must
-return a concrete target or `target.none()`. An absent event handler means the
-event is ignored. Returning `target.none()` means it was handled without a
-destination, so queued commands, raised events, and emitted events are still
-retained. It remains valid when a transition declares `targets`: those paths
-are an upper bound on concrete destinations, not an exhaustive result set.
+Every installed event, `always`, `onDone`, choice, and invoke lifecycle handler
+must use `Machine.transition`. Each direct branch declares one `target`; a
+conditional transition declares ordered `cases` and a required `otherwise`.
+`when` returns `Option.some(match)` to select a case and infer `match` in its
+resolver. Selecting `to.none()` handles the transition without a destination,
+while retaining queued commands, raised events, and emitted events.
 
-`reenter: true` remains meaningful with `target.none()`: the source exits and
+`reenter: true` remains meaningful with `to.none()`: the source exits and
 enters again while its logical configuration is retained.
 
 Closed statechart and machine operations use `enqueue`:
 
 ```ts
-Submit: ({ target }, enqueue) => {
-  enqueue.emit(Emissions.SaveRequested())
-  return target.local.Saving.from()
-}
+Submit: Machine.transition({
+  target: (to) => to.local.Saving(),
+  resolve: ({ target }, enqueue) => {
+    enqueue.emit(Emissions.SaveRequested())
+    return target.from()
+  }
+})
 ```
 
 Declare emission constructors separately from machine inputs:
@@ -648,11 +690,15 @@ const child = Machine.make({
 }).handle({
   Working: {
     on: {
-      Finish: ({ parent }, enqueue) => {
-        if (parent !== undefined) {
-          enqueue.sendTo(parent, ParentEvents.ChildFinished())
+      Finish: Machine.transition({
+        target: (to) => to.none(),
+        resolve: ({ parent }, enqueue) => {
+          if (parent !== undefined) {
+            enqueue.sendTo(parent, ParentEvents.ChildFinished())
+          }
+          return undefined
         }
-      }
+      })
     }
   }
 })
@@ -718,7 +764,10 @@ const definition = Machine.make({
   states: States.states,
   events: Events,
   internalEvents: InternalEvents,
-  initial: () => States.initial.Idle.from()
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from()
+  }
 })
 ```
 
@@ -774,9 +823,14 @@ receive the typed Effect channels and can transition directly:
 invoke: Machine.invoke({
   id: "save",
   effect: () => SaveService.save(draft),
-  onDone: ({ output, target }) => target.full.Saved({ entry: output }),
-  onFailure: ({ error, target }) =>
-    target.full.SaveFailed({ message: error.message })
+  onDone: Machine.transition({
+    target: (to) => to.full.Saved(),
+    resolve: ({ output, target }) => target.from({ entry: output })
+  }),
+  onFailure: Machine.transition({
+    target: (to) => to.full.SaveFailed(),
+    resolve: ({ error, target }) => target.from({ message: error.message })
+  })
 })
 ```
 
@@ -799,8 +853,14 @@ error, and service channels together. No return annotation is needed:
 invoke: Machine.invoke({
   id: "load",
   effect: ({ state }) => LoadService.load(state.userId),
-  onDone: ({ output, target }) => target.full.Loaded({ user: output }),
-  onFailure: ({ error, target }) => target.full.LoadFailed({ error })
+  onDone: Machine.transition({
+    target: (to) => to.full.Loaded(),
+    resolve: ({ output, target }) => target.from({ user: output })
+  }),
+  onFailure: Machine.transition({
+    target: (to) => to.full.LoadFailed(),
+    resolve: ({ error, target }) => target.from({ error })
+  })
 })
 ```
 
@@ -824,8 +884,14 @@ const machine = definition.handle({
         parent === undefined
           ? Effect.void
           : parent.send(ParentEvents.SaveStarted()),
-      onDone: ({ target }) => target.none(),
-      onFailure: ({ target }) => target.none()
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      onFailure: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
     })
   }
 })
@@ -840,7 +906,10 @@ A cancellable timer uses the same object:
 invoke: Machine.invoke({
   id: "clear-status",
   after: "3 seconds",
-  onDone: ({ target }) => target.full.Clear()
+  onDone: Machine.transition({
+    target: (to) => to.full.Clear(),
+    resolve: ({ target }) => target()
+  })
 })
 ```
 
@@ -867,7 +936,10 @@ Invoke it from its owning state:
 invoke: Machine.invoke({
   child: Editor,
   input: editorInput,
-  onDone: ({ output, target }) => target.full.EditorDone({ output })
+  onDone: Machine.transition({
+    target: (to) => to.full.EditorDone(),
+    resolve: ({ output, target }) => target.from({ output })
+  })
 })
 ```
 
@@ -1182,12 +1254,15 @@ reference model when correctness of the expected behavior matters.
 
 ## Common compiler errors
 
-### `initial` is not callable
+### `initial` requires a static target
 
-Wrap the initial builder result:
+Select the initial root separately from constructing its value:
 
 ```ts
-initial: () => States.initial.Idle.from()
+initial: {
+  target: (to) => to.Idle(),
+  resolve: ({ target }) => target.from()
+}
 ```
 
 ### Invoked child expects events not accepted by the parent

@@ -28,6 +28,51 @@ const snapshotAtPath = (snapshot: unknown, path: string): unknown => {
 }
 
 describe("MachineTest finite-model reference interpreter", () => {
+  it.effect("compiles transitions to an inactive compound's initial choice", () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "root",
+          value: 0,
+          initial: "idle",
+          states: [
+            { _tag: "Atomic", key: "idle", value: 1 },
+            {
+              _tag: "Compound",
+              key: "destination",
+              value: 2,
+              initial: "route",
+              states: [
+                { _tag: "Atomic", key: "ready", value: 3 },
+                {
+                  _tag: "Choice",
+                  key: "route",
+                  targets: ["root.destination.ready"],
+                  selected: "root.destination.ready"
+                }
+              ]
+            }
+          ]
+        }],
+        initial: "root",
+        events: ["Start"],
+        transitions: [{
+          source: "root.idle",
+          trigger: { type: "event", event: "Start" },
+          target: "root.destination.route",
+          reenter: false
+        }]
+      }
+
+      const reference = MachineTest.interpretModel(model, ["Start"])
+      assert.deepStrictEqual(reference.final.activePaths, ["root", "root.destination", "root.destination.ready"])
+
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [event("Start")] })
+      yield* MachineTest.verifyModel(model, trace)
+    }))
+
   it.effect("stabilizes acyclic always and completion transitions in semantic order", () =>
     Effect.gen(function*() {
       const model: MachineTest.FiniteModel = {
@@ -488,8 +533,8 @@ describe("MachineTest finite-model reference interpreter", () => {
       ])
       assert.strictEqual(reference.steps[0]!.done, false)
       assert.deepStrictEqual(afterLeft.completions, [
-        { path: "workflow.left.done", output: "left:done" },
-        { path: "workflow.left", output: "left:done" }
+        { path: "workflow.left.done" as const, output: "left:done" },
+        { path: "workflow.left" as const, output: "left:done" }
       ])
 
       const afterRight = reference.steps[1]!.after
@@ -940,11 +985,14 @@ describe("MachineTest finite-model reference interpreter", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Local, Exit),
-        initial: () =>
-          states.initial.root({ _tag: "Root", version: 0 }, (regions) =>
-            regions
-              .left({ _tag: "Left", version: 0 }, (left) => left.idle({ _tag: "LeftIdle", version: 0 }))
-              .right({ _tag: "Right", version: 0 }, (right) => right.idle({ _tag: "RightIdle", version: 0 })))
+        initial: {
+          target: (to) => to.root.initial(),
+          resolve: ({ target }) =>
+            target({ _tag: "Root", version: 0 }, (regions) =>
+              regions
+                .left({ _tag: "Left", version: 0 }, (left) => left.idle({ _tag: "LeftIdle", version: 0 }))
+                .right({ _tag: "Right", version: 0 }, (right) => right.idle({ _tag: "RightIdle", version: 0 })))
+        }
       }).handle({
         root: {
           states: {
@@ -952,8 +1000,14 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: ({ target }) => target.local.done({ _tag: "LeftDone", version: 1 }),
-                    Exit: ({ target }) => target.full.outside({ _tag: "Outside", version: 1 })
+                    Local: Machine.transition({
+                      target: (to) => to.local.done(),
+                      resolve: ({ target }) => target({ _tag: "LeftDone", version: 1 })
+                    }),
+                    Exit: Machine.transition({
+                      target: (to) => to.full.outside(),
+                      resolve: ({ target }) => target({ _tag: "Outside", version: 1 })
+                    })
                   }
                 }
               }
@@ -962,8 +1016,14 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: ({ target }) => target.local.idle({ _tag: "RightIdle", version: 1 }),
-                    Exit: ({ target }) => target.local.idle({ _tag: "RightIdle", version: 2 })
+                    Local: Machine.transition({
+                      target: (to) => to.local.idle(),
+                      resolve: ({ target }) => target({ _tag: "RightIdle", version: 1 })
+                    }),
+                    Exit: Machine.transition({
+                      target: (to) => to.local.idle(),
+                      resolve: ({ target }) => target({ _tag: "RightIdle", version: 2 })
+                    })
                   }
                 }
               }
@@ -1050,7 +1110,7 @@ describe("MachineTest finite-model reference interpreter", () => {
 
       const reference = MachineTest.interpretModel(model, ["After"])
       assert.deepStrictEqual(reference.initial.startingState.completions, [])
-      assert.deepStrictEqual(reference.initial.state.completions, [{ path: "finished", output: "complete" }])
+      assert.deepStrictEqual(reference.initial.state.completions, [{ path: "finished" as const, output: "complete" }])
       assert.strictEqual(reference.initial.done, true)
       assert.strictEqual(reference.initial.output, "complete")
       assert.strictEqual(reference.steps[0]?.done, true)
@@ -1079,8 +1139,8 @@ describe("MachineTest finite-model reference interpreter", () => {
 
       const reference = MachineTest.interpretModel(model, [])
       assert.deepStrictEqual(reference.initial.state.completions, [
-        { path: "job.done", output: "result" },
-        { path: "job", output: "result" }
+        { path: "job.done" as const, output: "result" },
+        { path: "job" as const, output: "result" }
       ])
       assert.strictEqual(reference.initial.state.status, "done")
       assert.strictEqual(reference.initial.output, "result")
@@ -1124,8 +1184,8 @@ describe("MachineTest finite-model reference interpreter", () => {
         [{ type: "done" }]
       )
       assert.deepStrictEqual(reference.final.completions, [
-        { path: "job.done", output: "job:done" },
-        { path: "job", output: "job:done" }
+        { path: "job.done" as const, output: "job:done" },
+        { path: "job" as const, output: "job:done" }
       ])
       assert.strictEqual(reference.final.status, "done")
 
@@ -1278,10 +1338,10 @@ describe("MachineTest finite-model reference interpreter", () => {
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [] })
       const right = {
-        path: "root",
+        path: "root" as const,
         value: { _tag: "State_root", value: 0 },
         state: {
-          path: "root.right",
+          path: "root.right" as const,
           value: { _tag: "State_root_right", value: 2 }
         }
       }

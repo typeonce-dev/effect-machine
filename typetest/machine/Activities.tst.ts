@@ -10,13 +10,30 @@ const States = Machine.defineStates({ Loading, Dynamic })
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(TimedOut),
-  initial: () => States.initial.Loading(new Loading({}))
+  initial: {
+    target: (to) => to.Loading(),
+    resolve: ({ target }) => (target(new Loading({})))
+  }
 }).handle({
   Loading: {
-    invoke: Machine.invoke({ id: "timeout", after: "1 second", onDone: ({ target }) => target.none() })
+    invoke: Machine.invoke({
+      id: "timeout",
+      after: "1 second",
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
+    })
   },
   Dynamic: {
-    invoke: Machine.invoke({ id: "dynamic", after: () => "2 seconds" as const, onDone: ({ target }) => target.none() })
+    invoke: Machine.invoke({
+      id: "dynamic",
+      after: () => "2 seconds" as const,
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
+    })
   }
 })
 

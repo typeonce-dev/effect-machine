@@ -87,30 +87,28 @@ const States = Machine.defineStates({
   }
 })
 
-const initial = States.initial.n0(
-  new NodeState({ level: 0 }),
-  (n0) =>
-    n0.n1(
-      new NodeState({ level: 1 }),
-      (n1) =>
-        n1.n2(new NodeState({ level: 2 }), (n2) =>
-          n2.n3(new NodeState({ level: 3 }), (n3) =>
-            n3.n4(new NodeState({ level: 4 }), (n4) =>
-              n4.n5(new NodeState({ level: 5 }), (n5) =>
-                n5.n6(new NodeState({ level: 6 }), (n6) =>
-                  n6.n7(new NodeState({ level: 7 }), (n7) =>
-                    n7.n8(new NodeState({ level: 8 }), (n8) =>
-                      n8.n9(new NodeState({ level: 9 }), (n9) =>
-                        n9.n10(new NodeState({ level: 10 }), (n10) =>
-                          n10.n11(new NodeState({ level: 11 }), (n11) =>
-                            n11.idle(new DeepIdle({ value: "initial" }))))))))))))
-    )
-)
+const initial = (() => {
+  let state: any = {
+    path: "n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.idle",
+    value: new DeepIdle({ value: "initial" })
+  }
+  for (let level = 11; level >= 0; level--) {
+    state = {
+      path: Array.from({ length: level + 1 }, (_, index) => `n${index}`).join("."),
+      value: new NodeState({ level }),
+      state
+    }
+  }
+  return state as Machine.Machine.Snapshot<typeof States.states>
+})()
 
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Advance),
-  initial: () => initial
+  initial: {
+    target: (to) => to.n0.initial(),
+    resolve: () => initial
+  }
 }).handle({
   n0: {
     states: {
@@ -138,8 +136,11 @@ const machine = Machine.make({
                                                 states: {
                                                   idle: {
                                                     on: {
-                                                      Advance: ({ event, target }) =>
-                                                        target.local.done(new DeepDone({ value: event.value }))
+                                                      Advance: Machine.transition({
+                                                        target: (to) => to.local.done(),
+                                                        resolve: ({ event, target }) =>
+                                                          target(new DeepDone({ value: event.value }))
+                                                      })
                                                     }
                                                   },
                                                   done: {}

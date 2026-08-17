@@ -33,7 +33,10 @@ describe("Machine event constructor collections", () => {
     states: states.states,
     events,
     internalEvents,
-    initial: () => states.initial.Idle.from()
+    initial: {
+      target: (to) => to.Idle(),
+      resolve: ({ target }) => (target.from())
+    }
   })
 
   it("derives public constructors and their schema make inputs", () => {
@@ -74,13 +77,17 @@ describe("Machine event constructor collections", () => {
     expect(Machine.make).type.not.toBeCallableWith({
       states: states.states,
       events: internalEvents,
-      initial: () => states.initial.Idle.from()
+      initial: {
+        target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
+      }
     })
     expect(Machine.make).type.not.toBeCallableWith({
       states: states.states,
       events,
       internalEvents: events,
-      initial: () => states.initial.Idle.from()
+      initial: {
+        target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
+      }
     })
 
     const Reset = Schema.TaggedStruct("Reset", {})
@@ -93,7 +100,10 @@ describe("Machine event constructor collections", () => {
     const openMachine = Machine.make({
       states: states.states,
       events: openEvents,
-      initial: () => states.initial.Idle.from()
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target.from())
+      }
     })
 
     expect(openEvents.Dynamic).type.toRaiseError()
@@ -113,18 +123,24 @@ describe("Machine event constructor collections", () => {
             Machine.invoke({
               id: "load",
               effect: () => Effect.succeed("ready"),
-              onDone: ({ output, target }, enqueue) => {
-                enqueue.raise(internalEvents.Loaded({ value: output }))
-                return target.none()
-              }
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: ({ output }, enqueue) => {
+                  enqueue.raise(internalEvents.Loaded({ value: output }))
+                  return undefined
+                }
+              })
             }),
             Machine.invoke({
               id: "timeout",
               after: "1 second",
-              onDone: ({ target }, enqueue) => {
-                enqueue.raise(internalEvents.Failed())
-                return target.none()
-              }
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: (_, enqueue) => {
+                  enqueue.raise(internalEvents.Failed())
+                  return undefined
+                }
+              })
             })
           ]
         }

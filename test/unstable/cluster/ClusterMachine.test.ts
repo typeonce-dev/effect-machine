@@ -44,7 +44,10 @@ const CounterStates = Machine.defineStates({
 const UnsupportedChildMachine = Machine.make({
   states: { Count },
   events: Machine.events(),
-  initial: () => ({ path: "Count", value: new Count({ value: 0 }) })
+  initial: {
+    target: (to) => to.Count(),
+    resolve: () => ({ path: "Count" as const, value: new Count({ value: 0 }) })
+  }
 })
 const UnsupportedChild = Machine.child("unsupported", UnsupportedChildMachine)
 
@@ -60,35 +63,53 @@ const makeCounter = (state: {
     states: CounterStates.states,
     events: Machine.events(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
     emittedEvents: Machine.emittedEvents(Changed),
-    initial: () => CounterStates.initial.Count(new Count({ value: 0 }))
+    initial: {
+      target: (to) => to.Count(),
+      resolve: ({ target }) => target(new Count({ value: 0 }))
+    }
   }).handle({
     Count: {
       entry: () => {
         state.initialEntries += 1
       },
       on: {
-        Increment: ({ event, state: current }, enqueue) => {
-          state.actions += 1
-          state.inFlight += 1
-          state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
-          state.inFlight -= 1
-          const value = current.value + event.by
-          enqueue.emit(new Changed({ value }))
-          return CounterStates.initial.Count(new Count({ value }))
-        },
-        Fail: ({ state: current }, enqueue) => {
-          enqueue.emit(new Changed({ value: 999 }))
-          return CounterStates.initial.Count(current)
-        },
-        Finish: ({ state: current }) => CounterStates.initial.Done(new Done({ value: current.value })),
-        RaiseFromAction: ({ state: current }, enqueue) => {
-          enqueue.raise(new Increment({ by: 1, block: false }))
-          return CounterStates.initial.Count(current)
-        },
-        SpawnFromAction: ({ state: current }, enqueue) => {
-          enqueue.stop(UnsupportedChild)
-          return CounterStates.initial.Count(current)
-        }
+        Increment: Machine.transition({
+          target: (to) => to.full.Count(),
+          resolve: ({ event, state: current, target }, enqueue) => {
+            state.actions += 1
+            state.inFlight += 1
+            state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
+            state.inFlight -= 1
+            const value = current.value + event.by
+            enqueue.emit(new Changed({ value }))
+            return target(new Count({ value }))
+          }
+        }),
+        Fail: Machine.transition({
+          target: (to) => to.full.Count(),
+          resolve: ({ state: current, target }, enqueue) => {
+            enqueue.emit(new Changed({ value: 999 }))
+            return target(current)
+          }
+        }),
+        Finish: Machine.transition({
+          target: (to) => to.full.Done(),
+          resolve: ({ state: current, target }) => target(new Done({ value: current.value }))
+        }),
+        RaiseFromAction: Machine.transition({
+          target: (to) => to.full.Count(),
+          resolve: ({ state: current, target }, enqueue) => {
+            enqueue.raise(new Increment({ by: 1, block: false }))
+            return target(current)
+          }
+        }),
+        SpawnFromAction: Machine.transition({
+          target: (to) => to.full.Count(),
+          resolve: ({ state: current, target }, enqueue) => {
+            enqueue.stop(UnsupportedChild)
+            return target(current)
+          }
+        })
       }
     },
     Done: {}
@@ -262,7 +283,7 @@ describe("ClusterMachine", () => {
         assert.deepStrictEqual(emitted, [new Changed({ value: 2 })])
         assert.deepStrictEqual(storage.entries.get(storageKey("CounterEntity", "counter-1"))?.snapshot, {
           _tag: "MachineSnapshot",
-          active: [{ path: "Count", value: { _tag: "Count", value: "2" } }]
+          active: [{ path: "Count" as const, value: { _tag: "Count", value: "2" } }]
         })
 
         yield* TestClock.adjust(5000)
@@ -273,7 +294,7 @@ describe("ClusterMachine", () => {
         assert.strictEqual(state.initialEntries, 1)
         assert.strictEqual(state.actions, 2)
         assert.deepStrictEqual(storage.entries.get(storageKey("CounterEntity", "counter-1"))?.snapshot.active, [{
-          path: "Count",
+          path: "Count" as const,
           value: { _tag: "Count", value: "5" }
         }])
         assert.isTrue(storage.transactionFlags.every(Boolean))
@@ -306,7 +327,7 @@ describe("ClusterMachine", () => {
         assert.strictEqual(state.maxInFlight, 1)
         assert.strictEqual(state.actions, 2)
         assert.deepStrictEqual(storage.entries.get(storageKey("SerializedCounter", "counter-1"))?.snapshot.active, [{
-          path: "Count",
+          path: "Count" as const,
           value: { _tag: "Count", value: "2" }
         }])
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
@@ -373,7 +394,7 @@ describe("ClusterMachine", () => {
         assert.strictEqual(state.actions, 1)
         assert.strictEqual(storage.commits, 1)
         assert.deepStrictEqual(storage.entries.get(key)?.snapshot.active, [{
-          path: "Count",
+          path: "Count" as const,
           value: { _tag: "Count", value: "1" }
         }])
         const reply = driver.requests.get(String(requestId))!.replies[0]!
@@ -438,12 +459,18 @@ describe("ClusterMachine", () => {
         machineId: "Counter",
         version: "1",
         requestId: firstId,
-        snapshot: { _tag: "MachineSnapshot", active: [{ path: "Count", value: { _tag: "Count", value: "1" } }] }
+        snapshot: {
+          _tag: "MachineSnapshot",
+          active: [{ path: "Count" as const, value: { _tag: "Count", value: "1" } }]
+        }
       }
       const second: ClusterMachine.Checkpoint = {
         ...first,
         requestId: secondId,
-        snapshot: { _tag: "MachineSnapshot", active: [{ path: "Count", value: { _tag: "Count", value: "2" } }] }
+        snapshot: {
+          _tag: "MachineSnapshot",
+          active: [{ path: "Count" as const, value: { _tag: "Count", value: "2" } }]
+        }
       }
 
       assert.deepStrictEqual(yield* storage.commit(address, first), ClusterMachine.CommitResult.Committed())
@@ -467,21 +494,27 @@ describe("ClusterMachine", () => {
           entityType: "WrongMachineCounter",
           machineId: "Other",
           version: "1",
-          snapshot: { _tag: "MachineSnapshot", active: [{ path: "Count", value: { _tag: "Count", value: "0" } }] },
+          snapshot: {
+            _tag: "MachineSnapshot",
+            active: [{ path: "Count" as const, value: { _tag: "Count", value: "0" } }]
+          },
           reason: "MachineIdMismatch"
         },
         {
           entityType: "WrongVersionCounter",
           machineId: "Counter",
           version: "0",
-          snapshot: { _tag: "MachineSnapshot", active: [{ path: "Count", value: { _tag: "Count", value: "0" } }] },
+          snapshot: {
+            _tag: "MachineSnapshot",
+            active: [{ path: "Count" as const, value: { _tag: "Count", value: "0" } }]
+          },
           reason: "VersionMismatch"
         },
         {
           entityType: "InvalidSnapshotCounter",
           machineId: "Counter",
           version: "1",
-          snapshot: { _tag: "MachineSnapshot", active: [{ path: "Missing", value: {} }] },
+          snapshot: { _tag: "MachineSnapshot", active: [{ path: "Missing" as const, value: {} }] },
           reason: "InvalidCheckpoint"
         }
       ]
@@ -526,7 +559,7 @@ describe("ClusterMachine", () => {
         const client = makeClient("counter-1")
         assertAccepted(yield* client.send(new Finish({})))
         assert.deepStrictEqual(storage.entries.get(storageKey("FinalCounter", "counter-1"))?.snapshot.active, [{
-          path: "Done",
+          path: "Done" as const,
           value: { _tag: "Done", value: "0" }
         }])
 
@@ -534,7 +567,7 @@ describe("ClusterMachine", () => {
         assert.strictEqual(state.actions, 0)
         assert.strictEqual(storage.commits, 2)
         assert.deepStrictEqual(storage.entries.get(storageKey("FinalCounter", "counter-1"))?.snapshot.active, [{
-          path: "Done",
+          path: "Done" as const,
           value: { _tag: "Done", value: "0" }
         }])
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
@@ -562,13 +595,19 @@ describe("ClusterMachine", () => {
         id: "Invoked",
         states: states.states,
         events: Machine.events(Increment),
-        initial: () => states.initial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 0 }))
+        }
       }).handle({
         Count: {
           invoke: Machine.invoke({
             id: "child",
             effect: () => Effect.void,
-            onDone: ({ target }) => target.none()
+            onDone: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           })
         }
       })

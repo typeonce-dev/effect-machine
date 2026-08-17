@@ -23,21 +23,37 @@ const machine = Machine.make({
   states: states.states,
   events: Machine.events(Increment, Noop, Ignored, Burst, Reenter),
   internalEvents: Machine.internalEvents(RaisedIncrement),
-  initial: () => states.initial.Counter(new Counter({ count: 0 }))
+  initial: {
+    target: (to) => to.Counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
 }).handle({
   Counter: {
     on: {
-      Increment: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount })),
-      Noop: ({ target }) => target.none(),
-      Reenter: {
-        reenter: true,
-        transition: ({ state, target }) => target.full.Counter(new Counter({ count: state.count }))
-      },
-      Burst: ({ state, target }, enqueue) => {
-        enqueue.raise(new RaisedIncrement({}))
-        return target.full.Counter(new Counter({ count: state.count + 1 }))
-      },
-      RaisedIncrement: ({ state, target }) => target.full.Counter(new Counter({ count: state.count + 10 }))
+      Increment: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
+      }),
+      Noop: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      Reenter: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ state, target }) => target(new Counter({ count: state.count })),
+        reenter: true
+      }),
+      Burst: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ state, target }, enqueue) => {
+          enqueue.raise(new RaisedIncrement({}))
+          return target(new Counter({ count: state.count + 1 }))
+        }
+      }),
+      RaisedIncrement: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ state, target }) => target(new Counter({ count: state.count + 10 }))
+      })
     }
   }
 })
@@ -142,10 +158,18 @@ describe("MachineTest probe", () => {
       const invokeMachine = Machine.make({
         states: invokeStates.states,
         events: Machine.events(Load),
-        initial: () => invokeStates.initial.Idle(new Idle({}))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
       }).handle({
         Idle: {
-          on: { Load: ({ target }) => target.full.Loading(new Loading({})) }
+          on: {
+            Load: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({}))
+            })
+          }
         },
         Loading: {
           invoke: Machine.invoke({

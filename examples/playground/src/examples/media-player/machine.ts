@@ -13,175 +13,305 @@ import {
 import { initialPlaybackData, updatePlaybackData } from "./schemas.ts"
 import { MediaPlayer } from "./service.ts"
 
+type Definition = typeof MediaPlayerDefinition
+type States = Machine.Machine.States<Definition>
+type Events = Machine.Machine.Events<Definition>
+type Emits = Machine.Machine.Emits<Definition>
+type InputEvents = Machine.Machine.InputEvents<Definition>
+type ParentEvents = Machine.Machine.ParentEvents<Definition>
+type PlayingStateId = "Player.transport.Ready.Playing"
+type AnalyzeDone = Machine.Machine.InvokeTransition<
+  States,
+  Events,
+  Emits,
+  PlayingStateId,
+  Machine.Machine.InvokeDoneContext<States, Events, Emits, PlayingStateId, void, InputEvents, ParentEvents>
+>
+type AnalyzeSnapshot = Machine.Machine.InvokeTransition<
+  States,
+  Events,
+  Emits,
+  PlayingStateId,
+  Machine.Machine.InvokeSnapshotContext<
+    States,
+    Events,
+    Emits,
+    PlayingStateId,
+    Machine.Machine.LogicStateOf<typeof analyzeAudio>,
+    Machine.Machine.LogicErrorOf<typeof analyzeAudio>,
+    Machine.Machine.LogicOutputOf<typeof analyzeAudio>,
+    InputEvents,
+    ParentEvents
+  >
+>
+
+const analyzeDone: AnalyzeDone = Machine.transition({
+  target: (to) => to.none(),
+  resolve: () => undefined
+})
+
+const analyzeSnapshot: AnalyzeSnapshot = Machine.transition({
+  target: (to) => to.none(),
+  resolve: ({ snapshot }, enqueue) => {
+    const event = loudnessEvent(snapshot.state)
+    if (event !== undefined) enqueue.raise(event)
+    return undefined
+  }
+})
+
 export const MediaPlayerMachine = MediaPlayerDefinition.handle({
   Player: {
     states: {
       transport: {
         on: {
-          SourceSelected: {
-            reenter: true,
-            transition: ({ event, target }) => target.local.Loading.from({ url: event.url })
-          },
+          SourceSelected: Machine.transition({
+            target: (to) => to.local.Loading(),
+            resolve: ({ event, target }) => target.from({ url: event.url }),
+            reenter: true
+          }),
 
-          MediaFailed: ({ event, target }) => target.local.Failed.from({ message: event.message }),
+          MediaFailed: Machine.transition({
+            target: (to) => to.local.Failed(),
+            resolve: ({ event, target }) => target.from({ message: event.message })
+          }),
 
-          OperationFailed: ({ event, target }) => target.local.Failed.from({ message: event.message })
+          OperationFailed: Machine.transition({
+            target: (to) => to.local.Failed(),
+            resolve: ({ event, target }) => target.from({ message: event.message })
+          })
         },
         states: {
           Empty: {},
 
           Loading: {
-            invoke: Machine.invoke({
+            invoke: MediaPlayerDefinition.invoke({
               id: "load-audio",
               effect: ({ state }) => loadAudio(state.url),
-              onDone: ({ target }, enqueue) => {
-                enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded())
-                return target.none()
-              },
-              onFailure: ({ error, target }, enqueue) => {
-                enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
-                return target.none()
-              }
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: (_, enqueue) => {
+                  enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded())
+                  return undefined
+                }
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: ({ error }, enqueue) => {
+                  enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                  return undefined
+                }
+              })
             }),
             on: {
-              LoadSucceeded: ({ target }) => target.local.Ready.from((ready) => ready.Paused.from(initialPlaybackData))
+              LoadSucceeded: Machine.transition({
+                target: (to) => to.local.Ready(),
+                resolve: ({ target }) => target.from((ready) => ready.Paused.from(initialPlaybackData))
+              })
             }
           },
 
           Ready: {
             states: {
               Paused: {
-                invoke: Machine.invoke({
+                invoke: MediaPlayerDefinition.invoke({
                   id: "pause-audio",
                   effect: () => pauseAudio,
-                  onDone: ({ target }) => target.none(),
-                  onFailure: ({ error, target }, enqueue) => {
-                    enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
-                    return target.none()
-                  }
+                  onDone: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: () => undefined
+                  }),
+                  onFailure: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: ({ error }, enqueue) => {
+                      enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                      return undefined
+                    }
+                  })
                 }),
                 on: {
-                  PlayRequested: ({ state, target }) =>
-                    target.local.Playing.from({
-                      ...updatePlaybackData(state, {}),
-                      loudness: null
-                    }),
+                  PlayRequested: Machine.transition({
+                    target: (to) => to.local.Playing(),
+                    resolve: ({ state, target }) =>
+                      target.from({
+                        ...updatePlaybackData(state, {}),
+                        loudness: null
+                      })
+                  }),
 
-                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {}))
+                  RestartRequested: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  })
                 }
               },
 
               Playing: {
                 invoke: [
-                  Machine.invoke({
+                  MediaPlayerDefinition.invoke({
                     id: "play-audio",
                     effect: () => playAudio,
-                    onDone: ({ target }) => target.none(),
-                    onFailure: ({ error, target }, enqueue) => {
-                      enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
-                      return target.none()
-                    }
+                    onDone: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: () => undefined
+                    }),
+                    onFailure: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: ({ error }, enqueue) => {
+                        enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                        return undefined
+                      }
+                    })
                   }),
-                  Machine.invoke({
+                  MediaPlayerDefinition.invoke({
                     id: "analyze-audio",
                     address: Machine.childAddress("analyze-audio"),
                     logic: analyzeAudio,
-                    onDone: ({ target }) => target.none(),
-                    onSnapshot: ({ snapshot, target }, enqueue) => {
-                      const event = loudnessEvent(snapshot.state)
-                      if (event !== undefined) enqueue.raise(event)
-                      return target.none()
-                    }
+                    onDone: analyzeDone,
+                    onSnapshot: analyzeSnapshot
                   })
                 ],
                 on: {
-                  PauseRequested: ({ state, target }) => target.local.Paused.from(updatePlaybackData(state, {})),
+                  PauseRequested: Machine.transition({
+                    target: (to) => to.local.Paused(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
+                  RestartRequested: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  MediaWaiting: ({ state, target }) => target.local.Buffering.from(updatePlaybackData(state, {})),
+                  MediaWaiting: Machine.transition({
+                    target: (to) => to.local.Buffering(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  PlaybackEnded: ({ event, state, target }) =>
-                    target.local.Ended.from(updatePlaybackData(state, { currentTime: event.currentTime })),
+                  PlaybackEnded: Machine.transition({
+                    target: (to) => to.local.Ended(),
+                    resolve: ({ event, state, target }) =>
+                      target.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  }),
 
-                  TimeUpdated: ({ event, state, target }) =>
-                    target.local.Playing.from({
-                      currentTime: event.currentTime,
-                      loudness: state.loudness
-                    }),
+                  TimeUpdated: Machine.transition({
+                    target: (to) => to.local.Playing(),
+                    resolve: ({ event, state, target }) =>
+                      target.from({
+                        currentTime: event.currentTime,
+                        loudness: state.loudness
+                      })
+                  }),
 
-                  LoudnessMeasured: ({ event, state, target }) =>
-                    target.local.Playing.from({
-                      currentTime: state.currentTime,
-                      loudness: {
-                        rms: event.rms,
-                        peak: event.peak,
-                        decibels: event.decibels
-                      }
-                    })
+                  LoudnessMeasured: Machine.transition({
+                    target: (to) => to.local.Playing(),
+                    resolve: ({ event, state, target }) =>
+                      target.from({
+                        currentTime: state.currentTime,
+                        loudness: {
+                          rms: event.rms,
+                          peak: event.peak,
+                          decibels: event.decibels
+                        }
+                      })
+                  })
                 }
               },
 
               Buffering: {
                 on: {
-                  MediaCanPlay: ({ state, target }) =>
-                    target.local.Playing.from({
-                      ...updatePlaybackData(state, {}),
-                      loudness: null
-                    }),
+                  MediaCanPlay: Machine.transition({
+                    target: (to) => to.local.Playing(),
+                    resolve: ({ state, target }) =>
+                      target.from({
+                        ...updatePlaybackData(state, {}),
+                        loudness: null
+                      })
+                  }),
 
-                  PauseRequested: ({ state, target }) => target.local.Paused.from(updatePlaybackData(state, {})),
+                  PauseRequested: Machine.transition({
+                    target: (to) => to.local.Paused(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
+                  RestartRequested: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  PlaybackEnded: ({ event, state, target }) =>
-                    target.local.Ended.from(updatePlaybackData(state, { currentTime: event.currentTime })),
+                  PlaybackEnded: Machine.transition({
+                    target: (to) => to.local.Ended(),
+                    resolve: ({ event, state, target }) =>
+                      target.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  }),
 
-                  TimeUpdated: ({ event, state, target }) =>
-                    target.local.Buffering.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  TimeUpdated: Machine.transition({
+                    target: (to) => to.local.Buffering(),
+                    resolve: ({ event, state, target }) =>
+                      target.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  })
                 }
               },
 
               Restarting: {
-                invoke: Machine.invoke({
+                invoke: MediaPlayerDefinition.invoke({
                   id: "restart-audio",
                   effect: () => restartAudio,
-                  onDone: ({ target }, enqueue) => {
-                    enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded())
-                    return target.none()
-                  },
-                  onFailure: ({ error, target }, enqueue) => {
-                    enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
-                    return target.none()
-                  }
+                  onDone: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: (_, enqueue) => {
+                      enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded())
+                      return undefined
+                    }
+                  }),
+                  onFailure: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: ({ error }, enqueue) => {
+                      enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                      return undefined
+                    }
+                  })
                 }),
                 on: {
-                  RestartSucceeded: ({ target }) => target.local.Playing.from({ currentTime: 0, loudness: null }),
+                  RestartSucceeded: Machine.transition({
+                    target: (to) => to.local.Playing(),
+                    resolve: ({ target }) => target.from({ currentTime: 0, loudness: null })
+                  }),
 
-                  TimeUpdated: ({ event, state, target }) =>
-                    target.local.Restarting.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  TimeUpdated: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ event, state, target }) =>
+                      target.from(updatePlaybackData(state, { currentTime: event.currentTime }))
+                  })
                 }
               },
 
               Ended: {
                 on: {
-                  PlayRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {})),
+                  PlayRequested: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  }),
 
-                  RestartRequested: ({ state, target }) => target.local.Restarting.from(updatePlaybackData(state, {}))
+                  RestartRequested: Machine.transition({
+                    target: (to) => to.local.Restarting(),
+                    resolve: ({ state, target }) => target.from(updatePlaybackData(state, {}))
+                  })
                 }
               }
             }
           },
 
           Failed: {
-            invoke: Machine.invoke({
+            invoke: MediaPlayerDefinition.invoke({
               id: "report-error",
               effect: ({ state }) =>
                 Effect.gen(function*() {
                   const mediaPlayer = yield* MediaPlayer
                   yield* mediaPlayer.reportError(state.message)
                 }),
-              onDone: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             })
           }
         }
@@ -190,68 +320,84 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
       settings: {
         states: {
           Audible: {
-            invoke: Machine.invoke({
+            invoke: MediaPlayerDefinition.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, false),
-              onDone: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             }),
             on: {
-              VolumeChanged: {
-                reenter: true,
-                transition: ({ event, state, target }) =>
-                  target.local.Audible.from({
+              VolumeChanged: Machine.transition({
+                target: (to) => to.local.Audible(),
+                resolve: ({ event, state, target }) =>
+                  target.from({
                     volume: event.volume,
                     playbackRate: state.playbackRate
-                  })
-              },
+                  }),
+                reenter: true
+              }),
 
-              PlaybackRateChanged: {
-                reenter: true,
-                transition: ({ event, state, target }) =>
-                  target.local.Audible.from({
+              PlaybackRateChanged: Machine.transition({
+                target: (to) => to.local.Audible(),
+                resolve: ({ event, state, target }) =>
+                  target.from({
                     volume: state.volume,
                     playbackRate: event.playbackRate
-                  })
-              },
+                  }),
+                reenter: true
+              }),
 
-              MuteRequested: ({ state, target }) =>
-                target.local.Muted.from({
-                  volume: state.volume,
-                  playbackRate: state.playbackRate
-                })
+              MuteRequested: Machine.transition({
+                target: (to) => to.local.Muted(),
+                resolve: ({ state, target }) =>
+                  target.from({
+                    volume: state.volume,
+                    playbackRate: state.playbackRate
+                  })
+              })
             }
           },
 
           Muted: {
-            invoke: Machine.invoke({
+            invoke: MediaPlayerDefinition.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, true),
-              onDone: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             }),
             on: {
-              VolumeChanged: {
-                reenter: true,
-                transition: ({ event, state, target }) =>
-                  target.local.Muted.from({
+              VolumeChanged: Machine.transition({
+                target: (to) => to.local.Muted(),
+                resolve: ({ event, state, target }) =>
+                  target.from({
                     volume: event.volume,
                     playbackRate: state.playbackRate
-                  })
-              },
+                  }),
+                reenter: true
+              }),
 
-              PlaybackRateChanged: {
-                reenter: true,
-                transition: ({ event, state, target }) =>
-                  target.local.Muted.from({
+              PlaybackRateChanged: Machine.transition({
+                target: (to) => to.local.Muted(),
+                resolve: ({ event, state, target }) =>
+                  target.from({
                     volume: state.volume,
                     playbackRate: event.playbackRate
-                  })
-              },
+                  }),
+                reenter: true
+              }),
 
-              UnmuteRequested: ({ state, target }) =>
-                target.local.Audible.from({
-                  volume: state.volume,
-                  playbackRate: state.playbackRate
-                })
+              UnmuteRequested: Machine.transition({
+                target: (to) => to.local.Audible(),
+                resolve: ({ state, target }) =>
+                  target.from({
+                    volume: state.volume,
+                    playbackRate: state.playbackRate
+                  })
+              })
             }
           }
         }

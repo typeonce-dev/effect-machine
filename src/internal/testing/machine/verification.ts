@@ -475,12 +475,15 @@ const sameCoverageTrigger = (
 ): boolean =>
   left.type === right.type && (left.type !== "event" || right.type === "event" && left.event === right.event)
 
-const targetWithinDeclaredBounds = (
+const targetWithinDeclaredBranches = (
   target: string | undefined,
-  bounds: Machine.Machine.TransitionTargets
+  branches: ReadonlyArray<Machine.Machine.TransitionBranch>
 ): boolean =>
-  target === undefined || bounds.type === "dynamic" ||
-  bounds.paths.some((path) => target === path || target.startsWith(`${path}.`))
+  branches.some((branch) =>
+    branch.target === undefined ?
+      target === undefined
+      : target !== undefined && (target === branch.target || target.startsWith(`${branch.target}.`))
+  )
 
 const finiteTagValues = (ast: SchemaAST.AST): ReadonlyArray<PropertyKey> | undefined => {
   if (SchemaAST.isLiteral(ast)) {
@@ -574,7 +577,7 @@ export const coverage = <M extends AnyMachine>(
       source: definition.source,
       trigger: definition.trigger,
       reenter: definition.reenter,
-      targets: definition.targets
+      branches: definition.branches
     })
   )
   const transitionHits = new Set<number>()
@@ -656,7 +659,7 @@ export const coverage = <M extends AnyMachine>(
         definition.source === retained.source &&
         definition.reenter === retained.reenter &&
         sameCoverageTrigger(definition.trigger, retained.trigger) &&
-        targetWithinDeclaredBounds(retained.target, definition.targets)
+        targetWithinDeclaredBranches(retained.target, definition.branches)
       )
       if (definitionIndex !== -1) transitionHits.add(definitionIndex)
     }
@@ -1511,13 +1514,14 @@ export const verify = <M extends AnyMachine>(
       )
       return
     }
-    if (transition.target === undefined || definition.targets.type === "dynamic") return
-    if (!definition.targets.paths.some((bound) => isDescendantOrSelf(String(transition.target), String(bound)))) {
+    if (targetWithinDeclaredBranches(transition.target, definition.branches)) return
+    const targets = definition.branches.flatMap((branch) => branch.target === undefined ? [] : [branch.target])
+    if (!targets.some((bound) => isDescendantOrSelf(String(transition.target), String(bound)))) {
       add(
         "targetBounds.target",
         location,
         `transition target "${String(transition.target)}" is outside declared bounds ` +
-          `[${definition.targets.paths.join(", ")}]`,
+          `[${targets.join(", ")}]`,
         String(transition.target)
       )
     }

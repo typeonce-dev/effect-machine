@@ -1,6 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Context, Data, Effect } from "effect"
-import { Done, Flow, Idle, initialIdle, machine, Running } from "./successive-handle-control.js"
+import { Done, Flow, Idle, machine, Running } from "./successive-handle-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
   true :
@@ -17,15 +17,15 @@ const withFlow = machine.handle({
   Flow: {
     history: {
       recent: {
-        default: () => initialIdle()
+        default: ({ target }) => target.Flow(Flow.make({}), (flow) => flow.Idle(Idle.make({})))
       }
     },
     states: {
       Route: {
-        choice: {
-          targets: ["Flow.Idle"],
-          transition: ({ target }) => target.local.Idle(Idle.make({}))
-        }
+        choice: Machine.transition({
+          target: (to) => to.local.Idle(),
+          resolve: ({ target }) => target(Idle.make({}))
+        })
       }
     }
   }
@@ -36,7 +36,10 @@ const withIdle = withFlow.handle({
     states: {
       Idle: {
         on: {
-          Start: ({ target }) => target.local.Running(Running.make({}))
+          Start: Machine.transition({
+            target: (to) => to.local.Running(),
+            resolve: ({ target }) => target(Running.make({}))
+          })
         }
       }
     }
@@ -48,7 +51,10 @@ const withRunning = withIdle.handle({
     states: {
       Running: {
         on: {
-          Finish: ({ event, target }) => target.local.Done(Done.make({ value: event.value }))
+          Finish: Machine.transition({
+            target: (to) => to.local.Done(),
+            resolve: ({ event, target }) => target(Done.make({ value: event.value }))
+          })
         }
       }
     }

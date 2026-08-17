@@ -161,8 +161,11 @@ const makeDeepMachine = () =>
   Machine.make({
     states: DeepStates.states,
     events: Machine.events(Advance),
-    initial: (): never => {
-      throw new Error("type-only")
+    initial: {
+      target: (to) => to.Root.initial(),
+      resolve: (): never => {
+        throw new Error("type-only")
+      }
     }
   })
 
@@ -242,28 +245,6 @@ describe("deep handler trees", () => {
     }))
     expect(machine.handle).type.not.toBeCallableWith(atHub({
       onDone: () => undefined
-    }))
-    expect(machine.handle).type.not.toBeCallableWith(atHub({
-      states: {
-        Idle: {
-          on: {
-            Advance: {
-              targets: ["Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Idle"],
-              transition: (
-                { target }: Machine.Machine.HandlerContext<
-                  typeof DeepStates.states,
-                  readonly [typeof Advance],
-                  readonly [],
-                  "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub.Idle",
-                  "Advance",
-                  never,
-                  never
-                >
-              ) => target.local.Done(new Done({ value: "invalid-bound" }))
-            }
-          }
-        }
-      }
     }))
   })
 
@@ -428,8 +409,11 @@ describe("deep handler trees", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: (): never => {
-        throw new Error("type-only")
+      initial: {
+        target: (to) => to.n0.initial(),
+        resolve: (): never => {
+          throw new Error("type-only")
+        }
       }
     }).handle({
       n0: {

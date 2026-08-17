@@ -26,9 +26,12 @@ const choiceStates = Machine.defineStates({
 const choiceIncomplete = Machine.make({
   states: choiceStates.states,
   events: Machine.events(Tick),
-  initial: () => choiceStates.initial.Ready(new Ready({}))
+  initial: {
+    target: (to) => to.Ready(),
+    resolve: ({ target }) => (target(new Ready({})))
+  }
 })
-const choiceSnapshot = choiceStates.initial.Ready(new Ready({}))
+const choiceSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
 const historyStates = Machine.defineStates({
   Ready,
@@ -45,9 +48,12 @@ const historyStates = Machine.defineStates({
 const historyIncomplete = Machine.make({
   states: historyStates.states,
   events: Machine.events(Tick),
-  initial: () => historyStates.initial.Ready(new Ready({}))
+  initial: {
+    target: (to) => to.Ready(),
+    resolve: ({ target }) => (target(new Ready({})))
+  }
 })
-const historySnapshot = historyStates.initial.Ready(new Ready({}))
+const historySnapshot = { path: "Ready" as const, value: new Ready({}) }
 
 const outputStates = Machine.defineStates({
   Ready,
@@ -61,9 +67,12 @@ const outputStates = Machine.defineStates({
 const outputIncomplete = Machine.make({
   states: outputStates.states,
   events: Machine.events(Tick),
-  initial: () => outputStates.initial.Ready(new Ready({}))
+  initial: {
+    target: (to) => to.Ready(),
+    resolve: ({ target }) => (target(new Ready({})))
+  }
 })
-const outputSnapshot = outputStates.initial.Ready(new Ready({}))
+const outputSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
 const bound = null as unknown as AtomMachine.Bound<never>
 
@@ -138,7 +147,10 @@ describe("executable machine readiness", () => {
     const complete = Machine.make({
       states: completeStates.states,
       events: Machine.events(Tick),
-      initial: () => completeStates.initial.Ready(new Ready({}))
+      initial: {
+        target: (to) => to.Ready(),
+        resolve: ({ target }) => (target(new Ready({})))
+      }
     }).handle({
       Flow: {
         history: {
@@ -152,10 +164,10 @@ describe("executable machine readiness", () => {
         },
         states: {
           Route: {
-            choice: {
-              targets: ["Flow.Idle"],
-              transition: ({ target }) => target.local.Idle(new Idle({}))
-            }
+            choice: Machine.transition({
+              target: (to) => to.local.Idle(),
+              resolve: ({ target }) => target(new Idle({}))
+            })
           },
           Done: {
             output: ({ state }) => state.value
@@ -163,16 +175,12 @@ describe("executable machine readiness", () => {
         }
       }
     })
-    const completeSnapshot = completeStates.initial.Ready(new Ready({}))
+    const completeSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
     const plannedInitial = Machine.planInitial(complete)
     const planned = Machine.plan(complete, completeSnapshot, new Tick({}))
     const started = Machine.start(complete)
     const resumed = Machine.resume(complete, completeSnapshot)
-    const invocation = Machine.invoke({
-      child: Machine.child("complete", complete),
-      onDone: ({ target }) => target.none()
-    })
     const trace = MachineTest.run(complete, { events: [new Tick({})] })
     const atom = AtomMachine.make(complete)
     const resumedAtom = AtomMachine.resume(complete, completeSnapshot)
@@ -199,7 +207,6 @@ describe("executable machine readiness", () => {
     expect<Effect.Success<typeof resumed>["send"]>().type.toBe<
       (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
     >()
-    expect(invocation).type.toBeAssignableTo<Machine.Machine.InvokeConfig<any, any, any, any>>()
     expect<Effect.Success<typeof trace>>().type.toBe<MachineTest.Trace<typeof complete>>()
     expect<AtomChannels<typeof atom>>().type.toBe<
       readonly [

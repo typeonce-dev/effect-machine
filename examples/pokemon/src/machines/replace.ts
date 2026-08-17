@@ -36,30 +36,45 @@ export const ReplaceMachine = Machine.make({
   events: ReplaceEvents,
   internalEvents: ReplaceInternalEvents,
   parentEvents: TeamEvents,
-  initial: () => ReplaceStates.initial.Idle.from()
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from()
+  }
 }).handle({
   Idle: {
     on: {
-      ReplacePokemon: ({ event, target }) => target.full.Replacing.from({ id: event.id })
+      ReplacePokemon: Machine.transition({
+        target: (to) => to.full.Replacing(),
+        resolve: ({ event, target }) => target.from({ id: event.id })
+      })
     }
   },
   Replacing: {
     invoke: Machine.invoke({
       id: "replaceWithRandom",
       effect: () => replaceWithRandom,
-      onDone: ({ output, target }, enqueue) => {
-        enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon }))
-        return target.none()
-      },
-      onFailure: ({ target }) => target.full.Idle.from()
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: ({ output }, enqueue) => {
+          enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon }))
+          return undefined
+        }
+      }),
+      onFailure: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ target }) => target.from()
+      })
     }),
     on: {
-      Replaced: ({ event, parent, state, target }, enqueue) => {
-        if (parent !== undefined) {
-          enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
+      Replaced: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ event, parent, state, target }, enqueue) => {
+          if (parent !== undefined) {
+            enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
+          }
+          return target.from()
         }
-        return target.full.Idle.from()
-      }
+      })
     }
   }
 })

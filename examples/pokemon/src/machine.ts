@@ -15,37 +15,63 @@ export const States = Machine.defineStates({ Loading: {}, ActiveTeam, Failed: {}
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
-const machine = Machine.make({
+const definition = Machine.make({
   states: States.states,
   events: TeamEvents,
-  initial: () => States.initial.Loading.from()
-}).handle({
+  initial: {
+    target: (to) => to.Loading(),
+    resolve: ({ target }) => target.from()
+  }
+})
+
+const machine = definition.handle({
   Loading: {
-    invoke: Machine.invoke({
+    invoke: definition.invoke({
       id: "load-team",
       effect: () =>
         Effect.gen(function*() {
           const service = yield* PokemonService
           return yield* service.getRandomTeam()
         }),
-      onDone: ({ output, target }) => target.full.ActiveTeam.from({ team: output }),
-      onFailure: ({ target }) => target.full.Failed.from()
+      onDone: Machine.transition({
+        target: (to) => to.full.ActiveTeam(),
+        resolve: ({ output, target }) => target.from({ team: output })
+      }),
+      onFailure: Machine.transition({
+        target: (to) => to.full.Failed(),
+        resolve: ({ target }) => target.from()
+      })
     })
   },
   ActiveTeam: {
     invoke: [
-      Machine.invoke({
+      definition.invoke({
         child: SelectionChild,
-        onDone: ({ target }) => target.none(),
-        onFailure: ({ target }) => target.full.Failed.from()
+        onDone: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        }),
+        onFailure: Machine.transition({
+          target: (to) => to.full.Failed(),
+          resolve: ({ target }) => target.from()
+        })
       }),
-      Machine.invoke({ child: ReplaceChild, onFailure: ({ target }) => target.full.Failed.from() })
+      definition.invoke({
+        child: ReplaceChild,
+        onFailure: Machine.transition({
+          target: (to) => to.full.Failed(),
+          resolve: ({ target }) => target.from()
+        })
+      })
     ],
     on: {
-      ReplaceInTeam: ({ event, target, state }) =>
-        target.full.ActiveTeam.from({
-          team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon))
-        })
+      ReplaceInTeam: Machine.transition({
+        target: (to) => to.full.ActiveTeam(),
+        resolve: ({ event, target, state }) =>
+          target.from({
+            team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon))
+          })
+      })
     }
   },
   Failed: {}

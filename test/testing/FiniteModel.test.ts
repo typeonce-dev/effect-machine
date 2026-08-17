@@ -146,7 +146,7 @@ const canonicalTransition = (transition: Machine.Machine.TransitionDefinition) =
   source: transition.source,
   trigger: transition.trigger,
   reenter: transition.reenter,
-  targets: transition.targets.type === "declared" ? transition.targets.paths : undefined
+  branches: transition.branches
 })
 
 describe("MachineTest finite models", () => {
@@ -314,11 +314,13 @@ describe("MachineTest finite models", () => {
         assert.strictEqual(actual.source, expected.source)
         assert.deepStrictEqual(actual.trigger, expected.trigger)
         assert.strictEqual(actual.reenter, "reenter" in expected ? expected.reenter : false)
+        assert.strictEqual(actual.branches.length, 1)
+        const target = actual.branches[0]!.target
         if (expected.target === undefined) {
-          assert.strictEqual(actual.targets, undefined)
+          assert.strictEqual(target, undefined)
         } else {
-          assert.strictEqual(actual.targets?.length, 1)
-          const bound = actual.targets![0]!
+          assert.notStrictEqual(target, undefined)
+          const bound = target!
           assert.ok(
             expected.target === bound || expected.target.startsWith(`${bound}.`) ||
               bound.startsWith(`${expected.target}.`)

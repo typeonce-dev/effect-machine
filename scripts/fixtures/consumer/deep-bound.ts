@@ -49,7 +49,10 @@ const childMachine = Machine.make({
   events: Machine.events(),
   parentEvents: ChildParentEvents,
   input: Schema.Struct({ value: Schema.String }),
-  initial: ({ value }) => ChildStates.initial.Done(ChildState.cases.Done.make({ value }))
+  initial: {
+    target: (to) => to.Done(),
+    resolve: ({ input, target }) => target(ChildState.cases.Done.make({ value: input.value }))
+  }
 }).handle({
   Done: {
     entry: ({ parent, state }, enqueue) => {
@@ -92,23 +95,29 @@ const definition = Machine.make({
   internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
   emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
-  initial: ({ seed: _seed }) => States.initial.Idle(State.cases.Idle.make({}))
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ input: { seed: _seed }, target }) => target(State.cases.Idle.make({}))
+  }
 })
 const machine = definition.handle({
   Idle: {
     invoke: definition.invoke({
       id: "deep-inline-invoke",
       effect: () => Effect.asVoid(ExternalService),
-      onDone: ({ target }) => target.none()
+      onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
     }),
     on: {
-      Begin: ({ target }) =>
-        target.full.Ready(
-          State.cases.Ready.make({}),
-          (ready) =>
-            ready.Editor(State.cases.Editor.make({}), (editor) =>
-              editor.Editing(State.cases.Editing.make({ value: "ready" })))
-        )
+      Begin: Machine.transition({
+        target: (to) => to.full.Ready(),
+        resolve: ({ target }) =>
+          target(
+            State.cases.Ready.make({}),
+            (ready) =>
+              ready.Editor(State.cases.Editor.make({}), (editor) =>
+                editor.Editing(State.cases.Editing.make({ value: "ready" })))
+          )
+      })
     }
   },
   Ready: {
@@ -117,22 +126,31 @@ const machine = definition.handle({
         states: {
           Editing: {
             on: {
-              Save: ({ event, target }) => target.local.Saving(State.cases.Saving.make({ value: event.value })),
-              Loaded: ({ target }) => target.none()
+              Save: Machine.transition({
+                target: (to) => to.local.Saving(),
+                resolve: ({ event, target }) => target(State.cases.Saving.make({ value: event.value }))
+              }),
+              Loaded: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
             }
           },
           Saving: {
             invoke: definition.invoke({
               child: Child,
               input: ({ state }) => ({ value: state.value }),
-              onDone: ({ target }) => target.none()
+              onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
             }),
             on: {
-              ChildNotice: ({ event, target }, enqueue) => {
-                enqueue.emit(Emissions.Notice({ value: event.value }))
-                return target.local.Saving(State.cases.Saving.make({ value: event.value }))
-              },
-              ChildCompleted: ({ event, target }) => target.full.Done(State.cases.Done.make({ value: event.value }))
+              ChildNotice: Machine.transition({
+                target: (to) => to.local.Saving(),
+                resolve: ({ event, target }, enqueue) => {
+                  enqueue.emit(Emissions.Notice({ value: event.value }))
+                  return target(State.cases.Saving.make({ value: event.value }))
+                }
+              }),
+              ChildCompleted: Machine.transition({
+                target: (to) => to.full.Done(),
+                resolve: ({ event, target }) => target(State.cases.Done.make({ value: event.value }))
+              })
             }
           }
         }
@@ -227,8 +245,11 @@ const PackagedDeepStates = Machine.defineStates({
 const packagedDeepMachine = Machine.make({
   states: PackagedDeepStates.states,
   events: Machine.events(),
-  initial: (): never => {
-    throw new Error("type-only packaged consumer fixture")
+  initial: {
+    target: (to) => to.n0.initial(),
+    resolve: (): never => {
+      throw new Error("type-only packaged consumer fixture")
+    }
   }
 }).handle({
   n0: {

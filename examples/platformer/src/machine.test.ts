@@ -157,17 +157,17 @@ describe("platformer history integration", () => {
       const definitions = Machine.transitionDefinitions(CharacterMachine)
       const rendered = renderMachine(CharacterMachine, initial.state)
 
-      expect(definitions).toHaveLength(27)
+      expect(definitions).toHaveLength(28)
       expect(definitions).toContainEqual({
         source: "Character.locomotion.Playing.Airborne.airJump",
         trigger: { type: "event", event: "WallJump" },
         reenter: true,
-        targets: {
-          type: "declared",
-          paths: ["Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"]
-        }
+        branches: [{
+          type: "direct",
+          target: "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"
+        }]
       })
-      expect(definitions.every(({ targets }) => targets.type === "declared")).toBe(true)
+      expect(definitions.every(({ branches }) => branches.length > 0)).toBe(true)
       expect(rendered).toContain("◇ on: WallJump [reenter] → AirJumpWallLock")
       expect(rendered).toContain(
         "Candidate events: Move, DownPressed, JumpPressed, Pause, WallJump, WallContact, Reset"

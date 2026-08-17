@@ -66,19 +66,31 @@ const CounterDefinition = Machine.make({
   id: "Counter",
   states: States.states,
   events: CounterEvent,
-  initial: () => States.initial.Idle.from()
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from()
+  }
 })
 
 const Counter = CounterDefinition.handle({
   Idle: {
     on: {
-      Start: ({ target }) => target.full.Running.from({ count: 0 })
+      Start: Machine.transition({
+        target: (to) => to.full.Running(),
+        resolve: ({ target }) => target.from({ count: 0 })
+      })
     }
   },
   Running: {
     on: {
-      Increment: ({ state, target }) => target.full.Running.from({ count: state.count + 1 }),
-      Stop: ({ target }) => target.full.Idle.from()
+      Increment: Machine.transition({
+        target: (to) => to.full.Running(),
+        resolve: ({ state, target }) => target.from({ count: state.count + 1 })
+      }),
+      Stop: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ target }) => target.from()
+      })
     }
   }
 })
@@ -111,8 +123,7 @@ Use this order to preserve inference and keep boundaries explicit:
 Use `.from(...)` when constructing a new state from fields:
 
 ```ts
-target.local.Saving.from({ draft: event.draft })
-States.initial.Form.from({ draft: "" }, (form) => form.Editing.from())
+target.from({ draft: event.draft })
 ```
 
 The machine runs these inputs through the state schema while planning. Schema
@@ -124,10 +135,12 @@ When sibling states share fields, remove the source discriminator and pass the
 remaining fields through the target schema:
 
 ```ts
-Submit: ;
-;(({ state, target }) => {
-  const { _tag: _, ...fields } = state
-  return target.local.Saving.from({ ...fields, attempt: 1 })
+Submit: Machine.transition({
+  target: (to) => to.local.Saving(),
+  resolve: ({ state, target }) => {
+    const { _tag: _, ...fields } = state
+    return target.from({ ...fields, attempt: 1 })
+  }
 })
 ```
 
@@ -144,7 +157,10 @@ const States = Machine.defineStates({
   }
 })
 
-States.initial.Form.from((form) => form.Editing.from())
+initial: {
+  target: (to) => to.Form.initial(),
+  resolve: ({ target }) => target((form) => form.Editing.from())
+}
 ```
 
 Schema-less states remain active, targetable, matchable, and visible through
@@ -181,7 +197,10 @@ const definition = Machine.make({
   events: CommandEvent,
   internalEvents: InternalEvent,
   emittedEvents: Emissions,
-  initial: () => States.initial.Idle.from()
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from()
+  }
 })
 ```
 
@@ -293,16 +312,22 @@ const child = Machine.make({
   states: ChildStates.states,
   events: ChildEvents,
   parentEvents: ParentEvents,
-  initial: () => ChildStates.initial.Working.from()
+  initial: {
+    target: (to) => to.Working(),
+    resolve: ({ target }) => target.from()
+  }
 }).handle({
   Working: {
     on: {
-      Finish: ({ parent, target }, enqueue) => {
-        if (parent !== undefined) {
-          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+      Finish: Machine.transition({
+        target: (to) => to.full.Done(),
+        resolve: ({ parent, target }, enqueue) => {
+          if (parent !== undefined) {
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+          }
+          return target.from()
         }
-        return target.full.Done.from()
-      }
+      })
     }
   },
   Done: {}
@@ -377,8 +402,14 @@ Loading: {
   invoke: Machine.invoke({
     id: "save-document",
     effect: () => saveDocument,
-    onDone: ({ output, target }) => target.full.Saved({ id: output.id }),
-    onFailure: ({ error, target }) => target.full.Failed({ message: String(error) })
+    onDone: Machine.transition({
+      target: (to) => to.full.Saved(),
+      resolve: ({ output, target }) => target.from({ id: output.id })
+    }),
+    onFailure: Machine.transition({
+      target: (to) => to.full.Failed(),
+      resolve: ({ error, target }) => target.from({ message: String(error) })
+    })
   })
 }
 
@@ -386,7 +417,10 @@ Waiting: {
   invoke: Machine.invoke({
     id: "save-timeout",
     after: "3 seconds",
-    onDone: ({ target }) => target.full.Failed({ message: "Timed out" })
+    onDone: Machine.transition({
+      target: (to) => to.full.Failed(),
+      resolve: ({ target }) => target.from({ message: "Timed out" })
+    })
   })
 }
 ```
@@ -401,8 +435,14 @@ for state-dependent Effects:
 invoke: Machine.invoke({
   id: "load-document",
   effect: ({ state }) => loadDocument(state.documentId),
-  onDone: ({ output, target }) => target.full.Ready({ document: output }),
-  onFailure: ({ error, target }) => target.full.Failed({ message: error.message })
+  onDone: Machine.transition({
+    target: (to) => to.full.Ready(),
+    resolve: ({ output, target }) => target.from({ document: output })
+  }),
+  onFailure: Machine.transition({
+    target: (to) => to.full.Failed(),
+    resolve: ({ error, target }) => target.from({ message: error.message })
+  })
 })
 ```
 
@@ -428,8 +468,14 @@ const machine = definition.handle({
         parent === undefined
           ? Effect.void
           : parent.send(ParentEvents.SaveStarted()),
-      onDone: ({ target }) => target.none(),
-      onFailure: ({ target }) => target.none()
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      onFailure: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
     })
   }
 })

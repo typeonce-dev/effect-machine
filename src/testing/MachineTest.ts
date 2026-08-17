@@ -231,8 +231,20 @@ export interface Scenarios<M extends AnyMachine> {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(Reset),
- *   initial: () => States.initial.Idle.from()
- * }).handle({ Idle: { on: { Reset: () => States.initial.Idle.from() } } })
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
+ * }).handle({
+ *   Idle: {
+ *     on: {
+ *       Reset: Machine.transition({
+ *         target: (to) => to.full.Idle(),
+ *         resolve: ({ target }) => target.from()
+ *       })
+ *     }
+ *   }
+ * })
  *
  * const generated = MachineTest.scenarios(machine, { maxEvents: 5 })
  * ```
@@ -480,7 +492,10 @@ export { ProbeUnavailableError } from "../internal/testing/machine/verification.
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Idle.from()
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
  * }).handle({ Idle: {} })
  *
  * const program = Effect.gen(function*() {
@@ -1090,7 +1105,10 @@ export const Invariant: {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Count(new Count({ value: 0 }))
+ *   initial: {
+ *     target: (to) => to.Count(),
+ *     resolve: ({ target }) => target(new Count({ value: 0 }))
+ *   }
  * }).handle({ Count: {} })
  *
  * const nonNegative = MachineTest.invariants(machine).state(
@@ -1408,10 +1426,19 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(Increment),
- *   initial: () => States.initial.Count(new Count({ value: 0 }))
+ *   initial: {
+ *     target: (to) => to.Count(),
+ *     resolve: ({ target }) => target(new Count({ value: 0 }))
+ *   }
  * }).handle({
- *   Count: { on: { Increment: ({ state }) =>
- *     States.initial.Count(new Count({ value: state.value + 1 })) } }
+ *   Count: {
+ *     on: {
+ *       Increment: Machine.transition({
+ *         target: (to) => to.full.Count(),
+ *         resolve: ({ state, target }) => target(new Count({ value: state.value + 1 }))
+ *       })
+ *     }
+ *   }
  * })
  *
  * const explored = MachineTest.explore(machine, {
@@ -1592,7 +1619,10 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Idle.from()
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
  * }).handle({ Idle: {} })
  *
  * const trace = MachineTest.run(machine, { events: [] })
@@ -1659,7 +1689,7 @@ export interface TransitionCoverageItem<
   readonly source: SourcePath
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
-  readonly targets: Machine.Machine.TransitionTargets<TargetPath>
+  readonly branches: ReadonlyArray<Machine.Machine.TransitionBranch<TargetPath>>
 }
 
 /**
@@ -1819,7 +1849,10 @@ export interface Coverage<M extends AnyMachine> {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Idle.from()
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
  * }).handle({ Idle: {} })
  *
  * const report = Effect.map(
@@ -2035,7 +2068,10 @@ export interface VerifyOptions {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Idle.from()
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
  * }).handle({ Idle: {} })
  *
  * const checked = Effect.gen(function*() {

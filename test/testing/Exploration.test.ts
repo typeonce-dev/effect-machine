@@ -17,13 +17,25 @@ const States = Machine.defineStates({ counter: Counter })
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Increment, Reset, Corrupt),
-  initial: () => States.initial.counter(new Counter({ count: 0 }))
+  initial: {
+    target: (to) => to.counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
 }).handle({
   counter: {
     on: {
-      Increment: ({ state, target }) => target.full.counter(new Counter({ count: state.count + 1 })),
-      Reset: ({ target }) => target.full.counter(new Counter({ count: 0 })),
-      Corrupt: ({ target }) => target.full.counter(new Counter({ count: -1 }))
+      Increment: Machine.transition({
+        target: (to) => to.full.counter(),
+        resolve: ({ state, target }) => target(new Counter({ count: state.count + 1 }))
+      }),
+      Reset: Machine.transition({
+        target: (to) => to.full.counter(),
+        resolve: ({ target }) => target(new Counter({ count: 0 }))
+      }),
+      Corrupt: Machine.transition({
+        target: (to) => to.full.counter(),
+        resolve: ({ target }) => target(new Counter({ count: -1 }))
+      })
     }
   }
 })
@@ -208,7 +220,10 @@ describe("MachineTest bounded exploration", () => {
         states: States.states,
         events: Machine.events(Increment),
         input: Seed,
-        initial: ({ count }) => States.initial.counter(new Counter({ count }))
+        initial: {
+          target: (to) => to.counter(),
+          resolve: ({ input, target }) => target(new Counter({ count: input.count }))
+        }
       }).handle({ counter: {} })
       const explored = yield* MachineTest.explore(inputMachine, {
         input: new Seed({ count: 7 }),

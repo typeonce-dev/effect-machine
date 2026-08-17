@@ -18,15 +18,25 @@ describe("Machine inspection", () => {
       }
     }
   })
-  const initial = States.initial.root(new Root({}), (root) => root.idle(new Idle({})))
+  const initial: Machine.Machine.Snapshot<typeof States.states> = {
+    path: "root",
+    value: new Root({}),
+    state: { path: "root.idle", value: new Idle({}) }
+  }
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Reset),
-    initial: () => initial
+    initial: {
+      target: (to) => to.root.initial(),
+      resolve: ({ target }) => target(new Root({}), (root) => root.idle(new Idle({})))
+    }
   }).handle({
     root: {
       on: {
-        Reset: ({ target }) => target.none()
+        Reset: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
       }
     }
   })
@@ -36,8 +46,20 @@ describe("Machine inspection", () => {
     const executable = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: () => FlatStates.initial.Idle(new Idle({}))
-    }).handle({ Idle: { on: { Reset: ({ target }) => target.none() } } })
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
+    }).handle({
+      Idle: {
+        on: {
+          Reset: Machine.transition({
+            target: (to) => to.none(),
+            resolve: () => undefined
+          })
+        }
+      }
+    })
     Effect.gen(function*() {
       const prepared = yield* Machine.prepare(executable)
       expect(prepared.inspection).type.toBe<Stream.Stream<Machine.Inspection.Event>>()
@@ -137,7 +159,10 @@ describe("Machine inspection", () => {
     const choiceMachine = Machine.make({
       states: ChoiceStates.states,
       events: Machine.events(),
-      initial: () => ChoiceStates.initial.Flow(new Root({}), (flow) => flow.Routing())
+      initial: {
+        target: (to) => to.Flow.initial(),
+        resolve: ({ target }) => (target(new Root({}), (flow) => flow.Routing()))
+      }
     })
     const flow = Machine.stateNodes(choiceMachine).find((node) => node.type === "compound")!
     const routing = Machine.stateNodes(choiceMachine).find((node) => node.type === "choice")!
@@ -165,129 +190,35 @@ describe("Machine inspection", () => {
     if (definition.trigger.type === "event") {
       expect(definition.trigger.event).type.toBe<"Reset">()
     }
-    expect(definition.targets).type.toBe<
-      | { readonly type: "dynamic" }
-      | { readonly type: "declared"; readonly paths: ReadonlyArray<"root" | "root.idle" | "root.recent"> }
+    expect(definition.branches).type.toBe<
+      ReadonlyArray<Machine.Machine.TransitionBranch<"root" | "root.idle" | "root.recent">>
     >()
   })
 
-  it("checks inferred transition results against declared targets", () => {
+  it("requires statically selected transitions", () => {
     const FlatStates = Machine.defineStates({ idle: Idle, running: Running })
     const flat = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: () => FlatStates.initial.idle(new Idle({}))
+      initial: {
+        target: (to) => to.idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     })
-    const target = flat.makeTargetBuilder("idle")
+    flat.handle({
+      idle: {
+        on: {
+          Reset: Machine.transition({
+            target: (to) => to.full.running(),
+            resolve: ({ target }) => target(new Running({}))
+          })
+        }
+      }
+    })
 
-    const direct = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["running"],
-            transition: () => target.full.running(new Running({}))
-          }
-        }
-      }
-    } as const
-    const effectful = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["running"],
-            transition: () => Effect.succeed(target.full.running(new Running({})))
-          }
-        }
-      }
-    } as const
-    const constructed = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["running"],
-            transition: () => target.full.running.from()
-          }
-        }
-      }
-    } as const
-    const undeclared = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["idle"],
-            transition: () => target.full.running(new Running({}))
-          }
-        }
-      }
-    } as const
-    const multiple = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["idle", "running"],
-            transition: () =>
-              Math.random() > 0.5
-                ? target.full.idle(new Idle({}))
-                : target.full.running(new Running({}))
-          }
-        }
-      }
-    } as const
-    const partiallyUndeclared = {
-      idle: {
-        on: {
-          Reset: {
-            targets: ["running"],
-            transition: () =>
-              Math.random() > 0.5
-                ? target.full.idle(new Idle({}))
-                : target.full.running(new Running({}))
-          }
-        }
-      }
-    } as const
-    const always = {
-      idle: {
-        always: {
-          targets: ["running"],
-          transition: () => target.full.running(new Running({}))
-        }
-      }
-    } as const
-    const undeclaredAlways = {
-      idle: {
-        always: {
-          targets: ["idle"],
-          transition: () => target.full.running(new Running({}))
-        }
-      }
-    } as const
-    const onDone = {
-      idle: {
-        onDone: {
-          targets: ["running"],
-          transition: () => Effect.succeed(target.full.running(new Running({})))
-        }
-      }
-    } as const
-    const undeclaredOnDone = {
-      idle: {
-        onDone: {
-          targets: ["idle"],
-          transition: () => target.full.running(new Running({}))
-        }
-      }
-    } as const
-
-    expect(flat.handle).type.toBeCallableWith(direct)
-    expect(flat.handle).type.not.toBeCallableWith(effectful)
-    expect(flat.handle).type.toBeCallableWith(constructed)
-    expect(flat.handle).type.toBeCallableWith(multiple)
-    expect(flat.handle).type.toBeCallableWith(always)
-    expect(flat.handle).type.not.toBeCallableWith(onDone)
-    expect(flat.handle).type.not.toBeCallableWith(undeclared)
-    expect(flat.handle).type.not.toBeCallableWith(partiallyUndeclared)
-    expect(flat.handle).type.not.toBeCallableWith(undeclaredAlways)
-    expect(flat.handle).type.not.toBeCallableWith(undeclaredOnDone)
+    expect(flat.handle).type.not.toBeCallableWith({ idle: { on: { Reset: () => undefined } } })
+    expect(flat.handle).type.not.toBeCallableWith({
+      idle: { on: { Reset: { target: () => undefined, resolve: () => undefined } } }
+    })
   })
 })
