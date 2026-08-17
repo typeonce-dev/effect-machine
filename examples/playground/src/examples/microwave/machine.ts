@@ -58,7 +58,7 @@ export const MicrowaveMachine = definition.handle({
           Idle: {
             on: {
               PowerPressed: Machine.transition({
-                cases: [{
+                cases: (branch) => [branch({
                   title: "door closed",
                   when: ({ snapshot }) =>
                     MicrowaveStates.matches(snapshot, "Oven.door.Closed")
@@ -66,7 +66,7 @@ export const MicrowaveMachine = definition.handle({
                       : Option.none(),
                   target: (to) => to.local.Cooking(),
                   resolve: ({ target }) => target.from({ elapsedSeconds: 0 })
-                }],
+                })],
                 otherwise: { target: (to) => to.none(), resolve: () => undefined }
               })
             }

@@ -77,7 +77,7 @@ definition.handle({
 definition.handle({
   Loading: {
     always: Machine.transition({
-      cases: [{
+      cases: (branch) => [branch({
         title: "ready",
         when: ({ /*case-when-context*/ }) => Option.some("ready" as const),
         target: (to) => to.full.Done(),
@@ -85,7 +85,21 @@ definition.handle({
           const exact: "ready" = context.match
           return context.target.from()
         }
-      }],
+      })],
+      otherwise: {
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }
+    })
+  }
+})
+
+definition.handle({
+  Loading: {
+    always: Machine.transition({
+      cases: (branch) => [branch({
+        /*case-properties*/
+      })],
       otherwise: {
         target: (to) => to.none(),
         resolve: () => undefined
@@ -178,5 +192,11 @@ test("contextually completes transition definitions while authoring", () => {
   const resolve = completions("case-resolve-context")
   assert.equal(resolve.has("match"), true)
   assert.equal(resolve.has("target"), true)
+
+  const caseProperties = completions("case-properties")
+  assert.equal(caseProperties.has("title"), true)
+  assert.equal(caseProperties.has("when"), true)
+  assert.equal(caseProperties.has("target"), true)
+  assert.equal(caseProperties.has("resolve"), true)
 
 })

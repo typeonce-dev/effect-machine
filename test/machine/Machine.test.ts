@@ -5479,12 +5479,12 @@ describe("Machine", () => {
           Machine.Machine.ParentEvents<typeof definition>
         >
       > = Machine.transition({
-        cases: [{
+        cases: (branch) => [branch({
           title: "request is ready",
           when: ({ snapshot }) => snapshot.state === "ready" ? Option.some(snapshot) : Option.none(),
           target: (to) => to.full.Success(),
           resolve: ({ snapshot, target }) => target(new Success({ requestId: snapshot.state }))
-        }],
+        })],
         otherwise: { target: (to) => to.none(), resolve: () => undefined }
       })
       const machine = definition.handle({

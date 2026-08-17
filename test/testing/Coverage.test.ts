@@ -64,12 +64,12 @@ const startupMachine = Machine.make({
 }).handle({
   count: {
     always: Machine.transition({
-      cases: [{
+      cases: (branch) => [branch({
         title: "count is zero",
         when: ({ state }) => state.value === 0 ? Option.some(state) : Option.none(),
         target: (to) => to.full.count(),
         resolve: ({ target }) => target(new Count({ value: 1 }))
-      }],
+      })],
       otherwise: { target: (to) => to.none(), resolve: () => undefined }
     }),
     on: {

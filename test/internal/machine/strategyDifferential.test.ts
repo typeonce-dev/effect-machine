@@ -733,12 +733,12 @@ describe("machine planner and runtime strategies", () => {
             Machine.Machine.ParentEvents<typeof definition>
           >
         > = Machine.transition({
-          cases: [{
+          cases: (branch) => [branch({
             title: "worker is stale",
             when: ({ snapshot }) => snapshot.state === "stale" ? Option.some(snapshot) : Option.none(),
             target: (to) => to.full.Failed(),
             resolve: ({ target }) => target(new Failed({}))
-          }],
+          })],
           otherwise: { target: (to) => to.none(), resolve: () => undefined }
         })
         const machine = definition.handle({
