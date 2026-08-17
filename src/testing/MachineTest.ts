@@ -1677,9 +1677,9 @@ export interface StateCoverage<Path extends string = string> {
  * One stable transition-definition identity in definition order.
  *
  * @category models
- * @since 0.4.0
+ * @since 0.14.0
  */
-export interface TransitionCoverageItem<
+export interface TransitionDefinitionCoverageItem<
   SourcePath extends string = string,
   EventTag extends PropertyKey = PropertyKey,
   TargetPath extends string = SourcePath
@@ -1690,6 +1690,42 @@ export interface TransitionCoverageItem<
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
   readonly branches: ReadonlyArray<Machine.Machine.TransitionBranch<TargetPath>>
+}
+
+/**
+ * One statically declared transition branch together with its owning
+ * definition identity.
+ *
+ * @category models
+ * @since 0.14.0
+ */
+export interface TransitionBranchCoverageItem<
+  SourcePath extends string = string,
+  EventTag extends PropertyKey = PropertyKey,
+  TargetPath extends string = SourcePath
+> {
+  readonly id: string
+  readonly definitionIndex: number
+  readonly branchIndex: number
+  readonly source: SourcePath
+  readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
+  readonly reenter: boolean
+  readonly branch: Machine.Machine.TransitionBranch<TargetPath>
+}
+
+/**
+ * Definition-level and exact branch-level transition coverage.
+ *
+ * @category models
+ * @since 0.14.0
+ */
+export interface TransitionCoverage<
+  SourcePath extends string = string,
+  EventTag extends PropertyKey = PropertyKey,
+  TargetPath extends string = SourcePath
+> {
+  readonly definitions: CoverageSummary<TransitionDefinitionCoverageItem<SourcePath, EventTag, TargetPath>>
+  readonly branches: CoverageSummary<TransitionBranchCoverageItem<SourcePath, EventTag, TargetPath>>
 }
 
 /**
@@ -1812,12 +1848,10 @@ export interface HistoryCoverageEvidence<Path extends string = string> {
  */
 export interface Coverage<M extends AnyMachine> {
   readonly states: StateCoverage<StatePath<M>>
-  readonly transitions: CoverageSummary<
-    TransitionCoverageItem<
-      StateNodePath<M>,
-      Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
-      StateNodePath<M>
-    >
+  readonly transitions: TransitionCoverage<
+    StateNodePath<M>,
+    Machine.Machine.TagOf<Machine.Machine.Events<M>[number]>,
+    StateNodePath<M>
   >
   readonly events: EventCoverage<Machine.Machine.TagOf<Machine.Machine.InputEvents<M>[number]>>
   readonly scenarios: ScenarioCoverage
@@ -1832,10 +1866,10 @@ export interface Coverage<M extends AnyMachine> {
 }
 
 /**
- * Computes deterministic, definition-aware coverage from completed planner
- * traces. Finite declared sets report hits and misses; scenarios and logical
- * configurations report observations only because their complete spaces are
- * generally infinite.
+ * Computes deterministic, definition- and branch-aware coverage from
+ * completed planner traces. Finite declared sets report hits and misses;
+ * scenarios and logical configurations report observations only because their
+ * complete spaces are generally infinite.
  *
  * **Example**
  *
@@ -1979,7 +2013,7 @@ export type VerificationLawGroup =
   | "microsteps"
   | "completion"
   | "history"
-  | "targetBounds"
+  | "definitions"
 
 /**
  * Stable identifiers for individual planner laws.
@@ -2012,8 +2046,10 @@ export type VerificationLaw =
   | "history.value"
   | "history.shallow"
   | "history.deep"
-  | "targetBounds.definition"
-  | "targetBounds.target"
+  | "definitions.initial"
+  | "definitions.transition"
+  | "definitions.branchIndex"
+  | "definitions.selection"
 
 /**
  * One independently observed violation in a planner trace.
@@ -2050,7 +2086,9 @@ export interface VerifyOptions {
 
 /**
  * Verifies an executed trace using only public machine inspection and raw
- * snapshot data. The verifier deliberately does not reuse planner
+ * snapshot data. Retained transitions are checked against their exact static
+ * branch and target selection, and startup is checked against the declared
+ * initial root. The verifier deliberately does not reuse planner
  * normalization, encoding, finality, or other internal helpers.
  *
  * Every selected law is evaluated and returned in one structured error so a

@@ -81,6 +81,41 @@ const startupMachine = Machine.make({
   }
 })
 
+class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
+  value: Schema.Int
+}) {}
+
+const branchMachine = Machine.make({
+  states: StartupStates.states,
+  events: Machine.events(Select),
+  initial: {
+    target: (to) => to.count(),
+    resolve: ({ target }) => target(new Count({ value: 0 }))
+  }
+}).handle({
+  count: {
+    on: {
+      Select: Machine.transition({
+        cases: (branch) => [
+          branch({
+            title: "negative",
+            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.none(),
+            resolve: () => undefined
+          }),
+          branch({
+            title: "zero",
+            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.none(),
+            resolve: () => undefined
+          })
+        ],
+        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+      })
+    }
+  }
+})
+
 const Tick = Symbol.for("MachineTestCoverage/Tick")
 const TickEvent = Schema.Struct({ _tag: Schema.UniqueSymbol(Tick) })
 const ChoiceEvent = Schema.Struct({
@@ -210,10 +245,13 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(partial.events.available, true)
       if (!partial.events.available) return
       assert.deepStrictEqual(partial.states.activation.misses.map(({ path }) => path), ["done"])
-      assert.deepStrictEqual(partial.transitions.misses.map(({ source, trigger }) => ({ source, trigger })), [{
-        source: "count",
-        trigger: { type: "event", event: "Finish" }
-      }])
+      assert.deepStrictEqual(
+        partial.transitions.definitions.misses.map(({ source, trigger }) => ({ source, trigger })),
+        [{
+          source: "count",
+          trigger: { type: "event", event: "Finish" }
+        }]
+      )
       assert.deepStrictEqual(partial.events.misses, [{ tag: "Finish", count: 0 }])
       assert.strictEqual(partial.logicalConfigurations.hit, 2)
 
@@ -221,12 +259,41 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(combined.events.available, true)
       if (!combined.events.available) return
       assert.strictEqual(combined.states.activation.missing, 0)
-      assert.strictEqual(combined.transitions.missing, 0)
+      assert.strictEqual(combined.transitions.definitions.missing, 0)
+      assert.strictEqual(combined.transitions.branches.missing, 0)
       assert.strictEqual(combined.events.missing, 0)
       assert.ok(combined.states.exit.hits.some(({ path }) => path === "count"))
       assert.ok(combined.states.entry.hits.some(({ path }) => path === "done"))
       assert.strictEqual(combined.scenarios.traces, 2)
       assert.strictEqual(combined.scenarios.events, 2)
+    }))
+
+  it.effect("attributes identical targetless results to their exact conditional branches", () =>
+    Effect.gen(function*() {
+      const negative = yield* MachineTest.run(branchMachine, { events: [new Select({ value: -1 })] })
+      const zero = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 0 })] })
+      const positive = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 1 })] })
+
+      const partial = MachineTest.coverage(branchMachine, negative)
+      assert.strictEqual(partial.transitions.definitions.hit, 1)
+      assert.deepStrictEqual(partial.transitions.branches.hits.map(({ branchIndex }) => branchIndex), [0])
+      assert.deepStrictEqual(partial.transitions.branches.misses.map(({ branchIndex }) => branchIndex), [1, 2])
+
+      const complete = MachineTest.coverage(branchMachine, [negative, zero, positive])
+      assert.strictEqual(complete.transitions.definitions.missing, 0)
+      assert.strictEqual(complete.transitions.branches.missing, 0)
+      assert.deepStrictEqual(
+        complete.transitions.branches.hits.map(({ id, branchIndex, branch }) => ({
+          id,
+          branchIndex,
+          type: branch.type
+        })),
+        [
+          { id: "transition:0:branch:0", branchIndex: 0, type: "case" },
+          { id: "transition:0:branch:1", branchIndex: 1, type: "case" },
+          { id: "transition:0:branch:2", branchIndex: 2, type: "otherwise" }
+        ]
+      )
     }))
 
   it.effect("covers finite decoded symbol and union tags and diagnoses open tag spaces", () =>
@@ -263,6 +330,7 @@ describe("MachineTest trace coverage", () => {
       assert.ok(parallelCoverage.completion.paths.includes("workflow"))
       assert.ok(parallelCoverage.completion.paths.includes("workflow.left"))
       assert.strictEqual(parallelCoverage.microsteps.eventTriggered, 2)
+      assert.strictEqual(parallelCoverage.transitions.branches.hit, 2)
 
       const historyMachine = MachineTest.compileModel(historyModel)
       const history = yield* MachineTest.run(historyMachine, {
@@ -273,6 +341,9 @@ describe("MachineTest trace coverage", () => {
       assert.deepStrictEqual(historyCoverage.history.recorded, [{ path: "owner.exact" as const, modes: ["deep"] }])
       assert.strictEqual(historyCoverage.history.targets, 1)
       assert.strictEqual(historyCoverage.history.resolvedTargets, 1)
+      assert.ok(
+        historyCoverage.transitions.branches.hits.some(({ branch }) => branch.selection.kind === "history")
+      )
     }))
 })
 

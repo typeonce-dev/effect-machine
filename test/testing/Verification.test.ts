@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -14,6 +14,9 @@ class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
 class Noop extends Schema.TaggedClass<Noop>("Noop")("Noop", {}) {}
 class Restart extends Schema.TaggedClass<Restart>("Restart")("Restart", {}) {}
+class Select extends Schema.TaggedClass<Select>("VerificationSelect")("Select", {
+  value: Schema.Int
+}) {}
 
 const NavigationStates = Machine.defineStates({
   off: Off,
@@ -88,6 +91,61 @@ const counterMachine = Machine.make({
         resolve: () => undefined
       })
     }
+  }
+})
+
+const conditionalMachine = Machine.make({
+  states: CounterStates.states,
+  events: Machine.events(Select),
+  initial: {
+    target: (to) => to.counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
+}).handle({
+  counter: {
+    on: {
+      Select: Machine.transition({
+        cases: (branch) => [
+          branch({
+            title: "negative",
+            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.none(),
+            resolve: () => undefined
+          }),
+          branch({
+            title: "zero",
+            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
+            target: (to) => to.full.counter(),
+            resolve: ({ target }) => target(new Counter({ count: 0 }))
+          })
+        ],
+        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+      })
+    }
+  }
+})
+
+const invokedMachine = Machine.make({
+  states: CounterStates.states,
+  events: Machine.events(),
+  initial: {
+    target: (to) => to.counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
+}).handle({
+  counter: {
+    invoke: [
+      Machine.invoke({
+        id: "first",
+        effect: () => Effect.succeed(1),
+        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+      }),
+      Machine.invoke({
+        id: "second",
+        effect: () => Effect.succeed(2),
+        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+      })
+    ]
   }
 })
 
@@ -736,7 +794,7 @@ describe("MachineTest.verify", () => {
       ))
     }))
 
-  it.effect("reports requested targets outside declared bounds", () =>
+  it.effect("binds retained targets to the exact selected branch and selection scope", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
       const step = trace.steps[0]!
@@ -750,19 +808,138 @@ describe("MachineTest.verify", () => {
             ...step.plan,
             microsteps: [{
               ...microstep,
-              transitions: [{ ...transition, target: "off" }]
+              transitions: [{ ...transition, target: "app.two" }]
             }]
           }
         }]
       } as typeof trace
 
       const error = yield* MachineTest.verify(navigationMachine, corrupted, {
-        laws: ["targetBounds"]
+        laws: ["definitions"]
       }).pipe(Effect.flip)
-      const violation = error.violations.find(({ law }) => law === "targetBounds.target")
+      const violation = error.violations.find(({ law }) => law === "definitions.selection")
       assert.strictEqual(violation?.eventIndex, 0)
       assert.strictEqual(violation?.microstepIndex, 0)
-      assert.strictEqual(violation?.path, "off")
+      assert.strictEqual(violation?.path, "app.two")
+    }))
+
+  it.effect("rejects invalid and cross-branch conditional evidence", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(conditionalMachine, { events: [new Select({ value: -1 })] })
+      const step = trace.steps[0]!
+      const microstep = step.plan.microsteps[0]!
+      const transition = microstep.transitions[0]!
+
+      const invalidIndex = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, branchIndex: 99 }]
+            }]
+          }
+        }]
+      } as typeof trace
+      const indexError = yield* MachineTest.verify(conditionalMachine, invalidIndex, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(indexError), "definitions.branchIndex")
+
+      const crossBranch = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, branchIndex: 1 }]
+            }]
+          }
+        }]
+      } as typeof trace
+      const branchError = yield* MachineTest.verify(conditionalMachine, crossBranch, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(branchError), "definitions.selection")
+    }))
+
+  it.effect("binds startup to the statically selected root", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
+      const corrupted = {
+        ...trace,
+        initial: {
+          ...trace.initial,
+          startingState: trace.final
+        }
+      } as typeof trace
+
+      const error = yield* MachineTest.verify(navigationMachine, corrupted, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      const violation = error.violations.find(({ law }) => law === "definitions.initial")
+      assert.strictEqual(violation?.eventIndex, undefined)
+      assert.strictEqual(violation?.path, "app")
+    }))
+
+  it.effect("distinguishes invoke definitions by lifecycle id and outcome", () =>
+    Effect.gen(function*() {
+      const trace = yield* MachineTest.run(invokedMachine, { events: [] })
+      const transition = {
+        source: "counter" as const,
+        trigger: { type: "invoke" as const, id: "second", outcome: "done" as const },
+        reenter: false,
+        branchIndex: 0,
+        target: undefined,
+        resolvedTarget: undefined
+      }
+      const microstep: MachineTest.Microstep<typeof invokedMachine> = {
+        next: trace.initial.startingState,
+        event: Machine.InitialEvent,
+        transitions: [transition],
+        commands: [],
+        raisedEvents: [],
+        emittedEvents: [],
+        exitPaths: [],
+        entryPaths: [],
+        changed: false
+      }
+      const withInvoke = {
+        ...trace,
+        initial: {
+          ...trace.initial,
+          plan: {
+            ...trace.initial.plan,
+            microsteps: [microstep]
+          }
+        }
+      }
+      yield* MachineTest.verify(invokedMachine, withInvoke, { laws: ["definitions"] })
+
+      const wrongId = {
+        ...withInvoke,
+        initial: {
+          ...withInvoke.initial,
+          plan: {
+            ...withInvoke.initial.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{
+                ...transition,
+                trigger: { ...transition.trigger, id: "missing" }
+              }]
+            }]
+          }
+        }
+      } as typeof withInvoke
+      const error = yield* MachineTest.verify(invokedMachine, wrongId, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(error), "definitions.transition")
     }))
 
   const generatedNavigation = MachineTest.scenarios(navigationMachine, {
