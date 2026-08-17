@@ -11,6 +11,7 @@ import type {
   ChildAddress,
   ChildMachine,
   Command,
+  Definition,
   ExecutionServices,
   InitialEvent as InitialEventModel,
   Logic,
@@ -113,8 +114,8 @@ const Proto = {
 
 const makeBoundInvoke = (config: unknown): unknown => config
 
-const cloneWithHandlers = (
-  self: Machine.Any,
+const makeWithHandlers = (
+  self: Definition.Any,
   handlers: Machine.StateConfigs<any, any, any, any, any, any, any>
 ): Machine.Any => {
   const machine = Object.create(Proto)
@@ -130,7 +131,6 @@ const cloneWithHandlers = (
   machine.stateNodes = self.stateNodes
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
-  machine.handle = makeHandle(machine)
   machine.invoke = makeBoundInvoke
   Protocol.copyProtocol(self, machine)
   return machine
@@ -532,15 +532,12 @@ const flattenHandlers = (
   }
 }
 
-const makeHandle = (self: Machine.Any): Machine.Any["handle"] =>
+const makeHandle = (self: Definition.Any): Definition.Any["handle"] =>
   ((config: Record<string, unknown>) => {
-    const handlers: Record<PropertyKey, Machine.AnyStateConfig> = Object.assign(
-      Object.create(null),
-      self.handlers
-    )
+    const handlers: Record<PropertyKey, Machine.AnyStateConfig> = Object.create(null)
     flattenHandlers(handlers, self.stateNodes, self.states, "", config)
-    return cloneWithHandlers(self, handlers)
-  }) as Machine.Any["handle"]
+    return makeWithHandlers(self, handlers)
+  }) as Definition.Any["handle"]
 
 export const isMachine = (
   u: unknown
@@ -1215,19 +1212,15 @@ type MakeResult<
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
-> = Machine<
+> = Definition<
   States,
   readonly [...InputEvents, ...InternalEvents],
   Input,
-  Machine.StateIdentifier<States>,
-  never,
-  never,
   InitialE,
   InitialR,
   Machine.FinalStateFromDefinition<States>,
   Machine.TerminalOutput<States>,
   Emits,
-  never,
   InputEvents,
   ParentEvents
 >

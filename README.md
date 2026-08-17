@@ -102,6 +102,16 @@ const program = Effect.gen(function*() {
 })
 ```
 
+`handle` creates a complete implementation boundary. Its result does not
+expose `handle`, so all behavior for one machine belongs in the same handler
+tree. Reuse the definition when multiple independent implementations are
+useful, such as production and testing variants:
+
+```ts
+const ProductionCounter = CounterDefinition.handle(productionHandlers)
+const TestingCounter = CounterDefinition.handle(testingHandlers)
+```
+
 `Machine.start` returns a `MachineRef` with `send`, `state`, `snapshot`,
 `changes`, `emissions`, `join`, and `stop`. Sending enqueues an event; observe
 `changes` or use the testing probe when work must be causally acknowledged.

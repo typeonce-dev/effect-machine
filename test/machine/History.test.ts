@@ -118,7 +118,8 @@ const makeCheckoutMachine = (
   initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>,
   onInitialize?: () => void,
   lifecycle?: Array<string>,
-  onDefault?: () => void
+  onDefault?: () => void,
+  exactDefault?: () => ReturnType<typeof checkoutShipping>
 ) =>
   Machine.make({
     states: CheckoutStates.states,
@@ -151,10 +152,10 @@ const makeCheckoutMachine = (
           }
         },
         exact: {
-          default: () => {
+          default: exactDefault ?? (() => {
             onDefault?.()
             return checkoutShipping("fallback-order", "fallback-address")
-          }
+          })
         }
       },
       on: {
@@ -767,16 +768,12 @@ describe("Machine history states", () => {
   it.effect("rejects a forged fallback that omits its declared owner with a precise diagnostic", () =>
     Effect.gen(function*() {
       const unsafe = makeCheckoutMachine(
-        { path: "support" as const, value: new Support({ ticket: "new" }) }
-      ).handle({
-        checkout: {
-          history: {
-            exact: {
-              default: (() => ({ path: "support" as const, value: new Support({ ticket: "forged" }) })) as any
-            }
-          }
-        }
-      })
+        { path: "support" as const, value: new Support({ ticket: "new" }) },
+        undefined,
+        undefined,
+        undefined,
+        (() => ({ path: "support" as const, value: new Support({ ticket: "forged" }) })) as any
+      )
       const initial = yield* Machine.planInitial(unsafe)
       const exit = yield* Effect.exit(Machine.plan(unsafe, initial.state, new ResumeDeep({})))
 

@@ -168,14 +168,15 @@ describe("Machine history states", () => {
   })
 
   it("exposes zero-argument history targets without value overrides", () => {
-    const machine = Machine.make({
+    const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
       initial: {
         target: (to) => to.support(),
         resolve: ({ target }) => (target(new Support({})))
       }
-    }).handle({
+    })
+    const incomplete = definition.handle({
       support: {
         on: {
           Resume: Machine.transition({
@@ -196,20 +197,21 @@ describe("Machine history states", () => {
       }
     })
 
-    expect(machine).type.toBeAssignableTo<Machine.Machine.Any>()
+    expect(incomplete).type.toBeAssignableTo<Machine.Machine.Any>()
   })
 
   it("requires typed defaults and only the shallow-dependent initializer", () => {
     expect<Machine.Machine.RequiredHistoryInitializers<typeof States.states>>().type.toBe<"checkout.payment">()
 
-    const machine = Machine.make({
+    const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
       initial: {
         target: (to) => to.support(),
         resolve: ({ target }) => (target(new Support({})))
       }
-    }).handle({
+    })
+    const incomplete = definition.handle({
       support: {
         on: {
           Resume: Machine.transition({
@@ -220,9 +222,9 @@ describe("Machine history states", () => {
       }
     })
 
-    expect(Machine.planInitial).type.not.toBeCallableWith(machine)
+    expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
 
-    const complete = machine.handle({
+    const complete = definition.handle({
       checkout: {
         history: {
           recent: {
@@ -473,8 +475,8 @@ describe("Machine history states", () => {
     })
   })
 
-  it("tracks defaults and shallow initializers across successive handle calls", () => {
-    const machine = Machine.make({
+  it("requires defaults and shallow initializers in one handler tree", () => {
+    const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
       initial: {
@@ -482,7 +484,7 @@ describe("Machine history states", () => {
         resolve: ({ target }) => (target(new Support({})))
       }
     })
-    const afterDefaults = machine.handle({
+    const afterDefaults = definition.handle({
       checkout: {
         history: {
           recent: {
@@ -504,8 +506,24 @@ describe("Machine history states", () => {
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(afterDefaults)
 
-    const complete = afterDefaults.handle({
+    const complete = definition.handle({
       checkout: {
+        history: {
+          recent: {
+            default: ({ target }) =>
+              target.checkout(
+                new Checkout({ orderId: "fallback" }),
+                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+              )
+          },
+          exact: {
+            default: ({ target }) =>
+              target.checkout(
+                new Checkout({ orderId: "fallback" }),
+                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+              )
+          }
+        },
         states: {
           payment: {
             initialize: ({ state, builder }) => builder(new CardEntry({ cardNumber: String(state.attempt) }))
