@@ -37,14 +37,21 @@ interface TransitionDefinition {
       readonly outcome: "done" | "failure" | "snapshot"
     }
   readonly reenter: boolean
-  readonly targets:
+  readonly branches: ReadonlyArray<
     | {
-      readonly type: "dynamic"
+      readonly type: "direct"
+      readonly target: string | undefined
     }
     | {
-      readonly type: "declared"
-      readonly paths: ReadonlyArray<string>
+      readonly type: "case"
+      readonly title: string
+      readonly target: string | undefined
     }
+    | {
+      readonly type: "otherwise"
+      readonly target: string | undefined
+    }
+  >
 }
 
 type ActivityDefinition =
@@ -101,16 +108,20 @@ const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
 
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<string> => {
   const labels: Array<string> = []
-  const targets = (definition: TransitionDefinition): string =>
-    definition.targets.type === "dynamic" ?
-      ""
-      : definition.targets.paths.length === 0 ?
-      " → ∅"
-      : ` → ${definition.targets.paths.map((path) => path.slice(path.lastIndexOf(".") + 1)).join(" | ")}`
+  const target = (path: string | undefined): string =>
+    path === undefined ? " → ∅" : ` → ${path.slice(path.lastIndexOf(".") + 1)}`
+  const branches = (definition: TransitionDefinition): string =>
+    definition.branches.map((branch) =>
+      branch.type === "direct" ?
+        target(branch.target)
+        : branch.type === "case" ?
+        ` [${branch.title}]${target(branch.target)}`
+        : ` [otherwise]${target(branch.target)}`
+    ).join(" |")
   const events = definitions.flatMap((definition) =>
     definition.trigger.type === "event" ?
       [
-        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${targets(definition)}`
+        `${String(definition.trigger.event)}${definition.reenter ? " [reenter]" : ""}${branches(definition)}`
       ]
       : []
   )
@@ -120,13 +131,13 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
   }
   for (const definition of definitions) {
     if (definition.trigger.type === "always") {
-      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
+      labels.push(`◇ always${definition.reenter ? " [reenter]" : ""}${branches(definition)}`)
     } else if (definition.trigger.type === "done") {
-      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${targets(definition)}`)
+      labels.push(`◇ done${definition.reenter ? " [reenter]" : ""}${branches(definition)}`)
     } else if (definition.trigger.type === "choice") {
-      labels.push(`◇ choice${targets(definition)}`)
+      labels.push(`◇ choice${branches(definition)}`)
     } else if (definition.trigger.type === "invoke") {
-      labels.push(`◇ invoke ${definition.trigger.id} ${definition.trigger.outcome}${targets(definition)}`)
+      labels.push(`◇ invoke ${definition.trigger.id} ${definition.trigger.outcome}${branches(definition)}`)
     }
   }
   return labels
@@ -187,8 +198,8 @@ export const makeTextRenderer = <Machine extends MachineValue, Snapshot>(
   const lines = [
     machine.id ?? "Machine",
     activities.size === 0
-      ? "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)"
-      : "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)  ◆ activity",
+      ? "● active  ○ inactive  ◇ transition (→ target, ∅ none)"
+      : "● active  ○ inactive  ◇ transition (→ target, ∅ none)  ◆ activity",
     ""
   ]
   const visit = (node: StateNode, prefix: string, isLast: boolean): void => {

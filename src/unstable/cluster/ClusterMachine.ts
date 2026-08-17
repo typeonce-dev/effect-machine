@@ -316,7 +316,10 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: () => States.initial.Idle.from()
+ *   initial: {
+ *     target: (to) => to.Idle(),
+ *     resolve: ({ target }) => target.from()
+ *   }
  * }).handle({ Idle: {} })
  *
  * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })

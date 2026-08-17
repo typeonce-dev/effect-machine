@@ -20,13 +20,19 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: () => States.initial.Loading.from()
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Effect.succeed("ready"),
-            onDone: ({ output, target }) => target.full.Complete(new Complete({ value: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Complete(),
+              resolve: ({ output, target }) => target(new Complete({ value: output }))
+            })
           })
         },
         Complete: {},
@@ -37,12 +43,12 @@ describe("inline invoke", () => {
         source: "Loading",
         trigger: { type: "invoke", id: "load", outcome: "done" },
         reenter: false,
-        targets: { type: "dynamic" }
+        branches: [{ type: "direct", target: "Complete" }]
       }])
 
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-      assert.deepStrictEqual(yield* ref.state, States.initial.Complete(new Complete({ value: "ready" })))
+      assert.deepStrictEqual(yield* ref.state, { path: "Complete" as const, value: new Complete({ value: "ready" }) })
     }))
 
   it.effect("plans a typed Effect failure directly", () =>
@@ -50,13 +56,19 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: () => States.initial.Loading.from()
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Effect.fail("offline"),
-            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error }))
+            onFailure: Machine.transition({
+              target: (to) => to.full.Failed(),
+              resolve: ({ error, target }) => target(new Failed({ message: error }))
+            })
           })
         },
         Complete: {},
@@ -65,7 +77,7 @@ describe("inline invoke", () => {
 
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-      assert.deepStrictEqual(yield* ref.state, States.initial.Failed(new Failed({ message: "offline" })))
+      assert.deepStrictEqual(yield* ref.state, { path: "Failed" as const, value: new Failed({ message: "offline" }) })
     }))
 
   it.effect("fails the owning machine when an Effect source factory defects", () =>
@@ -74,10 +86,18 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(Start),
-        initial: () => States.initial.Idle.from()
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target.from()
+        }
       }).handle({
         Idle: {
-          on: { Start: ({ target }) => target.full.Loading.from() }
+          on: {
+            Start: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target.from()
+            })
+          }
         },
         Loading: {
           invoke: Machine.invoke({
@@ -85,7 +105,10 @@ describe("inline invoke", () => {
             effect: (): Effect.Effect<string> => {
               throw defect
             },
-            onDone: ({ target }) => target.none()
+            onDone: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           })
         },
         Complete: {},
@@ -112,10 +135,18 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(Start),
-        initial: () => States.initial.Idle.from()
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target.from()
+        }
       }).handle({
         Idle: {
-          on: { Start: ({ target }) => target.full.Loading.from() }
+          on: {
+            Start: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target.from()
+            })
+          }
         },
         Loading: {
           invoke: Machine.invoke({

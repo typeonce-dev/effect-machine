@@ -150,7 +150,7 @@ const compileIndexedExecutionDescriptor = (
     }
     const byEvent = new Map<PropertyKey, MicrostepTransition<any, any, any, any>>()
     for (const tag of Reflect.ownKeys(config.on)) {
-      const transition = normalizeTransition(config.on[tag])
+      const transition = normalizeTransition(config.on[tag] as Parameters<typeof normalizeTransition>[0])
       if (transition !== undefined) {
         byEvent.set(tag, transition)
       }

@@ -37,37 +37,48 @@ describe("Machine transition snapshot context", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(Advance),
-      initial: () =>
-        States.initial.Root(
+      initial: {
+        target: (to) => to.Root.initial(),
+        resolve: ({ target }) => (target(
           new Root({}),
           (root) =>
             root
               .Left(new Left({}), (left) => left.LeftIdle(new LeftIdle({})))
               .Right(new Right({}), (right) => right.RightIdle(new RightIdle({})))
-        )
+        ))
+      }
     }).handle({
       Root: {
         states: {
           Left: {
-            onDone: ({ snapshot, target }) => {
-              expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-              expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-              expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-              expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-              return target.local.LeftIdle(new LeftIdle({}))
-            },
+            onDone: Machine.transition({
+              target: (to) => to.local.LeftIdle(),
+              resolve: ({ snapshot, target }) => {
+                expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+                expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                return target(new LeftIdle({}))
+              }
+            }),
             states: {
               LeftIdle: {
-                always: ({ snapshot, target }) => {
-                  expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                  return target.none()
-                },
-                on: {
-                  Advance: ({ snapshot, target }) => {
+                always: Machine.transition({
+                  target: (to) => to.none(),
+                  resolve: ({ snapshot }) => {
                     expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                    expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
-                    return target.local.LeftDone(new LeftDone({}))
+                    return undefined
                   }
+                }),
+                on: {
+                  Advance: Machine.transition({
+                    target: (to) => to.local.LeftDone(),
+                    resolve: ({ snapshot, target }) => {
+                      expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+                      expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
+                      return target(new LeftDone({}))
+                    }
+                  })
                 }
               }
             }
@@ -93,7 +104,10 @@ describe("Machine transition snapshot context", () => {
     Machine.make({
       states: choiceStates.states,
       events: Machine.events(),
-      initial: () => choiceStates.initial.Flow(new Flow({}), (flow) => flow.Routing())
+      initial: {
+        target: (to) => to.Flow.initial(),
+        resolve: ({ target }) => (target(new Flow({}), (flow) => flow.Routing()))
+      }
     }).handle({
       Flow: {
         entry: (context) => {
@@ -101,13 +115,13 @@ describe("Machine transition snapshot context", () => {
         },
         states: {
           Routing: {
-            choice: {
-              targets: ["Flow.Active"],
-              transition: (context) => {
+            choice: Machine.transition({
+              target: (to) => to.local.Active(),
+              resolve: (context) => {
                 expect(context).type.not.toHaveProperty("snapshot")
-                return context.target.local.Active(new Active({}))
+                return context.target(new Active({}))
               }
-            }
+            })
           }
         }
       }

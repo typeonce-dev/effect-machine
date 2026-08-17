@@ -49,6 +49,7 @@ export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId
 
 const TypeId = "~effect/Machine"
 export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
+export const TransitionTypeId: unique symbol = Symbol.for("effect/Machine/Transition")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type IsAny<A> = 0 extends 1 & A ? true : false
 type MachineRuntimeRequirement = internalRuntime.MachineRuntime
@@ -127,47 +128,291 @@ const cloneWithHandlers = (
   return machine
 }
 
-const validateTransitionTargets = (
+type DefinitionBranch = {
+  readonly title?: string
+  readonly when?: (context: any) => Option.Option<unknown>
+  readonly target: (selector: unknown) => unknown
+  readonly resolve?: (context: any, enqueue: unknown) => unknown
+}
+
+type CapturedBranch = DefinitionBranch & {
+  readonly selection: Topology.TargetSelection
+}
+
+const makeSelectionMethod = (
+  kind: Topology.TargetSelectionKind,
+  path: string | undefined,
+  scope: Topology.TargetSelectionScope
+): () => Topology.TargetSelection =>
+() => Topology.makeTargetSelection(kind, path, scope)
+
+const addSelectionChildren = (
+  builder: Record<string, unknown>,
+  stateNodes: Machine.StateNodes,
+  parent: string,
+  scope: "local" | "branch"
+): void => {
+  for (const node of stateNodes.byPath.values()) {
+    if (node.parent !== parent || node.type === "history") continue
+    builder[node.key] = makeSelectionNode(stateNodes, node.path, scope)
+  }
+}
+
+const makeSelectionNode = (
   stateNodes: Machine.StateNodes,
   path: string,
-  trigger: PropertyKey,
-  transition: unknown
-): void => {
-  if (typeof transition !== "object" || transition === null || !hasProperty(transition, "targets")) {
-    return
-  }
-  if (!Array.isArray(transition.targets)) {
-    throw new Error(
-      `Machine expected transition targets for state "${path}" on "${String(trigger)}" to be an array`
-    )
-  }
-  for (const target of transition.targets) {
-    if (typeof target !== "string" || !stateNodes.byPath.has(target)) {
-      throw new Error(
-        `Machine transition for state "${path}" on "${String(trigger)}" declares unknown target "${String(target)}"`
-      )
+  scope: Topology.TargetSelectionScope
+): unknown => {
+  const node = getTargetBuilderNode(stateNodes, path)
+  const kind: Topology.TargetSelectionKind = node.type === "choice" ? "choice" : "state"
+  const method = makeSelectionMethod(kind, path, scope) as unknown as Record<string, unknown>
+  if (node.type !== "atomic" && node.type !== "final" && node.type !== "choice" && node.type !== "history") {
+    Object.defineProperty(method, "initial", {
+      value: makeSelectionMethod("initial", path, scope),
+      enumerable: true
+    })
+    if (scope === "local" || scope === "branch") {
+      addSelectionChildren(method, stateNodes, path, scope)
     }
   }
+  return method
 }
 
-const captureTransition = (transition: unknown): unknown => {
+const makeHistorySelectionTree = (
+  stateNodes: Machine.StateNodes,
+  parent: string | undefined
+): Record<string, unknown> => {
+  const builder: Record<string, unknown> = {}
+  for (const node of stateNodes.byPath.values()) {
+    if (node.parent !== parent) continue
+    if (node.type === "history") {
+      builder[node.key] = makeSelectionMethod("history", node.path, "full")
+    } else if (node.type !== "choice") {
+      const children = makeHistorySelectionTree(stateNodes, node.path)
+      if (Object.keys(children).length > 0) builder[node.key] = children
+    }
+  }
+  return builder
+}
+
+const makeTargetSelector = (
+  stateNodes: Machine.StateNodes,
+  source: string
+): unknown => {
+  const full: Record<string, unknown> = {}
+  for (const node of stateNodes.byPath.values()) {
+    if (node.parent === undefined && node.type !== "history" && node.type !== "choice") {
+      full[node.key] = makeSelectionNode(stateNodes, node.path, "full")
+    }
+  }
+  const branch: Record<string, unknown> = {}
+  const root = getTargetBuilderNode(stateNodes, source.split(".")[0]!)
+  branch[root.key] = makeSelectionNode(stateNodes, root.path, "branch")
+  const local: Record<string, unknown> = {}
+  const localScope = getLocalTargetScope(stateNodes, source)
+  if (localScope !== undefined) addSelectionChildren(local, stateNodes, localScope, "local")
+  return {
+    none: makeSelectionMethod("none", undefined, "local"),
+    local,
+    branch,
+    full,
+    history: makeHistorySelectionTree(stateNodes, undefined)
+  }
+}
+
+const captureDefinitionBranch = (
+  branch: unknown,
+  selector: unknown,
+  path: string,
+  trigger: PropertyKey
+): CapturedBranch => {
+  if (
+    typeof branch !== "object" || branch === null || !hasProperty(branch, "target") ||
+    typeof branch.target !== "function"
+  ) {
+    throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" requires a target selector`)
+  }
+  const selection = branch.target(selector)
+  if (!Topology.isTargetSelection(selection)) {
+    throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must select exactly one target`)
+  }
+  return { ...(branch as DefinitionBranch), selection }
+}
+
+const getSelectionBuilder = (
+  target: Record<string, any>,
+  selection: Topology.TargetSelection,
+  stateNodes: Machine.StateNodes,
+  source: string
+): unknown => {
+  if (selection.kind === "none") return target.none
+  let builder: any
+  let parts = selection.path!.split(".")
+  if (selection.kind === "history") {
+    builder = target.history
+  } else if (selection.scope === "local") {
+    builder = target.local
+    const scope = getLocalTargetScope(stateNodes, source)
+    if (scope !== undefined) parts = selection.path!.slice(scope.length + 1).split(".")
+  } else if (selection.scope === "branch") {
+    builder = target.branch
+  } else {
+    builder = target.full
+  }
+  for (const part of parts) builder = builder[part]
+  if (selection.kind === "initial") builder = builder.initial
+  if (
+    typeof builder !== "function" &&
+    (typeof builder !== "object" || builder === null || typeof builder.from !== "function")
+  ) {
+    throw new Error(`Machine could not construct selected transition target "${selection.path}"`)
+  }
+  return builder
+}
+
+const constructSelectedTarget = (builder: any): unknown => typeof builder === "function" ? builder() : builder.from()
+
+const validateResolvedSelection = (
+  result: unknown,
+  selection: Topology.TargetSelection,
+  stateNodes: Machine.StateNodes
+): void => {
+  if (selection.kind === "none") {
+    if (result !== undefined) {
+      throw new Error("Machine targetless transition resolver must return undefined")
+    }
+    return
+  }
+  if (result === undefined) return
+  const resultPath = typeof result === "object" && result !== null && hasProperty(result, "path") &&
+      typeof result.path === "string"
+    ? result.path
+    : undefined
+  const selectedNode = selection.path === undefined ? undefined : stateNodes.byPath.get(selection.path)
+  const acceptsDescendant = (selection.scope === "local" || selection.scope === "branch") &&
+    (selectedNode?.type === "compound" || selectedNode?.type === "parallel")
+  if (
+    resultPath === undefined ||
+    (resultPath !== selection.path && !(acceptsDescendant && resultPath.startsWith(`${selection.path}.`)))
+  ) {
+    throw new Error(
+      `Machine transition resolver selected "${selection.path}" but constructed "${resultPath ?? "<invalid>"}"`
+    )
+  }
+}
+
+const runCapturedBranch = (
+  branch: CapturedBranch,
+  context: Record<string, any>,
+  enqueue: unknown,
+  stateNodes: Machine.StateNodes,
+  source: string,
+  match?: { readonly value: unknown }
+): unknown => {
+  const selectedTarget = getSelectionBuilder(context.target, branch.selection, stateNodes, source)
+  if (branch.resolve === undefined) return constructSelectedTarget(selectedTarget)
+  const resolverContext = { ...context }
+  if (branch.selection.kind === "none") delete resolverContext.target
+  else resolverContext.target = selectedTarget
+  if (match !== undefined) resolverContext.match = match.value
+  const resolved = branch.resolve(resolverContext, enqueue)
+  validateResolvedSelection(resolved, branch.selection, stateNodes)
+  return resolved === undefined ? constructSelectedTarget(selectedTarget) : resolved
+}
+
+const captureTransition = (
+  transition: unknown,
+  stateNodes: Machine.StateNodes,
+  path: string,
+  trigger: PropertyKey
+): unknown => {
   if (typeof transition !== "object" || transition === null) {
-    return transition
+    throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must be an object`)
   }
-  const captured = { ...(transition as Record<PropertyKey, unknown>) }
-  if (Array.isArray(captured.targets)) {
-    captured.targets = captured.targets.slice()
+  const definition = transition as Record<PropertyKey, unknown>
+  const selector = makeTargetSelector(stateNodes, path)
+  const reenter = definition.reenter === true
+  if (Array.isArray(definition.cases)) {
+    const rawCases = definition.cases as ReadonlyArray<unknown>
+    if (definition.cases.length === 0 || !hasProperty(definition, "otherwise")) {
+      throw new Error(
+        `Machine conditional transition for state "${path}" on "${String(trigger)}" requires cases and otherwise`
+      )
+    }
+    const cases = rawCases.map((branch) => {
+      const captured = captureDefinitionBranch(branch, selector, path, trigger)
+      if (typeof captured.title !== "string" || captured.title.length === 0 || typeof captured.when !== "function") {
+        throw new Error(
+          `Machine conditional transition case for state "${path}" on "${String(trigger)}" requires title and when`
+        )
+      }
+      return captured
+    })
+    const otherwise = captureDefinitionBranch(definition.otherwise, selector, path, trigger)
+    return {
+      reenter,
+      targets: [
+        ...new Set(
+          [...cases, otherwise].flatMap((branch) => branch.selection.path === undefined ? [] : [branch.selection.path])
+        )
+      ],
+      branches: [
+        ...cases.map((branch) => ({ type: "case" as const, title: branch.title!, target: branch.selection.path })),
+        { type: "otherwise" as const, target: otherwise.selection.path }
+      ],
+      transition: (context: Record<string, any>, enqueue: unknown) => {
+        const predicateContext = { ...context }
+        delete predicateContext.target
+        for (const branch of cases) {
+          const result = branch.when!(predicateContext)
+          if (!Option.isOption(result)) {
+            throw new Error(`Machine conditional transition case "${branch.title}" must return Option`)
+          }
+          if (Option.isSome(result)) {
+            return runCapturedBranch(branch, context, enqueue, stateNodes, path, { value: result.value })
+          }
+        }
+        return runCapturedBranch(otherwise, context, enqueue, stateNodes, path)
+      }
+    }
   }
-  return captured
+  const branch = captureDefinitionBranch(transition, selector, path, trigger)
+  return {
+    reenter,
+    targets: branch.selection.path === undefined ? [] : [branch.selection.path],
+    branches: [{ type: "direct" as const, target: branch.selection.path }],
+    transition: (context: Record<string, any>, enqueue: unknown) =>
+      runCapturedBranch(branch, context, enqueue, stateNodes, path)
+  }
 }
 
-const captureEventHandlers = (on: object): Record<PropertyKey, unknown> => {
+const captureEventHandlers = (
+  on: object,
+  stateNodes: Machine.StateNodes,
+  path: string
+): Record<PropertyKey, unknown> => {
   // The machine owns its dispatch table. Compiled plans may snapshot these
   // definitions, so retaining caller-owned containers would let strategies
   // observe different handlers after an unsafe external mutation.
   const captured: Record<PropertyKey, unknown> = Object.create(null)
   for (const event of Reflect.ownKeys(on)) {
-    captured[event] = captureTransition((on as Record<PropertyKey, unknown>)[event])
+    captured[event] = captureTransition((on as Record<PropertyKey, unknown>)[event], stateNodes, path, event)
+  }
+  return captured
+}
+
+const captureInvokeDefinition = (
+  invoke: unknown,
+  stateNodes: Machine.StateNodes,
+  path: string
+): unknown => {
+  if (Array.isArray(invoke)) return invoke.map((item) => captureInvokeDefinition(item, stateNodes, path))
+  if (typeof invoke !== "object" || invoke === null) return invoke
+  const captured = { ...(invoke as Record<PropertyKey, unknown>) }
+  for (const key of ["onDone", "onFailure", "onSnapshot"] as const) {
+    if (captured[key] !== undefined) {
+      captured[key] = captureTransition(captured[key], stateNodes, path, key)
+    }
   }
   return captured
 }
@@ -191,15 +436,21 @@ const flattenHandlers = (
     const { states: childConfig, ...stateConfig } = nodeConfig as Record<string, unknown>
     const on = stateConfig.on
     if (typeof on === "object" && on !== null) {
-      const capturedOn = captureEventHandlers(on)
+      const capturedOn = captureEventHandlers(on, stateNodes, path)
       stateConfig.on = capturedOn
-      for (const event of Reflect.ownKeys(capturedOn)) {
-        validateTransitionTargets(stateNodes, path, event, capturedOn[event])
-      }
     }
-    validateTransitionTargets(stateNodes, path, "always", stateConfig.always)
-    validateTransitionTargets(stateNodes, path, "done", stateConfig.onDone)
-    validateTransitionTargets(stateNodes, path, "choice", stateConfig.choice)
+    if (stateConfig.always !== undefined) {
+      stateConfig.always = captureTransition(stateConfig.always, stateNodes, path, "always")
+    }
+    if (stateConfig.onDone !== undefined) {
+      stateConfig.onDone = captureTransition(stateConfig.onDone, stateNodes, path, "done")
+    }
+    if (stateConfig.choice !== undefined) {
+      stateConfig.choice = captureTransition(stateConfig.choice, stateNodes, path, "choice")
+    }
+    if (stateConfig.invoke !== undefined) {
+      stateConfig.invoke = captureInvokeDefinition(stateConfig.invoke, stateNodes, path)
+    }
     const node = stateNodes.byPath.get(path)
     if (node?.type === "choice") {
       if (
@@ -208,7 +459,7 @@ const flattenHandlers = (
         !hasProperty(stateConfig.choice, "targets") || !Array.isArray(stateConfig.choice.targets) ||
         stateConfig.choice.targets.length === 0
       ) {
-        throw new Error(`Machine choice state "${path}" requires a transition and at least one declared target`)
+        throw new Error(`Machine choice state "${path}" requires a transition`)
       }
     }
     handlers[path] = stateConfig as Machine.AnyStateConfig
@@ -764,13 +1015,80 @@ const makeTargetBuilder = <const States extends Machine.StateSchemas>(
     }) as Machine.TargetBuilder<States, Source>
 }
 
+const makeInitialSelector = (stateNodes: Machine.StateNodes): unknown => {
+  const selector: Record<string, unknown> = {}
+  for (const node of stateNodes.byPath.values()) {
+    if (node.parent === undefined && node.type !== "history" && node.type !== "choice") {
+      selector[node.key] = makeSelectionNode(stateNodes, node.path, "initial")
+    }
+  }
+  return selector
+}
+
+const getInitialSelectionBuilder = (
+  initialBuilder: Record<string, any>,
+  selection: Topology.TargetSelection
+): (...args: ReadonlyArray<any>) => unknown => {
+  const path = selection.path
+  if (path === undefined || path.includes(".")) {
+    throw new Error("Machine initial target must select one top-level state")
+  }
+  const builder = initialBuilder[path]
+  if (typeof builder !== "function") {
+    throw new Error(`Machine could not construct selected initial state "${path}"`)
+  }
+  return builder
+}
+
+const captureInitialBranch = (
+  branch: unknown,
+  selector: unknown,
+  initialBuilder: Record<string, any>
+): CapturedBranch & { readonly builder: (...args: ReadonlyArray<any>) => unknown } => {
+  const captured = captureDefinitionBranch(branch, selector, "<machine>", "initial")
+  if (captured.selection.kind !== "state" && captured.selection.kind !== "initial") {
+    throw new Error("Machine initial target must select a top-level state or its declared initial entry")
+  }
+  return { ...captured, builder: getInitialSelectionBuilder(initialBuilder, captured.selection) }
+}
+
+const validateInitialSelection = (result: unknown, selection: Topology.TargetSelection): void => {
+  if (
+    typeof result !== "object" || result === null || !hasProperty(result, "path") || result.path !== selection.path
+  ) {
+    const resultPath = typeof result === "object" && result !== null && hasProperty(result, "path")
+      ? String(result.path)
+      : "<invalid>"
+    throw new Error(`Machine initial resolver selected "${selection.path}" but constructed "${resultPath}"`)
+  }
+}
+
+const compileInitial = (
+  definition: unknown,
+  states: Machine.StateTree,
+  stateNodes: Machine.StateNodes
+): (input?: unknown) => unknown => {
+  if (typeof definition !== "object" || definition === null) {
+    throw new Error("Machine initial definition must be an object")
+  }
+  const selector = makeInitialSelector(stateNodes)
+  const initialBuilder = makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Record<string, any>
+  const branch = captureInitialBranch(definition, selector, initialBuilder)
+  return (input?: unknown) => {
+    const result = branch.resolve === undefined
+      ? branch.builder()
+      : branch.resolve({ input, target: branch.builder }, undefined)
+    validateInitialSelection(result, branch.selection)
+    return result
+  }
+}
+
 export const defineStates: DefineStates = (<const States extends Machine.StateSchemas>(
   states: States
 ): Machine.DefinedStates<States> => {
   StateDefinition.validateStateDefinitions(states, "Machine.defineStates")
   return {
     states,
-    initial: makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Machine.InitialBuilder<States>,
     get:
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
         Topology.getSnapshotByPath(snapshot, path).pipe(
@@ -813,7 +1131,7 @@ type MakeConfig<
   readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
   readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
   readonly input?: Input
-  readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
+  readonly initial: unknown
 }
 
 type MakeResult<
@@ -890,7 +1208,7 @@ export const make: Make = (<
     readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
     readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
     readonly input?: Input
-    readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
+    readonly initial: unknown
   }
 ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents> => {
   StateDefinition.validateStateDefinitions(config.states, "Machine.make")
@@ -902,8 +1220,8 @@ export const make: Make = (<
   self.parentEvents = config.parentEvents ?? Protocol.makeEventProtocol("public", [] as const)
   self.input = config.input
   self.id = config.id
-  self.initial = config.initial
   self.stateNodes = Topology.compileStateNodes(config.states)
+  self.initial = compileInitial(config.initial, config.states, self.stateNodes)
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)

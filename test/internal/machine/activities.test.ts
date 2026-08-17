@@ -17,7 +17,10 @@ const childMachine = Machine.make({
   id: "document-worker",
   states: childStates.states,
   events: Machine.events(),
-  initial: () => childStates.initial.ChildIdle(new ChildIdle({}))
+  initial: {
+    target: (to) => to.ChildIdle(),
+    resolve: ({ target }) => target(new ChildIdle({}))
+  }
 })
 const child = Machine.child("child", childMachine)
 
@@ -28,7 +31,10 @@ const activityMachine = Machine.make({
   id: "activity-inspection",
   states: activityStates.states,
   events: Machine.events(WorkSucceeded, WorkFailed, LoadTimedOut),
-  initial: () => activityStates.initial.Loading(new Loading({}))
+  initial: {
+    target: (to) => to.Loading(),
+    resolve: ({ target }) => target(new Loading({}))
+  }
 }).handle({
   Loading: {
     invoke: [
@@ -40,10 +46,23 @@ const activityMachine = Machine.make({
       Machine.invoke({
         id: "load-document",
         effect: () => Effect.fail("unavailable").pipe(Effect.as(1)),
-        onDone: ({ target }) => target.none(),
-        onFailure: ({ target }) => target.none()
+        onDone: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        }),
+        onFailure: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
       }),
-      Machine.invoke({ id: "load-timeout", after: timerDuration, onDone: ({ target }) => target.none() }),
+      Machine.invoke({
+        id: "load-timeout",
+        after: timerDuration,
+        onDone: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
+      }),
       Machine.invoke({ child })
     ]
   },
@@ -67,11 +86,11 @@ const renderActivityMachine = makeTextRenderer<
 const machine = {
   stateNodes: {
     byPath: new Map([
-      ["Idle", { path: "Idle" }],
-      ["Loading", { path: "Loading" }],
-      ["Parent", { path: "Parent" }],
-      ["Parent.Active", { path: "Parent.Active" }],
-      ["Dynamic", { path: "Dynamic" }]
+      ["Idle", { path: "Idle" as const }],
+      ["Loading", { path: "Loading" as const }],
+      ["Parent", { path: "Parent" as const }],
+      ["Parent.Active", { path: "Parent.Active" as const }],
+      ["Dynamic", { path: "Dynamic" as const }]
     ])
   },
   handlers: {
@@ -156,10 +175,20 @@ describe("machine activity metadata", () => {
         const generated = Machine.make({
           states: activityStates.states,
           events: Machine.events(LoadTimedOut),
-          initial: () => activityStates.initial.Loading(new Loading({}))
+          initial: {
+            target: (to) => to.Loading(),
+            resolve: ({ target }) => target(new Loading({}))
+          }
         }).handle({
           Loading: {
-            invoke: Machine.invoke({ id, after: durationMillis, onDone: ({ target }) => target.none() })
+            invoke: Machine.invoke({
+              id,
+              after: durationMillis,
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
+            })
           }
         })
         const definition = Machine.activityDefinitions(generated)[0]
@@ -202,7 +231,7 @@ describe("machine activity metadata", () => {
   it("does not evaluate source factories while inspecting", () => {
     let evaluations = 0
     const dynamic = {
-      stateNodes: { byPath: new Map([["Active", { path: "Active" }]]) },
+      stateNodes: { byPath: new Map([["Active", { path: "Active" as const }]]) },
       handlers: {
         Active: {
           invoke: {
@@ -242,7 +271,7 @@ describe("machine activity metadata", () => {
     }
 
     const definitions = activityDefinitions(withUnknownHandler)
-    const paths = new Set(Array.from(withUnknownHandler.stateNodes.byPath.values(), ({ path }) => path))
+    const paths = new Set<string>(Array.from(withUnknownHandler.stateNodes.byPath.values(), ({ path }) => path))
 
     assert(definitions.every(({ source }) => paths.has(source)))
     assert.notInclude(definitions.map((definition) => "id" in definition ? definition.id : undefined), "orphan")
@@ -250,15 +279,15 @@ describe("machine activity metadata", () => {
 
   it("renders activities beneath their owning state", () => {
     assert.strictEqual(
-      renderActivityMachine(activityMachine, activityStates.initial.Loading(new Loading({}))),
+      renderActivityMachine(activityMachine, { path: "Loading" as const, value: new Loading({}) }),
       [
         "activity-inspection",
-        "● active  ○ inactive  ◇ transition (→ declared, ∅ none, omitted dynamic)  ◆ activity",
+        "● active  ○ inactive  ◇ transition (→ target, ∅ none)  ◆ activity",
         "",
         "├─ ● Loading",
-        "│  ├─ ◇ invoke load-document done",
-        "│  ├─ ◇ invoke load-document failure",
-        "│  ├─ ◇ invoke load-timeout done",
+        "│  ├─ ◇ invoke load-document done → ∅",
+        "│  ├─ ◇ invoke load-document failure → ∅",
+        "│  ├─ ◇ invoke load-timeout done → ∅",
         "│  ├─ ◆ process: poll-server",
         "│  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
         "│  ├─ ◆ timer: load-timeout [10s]",

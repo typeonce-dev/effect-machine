@@ -73,11 +73,17 @@ describe("machine activity lifecycle model", () => {
             const machine = Machine.make({
               states: states.states,
               events: Machine.events(Enter, Leave, Restart),
-              initial: () => states.initial.Idle(new Idle({}))
+              initial: {
+                target: (to) => to.Idle(),
+                resolve: ({ target }) => target(new Idle({}))
+              }
             }).handle({
               Idle: {
                 on: {
-                  Enter: ({ target }) => target.full.Active(new Active({}))
+                  Enter: Machine.transition({
+                    target: (to) => to.full.Active(),
+                    resolve: ({ target }) => target(new Active({}))
+                  })
                 }
               },
               Active: {
@@ -85,15 +91,25 @@ describe("machine activity lifecycle model", () => {
                   id: "activity",
                   address: Machine.childAddress("activity"),
                   logic: probe.logic("active", { _tag: "Blocked" }),
-                  onDone: ({ target }) => target.none(),
-                  onFailure: ({ target }) => target.none()
+                  onDone: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: () => undefined
+                  }),
+                  onFailure: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: () => undefined
+                  })
                 }),
                 on: {
-                  Leave: ({ target }) => target.full.Idle(new Idle({})),
-                  Restart: {
-                    reenter: true,
-                    transition: ({ target }) => target.full.Active(new Active({}))
-                  }
+                  Leave: Machine.transition({
+                    target: (to) => to.full.Idle(),
+                    resolve: ({ target }) => target(new Idle({}))
+                  }),
+                  Restart: Machine.transition({
+                    target: (to) => to.full.Active(),
+                    resolve: ({ target }) => target(new Active({})),
+                    reenter: true
+                  })
                 }
               }
             })
@@ -148,15 +164,24 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Completed),
-        initial: () => states.initial.Active(new Active({}))
+        initial: {
+          target: (to) => to.Active(),
+          resolve: ({ target }) => target(new Active({}))
+        }
       }).handle({
         Active: {
           invoke: Machine.invoke({
             id: "immediate",
             address: Machine.childAddress("immediate"),
             logic: probe.immediate("immediate", (epoch) => new Completed({ epoch })),
-            onDone: ({ output, target }) => target.full.Done(new Done({ epoch: output.epoch })),
-            onFailure: ({ target }) => target.none()
+            onDone: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ output, target }) => target(new Done({ epoch: output.epoch }))
+            }),
+            onFailure: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           })
         },
         Done: {
@@ -184,7 +209,10 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(Restart, QueueBarrier),
         internalEvents: Machine.internalEvents(Completed),
-        initial: () => states.initial.Active(new EpochActive({ acknowledged: 0 }))
+        initial: {
+          target: (to) => to.Active(),
+          resolve: ({ target }) => target(new EpochActive({ acknowledged: 0 }))
+        }
       }).handle({
         Active: {
           invoke: Machine.invoke({
@@ -194,18 +222,29 @@ describe("machine activity lifecycle model", () => {
               _tag: "StaleOnCancel",
               event: (epoch) => new Completed({ epoch })
             }),
-            onDone: ({ target }) => target.none(),
-            onFailure: ({ target }) => target.none()
+            onDone: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            }),
+            onFailure: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           }),
           on: {
-            Restart: {
-              reenter: true,
-              transition: ({ state, target }) =>
-                target.full.Active(new EpochActive({ acknowledged: state.acknowledged }))
-            },
-            QueueBarrier: ({ state, target }) =>
-              target.full.Active(new EpochActive({ acknowledged: state.acknowledged + 1 })),
-            Completed: ({ event, target }) => target.full.Done(new Done({ epoch: event.epoch }))
+            Restart: Machine.transition({
+              target: (to) => to.full.Active(),
+              resolve: ({ state, target }) => target(new EpochActive({ acknowledged: state.acknowledged })),
+              reenter: true
+            }),
+            QueueBarrier: Machine.transition({
+              target: (to) => to.full.Active(),
+              resolve: ({ state, target }) => target(new EpochActive({ acknowledged: state.acknowledged + 1 }))
+            }),
+            Completed: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ event, target }) => target(new Done({ epoch: event.epoch }))
+            })
           }
         },
         Done: {}
@@ -281,22 +320,25 @@ describe("machine activity lifecycle model", () => {
           }
         },
         events: Machine.events(LeaveLeft),
-        initial: () => ({
-          path: "Root" as const,
-          value: new Root({}),
-          states: {
-            left: {
-              path: "Root.left" as const,
-              value: new Left({}),
-              state: { path: "Root.left.active" as const, value: new LeftActive({}) }
-            },
-            right: {
-              path: "Root.right" as const,
-              value: new Right({}),
-              state: { path: "Root.right.active" as const, value: new RightActive({}) }
+        initial: {
+          target: (to) => to.Root.initial(),
+          resolve: () => ({
+            path: "Root" as const,
+            value: new Root({}),
+            states: {
+              left: {
+                path: "Root.left" as const,
+                value: new Left({}),
+                state: { path: "Root.left.active" as const, value: new LeftActive({}) }
+              },
+              right: {
+                path: "Root.right" as const,
+                value: new Right({}),
+                state: { path: "Root.right.active" as const, value: new RightActive({}) }
+              }
             }
-          }
-        })
+          })
+        }
       }).handle({
         Root: {
           states: {
@@ -307,11 +349,20 @@ describe("machine activity lifecycle model", () => {
                     id: "left-activity",
                     address: Machine.childAddress("left-activity"),
                     logic: probe.logic("left", { _tag: "Blocked" }),
-                    onDone: ({ target }) => target.none(),
-                    onFailure: ({ target }) => target.none()
+                    onDone: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: () => undefined
+                    }),
+                    onFailure: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: () => undefined
+                    })
                   }),
                   on: {
-                    LeaveLeft: ({ target }) => target.local.idle(new LeftIdle({}))
+                    LeaveLeft: Machine.transition({
+                      target: (to) => to.local.idle(),
+                      resolve: ({ target }) => target(new LeftIdle({}))
+                    })
                   }
                 }
               }
@@ -323,8 +374,14 @@ describe("machine activity lifecycle model", () => {
                     id: "right-activity",
                     address: Machine.childAddress("right-activity"),
                     logic: probe.logic("right", { _tag: "Blocked" }),
-                    onDone: ({ target }) => target.none(),
-                    onFailure: ({ target }) => target.none()
+                    onDone: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: () => undefined
+                    }),
+                    onFailure: Machine.transition({
+                      target: (to) => to.none(),
+                      resolve: () => undefined
+                    })
                   })
                 }
               }
@@ -364,7 +421,10 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(Leave),
         internalEvents: Machine.internalEvents(TimerFired),
-        initial: () => states.initial.Active(new Active({}))
+        initial: {
+          target: (to) => to.Active(),
+          resolve: ({ target }) => target(new Active({}))
+        }
       }).handle({
         Idle: {},
         Active: {
@@ -373,17 +433,29 @@ describe("machine activity lifecycle model", () => {
               id: "timed-activity",
               address: Machine.childAddress("timed-activity"),
               logic: probe.logic("timed", { _tag: "Blocked" }),
-              onDone: ({ target }) => target.none(),
-              onFailure: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             }),
             Machine.invoke({
               id: "deadline",
               after: "1 hour",
-              onDone: ({ target }) => target.full.Done(new Done({ epoch: -1 }))
+              onDone: Machine.transition({
+                target: (to) => to.full.Done(),
+                resolve: ({ target }) => target(new Done({ epoch: -1 }))
+              })
             })
           ],
           on: {
-            Leave: ({ target }) => target.full.Idle(new Idle({}))
+            Leave: Machine.transition({
+              target: (to) => to.full.Idle(),
+              resolve: ({ target }) => target(new Idle({}))
+            })
           }
         },
         Done: {}
@@ -410,7 +482,10 @@ describe("machine activity lifecycle model", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Active(new Active({}))
+        initial: {
+          target: (to) => to.Active(),
+          resolve: ({ target }) => target(new Active({}))
+        }
       }).handle({
         Active: {
           invoke: [
@@ -418,17 +493,29 @@ describe("machine activity lifecycle model", () => {
               id: "failing",
               address: Machine.childAddress("failing"),
               logic: probe.logic("failing", { _tag: "Failure" }),
-              onDone: ({ target }) => target.none(),
-              onFailure: ({ error }) => {
-                throw error
-              }
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: ({ error }) => {
+                  throw error
+                }
+              })
             }),
             Machine.invoke({
               id: "sibling",
               address: Machine.childAddress("sibling"),
               logic: probe.logic("sibling", { _tag: "Blocked" }),
-              onDone: ({ target }) => target.none(),
-              onFailure: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             })
           ]
         }
@@ -458,7 +545,10 @@ describe("machine activity lifecycle model", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Active(new Active({}))
+        initial: {
+          target: (to) => to.Active(),
+          resolve: ({ target }) => target(new Active({}))
+        }
       }).handle({
         Active: {
           invoke: [
@@ -466,15 +556,27 @@ describe("machine activity lifecycle model", () => {
               id: "first",
               address: Machine.childAddress("first"),
               logic: probe.logic("first", { _tag: "Blocked" }),
-              onDone: ({ target }) => target.none(),
-              onFailure: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             }),
             Machine.invoke({
               id: "second",
               address: Machine.childAddress("second"),
               logic: probe.logic("second", { _tag: "Blocked" }),
-              onDone: ({ target }) => target.none(),
-              onFailure: ({ target }) => target.none()
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
             })
           ]
         }

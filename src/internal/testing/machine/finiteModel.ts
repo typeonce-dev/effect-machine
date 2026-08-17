@@ -1177,44 +1177,6 @@ const stateValue = (
   return { _tag: stateTag(state.path), value: value ?? state.node.value }
 }
 
-const runtimeTargetPath = (
-  byPath: ReadonlyMap<string, FlatFiniteState>,
-  sourcePath: string,
-  requestedPath: string
-): string => {
-  const source = byPath.get(sourcePath)!
-  const requested = byPath.get(requestedPath)!
-  if (requested.node._tag === "History") return requested.parent!
-  if (requested.node._tag === "Choice") return runtimeTargetPath(byPath, sourcePath, requested.node.selected)
-  if (source.root !== requested.root) return requested.path
-
-  const initial = (path: string): string => {
-    const current = byPath.get(path)!
-    if (current.node._tag === "Parallel") {
-      if (sourcePath !== current.path && !sourcePath.startsWith(`${current.path}.`)) {
-        return current.path
-      }
-      const child = sourcePath === current.path
-        ? current.node.states[0]!.key
-        : sourcePath.slice(current.path.length + 1).split(".")[0]!
-      return initial(`${current.path}.${child}`)
-    }
-    return current.node._tag === "Compound" ? initial(`${current.path}.${current.node.initial}`) : current.path
-  }
-  const inspect = (path: string): string => {
-    const current = byPath.get(path)!
-    if (
-      current.node._tag === "Parallel" && sourcePath !== current.path && !sourcePath.startsWith(`${current.path}.`)
-    ) {
-      return current.path
-    }
-    if (current.path === requestedPath) return initial(current.path)
-    const next = requestedPath.slice(current.path.length + 1).split(".")[0]!
-    return inspect(`${current.path}.${next}`)
-  }
-  return inspect(source.root)
-}
-
 const makeStateTree = (
   states: ReadonlyArray<FiniteState>,
   parent: string | undefined
@@ -1357,10 +1319,88 @@ const selectHistoryTarget = (builder: Record<string, any>, path: string): unknow
   return current[parts[parts.length - 1]!]()
 }
 
-type TargetBuilder = {
-  readonly branch: Record<string, any>
-  readonly full: Record<string, any>
-  readonly history: Record<string, any>
+const selectableDefinitionTarget = (
+  source: string,
+  target: string,
+  byPath: ReadonlyMap<string, FlatFiniteState>
+): string => {
+  const parts = target.split(".")
+  for (let index = 0; index < parts.length; index++) {
+    const path = parts.slice(0, index + 1).join(".")
+    const node = byPath.get(path)?.node
+    if (
+      (node?._tag === "Compound" || node?._tag === "Parallel") &&
+      source !== path && !source.startsWith(`${path}.`)
+    ) return path
+  }
+  return target
+}
+
+const selectDefinitionTarget = (
+  selector: Record<string, any>,
+  source: string,
+  target: string,
+  byPath: ReadonlyMap<string, FlatFiniteState>
+): unknown => {
+  const selected = byPath.get(target)!
+  if (selected.node._tag === "History") {
+    return selectHistoryTarget(selector.history, target)
+  }
+  const sourceRoot = byPath.get(source)!.root
+  if (selected.root !== sourceRoot) {
+    const root = target.split(".")[0]!
+    return selector.full[root]()
+  }
+  const selectable = selectableDefinitionTarget(source, target, byPath)
+  let current = selector.branch
+  const parts = selectable.split(".")
+  for (const part of parts) current = current[part]
+  if (typeof current === "function") return current()
+  return current.initial()
+}
+
+const resolveDefinitionTarget = (
+  builder: any,
+  source: string,
+  target: string,
+  byPath: ReadonlyMap<string, FlatFiniteState>,
+  value?: number
+): unknown => {
+  const selected = byPath.get(target)!
+  if (selected.node._tag === "History") return builder()
+  if (selected.root !== byPath.get(source)!.root) {
+    const parts = target.split(".")
+    return selectSnapshot({ [parts[0]!]: builder }, parts[0]!, byPath, parts, 0, source, value)
+  }
+  const selectable = selectableDefinitionTarget(source, target, byPath)
+  if (selectable !== target) {
+    const bound = byPath.get(selectable)!
+    const parts = target.split(".")
+    return selectSnapshot(
+      { [bound.node.key]: builder },
+      selectable,
+      byPath,
+      parts,
+      selectable.split(".").length - 1,
+      source,
+      value
+    )
+  }
+  if (selected.node._tag === "Choice") return builder()
+  const input = { value: value ?? selected.node.value }
+  if (selected.node._tag === "Compound" || selected.node._tag === "Parallel") {
+    const parts = target.split(".")
+    return selectSnapshot(
+      { [selected.node.key]: builder },
+      target,
+      byPath,
+      parts,
+      parts.length - 1,
+      source,
+      value
+    )
+  }
+  return builder.from(input)
 }
 
 const makeHandlers = (
@@ -1375,15 +1415,11 @@ const makeHandlers = (
     if (node._tag === "History") continue
     if (node._tag === "Choice") {
       handlers[node.key] = {
-        choice: {
-          targets: node.targets,
-          transition: ({ target }: { readonly target: TargetBuilder }) => {
-            const selected = byPath.get(node.selected)!
-            const parts = selected.path.split(".")
-            const builder = selected.root === byPath.get(path)!.root ? target.branch : target.full
-            return selectSnapshot(builder, parts[0]!, byPath, parts, 0, path)
-          }
-        }
+        choice: (Machine.transition as any)({
+          target: (to: Record<string, any>) => selectDefinitionTarget(to, path, node.selected, byPath) as any,
+          resolve: ({ target }: { readonly target: any }) =>
+            resolveDefinitionTarget(target, path, node.selected, byPath)
+        } as any)
       }
       continue
     }
@@ -1396,27 +1432,17 @@ const makeHandlers = (
     let onDone: unknown
     for (const transition of transitions.values()) {
       if (transition.source !== path) continue
-      const config = {
+      const config = (Machine.transition as any)({
         ...("reenter" in transition ? { reenter: transition.reenter } : {}),
-        ...(transition.target === undefined
-          ? {}
-          : {
-            targets: [
-              byPath.get(transition.target)!.node._tag === "History" ||
-                byPath.get(transition.target)!.node._tag === "Choice"
-                ? transition.target
-                : runtimeTargetPath(byPath, path, transition.target)
-            ]
-          }),
-        transition: ({ target }: { readonly target: TargetBuilder }) => {
-          if (transition.target === undefined) return undefined
-          const targetState = byPath.get(transition.target)!
-          if (targetState.node._tag === "History") return selectHistoryTarget(target.history, targetState.path)
-          const parts = transition.target.split(".")
-          const builder = targetState.root === byPath.get(path)!.root ? target.branch : target.full
-          return selectSnapshot(builder, parts[0]!, byPath, parts, 0, path, transition.targetValue)
-        }
-      }
+        target: (to: Record<string, any>) =>
+          transition.target === undefined
+            ? to.none()
+            : selectDefinitionTarget(to, path, transition.target, byPath),
+        resolve: transition.target === undefined
+          ? () => undefined
+          : ({ target }: { readonly target: any }) =>
+            resolveDefinitionTarget(target, path, transition.target!, byPath, transition.targetValue)
+      } as any)
       if (transition.trigger.type === "event") on[transition.trigger.event] = config
       else if (transition.trigger.type === "always") always = config
       else onDone = config
@@ -1489,8 +1515,15 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const machine = Machine.make({
     states: defined.states as any,
     events: Machine.events(...eventSchemas) as any,
-    initial: () => selectSnapshot(defined.initial as any, initial.path, byPath, [initial.path], 0) as any
-  })
+    initial: {
+      target: (to: Record<string, any>) => {
+        const selected = to[initial.path]
+        return typeof selected === "function" ? selected() : selected.initial()
+      },
+      resolve: ({ target }: { readonly target: any }) =>
+        selectSnapshot({ [initial.path]: target }, initial.path, byPath, [initial.path], 0) as any
+    }
+  } as any)
   const transitions = new Map(model.transitions.map((transition) => [
     `${transition.source}\u0000${triggerKey(transition.trigger)}`,
     transition

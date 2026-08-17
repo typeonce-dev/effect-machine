@@ -41,12 +41,21 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Open, OpenInvalid),
-    initial: () => States.initial.closed(new Closed({}))
+    initial: {
+      target: (to) => to.closed(),
+      resolve: ({ target }) => target(new Closed({}))
+    }
   }).handle({
     closed: {
       on: {
-        Open: ({ target }) => target.full.opened.initial.from({ id: "team-1" }),
-        OpenInvalid: ({ target }) => target.full.opened.initial.from({ id: "" })
+        Open: Machine.transition({
+          target: (to) => to.full.opened.initial(),
+          resolve: ({ target }) => target.from({ id: "team-1" })
+        }),
+        OpenInvalid: Machine.transition({
+          target: (to) => to.full.opened.initial(),
+          resolve: ({ target }) => target.from({ id: "" })
+        })
       }
     },
     opened: {
@@ -74,11 +83,17 @@ const makeParallelMachine = () =>
   Machine.make({
     states: ParallelStates.states,
     events: Machine.events(EnterDashboard),
-    initial: () => ParallelStates.initial.outside(new Outside({}))
+    initial: {
+      target: (to) => to.outside(),
+      resolve: ({ target }) => target(new Outside({}))
+    }
   }).handle({
     outside: {
       on: {
-        EnterDashboard: ({ target }) => target.full.dashboard.initial(new Dashboard({}))
+        EnterDashboard: Machine.transition({
+          target: (to) => to.full.dashboard.initial(),
+          resolve: ({ target }) => target(new Dashboard({}))
+        })
       }
     },
     dashboard: {
@@ -107,20 +122,26 @@ const makeChoiceMachine = () =>
   Machine.make({
     states: ChoiceStates.states,
     events: Machine.events(EnterFlow),
-    initial: () => ChoiceStates.initial.outside(new Outside({}))
+    initial: {
+      target: (to) => to.outside(),
+      resolve: ({ target }) => target(new Outside({}))
+    }
   }).handle({
     outside: {
       on: {
-        EnterFlow: ({ target }) => target.full.flow.initial(new Flow({}))
+        EnterFlow: Machine.transition({
+          target: (to) => to.full.flow.initial(),
+          resolve: ({ target }) => target(new Flow({}))
+        })
       }
     },
     flow: {
       states: {
         routing: {
-          choice: {
-            targets: ["flow.approved"],
-            transition: ({ target }) => target.local.approved(new Approved({}))
-          }
+          choice: Machine.transition({
+            target: (to) => to.local.approved(),
+            resolve: ({ target }) => target(new Approved({}))
+          })
         }
       }
     }
@@ -138,11 +159,17 @@ const makeStructuralMachine = () =>
   Machine.make({
     states: StructuralStates.states,
     events: Machine.events(EnterFlow),
-    initial: () => StructuralStates.initial.outside(new Outside({}))
+    initial: {
+      target: (to) => to.outside(),
+      resolve: ({ target }) => target(new Outside({}))
+    }
   }).handle({
     outside: {
       on: {
-        EnterFlow: ({ target }) => target.full.group.initial.from()
+        EnterFlow: Machine.transition({
+          target: (to) => to.full.group.initial(),
+          resolve: ({ target }) => target.from()
+        })
       }
     }
   })
@@ -165,14 +192,23 @@ const makeNestedMachine = () =>
   Machine.make({
     states: NestedStates.states,
     events: Machine.events(OpenLocal, OpenBranch),
-    initial: () => NestedStates.initial.root.from((root) => root.closed(new Closed({})))
+    initial: {
+      target: (to) => to.root.initial(),
+      resolve: ({ target }) => target.from((root) => root.closed(new Closed({})))
+    }
   }).handle({
     root: {
       states: {
         closed: {
           on: {
-            OpenLocal: ({ target }) => target.local.opened.initial.from({ id: "local" }),
-            OpenBranch: ({ target }) => target.branch.root.opened.initial.from({ id: "branch" })
+            OpenLocal: Machine.transition({
+              target: (to) => to.local.opened.initial(),
+              resolve: ({ target }) => target.from({ id: "local" })
+            }),
+            OpenBranch: Machine.transition({
+              target: (to) => to.branch.root.opened.initial(),
+              resolve: ({ target }) => target.from({ id: "branch" })
+            })
           }
         },
         opened: {
@@ -191,10 +227,11 @@ describe("declared initial entry", () => {
 
       assert.deepStrictEqual(
         planned.next,
-        States.initial.opened(
-          new Opened({ id: "team-1" }),
-          (opened) => opened.idle(new Idle({ count: 1 }))
-        )
+        {
+          path: "opened" as const,
+          value: new Opened({ id: "team-1" }),
+          state: { path: "opened.idle" as const, value: new Idle({ count: 1 }) }
+        }
       )
     }))
 
@@ -217,16 +254,18 @@ describe("declared initial entry", () => {
 
       assert.deepStrictEqual(
         planned.next,
-        ParallelStates.initial.dashboard(
-          new Dashboard({}),
-          (dashboard) =>
-            dashboard
-              .filters(
-                new Filters({ id: "all" }),
-                (filters) => filters.ready(new Ready({ enabled: true }))
-              )
-              .results(new Results({ count: 2 }))
-        )
+        {
+          path: "dashboard" as const,
+          value: new Dashboard({}),
+          states: {
+            filters: {
+              path: "dashboard.filters" as const,
+              value: new Filters({ id: "all" }),
+              state: { path: "dashboard.filters.ready" as const, value: new Ready({ enabled: true }) }
+            },
+            results: { path: "dashboard.results" as const, value: new Results({ count: 2 }) }
+          }
+        }
       )
     }))
 
@@ -239,9 +278,9 @@ describe("declared initial entry", () => {
       assert.deepStrictEqual(
         planned.next,
         {
-          path: "flow",
+          path: "flow" as const,
           value: new Flow({}),
-          state: { path: "flow.approved", value: new Approved({}) }
+          state: { path: "flow.approved" as const, value: new Approved({}) }
         }
       )
       assert.deepStrictEqual(planned.microsteps[0]?.transitions, [{
@@ -266,9 +305,9 @@ describe("declared initial entry", () => {
       const planned = yield* Machine.plan(machine, initial.state, new EnterFlow({}))
 
       assert.deepStrictEqual(planned.next, {
-        path: "group",
+        path: "group" as const,
         value: undefined,
-        state: { path: "group.idle", value: undefined }
+        state: { path: "group.idle" as const, value: undefined }
       })
     }))
 
@@ -281,12 +320,12 @@ describe("declared initial entry", () => {
 
       for (const [planned, id] of [[local, "local"], [branch, "branch"]] as const) {
         assert.deepStrictEqual(planned.next, {
-          path: "root",
+          path: "root" as const,
           value: undefined,
           state: {
-            path: "root.opened",
+            path: "root.opened" as const,
             value: new Opened({ id }),
-            state: { path: "root.opened.idle", value: new Idle({ count: 3 }) }
+            state: { path: "root.opened.idle" as const, value: new Idle({ count: 3 }) }
           }
         })
       }

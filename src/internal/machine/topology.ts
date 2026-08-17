@@ -25,6 +25,8 @@ export const ChoiceTargetTypeId: unique symbol = Symbol("effect/Machine/ChoiceTa
 
 export const NoTargetTypeId: unique symbol = Symbol("effect/Machine/NoTarget")
 
+export const TargetSelectionTypeId: unique symbol = Symbol("effect/Machine/TargetSelection")
+
 interface StateInput {
   readonly [StateInputTypeId]: typeof StateInputTypeId
   readonly input: unknown
@@ -61,6 +63,32 @@ export interface ChoiceTarget {
 export interface NoTarget {
   readonly [NoTargetTypeId]: typeof NoTargetTypeId
 }
+
+export type TargetSelectionKind = "state" | "initial" | "history" | "choice" | "none"
+
+export type TargetSelectionScope = "local" | "branch" | "full" | "initial"
+
+/** Immutable destination selected while a machine definition is captured. */
+export interface TargetSelection {
+  readonly [TargetSelectionTypeId]: typeof TargetSelectionTypeId
+  readonly kind: TargetSelectionKind
+  readonly scope: TargetSelectionScope | undefined
+  readonly path: string | undefined
+}
+
+export const makeTargetSelection = (
+  kind: TargetSelectionKind,
+  path?: string,
+  scope?: TargetSelectionScope
+): TargetSelection =>
+  Object.freeze({
+    [TargetSelectionTypeId]: TargetSelectionTypeId as typeof TargetSelectionTypeId,
+    kind,
+    scope,
+    path
+  })
+
+export const isTargetSelection = (u: unknown): u is TargetSelection => hasProperty(u, TargetSelectionTypeId)
 
 const noTarget = Object.freeze({
   [NoTargetTypeId]: NoTargetTypeId
@@ -381,12 +409,10 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
   } as Machine.StateNodes
 }
 
-const dynamicTransitionTargets = { type: "dynamic" } as const
-
-const transitionTargets = (handler: unknown): Machine.TransitionTargets =>
-  typeof handler === "object" && handler !== null && "targets" in handler && handler.targets !== undefined
-    ? { type: "declared", paths: Array.from(handler.targets as ReadonlyArray<string>) }
-    : dynamicTransitionTargets
+const transitionBranches = (handler: unknown): ReadonlyArray<Machine.TransitionBranch> =>
+  typeof handler === "object" && handler !== null && "branches" in handler && Array.isArray(handler.branches)
+    ? Array.from(handler.branches as ReadonlyArray<Machine.TransitionBranch>)
+    : []
 
 export const transitionDefinitions = (
   machine: Machine.Any
@@ -404,7 +430,7 @@ export const transitionDefinitions = (
           source: node.path,
           trigger: { type: "choice" },
           reenter: false,
-          targets: transitionTargets(choice)
+          branches: transitionBranches(choice)
         })
       }
       continue
@@ -414,8 +440,8 @@ export const transitionDefinitions = (
       definitions.push({
         source: node.path,
         trigger: { type: "event", event },
-        reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
-        targets: transitionTargets(handler)
+        reenter: hasProperty(handler, "reenter") && handler.reenter === true,
+        branches: transitionBranches(handler)
       })
     }
     if (config.always !== undefined) {
@@ -423,7 +449,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "always" },
         reenter: false,
-        targets: transitionTargets(config.always)
+        branches: transitionBranches(config.always)
       })
     }
     if (config.onDone !== undefined) {
@@ -431,7 +457,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "done" },
         reenter: false,
-        targets: transitionTargets(config.onDone)
+        branches: transitionBranches(config.onDone)
       })
     }
     const invokes = config.invoke === undefined
@@ -452,7 +478,7 @@ export const transitionDefinitions = (
             source: node.path,
             trigger: { type: "invoke", id, outcome },
             reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
-            targets: transitionTargets(handler)
+            branches: transitionBranches(handler)
           })
         }
       }

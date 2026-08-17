@@ -20,19 +20,19 @@ const CounterStates = Machine.defineStates({ count: Count, done: Done })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Finish),
-  initial: () => CounterStates.initial.count(new Count({ value: 0 }))
+  initial: {
+    target: (to) => to.count(),
+    resolve: ({ target }) => target(new Count({ value: 0 }))
+  }
 }).handle({
   count: {
     on: {
-      Add: {
-        reenter: true,
-        targets: ["count"],
-        transition: ({ event, state, target }) => target.full.count(new Count({ value: state.value + event.amount }))
-      },
-      Finish: {
-        targets: ["done"],
-        transition: ({ target }) => target.full.done(new Done({}))
-      }
+      Add: Machine.transition({
+        target: (to) => to.full.count(),
+        resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.amount })),
+        reenter: true
+      }),
+      Finish: Machine.transition({ target: (to) => to.full.done(), resolve: ({ target }) => target(new Done({})) })
     }
   },
   done: {}
@@ -47,22 +47,36 @@ const opaqueMachine = Machine.make({
   states: OpaqueStates.states,
   events: Machine.events(),
   input: Schema.Any,
-  initial: (payload) => OpaqueStates.initial.opaque(new Opaque({ payload }))
+  initial: {
+    target: (to) => to.opaque(),
+    resolve: ({ input: payload, target }) => target(new Opaque({ payload }))
+  }
 })
 
 const StartupStates = Machine.defineStates({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Add),
-  initial: () => StartupStates.initial.count(new Count({ value: 0 }))
+  initial: {
+    target: (to) => to.count(),
+    resolve: ({ target }) => target(new Count({ value: 0 }))
+  }
 }).handle({
   count: {
-    always: ({ target, state }) =>
-      state.value === 0
-        ? target.full.count(new Count({ value: 1 }))
-        : target.none(),
+    always: Machine.transition({
+      cases: [{
+        title: "count is zero",
+        when: ({ state }) => state.value === 0 ? Option.some(state) : Option.none(),
+        target: (to) => to.full.count(),
+        resolve: ({ target }) => target(new Count({ value: 1 }))
+      }],
+      otherwise: { target: (to) => to.none(), resolve: () => undefined }
+    }),
     on: {
-      Add: ({ event, state, target }) => target.full.count(new Count({ value: state.value + event.amount }))
+      Add: Machine.transition({
+        target: (to) => to.full.count(),
+        resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.amount }))
+      })
     }
   }
 })
@@ -77,20 +91,35 @@ const EventStates = Machine.defineStates({ count: Count })
 const finiteEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(TickEvent, ChoiceEvent),
-  initial: () => EventStates.initial.count(new Count({ value: 0 }))
+  initial: {
+    target: (to) => to.count(),
+    resolve: ({ target }) => target(new Count({ value: 0 }))
+  }
 }).handle({
   count: {
     on: {
-      [Tick]: ({ target }) => target.none(),
-      Alpha: ({ target }) => target.none(),
-      Beta: ({ target }) => target.none()
+      [Tick]: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      Alpha: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      Beta: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      })
     }
   }
 })
 const openEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(OpenEvent),
-  initial: () => EventStates.initial.count(new Count({ value: 0 }))
+  initial: {
+    target: (to) => to.count(),
+    resolve: ({ target }) => target(new Count({ value: 0 }))
+  }
 }).handle({ count: {} })
 
 const event = (_tag: string): { readonly _tag: string } => ({ _tag })
@@ -241,7 +270,7 @@ describe("MachineTest trace coverage", () => {
       })
       const historyCoverage = MachineTest.coverage(historyMachine, history)
       assert.ok(historyCoverage.history.recordObservations > 0)
-      assert.deepStrictEqual(historyCoverage.history.recorded, [{ path: "owner.exact", modes: ["deep"] }])
+      assert.deepStrictEqual(historyCoverage.history.recorded, [{ path: "owner.exact" as const, modes: ["deep"] }])
       assert.strictEqual(historyCoverage.history.targets, 1)
       assert.strictEqual(historyCoverage.history.resolvedTargets, 1)
     }))

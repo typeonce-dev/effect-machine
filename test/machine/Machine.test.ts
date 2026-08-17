@@ -106,35 +106,32 @@ describe("Machine", () => {
       class Stable extends Schema.TaggedClass<Stable>("Stable")("Stable", {}) {}
       class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
       const states = Machine.defineStates({ Stable })
-      const transition = {
-        reenter: false,
-        targets: [] as Array<"Stable">,
-        transition: ({ target }: Machine.Machine.HandlerContext<
-          typeof states.states,
-          readonly [typeof Ping],
-          readonly [],
-          "Stable",
-          "Ping",
-          never,
-          never
-        >) => target.none()
-      }
-      const on: { Ping?: typeof transition } = { Ping: transition }
+      const transition = Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined,
+        reenter: false
+      })
+      const on: any = { Ping: transition }
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: () => states.initial.Stable(new Stable({}))
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target(new Stable({}))
+        }
       }).handle({ Stable: { on } })
 
       delete on.Ping
-      transition.reenter = true
-      transition.targets.push("Stable")
+      ;(transition as any).reenter = true
+      ;(transition as any).target = () => {
+        throw new Error("captured transition unexpectedly re-evaluated its target selector")
+      }
 
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "Stable",
         trigger: { type: "event", event: "Ping" },
         reenter: false,
-        targets: { type: "declared", paths: [] }
+        branches: [{ type: "direct", target: undefined }]
       }])
 
       const initial = yield* Machine.planInitial(machine)
@@ -278,7 +275,12 @@ describe("Machine", () => {
   class ReserveInventory extends Schema.TaggedClass<ReserveInventory>("ReserveInventory")("ReserveInventory", {
     reservationId: Schema.String
   }) {}
-  const FlatInitial = Machine.defineStates({ Idle, Loading, Success, Failed }).initial
+  const FlatInitial = {
+    Idle: (value: Idle) => ({ path: "Idle" as const, value }),
+    Loading: (value: Loading) => ({ path: "Loading" as const, value }),
+    Success: (value: Success) => ({ path: "Success" as const, value }),
+    Failed: (value: Failed) => ({ path: "Failed" as const, value })
+  }
   const SuccessOutput = {
     schema: Success,
     type: "final",
@@ -289,8 +291,11 @@ describe("Machine", () => {
     type: "final",
     output: Schema.String
   } as const
-  const LowercaseInitial = Machine.defineStates({ idle: Idle, loading: Loading, success: Success }).initial
-  const DuplicateInitial = Machine.defineStates({ a: Duplicate, b: Duplicate }).initial
+  const LowercaseInitial = {
+    idle: (value: Idle) => ({ path: "idle" as const, value }),
+    loading: (value: Loading) => ({ path: "loading" as const, value }),
+    success: (value: Success) => ({ path: "success" as const, value })
+  }
 
   it.effect("make constructs the initial state from input", () =>
     Effect.gen(function*() {
@@ -299,7 +304,10 @@ describe("Machine", () => {
         states: states.states,
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       })
 
       const planned = yield* Machine.planInitial(machine, { userId: "user-1" })
@@ -313,7 +321,10 @@ describe("Machine", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: () => states.initial.Idle(new Idle({ userId: "user-1" }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+      }
     })
 
     assert.strictEqual(Machine.isMachine(machine), true)
@@ -324,24 +335,31 @@ describe("Machine", () => {
     Effect.gen(function*() {
       class Convert extends Schema.TaggedClass<Convert>("Convert")("Convert", {}) {}
       const states = Machine.defineStates({ Submit, RequestSucceeded })
-      const machine = Machine.make({
+      const definition = Machine.make({
         states: states.states,
         events: Machine.events(Convert),
-        initial: () => states.initial.Submit(new Submit({ value: "loaded" }))
-      }).handle({
+        initial: {
+          target: (to) => to.Submit(),
+          resolve: ({ target }) => target(new Submit({ value: "loaded" }))
+        }
+      })
+      const machine = definition.handle({
         Submit: {
           on: {
-            Convert: ({ state, target }) => {
-              const { _tag: _, ...fields } = state
-              return target.full.RequestSucceeded.from(fields)
-            }
+            Convert: Machine.transition({
+              target: (to) => to.full.RequestSucceeded(),
+              resolve: ({ state, target }) => {
+                const { _tag: _, ...fields } = state
+                return target.from(fields)
+              }
+            })
           }
         }
       })
 
       const plan = yield* Machine.plan(
         machine,
-        states.initial.Submit(new Submit({ value: "loaded" })),
+        { path: "Submit" as const, value: new Submit({ value: "loaded" }) },
         new Convert({})
       )
       assert.instanceOf(plan.next.value, RequestSucceeded)
@@ -355,13 +373,19 @@ describe("Machine", () => {
       states: states.states,
       events: Machine.events(Submit),
       input: Input,
-      initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+      }
     }).handle({
       Idle: {
         on: {
-          Submit: ({ target }) => {
-            return target.full.Loading(new Loading({ requestId: "request-1" }))
-          }
+          Submit: Machine.transition({
+            target: (to) => to.full.Loading(),
+            resolve: ({ target }) => {
+              return target(new Loading({ requestId: "request-1" }))
+            }
+          })
         }
       }
     })
@@ -381,7 +405,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: defined.states,
         events: Machine.events(Submit),
-        initial: () => defined.initial.idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       })
 
       const planned = yield* Machine.planInitial(machine)
@@ -421,13 +448,22 @@ describe("Machine", () => {
     const checking = new CheckingInventory({ sku: "sku-1" })
     const shipping = new Shipping({ address: "Main Street" })
     const quoting = new QuotingShipping({ postalCode: "12345" })
-    const snapshot = states.initial.fulfillment(
-      fulfillment,
-      (fulfillment) =>
-        fulfillment
-          .inventory(inventory, (inventory) => inventory.checking(checking))
-          .shipping(shipping, (shipping) => shipping.quoting(quoting))
-    )
+    const snapshot = {
+      path: "fulfillment" as const,
+      value: fulfillment,
+      states: {
+        inventory: {
+          path: "fulfillment.inventory" as const,
+          value: inventory,
+          state: { path: "fulfillment.inventory.checking" as const, value: checking }
+        },
+        shipping: {
+          path: "fulfillment.shipping" as const,
+          value: shipping,
+          state: { path: "fulfillment.shipping.quoting" as const, value: quoting }
+        }
+      }
+    }
 
     assert.deepStrictEqual(states.get(snapshot, "fulfillment"), Option.some(fulfillment))
     assert.deepStrictEqual(states.get(snapshot, "fulfillment.inventory"), Option.some(inventory))
@@ -451,7 +487,7 @@ describe("Machine", () => {
     assert.deepStrictEqual(states.getWithParents(snapshot, "fulfillment.inventory.reserved"), Option.none())
     assert.deepStrictEqual(
       states.getSnapshot(snapshot, "fulfillment.inventory.checking"),
-      Option.some({ path: "fulfillment.inventory.checking", value: checking })
+      Option.some({ path: "fulfillment.inventory.checking" as const, value: checking })
     )
     assert.strictEqual(states.matches(snapshot, "fulfillment.shipping"), true)
     assert.strictEqual(states.matches(snapshot, "fulfillment.shipping.quoted"), false)
@@ -492,17 +528,20 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Authorize),
-        initial: () =>
-          states.initial.payment(
-            payment,
-            (payment) => payment.entering(entering)
-          )
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: ({ target }) =>
+            target(
+              payment,
+              (payment) => payment.entering(entering)
+            )
+        }
       })
 
       const planned = yield* Machine.planInitial(machine)
 
       assertCompoundStateSnapshot(planned.state, "payment", payment, {
-        path: "payment.entering",
+        path: "payment.entering" as const,
         value: entering
       })
     }))
@@ -541,38 +580,41 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.fulfillment(
-            fulfillment,
-            (fulfillment) =>
-              fulfillment
-                .inventory(
-                  inventory,
-                  (inventory) => inventory.checking(checking)
-                )
-                .shipping(
-                  shipping,
-                  (shipping) => shipping.quoting(quoting)
-                )
-          )
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: ({ target }) =>
+            target(
+              fulfillment,
+              (fulfillment) =>
+                fulfillment
+                  .inventory(
+                    inventory,
+                    (inventory) => inventory.checking(checking)
+                  )
+                  .shipping(
+                    shipping,
+                    (shipping) => shipping.quoting(quoting)
+                  )
+            )
+        }
       })
 
       const planned = yield* Machine.planInitial(machine)
 
       assertParallelStateSnapshot(planned.state, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.checking",
+            path: "fulfillment.inventory.checking" as const,
             value: checking
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -609,21 +651,45 @@ describe("Machine", () => {
           states: states.states,
           events,
           internalEvents,
-          initial: () => states.initial.Active.from({ value: "initial" })
+          initial: {
+            target: (to) => to.Active(),
+            resolve: ({ target }) => target.from({ value: "initial" })
+          }
         })
         const machine = definition.handle({
           Active: {
             on: {
-              SetValue: ({ event, target }) => target.full.Active.from({ value: event.value }),
-              Reset: (_, enqueue) => {
-                enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
-                return _.target.none()
-              },
-              Defaulted: ({ event, target }) => target.full.Active.from({ value: event.label ?? "default-label" }),
-              Loaded: ({ event, target }) => target.full.Active.from({ value: event.value }),
-              TimedOut: ({ target }) => target.full.Active.from({ value: "timed-out" }),
-              Alpha: ({ event, target }) => target.full.Active.from({ value: event.value }),
-              Beta: ({ event, target }) => target.full.Active.from({ value: event.value })
+              SetValue: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ event, target }) => target.from({ value: event.value })
+              }),
+              Reset: Machine.transition({
+                target: (to) => to.none(),
+                resolve: (_, enqueue) => {
+                  enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
+                  return undefined
+                }
+              }),
+              Defaulted: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ event, target }) => target.from({ value: event.label ?? "default-label" })
+              }),
+              Loaded: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ event, target }) => target.from({ value: event.value })
+              }),
+              TimedOut: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ target }) => target.from({ value: "timed-out" })
+              }),
+              Alpha: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ event, target }) => target.from({ value: event.value })
+              }),
+              Beta: Machine.transition({
+                target: (to) => to.full.Active(),
+                resolve: ({ event, target }) => target.from({ value: event.value })
+              })
             }
           }
         })
@@ -646,25 +712,25 @@ describe("Machine", () => {
         fields.value = "mutated"
         const set = yield* Machine.plan(machine, initial.state, setValue)
         assert.deepStrictEqual(set.next, {
-          path: "Active",
+          path: "Active" as const,
           value: { _tag: "DeferredEventState", value: "next" }
         })
 
         const defaulted = yield* Machine.plan(machine, set.next, events.Defaulted({ id: "event-1" }))
         assert.deepStrictEqual(defaulted.next, {
-          path: "Active",
+          path: "Active" as const,
           value: { _tag: "DeferredEventState", value: "default-label" }
         })
 
         const loaded = yield* Machine.plan(machine, defaulted.next, events.Reset())
         assert.deepStrictEqual(loaded.next, {
-          path: "Active",
+          path: "Active" as const,
           value: { _tag: "DeferredEventState", value: "loaded" }
         })
 
         const alpha = yield* Machine.plan(machine, loaded.next, events.Alpha({ value: "alpha" }))
         assert.deepStrictEqual(alpha.next, {
-          path: "Active",
+          path: "Active" as const,
           value: { _tag: "DeferredEventState", value: "alpha" }
         })
       }))
@@ -679,10 +745,22 @@ describe("Machine", () => {
           id: "deferred-event-failure",
           states: states.states,
           events: Machine.events(Event),
-          initial: () => states.initial.Idle.from()
+          initial: {
+            target: (to) => to.Idle(),
+            resolve: ({ target }) => target.from()
+          }
         })
         const events = definition.events
-        const machine = definition.handle({ Idle: { on: { Submit: ({ target }) => target.none() } } })
+        const machine = definition.handle({
+          Idle: {
+            on: {
+              Submit: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
+            }
+          }
+        })
 
         let construction: ReturnType<typeof events.Submit> | undefined
         assert.doesNotThrow(() => {
@@ -724,21 +802,30 @@ describe("Machine", () => {
           states: states.states,
           events: Machine.events(),
           internalEvents: Machine.internalEvents(InternalEvent),
-          initial: () => states.initial.Loading.from()
+          initial: {
+            target: (to) => to.Loading(),
+            resolve: ({ target }) => target.from()
+          }
         })
         const machine = definition.handle({
           Loading: {
             invoke: Machine.invoke({
               id: "load",
               effect: () => Deferred.await(release),
-              onDone: ({ target }) => target.full.Waiting.from()
+              onDone: Machine.transition({
+                target: (to) => to.full.Waiting(),
+                resolve: ({ target }) => target.from()
+              })
             })
           },
           Waiting: {
             invoke: Machine.invoke({
               id: "timeout",
               after: "1 second",
-              onDone: ({ target }) => target.full.Done.from()
+              onDone: Machine.transition({
+                target: (to) => to.full.Done(),
+                resolve: ({ target }) => target.from()
+              })
             })
           },
           Done: {}
@@ -769,13 +856,28 @@ describe("Machine", () => {
         const first = Machine.make({
           states: states.states,
           events: Machine.events(FirstEvent),
-          initial: () => states.initial.Idle.from()
+          initial: {
+            target: (to) => to.Idle(),
+            resolve: ({ target }) => target.from()
+          }
         })
         const second = Machine.make({
           states: states.states,
           events: Machine.events(SecondEvent),
-          initial: () => states.initial.Idle.from()
-        }).handle({ Idle: { on: { Submit: ({ target }) => target.none() } } })
+          initial: {
+            target: (to) => to.Idle(),
+            resolve: ({ target }) => target.from()
+          }
+        }).handle({
+          Idle: {
+            on: {
+              Submit: Machine.transition({
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
+            }
+          }
+        })
         const construction = first.events.Submit({ value: "value" })
         const initial = yield* Machine.planInitial(second)
         const error = yield* Machine.plan(second, initial.state, construction).pipe(Effect.flip)
@@ -795,7 +897,10 @@ describe("Machine", () => {
           id: "from-default",
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.idle.from({ id: "idle-1" })
+          initial: {
+            target: (to) => to.idle(),
+            resolve: ({ target }) => target.from({ id: "idle-1" })
+          }
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -823,11 +928,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Event),
-          initial: () => states.initial.Idle.from()
+          initial: {
+            target: (to) => to.Idle(),
+            resolve: ({ target }) => target.from()
+          }
         }).handle({
           Idle: {
             on: {
-              Submit: ({ event, target }) => target.full.Done.from({ requestId: event.requestId })
+              Submit: Machine.transition({
+                target: (to) => to.full.Done(),
+                resolve: ({ event, target }) => target.from({ requestId: event.requestId })
+              })
             }
           },
           Done: {}
@@ -858,7 +969,10 @@ describe("Machine", () => {
           id: "from-default-only",
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.DefaultOnly.from()
+          initial: {
+            target: (to) => to.DefaultOnly(),
+            resolve: ({ target }) => target.from()
+          }
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -915,18 +1029,36 @@ describe("Machine", () => {
             Event.cases.Full,
             Event.cases.Finish
           ),
-          initial: () => states.initial.Flow.from((flow) => flow.Idle.from())
+          initial: {
+            target: (to) => to.Flow.initial(),
+            resolve: ({ target }) => target.from((flow) => flow.Idle.from())
+          }
         }).handle({
           Flow: {
             states: {
               Idle: {
                 on: {
-                  Local: ({ target }) => target.local.Running.from(),
-                  LocalWith: ({ target }) => target.local.with.from((flow) => flow.Running.from()),
-                  Branch: ({ target }) => target.branch.Flow.Nested.from((nested) => nested.NestedIdle.from()),
-                  Full: ({ target }) =>
-                    target.full.Flow.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from())),
-                  Finish: ({ target }) => target.local.Done.from()
+                  Local: Machine.transition({
+                    target: (to) => to.local.Running(),
+                    resolve: ({ target }) => target.from()
+                  }),
+                  LocalWith: Machine.transition({
+                    target: (to) => to.local.Running(),
+                    resolve: ({ target }) => target.from()
+                  }),
+                  Branch: Machine.transition({
+                    target: (to) => to.branch.Flow.Nested(),
+                    resolve: ({ target }) => target.from((nested) => nested.NestedIdle.from())
+                  }),
+                  Full: Machine.transition({
+                    target: (to) => to.full.Flow(),
+                    resolve: ({ target }) =>
+                      target.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from()))
+                  }),
+                  Finish: Machine.transition({
+                    target: (to) => to.local.Done(),
+                    resolve: ({ target }) => target.from()
+                  })
                 }
               },
               Running: {},
@@ -993,12 +1125,15 @@ describe("Machine", () => {
           id: "from-empty-parallel",
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.Parallel.from((parallel) =>
-              parallel
-                .left.from((left) => left.LeftIdle.from())
-                .right.from((right) => right.RightIdle.from())
-            )
+          initial: {
+            target: (to) => to.Parallel.initial(),
+            resolve: ({ target }) =>
+              target.from((parallel) =>
+                parallel
+                  .left.from((left) => left.LeftIdle.from())
+                  .right.from((right) => right.RightIdle.from())
+              )
+          }
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -1017,12 +1152,14 @@ describe("Machine", () => {
           Schema.makeFilter(() => "blocked state cannot be entered")
         )
         const states = Machine.defineStates({ Blocked })
-        const invalid = states.initial.Blocked.from()
         const machine = Machine.make({
           id: "from-empty-refinement",
           states: states.states,
           events: Machine.events(),
-          initial: () => invalid
+          initial: {
+            target: (to) => to.Blocked(),
+            resolve: ({ target }) => target.from()
+          }
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1034,12 +1171,14 @@ describe("Machine", () => {
     it.effect("fails invalid refinement input through MachineSchemaDecodeError without throwing in the builder", () =>
       Effect.gen(function*() {
         const states = Machine.defineStates({ NonEmptyIdle })
-        const invalid = states.initial.NonEmptyIdle.from({ userId: "" })
         const machine = Machine.make({
           id: "from-refinement",
           states: states.states,
           events: Machine.events(),
-          initial: () => invalid
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target.from({ userId: "" })
+          }
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1055,11 +1194,17 @@ describe("Machine", () => {
           id: "from-transition-refinement",
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle.from({ userId: "user-1" })
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target.from({ userId: "user-1" })
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ target }) => target.full.NonEmptyLoading.from({ requestId: "" })
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.NonEmptyLoading(),
+                resolve: ({ target }) => target.from({ requestId: "" })
+              })
             }
           }
         })
@@ -1107,24 +1252,30 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: () => states.initial.idle.from({ userId: "user-1" })
+          initial: {
+            target: (to) => to.idle(),
+            resolve: ({ target }) => target.from({ userId: "user-1" })
+          }
         }).handle({
           idle: {
             on: {
-              Submit: ({ event, target }) =>
-                target.full.fulfillment.from(
-                  { id: event.value },
-                  (fulfillment) =>
-                    fulfillment
-                      .inventory.from(
-                        { warehouse: "warehouse-1" },
-                        (inventory) => inventory.reserved.from({ reservationId: event.value })
-                      )
-                      .shipping.from(
-                        { address: "Main Street" },
-                        (shipping) => shipping.quoted.from({ quoteId: event.value })
-                      )
-                )
+              Submit: Machine.transition({
+                target: (to) => to.full.fulfillment(),
+                resolve: ({ event, target }) =>
+                  target.from(
+                    { id: event.value },
+                    (fulfillment) =>
+                      fulfillment
+                        .inventory.from(
+                          { warehouse: "warehouse-1" },
+                          (inventory) => inventory.reserved.from({ reservationId: event.value })
+                        )
+                        .shipping.from(
+                          { address: "Main Street" },
+                          (shipping) => shipping.quoted.from({ quoteId: event.value })
+                        )
+                  )
+              })
             }
           }
         })
@@ -1134,18 +1285,18 @@ describe("Machine", () => {
 
         assertParallelStateSnapshot(planned.next as any, "fulfillment", new Fulfillment({ id: "order-1" }), {
           inventory: {
-            path: "fulfillment.inventory",
+            path: "fulfillment.inventory" as const,
             value: new Inventory({ warehouse: "warehouse-1" }),
             state: {
-              path: "fulfillment.inventory.reserved",
+              path: "fulfillment.inventory.reserved" as const,
               value: new InventoryReserved({ reservationId: "order-1" })
             }
           },
           shipping: {
-            path: "fulfillment.shipping",
+            path: "fulfillment.shipping" as const,
             value: new Shipping({ address: "Main Street" }),
             state: {
-              path: "fulfillment.shipping.quoted",
+              path: "fulfillment.shipping.quoted" as const,
               value: new ShippingQuoted({ quoteId: "order-1" })
             }
           }
@@ -1167,21 +1318,27 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: () =>
-            states.initial.payment.from(
-              { id: "payment-1" },
-              (payment) => payment.entering.from({ amount: 1 })
-            )
+          initial: {
+            target: (to) => to.payment.initial(),
+            resolve: ({ target }) =>
+              target.from(
+                { id: "payment-1" },
+                (payment) => payment.entering.from({ amount: 1 })
+              )
+          }
         }).handle({
           payment: {
             states: {
               entering: {
                 on: {
-                  Submit: ({ event, target }) =>
-                    target.local.with.from(
-                      { id: "payment-2" },
-                      (payment) => payment.authorized.from({ code: event.value })
-                    )
+                  Submit: Machine.transition({
+                    target: (to) => to.branch.payment(),
+                    resolve: ({ event, target }) =>
+                      target.from(
+                        { id: "payment-2" },
+                        (payment) => payment.authorized.from({ code: event.value })
+                      )
+                  })
                 }
               }
             }
@@ -1192,7 +1349,7 @@ describe("Machine", () => {
         const planned = yield* Machine.plan(machine, initial.state, new Submit({ value: "auth-1" }))
 
         assertCompoundStateSnapshot(planned.next as any, "payment", new Payment({ id: "payment-2" }), {
-          path: "payment.authorized",
+          path: "payment.authorized" as const,
           value: new AuthorizedPayment({ code: "auth-1" })
         })
       }))
@@ -1218,25 +1375,31 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: () =>
-            states.initial.workflow.from(
-              { id: "workflow-1" },
-              (workflow) => workflow.idle.from({ userId: "user-1" })
-            )
+          initial: {
+            target: (to) => to.workflow.initial(),
+            resolve: ({ target }) =>
+              target.from(
+                { id: "workflow-1" },
+                (workflow) => workflow.idle.from({ userId: "user-1" })
+              )
+          }
         }).handle({
           workflow: {
             states: {
               idle: {
                 on: {
-                  Submit: ({ event, target }) =>
-                    target.branch.workflow.from(
-                      { id: "workflow-2" },
-                      (workflow) =>
-                        workflow.checkout.from(
-                          { id: "checkout-1" },
-                          (checkout) => checkout.quoted.from({ quoteId: event.value })
-                        )
-                    )
+                  Submit: Machine.transition({
+                    target: (to) => to.branch.workflow(),
+                    resolve: ({ event, target }) =>
+                      target.from(
+                        { id: "workflow-2" },
+                        (workflow) =>
+                          workflow.checkout.from(
+                            { id: "checkout-1" },
+                            (checkout) => checkout.quoted.from({ quoteId: event.value })
+                          )
+                      )
+                  })
                 }
               }
             }
@@ -1247,10 +1410,10 @@ describe("Machine", () => {
         const planned = yield* Machine.plan(machine, initial.state, new Submit({ value: "quote-1" }))
 
         assertCompoundStateSnapshot(planned.next as any, "workflow", new Payment({ id: "workflow-2" }), {
-          path: "workflow.checkout",
+          path: "workflow.checkout" as const,
           value: new Fulfillment({ id: "checkout-1" }),
           state: {
-            path: "workflow.checkout.quoted",
+            path: "workflow.checkout.quoted" as const,
             value: new ShippingQuoted({ quoteId: "quote-1" })
           }
         })
@@ -1265,7 +1428,10 @@ describe("Machine", () => {
           states: states.states,
           events: Machine.events(NonEmptySubmit),
           input: NonEmptyInput,
-          initial: (input) => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: input.userId }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ input: input, target }) => target(new NonEmptyIdle({ userId: input.userId }))
+          }
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine, { userId: "" as any }))
@@ -1279,7 +1445,10 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+          }
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1293,11 +1462,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ state, target }) => target.full.NonEmptyIdle(state)
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.NonEmptyIdle(),
+                resolve: ({ state, target }) => target(state)
+              })
             }
           }
         })
@@ -1305,7 +1480,7 @@ describe("Machine", () => {
         const error = yield* Effect.flip(
           Machine.plan(
             machine,
-            states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" })),
+            { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
             unsafeTagged({ _tag: "NonEmptySubmit", value: "" })
           )
         )
@@ -1319,11 +1494,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ state, target }) => target.full.NonEmptyIdle(state)
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.NonEmptyIdle(),
+                resolve: ({ state, target }) => target(state)
+              })
             }
           }
         })
@@ -1354,12 +1535,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ target }) =>
-                target.full.NonEmptyLoading(unsafeTagged({ _tag: "NonEmptyLoading", requestId: "" }))
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.NonEmptyLoading(),
+                resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyLoading", requestId: "" }))
+              })
             }
           }
         })
@@ -1367,7 +1553,7 @@ describe("Machine", () => {
         const error = yield* Effect.flip(
           Machine.plan(
             machine,
-            states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" })),
+            { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
             new NonEmptySubmit({ value: "request-1" })
           )
         )
@@ -1381,12 +1567,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ target }) =>
-                target.full.NonEmptyIdle(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.NonEmptyIdle(),
+                resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+              })
             }
           }
         })
@@ -1416,11 +1607,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: ({ event, target }) => target.full.done(new NonEmptyDone({ requestId: event.value }))
+              NonEmptySubmit: Machine.transition({
+                target: (to) => to.full.done(),
+                resolve: ({ event, target }) => target(new NonEmptyDone({ requestId: event.value }))
+              })
             }
           },
           done: {
@@ -1431,7 +1628,7 @@ describe("Machine", () => {
         const error = yield* Effect.flip(
           Machine.plan(
             machine,
-            states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" })),
+            { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
             new NonEmptySubmit({ value: "request-1" })
           )
         )
@@ -1461,14 +1658,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.all(
-              new ParallelRoot({ id: "all" }),
-              (all) =>
-                all
-                  .left(new ParallelLeftDone({ id: "left" }))
-                  .right(new ParallelRightDone({ id: "right" }))
-            )
+          initial: {
+            target: (to) => to.all.initial(),
+            resolve: ({ target }) =>
+              target(
+                new ParallelRoot({ id: "all" }),
+                (all) =>
+                  all
+                    .left(new ParallelLeftDone({ id: "left" }))
+                    .right(new ParallelRightDone({ id: "right" }))
+              )
+          }
         }).handle({
           all: {
             output: () => ({ summary: "" as any })
@@ -1486,13 +1686,16 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         })
 
         const error = yield* Effect.flip(
           Machine.plan(
             machine,
-            { path: "missing", value: new NonEmptyIdle({ userId: "user-1" }) } as any,
+            { path: "missing" as const, value: new NonEmptyIdle({ userId: "user-1" }) } as any,
             new NonEmptySubmit({ value: "request-1" })
           )
         )
@@ -1510,7 +1713,10 @@ describe("Machine", () => {
           id: "Counter",
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.count(new EncodedCount({ count: 1 }))
+          initial: {
+            target: (to) => to.count(),
+            resolve: ({ target }) => target(new EncodedCount({ count: 1 }))
+          }
         })
         const planned = yield* Machine.planInitial(machine)
 
@@ -1520,7 +1726,7 @@ describe("Machine", () => {
         assert.deepStrictEqual(encoded, {
           _tag: "MachineSnapshot",
           active: [{
-            path: "count",
+            path: "count" as const,
             value: { _tag: "EncodedCount", count: "1" }
           }]
         })
@@ -1557,20 +1763,23 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.fulfillment(
-              new Fulfillment({ id: "fulfillment-1" }),
-              (fulfillment) =>
-                fulfillment
-                  .inventory(
-                    new Inventory({ warehouse: "warehouse-1" }),
-                    (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-                  )
-                  .shipping(
-                    new Shipping({ address: "Main Street" }),
-                    (shipping) => shipping.quoting(new QuotingShipping({ postalCode: "12345" }))
-                  )
-            )
+          initial: {
+            target: (to) => to.fulfillment.initial(),
+            resolve: ({ target }) =>
+              target(
+                new Fulfillment({ id: "fulfillment-1" }),
+                (fulfillment) =>
+                  fulfillment
+                    .inventory(
+                      new Inventory({ warehouse: "warehouse-1" }),
+                      (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                    )
+                    .shipping(
+                      new Shipping({ address: "Main Street" }),
+                      (shipping) => shipping.quoting(new QuotingShipping({ postalCode: "12345" }))
+                    )
+              )
+          }
         })
         const planned = yield* Machine.planInitial(machine)
 
@@ -1606,14 +1815,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.all(
-              new ParallelRoot({ id: "all" }),
-              (all) =>
-                all
-                  .left(new ParallelLeftDone({ id: "left" }))
-                  .right(new ParallelRightDone({ id: "right" }))
-            )
+          initial: {
+            target: (to) => to.all.initial(),
+            resolve: ({ target }) =>
+              target(
+                new ParallelRoot({ id: "all" }),
+                (all) =>
+                  all
+                    .left(new ParallelLeftDone({ id: "left" }))
+                    .right(new ParallelRightDone({ id: "right" }))
+              )
+          }
         }).handle({
           all: {
             states: {
@@ -1628,8 +1840,8 @@ describe("Machine", () => {
         const encoded = yield* Machine.encodeSnapshot(machine, planned.state)
         const decoded = yield* Machine.decodeSnapshot(machine, encoded)
 
-        assert.deepStrictEqual(encoded.completed, [{ path: "all.left", output: "1" }])
-        assert.deepStrictEqual(decoded.completed, [{ path: "all.left", output: 1 }])
+        assert.deepStrictEqual(encoded.completed, [{ path: "all.left" as const, output: "1" }])
+        assert.deepStrictEqual(decoded.completed, [{ path: "all.left" as const, output: 1 }])
       }))
 
     it.effect("round-trips void completion outputs through JSON", () =>
@@ -1650,14 +1862,17 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.all(
-              new ParallelRoot({ id: "all" }),
-              (all) =>
-                all
-                  .left(new ParallelLeftDone({ id: "left" }))
-                  .right(new ParallelRightDone({ id: "right" }))
-            )
+          initial: {
+            target: (to) => to.all.initial(),
+            resolve: ({ target }) =>
+              target(
+                new ParallelRoot({ id: "all" }),
+                (all) =>
+                  all
+                    .left(new ParallelLeftDone({ id: "left" }))
+                    .right(new ParallelRightDone({ id: "right" }))
+              )
+          }
         }).handle({
           all: {
             states: {
@@ -1670,8 +1885,8 @@ describe("Machine", () => {
         const encoded = yield* Machine.encodeSnapshot(machine, planned.state)
         const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
 
-        assert.deepStrictEqual(encoded.completed, [{ path: "all.left" }])
-        assert.deepStrictEqual(decoded.completed, [{ path: "all.left", output: undefined }])
+        assert.deepStrictEqual(encoded.completed, [{ path: "all.left" as const }])
+        assert.deepStrictEqual(decoded.completed, [{ path: "all.left" as const, output: undefined }])
       }))
 
     it.effect("rejects state values that cannot be encoded", () =>
@@ -1680,11 +1895,14 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         })
 
         const error = yield* Machine.encodeSnapshot(machine, {
-          path: "NonEmptyIdle",
+          path: "NonEmptyIdle" as const,
           value: unsafeTagged({ _tag: "NonEmptyIdle", userId: "" })
         }).pipe(Effect.flip)
 
@@ -1697,12 +1915,15 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         })
 
         const error = yield* Machine.encodeSnapshot(machine, {
-          ...states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" })),
-          completed: [{ path: "missing", output: undefined }]
+          ...{ path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
+          completed: [{ path: "missing" as const, output: undefined }]
         }).pipe(Effect.flip)
 
         assert.instanceOf(error, Machine.MachineSchemaEncodeError)
@@ -1715,13 +1936,16 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () => states.initial.NonEmptyIdle(new NonEmptyIdle({ userId: "user-1" }))
+          initial: {
+            target: (to) => to.NonEmptyIdle(),
+            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
+          }
         })
 
         const error = yield* Machine.decodeSnapshot(machine, {
           _tag: "MachineSnapshot",
           active: [{
-            path: "NonEmptyIdle",
+            path: "NonEmptyIdle" as const,
             value: { _tag: "NonEmptyIdle", userId: "" }
           }]
         }).pipe(Effect.flip)
@@ -1744,17 +1968,20 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: () =>
-            states.initial.payment(
-              new Payment({ id: "payment-1" }),
-              (payment) => payment.entering(new EnteringPayment({ amount: 1 }))
-            )
+          initial: {
+            target: (to) => to.payment.initial(),
+            resolve: ({ target }) =>
+              target(
+                new Payment({ id: "payment-1" }),
+                (payment) => payment.entering(new EnteringPayment({ amount: 1 }))
+              )
+          }
         })
 
         const error = yield* Machine.decodeSnapshot(machine, {
           _tag: "MachineSnapshot",
           active: [{
-            path: "payment.entering",
+            path: "payment.entering" as const,
             value: { _tag: "EnteringPayment", amount: 1 }
           }]
         }).pipe(Effect.flip)
@@ -1773,12 +2000,18 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => LowercaseInitial.idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         idle: {
           on: {
-            Submit: ({ event, state, target }) =>
-              target.full.loading(new Loading({ requestId: `${state.userId}:${event.value}` }))
+            Submit: Machine.transition({
+              target: (to) => to.full.loading(),
+              resolve: ({ event, state, target }) =>
+                target(new Loading({ requestId: `${state.userId}:${event.value}` }))
+            })
           }
         }
       })
@@ -1804,16 +2037,25 @@ describe("Machine", () => {
           b: Duplicate
         },
         events: Machine.events(Submit, Reset),
-        initial: () => DuplicateInitial.a(new Duplicate({ value: "a" }))
+        initial: {
+          target: (to) => to.a(),
+          resolve: ({ target }) => target(new Duplicate({ value: "a" }))
+        }
       }).handle({
         a: {
           on: {
-            Submit: ({ event, target }) => target.full.b(new Duplicate({ value: event.value }))
+            Submit: Machine.transition({
+              target: (to) => to.full.b(),
+              resolve: ({ event, target }) => target(new Duplicate({ value: event.value }))
+            })
           }
         },
         b: {
           on: {
-            Reset: ({ target }) => target.full.a(new Duplicate({ value: "reset" }))
+            Reset: Machine.transition({
+              target: (to) => to.full.a(),
+              resolve: ({ target }) => target(new Duplicate({ value: "reset" }))
+            })
           }
         }
       })
@@ -1823,7 +2065,7 @@ describe("Machine", () => {
       assert.deepStrictEqual(Machine.enabled(machine, initial.state), ["Submit"])
       assert.deepStrictEqual(
         Machine.enabled(machine, {
-          path: "b",
+          path: "b" as const,
           value: new Duplicate({ value: "b" })
         }),
         ["Reset"]
@@ -1844,11 +2086,17 @@ describe("Machine", () => {
           b: Duplicate
         },
         events: Machine.events(Submit),
-        initial: () => DuplicateInitial.a(new Duplicate({ value: "a" }))
+        initial: {
+          target: (to) => to.a(),
+          resolve: ({ target }) => target(new Duplicate({ value: "a" }))
+        }
       }).handle({
         a: {
           on: {
-            Submit: ({ event, target }) => target.full.b(new Duplicate({ value: event.value }))
+            Submit: Machine.transition({
+              target: (to) => to.full.b(),
+              resolve: ({ event, target }) => target(new Duplicate({ value: event.value }))
+            })
           }
         }
       })
@@ -1876,11 +2124,17 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Submit),
-        initial: () => LowercaseInitial.idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         idle: {
           on: {
-            Submit: ({ event, target }) => target.full.success(new Success({ requestId: event.value }))
+            Submit: Machine.transition({
+              target: (to) => to.full.success(),
+              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
+            })
           }
         }
       })
@@ -1914,27 +2168,36 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(Authorize),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: entering
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: entering
+            }
+          })
+        }
       }).handle({
         payment: {
           on: {
-            Authorize: ({ target }) => target.full.failed(new Failed({ message: "parent" }))
+            Authorize: Machine.transition({
+              target: (to) => to.full.failed(),
+              resolve: ({ target }) => target(new Failed({ message: "parent" }))
+            })
           },
           states: {
             entering: {
               on: {
-                Authorize: ({ event, containingState, ancestors, target }) => {
-                  assert.deepStrictEqual(containingState, payment)
-                  assert.deepStrictEqual(ancestors, { payment })
-                  return target.local.authorized(new AuthorizedPayment({ code: event.code }))
-                }
+                Authorize: Machine.transition({
+                  target: (to) => to.local.authorized(),
+                  resolve: ({ event, containingState, ancestors, target }) => {
+                    assert.deepStrictEqual(containingState, payment)
+                    assert.deepStrictEqual(ancestors, { payment })
+                    return target(new AuthorizedPayment({ code: event.code }))
+                  }
+                })
               }
             }
           }
@@ -1971,23 +2234,32 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(Authorize, Reset),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: entering
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: entering
+            }
+          })
+        }
       }).handle({
         payment: {
           on: {
-            Reset: ({ target }) => target.full.failed(new Failed({ message: "reset" }))
+            Reset: Machine.transition({
+              target: (to) => to.full.failed(),
+              resolve: ({ target }) => target(new Failed({ message: "reset" }))
+            })
           },
           states: {
             entering: {
               on: {
-                Authorize: ({ event, target }) => target.local.authorized(new AuthorizedPayment({ code: event.code }))
+                Authorize: Machine.transition({
+                  target: (to) => to.local.authorized(),
+                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
+                })
               }
             },
             authorized: {
@@ -2032,18 +2304,24 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Reset),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: entering
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: entering
+            }
+          })
+        }
       }).handle({
         payment: {
           on: {
-            Reset: ({ target }) => target.full.idle(new Idle({ userId: "user-1" }))
+            Reset: Machine.transition({
+              target: (to) => to.full.idle(),
+              resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+            })
           }
         }
       })
@@ -2092,48 +2370,54 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: () => states.initial.idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         idle: {
           on: {
-            Submit: ({ event, target }) =>
-              target.full.fulfillment(
-                new Fulfillment({ id: event.value }),
-                (fulfillment) =>
-                  fulfillment
-                    .inventory(
-                      new Inventory({ warehouse: "warehouse-1" }),
-                      (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.value }))
-                    )
-                    .shipping(
-                      new Shipping({ address: "Main Street" }),
-                      (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
-                    )
-              )
+            Submit: Machine.transition({
+              target: (to) => to.full.fulfillment(),
+              resolve: ({ event, target }) =>
+                target(
+                  new Fulfillment({ id: event.value }),
+                  (fulfillment) =>
+                    fulfillment
+                      .inventory(
+                        new Inventory({ warehouse: "warehouse-1" }),
+                        (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.value }))
+                      )
+                      .shipping(
+                        new Shipping({ address: "Main Street" }),
+                        (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
+                      )
+                )
+            })
           }
         }
       })
 
       const planned = yield* Machine.plan(
         machine,
-        states.initial.idle(new Idle({ userId: "user-1" })),
+        { path: "idle" as const, value: new Idle({ userId: "user-1" }) },
         new Submit({ value: "order-1" })
       )
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", new Fulfillment({ id: "order-1" }), {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: new Inventory({ warehouse: "warehouse-1" }),
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "order-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: new Shipping({ address: "Main Street" }),
           state: {
-            path: "fulfillment.shipping.quoted",
+            path: "fulfillment.shipping.quoted" as const,
             value: new ShippingQuoted({ quoteId: "order-1" })
           }
         }
@@ -2184,30 +2468,36 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: () =>
-          states.initial.workflow(
-            workflow,
-            (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
-          )
+        initial: {
+          target: (to) => to.workflow.initial(),
+          resolve: ({ target }) =>
+            target(
+              workflow,
+              (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
+            )
+        }
       }).handle({
         workflow: {
           states: {
             idle: {
               on: {
-                Submit: ({ event, target }) =>
-                  target.local.fulfillment(
-                    new Fulfillment({ id: event.value }),
-                    (fulfillment) =>
-                      fulfillment
-                        .inventory(
-                          new Inventory({ warehouse: "warehouse-1" }),
-                          (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.value }))
-                        )
-                        .shipping(
-                          new Shipping({ address: "Main Street" }),
-                          (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
-                        )
-                  )
+                Submit: Machine.transition({
+                  target: (to) => to.local.fulfillment(),
+                  resolve: ({ event, target }) =>
+                    target(
+                      new Fulfillment({ id: event.value }),
+                      (fulfillment) =>
+                        fulfillment
+                          .inventory(
+                            new Inventory({ warehouse: "warehouse-1" }),
+                            (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.value }))
+                          )
+                          .shipping(
+                            new Shipping({ address: "Main Street" }),
+                            (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
+                          )
+                    )
+                })
               }
             }
           }
@@ -2216,30 +2506,31 @@ describe("Machine", () => {
 
       const planned = yield* Machine.plan(
         machine,
-        states.initial.workflow(
-          workflow,
-          (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
-        ),
+        {
+          path: "workflow" as const,
+          value: workflow,
+          state: { path: "workflow.idle" as const, value: new Idle({ userId: "user-1" }) }
+        },
         new Submit({ value: "order-1" })
       )
 
       assertCompoundStateSnapshot(planned.next as any, "workflow", workflow, {
-        path: "workflow.fulfillment",
+        path: "workflow.fulfillment" as const,
         value: new Fulfillment({ id: "order-1" }),
         states: {
           inventory: {
-            path: "workflow.fulfillment.inventory",
+            path: "workflow.fulfillment.inventory" as const,
             value: new Inventory({ warehouse: "warehouse-1" }),
             state: {
-              path: "workflow.fulfillment.inventory.reserved",
+              path: "workflow.fulfillment.inventory.reserved" as const,
               value: new InventoryReserved({ reservationId: "order-1" })
             }
           },
           shipping: {
-            path: "workflow.fulfillment.shipping",
+            path: "workflow.fulfillment.shipping" as const,
             value: new Shipping({ address: "Main Street" }),
             state: {
-              path: "workflow.fulfillment.shipping.quoted",
+              path: "workflow.fulfillment.shipping.quoted" as const,
               value: new ShippingQuoted({ quoteId: "order-1" })
             }
           }
@@ -2283,20 +2574,25 @@ describe("Machine", () => {
           }
         }
       })
-      const initial = states.initial.app(
-        app,
-        (app) =>
-          app
-            .flow(
-              flow,
-              (flow) => flow.idle(new Idle({ userId: "user-1" }))
-            )
-            .monitor(monitor)
-      )
+      const initial = {
+        path: "app" as const,
+        value: app,
+        states: {
+          flow: {
+            path: "app.flow" as const,
+            value: flow,
+            state: { path: "app.flow.idle" as const, value: new Idle({ userId: "user-1" }) }
+          },
+          monitor: { path: "app.monitor" as const, value: monitor }
+        }
+      }
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: () => initial
+        initial: {
+          target: (to) => to.app.initial(),
+          resolve: () => initial
+        }
       }).handle({
         app: {
           states: {
@@ -2304,14 +2600,17 @@ describe("Machine", () => {
               states: {
                 idle: {
                   on: {
-                    Submit: ({ event, target }) =>
-                      target.branch.app.flow.fulfillment(
-                        new Fulfillment({ id: event.value }),
-                        (fulfillment) =>
-                          fulfillment
-                            .inventory(new Inventory({ warehouse: "warehouse-1" }))
-                            .shipping(new Shipping({ address: "Main Street" }))
-                      )
+                    Submit: Machine.transition({
+                      target: (to) => to.branch.app.flow.fulfillment(),
+                      resolve: ({ event, target }) =>
+                        target(
+                          new Fulfillment({ id: event.value }),
+                          (fulfillment) =>
+                            fulfillment
+                              .inventory(new Inventory({ warehouse: "warehouse-1" }))
+                              .shipping(new Shipping({ address: "Main Street" }))
+                        )
+                    })
                   }
                 }
               }
@@ -2324,25 +2623,25 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "app", app, {
         flow: {
-          path: "app.flow",
+          path: "app.flow" as const,
           value: flow,
           state: {
-            path: "app.flow.fulfillment",
+            path: "app.flow.fulfillment" as const,
             value: new Fulfillment({ id: "order-1" }),
             states: {
               inventory: {
-                path: "app.flow.fulfillment.inventory",
+                path: "app.flow.fulfillment.inventory" as const,
                 value: new Inventory({ warehouse: "warehouse-1" })
               },
               shipping: {
-                path: "app.flow.fulfillment.shipping",
+                path: "app.flow.fulfillment.shipping" as const,
                 value: new Shipping({ address: "Main Street" })
               }
             }
           }
         },
         monitor: {
-          path: "app.monitor",
+          path: "app.monitor" as const,
           value: monitor
         }
       })
@@ -2381,20 +2680,23 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.fulfillment(
-            fulfillment,
-            (fulfillment) =>
-              fulfillment
-                .inventory(
-                  inventory,
-                  (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-                )
-                .shipping(
-                  shipping,
-                  (shipping) => shipping.quoting(quoting)
-                )
-          )
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: ({ target }) =>
+            target(
+              fulfillment,
+              (fulfillment) =>
+                fulfillment
+                  .inventory(
+                    inventory,
+                    (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                  )
+                  .shipping(
+                    shipping,
+                    (shipping) => shipping.quoting(quoting)
+                  )
+            )
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -2402,8 +2704,11 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 }
               }
@@ -2417,18 +2722,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -2468,20 +2773,23 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.fulfillment(
-            fulfillment,
-            (fulfillment) =>
-              fulfillment
-                .inventory(
-                  new Inventory({ warehouse: "warehouse-1" }),
-                  (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-                )
-                .shipping(
-                  shipping,
-                  (shipping) => shipping.quoting(quoting)
-                )
-          )
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: ({ target }) =>
+            target(
+              fulfillment,
+              (fulfillment) =>
+                fulfillment
+                  .inventory(
+                    new Inventory({ warehouse: "warehouse-1" }),
+                    (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                  )
+                  .shipping(
+                    shipping,
+                    (shipping) => shipping.quoting(quoting)
+                  )
+            )
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -2489,11 +2797,15 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.with(
-                        nextInventory,
-                        (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
-                      )
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.branch.fulfillment.inventory(),
+                      resolve: ({ event, target }) =>
+                        target(
+                          nextInventory,
+                          (inventory) =>
+                            inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                        )
+                    })
                   }
                 }
               }
@@ -2507,18 +2819,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: nextInventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -2559,20 +2871,23 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.fulfillment(
-            fulfillment,
-            (fulfillment) =>
-              fulfillment
-                .inventory(
-                  inventory,
-                  (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-                )
-                .shipping(
-                  shipping,
-                  (shipping) => shipping.quoting(quoting)
-                )
-          )
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: ({ target }) =>
+            target(
+              fulfillment,
+              (fulfillment) =>
+                fulfillment
+                  .inventory(
+                    inventory,
+                    (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                  )
+                  .shipping(
+                    shipping,
+                    (shipping) => shipping.quoting(quoting)
+                  )
+            )
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -2580,11 +2895,15 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.branch.fulfillment.inventory(
-                        nextInventory,
-                        (inventory) => inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
-                      )
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.branch.fulfillment.inventory(),
+                      resolve: ({ event, target }) =>
+                        target(
+                          nextInventory,
+                          (inventory) =>
+                            inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                        )
+                    })
                   }
                 }
               }
@@ -2598,18 +2917,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: nextInventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -2651,20 +2970,23 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.fulfillment(
-            fulfillment,
-            (fulfillment) =>
-              fulfillment
-                .inventory(
-                  inventory,
-                  (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-                )
-                .shipping(
-                  shipping,
-                  (shipping) => shipping.quoting(quoting)
-                )
-          )
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: ({ target }) =>
+            target(
+              fulfillment,
+              (fulfillment) =>
+                fulfillment
+                  .inventory(
+                    inventory,
+                    (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                  )
+                  .shipping(
+                    shipping,
+                    (shipping) => shipping.quoting(quoting)
+                  )
+            )
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -2672,16 +2994,19 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.branch.fulfillment(
-                        nextFulfillment,
-                        (fulfillment) =>
-                          fulfillment.inventory(
-                            nextInventory,
-                            (inventory) =>
-                              inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
-                          )
-                      )
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.branch.fulfillment(),
+                      resolve: ({ event, target }) =>
+                        target(
+                          nextFulfillment,
+                          (fulfillment) =>
+                            fulfillment.inventory(
+                              nextInventory,
+                              (inventory) =>
+                                inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                            )
+                        )
+                    })
                   }
                 }
               }
@@ -2695,18 +3020,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", nextFulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: nextInventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -2745,15 +3070,18 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: () =>
-          states.initial.payment(
-            payment,
-            (payment) =>
-              payment.inventory(
-                inventory,
-                (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
-              )
-          )
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: ({ target }) =>
+            target(
+              payment,
+              (payment) =>
+                payment.inventory(
+                  inventory,
+                  (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
+                )
+            )
+        }
       }).handle({
         payment: {
           states: {
@@ -2761,11 +3089,14 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.branch.payment.shipping(
-                        shipping,
-                        (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.reservationId }))
-                      )
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.branch.payment.shipping(),
+                      resolve: ({ event, target }) =>
+                        target(
+                          shipping,
+                          (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.reservationId }))
+                        )
+                    })
                   }
                 }
               }
@@ -2782,10 +3113,10 @@ describe("Machine", () => {
       )
 
       assertCompoundStateSnapshot(planned.next as any, "payment", payment, {
-        path: "payment.shipping",
+        path: "payment.shipping" as const,
         value: shipping,
         state: {
-          path: "payment.shipping.quoted",
+          path: "payment.shipping.quoted" as const,
           value: new ShippingQuoted({ quoteId: "quote-1" })
         }
       })
@@ -2810,23 +3141,32 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize, Reset),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: new EnteringPayment({ amount: 100 })
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: new EnteringPayment({ amount: 100 })
+            }
+          })
+        }
       }).handle({
         payment: {
           on: {
-            Reset: ({ target }) => target.local.entering(new EnteringPayment({ amount: 0 }))
+            Reset: Machine.transition({
+              target: (to) => to.local.entering(),
+              resolve: ({ target }) => target(new EnteringPayment({ amount: 0 }))
+            })
           },
           states: {
             entering: {
               on: {
-                Authorize: ({ event, target }) => target.local.authorized(new AuthorizedPayment({ code: event.code }))
+                Authorize: Machine.transition({
+                  target: (to) => to.local.authorized(),
+                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
+                })
               }
             },
             authorized: {
@@ -2867,14 +3207,17 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Reset),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.authorized" as const,
-            value: authorized
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.authorized" as const,
+              value: authorized
+            }
+          })
+        }
       }).handle({
         payment: {
           states: {
@@ -2916,23 +3259,32 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize, Reset),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: new EnteringPayment({ amount: 100 })
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: new EnteringPayment({ amount: 100 })
+            }
+          })
+        }
       }).handle({
         payment: {
           on: {
-            Reset: ({ target }) => target.full.idle(new Idle({ userId: "user-1" }))
+            Reset: Machine.transition({
+              target: (to) => to.full.idle(),
+              resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+            })
           },
           states: {
             entering: {
               on: {
-                Authorize: ({ event, target }) => target.local.authorized(new AuthorizedPayment({ code: event.code }))
+                Authorize: Machine.transition({
+                  target: (to) => to.local.authorized(),
+                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
+                })
               }
             },
             authorized: {
@@ -2951,15 +3303,15 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "payment",
+          path: "payment" as const,
           value: payment,
           state: {
-            path: "payment.authorized",
+            path: "payment.authorized" as const,
             value: new AuthorizedPayment({ code: "auth-1" })
           },
           completed: [
-            { path: "payment.authorized", output: "auth-1" },
-            { path: "payment", output: "auth-1" }
+            { path: "payment.authorized" as const, output: "auth-1" },
+            { path: "payment" as const, output: "auth-1" }
           ]
         },
         output: "auth-1"
@@ -2994,32 +3346,43 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(ReserveInventory, Reset),
-        initial: () => ({
-          path: "checkout",
-          value: checkout,
-          state: {
-            path: "checkout.inventory" as const,
-            value: inventory,
+        initial: {
+          target: (to) => to.checkout.initial(),
+          resolve: () => ({
+            path: "checkout" as const,
+            value: checkout,
             state: {
-              path: "checkout.inventory.checking" as const,
-              value: new CheckingInventory({ sku: "sku-1" })
+              path: "checkout.inventory" as const,
+              value: inventory,
+              state: {
+                path: "checkout.inventory.checking" as const,
+                value: new CheckingInventory({ sku: "sku-1" })
+              }
             }
-          }
-        })
+          })
+        }
       }).handle({
         checkout: {
           on: {
-            Reset: ({ target }) => target.full.failed(new Failed({ message: "reset" }))
+            Reset: Machine.transition({
+              target: (to) => to.full.failed(),
+              resolve: ({ target }) => target(new Failed({ message: "reset" }))
+            })
           },
           states: {
             inventory: {
-              onDone: ({ output, target }) =>
-                target.branch.checkout.shipped(new ShippingQuoted({ quoteId: String(output) })),
+              onDone: Machine.transition({
+                target: (to) => to.branch.checkout.shipped(),
+                resolve: ({ output, target }) => target(new ShippingQuoted({ quoteId: String(output) }))
+              }),
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 },
                 reserved: {
@@ -3035,7 +3398,7 @@ describe("Machine", () => {
       const planned = yield* Machine.plan(machine, initial.state, new ReserveInventory({ reservationId: "res-1" }))
 
       assertCompoundStateSnapshot(planned.next as any, "checkout", checkout, {
-        path: "checkout.shipped",
+        path: "checkout.shipped" as const,
         value: new ShippingQuoted({ quoteId: "res-1" })
       })
       assert.strictEqual(Machine.isFinal(machine, planned.next), false)
@@ -3082,28 +3445,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: new CheckingInventory({ sku: "sku-1" })
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: quoting
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: new CheckingInventory({ sku: "sku-1" })
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: quoting
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -3111,8 +3477,11 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 }
               }
@@ -3133,18 +3502,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoting",
+            path: "fulfillment.shipping.quoting" as const,
             value: quoting
           }
         }
@@ -3197,28 +3566,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: checking
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: quoting
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: checking
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: quoting
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           output: ({ outputs }) => ({
@@ -3230,8 +3602,11 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 },
                 reserved: {
@@ -3243,8 +3618,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.quoted(new ShippingQuoted({ quoteId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.quoted(),
+                      resolve: ({ event, target }) => target(new ShippingQuoted({ quoteId: event.reservationId }))
+                    })
                   }
                 },
                 quoted: {
@@ -3261,18 +3638,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoted",
+            path: "fulfillment.shipping.quoted" as const,
             value: new ShippingQuoted({ quoteId: "res-1" })
           }
         }
@@ -3337,28 +3714,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory, Resolve),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: new CheckingInventory({ sku: "sku-1" })
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: quoting
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: new CheckingInventory({ sku: "sku-1" })
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: quoting
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           output: ({ outputs }) => outputs,
@@ -3367,8 +3747,11 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 },
                 reserved: {
@@ -3380,7 +3763,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    Resolve: ({ target }) => target.local.quoted(new ShippingQuoted({ quoteId: "quote-1" }))
+                    Resolve: Machine.transition({
+                      target: (to) => to.local.quoted(),
+                      resolve: ({ target }) => target(new ShippingQuoted({ quoteId: "quote-1" }))
+                    })
                   }
                 },
                 quoted: {
@@ -3460,28 +3846,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: checking
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: quoting
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: checking
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: quoting
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -3489,8 +3878,11 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.reserved(new InventoryReserved({ reservationId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }) =>
+                        target(new InventoryReserved({ reservationId: event.reservationId }))
+                    })
                   }
                 }
               }
@@ -3499,8 +3891,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    ReserveInventory: ({ event, target }) =>
-                      target.local.quoted(new ShippingQuoted({ quoteId: event.reservationId }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.quoted(),
+                      resolve: ({ event, target }) => target(new ShippingQuoted({ quoteId: event.reservationId }))
+                    })
                   }
                 }
               }
@@ -3514,18 +3908,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoted",
+            path: "fulfillment.shipping.quoted" as const,
             value: new ShippingQuoted({ quoteId: "res-1" })
           }
         }
@@ -3565,28 +3959,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory, Resolve),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: checking
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: quoting
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: checking
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: quoting
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           states: {
@@ -3594,14 +3991,17 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ event, target }, enqueue) => {
-                      enqueue.raise(new Resolve({}))
-                      return target.local.reserved(
-                        new InventoryReserved({
-                          reservationId: event.reservationId
-                        })
-                      )
-                    }
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.local.reserved(),
+                      resolve: ({ event, target }, enqueue) => {
+                        enqueue.raise(new Resolve({}))
+                        return target(
+                          new InventoryReserved({
+                            reservationId: event.reservationId
+                          })
+                        )
+                      }
+                    })
                   }
                 }
               }
@@ -3610,7 +4010,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    Resolve: ({ target }) => target.local.quoted(new ShippingQuoted({ quoteId: "raised" }))
+                    Resolve: Machine.transition({
+                      target: (to) => to.local.quoted(),
+                      resolve: ({ target }) => target(new ShippingQuoted({ quoteId: "raised" }))
+                    })
                   }
                 }
               }
@@ -3624,18 +4027,18 @@ describe("Machine", () => {
 
       assertParallelStateSnapshot(planned.next as any, "fulfillment", fulfillment, {
         inventory: {
-          path: "fulfillment.inventory",
+          path: "fulfillment.inventory" as const,
           value: inventory,
           state: {
-            path: "fulfillment.inventory.reserved",
+            path: "fulfillment.inventory.reserved" as const,
             value: new InventoryReserved({ reservationId: "res-1" })
           }
         },
         shipping: {
-          path: "fulfillment.shipping",
+          path: "fulfillment.shipping" as const,
           value: shipping,
           state: {
-            path: "fulfillment.shipping.quoted",
+            path: "fulfillment.shipping.quoted" as const,
             value: new ShippingQuoted({ quoteId: "raised" })
           }
         }
@@ -3648,7 +4051,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(Submit),
-        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       })
 
       const actor = yield* Machine.start(machine)
@@ -3662,11 +4068,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         }
       })
@@ -3681,7 +4093,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(snapshot, {
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       })
     }))
 
@@ -3690,16 +4102,25 @@ describe("Machine", () => {
       states: { Idle, Loading },
       events: Machine.events(Submit, Reset),
       input: Input,
-      initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+      }
     }).handle({
       Idle: {
         on: {
-          Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+          Submit: Machine.transition({
+            target: (to) => to.full.Loading(),
+            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+          })
         }
       },
       Loading: {
         on: {
-          Reset: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+          Reset: Machine.transition({
+            target: (to) => to.full.Idle(),
+            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+          })
         }
       }
     })
@@ -3719,11 +4140,17 @@ describe("Machine", () => {
       },
       events: Machine.events(Submit),
       input: Input,
-      initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+      }
     }).handle({
       Idle: {
         on: {
-          Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+          Submit: Machine.transition({
+            target: (to) => to.full.Success(),
+            resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+          })
         }
       },
       Success: {}
@@ -3741,11 +4168,17 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            })
           }
         },
         Success: {
@@ -3757,7 +4190,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Idle", value: new Idle({ userId: "user-1" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "user-1" }) }
       })
 
       yield* actor.send(new Submit({ value: "hello" }))
@@ -3771,11 +4204,17 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            })
           }
         },
         Success: {
@@ -3798,7 +4237,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Success: SuccessOutput },
         events: Machine.events(Submit),
-        initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Success(),
+          resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+        }
       }).handle({
         Success: {
           output: ({ state }) => {
@@ -3818,9 +4260,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request-1" }),
-          completed: [{ path: "Success", output: "request-1" }]
+          completed: [{ path: "Success" as const, output: "request-1" }]
         },
         output: "request-1"
       })
@@ -3832,7 +4274,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Success: SuccessOutput },
         events: Machine.events(Submit),
-        initial: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Success(),
+          resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+        }
       }).handle({
         Success: {
           output: ({ state }) => {
@@ -3847,7 +4292,7 @@ describe("Machine", () => {
       const planned = yield* Machine.plan(machine, cloned, new Submit({ value: "ignored" }))
 
       assert.strictEqual(initial.done, true)
-      assert.deepStrictEqual(cloned.completed, [{ path: "Success", output: "request-1" }])
+      assert.deepStrictEqual(cloned.completed, [{ path: "Success" as const, output: "request-1" }])
       assert.strictEqual(planned.done, true)
       assert.strictEqual(planned.output, "request-1")
       assert.strictEqual(outputCalls, 1)
@@ -3862,11 +4307,17 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            })
           }
         },
         Success: {}
@@ -3879,9 +4330,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request-1" }),
-          completed: [{ path: "Success", output: undefined }]
+          completed: [{ path: "Success" as const, output: undefined }]
         },
         output: undefined
       })
@@ -3896,12 +4347,21 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit, Reset),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" })),
-            Reset: () => FlatInitial.Idle(new Idle({ userId: "user-2" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            }),
+            Reset: Machine.transition({
+              target: (to) => to.full.Idle(),
+              resolve: ({ target }) => target(new Idle({ userId: "user-2" }))
+            })
           }
         },
         Success: {}
@@ -3915,9 +4375,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request-1" }),
-          completed: [{ path: "Success", output: undefined }]
+          completed: [{ path: "Success" as const, output: undefined }]
         },
         output: undefined
       })
@@ -3928,11 +4388,17 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle, Loading },
         events: Machine.events(Submit),
-        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         }
       })
@@ -3956,11 +4422,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         }
       })
@@ -3974,7 +4446,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "stopped",
-        state: { path: "Idle", value: new Idle({ userId: "user-1" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "user-1" }) }
       })
     }))
 
@@ -3987,7 +4459,10 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Success: {}
       })
@@ -4006,11 +4481,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: ({ target }) => target.none()
+            Submit: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           }
         }
       })
@@ -4029,11 +4510,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         }
       })
@@ -4048,7 +4535,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Idle", value: new Idle({ userId: "user-1" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "user-1" }) }
       })
 
       yield* actor.send(new Submit({ value: "hello" }))
@@ -4056,14 +4543,14 @@ describe("Machine", () => {
       const snapshots = Array.from(yield* Fiber.join(observer))
       assert.deepStrictEqual(snapshots, [{
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       }])
       assert.deepStrictEqual((yield* actor.state).value, new Loading({ requestId: "request-1" }))
 
       yield* actor.stop
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "stopped",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       })
     }))
 
@@ -4073,11 +4560,17 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Success(new Success({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            })
           }
         },
         Success: {
@@ -4093,9 +4586,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request-1" }),
-          completed: [{ path: "Success", output: "request-1" }]
+          completed: [{ path: "Success" as const, output: "request-1" }]
         },
         output: "request-1"
       })
@@ -4108,11 +4601,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit, Reset),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         }
       })
@@ -4128,22 +4627,32 @@ describe("Machine", () => {
 
   it.effect("start runs invoke configs", () =>
     Effect.gen(function*() {
-      const machine = Machine.make({
+      const definition = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestSucceeded),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
-      }).handle({
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
+      })
+      const machine = definition.handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
-          invoke: Machine.invoke({
+          invoke: definition.invoke({
             id: "request",
             effect: () => Effect.succeed("done:request-1"),
-            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ output, target }) => target(new Success({ requestId: output }))
+            })
           })
         },
         Success: {
@@ -4159,9 +4668,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "done:request-1" }),
-          completed: [{ path: "Success", output: "done:request-1" }]
+          completed: [{ path: "Success" as const, output: "done:request-1" }]
         },
         output: "done:request-1"
       })
@@ -4169,22 +4678,32 @@ describe("Machine", () => {
 
   it.effect("start invokes a child process and handles its output event", () =>
     Effect.gen(function*() {
-      const machine = Machine.make({
+      const definition = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestSucceeded),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
-      }).handle({
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
+      })
+      const machine = definition.handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
-          invoke: Machine.invoke({
+          invoke: definition.invoke({
             id: "request",
             effect: () => Effect.succeed("done:request-1"),
-            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ output, target }) => target(new Success({ requestId: output }))
+            })
           })
         },
         Success: {
@@ -4200,9 +4719,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "done:request-1" }),
-          completed: [{ path: "Success", output: "done:request-1" }]
+          completed: [{ path: "Success" as const, output: "done:request-1" }]
         },
         output: "done:request-1"
       })
@@ -4214,14 +4733,20 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "child" }))
+        }
       })
       const Child = Machine.child("shared-child", childMachine)
       const parentStates = Machine.defineStates({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({ child: Child })
@@ -4250,11 +4775,11 @@ describe("Machine", () => {
       yield* first.stop
       assert.deepStrictEqual(yield* second.snapshot, {
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "parent" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "parent" }) }
       })
       assert.deepStrictEqual(yield* secondChild.value.snapshot, {
         status: "active",
-        state: { path: "Idle", value: new Idle({ userId: "child" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "child" }) }
       })
       yield* second.stop
     }))
@@ -4265,14 +4790,20 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "child" }))
+        }
       }).handle({ Idle: {} })
       const Child = Machine.child("owned-child", childMachine)
       const parentStates = Machine.defineStates({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
+        }
       }).handle({
         Loading: { invoke: Machine.invoke({ child: Child }) }
       })
@@ -4285,7 +4816,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* child.value.snapshot, {
         status: "stopped",
-        state: { path: "Idle", value: new Idle({ userId: "child" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "child" }) }
       })
       assert.instanceOf(yield* Effect.flip(child.value.join), Machine.StoppedError)
       assert(Option.isNone(yield* parent.child(Child)))
@@ -4299,9 +4830,12 @@ describe("Machine", () => {
         states: childStates.states,
         events: Machine.events(),
         input: Input,
-        initial: (input) => {
-          starts += 1
-          return childStates.initial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input, target }) => {
+            starts += 1
+            return target(new Idle({ userId: input.userId }))
+          }
         }
       }).handle({ Idle: {} })
       const Child = Machine.child("input-child", childMachine)
@@ -4309,7 +4843,10 @@ describe("Machine", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({ child: Child, input: { userId: "configured" } })
@@ -4327,7 +4864,7 @@ describe("Machine", () => {
       assert(Option.isSome(secondChild))
       assert.notStrictEqual(firstChild.value, secondChild.value)
       assert.deepStrictEqual(yield* firstChild.value.state, {
-        path: "Idle",
+        path: "Idle" as const,
         value: new Idle({ userId: "configured" })
       })
       yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
@@ -4344,7 +4881,10 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: () => childStates.initial.Success(new Success({ requestId: "child-output" }))
+        initial: {
+          target: (to) => to.Success(),
+          resolve: ({ target }) => target(new Success({ requestId: "child-output" }))
+        }
       }).handle({
         Success: { output: ({ state }) => state.requestId }
       })
@@ -4356,12 +4896,18 @@ describe("Machine", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(ChildFinished),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "parent" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ output, target }) => target(new Success({ requestId: output }))
+            })
           })
         },
         Success: { output: ({ state }) => state.requestId }
@@ -4379,7 +4925,10 @@ describe("Machine", () => {
         states: states.states,
         events: Machine.events(),
         input: Input,
-        initial: (input) => states.initial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {}
       })
@@ -4392,11 +4941,11 @@ describe("Machine", () => {
       )
 
       assert.deepStrictEqual(yield* first.state, {
-        path: "Idle",
+        path: "Idle" as const,
         value: new Idle({ userId: "first" })
       })
       assert.deepStrictEqual(yield* second.state, {
-        path: "Idle",
+        path: "Idle" as const,
         value: new Idle({ userId: "second" })
       })
       yield* Effect.all([first.stop, second.stop], { concurrency: "unbounded" })
@@ -4408,14 +4957,20 @@ describe("Machine", () => {
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: () => childStates.initial.Idle(new Idle({ userId: "child" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "child" }))
+        }
       })
       const Child = Machine.child("child-machine", child)
       const parentStates = Machine.defineStates({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: [
@@ -4444,7 +4999,10 @@ describe("Machine", () => {
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: () => parentStates.initial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: [
@@ -4477,18 +5035,27 @@ describe("Machine", () => {
         states: { Idle, Loading, Failed: FailedOutput },
         events: Machine.events(Submit, RequestFailed),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.fail(error),
-            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+            onFailure: Machine.transition({
+              target: (to) => to.full.Failed(),
+              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
+            })
           })
         },
         Failed: {
@@ -4504,9 +5071,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Failed",
+          path: "Failed" as const,
           value: new Failed({ message: "boom" }),
-          completed: [{ path: "Failed", output: "boom" }]
+          completed: [{ path: "Failed" as const, output: "boom" }]
         },
         output: "boom"
       })
@@ -4518,18 +5085,27 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.succeed("loaded"),
-            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ output, target }) => target(new Success({ requestId: output }))
+            })
           })
         },
         Success: {
@@ -4549,7 +5125,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(RequestSucceeded),
-        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -4565,10 +5144,16 @@ describe("Machine", () => {
                     Effect.andThen(Effect.never)
                   )
             }),
-            onFailure: ({ target }) => target.none()
+            onFailure: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           }),
           on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+            RequestSucceeded: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
+            })
           }
         },
         Success: {
@@ -4588,11 +5173,17 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Resolve, RequestSucceeded),
-        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Idle: {
           on: {
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+            RequestSucceeded: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
+            })
           }
         },
         Loading: {
@@ -4609,10 +5200,16 @@ describe("Machine", () => {
                     Effect.onInterrupt(() => sendTo(parent, new RequestSucceeded({ value: "stale" })))
                   )
             }),
-            onFailure: ({ target }) => target.none()
+            onFailure: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           }),
           on: {
-            Resolve: () => FlatInitial.Idle(new Idle({ userId: "resolved" }))
+            Resolve: Machine.transition({
+              target: (to) => to.full.Idle(),
+              resolve: ({ target }) => target(new Idle({ userId: "resolved" }))
+            })
           }
         },
         Success: {
@@ -4631,7 +5228,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Idle", value: new Idle({ userId: "resolved" }) }
+        state: { path: "Idle" as const, value: new Idle({ userId: "resolved" }) }
       })
       yield* actor.stop
     }))
@@ -4643,13 +5240,19 @@ describe("Machine", () => {
         states: { Loading, Failed: FailedOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded, RequestFailed),
-        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.fail(failure),
-            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+            onFailure: Machine.transition({
+              target: (to) => to.full.Failed(),
+              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
+            })
           })
         },
         Failed: {
@@ -4671,13 +5274,19 @@ describe("Machine", () => {
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => requiredMessage,
-            onDone: ({ output, target }) => target.full.Success(new Success({ requestId: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ output, target }) => target(new Success({ requestId: output }))
+            })
           })
         },
         Success: {
@@ -4701,13 +5310,19 @@ describe("Machine", () => {
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 hour",
-            onDone: ({ target }) => target.full.Success(new Success({ requestId: "timeout" }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "timeout" }))
+            })
           })
         },
         Success: {
@@ -4724,25 +5339,51 @@ describe("Machine", () => {
 
   it.effect("start maps invoked child active snapshots to machine events", () =>
     Effect.gen(function*() {
-      const machine = Machine.make({
+      const definition = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestProgress),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
-      }).handle({
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
+      })
+      const onSnapshot: Machine.Machine.InvokeTransition<
+        Machine.Machine.States<typeof definition>,
+        Machine.Machine.Events<typeof definition>,
+        Machine.Machine.Emits<typeof definition>,
+        "Loading",
+        Machine.Machine.InvokeSnapshotContext<
+          Machine.Machine.States<typeof definition>,
+          Machine.Machine.Events<typeof definition>,
+          Machine.Machine.Emits<typeof definition>,
+          "Loading",
+          string,
+          never,
+          never,
+          Machine.Machine.InputEvents<typeof definition>,
+          Machine.Machine.ParentEvents<typeof definition>
+        >
+      > = Machine.transition({
+        target: (to) => to.full.Success(),
+        resolve: ({ id, snapshot, target }) => target(new Success({ requestId: `${id}:${snapshot.state}` }))
+      })
+      const machine = definition.handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
-          invoke: Machine.invoke({
+          invoke: {
             id: "request",
             address: Machine.childAddress("progress-request"),
             logic: Machine.logic({ initial: "pending", run: () => Effect.never }),
-            onSnapshot: ({ id, snapshot, target }) =>
-              target.full.Success(new Success({ requestId: `${id}:${snapshot.state}` }))
-          })
+            onSnapshot
+          }
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4757,9 +5398,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request:pending" }),
-          completed: [{ path: "Success", output: "request:pending" }]
+          completed: [{ path: "Success" as const, output: "request:pending" }]
         },
         output: "request:pending"
       })
@@ -4772,11 +5413,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
@@ -4797,7 +5444,7 @@ describe("Machine", () => {
       if (snapshot.status !== "error") return assert.fail("expected an error snapshot")
       assert.strictEqual(Cause.squash(snapshot.cause), error)
       assert.deepStrictEqual(snapshot.state, {
-        path: "Loading",
+        path: "Loading" as const,
         value: new Loading({ requestId: "request-1" })
       })
     }))
@@ -4806,19 +5453,51 @@ describe("Machine", () => {
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
-      const machine = Machine.make({
+      const definition = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestProgress),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
-      }).handle({
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
+      })
+      const onSnapshot: Machine.Machine.InvokeTransition<
+        Machine.Machine.States<typeof definition>,
+        Machine.Machine.Events<typeof definition>,
+        Machine.Machine.Emits<typeof definition>,
+        "Loading",
+        Machine.Machine.InvokeSnapshotContext<
+          Machine.Machine.States<typeof definition>,
+          Machine.Machine.Events<typeof definition>,
+          Machine.Machine.Emits<typeof definition>,
+          "Loading",
+          string,
+          never,
+          never,
+          Machine.Machine.InputEvents<typeof definition>,
+          Machine.Machine.ParentEvents<typeof definition>
+        >
+      > = Machine.transition({
+        cases: [{
+          title: "request is ready",
+          when: ({ snapshot }) => snapshot.state === "ready" ? Option.some(snapshot) : Option.none(),
+          target: (to) => to.full.Success(),
+          resolve: ({ snapshot, target }) => target(new Success({ requestId: snapshot.state }))
+        }],
+        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+      })
+      const machine = definition.handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
-          invoke: Machine.invoke({
+          invoke: {
             id: "request",
             address: Machine.childAddress("filtered-progress"),
             logic: Machine.logic({
@@ -4830,11 +5509,8 @@ describe("Machine", () => {
                   Effect.andThen(Effect.never)
                 )
             }),
-            onSnapshot: ({ snapshot, target }) =>
-              snapshot.state === "ready"
-                ? target.full.Success(new Success({ requestId: snapshot.state }))
-                : target.none()
-          })
+            onSnapshot
+          }
         },
         Success: {
           output: ({ state }) => state.requestId
@@ -4849,7 +5525,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       })
 
       yield* Deferred.succeed(release, void 0)
@@ -4858,9 +5534,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "ready" }),
-          completed: [{ path: "Success", output: "ready" }]
+          completed: [{ path: "Success" as const, output: "ready" }]
         },
         output: "ready"
       })
@@ -4872,11 +5548,17 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
@@ -4887,7 +5569,10 @@ describe("Machine", () => {
               initial: "pending",
               run: () => Effect.void
             }),
-            onDone: ({ target }) => target.none()
+            onDone: Machine.transition({
+              target: (to) => to.none(),
+              resolve: () => undefined
+            })
           })
         }
       })
@@ -4899,7 +5584,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       })
 
       yield* actor.stop
@@ -4927,11 +5612,17 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, Resolve, RequestSucceeded),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
@@ -4941,8 +5632,14 @@ describe("Machine", () => {
             logic: childLogic
           }),
           on: {
-            Resolve: () => FlatInitial.Success(new Success({ requestId: "request-1" })),
-            RequestSucceeded: ({ event }) => FlatInitial.Success(new Success({ requestId: event.value }))
+            Resolve: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
+            }),
+            RequestSucceeded: Machine.transition({
+              target: (to) => to.full.Success(),
+              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
+            })
           }
         },
         Success: {
@@ -4964,7 +5661,7 @@ describe("Machine", () => {
       assert.strictEqual(yield* Ref.get(joinDone), false)
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "active",
-        state: { path: "Loading", value: new Loading({ requestId: "request-1" }) }
+        state: { path: "Loading" as const, value: new Loading({ requestId: "request-1" }) }
       })
 
       yield* Deferred.succeed(releaseChildStop, void 0)
@@ -4973,9 +5670,9 @@ describe("Machine", () => {
       assert.deepStrictEqual(yield* actor.snapshot, {
         status: "done",
         state: {
-          path: "Success",
+          path: "Success" as const,
           value: new Success({ requestId: "request-1" }),
-          completed: [{ path: "Success", output: "request-1" }]
+          completed: [{ path: "Success" as const, output: "request-1" }]
         },
         output: "request-1"
       })
@@ -5010,14 +5707,17 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize),
-        initial: () => ({
-          path: "payment",
-          value: payment,
-          state: {
-            path: "payment.entering" as const,
-            value: entering
-          }
-        })
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: entering
+            }
+          })
+        }
       }).handle({
         payment: {
           invoke: Machine.invoke({
@@ -5037,7 +5737,10 @@ describe("Machine", () => {
                 logic: makeInvokeLogic("entering", enteringStarted)
               }),
               on: {
-                Authorize: ({ event, target }) => target.local.authorized(new AuthorizedPayment({ code: event.code }))
+                Authorize: Machine.transition({
+                  target: (to) => to.local.authorized(),
+                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
+                })
               }
             },
             authorized: {
@@ -5128,28 +5831,31 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: () => ({
-          path: "fulfillment",
-          value: fulfillment,
-          states: {
-            inventory: {
-              path: "fulfillment.inventory" as const,
-              value: inventory,
-              state: {
-                path: "fulfillment.inventory.checking" as const,
-                value: new CheckingInventory({ sku: "sku-1" })
-              }
-            },
-            shipping: {
-              path: "fulfillment.shipping" as const,
-              value: shipping,
-              state: {
-                path: "fulfillment.shipping.quoting" as const,
-                value: new QuotingShipping({ postalCode: "12345" })
+        initial: {
+          target: (to) => to.fulfillment.initial(),
+          resolve: () => ({
+            path: "fulfillment" as const,
+            value: fulfillment,
+            states: {
+              inventory: {
+                path: "fulfillment.inventory" as const,
+                value: inventory,
+                state: {
+                  path: "fulfillment.inventory.checking" as const,
+                  value: new CheckingInventory({ sku: "sku-1" })
+                }
+              },
+              shipping: {
+                path: "fulfillment.shipping" as const,
+                value: shipping,
+                state: {
+                  path: "fulfillment.shipping.quoting" as const,
+                  value: new QuotingShipping({ postalCode: "12345" })
+                }
               }
             }
-          }
-        })
+          })
+        }
       }).handle({
         fulfillment: {
           invoke: Machine.invoke({
@@ -5167,7 +5873,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: ({ target }) => target.full.success(new Success({ requestId: "done" }))
+                    ReserveInventory: Machine.transition({
+                      target: (to) => to.full.success(),
+                      resolve: ({ target }) => target(new Success({ requestId: "done" }))
+                    })
                   }
                 }
               }
@@ -5216,8 +5925,11 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(),
-        initial: () => {
-          throw defect
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: () => {
+            throw defect
+          }
         }
       })
 
@@ -5243,17 +5955,20 @@ describe("Machine", () => {
         }
       })
       const invalidInitialState = {
-        path: "payment",
+        path: "payment" as const,
         value: new Payment({ id: "payment-1" }),
         state: {
-          path: "payment.authorized",
+          path: "payment.authorized" as const,
           value: new AuthorizedPayment({ code: "authorization-1" })
         }
       }
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () => invalidInitialState as any
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => invalidInitialState as any
+        }
       })
 
       const planningError = yield* Effect.flip(Machine.planInitial(machine))
@@ -5272,16 +5987,28 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: (input) => FlatInitial.Idle(new Idle({ userId: input.userId }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
+        }
       }).handle({
         Idle: {
-          always: () => FlatInitial.Loading(new Loading({ requestId: "request-1" })),
+          always: Machine.transition({
+            target: (to) => to.full.Loading(),
+            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+          }),
           on: {
-            Submit: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+            Submit: Machine.transition({
+              target: (to) => to.full.Loading(),
+              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+            })
           }
         },
         Loading: {
-          always: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+          always: Machine.transition({
+            target: (to) => to.full.Idle(),
+            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+          })
         }
       })
 
@@ -5301,13 +6028,22 @@ describe("Machine", () => {
         id: "InitialLoopMachine",
         states: { Idle, Loading },
         events: Machine.events(),
-        initial: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         Idle: {
-          always: () => FlatInitial.Loading(new Loading({ requestId: "request-1" }))
+          always: Machine.transition({
+            target: (to) => to.full.Loading(),
+            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
+          })
         },
         Loading: {
-          always: () => FlatInitial.Idle(new Idle({ userId: "user-1" }))
+          always: Machine.transition({
+            target: (to) => to.full.Idle(),
+            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+          })
         }
       })
 
@@ -5341,30 +6077,39 @@ describe("Machine", () => {
         id: "CompletionLoopMachine",
         states: states.states,
         events: Machine.events(Submit),
-        initial: () => states.initial.idle(new Idle({ userId: "user-1" }))
+        initial: {
+          target: (to) => to.idle(),
+          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
+        }
       }).handle({
         idle: {
           on: {
-            Submit: () =>
-              states.initial.flow(
-                new Loading({ requestId: "request-1" }),
-                (flow) => flow.done(new Success({ requestId: "request-1" }))
-              )
+            Submit: Machine.transition({
+              target: (to) => to.full.flow(),
+              resolve: ({ target }) =>
+                target(
+                  new Loading({ requestId: "request-1" }),
+                  (flow) => flow.done(new Success({ requestId: "request-1" }))
+                )
+            })
           }
         },
         flow: {
-          onDone: ({ state, target }) =>
-            target.full.flow(
-              state,
-              (flow) => flow.done(new Success({ requestId: state.requestId }))
-            )
+          onDone: Machine.transition({
+            target: (to) => to.full.flow(),
+            resolve: ({ state, target }) =>
+              target(
+                state,
+                (flow) => flow.done(new Success({ requestId: state.requestId }))
+              )
+          })
         }
       })
 
       const error = yield* Effect.flip(
         Machine.plan(
           machine,
-          states.initial.idle(new Idle({ userId: "user-1" })),
+          { path: "idle" as const, value: new Idle({ userId: "user-1" }) },
           new Submit({ value: "request-1" })
         )
       )
@@ -5405,24 +6150,31 @@ describe("Machine", () => {
     Machine.make({
       states: ParallelCounterStates.states,
       events: Machine.events(AdvanceCounters),
-      initial: () =>
-        ParallelCounterStates.initial.running(
-          new CounterRunning({}),
-          (running) => running.left(new LeftCounter({ value: 0 })).right(new RightCounter({ value: 0 }))
-        )
+      initial: {
+        target: (to) => to.running.initial(),
+        resolve: ({ target }) =>
+          target(
+            new CounterRunning({}),
+            (running) => running.left(new LeftCounter({ value: 0 })).right(new RightCounter({ value: 0 }))
+          )
+      }
     }).handle({
       running: {
         states: {
           left: {
             on: {
-              AdvanceCounters: ({ state, target }) =>
-                target.branch.running.left(new LeftCounter({ value: state.value + 1 }))
+              AdvanceCounters: Machine.transition({
+                target: (to) => to.branch.running.left(),
+                resolve: ({ state, target }) => target(new LeftCounter({ value: state.value + 1 }))
+              })
             }
           },
           right: {
             on: {
-              AdvanceCounters: ({ state, target }) =>
-                target.branch.running.right(new RightCounter({ value: state.value + 1 }))
+              AdvanceCounters: Machine.transition({
+                target: (to) => to.branch.running.right(),
+                resolve: ({ state, target }) => target(new RightCounter({ value: state.value + 1 }))
+              })
             }
           }
         }
@@ -5434,11 +6186,17 @@ describe("Machine", () => {
     return Machine.make({
       states: states.states,
       events: Machine.events(ConcurrentPing),
-      initial: () => states.initial.ConcurrentIdle(new ConcurrentIdle({}))
+      initial: {
+        target: (to) => to.ConcurrentIdle(),
+        resolve: ({ target }) => target(new ConcurrentIdle({}))
+      }
     }).handle({
       ConcurrentIdle: {
         on: {
-          ConcurrentPing: ({ target }) => target.none()
+          ConcurrentPing: Machine.transition({
+            target: (to) => to.none(),
+            resolve: () => undefined
+          })
         }
       }
     })
@@ -5492,7 +6250,7 @@ describe("Machine", () => {
 
       assert.deepStrictEqual(yield* ref.snapshot, {
         status: "stopped",
-        state: { path: "ConcurrentIdle", value: new ConcurrentIdle({}) }
+        state: { path: "ConcurrentIdle" as const, value: new ConcurrentIdle({}) }
       })
     }))
 

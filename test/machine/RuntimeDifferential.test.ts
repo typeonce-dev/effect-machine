@@ -54,16 +54,28 @@ describe("pure planning and managed runtime differential", () => {
         states: states.states,
         events: Machine.events(Cascade, Ignore, Finish),
         internalEvents: Machine.internalEvents(Increment),
-        initial: () => states.initial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 0 }))
+        }
       }).handle({
         Count: {
           on: {
-            Cascade: (_, enqueue) => {
-              enqueue.raise(new Increment({}))
-              return _.target.none()
-            },
-            Increment: ({ state, target }) => target.full.Count(new Count({ value: state.value + 1 })),
-            Finish: ({ state, target }) => target.full.Done(new Done({ value: state.value }))
+            Cascade: Machine.transition({
+              target: (to) => to.none(),
+              resolve: (_, enqueue) => {
+                enqueue.raise(new Increment({}))
+                return undefined
+              }
+            }),
+            Increment: Machine.transition({
+              target: (to) => to.full.Count(),
+              resolve: ({ state, target }) => target(new Count({ value: state.value + 1 }))
+            }),
+            Finish: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ state, target }) => target(new Done({ value: state.value }))
+            })
           }
         },
         Done: { output: ({ state }) => state.value }
@@ -140,69 +152,85 @@ describe("pure planning and managed runtime differential", () => {
         states: states.states,
         events: Machine.events(Advance, Inspect, Finish),
         internalEvents: Machine.internalEvents(Bump),
-        initial: () =>
-          states.initial.Running(
-            new Running({}),
-            (running) => running.Left(new Left({ value: 0 })).Right(new Right({ value: 0 }))
-          )
+        initial: {
+          target: (to) => to.Running.initial(),
+          resolve: ({ target }) =>
+            target(
+              new Running({}),
+              (running) => running.Left(new Left({ value: 0 })).Right(new Right({ value: 0 }))
+            )
+        }
       }).handle({
         Running: {
           on: {
-            Finish: ({ snapshot, target }) => {
-              if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
-              return target.full.Done(
-                new Done({
-                  value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
-                })
-              )
-            }
+            Finish: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ snapshot, target }) => {
+                if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
+                return target(
+                  new Done({
+                    value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+                  })
+                )
+              }
+            })
           },
           states: {
             Left: {
               on: {
-                Advance: ({ state, target }, enqueue) => {
-                  enqueue.raise(new Bump({}))
-                  return target.branch.Running.Left(new Left({ value: state.value + 1 }))
-                }
+                Advance: Machine.transition({
+                  target: (to) => to.branch.Running.Left(),
+                  resolve: ({ state, target }, enqueue) => {
+                    enqueue.raise(new Bump({}))
+                    return target(new Left({ value: state.value + 1 }))
+                  }
+                })
               }
             },
             Right: {
               on: {
-                Advance: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 10 })),
-                Bump: ({ state, target }) => target.branch.Running.Right(new Right({ value: state.value + 100 })),
-                Inspect: (context) => {
-                  const { state, containingState, ancestors, snapshot } = context
-                  if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
-                  const expectedKeys = [
-                    "self",
-                    "parent",
-                    "state",
-                    "containingState",
-                    "ancestors",
-                    "event",
-                    "snapshot",
-                    "target"
-                  ]
-                  const spread = { ...context }
-                  assert.deepStrictEqual(Object.keys(context), expectedKeys)
-                  assert.deepStrictEqual(Object.keys(spread), expectedKeys)
-                  assert.strictEqual(spread.self, context.self)
-                  assert.strictEqual(spread.parent, context.parent)
-                  assert.strictEqual(spread.state, state)
-                  assert.strictEqual(spread.containingState, containingState)
-                  assert.strictEqual(spread.ancestors, ancestors)
-                  assert.strictEqual(spread.event, context.event)
-                  assert.strictEqual(spread.snapshot, snapshot)
-                  assert.strictEqual(spread.target, context.target)
-                  observations.push({
-                    state: state.value,
-                    parent: containingState._tag,
-                    parents: ancestors.Running._tag,
-                    left: snapshot.states.Left.value.value,
-                    right: snapshot.states.Right.value.value
-                  })
-                  return context.target.none()
-                }
+                Advance: Machine.transition({
+                  target: (to) => to.branch.Running.Right(),
+                  resolve: ({ state, target }) => target(new Right({ value: state.value + 10 }))
+                }),
+                Bump: Machine.transition({
+                  target: (to) => to.branch.Running.Right(),
+                  resolve: ({ state, target }) => target(new Right({ value: state.value + 100 }))
+                }),
+                Inspect: Machine.transition({
+                  target: (to) => to.none(),
+                  resolve: (context) => {
+                    const { state, containingState, ancestors, snapshot } = context
+                    if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
+                    const expectedKeys = [
+                      "self",
+                      "parent",
+                      "state",
+                      "containingState",
+                      "ancestors",
+                      "event",
+                      "snapshot"
+                    ]
+                    const spread = { ...context }
+                    assert.deepStrictEqual(Object.keys(context), expectedKeys)
+                    assert.deepStrictEqual(Object.keys(spread), expectedKeys)
+                    assert.strictEqual(spread.self, context.self)
+                    assert.strictEqual(spread.parent, context.parent)
+                    assert.strictEqual(spread.state, state)
+                    assert.strictEqual(spread.containingState, containingState)
+                    assert.strictEqual(spread.ancestors, ancestors)
+                    assert.strictEqual(spread.event, context.event)
+                    assert.strictEqual(spread.snapshot, snapshot)
+                    observations.push({
+                      state: state.value,
+                      parent: containingState._tag,
+                      parents: ancestors.Running._tag,
+                      left: snapshot.states.Left.value.value,
+                      right: snapshot.states.Right.value.value
+                    })
+                    return undefined
+                  }
+                })
               }
             }
           }
@@ -439,7 +467,10 @@ describe("pure planning and managed runtime differential", () => {
         events: Machine.events(Begin),
         internalEvents: Machine.internalEvents(RaisedOne, RaisedTwo),
         emittedEvents: Machine.emittedEvents(Notice),
-        initial: () => states.initial.Idle(new Idle({}))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -447,12 +478,15 @@ describe("pure planning and managed runtime differential", () => {
             enqueue.emit(new Notice({ label: "initial" }))
           },
           on: {
-            Begin: ({ target }, enqueue) => {
-              record("transition:begin")
-              enqueue.emit(new Notice({ label: "transition" }))
-              enqueue.raise(new RaisedOne({}))
-              return target.full.Working(new Working({}))
-            }
+            Begin: Machine.transition({
+              target: (to) => to.full.Working(),
+              resolve: ({ target }, enqueue) => {
+                record("transition:begin")
+                enqueue.emit(new Notice({ label: "transition" }))
+                enqueue.raise(new RaisedOne({}))
+                return target(new Working({}))
+              }
+            })
           }
         },
         Working: {
@@ -462,16 +496,22 @@ describe("pure planning and managed runtime differential", () => {
             enqueue.raise(new RaisedTwo({}))
           },
           on: {
-            RaisedOne: (_, enqueue) => {
-              record("raised:one")
-              enqueue.emit(new Notice({ label: "raised-one" }))
-              return _.target.none()
-            },
-            RaisedTwo: ({ target }, enqueue) => {
-              record("raised:two")
-              enqueue.emit(new Notice({ label: "raised-two" }))
-              return target.full.Finished(new Finished({}))
-            }
+            RaisedOne: Machine.transition({
+              target: (to) => to.none(),
+              resolve: (_, enqueue) => {
+                record("raised:one")
+                enqueue.emit(new Notice({ label: "raised-one" }))
+                return undefined
+              }
+            }),
+            RaisedTwo: Machine.transition({
+              target: (to) => to.full.Finished(),
+              resolve: ({ target }, enqueue) => {
+                record("raised:two")
+                enqueue.emit(new Notice({ label: "raised-two" }))
+                return target(new Finished({}))
+              }
+            })
           }
         },
         Finished: {
@@ -549,9 +589,19 @@ describe("pure planning and managed runtime differential", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ignore, Go),
-        initial: () => states.initial.Idle(new Idle({}))
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
       }).handle({
-        Idle: { on: { Go: () => states.initial.Active(new Active({})) } },
+        Idle: {
+          on: {
+            Go: Machine.transition({
+              target: (to) => to.full.Active(),
+              resolve: ({ target }) => target(new Active({}))
+            })
+          }
+        },
         Active: {}
       })
       const initial = yield* Machine.planInitial(machine)

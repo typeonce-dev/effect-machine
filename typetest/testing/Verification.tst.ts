@@ -11,7 +11,10 @@ describe("MachineTest.verify", () => {
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Tick),
-    initial: () => States.initial.idle(new Idle({}))
+    initial: {
+      target: (to) => to.idle(),
+      resolve: ({ target }) => (target(new Idle({})))
+    }
   }).handle({ idle: {} })
 
   const trace = {} as MachineTest.Trace<typeof machine>

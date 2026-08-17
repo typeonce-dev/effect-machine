@@ -142,7 +142,10 @@ export const States = Machine.defineStates({
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: (): never => {
-    throw new Error("type-performance fixture")
+  initial: {
+    target: (to) => to.n0.initial(),
+    resolve: (): never => {
+      throw new Error("type-performance fixture")
+    }
   }
 })

@@ -96,23 +96,23 @@ const checkoutPaymentVerifying = (
   attempt: number,
   challengeId: string
 ): Machine.Machine.Snapshot<typeof CheckoutStates.states> => ({
-  path: "checkout",
+  path: "checkout" as const,
   value: new Checkout({ orderId }),
   state: {
-    path: "checkout.payment",
+    path: "checkout.payment" as const,
     value: new Payment({ attempt }),
     state: {
-      path: "checkout.payment.verifying",
+      path: "checkout.payment.verifying" as const,
       value: new Verifying({ challengeId })
     }
   }
 })
 
-const checkoutShipping = (orderId: string, address: string) =>
-  CheckoutStates.initial.checkout(
-    new Checkout({ orderId }),
-    (checkout) => checkout.shipping(new Shipping({ address }))
-  )
+const checkoutShipping = (orderId: string, address: string) => ({
+  path: "checkout" as const,
+  value: new Checkout({ orderId }),
+  state: { path: "checkout.shipping" as const, value: new Shipping({ address }) }
+})
 
 const makeCheckoutMachine = (
   initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>,
@@ -123,7 +123,18 @@ const makeCheckoutMachine = (
   Machine.make({
     states: CheckoutStates.states,
     events: Machine.events(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory),
-    initial: () => initial
+    initial: (initial.path === "checkout"
+      ? {
+        target: (to: any) => to.checkout.initial(),
+        resolve: ({ target }: any) =>
+          target(new Checkout({ orderId: "initial" }), (checkout: any) =>
+            checkout.shipping(new Shipping({ address: "initial" })))
+      }
+      : {
+        target: (to: any) =>
+          to.support(),
+        resolve: () => initial
+      }) as any
   }).handle({
     checkout: {
       entry: () => {
@@ -147,21 +158,31 @@ const makeCheckoutMachine = (
         }
       },
       on: {
-        Leave: ({ target }) => target.full.support(new Support({ ticket: "ticket-1" })),
-        GoShipping: ({ event, target }) => target.local.shipping(new Shipping({ address: event.address })),
-        ReenterHistory: {
-          reenter: true,
-          transition: ({ target }) => target.history.checkout.exact()
-        }
+        Leave: Machine.transition({
+          target: (to) => to.full.support(),
+          resolve: ({ target }) => target(new Support({ ticket: "ticket-1" }))
+        }),
+        GoShipping: Machine.transition({
+          target: (to) => to.local.shipping(),
+          resolve: ({ event, target }) => target(new Shipping({ address: event.address }))
+        }),
+        ReenterHistory: Machine.transition({
+          target: (to) => to.history.checkout.exact(),
+          resolve: ({ target }) => target(),
+          reenter: true
+        })
       },
       states: {
         shipping: {
           on: {
-            EnterVerifying: ({ target }) =>
-              target.local.payment(
-                new Payment({ attempt: 2 }),
-                (payment) => payment.verifying(new Verifying({ challengeId: "challenge-7" }))
-              )
+            EnterVerifying: Machine.transition({
+              target: (to) => to.local.payment(),
+              resolve: ({ target }) =>
+                target(
+                  new Payment({ attempt: 2 }),
+                  (payment) => payment.verifying(new Verifying({ challengeId: "challenge-7" }))
+                )
+            })
           }
         },
         payment: {
@@ -196,8 +217,14 @@ const makeCheckoutMachine = (
         lifecycle?.push("exit:support")
       },
       on: {
-        ResumeShallow: ({ target }) => target.history.checkout.recent(),
-        ResumeDeep: ({ target }) => target.history.checkout.exact()
+        ResumeShallow: Machine.transition({
+          target: (to) => to.history.checkout.recent(),
+          resolve: ({ target }) => target()
+        }),
+        ResumeDeep: Machine.transition({
+          target: (to) => to.history.checkout.exact(),
+          resolve: ({ target }) => target()
+        })
       }
     }
   })
@@ -266,22 +293,22 @@ const WorkspaceStates = Machine.defineStates({
 })
 
 const activeWorkspace: Machine.Machine.Snapshot<typeof WorkspaceStates.states> = {
-  path: "workspace",
+  path: "workspace" as const,
   value: new Workspace({ id: "workspace-1" }),
   states: {
     editor: {
-      path: "workspace.editor",
+      path: "workspace.editor" as const,
       value: new Editor({ documentId: "document-1" }),
       state: {
-        path: "workspace.editor.preview",
+        path: "workspace.editor.preview" as const,
         value: new Preview({ page: 4 })
       }
     },
     sidebar: {
-      path: "workspace.sidebar",
+      path: "workspace.sidebar" as const,
       value: new Sidebar({ width: 320 }),
       state: {
-        path: "workspace.sidebar.search",
+        path: "workspace.sidebar.search" as const,
         value: new Search({ query: "history" })
       }
     }
@@ -292,13 +319,20 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
   Machine.make({
     states: WorkspaceStates.states,
     events: Machine.events(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
-    initial: () => activeWorkspace
+    initial: {
+      target: (to) => to.workspace.initial(),
+      resolve: ({ target }) =>
+        target(new Workspace({ id: "initial" }), (workspace) =>
+          workspace
+            .editor(new Editor({ documentId: "initial" }), (editor) => editor.writing(new Writing({ draft: "" })))
+            .sidebar(new Sidebar({ width: 0 }), (sidebar) => sidebar.files(new Files({ directory: "/" }))))
+    }
   }).handle({
     workspace: {
       history: {
         recent: {
-          default: () =>
-            WorkspaceStates.initial.workspace(
+          default: ({ target }) =>
+            target.workspace(
               new Workspace({ id: "fallback" }),
               (workspace) =>
                 workspace
@@ -313,8 +347,8 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
             )
         },
         exact: {
-          default: () =>
-            WorkspaceStates.initial.workspace(
+          default: ({ target }) =>
+            target.workspace(
               new Workspace({ id: "fallback" }),
               (workspace) =>
                 workspace
@@ -330,7 +364,10 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
         }
       },
       on: {
-        LeaveWorkspace: ({ target }) => target.full.away(new Away({}))
+        LeaveWorkspace: Machine.transition({
+          target: (to) => to.full.away(),
+          resolve: ({ target }) => target(new Away({}))
+        })
       },
       states: {
         editor: {
@@ -349,8 +386,14 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
     },
     away: {
       on: {
-        ResumeWorkspaceShallow: ({ target }) => target.history.workspace.recent(),
-        ResumeWorkspaceDeep: ({ target }) => target.history.workspace.exact()
+        ResumeWorkspaceShallow: Machine.transition({
+          target: (to) => to.history.workspace.recent(),
+          resolve: ({ target }) => target()
+        }),
+        ResumeWorkspaceDeep: Machine.transition({
+          target: (to) => to.history.workspace.exact(),
+          resolve: ({ target }) => target()
+        })
       }
     }
   })
@@ -378,19 +421,19 @@ const NestedHistoryStates = Machine.defineStates({
 })
 
 const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryStates.states> = {
-  path: "workspace",
+  path: "workspace" as const,
   value: new Workspace({ id: "workspace-1" }),
   states: {
     editor: {
-      path: "workspace.editor",
+      path: "workspace.editor" as const,
       value: new Editor({ documentId: "document-1" }),
       state: {
-        path: "workspace.editor.preview",
+        path: "workspace.editor.preview" as const,
         value: new Preview({ page: 4 })
       }
     },
     sidebar: {
-      path: "workspace.sidebar",
+      path: "workspace.sidebar" as const,
       value: new Search({ query: "untouched" })
     }
   }
@@ -399,25 +442,28 @@ const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryState
 const nestedHistoryMachine = Machine.make({
   states: NestedHistoryStates.states,
   events: Machine.events(RestoreEditor, DefaultEditor),
-  initial: () =>
-    NestedHistoryStates.initial.workspace(
-      new Workspace({ id: "workspace-1" }),
-      (workspace) =>
-        workspace
-          .editor(
-            new Editor({ documentId: "document-1" }),
-            (editor) => editor.writing(new Writing({ draft: "" }))
-          )
-          .sidebar(new Search({ query: "untouched" }))
-    )
+  initial: {
+    target: (to) => to.workspace.initial(),
+    resolve: ({ target }) =>
+      target(
+        new Workspace({ id: "workspace-1" }),
+        (workspace) =>
+          workspace
+            .editor(
+              new Editor({ documentId: "document-1" }),
+              (editor) => editor.writing(new Writing({ draft: "" }))
+            )
+            .sidebar(new Search({ query: "untouched" }))
+      )
+  }
 }).handle({
   workspace: {
     states: {
       editor: {
         history: {
           exact: {
-            default: () =>
-              NestedHistoryStates.initial.workspace(
+            default: ({ target }) =>
+              target.workspace(
                 new Workspace({ id: "fallback-workspace" }),
                 (workspace) =>
                   workspace
@@ -432,16 +478,23 @@ const nestedHistoryMachine = Machine.make({
         states: {
           preview: {
             on: {
-              RestoreEditor: {
-                reenter: true,
-                transition: ({ target }) => target.history.workspace.editor.exact()
-              },
-              DefaultEditor: ({ target }) => target.history.workspace.editor.exact()
+              RestoreEditor: Machine.transition({
+                target: (to) => to.history.workspace.editor.exact(),
+                resolve: ({ target }) => target(),
+                reenter: true
+              }),
+              DefaultEditor: Machine.transition({
+                target: (to) => to.history.workspace.editor.exact(),
+                resolve: ({ target }) => target()
+              })
             }
           },
           writing: {
             on: {
-              DefaultEditor: ({ target }) => target.history.workspace.editor.exact()
+              DefaultEditor: Machine.transition({
+                target: (to) => to.history.workspace.editor.exact(),
+                resolve: ({ target }) => target()
+              })
             }
           }
         }
@@ -455,7 +508,7 @@ describe("Machine history states", () => {
     Effect.gen(function*() {
       let initialized = 0
       const machine = makeCheckoutMachine(
-        CheckoutStates.initial.support(new Support({ ticket: "new" })),
+        { path: "support" as const, value: new Support({ ticket: "new" }) },
         () => initialized++
       )
 
@@ -492,7 +545,7 @@ describe("Machine history states", () => {
       const resumedOnce = yield* Machine.plan(machine, secondLeave.next, new ResumeDeep({}))
       assert.strictEqual(resumedOnce.next.path, "checkout")
       assert.deepStrictEqual((resumedOnce.next as any).state, {
-        path: "checkout.shipping",
+        path: "checkout.shipping" as const,
         value: new Shipping({ address: "Second Street" })
       })
 
@@ -516,7 +569,7 @@ describe("Machine history states", () => {
       assert.deepStrictEqual(resumed.next.value, new Checkout({ orderId: "order-1" }))
       assert.deepStrictEqual((resumed.next as any).state.value, new Payment({ attempt: 3 }))
       assert.deepStrictEqual((resumed.next as any).state.state, {
-        path: "checkout.payment.cardEntry",
+        path: "checkout.payment.cardEntry" as const,
         value: new CardEntry({ cardNumber: "fresh-3" })
       })
 
@@ -617,18 +670,18 @@ describe("Machine history states", () => {
       const shallow = yield* Machine.plan(machine, leftAgain.next, new ResumeWorkspaceShallow({}))
       assert.deepStrictEqual(initialized, ["editor", "sidebar"])
       assert.deepStrictEqual((shallow.next as any).states.editor, {
-        path: "workspace.editor",
+        path: "workspace.editor" as const,
         value: new Editor({ documentId: "document-1" }),
         state: {
-          path: "workspace.editor.writing",
+          path: "workspace.editor.writing" as const,
           value: new Writing({ draft: "fresh:document-1" })
         }
       })
       assert.deepStrictEqual((shallow.next as any).states.sidebar, {
-        path: "workspace.sidebar",
+        path: "workspace.sidebar" as const,
         value: new Sidebar({ width: 320 }),
         state: {
-          path: "workspace.sidebar.files",
+          path: "workspace.sidebar.files" as const,
           value: new Files({ directory: "/fresh/320" })
         }
       })
@@ -644,7 +697,7 @@ describe("Machine history states", () => {
 
       assert.deepStrictEqual((restored.next as any).states.editor, (nestedParallelSnapshot as any).states.editor)
       assert.deepStrictEqual((restored.next as any).states.sidebar, {
-        path: "workspace.sidebar",
+        path: "workspace.sidebar" as const,
         value: new Search({ query: "untouched" })
       })
       assert.deepStrictEqual(restored.next.history?.["workspace.editor.exact"]?.active, [
@@ -663,15 +716,15 @@ describe("Machine history states", () => {
       )
 
       assert.deepStrictEqual((restored.next as any).states.editor, {
-        path: "workspace.editor",
+        path: "workspace.editor" as const,
         value: new Editor({ documentId: "fallback" }),
         state: {
-          path: "workspace.editor.writing",
+          path: "workspace.editor.writing" as const,
           value: new Writing({ draft: "" })
         }
       })
       assert.deepStrictEqual((restored.next as any).states.sidebar, {
-        path: "workspace.sidebar",
+        path: "workspace.sidebar" as const,
         value: new Search({ query: "untouched" })
       })
       assert.strictEqual(restored.microsteps[0]?.transitions[0]?.target, "workspace.editor.exact")
@@ -714,12 +767,12 @@ describe("Machine history states", () => {
   it.effect("rejects a forged fallback that omits its declared owner with a precise diagnostic", () =>
     Effect.gen(function*() {
       const unsafe = makeCheckoutMachine(
-        CheckoutStates.initial.support(new Support({ ticket: "new" }))
+        { path: "support" as const, value: new Support({ ticket: "new" }) }
       ).handle({
         checkout: {
           history: {
             exact: {
-              default: (() => CheckoutStates.initial.support(new Support({ ticket: "forged" }))) as any
+              default: (() => ({ path: "support" as const, value: new Support({ ticket: "forged" }) })) as any
             }
           }
         }

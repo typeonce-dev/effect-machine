@@ -37,11 +37,14 @@ const States = Machine.defineStates({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: () =>
-    States.initial.root(new Root({}), (root) =>
-      root
-        .flow(new Flow({}), (flow) => flow.idle(new Idle({})))
-        .side(new Side({})))
+  initial: {
+    target: (to) => to.root.initial(),
+    resolve: ({ target }) =>
+      target(new Root({}), (root) =>
+        root
+          .flow(new Flow({}), (flow) => flow.idle(new Idle({})))
+          .side(new Side({})))
+  }
 })
 
 const ChoiceStates = Machine.defineStates({
@@ -58,15 +61,15 @@ const ChoiceStates = Machine.defineStates({
 const choiceMachine = Machine.make({
   states: ChoiceStates.states,
   events: Machine.events(),
-  initial: () => ChoiceStates.initial.Flow(new ChoiceFlow({}), (flow) => flow.Routing())
+  initial: {
+    target: (to) => to.Flow.initial(),
+    resolve: ({ target }) => target(new ChoiceFlow({}), (flow) => flow.Routing())
+  }
 }).handle({
   Flow: {
     states: {
       Routing: {
-        choice: {
-          targets: ["Flow.Ready"],
-          transition: ({ target }) => target.local.Ready(new Ready({}))
-        }
+        choice: Machine.transition({ target: (to) => to.local.Ready(), resolve: ({ target }) => target(new Ready({})) })
       }
     }
   }
@@ -140,8 +143,8 @@ describe("Machine compiled state-node inspection", () => {
       assert.deepStrictEqual(
         Machine.configuration(choiceMachine, plan.state).map(({ path, type }) => ({ path, type })),
         [
-          { path: "Flow", type: "compound" },
-          { path: "Flow.Ready", type: "atomic" }
+          { path: "Flow" as const, type: "compound" },
+          { path: "Flow.Ready" as const, type: "atomic" }
         ]
       )
     }))

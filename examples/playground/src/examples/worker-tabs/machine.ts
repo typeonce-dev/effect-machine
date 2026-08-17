@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { type SharedEvent, SharedMachineEvents } from "./protocol.ts"
 
 export type { SharedEvent } from "./protocol.ts"
@@ -15,7 +15,10 @@ const definition = Machine.make({
   id: "WorkerHostedMachine",
   states: SharedMachineStates.states,
   events: SharedMachineEvents,
-  initial: () => SharedMachineStates.initial.Idle.from({ count: 0 })
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ target }) => target.from({ count: 0 })
+  }
 })
 
 // Worker and BroadcastChannel messages need decoded, cloneable data rather
@@ -34,23 +37,54 @@ export const SharedTransportEvents = {
 export const SharedMachine = definition.handle({
   Idle: {
     on: {
-      Started: ({ state, target }) => target.full.Active.from({ count: state.count }),
-      Reset: ({ target }) => target.full.Idle.from({ count: 0 }),
-      Synchronized: ({ event, target }) =>
-        event.active
-          ? target.full.Active.from({ count: event.count })
-          : target.full.Idle.from({ count: event.count })
+      Started: Machine.transition({
+        target: (to) => to.full.Active(),
+        resolve: ({ state, target }) => target.from({ count: state.count })
+      }),
+      Reset: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ target }) => target.from({ count: 0 })
+      }),
+      Synchronized: Machine.transition({
+        cases: [{
+          title: "active",
+          when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
+          target: (to) => to.full.Active(),
+          resolve: ({ match, target }) => target.from({ count: match })
+        }],
+        otherwise: {
+          target: (to) => to.full.Idle(),
+          resolve: ({ event, target }) => target.from({ count: event.count })
+        }
+      })
     }
   },
   Active: {
     on: {
-      Incremented: ({ state, target }) => target.full.Active.from({ count: state.count + 1 }),
-      Reset: ({ target }) => target.full.Active.from({ count: 0 }),
-      Stopped: ({ state, target }) => target.full.Idle.from({ count: state.count }),
-      Synchronized: ({ event, target }) =>
-        event.active
-          ? target.full.Active.from({ count: event.count })
-          : target.full.Idle.from({ count: event.count })
+      Incremented: Machine.transition({
+        target: (to) => to.full.Active(),
+        resolve: ({ state, target }) => target.from({ count: state.count + 1 })
+      }),
+      Reset: Machine.transition({
+        target: (to) => to.full.Active(),
+        resolve: ({ target }) => target.from({ count: 0 })
+      }),
+      Stopped: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ state, target }) => target.from({ count: state.count })
+      }),
+      Synchronized: Machine.transition({
+        cases: [{
+          title: "active",
+          when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
+          target: (to) => to.full.Active(),
+          resolve: ({ match, target }) => target.from({ count: match })
+        }],
+        otherwise: {
+          target: (to) => to.full.Idle(),
+          resolve: ({ event, target }) => target.from({ count: event.count })
+        }
+      })
     }
   }
 })

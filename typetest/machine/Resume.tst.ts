@@ -14,16 +14,22 @@ const machine = Machine.make({
   states: States.states,
   events: Machine.events(Tick),
   input: Schema.Struct({ seed: Schema.Number }),
-  initial: (input) => States.initial.Idle(new Idle({ value: input.seed }))
+  initial: {
+    target: (to) => to.Idle(),
+    resolve: ({ input: input, target }) => (target(new Idle({ value: input.seed })))
+  }
 }).handle({
   Idle: {
     on: {
-      Tick: ({ state, target }) => target.full.Idle(new Idle({ value: state.value + 1 }))
+      Tick: Machine.transition({
+        target: (to) => to.full.Idle(),
+        resolve: ({ state, target }) => target(new Idle({ value: state.value + 1 }))
+      })
     }
   }
 })
 
-const snapshot = States.initial.Idle(new Idle({ value: 3 }))
+const snapshot: Snapshot = { path: "Idle", value: new Idle({ value: 3 }) }
 
 describe("Machine logical resumption", () => {
   it("excludes input while preserving synchronous runtime inference", () => {

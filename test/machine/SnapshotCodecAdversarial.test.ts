@@ -54,34 +54,45 @@ const topologyMachine = Machine.make({
   id: "codec-topology",
   states: TopologyStates.states,
   events: Machine.events(),
-  initial: () => topologyActive()
+  initial: { target: (to) => to.Root.initial(), resolve: () => topologyActive() }
 })
 
-const topologyActive = () =>
-  TopologyStates.initial.Root(new Root({ id: "root-1" }), (root) =>
-    root
-      .left(new Left({}), (left) => left.working(new LeftWorking({ task: "left-1" })))
-      .right(new Right({}), (right) => right.working(new RightWorking({ enabled: true }))))
+const topologyActive = () => ({
+  path: "Root" as const,
+  value: new Root({ id: "root-1" }),
+  states: {
+    left: {
+      path: "Root.left" as const,
+      value: new Left({}),
+      state: { path: "Root.left.working" as const, value: new LeftWorking({ task: "left-1" }) }
+    },
+    right: {
+      path: "Root.right" as const,
+      value: new Right({}),
+      state: { path: "Root.right.working" as const, value: new RightWorking({ enabled: true }) }
+    }
+  }
+})
 
 const topologyFinal = () =>
   ({
-    path: "Root",
+    path: "Root" as const,
     value: new Root({ id: "root-1" }),
     states: {
       left: {
-        path: "Root.left",
+        path: "Root.left" as const,
         value: new Left({}),
-        state: { path: "Root.left.done", value: new LeftDone({}) }
+        state: { path: "Root.left.done" as const, value: new LeftDone({}) }
       },
       right: {
-        path: "Root.right",
+        path: "Root.right" as const,
         value: new Right({}),
-        state: { path: "Root.right.done", value: new RightDone({}) }
+        state: { path: "Root.right.done" as const, value: new RightDone({}) }
       }
     },
     completed: [
-      { path: "Root.left.done", output: 7 },
-      { path: "Root.right.done", output: true }
+      { path: "Root.left.done" as const, output: 7 },
+      { path: "Root.right.done" as const, output: true }
     ]
   }) as Machine.Machine.Snapshot<typeof TopologyStates.states>
 
@@ -123,12 +134,15 @@ const historyMachine = Machine.make({
   id: "codec-history",
   states: HistoryStates.states,
   events: Machine.events(),
-  initial: () => HistoryStates.initial.Outside(new Outside({}))
+  initial: {
+    target: (to) => to.Outside(),
+    resolve: ({ target }) => target(new Outside({}))
+  }
 })
 
 const historySnapshot = () =>
   ({
-    ...HistoryStates.initial.Outside(new Outside({})),
+    ...{ path: "Outside" as const, value: new Outside({}) },
     history: {
       "Workspace.recent": {
         mode: "shallow" as const,
@@ -202,8 +216,8 @@ describe("snapshot codec adversarial boundaries", () => {
 
       const encodedFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyFinal())
       assert.deepStrictEqual(encodedFinal.completed, [
-        { path: "Root.left.done", output: "7" },
-        { path: "Root.right.done", output: true }
+        { path: "Root.left.done" as const, output: "7" },
+        { path: "Root.right.done" as const, output: true }
       ])
     }))
 
@@ -228,9 +242,17 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-original",
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Before(new Before({}))
+        initial: {
+          target: (to) => to.Before(),
+          resolve: ({ target }) => target(new Before({}))
+        }
       }).handle({
-        Before: { always: ({ target }) => target.full.Boundary(new Boundary({})) },
+        Before: {
+          always: Machine.transition({
+            target: (to) => to.full.Boundary(),
+            resolve: ({ target }) => target(new Boundary({}))
+          })
+        },
         Boundary: {},
         After: {}
       })
@@ -238,10 +260,18 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-changed",
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Before(new Before({}))
+        initial: {
+          target: (to) => to.Before(),
+          resolve: ({ target }) => target(new Before({}))
+        }
       }).handle({
         Before: {},
-        Boundary: { always: ({ target }) => target.full.After(new After({})) },
+        Boundary: {
+          always: Machine.transition({
+            target: (to) => to.full.After(),
+            resolve: ({ target }) => target(new After({}))
+          })
+        },
         After: {}
       })
 
@@ -261,7 +291,7 @@ describe("snapshot codec adversarial boundaries", () => {
     Effect.gen(function*() {
       const valid = topologyActive()
       const malformed: ReadonlyArray<unknown> = [
-        { path: "Missing", value: {} },
+        { path: "Missing" as const, value: {} },
         { ...valid, states: { left: valid.states.left } },
         {
           ...valid,
@@ -303,7 +333,7 @@ describe("snapshot codec adversarial boundaries", () => {
       mutations.push(missingRegion)
 
       const extraCompoundBranch = structuredClone(encoded) as any
-      extraCompoundBranch.active.push({ path: "Root.left.done", value: { _tag: "CodecLeftDone" } })
+      extraCompoundBranch.active.push({ path: "Root.left.done" as const, value: { _tag: "CodecLeftDone" } })
       mutations.push(extraCompoundBranch)
 
       const impossibleAncestry = structuredClone(encoded) as any
@@ -333,11 +363,11 @@ describe("snapshot codec adversarial boundaries", () => {
       mutations.push(wrongOutput)
 
       const activeNotFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyActive())
-      ;(activeNotFinal as any).completed = [{ path: "Root.left.working", output: undefined }]
+      ;(activeNotFinal as any).completed = [{ path: "Root.left.working" as const, output: undefined }]
       mutations.push(activeNotFinal)
 
       const inactiveFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyActive())
-      ;(inactiveFinal as any).completed = [{ path: "Root.left.done", output: "1" }]
+      ;(inactiveFinal as any).completed = [{ path: "Root.left.done" as const, output: "1" }]
       mutations.push(inactiveFinal)
 
       for (const mutation of mutations) {
@@ -351,9 +381,9 @@ describe("snapshot codec adversarial boundaries", () => {
       const active = topologyActive()
       const malformed: ReadonlyArray<unknown> = [
         { ...final, completed: [...(final.completed ?? []), final.completed?.[0]] },
-        { ...final, completed: [{ path: "Root.left.missing", output: 1 }] },
-        { ...active, completed: [{ path: "Root.left.working", output: undefined }] },
-        { ...final, completed: [{ path: "Root.left.done", output: null }] }
+        { ...final, completed: [{ path: "Root.left.missing" as const, output: 1 }] },
+        { ...active, completed: [{ path: "Root.left.working" as const, output: undefined }] },
+        { ...final, completed: [{ path: "Root.left.done" as const, output: null }] }
       ]
 
       for (const snapshot of malformed) {

@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 // Domain schemas are shared by state payloads and the public physics protocol.
 export const Axis = Schema.Literals([-1, 0, 1])
@@ -114,31 +114,40 @@ export const CharacterStates = Machine.defineStates({
   }
 })
 
-const initialCharacter = () =>
-  CharacterStates.initial.Character.from((character) =>
-    character
-      .locomotion.from((locomotion) =>
-        locomotion.Playing.from((playing) => playing.Grounded.from((grounded) => grounded.Standing.from()))
-      )
-      .facing.from((facing) => facing.Right.from())
-      .contact.from((contact) => contact.NoWall.from())
-  )
-
 const definition = Machine.make({
   id: "PlatformerCharacter",
   states: CharacterStates.states,
   events: CharacterEvents,
   internalEvents: InternalEvents,
-  initial: initialCharacter
+  initial: {
+    target: (to) => to.Character.initial(),
+    resolve: ({ target }) =>
+      target.from((character) =>
+        character
+          .locomotion.from((locomotion) =>
+            locomotion.Playing.from((playing) => playing.Grounded.from((grounded) => grounded.Standing.from()))
+          )
+          .facing.from((facing) => facing.Right.from())
+          .contact.from((contact) => contact.NoWall.from())
+      )
+  }
 })
 
 export const CharacterMachine = definition.handle({
   Character: {
     on: {
-      Reset: {
-        targets: ["Character"],
-        transition: initialCharacter
-      }
+      Reset: Machine.transition({
+        target: (to) => to.full.Character(),
+        resolve: ({ target }) =>
+          target.from((character) =>
+            character
+              .locomotion.from((locomotion) =>
+                locomotion.Playing.from((playing) => playing.Grounded.from((grounded) => grounded.Standing.from()))
+              )
+              .facing.from((facing) => facing.Right.from())
+              .contact.from((contact) => contact.NoWall.from())
+          )
+      })
     },
     states: {
       locomotion: {
@@ -146,23 +155,32 @@ export const CharacterMachine = definition.handle({
           Playing: {
             history: {
               resume: {
-                default: initialCharacter
+                default: ({ target }) =>
+                  target.Character.from((character) =>
+                    character
+                      .locomotion.from((locomotion) =>
+                        locomotion.Playing.from((playing) =>
+                          playing.Grounded.from((grounded) => grounded.Standing.from())
+                        )
+                      )
+                      .facing.from((facing) => facing.Right.from())
+                      .contact.from((contact) => contact.NoWall.from())
+                  )
               }
             },
             on: {
-              Pause: {
-                targets: ["Character.locomotion.Paused"],
-                transition: ({ event, target }) =>
-                  target.branch.Character.locomotion.Paused.from({ pausedAt: event.at })
-              }
+              Pause: Machine.transition({
+                target: (to) => to.branch.Character.locomotion.Paused(),
+                resolve: ({ event, target }) => target.from({ pausedAt: event.at })
+              })
             },
             states: {
               Grounded: {
                 on: {
-                  JumpPressed: {
-                    targets: ["Character"],
-                    transition: ({ event, target }) =>
-                      target.full.Character.from((character) =>
+                  JumpPressed: Machine.transition({
+                    target: (to) => to.full.Character(),
+                    resolve: ({ event, target }) =>
+                      target.from((character) =>
                         character
                           .locomotion.from((locomotion) =>
                             locomotion.Playing.from((playing) =>
@@ -183,137 +201,159 @@ export const CharacterMachine = definition.handle({
                               : contact.NoWall.from()
                           )
                       )
-                  }
+                  })
                 },
                 states: {
                   Standing: {
                     on: {
-                      Move: {
-                        targets: ["Character.locomotion.Playing.Grounded.Running"],
-                        transition: ({ event, target }) =>
-                          event.axis === 0
-                            ? target.none()
-                            : target.local.Running.from({ startedAt: event.at })
-                      },
-                      DownPressed: {
-                        targets: ["Character.locomotion.Playing.Grounded.Ducking"],
-                        transition: ({ event, target }) => target.local.Ducking.from({ startedAt: event.at })
-                      }
+                      Move: Machine.transition({
+                        cases: [{
+                          title: "moving",
+                          when: ({ event }) => event.axis === 0 ? Option.none() : Option.some(event),
+                          target: (to) => to.local.Running(),
+                          resolve: ({ match, target }) => target.from({ startedAt: match.at })
+                        }],
+                        otherwise: {
+                          target: (to) => to.none(),
+                          resolve: () => undefined
+                        }
+                      }),
+                      DownPressed: Machine.transition({
+                        target: (to) => to.local.Ducking(),
+                        resolve: ({ event, target }) => target.from({ startedAt: event.at })
+                      })
                     }
                   },
                   Running: {
                     on: {
-                      Move: {
-                        targets: ["Character.locomotion.Playing.Grounded.Standing"],
-                        transition: ({ event, target }) =>
-                          event.axis === 0 ? target.local.Standing.from() : target.none()
-                      },
-                      DownPressed: {
-                        targets: ["Character.locomotion.Playing.Grounded.Ducking"],
-                        transition: ({ event, target }) => target.local.Ducking.from({ startedAt: event.at })
-                      }
+                      Move: Machine.transition({
+                        cases: [{
+                          title: "stopped",
+                          when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
+                          target: (to) => to.local.Standing(),
+                          resolve: ({ target }) => target.from()
+                        }],
+                        otherwise: {
+                          target: (to) => to.none(),
+                          resolve: () => undefined
+                        }
+                      }),
+                      DownPressed: Machine.transition({
+                        target: (to) => to.local.Ducking(),
+                        resolve: ({ event, target }) => target.from({ startedAt: event.at })
+                      })
                     }
                   },
                   Ducking: {
                     on: {
-                      DownReleased: {
-                        targets: [
-                          "Character.locomotion.Playing.Grounded.Standing",
-                          "Character.locomotion.Playing.Grounded.Running"
-                        ],
-                        transition: ({ event, target }) =>
-                          event.axis === 0
-                            ? target.local.Standing.from()
-                            : target.local.Running.from({ startedAt: event.at })
-                      }
+                      DownReleased: Machine.transition({
+                        cases: [{
+                          title: "stopped",
+                          when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
+                          target: (to) => to.local.Standing(),
+                          resolve: ({ target }) => target.from()
+                        }],
+                        otherwise: {
+                          target: (to) => to.local.Running(),
+                          resolve: ({ event, target }) => target.from({ startedAt: event.at })
+                        }
+                      })
                     }
                   },
                   Landing: {
-                    invoke: Machine.invoke({
+                    invoke: definition.invoke({
                       id: "landing-settle",
                       after: "140 millis",
-                      onDone: {
-                        targets: [
-                          "Character.locomotion.Playing.Grounded.Standing",
-                          "Character.locomotion.Playing.Grounded.Running"
-                        ],
-                        transition: ({ state, target }) =>
-                          state.resumeAxis === 0
-                            ? target.local.Standing.from()
-                            : target.local.Running.from({ startedAt: state.landedAt + 140 })
-                      }
+                      onDone: Machine.transition({
+                        target: (to) => to.none(),
+                        resolve: (_, enqueue) => {
+                          enqueue.raise(InternalEvents.LandingSettled())
+                          return undefined
+                        }
+                      })
                     }),
                     on: {
-                      Move: {
-                        targets: ["Character.locomotion.Playing.Grounded.Landing"],
-                        transition: ({ event, state, target }) => {
-                          const { _tag: _, ...fields } = state
-                          return target.local.Landing.from({ ...fields, resumeAxis: event.axis })
+                      LandingSettled: Machine.transition({
+                        cases: [{
+                          title: "stopped",
+                          when: ({ state }) => state.resumeAxis === 0 ? Option.some(undefined) : Option.none(),
+                          target: (to) => to.local.Standing(),
+                          resolve: ({ target }) => target.from()
+                        }],
+                        otherwise: {
+                          target: (to) => to.local.Running(),
+                          resolve: ({ state, target }) => target.from({ startedAt: state.landedAt + 140 })
                         }
-                      }
+                      }),
+                      Move: Machine.transition({
+                        target: (to) => to.local.Landing(),
+                        resolve: ({ event, state, target }) => {
+                          const { _tag: _, ...fields } = state
+                          return target.from({ ...fields, resumeAxis: event.axis })
+                        }
+                      })
                     }
                   }
                 }
               },
               Airborne: {
                 on: {
-                  JumpPressed: {
-                    targets: [],
-                    transition: ({ event, target }, enqueue) => {
+                  JumpPressed: Machine.transition({
+                    target: (to) => to.none(),
+                    resolve: ({ event }, enqueue) => {
                       const push = awayFrom(event.wall)
                       enqueue.raise(
                         push === 0
                           ? InternalEvents.TryAirJump({ at: event.at })
                           : InternalEvents.WallJump({ at: event.at, push })
                       )
-                      return target.none()
+                      return undefined
                     }
-                  },
-                  Landed: {
-                    targets: ["Character.locomotion.Playing.Grounded.Landing"],
-                    transition: ({ event, target }) =>
-                      target.branch.Character.locomotion.Playing.Grounded.from((grounded) =>
+                  }),
+                  Landed: Machine.transition({
+                    target: (to) => to.branch.Character.locomotion.Playing.Grounded(),
+                    resolve: ({ event, target }) =>
+                      target.from((grounded) =>
                         grounded.Landing.from({
                           impact: event.impact,
                           resumeAxis: event.axis,
                           landedAt: event.at
                         })
                       )
-                  }
+                  })
                 },
                 states: {
                   motion: {
                     on: {
-                      DoubleJump: {
-                        targets: ["Character.locomotion.Playing.Airborne.motion.Jumping"],
-                        transition: ({ event, target }) =>
-                          target.local.Jumping.from({ startedAt: event.at, push: 0, kind: "Double" })
-                      },
-                      WallJump: {
-                        targets: ["Character.locomotion.Playing.Airborne.motion.Jumping"],
-                        transition: ({ event, target }) =>
-                          target.local.Jumping.from({ startedAt: event.at, push: event.push, kind: "Wall" })
-                      }
+                      DoubleJump: Machine.transition({
+                        target: (to) => to.local.Jumping(),
+                        resolve: ({ event, target }) => target.from({ startedAt: event.at, push: 0, kind: "Double" })
+                      }),
+                      WallJump: Machine.transition({
+                        target: (to) => to.local.Jumping(),
+                        resolve: ({ event, target }) =>
+                          target.from({ startedAt: event.at, push: event.push, kind: "Wall" })
+                      })
                     },
                     states: {
                       Jumping: {
                         on: {
-                          ApexReached: {
-                            targets: ["Character.locomotion.Playing.Airborne.motion.Falling"],
-                            transition: ({ event, target }) => target.local.Falling.from({ apexY: event.y })
-                          },
-                          DownPressed: {
-                            targets: ["Character.locomotion.Playing.Airborne.motion.Diving"],
-                            transition: ({ event, target }) => target.local.Diving.from({ startedAt: event.at })
-                          }
+                          ApexReached: Machine.transition({
+                            target: (to) => to.local.Falling(),
+                            resolve: ({ event, target }) => target.from({ apexY: event.y })
+                          }),
+                          DownPressed: Machine.transition({
+                            target: (to) => to.local.Diving(),
+                            resolve: ({ event, target }) => target.from({ startedAt: event.at })
+                          })
                         }
                       },
                       Falling: {
                         on: {
-                          DownPressed: {
-                            targets: ["Character.locomotion.Playing.Airborne.motion.Diving"],
-                            transition: ({ event, target }) => target.local.Diving.from({ startedAt: event.at })
-                          }
+                          DownPressed: Machine.transition({
+                            target: (to) => to.local.Diving(),
+                            resolve: ({ event, target }) => target.from({ startedAt: event.at })
+                          })
                         }
                       },
                       Diving: {}
@@ -321,21 +361,21 @@ export const CharacterMachine = definition.handle({
                   },
                   airJump: {
                     on: {
-                      WallJump: {
-                        reenter: true,
-                        targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock"],
-                        transition: ({ target }) => target.local.AirJumpWallLock.from()
-                      }
+                      WallJump: Machine.transition({
+                        target: (to) => to.local.AirJumpWallLock(),
+                        resolve: ({ target }) => target.from(),
+                        reenter: true
+                      })
                     },
                     states: {
                       AirJumpGroundLock: {
                         invoke: Machine.invoke({
                           id: "ground-air-jump-unlock",
                           after: "120 millis",
-                          onDone: {
-                            targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
-                            transition: ({ target }) => target.local.AirJumpReady.from()
-                          }
+                          onDone: Machine.transition({
+                            target: (to) => to.local.AirJumpReady(),
+                            resolve: ({ target }) => target.from()
+                          })
                         }),
                         on: {}
                       },
@@ -343,22 +383,22 @@ export const CharacterMachine = definition.handle({
                         invoke: Machine.invoke({
                           id: "wall-air-jump-unlock",
                           after: "240 millis",
-                          onDone: {
-                            targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpReady"],
-                            transition: ({ target }) => target.local.AirJumpReady.from()
-                          }
+                          onDone: Machine.transition({
+                            target: (to) => to.local.AirJumpReady(),
+                            resolve: ({ target }) => target.from()
+                          })
                         }),
                         on: {}
                       },
                       AirJumpReady: {
                         on: {
-                          TryAirJump: {
-                            targets: ["Character.locomotion.Playing.Airborne.airJump.AirJumpSpent"],
-                            transition: ({ event, target }, enqueue) => {
+                          TryAirJump: Machine.transition({
+                            target: (to) => to.local.AirJumpSpent(),
+                            resolve: ({ event, target }, enqueue) => {
                               enqueue.raise(InternalEvents.DoubleJump({ at: event.at }))
-                              return target.local.AirJumpSpent.from()
+                              return target.from()
                             }
-                          }
+                          })
                         }
                       },
                       AirJumpSpent: {}
@@ -370,10 +410,10 @@ export const CharacterMachine = definition.handle({
           },
           Paused: {
             on: {
-              Resume: {
-                targets: ["Character.locomotion.Playing.resume"],
-                transition: ({ target }) => target.history.Character.locomotion.Playing.resume()
-              }
+              Resume: Machine.transition({
+                target: (to) => to.history.Character.locomotion.Playing.resume(),
+                resolve: ({ target }) => target()
+              })
             }
           }
         }
@@ -382,41 +422,69 @@ export const CharacterMachine = definition.handle({
         states: {
           Left: {
             on: {
-              Move: {
-                targets: ["Character.facing.Right"],
-                transition: ({ event, target }) => event.axis === 1 ? target.local.Right.from() : target.none()
-              },
-              WallJump: {
-                targets: ["Character.facing.Right"],
-                transition: ({ event, target }) => event.push === 1 ? target.local.Right.from() : target.none()
-              }
+              Move: Machine.transition({
+                cases: [{
+                  title: "right",
+                  when: ({ event }) => event.axis === 1 ? Option.some(undefined) : Option.none(),
+                  target: (to) => to.local.Right(),
+                  resolve: ({ target }) => target.from()
+                }],
+                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+              }),
+              WallJump: Machine.transition({
+                cases: [{
+                  title: "right",
+                  when: ({ event }) => event.push === 1 ? Option.some(undefined) : Option.none(),
+                  target: (to) => to.local.Right(),
+                  resolve: ({ target }) => target.from()
+                }],
+                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+              })
             }
           },
           Right: {
             on: {
-              Move: {
-                targets: ["Character.facing.Left"],
-                transition: ({ event, target }) => event.axis === -1 ? target.local.Left.from() : target.none()
-              },
-              WallJump: {
-                targets: ["Character.facing.Left"],
-                transition: ({ event, target }) => event.push === -1 ? target.local.Left.from() : target.none()
-              }
+              Move: Machine.transition({
+                cases: [{
+                  title: "left",
+                  when: ({ event }) => event.axis === -1 ? Option.some(undefined) : Option.none(),
+                  target: (to) => to.local.Left(),
+                  resolve: ({ target }) => target.from()
+                }],
+                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+              }),
+              WallJump: Machine.transition({
+                cases: [{
+                  title: "left",
+                  when: ({ event }) => event.push === -1 ? Option.some(undefined) : Option.none(),
+                  target: (to) => to.local.Left(),
+                  resolve: ({ target }) => target.from()
+                }],
+                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+              })
             }
           }
         }
       },
       contact: {
         on: {
-          WallContact: {
-            targets: ["Character.contact.NoWall", "Character.contact.LeftWall", "Character.contact.RightWall"],
-            transition: ({ event, target }) =>
-              event.wall === -1
-                ? target.local.LeftWall.from()
-                : event.wall === 1
-                ? target.local.RightWall.from()
-                : target.local.NoWall.from()
-          }
+          WallContact: Machine.transition({
+            cases: [{
+              title: "left wall",
+              when: ({ event }) => event.wall === -1 ? Option.some(undefined) : Option.none(),
+              target: (to) => to.local.LeftWall(),
+              resolve: ({ target }) => target.from()
+            }, {
+              title: "right wall",
+              when: ({ event }) => event.wall === 1 ? Option.some(undefined) : Option.none(),
+              target: (to) => to.local.RightWall(),
+              resolve: ({ target }) => target.from()
+            }],
+            otherwise: {
+              target: (to) => to.local.NoWall(),
+              resolve: ({ target }) => target.from()
+            }
+          })
         },
         states: {
           NoWall: {},

@@ -110,7 +110,10 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Tick),
-    initial: () => States.initial.Idle(new Idle({}))
+    initial: {
+      target: (to) => to.Idle(),
+      resolve: ({ target }) => (target(new Idle({})))
+    }
   }).handle({
     Idle: {}
   })
@@ -122,7 +125,10 @@ describe("AtomMachine", () => {
     const parentMachine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: () => States.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     }).handle({
       Idle: {
         invoke: Machine.invoke({ child: Child })
@@ -278,12 +284,21 @@ describe("AtomMachine", () => {
       states: States.states,
       events: Machine.events(Tick),
       internalEvents: Machine.internalEvents(InternalTick),
-      initial: () => States.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     }).handle({
       Idle: {
         on: {
-          Tick: () => States.initial.Idle(new Idle({})),
-          InternalTick: () => States.initial.Idle(new Idle({}))
+          Tick: Machine.transition({
+            target: (to) => to.full.Idle(),
+            resolve: ({ target }) => target(new Idle({}))
+          }),
+          InternalTick: Machine.transition({
+            target: (to) => to.full.Idle(),
+            resolve: ({ target }) => target(new Idle({}))
+          })
         }
       }
     })
@@ -306,7 +321,10 @@ describe("AtomMachine", () => {
     const incomplete = Machine.make({
       states: OutputStates.states,
       events: Machine.events(Tick),
-      initial: () => OutputStates.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     })
     const runtime = Atom.runtime(Layer.empty)
     const bound = AtomMachine.bind(runtime)

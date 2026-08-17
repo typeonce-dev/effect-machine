@@ -13,12 +13,21 @@ describe("MachineTest invariants", () => {
     states: States.states,
     events: Machine.events(Tick),
     internalEvents: Machine.internalEvents(Internal),
-    initial: () => States.initial.idle(new Idle({ count: 0 }))
+    initial: {
+      target: (to) => to.idle(),
+      resolve: ({ target }) => (target(new Idle({ count: 0 })))
+    }
   }).handle({
     idle: {
       on: {
-        Tick: ({ target }) => target.none(),
-        Internal: ({ target }) => target.none()
+        Tick: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        }),
+        Internal: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
       }
     }
   })

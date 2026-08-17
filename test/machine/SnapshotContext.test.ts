@@ -31,14 +31,27 @@ const States = Machine.defineStates({
   }
 })
 
-const initial = () =>
-  States.initial.System(
-    new System({}),
-    (system) =>
-      system
-        .Playback(new Playback({}), (playback) => playback.Buffering(new Buffering({})))
-        .Network(new Network({}), (network) => network.Online(new Online({})))
-  )
+const initial = {
+  path: "System" as const,
+  value: new System({}),
+  states: {
+    Playback: {
+      path: "System.Playback" as const,
+      value: new Playback({}),
+      state: { path: "System.Playback.Buffering" as const, value: new Buffering({}) }
+    },
+    Network: {
+      path: "System.Network" as const,
+      value: new Network({}),
+      state: { path: "System.Network.Online" as const, value: new Online({}) }
+    }
+  }
+}
+
+const initialDefinition = {
+  target: (to: Machine.Machine.InitialSelector<typeof States.states>) => to.System.initial(),
+  resolve: () => initial
+}
 
 describe("Machine transition snapshot context", () => {
   it.effect("lets an effectful event handler inspect a sibling region", () =>
@@ -47,7 +60,7 @@ describe("Machine transition snapshot context", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(BufferReady),
-        initial
+        initial: initialDefinition
       }).handle({
         System: {
           states: {
@@ -55,12 +68,20 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   on: {
-                    BufferReady: ({ snapshot, target }) => {
-                      captured = snapshot
-                      return States.matches(snapshot, "System.Network.Online")
-                        ? target.local.Playing(new Playing({}))
-                        : target.none()
-                    }
+                    BufferReady: Machine.transition({
+                      cases: [{
+                        title: "network is online",
+                        when: ({ snapshot }) => {
+                          captured = snapshot
+                          return States.matches(snapshot, "System.Network.Online")
+                            ? Option.some(snapshot)
+                            : Option.none()
+                        },
+                        target: (to) => to.local.Playing(),
+                        resolve: ({ target }) => target(new Playing({}))
+                      }],
+                      otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                    })
                   }
                 }
               }
@@ -69,7 +90,7 @@ describe("Machine transition snapshot context", () => {
         }
       })
 
-      const plan = yield* Machine.plan(machine, initial(), new BufferReady({}))
+      const plan = yield* Machine.plan(machine, initial, new BufferReady({}))
 
       assert.strictEqual(States.matches(plan.next, "System.Playback.Playing"), true)
       assert.strictEqual(States.matches(captured!, "System.Playback.Buffering"), true)
@@ -86,7 +107,7 @@ describe("Machine transition snapshot context", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(Disconnect),
-        initial
+        initial: initialDefinition
       }).handle({
         System: {
           states: {
@@ -94,10 +115,13 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   on: {
-                    Disconnect: ({ snapshot, target }) => {
-                      captured.push(snapshot)
-                      return target.local.Playing(new Playing({}))
-                    }
+                    Disconnect: Machine.transition({
+                      target: (to) => to.local.Playing(),
+                      resolve: ({ snapshot, target }) => {
+                        captured.push(snapshot)
+                        return target(new Playing({}))
+                      }
+                    })
                   }
                 }
               }
@@ -106,10 +130,13 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Online: {
                   on: {
-                    Disconnect: ({ snapshot, target }) => {
-                      captured.push(snapshot)
-                      return target.local.Offline(new Offline({}))
-                    }
+                    Disconnect: Machine.transition({
+                      target: (to) => to.local.Offline(),
+                      resolve: ({ snapshot, target }) => {
+                        captured.push(snapshot)
+                        return target(new Offline({}))
+                      }
+                    })
                   }
                 }
               }
@@ -118,7 +145,7 @@ describe("Machine transition snapshot context", () => {
         }
       })
 
-      const plan = yield* Machine.plan(machine, initial(), new Disconnect({}))
+      const plan = yield* Machine.plan(machine, initial, new Disconnect({}))
 
       assert.lengthOf(plan.microsteps[0]!.transitions, 2)
       assert.lengthOf(captured, 2)
@@ -135,19 +162,25 @@ describe("Machine transition snapshot context", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial
+        initial: initialDefinition
       }).handle({
         System: {
           states: {
             Playback: {
               states: {
                 Buffering: {
-                  always: ({ snapshot, target }) => {
-                    captured = snapshot
-                    return States.matches(snapshot, "System.Network.Online")
-                      ? target.local.Playing(new Playing({}))
-                      : target.none()
-                  }
+                  always: Machine.transition({
+                    cases: [{
+                      title: "network is online",
+                      when: ({ snapshot }) => {
+                        captured = snapshot
+                        return States.matches(snapshot, "System.Network.Online") ? Option.some(snapshot) : Option.none()
+                      },
+                      target: (to) => to.local.Playing(),
+                      resolve: ({ target }) => target(new Playing({}))
+                    }],
+                    otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                  })
                 }
               }
             }
@@ -194,22 +227,28 @@ describe("Machine transition snapshot context", () => {
       const machine = Machine.make({
         states: completionStates.states,
         events: Machine.events(),
-        initial: () =>
-          completionStates.initial.System(
-            new System({}),
-            (system) =>
-              system
-                .Work(new Work({}), (work) => work.Finished(new Finished({})))
-                .Monitor(new Monitor({}), (monitor) => monitor.Active(new Active({})))
-          )
+        initial: {
+          target: (to) => to.System.initial(),
+          resolve: ({ target }) =>
+            target(
+              new System({}),
+              (system) =>
+                system
+                  .Work(new Work({}), (work) => work.Finished(new Finished({})))
+                  .Monitor(new Monitor({}), (monitor) => monitor.Active(new Active({})))
+            )
+        }
       }).handle({
         System: {
           states: {
             Work: {
-              onDone: ({ snapshot, target }) => {
-                captured = snapshot
-                return target.local.Restarted(new Restarted({}))
-              }
+              onDone: Machine.transition({
+                target: (to) => to.local.Restarted(),
+                resolve: ({ snapshot, target }) => {
+                  captured = snapshot
+                  return target(new Restarted({}))
+                }
+              })
             }
           }
         }
@@ -219,8 +258,8 @@ describe("Machine transition snapshot context", () => {
 
       assert.strictEqual(completionStates.matches(captured!, "System.Work.Finished"), true)
       assert.strictEqual(completionStates.matches(captured!, "System.Monitor.Active"), true)
-      assert.deepStrictEqual(captured!.completed, [{ path: "System.Work.Finished", output: undefined }, {
-        path: "System.Work",
+      assert.deepStrictEqual(captured!.completed, [{ path: "System.Work.Finished" as const, output: undefined }, {
+        path: "System.Work" as const,
         output: undefined
       }])
       assert.strictEqual(completionStates.matches(plan.state, "System.Work.Restarted"), true)

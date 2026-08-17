@@ -11,16 +11,22 @@ const invoked = machine.handle({
     invoke: Machine.invoke({
       id: "load-user",
       effect: ({ state }) => loadUser(state.userId),
-      onDone: ({ output, target }) => {
-        const user: User = output
-        void user
-        return target.none()
-      },
-      onFailure: ({ error, target }) => {
-        const loadError: LoadError = error
-        void loadError
-        return target.none()
-      }
+      onDone: Machine.transition({
+        target: (to) => to.none(),
+        resolve: ({ output }) => {
+          const user: User = output
+          void user
+          return undefined
+        }
+      }),
+      onFailure: Machine.transition({
+        target: (to) => to.none(),
+        resolve: ({ error }) => {
+          const loadError: LoadError = error
+          void loadError
+          return undefined
+        }
+      })
     })
   }
 })

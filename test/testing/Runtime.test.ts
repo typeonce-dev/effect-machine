@@ -27,13 +27,21 @@ const makeCounterMachine = () =>
     states: CounterStates.states,
     events: Machine.events(Add),
     internalEvents: Machine.internalEvents(InternalAdd),
-    initial: () => CounterStates.initial.Counter(new Counter({ count: 0 }))
+    initial: {
+      target: (to) => to.Counter(),
+      resolve: ({ target }) => target(new Counter({ count: 0 }))
+    }
   }).handle({
     Counter: {
       on: {
-        Add: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount })),
-        InternalAdd: ({ event, state, target }) =>
-          target.full.Counter(new Counter({ count: state.count + event.amount }))
+        Add: Machine.transition({
+          target: (to) => to.full.Counter(),
+          resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
+        }),
+        InternalAdd: Machine.transition({
+          target: (to) => to.full.Counter(),
+          resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
+        })
       }
     }
   })
@@ -42,17 +50,32 @@ const causalMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEvents(InternalAdd),
-  initial: () => CounterStates.initial.Counter(new Counter({ count: 0 }))
+  initial: {
+    target: (to) => to.Counter(),
+    resolve: ({ target }) => target(new Counter({ count: 0 }))
+  }
 }).handle({
   Counter: {
     on: {
-      Add: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount })),
-      Noop: ({ target }) => target.none(),
-      Burst: ({ state, target }, enqueue) => {
-        enqueue.raise(new InternalAdd({ amount: 10 }))
-        return target.full.Counter(new Counter({ count: state.count + 1 }))
-      },
-      InternalAdd: ({ event, state, target }) => target.full.Counter(new Counter({ count: state.count + event.amount }))
+      Add: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
+      }),
+      Noop: Machine.transition({
+        target: (to) => to.none(),
+        resolve: () => undefined
+      }),
+      Burst: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ state, target }, enqueue) => {
+          enqueue.raise(new InternalAdd({ amount: 10 }))
+          return target(new Counter({ count: state.count + 1 }))
+        }
+      }),
+      InternalAdd: Machine.transition({
+        target: (to) => to.full.Counter(),
+        resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
+      })
     }
   }
 })
@@ -235,13 +258,19 @@ describe("MachineTest runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: () => states.initial.Waiting(new Waiting({}))
+        initial: {
+          target: (to) => to.Waiting(),
+          resolve: ({ target }) => target(new Waiting({}))
+        }
       }).handle({
         Waiting: {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 second",
-            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+            onDone: Machine.transition({
+              target: (to) => to.full.TimedOut(),
+              resolve: ({ target }) => target(new TimedOut({}))
+            })
           })
         },
         TimedOut: {}
@@ -716,13 +745,19 @@ describe("MachineTest causal runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: () => states.initial.Waiting(new Waiting({}))
+        initial: {
+          target: (to) => to.Waiting(),
+          resolve: ({ target }) => target(new Waiting({}))
+        }
       }).handle({
         Waiting: {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 second",
-            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+            onDone: Machine.transition({
+              target: (to) => to.full.TimedOut(),
+              resolve: ({ target }) => target(new TimedOut({}))
+            })
           })
         },
         TimedOut: {}

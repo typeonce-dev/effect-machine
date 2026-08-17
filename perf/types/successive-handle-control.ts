@@ -31,10 +31,11 @@ export const States = Machine.defineStates({
   }
 })
 
-export const initialIdle = () => States.initial.Flow(Flow.make({}), (flow) => flow.Idle(Idle.make({})))
-
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(Start, Finish),
-  initial: initialIdle
+  initial: {
+    target: (to) => to.Flow.initial(),
+    resolve: ({ target }) => target(Flow.make({}), (flow) => flow.Idle(Idle.make({})))
+  }
 })

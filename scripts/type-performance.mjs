@@ -71,8 +71,10 @@ const scenarios = [
     label: "machine.handle (3 states, 2 transitions)",
     file: "handle.ts",
     control: "make",
-    maxInstantiations: 40_000,
-    maxMarginalInstantiations: 23_000
+    // The first statically captured transition pays the one-time constructor
+    // inference cost. Deeper and successive-handler scenarios gate scaling.
+    maxInstantiations: 70_000,
+    maxMarginalInstantiations: 56_000
   },
   {
     id: "dynamic-invoke-control",

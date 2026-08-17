@@ -25,7 +25,10 @@ const definition = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: TrafficLightEvents,
-  initial: () => TrafficLightStates.initial.Red.from()
+  initial: {
+    target: (to) => to.Red(),
+    resolve: ({ target }) => target.from()
+  }
 })
 
 export const TrafficLightMachine = definition.handle({
@@ -33,43 +36,65 @@ export const TrafficLightMachine = definition.handle({
     invoke: Machine.invoke({
       id: "red-timer",
       after: trafficLightDurations.Red,
-      onDone: ({ target }) => target.full.RedYellow.from()
+      onDone: Machine.transition({
+        target: (to) => to.full.RedYellow(),
+        resolve: ({ target }) => target.from()
+      })
     }),
     on: {
-      Reset: {
-        reenter: true,
-        transition: ({ target }) => target.full.Red.from()
-      }
+      Reset: Machine.transition({
+        target: (to) => to.full.Red(),
+        resolve: ({ target }) => target.from(),
+        reenter: true
+      })
     }
   },
   RedYellow: {
     invoke: Machine.invoke({
       id: "red-yellow-timer",
       after: trafficLightDurations.RedYellow,
-      onDone: ({ target }) => target.full.Green.from()
+      onDone: Machine.transition({
+        target: (to) => to.full.Green(),
+        resolve: ({ target }) => target.from()
+      })
     }),
     on: {
-      Reset: ({ target }) => target.full.Red.from()
+      Reset: Machine.transition({
+        target: (to) => to.full.Red(),
+        resolve: ({ target }) => target.from()
+      })
     }
   },
   Green: {
     invoke: Machine.invoke({
       id: "green-timer",
       after: trafficLightDurations.Green,
-      onDone: ({ target }) => target.full.Yellow.from()
+      onDone: Machine.transition({
+        target: (to) => to.full.Yellow(),
+        resolve: ({ target }) => target.from()
+      })
     }),
     on: {
-      Reset: ({ target }) => target.full.Red.from()
+      Reset: Machine.transition({
+        target: (to) => to.full.Red(),
+        resolve: ({ target }) => target.from()
+      })
     }
   },
   Yellow: {
     invoke: Machine.invoke({
       id: "yellow-timer",
       after: trafficLightDurations.Yellow,
-      onDone: ({ target }) => target.full.Red.from()
+      onDone: Machine.transition({
+        target: (to) => to.full.Red(),
+        resolve: ({ target }) => target.from()
+      })
     }),
     on: {
-      Reset: ({ target }) => target.full.Red.from()
+      Reset: Machine.transition({
+        target: (to) => to.full.Red(),
+        resolve: ({ target }) => target.from()
+      })
     }
   }
 })

@@ -257,9 +257,19 @@ describe("machine operation totality", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Finish),
-        initial: () => states.initial.Value({ _tag: "Value", amount: 42 })
+        initial: {
+          target: (to) => to.Value(),
+          resolve: ({ target }) => target({ _tag: "Value", amount: 42 })
+        }
       }).handle({
-        Value: { on: { Finish: ({ target }) => target.full.Done({ _tag: "Done" }) } },
+        Value: {
+          on: {
+            Finish: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ target }) => target({ _tag: "Done" })
+            })
+          }
+        },
         Done: { output: () => 42 }
       })
       const plan = yield* Machine.planInitial(machine)

@@ -69,55 +69,81 @@ export const SelectionStates = Machine.defineStates({
 })
 
 export const SelectionEvents = Machine.events(SelectPokemon, UpdateSearchText, SearchResult, ReplacePokemon)
-export const SelectionMachine = Machine.make({
+const definition = Machine.make({
   states: SelectionStates.states,
   events: SelectionEvents,
   parentEvents: TeamEvents,
-  initial: () =>
-    SelectionStates.initial.form.from((form) =>
-      form
-        .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
-        .selection.from((selection) => selection.Unselected.from())
-    )
-}).handle({
+  initial: {
+    target: (to) => to.form.initial(),
+    resolve: ({ target }) =>
+      target.from((form) =>
+        form
+          .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
+          .selection.from((selection) => selection.Unselected.from())
+      )
+  }
+})
+
+export const SelectionMachine = definition.handle({
   form: {
     states: {
       search: {
         on: {
-          UpdateSearchText: {
-            reenter: true,
-            transition: ({ event, target }) =>
-              target.local.with.from({ searchText: event.value }, (search) => search.Searching.from())
-          }
+          UpdateSearchText: Machine.transition({
+            target: (to) => to.local.with(),
+            resolve: ({ event, target }) =>
+              target.from({ searchText: event.value }, (search) => search.Searching.from()),
+            reenter: true
+          })
         },
         states: {
           WithPokemon: {
             on: {
-              ReplacePokemon: ({ event, parent, state, target }, enqueue) => {
-                if (parent !== undefined) {
-                  enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
+              ReplacePokemon: Machine.transition({
+                target: (to) => to.full.form(),
+                resolve: ({ event, parent, state, target }, enqueue) => {
+                  if (parent !== undefined) {
+                    enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
+                  }
+                  return target.from((form) =>
+                    form
+                      .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
+                      .selection.from((selection) => selection.Unselected.from())
+                  )
                 }
-                return target.full.form.from((form) =>
-                  form
-                    .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
-                    .selection.from((selection) => selection.Unselected.from())
-                )
-              }
+              })
             }
           },
           Searching: {
-            invoke: Machine.invoke({
+            invoke: definition.invoke({
               id: "search",
               effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
-              onDone: ({ output, target }) =>
-                output.result.pipe(
-                  Option.match({
-                    onNone: () => target.local.NoPokemon.from(),
-                    onSome: (pokemon) => target.local.WithPokemon.from({ pokemon })
-                  })
-                ),
-              onFailure: ({ target }) => target.local.NoPokemon.from()
-            })
+              onDone: Machine.transition({
+                target: (to) => to.none(),
+                resolve: ({ output }, enqueue) => {
+                  enqueue.raise(output)
+                  return undefined
+                }
+              }),
+              onFailure: Machine.transition({
+                target: (to) => to.local.NoPokemon(),
+                resolve: ({ target }) => target.from()
+              })
+            }),
+            on: {
+              SearchResult: Machine.transition({
+                cases: [{
+                  title: "found",
+                  when: ({ event }) => event.result,
+                  target: (to) => to.local.WithPokemon(),
+                  resolve: ({ match, target }) => target.from({ pokemon: match })
+                }],
+                otherwise: {
+                  target: (to) => to.local.NoPokemon(),
+                  resolve: ({ target }) => target.from()
+                }
+              })
+            }
           }
         }
       },
@@ -125,15 +151,26 @@ export const SelectionMachine = Machine.make({
         states: {
           Unselected: {
             on: {
-              SelectPokemon: ({ event, target }) => target.local.Selected.from({ id: event.id })
+              SelectPokemon: Machine.transition({
+                target: (to) => to.local.Selected(),
+                resolve: ({ event, target }) => target.from({ id: event.id })
+              })
             }
           },
           Selected: {
             on: {
-              SelectPokemon: ({ event, target, state }) =>
-                state.id === event.id
-                  ? target.local.Unselected.from()
-                  : target.local.Selected.from({ id: event.id })
+              SelectPokemon: Machine.transition({
+                cases: [{
+                  title: "already selected",
+                  when: ({ event, state }) => state.id === event.id ? Option.some(undefined) : Option.none(),
+                  target: (to) => to.local.Unselected(),
+                  resolve: ({ target }) => target.from()
+                }],
+                otherwise: {
+                  target: (to) => to.local.Selected(),
+                  resolve: ({ event, target }) => target.from({ id: event.id })
+                }
+              })
             }
           }
         }

@@ -71,35 +71,41 @@ describe("structural active state types", () => {
   })
 
   it("requires values only for schema-backed snapshot builders", () => {
-    States.initial.player.from((player) =>
-      player
-        .transport.from((transport) => transport.Empty.from())
-        .settings.from((settings) => settings.Audible.from({ volume: 1 }))
-    )
+    Machine.make({
+      states: States.states,
+      events: Machine.events(),
+      initial: {
+        target: (to) => to.player.initial(),
+        resolve: ({ target }) => {
+          expect(target.from).type.not.toBeCallableWith({}, () => undefined)
+          expect<typeof target extends (...args: ReadonlyArray<any>) => any ? true : false>().type.toBe<false>()
 
-    expect(States.initial.player.from).type.not.toBeCallableWith({}, () => undefined)
-    expect<typeof States.initial.player extends (...args: ReadonlyArray<any>) => any ? true : false>().type.toBe<
-      false
-    >()
+          type PlayerBuilder = Parameters<typeof target.from>[0] extends (builder: infer Builder) => unknown ? Builder
+            : never
+          const player = null as unknown as PlayerBuilder
+          expect(player.transport.from).type.not.toBeCallableWith((transport: unknown) => transport)
 
-    type PlayerBuilder = Parameters<typeof States.initial.player.from>[0] extends (builder: infer Builder) => unknown
-      ? Builder
-      : never
-    const player = null as unknown as PlayerBuilder
-    expect(player.transport.from).type.not.toBeCallableWith((transport: unknown) => transport)
+          type TransportBuilder = Parameters<typeof player.transport.from>[0] extends
+            (builder: infer Builder) => unknown ? Builder
+            : never
+          const transport = null as unknown as TransportBuilder
+          expect(transport.Empty.from).type.toBeCallableWith()
+          expect(transport.Empty.from).type.not.toBeCallableWith({})
+          type SettingsBuilder = Parameters<typeof player.settings.from>[0] extends
+            (builder: infer Builder) => unknown ? Builder
+            : never
+          const settings = null as unknown as SettingsBuilder
+          expect(settings.Audible.from).type.toBeCallableWith({ volume: 1 })
+          expect(settings.Audible.from).type.not.toBeCallableWith()
 
-    type TransportBuilder = Parameters<typeof player.transport.from>[0] extends (builder: infer Builder) => unknown
-      ? Builder
-      : never
-    const transport = null as unknown as TransportBuilder
-    expect(transport.Empty.from).type.toBeCallableWith()
-    expect(transport.Empty.from).type.not.toBeCallableWith({})
-    type SettingsBuilder = Parameters<typeof player.settings.from>[0] extends (builder: infer Builder) => unknown
-      ? Builder
-      : never
-    const settings = null as unknown as SettingsBuilder
-    expect(settings.Audible.from).type.toBeCallableWith({ volume: 1 })
-    expect(settings.Audible.from).type.not.toBeCallableWith()
+          return target.from((player) =>
+            player
+              .transport.from((transport) => transport.Empty.from())
+              .settings.from((settings) => settings.Audible.from({ volume: 1 }))
+          )
+        }
+      }
+    })
   })
 
   it("restricts value access while retaining structural snapshot queries", () => {
@@ -123,12 +129,14 @@ describe("structural active state types", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(Select, Loaded, Play),
-      initial: () =>
-        States.initial.player.from((player) =>
+      initial: {
+        target: (to) => to.player.initial(),
+        resolve: ({ target }) => (target.from((player) =>
           player
             .transport.from((transport) => transport.Empty.from())
             .settings.from((settings) => settings.Audible.from({ volume: 1 }))
-        )
+        ))
+      }
     }).handle({
       player: {
         states: {
@@ -139,43 +147,47 @@ describe("structural active state types", () => {
                   expect(state).type.toBe<undefined>()
                 },
                 on: {
-                  Select: ({ containingState, ancestors, state, target }) => {
-                    expect(state).type.toBe<undefined>()
-                    expect(containingState).type.toBe<undefined>()
-                    expect(ancestors).type.toBe<{}>()
-                    expect(target.local).type.not.toHaveProperty("with")
-                    expect(target.local.Empty.from).type.toBeCallableWith()
-                    expect(target.local.Empty.from).type.not.toBeCallableWith({})
-                    expect(target.local.Loading.from).type.toBeCallableWith({ url: "/song.mp3" })
-                    expect(target.local.Loading.from).type.not.toBeCallableWith()
-                    return target.local.Loading.from({ url: "/song.mp3" })
-                  }
+                  Select: Machine.transition({
+                    target: (to) => to.local.Loading(),
+                    resolve: ({ containingState, ancestors, state, target }) => {
+                      expect(state).type.toBe<undefined>()
+                      expect(containingState).type.toBe<undefined>()
+                      expect(ancestors).type.toBe<{}>()
+                      expect(target.from).type.toBeCallableWith({ url: "/song.mp3" })
+                      expect(target.from).type.not.toBeCallableWith()
+                      return target.from({ url: "/song.mp3" })
+                    }
+                  })
                 }
               },
               Loading: {
                 on: {
-                  Loaded: ({ event, target }) =>
-                    target.local.Ready.from(
-                      { duration: event.duration },
-                      (ready) => ready.Paused.from()
-                    )
+                  Loaded: Machine.transition({
+                    target: (to) => to.local.Ready(),
+                    resolve: ({ event, target }) =>
+                      target.from(
+                        { duration: event.duration },
+                        (ready) => ready.Paused.from()
+                      )
+                  })
                 }
               },
               Ready: {
                 states: {
                   Paused: {
                     on: {
-                      Play: ({ containingState, ancestors, state, target }) => {
-                        expect(state).type.toBe<undefined>()
-                        expect(containingState).type.toBe<Ready>()
-                        expect(ancestors).type.toBe<{ readonly "player.transport.Ready": Ready }>()
-                        expect(target.local).type.toHaveProperty("with")
-                        expect(target.local.Playing.from).type.toBeCallableWith({ position: 0 })
-                        return target.local.with.from(
-                          { duration: containingState.duration },
-                          (ready) => ready.Playing.from({ position: 0 })
-                        )
-                      }
+                      Play: Machine.transition({
+                        target: (to) => to.local.with(),
+                        resolve: ({ containingState, ancestors, state, target }) => {
+                          expect(state).type.toBe<undefined>()
+                          expect(containingState).type.toBe<Ready>()
+                          expect(ancestors).type.toBe<{ readonly "player.transport.Ready": Ready }>()
+                          return target.from(
+                            { duration: containingState.duration },
+                            (ready) => ready.Playing.from({ position: 0 })
+                          )
+                        }
+                      })
                     }
                   }
                 }

@@ -50,13 +50,21 @@ export const counterMachine = Machine.make({
   id: "RuntimeBenchmarkCounter",
   states: CounterStates.states,
   events: benchmarkApi.events(CounterEvent.cases.Increment, CounterEvent.cases.Finish),
-  initial: () => CounterStates.initial.Count.from({ value: 0 })
+  initial: benchmarkApi.initial({
+    target: (to) => to.Count(),
+    resolve: ({ target }) => target(CounterState.cases.Count.make({ value: 0 }))
+  }, () => CounterStates.initial.Count.from({ value: 0 }))
 }).handle({
   Count: {
     on: {
-      Increment: ({ state, target }) =>
-        target.full.Count.from({ value: state.value + 1 }),
-      Finish: ({ state, target }) => target.full.Done.from({ value: state.value })
+      Increment: benchmarkApi.transition({
+        target: (to) => to.full.Count(),
+        resolve: ({ state, target }) => target.from({ value: state.value + 1 })
+      }, ({ state, target }) => target.full.Count.from({ value: state.value + 1 })),
+      Finish: benchmarkApi.transition({
+        target: (to) => to.full.Done(),
+        resolve: ({ state, target }) => target.from({ value: state.value })
+      }, ({ state, target }) => target.full.Done.from({ value: state.value }))
     }
   },
   Done: {
@@ -71,7 +79,10 @@ const counterParentMachine = Machine.make({
   id: "RuntimeBenchmarkCounterParent",
   states: ParentStates.states,
   events: benchmarkApi.events(),
-  initial: () => ParentStates.initial.Active.from()
+  initial: benchmarkApi.initial({
+    target: (to) => to.Active(),
+    resolve: ({ target }) => target.from()
+  }, () => ParentStates.initial.Active.from())
 }).handle({
   Active: {
     invoke: benchmarkApi.invokeChild({ child: CounterChild, onDone: benchmarkApi.targetless })
@@ -82,7 +93,10 @@ const counterSnapshotParentMachine = Machine.make({
   id: "RuntimeBenchmarkSnapshotCounterParent",
   states: ParentStates.states,
   events: benchmarkApi.events(),
-  initial: () => ParentStates.initial.Active.from()
+  initial: benchmarkApi.initial({
+    target: (to) => to.Active(),
+    resolve: ({ target }) => target.from()
+  }, () => ParentStates.initial.Active.from())
 }).handle({
   Active: {
     invoke: benchmarkApi.invokeChild({
@@ -125,19 +139,26 @@ const hierarchicalCounterMachine = Machine.make({
   id: "RuntimeBenchmarkHierarchicalCounter",
   states: HierarchicalStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish),
-  initial: () =>
+  initial: benchmarkApi.initial({
+    target: (to) => to.Active.initial(),
+    resolve: ({ target }) => target.from((active) => active.Count.from({ value: 0 }))
+  }, () =>
     HierarchicalStates.initial.Active.from(
       (active) => active.Count.from({ value: 0 })
-    )
+    ))
 }).handle({
   Active: {
     states: {
       Count: {
         on: {
-          Increment: ({ state, target }) =>
-            target.local.Count.from({ value: state.value + 1 }),
-          Finish: ({ state, target }) =>
-            target.full.Complete.from({ value: state.value })
+          Increment: benchmarkApi.transition({
+            target: (to) => to.local.Count(),
+            resolve: ({ state, target }) => target.from({ value: state.value + 1 })
+          }, ({ state, target }) => target.local.Count.from({ value: state.value + 1 })),
+          Finish: benchmarkApi.transition({
+            target: (to) => to.full.Complete(),
+            resolve: ({ state, target }) => target.from({ value: state.value })
+          }, ({ state, target }) => target.full.Complete.from({ value: state.value }))
         }
       }
     }
@@ -174,32 +195,48 @@ const parallelCounterMachine = Machine.make({
   id: "RuntimeBenchmarkParallelCounter",
   states: ParallelStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.IncrementLeft, HierarchicalEvent.cases.IncrementRight, HierarchicalEvent.cases.Finish),
-  initial: () =>
+  initial: benchmarkApi.initial({
+    target: (to) => to.Active.initial(),
+    resolve: ({ target }) =>
+      target.from((active) =>
+        active
+          .Left.from({ value: 0 })
+          .Right.from({ value: 0 }))
+  }, () =>
     ParallelStates.initial.Active.from(
       (active) =>
         active
           .Left.from({ value: 0 })
           .Right.from({ value: 0 })
-    )
+    ))
 }).handle({
   Active: {
     on: {
-      Finish: ({ snapshot, target }) =>
-        target.full.Complete.from({
+      Finish: benchmarkApi.transition({
+        target: (to) => to.full.Complete(),
+        resolve: ({ snapshot, target }) => target.from({
           value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
         })
+      }, ({ snapshot, target }) =>
+        target.full.Complete.from({
+          value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+        }))
     },
     states: {
       Left: {
         on: {
-          IncrementLeft: ({ state, target }) =>
-            target.branch.Active.Left.from({ value: state.value + 1 })
+          IncrementLeft: benchmarkApi.transition({
+            target: (to) => to.branch.Active.Left(),
+            resolve: ({ state, target }) => target.from({ value: state.value + 1 })
+          }, ({ state, target }) => target.branch.Active.Left.from({ value: state.value + 1 }))
         }
       },
       Right: {
         on: {
-          IncrementRight: ({ state, target }) =>
-            target.branch.Active.Right.from({ value: state.value + 1 })
+          IncrementRight: benchmarkApi.transition({
+            target: (to) => to.branch.Active.Right(),
+            resolve: ({ state, target }) => target.from({ value: state.value + 1 })
+          }, ({ state, target }) => target.branch.Active.Right.from({ value: state.value + 1 }))
         }
       }
     }

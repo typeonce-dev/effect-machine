@@ -11,7 +11,10 @@ const InternalEvent = Schema.TaggedStruct("InternalEvent", { value: Schema.Strin
 describe("machine protocols", () => {
   it("rejects forged, misclassified, and overlapping event descriptors", () => {
     const states = Machine.defineStates({ ProtocolIdle })
-    const initial = () => states.initial.ProtocolIdle(new ProtocolIdle({}))
+    const initial = {
+      target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.ProtocolIdle(),
+      resolve: () => ({ path: "ProtocolIdle" as const, value: new ProtocolIdle({}) })
+    }
 
     assert.throws(
       () => Machine.make({ states: states.states, events: [PublicEvent] as any, initial }),
@@ -40,7 +43,10 @@ describe("machine protocols", () => {
         states: states.states,
         events: Machine.events(PublicEvent),
         internalEvents: Machine.internalEvents(InternalEvent),
-        initial: () => states.initial.ProtocolIdle(new ProtocolIdle({}))
+        initial: {
+          target: (to) => to.ProtocolIdle(),
+          resolve: ({ target }) => target(new ProtocolIdle({}))
+        }
       }).handle({})
 
       assert.strictEqual(Object.hasOwn(machine, "eventSchemas"), false)

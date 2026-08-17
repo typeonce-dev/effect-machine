@@ -32,11 +32,17 @@ describe("machine reference event channels", () => {
     internalEvents: InternalEvents,
     parentEvents: ParentEvents,
     emittedEvents: Emissions,
-    initial: () => states.initial.Idle(new Idle({}))
+    initial: {
+      target: (to) => to.Idle(),
+      resolve: ({ target }) => (target(new Idle({})))
+    }
   }).handle({
     Idle: {
       on: {
-        Ping: ({ target }) => target.none()
+        Ping: Machine.transition({
+          target: (to) => to.none(),
+          resolve: () => undefined
+        })
       }
     }
   })
@@ -57,27 +63,33 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parentEvents: ParentEvents,
       emittedEvents: Emissions,
-      initial: () => states.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     }).handle({
       Idle: {
         on: {
-          Ping: ({ parent, self, target }, enqueue) => {
-            expect(self.send).type.toBeCallableWith(Events.Ping())
-            expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
-            expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
-            expect(enqueue.sendTo).type.not.toBeCallableWith(self, ParentEvents.ParentNotice({ value: 1 }))
+          Ping: Machine.transition({
+            target: (to) => to.none(),
+            resolve: ({ parent, self }, enqueue) => {
+              expect(self.send).type.toBeCallableWith(Events.Ping())
+              expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
+              expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
+              expect(enqueue.sendTo).type.not.toBeCallableWith(self, ParentEvents.ParentNotice({ value: 1 }))
 
-            if (parent !== undefined) {
-              expect(enqueue.sendTo).type.toBeCallableWith(parent, ParentEvents.ParentNotice({ value: 1 }))
-              expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
+              if (parent !== undefined) {
+                expect(enqueue.sendTo).type.toBeCallableWith(parent, ParentEvents.ParentNotice({ value: 1 }))
+                expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
+              }
+
+              expect(enqueue.raise).type.toBeCallableWith(InternalEvents.Local())
+              expect(enqueue.emit).type.toBeCallableWith(Emissions.Published())
+              expect(enqueue.emit).type.toBeCallableWith(Emissions.ValuedPublished({ value: 1 }))
+              expect(enqueue.emit).type.not.toBeCallableWith(Events.Ping())
+              return undefined
             }
-
-            expect(enqueue.raise).type.toBeCallableWith(InternalEvents.Local())
-            expect(enqueue.emit).type.toBeCallableWith(Emissions.Published())
-            expect(enqueue.emit).type.toBeCallableWith(Emissions.ValuedPublished({ value: 1 }))
-            expect(enqueue.emit).type.not.toBeCallableWith(Events.Ping())
-            return target.none()
-          }
+          })
         }
       }
     })
@@ -87,33 +99,24 @@ describe("machine reference event channels", () => {
     const compatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, ParentEvents),
-      initial: () => states.initial.Idle(new Idle({}))
-    })
-    compatible.handle({
-      Idle: {
-        invoke: {
-          child: Child,
-          onDone: () => states.initial.Idle(new Idle({})),
-          onFailure: () => states.initial.Idle(new Idle({})),
-          onSnapshot: () => states.initial.Idle(new Idle({}))
-        }
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
       }
     })
+    compatible.invoke({ child: Child })
 
     const incompatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, OtherParentEvent),
-      initial: () => states.initial.Idle(new Idle({}))
-    })
-    expect(incompatible.handle).type.not.toBeCallableWith({
-      Idle: {
-        invoke: {
-          child: Child,
-          onDone: () => states.initial.Idle(new Idle({})),
-          onFailure: () => states.initial.Idle(new Idle({})),
-          onSnapshot: () => states.initial.Idle(new Idle({}))
-        }
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
       }
+    })
+    const incompatibleChild = incompatible.invoke({ child: Child })
+    expect(incompatible.handle).type.not.toBeCallableWith({
+      Idle: { invoke: incompatibleChild }
     })
   })
 
@@ -151,7 +154,10 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parentEvents: ParentEvents,
       emittedEvents: Emissions,
-      initial: () => states.initial.Idle(new Idle({}))
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => (target(new Idle({})))
+      }
     })
 
     definition.handle({
@@ -167,13 +173,16 @@ describe("machine reference event channels", () => {
             }
             return Effect.void
           },
-          onDone: ({ parent, self, target }) => {
-            expect(self.send).type.toBeCallableWith(Events.Ping())
-            if (parent !== undefined) {
-              expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+          onDone: Machine.transition({
+            target: (to) => to.none(),
+            resolve: ({ parent, self }) => {
+              expect(self.send).type.toBeCallableWith(Events.Ping())
+              if (parent !== undefined) {
+                expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+              }
+              return undefined
             }
-            return target.none()
-          }
+          })
         })
       }
     })
@@ -189,7 +198,10 @@ describe("machine reference event channels", () => {
             }
             return Effect.void
           },
-          onDone: ({ target }) => target.none()
+          onDone: Machine.transition({
+            target: (to) => to.none(),
+            resolve: () => undefined
+          })
         })
       }
     })

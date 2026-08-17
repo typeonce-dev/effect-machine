@@ -70,7 +70,10 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: () => states.initial.Inactive(new Inactive({}))
+        initial: {
+          target: (to) => to.Inactive(),
+          resolve: ({ target }) => target(new Inactive({}))
+        }
       }).handle({
         Root: {
           invoke: Machine.invoke({
@@ -121,10 +124,22 @@ describe("Machine.resume", () => {
           })
         }
       })
-      const snapshot = states.initial.Root(new Root({}), (root) =>
-        root
-          .left(new Left({}), (left) => left.On(new LeftOn({})))
-          .right(new Right({}), (right) => right.On(new RightOn({}))))
+      const snapshot = {
+        path: "Root" as const,
+        value: new Root({}),
+        states: {
+          left: {
+            path: "Root.left" as const,
+            value: new Left({}),
+            state: { path: "Root.left.On" as const, value: new LeftOn({}) }
+          },
+          right: {
+            path: "Root.right" as const,
+            value: new Right({}),
+            state: { path: "Root.right.On" as const, value: new RightOn({}) }
+          }
+        }
+      }
 
       const ref = yield* Machine.resume(machine, snapshot)
       yield* Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow, { discard: true })
@@ -153,19 +168,53 @@ describe("Machine.resume", () => {
           }
         }
       })
-      const initial = states.initial.Root(new Root({}), (root) =>
-        root
-          .left(new Left({}), (left) => left.A(new LeftA({})))
-          .right(new Right({}), (right) => right.A(new RightA({}))))
-      const machine = Machine.make({ states: states.states, events: Machine.events(Advance), initial: () => initial })
+      const initial = {
+        path: "Root" as const,
+        value: new Root({}),
+        states: {
+          left: {
+            path: "Root.left" as const,
+            value: new Left({}),
+            state: { path: "Root.left.A" as const, value: new LeftA({}) }
+          },
+          right: {
+            path: "Root.right" as const,
+            value: new Right({}),
+            state: { path: "Root.right.A" as const, value: new RightA({}) }
+          }
+        }
+      }
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Advance),
+        initial: { target: (to) => to.Root.initial(), resolve: () => initial }
+      })
         .handle({
           Root: {
             states: {
               left: {
-                states: { A: { on: { Advance: ({ target }) => target.local.B(new LeftB({})) } } }
+                states: {
+                  A: {
+                    on: {
+                      Advance: Machine.transition({
+                        target: (to) => to.local.B(),
+                        resolve: ({ target }) => target(new LeftB({}))
+                      })
+                    }
+                  }
+                }
               },
               right: {
-                states: { A: { on: { Advance: ({ target }) => target.local.B(new RightB({})) } } }
+                states: {
+                  A: {
+                    on: {
+                      Advance: Machine.transition({
+                        target: (to) => to.local.B(),
+                        resolve: ({ target }) => target(new RightB({}))
+                      })
+                    }
+                  }
+                }
               }
             }
           }
@@ -180,18 +229,18 @@ describe("Machine.resume", () => {
           snapshot.state.states.right.state.path === "Root.right.B"
       )
       assert.deepStrictEqual(yield* ref.state, {
-        path: "Root",
+        path: "Root" as const,
         value: new Root({}),
         states: {
           left: {
-            path: "Root.left",
+            path: "Root.left" as const,
             value: new Left({}),
-            state: { path: "Root.left.B", value: new LeftB({}) }
+            state: { path: "Root.left.B" as const, value: new LeftB({}) }
           },
           right: {
-            path: "Root.right",
+            path: "Root.right" as const,
             value: new Right({}),
-            state: { path: "Root.right.B", value: new RightB({}) }
+            state: { path: "Root.right.B" as const, value: new RightB({}) }
           }
         }
       })
@@ -207,12 +256,22 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Finish),
-        initial: () => states.initial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 0 }))
+        }
       }).handle({
-        Count: { on: { Finish: ({ target }) => target.full.Done(new Done({ value: 9 })) } },
+        Count: {
+          on: {
+            Finish: Machine.transition({
+              target: (to) => to.full.Done(),
+              resolve: ({ target }) => target(new Done({ value: 9 }))
+            })
+          }
+        },
         Done: { output: ({ state }) => state.value }
       })
-      const logical = states.initial.Done(new Done({ value: 9 }))
+      const logical = { path: "Done" as const, value: new Done({ value: 9 }) }
       const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
       const ref = yield* Machine.resume(machine, decoded)
 
@@ -235,17 +294,26 @@ describe("Machine.resume", () => {
         Next
       })
       const logical: Machine.Machine.Snapshot<typeof states.states> = {
-        path: "Flow",
+        path: "Flow" as const,
         value: new Flow({}),
-        state: { path: "Flow.Finished", value: new Finished({}) },
+        state: { path: "Flow.Finished" as const, value: new Finished({}) },
         completed: [
-          { path: "Flow.Finished", output: undefined },
-          { path: "Flow", output: undefined }
+          { path: "Flow.Finished" as const, output: undefined },
+          { path: "Flow" as const, output: undefined }
         ]
       }
-      const machine = Machine.make({ states: states.states, events: Machine.events(Ping), initial: () => logical })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Ping),
+        initial: { target: (to) => to.Flow.initial(), resolve: () => logical }
+      })
         .handle({
-          Flow: { onDone: ({ target }) => target.full.Next(new Next({})) },
+          Flow: {
+            onDone: Machine.transition({
+              target: (to) => to.full.Next(),
+              resolve: ({ target }) => target(new Next({}))
+            })
+          },
           Next: {}
         })
       const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
@@ -266,13 +334,21 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: () => states.initial.A(new A({}))
+        initial: {
+          target: (to) => to.A(),
+          resolve: ({ target }) => target(new A({}))
+        }
       }).handle({
-        A: { always: ({ target }) => target.full.B(new B({})) },
+        A: {
+          always: Machine.transition({
+            target: (to) => to.full.B(),
+            resolve: ({ target }) => target(new B({}))
+          })
+        },
         B: {}
       })
 
-      const ref = yield* Machine.resume(machine, states.initial.A(new A({})))
+      const ref = yield* Machine.resume(machine, { path: "A" as const, value: new A({}) })
       assert.strictEqual((yield* ref.state).path, "A")
       yield* ref.send(new Ping({}))
       yield* Effect.yieldNow
@@ -290,30 +366,39 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(Cancel),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: () => states.initial.Cancelled(new Cancelled({}))
+        initial: {
+          target: (to) => to.Cancelled(),
+          resolve: ({ target }) => target(new Cancelled({}))
+        }
       }).handle({
         Waiting: {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 second",
-            onDone: ({ target }) => target.full.TimedOut(new TimedOut({}))
+            onDone: Machine.transition({
+              target: (to) => to.full.TimedOut(),
+              resolve: ({ target }) => target(new TimedOut({}))
+            })
           }),
           on: {
-            Cancel: ({ target }) => target.full.Cancelled(new Cancelled({}))
+            Cancel: Machine.transition({
+              target: (to) => to.full.Cancelled(),
+              resolve: ({ target }) => target(new Cancelled({}))
+            })
           }
         },
         Cancelled: {},
         TimedOut: {}
       })
 
-      const first = yield* Machine.resume(machine, states.initial.Waiting(new Waiting({})))
+      const first = yield* Machine.resume(machine, { path: "Waiting" as const, value: new Waiting({}) })
       yield* TestClock.adjust("999 millis")
       assert.strictEqual((yield* first.state).path, "Waiting")
       yield* TestClock.adjust("1 millis")
       yield* waitFor(first, (snapshot) => snapshot.state.path === "TimedOut")
       yield* first.stop
 
-      const second = yield* Machine.resume(machine, states.initial.Waiting(new Waiting({})))
+      const second = yield* Machine.resume(machine, { path: "Waiting" as const, value: new Waiting({}) })
       yield* sendAndWait(second, new Cancel({}), (snapshot) => snapshot.state.path === "Cancelled")
       yield* TestClock.adjust("1 second")
       assert.strictEqual((yield* second.state).path, "Cancelled")
@@ -333,22 +418,28 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(LoadedEvent),
-        initial: () => states.initial.Loaded(new Loaded({ value: "initial" }))
+        initial: {
+          target: (to) => to.Loaded(),
+          resolve: ({ target }) => target(new Loaded({ value: "initial" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
-            onDone: ({ output, target }) => target.full.Loaded(new Loaded({ value: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.Loaded(),
+              resolve: ({ output, target }) => target(new Loaded({ value: output }))
+            })
           })
         },
         Loaded: {}
       })
 
-      const ref = yield* Machine.resume(machine, states.initial.Loading(new Loading({})))
+      const ref = yield* Machine.resume(machine, { path: "Loading" as const, value: new Loading({}) })
       yield* waitFor(ref, (snapshot) => snapshot.state.path === "Loaded")
       assert.strictEqual(yield* Ref.get(runs), 1)
-      assert.deepStrictEqual(yield* ref.state, states.initial.Loaded(new Loaded({ value: "fresh" })))
+      assert.deepStrictEqual(yield* ref.state, { path: "Loaded" as const, value: new Loaded({ value: "fresh" }) })
       yield* ref.stop
     }))
 
@@ -368,7 +459,10 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(FailedEvent),
-        initial: () => states.initial.Failed(new Failed({ message: "initial" }))
+        initial: {
+          target: (to) => to.Failed(),
+          resolve: ({ target }) => target(new Failed({ message: "initial" }))
+        }
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -377,16 +471,19 @@ describe("Machine.resume", () => {
               Ref.update(runs, (n) => n + 1).pipe(
                 Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
               ),
-            onFailure: ({ error, target }) => target.full.Failed(new Failed({ message: error.message }))
+            onFailure: Machine.transition({
+              target: (to) => to.full.Failed(),
+              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
+            })
           })
         },
         Failed: {}
       })
 
-      const ref = yield* Machine.resume(machine, states.initial.Loading(new Loading({})))
+      const ref = yield* Machine.resume(machine, { path: "Loading" as const, value: new Loading({}) })
       yield* waitFor(ref, (snapshot) => snapshot.state.path === "Failed")
       assert.strictEqual(yield* Ref.get(runs), 1)
-      assert.deepStrictEqual(yield* ref.state, states.initial.Failed(new Failed({ message: "offline" })))
+      assert.deepStrictEqual(yield* ref.state, { path: "Failed" as const, value: new Failed({ message: "offline" }) })
       yield* ref.stop
     }))
 
@@ -406,10 +503,18 @@ describe("Machine.resume", () => {
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(ChildFinish),
-        initial: () => childStates.initial.ChildIdle(new ChildIdle({ value: 1 }))
+        initial: {
+          target: (to) => to.ChildIdle(),
+          resolve: ({ target }) => target(new ChildIdle({ value: 1 }))
+        }
       }).handle({
         ChildIdle: {
-          on: { ChildFinish: ({ state, target }) => target.full.ChildDone(new ChildDone({ value: state.value + 1 })) }
+          on: {
+            ChildFinish: Machine.transition({
+              target: (to) => to.full.ChildDone(),
+              resolve: ({ state, target }) => target(new ChildDone({ value: state.value + 1 }))
+            })
+          }
         },
         ChildDone: { output: ({ state }) => state.value }
       })
@@ -418,28 +523,34 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ChildOutput),
-        initial: () => states.initial.ChildOutput(new ChildOutput({ value: 0 }))
+        initial: {
+          target: (to) => to.ChildOutput(),
+          resolve: ({ target }) => target(new ChildOutput({ value: 0 }))
+        }
       }).handle({
         Parent: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: ({ output, target }) => target.full.ChildOutput(new ChildOutput({ value: output }))
+            onDone: Machine.transition({
+              target: (to) => to.full.ChildOutput(),
+              resolve: ({ output, target }) => target(new ChildOutput({ value: output }))
+            })
           })
         },
         ChildOutput: {}
       })
 
-      const ref = yield* Machine.resume(machine, states.initial.Parent(new Parent({})))
+      const ref = yield* Machine.resume(machine, { path: "Parent" as const, value: new Parent({}) })
       const active = yield* ref.childChanges(Child).pipe(
         Stream.filter(Option.isSome),
         Stream.take(1),
         Stream.runCollect,
         Effect.map((values) => values[0]!.value)
       )
-      assert.deepStrictEqual(yield* active.state, childStates.initial.ChildIdle(new ChildIdle({ value: 1 })))
+      assert.deepStrictEqual(yield* active.state, { path: "ChildIdle" as const, value: new ChildIdle({ value: 1 }) })
       yield* active.send(new ChildFinish({}))
       yield* waitFor(ref, (snapshot) => snapshot.state.path === "ChildOutput")
-      assert.deepStrictEqual(yield* ref.state, states.initial.ChildOutput(new ChildOutput({ value: 2 })))
+      assert.deepStrictEqual(yield* ref.state, { path: "ChildOutput" as const, value: new ChildOutput({ value: 2 }) })
       assert(Option.isNone(yield* ref.child(Child)))
       yield* ref.stop
     }))
@@ -459,19 +570,35 @@ describe("Machine.resume", () => {
           }
         }
       })
-      const valid = states.initial.Root(new Root({}), (root) =>
-        root
-          .left(new Region({}), (left) => left.Leaf(new Leaf({ value: 1 })))
-          .right(new Region({}), (right) => right.Leaf(new Leaf({ value: 2 }))))
-      const machine = Machine.make({ states: states.states, events: Machine.events(), initial: () => valid })
+      const valid = {
+        path: "Root" as const,
+        value: new Root({}),
+        states: {
+          left: {
+            path: "Root.left" as const,
+            value: new Region({}),
+            state: { path: "Root.left.Leaf" as const, value: new Leaf({ value: 1 }) }
+          },
+          right: {
+            path: "Root.right" as const,
+            value: new Region({}),
+            state: { path: "Root.right.Leaf" as const, value: new Leaf({ value: 2 }) }
+          }
+        }
+      }
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        initial: { target: (to) => to.Root.initial(), resolve: () => valid }
+      })
       const forged: ReadonlyArray<unknown> = [
-        { path: "Missing", value: {} },
-        { path: "Root", value: new Root({}), states: { left: valid.states.left } },
+        { path: "Missing" as const, value: {} },
+        { path: "Root" as const, value: new Root({}), states: { left: valid.states.left } },
         {
           ...valid,
           states: {
             ...valid.states,
-            left: { path: "Root.left", value: new Region({}) }
+            left: { path: "Root.left" as const, value: new Region({}) }
           }
         },
         {
@@ -481,7 +608,7 @@ describe("Machine.resume", () => {
             left: { ...valid.states.left, state: { ...valid.states.left.state, value: { _tag: "Leaf", value: "x" } } }
           }
         },
-        { ...valid, completed: [{ path: "Root.left.Leaf", output: undefined }] },
+        { ...valid, completed: [{ path: "Root.left.Leaf" as const, output: undefined }] },
         { ...valid, completed: {} },
         { ...valid, history: { missing: { mode: "deep", active: [], values: {} } } }
       ]
@@ -501,11 +628,17 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Add),
-        initial: () => states.initial.Count(new Count({ value: 0 }))
+        initial: {
+          target: (to) => to.Count(),
+          resolve: ({ target }) => target(new Count({ value: 0 }))
+        }
       }).handle({
         Count: {
           on: {
-            Add: ({ event, state, target }) => target.full.Count(new Count({ value: state.value + event.value }))
+            Add: Machine.transition({
+              target: (to) => to.full.Count(),
+              resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.value }))
+            })
           }
         }
       })

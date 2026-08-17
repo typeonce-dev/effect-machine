@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 export const MicrowaveState = Schema.TaggedUnion({
   Cooking: { elapsedSeconds: Schema.Number }
@@ -39,12 +39,15 @@ const definition = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: MicrowaveEvents,
-  initial: () =>
-    MicrowaveStates.initial.Oven.from((oven) =>
-      oven
-        .engine.from((engine) => engine.Idle.from())
-        .door.from((door) => door.Closed.from())
-    )
+  initial: {
+    target: (to) => to.Oven.initial(),
+    resolve: ({ target }) =>
+      target.from((oven) =>
+        oven
+          .engine.from((engine) => engine.Idle.from())
+          .door.from((door) => door.Closed.from())
+      )
+  }
 })
 
 export const MicrowaveMachine = definition.handle({
@@ -54,21 +57,38 @@ export const MicrowaveMachine = definition.handle({
         states: {
           Idle: {
             on: {
-              PowerPressed: ({ snapshot, target }) =>
-                MicrowaveStates.matches(snapshot, "Oven.door.Closed")
-                  ? target.local.Cooking.from({ elapsedSeconds: 0 })
-                  : target.none()
+              PowerPressed: Machine.transition({
+                cases: [{
+                  title: "door closed",
+                  when: ({ snapshot }) =>
+                    MicrowaveStates.matches(snapshot, "Oven.door.Closed")
+                      ? Option.some(undefined)
+                      : Option.none(),
+                  target: (to) => to.local.Cooking(),
+                  resolve: ({ target }) => target.from({ elapsedSeconds: 0 })
+                }],
+                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+              })
             }
           },
           Cooking: {
             invoke: Machine.invoke({
               id: "cooking-second",
               after: "1 second",
-              onDone: ({ state, target }) => target.local.Cooking.from({ elapsedSeconds: state.elapsedSeconds + 1 })
+              onDone: Machine.transition({
+                target: (to) => to.local.Cooking(),
+                resolve: ({ state, target }) => target.from({ elapsedSeconds: state.elapsedSeconds + 1 })
+              })
             }),
             on: {
-              PowerPressed: ({ target }) => target.local.Idle.from(),
-              DoorOpened: ({ target }) => target.local.Idle.from()
+              PowerPressed: Machine.transition({
+                target: (to) => to.local.Idle(),
+                resolve: ({ target }) => target.from()
+              }),
+              DoorOpened: Machine.transition({
+                target: (to) => to.local.Idle(),
+                resolve: ({ target }) => target.from()
+              })
             }
           }
         }
@@ -77,12 +97,18 @@ export const MicrowaveMachine = definition.handle({
         states: {
           Closed: {
             on: {
-              DoorOpened: ({ target }) => target.local.Open.from()
+              DoorOpened: Machine.transition({
+                target: (to) => to.local.Open(),
+                resolve: ({ target }) => target.from()
+              })
             }
           },
           Open: {
             on: {
-              DoorClosed: ({ target }) => target.local.Closed.from()
+              DoorClosed: Machine.transition({
+                target: (to) => to.local.Closed(),
+                resolve: ({ target }) => target.from()
+              })
             }
           }
         }

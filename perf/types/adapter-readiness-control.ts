@@ -23,13 +23,16 @@ export const States = Machine.defineStates({
   Ready
 })
 
-export const snapshot = States.initial.Ready(Ready.make({}))
+export const snapshot = { path: "Ready" as const, value: Ready.make({}) }
 
 export const machine = Machine.make({
   id: "perf-readiness",
   states: States.states,
   events: Machine.events(),
-  initial: () => snapshot
+  initial: {
+    target: (to) => to.Ready(),
+    resolve: ({ target }) => target(Ready.make({}))
+  }
 }).handle({
   Flow: {
     history: {
@@ -40,10 +43,10 @@ export const machine = Machine.make({
     states: {
       Idle: {},
       Route: {
-        choice: {
-          targets: ["Ready"],
-          transition: ({ target }) => target.full.Ready(Ready.make({}))
-        }
+        choice: Machine.transition({
+          target: (to) => to.full.Ready(),
+          resolve: ({ target }) => target(Ready.make({}))
+        })
       }
     }
   },
