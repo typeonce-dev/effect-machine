@@ -2,6 +2,15 @@ import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { makeEffectMachineBenchmarkApi } from "../perf/runtime/effect-machine-compatibility.mjs"
 
+test("adapts the state-definition constructor across the public rename", () => {
+  const definitions = { Idle: "schema" }
+  const current = makeEffectMachineBenchmarkApi({ states: (states) => ({ api: "current", states }) })
+  const legacy = makeEffectMachineBenchmarkApi({ defineStates: (states) => ({ api: "legacy", states }) })
+
+  assert.deepEqual(current.states(definitions), { api: "current", states: definitions })
+  assert.deepEqual(legacy.states(definitions), { api: "legacy", states: definitions })
+})
+
 test("adapts static transition definitions only when the new capability is present", () => {
   const calls = []
   const Machine = {

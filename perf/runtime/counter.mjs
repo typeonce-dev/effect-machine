@@ -37,7 +37,7 @@ const CounterEvent = Schema.TaggedUnion({
   Finish: {}
 })
 
-const CounterStates = Machine.states({
+const CounterStates = benchmarkApi.states({
   Count: CounterState.cases.Count,
   Done: {
     schema: CounterState.cases.Done,
@@ -73,7 +73,7 @@ export const counterMachine = Machine.make({
 })
 
 const ParentState = Schema.TaggedUnion({ Active: {} })
-const ParentStates = Machine.states({ Active: ParentState.cases.Active })
+const ParentStates = benchmarkApi.states({ Active: ParentState.cases.Active })
 const CounterChild = Machine.child("counter", counterMachine)
 const counterParentMachine = Machine.make({
   id: "RuntimeBenchmarkCounterParent",
@@ -120,7 +120,7 @@ const HierarchicalEvent = Schema.TaggedUnion({
   Finish: {}
 })
 
-const HierarchicalStates = Machine.states({
+const HierarchicalStates = benchmarkApi.states({
   Active: {
     schema: HierarchicalState.cases.Active,
     initial: "Count",
@@ -175,7 +175,7 @@ const ParallelState = Schema.TaggedUnion({
   Complete: { value: Schema.Number }
 })
 
-const ParallelStates = Machine.states({
+const ParallelStates = benchmarkApi.states({
   Active: {
     schema: ParallelState.cases.Active,
     type: "parallel",
