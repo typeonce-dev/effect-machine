@@ -23,6 +23,9 @@ class Noop extends Schema.TaggedClass<Noop>("StrategyNoop")("Noop", {}) {}
 class Increment extends Schema.TaggedClass<Increment>("StrategyIncrement")("Increment", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("StrategyReenter")("Reenter", {}) {}
 class Finish extends Schema.TaggedClass<Finish>("StrategyFinish")("Finish", {}) {}
+class Select extends Schema.TaggedClass<Select>("StrategySelect")("Select", {
+  value: Schema.Number
+}) {}
 
 const makeFlatMachine = () => {
   const states = Machine.defineStates({
@@ -63,6 +66,56 @@ describe("machine planner and runtime strategies", () => {
       expected: "indexed-flat",
       label: "flat strategy"
     }))
+
+  it.effect("retains the selected conditional branch across generic and indexed-flat planning", () => {
+    const states = Machine.defineStates({ Count })
+    const machine = Machine.make({
+      states: states.states,
+      events: Machine.events(Select),
+      initial: {
+        target: (to) => to.Count(),
+        resolve: ({ target }) => target(new Count({ value: 0 }))
+      }
+    }).handle({
+      Count: {
+        on: {
+          Select: Machine.transition({
+            cases: (branch) => [
+              branch({
+                title: "negative",
+                when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
+                target: (to) => to.none(),
+                resolve: () => undefined
+              }),
+              branch({
+                title: "zero",
+                when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
+                target: (to) => to.none(),
+                resolve: () => undefined
+              })
+            ],
+            otherwise: { target: (to) => to.none(), resolve: () => undefined }
+          })
+        }
+      }
+    })
+    const events = [new Select({ value: -1 }), new Select({ value: 0 }), new Select({ value: 1 })]
+
+    return Effect.gen(function*() {
+      yield* verifyPlannerStrategies({
+        machine,
+        events,
+        expected: "indexed-flat",
+        label: "conditional branch identity"
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      for (let branchIndex = 0; branchIndex < events.length; branchIndex++) {
+        const planned = yield* Machine.plan(machine, initial.state, events[branchIndex]!)
+        assert.strictEqual(planned.microsteps[0]?.transitions[0]?.branchIndex, branchIndex)
+      }
+    })
+  })
 
   it.effect("reenters the source when an explicit targetless transition requests reentry", () =>
     Effect.gen(function*() {

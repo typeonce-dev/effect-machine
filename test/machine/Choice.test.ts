@@ -95,15 +95,40 @@ describe("Machine choice pseudo-states", () => {
         "Flow.Approved"
       ])
       assert.strictEqual(plan.microsteps[0]?.transitions[0]?.source, "Flow.Routing")
+      assert.strictEqual(plan.microsteps[0]?.transitions[0]?.branchIndex, 3)
       assert.strictEqual(Machine.isInitialEvent(plan.microsteps[0]!.event), true)
       assert.strictEqual(caseFactoryCalls, 1)
       const choice = Machine.transitionDefinitions(machine).find(({ source }) => source === "Flow.Routing")
       assert.deepStrictEqual(choice?.branches, [
-        { type: "case", title: "score is perfect", target: "Flow.Approved" },
-        { type: "case", title: "score is negative", target: "Flow.Rejected" },
-        { type: "case", title: "score is zero", target: "Flow.Rejected" },
-        { type: "case", title: "score is at least 70", target: "Flow.Approved" },
-        { type: "otherwise", target: "Flow.Rejected" }
+        {
+          type: "case",
+          title: "score is perfect",
+          target: "Flow.Approved",
+          selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+        },
+        {
+          type: "case",
+          title: "score is negative",
+          target: "Flow.Rejected",
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+        },
+        {
+          type: "case",
+          title: "score is zero",
+          target: "Flow.Rejected",
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+        },
+        {
+          type: "case",
+          title: "score is at least 70",
+          target: "Flow.Approved",
+          selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+        },
+        {
+          type: "otherwise",
+          target: "Flow.Rejected",
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+        }
       ])
       assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
         { path: "Flow" as const, type: "compound" },
@@ -586,23 +611,65 @@ describe("Machine choice pseudo-states", () => {
           { source: "Flow.Routing", trigger: "choice" }
         ]
       )
+      const historyDefinition = Machine.transitionDefinitions(historyChoice).find(
+        ({ source, trigger }) =>
+          source === "Outside" && trigger.type === "event" && trigger.event === "FallbackChoiceResume"
+      )
+      assert.deepStrictEqual(historyDefinition?.branches[0]?.selection, {
+        path: "Flow.Recent",
+        kind: "history",
+        scope: "full"
+      })
     }))
 
   it("inspects declared choice edges without executing the resolver", () => {
-    assert.deepStrictEqual(Machine.transitionDefinitions(machine).filter(({ trigger }) => trigger.type === "choice"), [
+    const definitions = Machine.transitionDefinitions(machine)
+    assert.deepStrictEqual(definitions.filter(({ trigger }) => trigger.type === "choice"), [
       {
         source: "Flow.Routing",
         trigger: { type: "choice" },
         reenter: false,
         branches: [
-          { type: "case", title: "score is perfect", target: "Flow.Approved" },
-          { type: "case", title: "score is negative", target: "Flow.Rejected" },
-          { type: "case", title: "score is zero", target: "Flow.Rejected" },
-          { type: "case", title: "score is at least 70", target: "Flow.Approved" },
-          { type: "otherwise", target: "Flow.Rejected" }
+          {
+            type: "case",
+            title: "score is perfect",
+            target: "Flow.Approved",
+            selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+          },
+          {
+            type: "case",
+            title: "score is negative",
+            target: "Flow.Rejected",
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          },
+          {
+            type: "case",
+            title: "score is zero",
+            target: "Flow.Rejected",
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          },
+          {
+            type: "case",
+            title: "score is at least 70",
+            target: "Flow.Approved",
+            selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+          },
+          {
+            type: "otherwise",
+            target: "Flow.Rejected",
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          }
         ]
       }
     ])
+    const recheck = definitions.find(
+      ({ source, trigger }) => source === "Flow.Approved" && trigger.type === "event" && trigger.event === "Recheck"
+    )
+    assert.deepStrictEqual(recheck?.branches[0]?.selection, {
+      path: "Flow",
+      kind: "initial",
+      scope: "branch"
+    })
   })
 
   it.effect("attributes choice microsteps in MachineTest traces and coverage", () =>

@@ -424,12 +424,13 @@ export interface ExecutionMacrostep<State = unknown> {
 const collectIndexedTransition = (
   machine: Machine.Any,
   transition: TransitionHandler<any, any, any, any>,
-  context: any
+  context: any,
+  evaluate?: NonNullable<MicrostepTransition<any, any, any, any>["evaluate"]>
 ) => {
   let commands: Array<RuntimeCommand> | undefined
   let raisedEvents: Array<any> | undefined
   let emittedEvents: Array<unknown> | undefined
-  const result = transition(context, {
+  const enqueue = {
     raise: (event: unknown) => {
       ;(raisedEvents ??= []).push(decodeEventSync(machine, event))
     },
@@ -442,9 +443,13 @@ const collectIndexedTransition = (
     stop: (child: unknown) => {
       ;(commands ??= []).push({ _tag: "Stop", child: child as any })
     }
-  })
+  }
+  const evaluated = evaluate === undefined
+    ? { result: transition(context, enqueue), branchIndex: 0 }
+    : evaluate(context, enqueue)
   return {
-    state: isNoTarget(result) ? undefined : result,
+    state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
+    branchIndex: evaluated.branchIndex,
     commands: commands ?? emptyExecutionValues,
     raisedEvents: raisedEvents ?? emptyExecutionValues,
     emittedEvents: emittedEvents ?? emptyExecutionValues
@@ -531,7 +536,12 @@ const collectIndexedEvaluatedTransition = (
   state: OwnedIndexedState,
   selection: IndexedSelectedTransition
 ): IndexedEvaluatedTransition => {
-  const transitionResult = collectIndexedTransition(machine, selection.transition.transition, selection.context)
+  const transitionResult = collectIndexedTransition(
+    machine,
+    selection.transition.transition,
+    selection.context,
+    selection.transition.evaluate
+  )
   const unresolvedTarget = transitionResult.state
   validateDeclaredTransitionTarget(
     selection.sourcePath,
@@ -558,6 +568,7 @@ const collectIndexedEvaluatedTransition = (
   if (!changed) {
     return {
       selection,
+      branchIndex: transitionResult.branchIndex,
       unresolvedTarget: unresolvedTarget as any,
       target: target as any,
       next,
@@ -581,6 +592,7 @@ const collectIndexedEvaluatedTransition = (
     : naturalBoundary
   return {
     selection,
+    branchIndex: transitionResult.branchIndex,
     unresolvedTarget: unresolvedTarget as any,
     target: target as any,
     next,
@@ -606,6 +618,7 @@ const indexedMicrostep = (
     source: transition.selection.sourcePath,
     trigger: transition.selection.trigger,
     reenter: transition.selection.transition.reenter,
+    branchIndex: transition.branchIndex,
     target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
     resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
   })
@@ -740,7 +753,8 @@ const planIndexedFlatState = (
           event,
           snapshot: snapshotFromIndexedState(descriptor, current),
           target: getTargetBuilder(machine, sourcePath)
-        }
+        },
+        transition.evaluate
       )
       const target = transitionResult.state
       validateDeclaredTransitionTarget(
@@ -789,6 +803,7 @@ const planIndexedFlatState = (
               source: sourcePath,
               trigger: { type: "event", event: event._tag },
               reenter: transition.reenter,
+              branchIndex: transitionResult.branchIndex,
               target: target === undefined ? undefined : getTargetNodePath(target as any),
               resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any)
             }]
