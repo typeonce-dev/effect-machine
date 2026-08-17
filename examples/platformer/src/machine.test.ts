@@ -2,6 +2,7 @@ import { Machine } from "@typeonce/effect-machine"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
+import { makeMermaidRenderer } from "../../../test/machine/visualization/mermaid.ts"
 import { makeTextRenderer } from "../../../test/machine/visualization/text.ts"
 import {
   airJumpMode,
@@ -15,6 +16,7 @@ import {
 } from "./machine.ts"
 
 const renderMachine = makeTextRenderer<typeof CharacterMachine, CharacterSnapshot>(Machine)
+const renderMermaid = makeMermaidRenderer<typeof CharacterMachine, CharacterSnapshot>(Machine)
 
 const playingSnapshot = (snapshot: CharacterSnapshot) => {
   const locomotion = snapshot.states.locomotion.state
@@ -156,6 +158,7 @@ describe("platformer history integration", () => {
       const initial = yield* Machine.planInitial(CharacterMachine)
       const definitions = Machine.transitionDefinitions(CharacterMachine)
       const rendered = renderMachine(CharacterMachine, initial.state)
+      const mermaid = renderMermaid(CharacterMachine, initial.state)
 
       expect(definitions).toHaveLength(28)
       expect(definitions).toContainEqual({
@@ -173,11 +176,18 @@ describe("platformer history integration", () => {
         }]
       })
       expect(definitions.every(({ branches }) => branches.length > 0)).toBe(true)
-      expect(rendered).toContain("◇ on: WallJump [reenter] → AirJumpWallLock")
+      expect(rendered).toContain("◇ on: WallJump [reenter]")
+      expect(rendered).toContain("└┄ → AirJumpWallLock")
+      expect(rendered).not.toContain("[otherwise] → ∅")
       expect(rendered).toContain(
         "Candidate events: Move, DownPressed, JumpPressed, Pause, WallJump, WallContact, Reset"
       )
       expect(rendered).not.toContain("Observed event samples")
+      expect(mermaid).toMatch(/^stateDiagram-v2\n  direction LR/)
+      expect(mermaid).toContain("state_13 --> state_15: WallJump [reenter]")
+      expect(mermaid).toContain("state_23 --> state_25: WallContact [left wall]")
+      expect(mermaid).toContain("state_23 --> state_24: WallContact [otherwise]")
+      expect(mermaid).not.toContain("∅")
     }))
   })
 

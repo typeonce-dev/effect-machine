@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
+import { makeMermaidRenderer } from "./visualization/mermaid.js"
 import { makeTextRenderer } from "./visualization/text.js"
 
 class Application extends Schema.TaggedClass<Application>("Application")("Application", {}) {}
@@ -124,6 +125,7 @@ const machine = Machine.make({
 })
 
 const renderMachine = makeTextRenderer<typeof machine, typeof initial>(Machine)
+const renderMermaidMachine = makeMermaidRenderer<typeof machine, typeof initial>(Machine)
 
 const LifecycleStates = Machine.defineStates({
   idle: Idle,
@@ -334,12 +336,14 @@ describe("Machine structural visualization", () => {
         renderLifecycleMachine(lifecycleMachine, planned.state),
         [
           "lifecycle-inspection",
-          "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
+          "● active  ○ inactive  ◇ transition  ┄ branch → target",
           "",
           "├─ ○ idle",
-          "│  └─ ◇ always → workflow",
+          "│  └─ ◇ always",
+          "│     └┄ → workflow",
           "├─ ○ workflow [compound, initial: complete]",
-          "│  ├─ ◇ done → disabled",
+          "│  ├─ ◇ done",
+          "│  │  └┄ → disabled",
           "│  └─ ○ complete [final]",
           "└─ ● disabled",
           "",
@@ -353,25 +357,43 @@ describe("Machine structural visualization", () => {
       renderMachine(machine, initial),
       [
         "inspection-example",
-        "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
+        "● active  ○ inactive  ◇ transition  ┄ branch → target",
         "",
         "├─ ● application [parallel]",
         "│  ├─ ● workflow [compound, initial: idle]",
         "│  │  ├─ ● idle",
-        "│  │  │  └─ ◇ on: Start → running, Refresh → ∅",
+        "│  │  │  └─ ◇ on: Start",
+        "│  │  │     └┄ → running",
         "│  │  ├─ ○ running [compound, initial: editing]",
         "│  │  │  ├─ ○ editing",
         "│  │  │  └─ ○ complete [final]",
         "│  │  └─ ○ recent [history, shallow]",
         "│  └─ ● connection [compound, initial: online]",
         "│     ├─ ● online",
-        "│     │  └─ ◇ on: Disconnect → offline",
+        "│     │  └─ ◇ on: Disconnect",
+        "│     │     └┄ → offline",
         "│     └─ ○ offline",
         "└─ ○ disabled",
         "",
         "Candidate events: Start, Refresh, Disconnect"
       ].join("\n")
     )
+  })
+
+  it("renders the full structure and concrete transitions as Mermaid", () => {
+    const rendered = renderMermaidMachine(machine, initial)
+
+    assert.isTrue(rendered.startsWith("stateDiagram-v2\n  direction LR"))
+    assert.include(rendered, "state \"● application [parallel]\" as state_0")
+    assert.include(rendered, "state \"● workflow\" as state_1")
+    assert.include(rendered, "[*] --> state_2")
+    assert.include(rendered, "state_5 --> [*]")
+    assert.include(rendered, "state \"○ recent [history: shallow]\" as state_6")
+    assert.include(rendered, "[*] --> state_0")
+    assert.include(rendered, "state_2 --> state_3: Start")
+    assert.include(rendered, "state_8 --> state_9: Disconnect")
+    assert.notMatch(rendered, /state_\d+ --> state_\d+: Refresh/)
+    assert.notInclude(rendered, "Candidate events")
   })
 
   it.effect("accepts a concrete leaf beneath a declared compound target", () =>

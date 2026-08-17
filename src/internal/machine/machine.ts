@@ -220,7 +220,13 @@ const makeTargetSelector = (
   branch[root.key] = makeSelectionNode(stateNodes, root.path, "branch")
   const local: Record<string, unknown> = {}
   const localScope = getLocalTargetScope(stateNodes, source)
-  if (localScope !== undefined) addSelectionChildren(local, stateNodes, localScope, "local")
+  if (localScope !== undefined) {
+    const localScopeNode = getTargetBuilderNode(stateNodes, localScope)
+    if (localScopeNode.schema !== undefined) {
+      local.with = makeSelectionMethod("state", localScope, "local")
+    }
+    addSelectionChildren(local, stateNodes, localScope, "local")
+  }
   return {
     none: makeSelectionMethod("none", undefined, "local"),
     local,
@@ -263,7 +269,14 @@ const getSelectionBuilder = (
   } else if (selection.scope === "local") {
     builder = target.local
     const scope = getLocalTargetScope(stateNodes, source)
-    if (scope !== undefined) parts = selection.path!.slice(scope.length + 1).split(".")
+    if (scope !== undefined) {
+      if (selection.path === scope) {
+        builder = builder.with
+        parts = []
+      } else {
+        parts = selection.path!.slice(scope.length + 1).split(".")
+      }
+    }
   } else if (selection.scope === "branch") {
     builder = target.branch
   } else {
