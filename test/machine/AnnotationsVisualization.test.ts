@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { Machine } from "../../src/index.js"
+import { makeMermaidRenderer } from "./visualization/mermaid.js"
 import { makeTextRenderer } from "./visualization/text.js"
 
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
@@ -43,6 +44,10 @@ const renderMachine = makeTextRenderer<
   typeof machine,
   Machine.Machine.Snapshot<typeof States.states>
 >(Machine)
+const renderMermaid = makeMermaidRenderer<
+  typeof machine,
+  Machine.Machine.Snapshot<typeof States.states>
+>(Machine)
 
 describe("Machine annotation visualization", () => {
   it("uses titles for active, choice, and history display while preserving structural keys", () => {
@@ -50,7 +55,7 @@ describe("Machine annotation visualization", () => {
       renderMachine(machine),
       [
         "Machine",
-        "● active  ○ inactive  ◇ transition (→ target, ∅ none)",
+        "● active  ○ inactive  ◇ transition  ┄ branch → target",
         "",
         "└─ ○ Document workflow (Workflow) [compound, initial: Idle]",
         "   ├─ ○ Waiting for edits (Idle)",
@@ -59,5 +64,15 @@ describe("Machine annotation visualization", () => {
         "   └─ ○ Done"
       ].join("\n")
     )
+  })
+
+  it("renders titled choice, history, and final states as Mermaid", () => {
+    const rendered = renderMermaid(machine)
+
+    assert.include(rendered, "state \"○ Document workflow (Workflow)\" as state_0")
+    assert.include(rendered, "state \"○ Select persistence route (Routing)\" as state_2")
+    assert.include(rendered, "state state_2 <<choice>>")
+    assert.include(rendered, "state \"○ Previous workflow state (Recent) [history: deep]\" as state_3")
+    assert.include(rendered, "state \"○ Done\" as state_4")
   })
 })

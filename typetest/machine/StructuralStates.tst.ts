@@ -148,7 +148,10 @@ describe("structural active state types", () => {
                 },
                 on: {
                   Select: Machine.transition({
-                    target: (to) => to.local.Loading(),
+                    target: (to) => {
+                      expect(to.local).type.not.toHaveProperty("with")
+                      return to.local.Loading()
+                    },
                     resolve: ({ containingState, ancestors, state, target }) => {
                       expect(state).type.toBe<undefined>()
                       expect(containingState).type.toBe<undefined>()

@@ -3,6 +3,7 @@ import { Duration, Effect, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import { activityDefinitions } from "../../../src/internal/machine/activities.js"
+import { makeMermaidRenderer } from "../../machine/visualization/mermaid.js"
 import { makeTextRenderer } from "../../machine/visualization/text.js"
 
 class Loading extends Schema.TaggedClass<Loading>("Loading")("Loading", {}) {}
@@ -79,6 +80,10 @@ const activityMachine = Machine.make({
 })
 
 const renderActivityMachine = makeTextRenderer<
+  typeof activityMachine,
+  Machine.Machine.Snapshot<typeof activityStates.states>
+>(Machine)
+const renderMermaidActivityMachine = makeMermaidRenderer<
   typeof activityMachine,
   Machine.Machine.Snapshot<typeof activityStates.states>
 >(Machine)
@@ -282,12 +287,9 @@ describe("machine activity metadata", () => {
       renderActivityMachine(activityMachine, { path: "Loading" as const, value: new Loading({}) }),
       [
         "activity-inspection",
-        "● active  ○ inactive  ◇ transition (→ target, ∅ none)  ◆ activity",
+        "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ activity",
         "",
         "├─ ● Loading",
-        "│  ├─ ◇ invoke load-document done → ∅",
-        "│  ├─ ◇ invoke load-document failure → ∅",
-        "│  ├─ ◇ invoke load-timeout done → ∅",
         "│  ├─ ◆ process: poll-server",
         "│  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
         "│  ├─ ◆ timer: load-timeout [10s]",
@@ -298,5 +300,19 @@ describe("machine activity metadata", () => {
         "Candidate events: none"
       ].join("\n")
     )
+  })
+
+  it("renders state-owned activities inside their Mermaid state", () => {
+    const rendered = renderMermaidActivityMachine(activityMachine, {
+      path: "Loading" as const,
+      value: new Loading({})
+    })
+
+    assert.include(
+      rendered,
+      "state_0: process / poll-server · effect / load-document · timer / load-timeout (10s) · machine / child → document-worker"
+    )
+    assert.notInclude(rendered, "success: dynamic")
+    assert.notInclude(rendered, "note right of")
   })
 })
