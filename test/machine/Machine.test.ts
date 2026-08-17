@@ -101,6 +101,35 @@ const assertMachineSchemaEncodeError = (
 const unsafeTagged = <A extends { readonly _tag: PropertyKey }>(value: A): A => value
 
 describe("Machine", () => {
+  it("creates independent one-shot implementations from one definition", () => {
+    class Stable extends Schema.TaggedClass<Stable>("OneShotStable")("Stable", {}) {}
+    class Ping extends Schema.TaggedClass<Ping>("OneShotPing")("Ping", {}) {}
+    const states = Machine.states({ Stable })
+    const definition = Machine.make({
+      states: states.states,
+      events: Machine.events(Ping),
+      initial: {
+        target: (to) => to.Stable(),
+        resolve: ({ target }) => target(new Stable({}))
+      }
+    })
+    const transition = Machine.transition({
+      target: (to) => to.none(),
+      resolve: () => undefined
+    })
+
+    const handlingPing = definition.handle({ Stable: { on: { Ping: transition } } })
+    const ignoringPing = definition.handle({ Stable: {} })
+
+    assert.isFalse("handle" in handlingPing)
+    assert.isFalse("handle" in ignoringPing)
+    assert.deepStrictEqual(Machine.transitionDefinitions(handlingPing).map(({ trigger }) => trigger), [{
+      type: "event",
+      event: "Ping"
+    }])
+    assert.deepStrictEqual(Machine.transitionDefinitions(ignoringPing), [])
+  })
+
   it.effect("captures event dispatch definitions supplied to handle", () =>
     Effect.gen(function*() {
       class Stable extends Schema.TaggedClass<Stable>("Stable")("Stable", {}) {}

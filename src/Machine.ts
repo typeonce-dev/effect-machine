@@ -96,7 +96,7 @@ export const isInitialEvent = (u: unknown): u is InitialEvent => hasProperty(u, 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
 /**
- * A schema-first machine definition.
+ * A schema-first machine implementation.
  *
  * **Details**
  *
@@ -222,33 +222,6 @@ export interface Machine<
   readonly handlers: Machine.StateConfigs<States, Events, Emits, UnhandledStates, Machine.TagOf<Events[number]>, E, R>
 
   /**
-   * Adds typed state handlers and returns the refined machine definition.
-   * Successive calls implement the remaining unhandled states while retaining
-   * accumulated errors, services, final states, and output evidence.
-   * Event dispatch maps and transition descriptors are captured by value, so
-   * later mutation of the objects supplied to this call cannot alter the
-   * resulting machine.
-   *
-   * @since 0.4.0
-   */
-  readonly handle: Machine.Handler<
-    States,
-    Events,
-    Emits,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    OutputStates,
-    InputEvents,
-    ParentEvents
-  >
-
-  /**
    * Machine-bound equivalent of {@link invoke}. Both forms preserve this
    * machine's public input and parent protocols in invocation callbacks;
    * `Machine.invoke(...)` inside `handle(...)` is the canonical inline form.
@@ -261,6 +234,93 @@ export interface Machine<
   readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
   /** @internal */
   readonly initialDefinition: Machine.InitialDefinition
+}
+
+/**
+ * A schema-first machine definition that can produce independent
+ * implementations.
+ *
+ * **Details**
+ *
+ * Call `handle` once for each implementation. The returned {@link Machine}
+ * does not expose `handle`, so handler configuration cannot be accumulated or
+ * replaced through chained calls. Calling `handle` multiple times on the same
+ * definition remains supported and creates independent machines.
+ *
+ * @category models
+ * @since 0.15.0
+ */
+export interface Definition<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Input extends Schema.Top = typeof Schema.Void,
+  InitialE = never,
+  InitialR = never,
+  FinalStates extends Machine.StateIdentifier<States> = never,
+  Output = never,
+  Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+> extends
+  Machine<
+    States,
+    Events,
+    Input,
+    Machine.StateIdentifier<States>,
+    never,
+    never,
+    InitialE,
+    InitialR,
+    FinalStates,
+    Output,
+    Emits,
+    never,
+    InputEvents,
+    ParentEvents
+  >
+{
+  /**
+   * Adds typed state handlers and returns an independent machine
+   * implementation. Event dispatch maps and transition descriptors are
+   * captured by value, so later mutation of the supplied objects cannot alter
+   * the resulting machine.
+   *
+   * @since 0.4.0
+   */
+  readonly handle: Machine.Handler<
+    States,
+    Events,
+    Emits,
+    Input,
+    Machine.StateIdentifier<States>,
+    never,
+    never,
+    InitialE,
+    InitialR,
+    FinalStates,
+    Output,
+    never,
+    InputEvents,
+    ParentEvents
+  >
+}
+
+/**
+ * Namespace containing type-level members associated with {@link Definition}.
+ *
+ * @category models
+ * @since 0.15.0
+ */
+export declare namespace Definition {
+  /**
+   * Any schema-first machine definition.
+   *
+   * @category models
+   * @since 0.15.0
+   */
+  export interface Any extends Machine.Any {
+    readonly handle: any
+  }
 }
 
 export {
@@ -2435,8 +2495,6 @@ export declare namespace Machine {
     readonly makeTargetBuilder: any
     /** @internal */
     readonly handlers: any
-    /** @internal */
-    readonly handle: any
     /** @internal */
     readonly invoke: any
     /** @internal */
@@ -7051,19 +7109,15 @@ type MakeResult<
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
-> = Machine<
+> = Definition<
   States,
   readonly [...InputEvents, ...InternalEvents],
   Input,
-  Machine.StateIdentifier<States>,
-  never,
-  never,
   InitialE,
   InitialR,
   Machine.FinalStateFromDefinition<States>,
   Machine.TerminalOutput<States>,
   Emits,
-  never,
   InputEvents,
   ParentEvents
 >

@@ -1,6 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Context, Data, Effect } from "effect"
-import { Done, Flow, Idle, machine, Running } from "./successive-handle-control.js"
+import { Done, Flow, Idle, machine, Running } from "./definition-variants-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
   true :
@@ -8,12 +7,7 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
 
-class IdleService extends Context.Service<IdleService, string>()("perf/successive/IdleService") {}
-class RunningService extends Context.Service<RunningService, string>()("perf/successive/RunningService") {}
-class IdleFailure extends Data.TaggedError("IdleFailure")<{}> {}
-class RunningFailure extends Data.TaggedError("RunningFailure")<{}> {}
-
-const withFlow = machine.handle({
+const complete = machine.handle({
   Flow: {
     history: {
       recent: {
@@ -26,12 +20,31 @@ const withFlow = machine.handle({
           target: (to) => to.local.Idle(),
           resolve: ({ target }) => target(Idle.make({}))
         })
+      },
+      Idle: {
+        on: {
+          Start: Machine.transition({
+            target: (to) => to.local.Running(),
+            resolve: ({ target }) => target(Running.make({}))
+          })
+        }
+      },
+      Running: {
+        on: {
+          Finish: Machine.transition({
+            target: (to) => to.local.Done(),
+            resolve: ({ event, target }) => target(Done.make({ value: event.value }))
+          })
+        }
+      },
+      Done: {
+        output: ({ state }) => state.value
       }
     }
   }
 })
 
-const withIdle = withFlow.handle({
+const idleOnly = machine.handle({
   Flow: {
     states: {
       Idle: {
@@ -46,7 +59,7 @@ const withIdle = withFlow.handle({
   }
 })
 
-const withRunning = withIdle.handle({
+const runningOnly = machine.handle({
   Flow: {
     states: {
       Running: {
@@ -61,16 +74,6 @@ const withRunning = withIdle.handle({
   }
 })
 
-const complete = withRunning.handle({
-  Flow: {
-    states: {
-      Done: {
-        output: ({ state }) => state.value
-      }
-    }
-  }
-})
-
 type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof complete>, never>>
 type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof complete>, never>>
 type OutputIsExact = Expect<Equal<Machine.Machine.Output<typeof complete>, string>>
@@ -78,5 +81,7 @@ type EveryStateIsHandled = Expect<Equal<Machine.Machine.UnhandledStates<typeof c
 type ErrorIsNotAny = Expect<Equal<IsAny<Machine.Machine.Error<typeof complete>>, false>>
 type ServicesAreNotAny = Expect<Equal<IsAny<Machine.Machine.Services<typeof complete>>, false>>
 
+void idleOnly
+void runningOnly
 void Machine.planInitial(complete)
 export type { ErrorIsExact, ErrorIsNotAny, EveryStateIsHandled, OutputIsExact, ServicesAreExact, ServicesAreNotAny }

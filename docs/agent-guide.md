@@ -43,6 +43,12 @@ declared:
 4. `Machine.make({...}).handle({...})`.
 5. Child descriptors, then runtime, Atom, or Cluster adapters.
 
+`Machine.make` returns a reusable definition. Each `handle` call creates one
+independent machine implementation and the result does not expose `handle`
+again. Put one implementation's complete behavior in a single handler tree;
+call `handle` again on the original definition for a separate production,
+testing, or simulation variant.
+
 `Schema.TaggedUnion` avoids one class declaration per case:
 
 ```ts

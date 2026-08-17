@@ -72,7 +72,7 @@ const scenarios = [
     file: "handle.ts",
     control: "make",
     // The first statically captured transition pays the one-time constructor
-    // inference cost. Deeper and successive-handler scenarios gate scaling.
+    // inference cost. Deeper and definition-variant scenarios gate scaling.
     maxInstantiations: 70_000,
     maxMarginalInstantiations: 56_000
   },
@@ -147,16 +147,16 @@ const scenarios = [
     maxMarginalInstantiations: 142_000
   },
   {
-    id: "successive-handle-control",
-    label: "successive machine.handle control",
-    file: "successive-handle-control.ts",
+    id: "definition-variants-control",
+    label: "machine definition variants control",
+    file: "definition-variants-control.ts",
     hidden: true
   },
   {
-    id: "successive-handle",
-    label: "machine.handle (4 successive calls)",
-    file: "successive-handle.ts",
-    control: "successive-handle-control",
+    id: "definition-variants",
+    label: "machine definition (3 independent implementations)",
+    file: "definition-variants.ts",
+    control: "definition-variants-control",
     maxInstantiations: 166_000,
     maxMarginalInstantiations: 147_000
   },

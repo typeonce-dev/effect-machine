@@ -79,50 +79,60 @@ const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
   "application.workflow"
 > => initial
 
-const machine = Machine.make({
+const machineDefinition = Machine.make({
   id: "inspection-example",
   states: States.states,
   events: Machine.events(Start, Disconnect, Refresh),
   initial: { target: (to) => to.application.initial(), resolve: () => initial }
-}).handle({
-  application: {
-    states: {
-      workflow: {
-        history: {
-          recent: {
-            default: initialWorkflow
-          }
-        },
-        states: {
-          idle: {
-            on: {
-              Start: Machine.transition({
-                target: (to) => to.local.running(),
-                resolve: ({ target }) => target(new Running({}), (running) => running.editing(new Editing({})))
-              }),
-              Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+})
+
+const makeMachine = (unsafeStart = false) =>
+  machineDefinition.handle({
+    application: {
+      states: {
+        workflow: {
+          history: {
+            recent: {
+              default: initialWorkflow
             }
           },
-          running: {
-            initialize: ({ builder }) => builder(new Editing({}))
+          states: {
+            idle: {
+              on: {
+                Start: unsafeStart ?
+                  Machine.transition({
+                    target: (to) => to.full.disabled(),
+                    resolve: ({ target }) => ({ ...target(new Disabled({})), path: "application.workflow.idle" }) as any
+                  }) :
+                  Machine.transition({
+                    target: (to) => to.local.running(),
+                    resolve: ({ target }) => target(new Running({}), (running) => running.editing(new Editing({})))
+                  }),
+                Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+              }
+            },
+            running: {
+              initialize: ({ builder }) => builder(new Editing({}))
+            }
           }
-        }
-      },
-      connection: {
-        states: {
-          online: {
-            on: {
-              Disconnect: Machine.transition({
-                target: (to) => to.local.offline(),
-                resolve: ({ target }) => target(new Offline({}))
-              })
+        },
+        connection: {
+          states: {
+            online: {
+              on: {
+                Disconnect: Machine.transition({
+                  target: (to) => to.local.offline(),
+                  resolve: ({ target }) => target(new Offline({}))
+                })
+              }
             }
           }
         }
       }
     }
-  }
-})
+  })
+
+const machine = makeMachine()
 
 const renderMachine = makeTextRenderer<typeof machine, typeof initial>(Machine)
 const renderMermaidMachine = makeMermaidRenderer<typeof machine, typeof initial>(Machine)
@@ -142,7 +152,7 @@ const LifecycleStates = Machine.states({
   disabled: Disabled
 })
 
-const lifecycleMachine = Machine.make({
+const lifecycleDefinition = Machine.make({
   id: "lifecycle-inspection",
   states: LifecycleStates.states,
   events: Machine.events(),
@@ -150,20 +160,31 @@ const lifecycleMachine = Machine.make({
     target: (to) => to.idle(),
     resolve: ({ target }) => target(new Idle({}))
   }
-}).handle({
-  idle: {
-    always: Machine.transition({
-      target: (to) => to.full.workflow(),
-      resolve: ({ target }) => target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
-    })
-  },
-  workflow: {
-    onDone: Machine.transition({
-      target: (to) => to.full.disabled(),
-      resolve: ({ target }) => target(new Disabled({}))
-    })
-  }
 })
+
+const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined) =>
+  lifecycleDefinition.handle({
+    idle: {
+      always: Machine.transition({
+        target: (to) => to.full.workflow(),
+        resolve: ({ target }) => {
+          const selected = target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
+          return unsafe === "always" ? ({ ...selected, path: "idle" } as any) : selected
+        }
+      })
+    },
+    workflow: {
+      onDone: Machine.transition({
+        target: (to) => to.full.disabled(),
+        resolve: ({ target }) => {
+          const selected = target(new Disabled({}))
+          return unsafe === "done" ? ({ ...selected, path: "workflow" } as any) : selected
+        }
+      })
+    }
+  })
+
+const lifecycleMachine = makeLifecycleMachine()
 
 const renderLifecycleMachine = makeTextRenderer<
   typeof lifecycleMachine,
@@ -412,25 +433,7 @@ describe("Machine structural visualization", () => {
 
   it.effect("rejects a runtime target outside its declaration", () =>
     Effect.gen(function*() {
-      const unsafe = machine.handle({
-        application: {
-          states: {
-            workflow: {
-              states: {
-                idle: {
-                  on: {
-                    Start: Machine.transition({
-                      target: (to) => to.full.disabled(),
-                      resolve: ({ target }) =>
-                        ({ ...target(new Disabled({})), path: "application.workflow.idle" }) as any
-                    })
-                  }
-                }
-              }
-            }
-          }
-        }
-      })
+      const unsafe = makeMachine(true)
       const exit = yield* Effect.exit(Machine.plan(unsafe, initial, new Start({})))
 
       assert.strictEqual(exit._tag, "Failure")
@@ -442,18 +445,7 @@ describe("Machine structural visualization", () => {
 
   it.effect("rejects runtime targets outside always and onDone declarations", () =>
     Effect.gen(function*() {
-      const unsafeAlways = lifecycleMachine.handle({
-        idle: {
-          always: Machine.transition({
-            target: (to) => to.full.workflow(),
-            resolve: ({ target }) =>
-              ({
-                ...target(new Workflow({}), (workflow) => workflow.complete(new Complete({}))),
-                path: "idle"
-              }) as any
-          })
-        }
-      })
+      const unsafeAlways = makeLifecycleMachine("always")
       const alwaysExit = yield* Effect.exit(Machine.planInitial(unsafeAlways))
 
       assert.strictEqual(alwaysExit._tag, "Failure")
@@ -461,14 +453,7 @@ describe("Machine structural visualization", () => {
         assert.include(Cause.pretty(alwaysExit.cause), "selected \"workflow\" but constructed \"idle\"")
       }
 
-      const unsafeDone = lifecycleMachine.handle({
-        workflow: {
-          onDone: Machine.transition({
-            target: (to) => to.full.disabled(),
-            resolve: ({ target }) => ({ ...target(new Disabled({})), path: "workflow" }) as any
-          })
-        }
-      })
+      const unsafeDone = makeLifecycleMachine("done")
       const doneExit = yield* Effect.exit(Machine.planInitial(unsafeDone))
 
       assert.strictEqual(doneExit._tag, "Failure")

@@ -444,14 +444,15 @@ describe("Machine", () => {
   })
 
   it("planInitial is synchronous at the transition boundary", () => {
-    const machine = Machine.make({
+    const definition = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
       initial: {
         target: (to) => to.down(),
         resolve: ({ target }) => (target(new Down({})))
       }
-    }).handle({
+    })
+    const machine = definition.handle({
       down: {
         entry: () => {}
       }
@@ -476,9 +477,10 @@ describe("Machine", () => {
         ) => Effect.succeed(target(new Down({})))
       }
     })
-    expect(machine.handle).type.not.toBeCallableWith({
+    expect(definition.handle).type.not.toBeCallableWith({
       down: { entry: () => Effect.void }
     })
+    expect(machine).type.not.toHaveProperty("handle")
   })
 
   it("types the closed enqueue protocol without exposing Effects", () => {
@@ -1468,6 +1470,24 @@ describe("Machine", () => {
       on: {}
     })
     expect(machine.handle).type.not.toBeCallableWith((up: unknown) => up)
+  })
+
+  it("allows independent implementations but removes handle from each result", () => {
+    const definition = Machine.make({
+      states: UpStates.states,
+      events: Machine.events(SignIn),
+      initial: {
+        target: (to) => to.down(),
+        resolve: ({ target }) => target(new Down({}))
+      }
+    })
+
+    const first = definition.handle({ down: {} })
+    const second = definition.handle({ down: {} })
+
+    expect(definition).type.toHaveProperty("handle")
+    expect(first).type.not.toHaveProperty("handle")
+    expect(second).type.not.toHaveProperty("handle")
   })
 
   it("final output callbacks receive lifecycle events", () => {
