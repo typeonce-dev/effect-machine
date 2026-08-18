@@ -180,6 +180,45 @@ describe("Machine live inspection", () => {
       }
     })))
 
+  it.effect("represents Stream invokes as owned Stream activities", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const active = Machine.make({
+        id: "stream-activity-root",
+        states: states.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target(new Idle({}))
+        }
+      }).handle({
+        Idle: {
+          invoke: Machine.invoke({
+            id: "updates",
+            stream: () => Stream.never,
+            onDone: { target: Machine.targetless }
+          })
+        }
+      })
+      const prepared = yield* Machine.prepare(active)
+      const collected = yield* prepared.inspection.pipe(
+        Stream.runCollect,
+        Effect.forkScoped({ startImmediately: true })
+      )
+      yield* Effect.yieldNow
+      const ref = yield* prepared.start
+      yield* Effect.yieldNow
+      yield* ref.stop
+
+      const records = Array.from(yield* Fiber.join(collected))
+      const started = records.find((record) => record._tag === "ActivityStarted")
+      assert.ok(started !== undefined && started._tag === "ActivityStarted")
+      if (started?._tag === "ActivityStarted") {
+        assert.strictEqual(started.activity.kind, "Stream")
+        assert.strictEqual(started.activity.id, "updates")
+        assert.strictEqual(started.activity.ownerPath, "Idle")
+      }
+    })))
+
   it.effect("correlates an explicit child-to-parent send with both local subjects", () =>
     Effect.scoped(Effect.gen(function*() {
       class ChildIdle extends Schema.TaggedClass<ChildIdle>("InspectionChildIdle")("ChildIdle", {}) {}

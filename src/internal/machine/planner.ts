@@ -952,7 +952,9 @@ const selectInvocationTransition = <
     return String(id) === event.id
   })
   if (invoke === undefined) return []
-  const handler = event.type === "done"
+  const handler = event.type === "element"
+    ? invoke.onElement
+    : event.type === "done"
     ? invoke.onDone
     : event.type === "failure"
     ? invoke.onFailure
@@ -968,7 +970,9 @@ const selectInvocationTransition = <
     snapshot,
     target: getTargetBuilder(machine, event.path),
     id: event.id,
-    ...(event.type === "done"
+    ...(event.type === "element"
+      ? { element: event.element }
+      : event.type === "done"
       ? { output: event.output }
       : event.type === "failure"
       ? { error: event.error }

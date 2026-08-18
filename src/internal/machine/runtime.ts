@@ -355,6 +355,9 @@ interface ProcessAddress<in Event> {
     source: Inspection.Subject | undefined,
     causedBy: Inspection.Causation | undefined
   ) => Effect.Effect<void, StoppedError>
+  readonly [acknowledgedSend]?: (
+    event: Event
+  ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
 }
 
 const isMachineTarget = (value: unknown): value is MachineTarget<unknown> =>
@@ -843,7 +846,10 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
     private readonly registry: ChildRegistry,
     private readonly self: ProcessAddress<any>,
     private readonly runtime: ProcessRuntime,
-    private readonly services?: Context.Context<any>
+    private readonly services?: Context.Context<any>,
+    private readonly sendAcknowledged?: (
+      event: unknown
+    ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
   ) {}
 
   private has(key: string): boolean {
@@ -886,7 +892,15 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         ...this.self,
         send: (event) => options.sendParent(isCurrent, event),
         sendInspected: (event, source, causedBy) =>
-          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void
+          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void,
+        ...(this.sendAcknowledged === undefined
+          ? undefined
+          : {
+            [acknowledgedSend]: (event: unknown) =>
+              isCurrent()
+                ? this.sendAcknowledged!(event)
+                : Effect.interrupt
+          })
       }
       const startOptions: StartInternalOptions = {
         detached: true,
@@ -1048,7 +1062,10 @@ const childlessRuntime: ChildRuntime = {
 const makeChildRuntimeSync = (
   self: ProcessAddress<any>,
   runtime: ProcessRuntime,
-  services?: Context.Context<any>
+  services?: Context.Context<any>,
+  sendAcknowledged?: (
+    event: unknown
+  ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
 ): ChildRuntime => {
   // Child-registry decisions are synchronous and every access below runs in
   // one Effect.sync / Effect.suspend step. Keep the unobserved representation
@@ -1290,15 +1307,18 @@ const makeChildRuntimeSync = (
     changes,
     sendTo,
     stop,
-    owned: new OwnedChildRuntimeImpl(registry, self, runtime, services)
+    owned: new OwnedChildRuntimeImpl(registry, self, runtime, services, sendAcknowledged)
   }
 }
 
 const makeChildRuntime = (
   self: ProcessAddress<any>,
   runtime: ProcessRuntime,
-  services?: Context.Context<any>
-): Effect.Effect<ChildRuntime> => Effect.sync(() => makeChildRuntimeSync(self, runtime, services))
+  services?: Context.Context<any>,
+  sendAcknowledged?: (
+    event: unknown
+  ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
+): Effect.Effect<ChildRuntime> => Effect.sync(() => makeChildRuntimeSync(self, runtime, services, sendAcknowledged))
 
 // `Machine.logic` permits an arbitrary Effect program, including programs that
 // suspend or supervise their own fibers. Keep its two-fiber worker/supervisor
@@ -1376,6 +1396,23 @@ const startGenericInternal: <
         Effect.tap(() => Effect.sync(() => publishInspectedSent(inspector, subject!, message)))
       )
     })
+  const sendAcknowledged:
+    | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
+    | undefined = logic.execution?._tag !== "Compiled"
+      ? undefined
+      : (event) =>
+        Effect.uninterruptibleMask((restore) =>
+          Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
+            Effect.flatMap((deferred) => {
+              const offered = inspector === undefined
+                ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
+                : offerInspected!(event, undefined, undefined, deferred)
+              return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
+            }),
+            Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
+          )
+        ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
+
   const self: ProcessAddress<Event> = {
     id,
     sessionId,
@@ -1396,22 +1433,6 @@ const startGenericInternal: <
       ? undefined
       : { inspectionSubject: subject!, sendInspected: offerInspected! })
   }
-  const sendAcknowledged:
-    | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
-    | undefined = logic.execution?._tag !== "Compiled"
-      ? undefined
-      : (event) =>
-        Effect.uninterruptibleMask((restore) =>
-          Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
-            Effect.flatMap((deferred) => {
-              const offered = inspector === undefined
-                ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
-                : offerInspected!(event, undefined, undefined, deferred)
-              return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
-            }),
-            Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
-          )
-        ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
 
   let {
     changes: childChanges,
@@ -1431,7 +1452,12 @@ const startGenericInternal: <
       sendTo,
       spawn,
       stop: stopChild
-    } = yield* makeChildRuntime(self, runtime))
+    } = yield* makeChildRuntime(
+      self,
+      runtime,
+      undefined,
+      sendAcknowledged === undefined ? undefined : (event) => sendAcknowledged(event as Event)
+    ))
   }
   const cleanupStartupFailure = <A, E>(exit: Exit.Exit<A, E>): Effect.Effect<void> => {
     if (Exit.isSuccess(exit)) return Effect.void
@@ -2227,7 +2253,12 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
   initializeCompiledSync(): Effect.Effect<MachineRef<any, any, any, any>, unknown> {
     this.publishCreated()
     if (!this.execution.childless) {
-      this.childRuntime = makeChildRuntimeSync(this.address, this.options.runtime, this.services)
+      this.childRuntime = makeChildRuntimeSync(
+        this.address,
+        this.options.runtime,
+        this.services,
+        (event) => this.sendAcknowledgedEffect(event)
+      )
     }
     const parent = this.options.parent
     const sendParent = this.options.sendParent ?? (parent === undefined
@@ -2304,7 +2335,12 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
     return Effect.gen(function*() {
       self.publishCreated()
       if (!self.execution.childless) {
-        self.childRuntime = yield* makeChildRuntime(self.address, self.options.runtime, self.services)
+        self.childRuntime = yield* makeChildRuntime(
+          self.address,
+          self.options.runtime,
+          self.services,
+          (event) => self.sendAcknowledgedEffect(event)
+        )
       }
       const parent = self.options.parent
       const sendParent = self.options.sendParent ?? (parent === undefined

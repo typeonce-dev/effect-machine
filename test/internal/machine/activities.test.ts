@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Schema } from "effect"
+import { Duration, Effect, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import { activityDefinitions } from "../../../src/internal/machine/activities.js"
@@ -64,6 +64,11 @@ const activityMachine = Machine.make({
           resolve: () => undefined
         })
       }),
+      Machine.invoke({
+        id: "updates",
+        stream: () => Stream.empty,
+        onDone: { target: Machine.targetless }
+      }),
       Machine.invoke({ child })
     ]
   },
@@ -107,7 +112,8 @@ const machine = {
           onFailure: () => undefined,
           type: "effect"
         },
-        { id: "load-timeout", after: "10 seconds" }
+        { id: "load-timeout", after: "10 seconds" },
+        { id: "updates", stream: () => Stream.empty }
       ]
     },
     "Parent.Active": {
@@ -140,6 +146,11 @@ describe("machine activity metadata", () => {
         id: "load-timeout",
         type: "timer",
         duration: "10s"
+      },
+      {
+        source: "Loading",
+        id: "updates",
+        type: "stream"
       },
       {
         source: "Loading",
@@ -223,6 +234,7 @@ describe("machine activity metadata", () => {
         type: "timer",
         duration: "10s"
       },
+      { source: "Loading", id: "updates", type: "stream" },
       {
         source: "Parent.Active",
         id: "child",
@@ -293,6 +305,7 @@ describe("machine activity metadata", () => {
         "│  ├─ ◆ process: poll-server",
         "│  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
         "│  ├─ ◆ timer: load-timeout [10s]",
+        "│  ├─ ◆ stream: updates",
         "│  └─ ◆ machine: child → document-worker",
         "└─ ○ Dynamic",
         "   └─ ◆ process: context-owned",
@@ -310,7 +323,7 @@ describe("machine activity metadata", () => {
 
     assert.include(
       rendered,
-      "state_0: process / poll-server · effect / load-document · timer / load-timeout (10s) · machine / child → document-worker"
+      "state_0: process / poll-server · effect / load-document · timer / load-timeout (10s) · stream / updates · machine / child → document-worker"
     )
     assert.notInclude(rendered, "success: dynamic")
     assert.notInclude(rendered, "note right of")

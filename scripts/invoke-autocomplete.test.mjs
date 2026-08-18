@@ -7,7 +7,7 @@ import ts from "typescript"
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const virtualFile = path.join(projectRoot, "invoke-autocomplete.fixture.ts")
 const source = `
-import { Effect, Option } from "effect"
+import { Effect, Option, Stream } from "effect"
 import { Machine } from "./src/index.js"
 
 const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
@@ -39,6 +39,22 @@ definition.handle({
 definition.handle({
   Loading: {
     invoke: Machine.invoke({
+      id: "updates",
+      stream: () => Stream.make(1),
+      onElement: {
+        target: Machine.targetless,
+        resolve: ({ /*element-context*/ ...context }) => undefined
+      },
+      onDone: { target: Machine.targetless }
+    })
+  },
+  Done: {},
+  Failed: {}
+})
+
+definition.handle({
+  Loading: {
+    invoke: Machine.invoke({
       id: "incomplete",
       effect: () => Effect.fail("offline").pipe(Effect.as(1)),
       /*invoke-properties*/
@@ -58,10 +74,10 @@ definition.handle({
 
 definition.handle({
   Loading: {
-    always: Machine.transition({
-      target: (to) => to.none(),
+    always: {
+      target: Machine.targetless,
       resolve: ({ /*targetless-context*/ }) => undefined
-    })
+    }
   }
 })
 
@@ -159,6 +175,13 @@ test("contextually completes Effect invocation factories while authoring", () =>
   const properties = completions("invoke-properties")
   assert.equal(properties.has("onDone"), true)
   assert.equal(properties.has("onFailure"), true)
+})
+
+test("contextually completes Stream element handlers while authoring", () => {
+  const element = completions("element-context")
+  assert.equal(element.has("element"), true)
+  assert.equal(element.has("state"), true)
+  assert.equal(element.has("target"), false)
 })
 
 test("contextually completes transition definitions while authoring", () => {

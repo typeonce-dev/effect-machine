@@ -1,63 +1,9 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
 import { MediaPlayerDefinition, MediaPlayerInternalEvents } from "./definition.ts"
-import {
-  analyzeAudio,
-  applyAudioSettings,
-  loadAudio,
-  loudnessEvent,
-  pauseAudio,
-  playAudio,
-  restartAudio
-} from "./invocations.ts"
+import { analyzeAudio, applyAudioSettings, loadAudio, pauseAudio, playAudio, restartAudio } from "./invocations.ts"
 import { initialPlaybackData, updatePlaybackData } from "./schemas.ts"
 import { MediaPlayer } from "./service.ts"
-
-type Definition = typeof MediaPlayerDefinition
-type States = Machine.Machine.States<Definition>
-type Events = Machine.Machine.Events<Definition>
-type Emits = Machine.Machine.Emits<Definition>
-type InputEvents = Machine.Machine.InputEvents<Definition>
-type ParentEvents = Machine.Machine.ParentEvents<Definition>
-type PlayingStateId = "Player.transport.Ready.Playing"
-type AnalyzeDone = Machine.Machine.InvokeTransition<
-  States,
-  Events,
-  Emits,
-  PlayingStateId,
-  Machine.Machine.InvokeDoneContext<States, Events, Emits, PlayingStateId, void, InputEvents, ParentEvents>
->
-type AnalyzeSnapshot = Machine.Machine.InvokeTransition<
-  States,
-  Events,
-  Emits,
-  PlayingStateId,
-  Machine.Machine.InvokeSnapshotContext<
-    States,
-    Events,
-    Emits,
-    PlayingStateId,
-    Machine.Machine.LogicStateOf<typeof analyzeAudio>,
-    Machine.Machine.LogicErrorOf<typeof analyzeAudio>,
-    Machine.Machine.LogicOutputOf<typeof analyzeAudio>,
-    InputEvents,
-    ParentEvents
-  >
->
-
-const analyzeDone: AnalyzeDone = Machine.transition({
-  target: (to) => to.none(),
-  resolve: () => undefined
-})
-
-const analyzeSnapshot: AnalyzeSnapshot = Machine.transition({
-  target: (to) => to.none(),
-  resolve: ({ snapshot }, enqueue) => {
-    const event = loudnessEvent(snapshot.state)
-    if (event !== undefined) enqueue.raise(event)
-    return undefined
-  }
-})
 
 export const MediaPlayerMachine = MediaPlayerDefinition.handle({
   Player: {
@@ -164,10 +110,20 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   }),
                   MediaPlayerDefinition.invoke({
                     id: "analyze-audio",
-                    address: Machine.childAddress("analyze-audio"),
-                    logic: analyzeAudio,
-                    onDone: analyzeDone,
-                    onSnapshot: analyzeSnapshot
+                    stream: () => analyzeAudio,
+                    onElement: {
+                      target: Machine.targetless,
+                      resolve: ({ element }, enqueue) => {
+                        enqueue.raise(MediaPlayerInternalEvents.LoudnessMeasured(element))
+                      }
+                    },
+                    onDone: { target: Machine.targetless },
+                    onFailure: {
+                      target: Machine.targetless,
+                      resolve: ({ error }, enqueue) => {
+                        enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
+                      }
+                    }
                   })
                 ],
                 on: {

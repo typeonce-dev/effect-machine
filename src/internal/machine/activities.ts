@@ -23,6 +23,9 @@ export type StaticActivityMetadata =
     readonly duration: string | "dynamic"
   }
   | {
+    readonly type: "stream"
+  }
+  | {
     readonly type: "machine"
     readonly child: {
       readonly id: string
@@ -92,6 +95,10 @@ const appendStaticDefinition = (
       type: "timer",
       duration: typeof after === "function" ? "dynamic" : Duration.format(Duration.fromInputUnsafe(after as any))
     })
+    return
+  }
+  if (Reflect.has(descriptor, "stream")) {
+    definitions.push({ source, id, type: "stream" })
     return
   }
   if (Reflect.has(descriptor, "logic")) {

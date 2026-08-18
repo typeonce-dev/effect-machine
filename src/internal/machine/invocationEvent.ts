@@ -14,6 +14,13 @@ export type InvocationEvent =
     readonly [InvocationEventTypeId]: true
     readonly path: string
     readonly id: string
+    readonly type: "element"
+    readonly element: unknown
+  }
+  | {
+    readonly [InvocationEventTypeId]: true
+    readonly path: string
+    readonly id: string
     readonly type: "done"
     readonly output: unknown
   }
@@ -39,6 +46,15 @@ export const done = (path: string, id: string, output: unknown): InvocationEvent
   id,
   type: "done",
   output
+})
+
+/** @internal */
+export const element = (path: string, id: string, value: unknown): InvocationEvent => ({
+  [InvocationEventTypeId]: true,
+  path,
+  id,
+  type: "element",
+  element: value
 })
 
 /** @internal */

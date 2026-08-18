@@ -123,8 +123,9 @@ its extra control is required:
 - Bind a shared Atom runtime once with `AtomMachine.bind(runtime)`, then use the
   returned `make` or `resume`. Use `AtomMachine.make(machine)` and
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
-- Use one invocation object: `effect` for one-shot work, `after` for a timer,
-  `logic` for reusable process logic, and `child` for a complete child
+- Use one invocation object: `effect` for one-shot work, `stream` for repeated
+  externally produced values, `after` for a timer, `logic` for reusable process
+  logic, and `child` for a complete child
   statechart. `Machine.invoke({...})` preserves owner state and source channels
   across sibling lifecycle handlers. Inside `.handle(...)`, `self` and `parent`
   use the owning definition's exact public input and `parentEvents` protocols.
@@ -942,6 +943,38 @@ The source may also be a function of the owning state's entry context when it
 needs `state`, `containingState`, `ancestors`, or the entry `event`. Source construction
 errors, defects, and interruption are machine failures rather than a second
 phase in `onFailure`.
+
+Use a Stream invocation for repeated values that are not themselves machine
+events. `onElement` maps each value into an owner transition, while `onDone`
+handles normal Stream completion and `onFailure` handles the typed Stream error:
+
+```ts
+invoke: Machine.invoke({
+  id: "broadcast-channel",
+  stream: () => messages,
+  onElement: {
+    target: Machine.targetless,
+    resolve: ({ element }, enqueue) => {
+      enqueue.raise(Events.MessageReceived({ message: element }))
+    }
+  },
+  onDone: { target: Machine.targetless },
+  onFailure: Machine.transition({
+    target: (to) => to.full.Disconnected(),
+    resolve: ({ error, target }) => target.from({ error })
+  })
+})
+```
+
+Element delivery is owner-scoped and backpressured: the Stream pulls again only
+after the selected parent macrostep commits. Exiting or reentering the owner
+interrupts the Stream and runs its finalizers. A later entry starts a fresh
+Stream. Stream defects and self-interruption fail the owning machine.
+
+The direct `{ target: Machine.targetless, resolve }` shorthand is available
+when a transition only enqueues commands. It is non-reentering and the resolver
+must return `undefined`. Keep `Machine.transition(...)` for full state selection,
+conditional branches, or reentry.
 
 When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
 `Machine.invoke` infers that owner context and the returned Effect's output,

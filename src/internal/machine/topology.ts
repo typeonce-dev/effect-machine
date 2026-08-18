@@ -467,8 +467,10 @@ export const transitionDefinitions = (
       : [config.invoke]
     for (const invoke of invokes) {
       const id = "child" in invoke ? String(invoke.child.id) : String(invoke.id)
-      for (const outcome of ["done", "failure", "snapshot"] as const) {
-        const handler = outcome === "done"
+      for (const outcome of ["element", "done", "failure", "snapshot"] as const) {
+        const handler = outcome === "element"
+          ? invoke.onElement
+          : outcome === "done"
           ? invoke.onDone
           : outcome === "failure"
           ? invoke.onFailure

@@ -38,7 +38,7 @@ export interface TransitionDefinition {
     | {
       readonly type: "invoke"
       readonly id: string
-      readonly outcome: "done" | "failure" | "snapshot"
+      readonly outcome: "element" | "done" | "failure" | "snapshot"
     }
   readonly reenter: boolean
   readonly branches: ReadonlyArray<
@@ -78,6 +78,11 @@ export type ActivityDefinition =
     readonly id: string
     readonly type: "timer"
     readonly duration: string | "dynamic"
+  }
+  | {
+    readonly source: string
+    readonly id: string
+    readonly type: "stream"
   }
   | {
     readonly source: string
