@@ -1721,6 +1721,7 @@ export interface TransitionBranchCoverageItem<
   readonly id: string
   readonly definitionIndex: number
   readonly branchIndex: number
+  readonly branchKey: string | undefined
   readonly source: SourcePath
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
@@ -2063,6 +2064,7 @@ export type VerificationLaw =
   | "definitions.initial"
   | "definitions.transition"
   | "definitions.branchIndex"
+  | "definitions.branchKey"
   | "definitions.selection"
   | "definitions.resolution"
 

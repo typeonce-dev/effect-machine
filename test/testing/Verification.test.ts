@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -106,21 +106,17 @@ const conditionalMachine = Machine.make({
   counter: {
     on: {
       Select: Machine.transition({
-        cases: (branch) => [
-          branch({
-            title: "negative",
-            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.none(),
-            resolve: () => undefined
-          }),
-          branch({
-            title: "zero",
-            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.full.counter(),
-            resolve: ({ target }) => target(new Counter({ count: 0 }))
-          })
-        ],
-        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+        branches: (to) => ({
+          negative: { target: to.none() },
+          zero: { target: to.full.counter() },
+          positive: { target: to.none() }
+        }),
+        resolve: ({ event, select }) =>
+          event.value < 0
+            ? select.negative()
+            : event.value === 0
+            ? select.zero(new Counter({ count: 0 }))
+            : select.positive()
       })
     }
   }
@@ -927,7 +923,7 @@ describe("MachineTest.verify", () => {
       assert.strictEqual(violation?.path, "app.two")
     }))
 
-  it.effect("rejects invalid and cross-branch conditional evidence", () =>
+  it.effect("rejects invalid named-branch evidence", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(conditionalMachine, { events: [new Select({ value: -1 })] })
       const step = trace.steps[0]!
@@ -952,6 +948,24 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(indexError), "definitions.branchIndex")
 
+      const wrongKey = {
+        ...trace,
+        steps: [{
+          ...step,
+          plan: {
+            ...step.plan,
+            microsteps: [{
+              ...microstep,
+              transitions: [{ ...transition, branchKey: "zero" }]
+            }]
+          }
+        }]
+      } as typeof trace
+      const keyError = yield* MachineTest.verify(conditionalMachine, wrongKey, {
+        laws: ["definitions"]
+      }).pipe(Effect.flip)
+      assert.include(laws(keyError), "definitions.branchKey")
+
       const crossBranch = {
         ...trace,
         steps: [{
@@ -960,7 +974,7 @@ describe("MachineTest.verify", () => {
             ...step.plan,
             microsteps: [{
               ...microstep,
-              transitions: [{ ...transition, branchIndex: 1 }]
+              transitions: [{ ...transition, branchIndex: 1, branchKey: "zero" }]
             }]
           }
         }]
@@ -1207,6 +1221,7 @@ describe("MachineTest.verify", () => {
         trigger: { type: "invoke" as const, id: "second", outcome: "done" as const },
         reenter: false,
         branchIndex: 0,
+        branchKey: undefined,
         target: undefined,
         resolvedTarget: undefined
       }

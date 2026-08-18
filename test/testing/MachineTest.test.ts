@@ -260,6 +260,7 @@ describe("MachineTest", () => {
         trigger: { type: "event", event: "Stop" },
         reenter: false,
         branchIndex: 0,
+        branchKey: undefined,
         target: "disabled",
         resolvedTarget: "disabled"
       }])

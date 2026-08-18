@@ -1283,14 +1283,7 @@ describe("Machine", () => {
     })
   })
 
-  it("conditional transitions infer unbounded match values and each selected target", () => {
-    const standaloneWhen = (event: SignIn) =>
-      event.userId.length > 0
-        ? Option.some({ userId: event.userId, recognized: true as const })
-        : Option.none()
-    type StandaloneMatch = ReturnType<typeof standaloneWhen> extends Option.Option<infer Match> ? Match : never
-    expect<StandaloneMatch>().type.toBe<{ userId: string; recognized: true }>()
-
+  it("branching transitions infer unbounded named targets", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
@@ -1304,59 +1297,38 @@ describe("Machine", () => {
       down: {
         on: {
           SignIn: Machine.transition({
-            cases: (branch) => [
-              branch({
+            branches: (to) => ({
+              recognized: {
                 title: "recognized user",
-                when: ({ event, state }) => {
-                  expect(event).type.toBe<SignIn>()
-                  expect(state).type.toBe<Down>()
-                  return event.userId.length > 0
-                    ? Option.some({ userId: event.userId, recognized: true as const })
-                    : Option.none()
-                },
-                target: (to) => to.full.down(),
-                resolve: ({ match, target }) => {
-                  expect(match).type.toBe<{ userId: string; recognized: true }>()
-                  expect(target).type.toBeCallableWith(new Down({}))
-                  return target(new Down({}))
-                }
-              }),
-              branch({
+                target: to.full.down()
+              },
+              measured: {
                 title: "measured user id",
-                when: ({ event }) => event.userId.length > 0 ? Option.some(event.userId.length) : Option.none(),
-                target: (to) => to.none(),
-                resolve: (context) => {
-                  expect(context.match).type.toBe<number>()
-                  expect(context).type.not.toHaveProperty("target")
-                  return undefined
-                }
-              }),
-              branch({
+                target: to.none()
+              },
+              named: {
                 title: "named user",
-                when: ({ event }) => event.userId.length > 0 ? Option.some(event.userId) : Option.none(),
-                target: (to) => to.full.down(),
-                resolve: ({ match, target }) => {
-                  expect(match).type.toBe<string>()
-                  expect(target).type.toBeCallableWith(new Down({}))
-                  return target(new Down({}))
-                }
-              }),
-              branch({
+                target: to.full.down()
+              },
+              active: {
                 title: "active user",
-                when: ({ event }) => event.userId.length > 0 ? Option.some({ active: true as const }) : Option.none(),
-                target: (to) => to.none(),
-                resolve: (context) => {
-                  expect(context.match).type.toBe<{ active: true }>()
-                  expect(context).type.not.toHaveProperty("target")
-                  return undefined
-                }
-              })
-            ],
-            otherwise: {
-              target: (to) => to.none(),
-              resolve: (context) => {
-                expect(context).type.not.toHaveProperty("target")
-                return undefined
+                target: to.none()
+              }
+            }),
+            resolve: ({ event, select, state }) => {
+              expect(event).type.toBe<SignIn>()
+              expect(state).type.toBe<Down>()
+              expect(select.recognized).type.toBeCallableWith(new Down({}))
+              expect(select.measured).type.toBeCallableWith()
+              switch (event.userId.length) {
+                case 0:
+                  return select.measured()
+                case 1:
+                  return select.named(new Down({}))
+                case 2:
+                  return select.active()
+                default:
+                  return select.recognized(new Down({}))
               }
             },
             reenter: true
@@ -1366,45 +1338,52 @@ describe("Machine", () => {
     })
 
     const target = (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => to.none()
-    type ConditionalInput = Machine.Machine.TransitionConditionalInput<
+    type BranchesInput = Machine.Machine.TransitionBranchesInput<
       typeof UpStates.states,
       readonly [typeof SignIn],
       readonly [],
       "down",
       SignInContext,
       never,
-      readonly [never],
-      ReturnType<typeof target>
+      { readonly ignored: { readonly target: ReturnType<typeof target> } }
     >
-    const branch = null as unknown as Parameters<ConditionalInput["cases"]>[0]
-    expect(branch).type.not.toBeCallableWith({
-      title: "invalid predicate",
-      when: () => true,
-      target: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => to.none(),
+    expect<BranchesInput["resolve"]>().type.not.toBeCallableWith({} as SignInContext, {} as never)
+    expect(Machine.transition).type.not.toBeCallableWith({
+      branches: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({
+        ignored: { target: to.none() }
+      }),
       resolve: () => undefined
     })
-
-    const otherwise: Machine.Machine.TransitionDirectInput<
-      typeof UpStates.states,
-      readonly [typeof SignIn],
-      readonly [],
-      "down",
-      SignInContext,
-      never,
-      ReturnType<typeof target>
-    > = { target, resolve: () => undefined }
     expect(Machine.transition).type.not.toBeCallableWith({
-      cases: () => [{
-        title: "raw case",
-        when: () => Option.some("raw"),
-        target,
-        resolve: () => undefined
-      }],
-      otherwise
+      branches: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({
+        ignored: { target: to.none() }
+      }),
+      resolve: ({ select }: { readonly select: { readonly ignored: () => Machine.Machine.NoTarget } }) =>
+        select.ignored()
     })
     expect(Machine.transition).type.not.toBeCallableWith({
-      cases: (_branch: typeof branch) => [],
-      otherwise
+      branches: (_to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({}),
+      resolve: () => undefined
+    })
+    expect(Machine.transition).type.not.toBeCallableWith({
+      branches: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({
+        "": { target: to.none() }
+      }),
+      resolve: () => undefined
+    })
+    expect(Machine.transition).type.not.toBeCallableWith({
+      branches: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({
+        0: { target: to.none() }
+      }),
+      resolve: () => undefined
+    })
+    const symbolBranch = Symbol("branch")
+    expect(Machine.transition).type.not.toBeCallableWith({
+      branches: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => ({
+        valid: { target: to.none() },
+        [symbolBranch]: { target: to.none() }
+      }),
+      resolve: () => undefined
     })
   })
 

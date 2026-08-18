@@ -7,7 +7,7 @@ import ts from "typescript"
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const virtualFile = path.join(projectRoot, "invoke-autocomplete.fixture.ts")
 const source = `
-import { Effect, Option, Stream } from "effect"
+import { Effect, Stream } from "effect"
 import { Machine } from "./src/index.js"
 
 const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
@@ -93,36 +93,18 @@ definition.handle({
 definition.handle({
   Loading: {
     always: Machine.transition({
-      cases: (branch) => [branch({
-        title: "ready",
-        when: ({ /*case-when-context*/ }) => Option.some("ready" as const),
-        target: (to) => to.full.Done(),
-        resolve: ({ /*case-resolve-context*/ ...context }) => {
-          const exact: "ready" = context.match
-          return context.target.from()
-        }
-      })],
-      otherwise: {
-        target: (to) => to.none(),
-        resolve: () => undefined
-      }
+      branches: (to) => ({
+        ready: {
+          title: "ready",
+          target: to./*branch-target-scopes*/full.Done()
+        },
+        unchanged: { target: to.none() }
+      }),
+      resolve: ({ /*branch-resolve-context*/ ...context }) => context.select.ready.from()
     })
   }
 })
 
-definition.handle({
-  Loading: {
-    always: Machine.transition({
-      cases: (branch) => [branch({
-        /*case-properties*/
-      })],
-      otherwise: {
-        target: (to) => to.none(),
-        resolve: () => undefined
-      }
-    })
-  }
-})
 `
 
 const config = ts.readConfigFile(path.join(projectRoot, "tsconfig.json"), ts.sys.readFile)
@@ -188,7 +170,7 @@ test("contextually completes transition definitions while authoring", () => {
   const properties = completions("transition-properties")
   assert.equal(properties.has("target"), true)
   assert.equal(properties.has("resolve"), true)
-  assert.equal(properties.has("cases"), true)
+  assert.equal(properties.has("branches"), true)
   assert.equal(properties.has("reenter"), true)
 
   const scopes = completions("target-scopes")
@@ -208,18 +190,16 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(targetless.has("state"), true)
   assert.equal(targetless.has("target"), false)
 
-  const when = completions("case-when-context")
-  assert.equal(when.has("state"), true)
-  assert.equal(when.has("target"), false)
+  const branchScopes = completions("branch-target-scopes")
+  assert.equal(branchScopes.has("none"), true)
+  assert.equal(branchScopes.has("local"), true)
+  assert.equal(branchScopes.has("branch"), true)
+  assert.equal(branchScopes.has("full"), true)
+  assert.equal(branchScopes.has("history"), true)
 
-  const resolve = completions("case-resolve-context")
-  assert.equal(resolve.has("match"), true)
-  assert.equal(resolve.has("target"), true)
-
-  const caseProperties = completions("case-properties")
-  assert.equal(caseProperties.has("title"), true)
-  assert.equal(caseProperties.has("when"), true)
-  assert.equal(caseProperties.has("target"), true)
-  assert.equal(caseProperties.has("resolve"), true)
+  const resolve = completions("branch-resolve-context")
+  assert.equal(resolve.has("state"), true)
+  assert.equal(resolve.has("select"), true)
+  assert.equal(resolve.has("target"), false)
 
 })

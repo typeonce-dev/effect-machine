@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -20,7 +20,7 @@ const States = Machine.states({
   }
 })
 
-let caseFactoryCalls = 0
+let branchFactoryCalls = 0
 
 const machine = Machine.make({
   states: States.states,
@@ -34,41 +34,27 @@ const machine = Machine.make({
     states: {
       Routing: {
         choice: Machine.transition({
-          cases: (branch) => {
-            caseFactoryCalls += 1
-            return [
-              branch({
-                title: "score is perfect",
-                when: ({ containingState }) =>
-                  containingState.score === 100 ? Option.some(containingState) : Option.none(),
-                target: (to) => to.local.Approved(),
-                resolve: ({ target }) => target(new Approved({}))
-              }),
-              branch({
-                title: "score is negative",
-                when: ({ containingState }) =>
-                  containingState.score < 0 ? Option.some(containingState.score) : Option.none(),
-                target: (to) => to.local.Rejected(),
-                resolve: ({ target }) => target(new Rejected({}))
-              }),
-              branch({
-                title: "score is zero",
-                when: ({ containingState }) => containingState.score === 0 ? Option.some(undefined) : Option.none(),
-                target: (to) => to.local.Rejected(),
-                resolve: ({ target }) => target(new Rejected({}))
-              }),
-              branch({
-                title: "score is at least 70",
-                when: ({ containingState }) =>
-                  containingState.score >= 70 ? Option.some(containingState) : Option.none(),
-                target: (to) => to.local.Approved(),
-                resolve: ({ target }) => target(new Approved({}))
-              })
-            ]
+          branches: (to) => {
+            branchFactoryCalls += 1
+            return {
+              perfect: { title: "Score is perfect", target: to.local.Approved() },
+              negative: { title: "Score is negative", target: to.local.Rejected() },
+              zero: { title: "Score is zero", target: to.local.Rejected() },
+              passing: { title: "Score is at least 70", target: to.local.Approved() },
+              failing: { target: to.local.Rejected() }
+            }
           },
-          otherwise: {
-            target: (to) => to.local.Rejected(),
-            resolve: ({ target }) => target(new Rejected({}))
+          resolve: ({ containingState, select }) => {
+            const score = containingState.score
+            return score === 100
+              ? select.perfect(new Approved({}))
+              : score < 0
+              ? select.negative(new Rejected({}))
+              : score === 0
+              ? select.zero(new Rejected({}))
+              : score >= 70
+              ? select.passing(new Approved({}))
+              : select.failing(new Rejected({}))
           }
         })
       },
@@ -96,36 +82,43 @@ describe("Machine choice pseudo-states", () => {
       ])
       assert.strictEqual(plan.microsteps[0]?.transitions[0]?.source, "Flow.Routing")
       assert.strictEqual(plan.microsteps[0]?.transitions[0]?.branchIndex, 3)
+      assert.strictEqual(plan.microsteps[0]?.transitions[0]?.branchKey, "passing")
       assert.strictEqual(Machine.isInitialEvent(plan.microsteps[0]!.event), true)
-      assert.strictEqual(caseFactoryCalls, 1)
+      assert.strictEqual(branchFactoryCalls, 1)
       const choice = Machine.transitionDefinitions(machine).find(({ source }) => source === "Flow.Routing")
       assert.deepStrictEqual(choice?.branches, [
         {
-          type: "case",
-          title: "score is perfect",
+          type: "branch",
+          key: "perfect",
+          title: "Score is perfect",
           target: "Flow.Approved",
           selection: { path: "Flow.Approved", kind: "state", scope: "local" }
         },
         {
-          type: "case",
-          title: "score is negative",
+          type: "branch",
+          key: "negative",
+          title: "Score is negative",
           target: "Flow.Rejected",
           selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
         },
         {
-          type: "case",
-          title: "score is zero",
+          type: "branch",
+          key: "zero",
+          title: "Score is zero",
           target: "Flow.Rejected",
           selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
         },
         {
-          type: "case",
-          title: "score is at least 70",
+          type: "branch",
+          key: "passing",
+          title: "Score is at least 70",
           target: "Flow.Approved",
           selection: { path: "Flow.Approved", kind: "state", scope: "local" }
         },
         {
-          type: "otherwise",
+          type: "branch",
+          key: "failing",
+          title: "failing",
           target: "Flow.Rejected",
           selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
         }
@@ -635,31 +628,37 @@ describe("Machine choice pseudo-states", () => {
         reenter: false,
         branches: [
           {
-            type: "case",
-            title: "score is perfect",
+            type: "branch",
+            key: "perfect",
+            title: "Score is perfect",
             target: "Flow.Approved",
             selection: { path: "Flow.Approved", kind: "state", scope: "local" }
           },
           {
-            type: "case",
-            title: "score is negative",
+            type: "branch",
+            key: "negative",
+            title: "Score is negative",
             target: "Flow.Rejected",
             selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
           },
           {
-            type: "case",
-            title: "score is zero",
+            type: "branch",
+            key: "zero",
+            title: "Score is zero",
             target: "Flow.Rejected",
             selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
           },
           {
-            type: "case",
-            title: "score is at least 70",
+            type: "branch",
+            key: "passing",
+            title: "Score is at least 70",
             target: "Flow.Approved",
             selection: { path: "Flow.Approved", kind: "state", scope: "local" }
           },
           {
-            type: "otherwise",
+            type: "branch",
+            key: "failing",
+            title: "failing",
             target: "Flow.Rejected",
             selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
           }

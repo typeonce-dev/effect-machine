@@ -47,8 +47,8 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
     trigger: { type: "choice" },
     reenter: false,
     branches: [
-      { type: "case", title: "approved %%\nnow", target: "Root.Done" },
-      { type: "otherwise", target: undefined }
+      { type: "branch", key: "approved", title: "approved %%\nnow", target: "Root.Done" },
+      { type: "branch", key: "unchanged", title: "unchanged", target: undefined }
     ]
   }],
   activityDefinitions: () => [{ source: "Root.Route", id: "worker %%\nend note", type: "process" }],

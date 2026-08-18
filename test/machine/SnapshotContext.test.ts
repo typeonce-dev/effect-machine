@@ -69,18 +69,16 @@ describe("Machine transition snapshot context", () => {
                 Buffering: {
                   on: {
                     BufferReady: Machine.transition({
-                      cases: (branch) => [branch({
-                        title: "network is online",
-                        when: ({ snapshot }) => {
-                          captured = snapshot
-                          return States.matches(snapshot, "System.Network.Online")
-                            ? Option.some(snapshot)
-                            : Option.none()
-                        },
-                        target: (to) => to.local.Playing(),
-                        resolve: ({ target }) => target(new Playing({}))
-                      })],
-                      otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                      branches: (to) => ({
+                        online: { title: "Network is online", target: to.local.Playing() },
+                        unchanged: { target: to.none() }
+                      }),
+                      resolve: ({ snapshot, select }) => {
+                        captured = snapshot
+                        return States.matches(snapshot, "System.Network.Online")
+                          ? select.online(new Playing({}))
+                          : select.unchanged()
+                      }
                     })
                   }
                 }
@@ -170,16 +168,16 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   always: Machine.transition({
-                    cases: (branch) => [branch({
-                      title: "network is online",
-                      when: ({ snapshot }) => {
-                        captured = snapshot
-                        return States.matches(snapshot, "System.Network.Online") ? Option.some(snapshot) : Option.none()
-                      },
-                      target: (to) => to.local.Playing(),
-                      resolve: ({ target }) => target(new Playing({}))
-                    })],
-                    otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                    branches: (to) => ({
+                      online: { title: "Network is online", target: to.local.Playing() },
+                      unchanged: { target: to.none() }
+                    }),
+                    resolve: ({ snapshot, select }) => {
+                      captured = snapshot
+                      return States.matches(snapshot, "System.Network.Online")
+                        ? select.online(new Playing({}))
+                        : select.unchanged()
+                    }
                   })
                 }
               }

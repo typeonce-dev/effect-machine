@@ -579,21 +579,14 @@ microstep, before any selected transition is applied:
 
 ```ts
 BufferReady: Machine.transition({
-  cases: (branch) => [
-    branch({
-      title: "online",
-      when: ({ snapshot }) =>
-        States.matches(snapshot, "Player.Network.Online")
-          ? Option.some(undefined)
-          : Option.none(),
-      target: (to) => to.local.Playing(),
-      resolve: ({ target }) => target.from()
-    })
-  ],
-  otherwise: {
-    target: (to) => to.none(),
-    resolve: () => undefined
-  }
+  branches: (to) => ({
+    online: { target: to.local.Playing() },
+    unchanged: { target: to.none() }
+  }),
+  resolve: ({ snapshot, select }) =>
+    States.matches(snapshot, "Player.Network.Online")
+      ? select.online.from()
+      : select.unchanged()
 })
 ```
 
@@ -649,30 +642,30 @@ synchronously:
 
 ```ts
 Submit: Machine.transition({
-  cases: (branch) => [
-    branch({
-      title: "valid",
-      when: ({ state }) => state.valid ? Option.some(state.draft) : Option.none(),
-      target: (to) => to.local.Saving(),
-      resolve: ({ match, target }) => target.from({ draft: match })
-    })
-  ],
-  otherwise: {
-    target: (to) => to.none(),
-    resolve: () => undefined
-  }
+  branches: (to) => ({
+    valid: { target: to.local.Saving() },
+    invalid: { target: to.none() }
+  }),
+  resolve: ({ state, select }) => state.valid
+    ? select.valid.from({ draft: state.draft })
+    : select.invalid()
 })
 ```
 
 Every installed event, `always`, `onDone`, choice, and invoke lifecycle handler
-must use `Machine.transition`. Each direct branch declares one `target`; a
-conditional transition declares ordered `cases` and a required `otherwise`.
-Construct each case with the locally supplied `branch` function. Every call
-independently infers its `when` match and target, so a transition may declare
-any number of heterogeneous cases without losing resolver inference. `when`
-returns `Option.some(match)` to select a case and expose `match` in its resolver.
-Selecting `to.none()` handles the transition without a destination, while
-retaining queued commands, raised events, and emitted events.
+must use `Machine.transition`. A direct transition declares one `target`. A
+branching transition declares every possible target in a named `branches`
+record, then uses ordinary TypeScript control flow in `resolve` to return one
+typed `select` builder. Branch keys are stable testing and inspection identities;
+an optional `title` controls presentation and otherwise defaults to the key.
+Selecting a branch whose target is `to.none()` handles the transition without a
+destination while retaining queued commands, raised events, and emitted events.
+
+The `branches` callback runs once when handlers are installed. Its record uses
+the deterministic ECMAScript property order for presentation and `branchIndex`;
+array-index and symbol keys are rejected. Treat the string key as semantic:
+reordering named properties may change their display index, but visualizers,
+coverage, and trace verification identify each branch by its key.
 
 `reenter: true` remains meaningful with `to.none()`: the source exits and
 enters again while its logical configuration is retained.
@@ -974,7 +967,7 @@ Stream. Stream defects and self-interruption fail the owning machine.
 The direct `{ target: Machine.targetless, resolve }` shorthand is available
 when a transition only enqueues commands. It is non-reentering and the resolver
 must return `undefined`. Keep `Machine.transition(...)` for full state selection,
-conditional branches, or reentry.
+named branches, or reentry.
 
 When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
 `Machine.invoke` infers that owner context and the returned Effect's output,
