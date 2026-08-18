@@ -288,6 +288,7 @@ describe("declared initial entry", () => {
         trigger: { type: "event", event: "EnterFlow" },
         reenter: false,
         branchIndex: 0,
+        branchKey: undefined,
         target: "flow",
         resolvedTarget: "flow"
       }, {
@@ -295,6 +296,7 @@ describe("declared initial entry", () => {
         trigger: { type: "choice" },
         reenter: false,
         branchIndex: 0,
+        branchKey: undefined,
         target: "flow.approved",
         resolvedTarget: "flow.approved"
       }])

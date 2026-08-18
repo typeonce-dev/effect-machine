@@ -1512,6 +1512,17 @@ export const verify = <M extends AnyMachine>(
       return undefined
     }
     const branch = definition.branches[transition.branchIndex]!
+    const expectedBranchKey = branch.type === "branch" ? branch.key : undefined
+    if (transition.branchKey !== expectedBranchKey) {
+      add(
+        "definitions.branchKey",
+        location,
+        `retained transition from "${transition.source}" selected branch key ` +
+          `"${String(transition.branchKey)}" instead of "${String(expectedBranchKey)}"`,
+        transition.source
+      )
+      return undefined
+    }
     if (!targetWithinSelection(transition.target, branch, byPath)) {
       const expected = branch.selection.kind === "none"
         ? "an explicitly targetless result"

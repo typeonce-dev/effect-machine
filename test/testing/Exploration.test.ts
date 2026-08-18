@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -57,21 +57,17 @@ const branchMachine = Machine.make({
   counter: {
     on: {
       Select: Machine.transition({
-        cases: (branch) => [
-          branch({
-            title: "negative",
-            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.none(),
-            resolve: () => undefined
-          }),
-          branch({
-            title: "zero",
-            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.none(),
-            resolve: () => undefined
-          })
-        ],
-        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+        branches: (to) => ({
+          negative: { target: to.none() },
+          zero: { target: to.none() },
+          positive: { target: to.none() }
+        }),
+        resolve: ({ event, select }) =>
+          event.value < 0
+            ? select.negative()
+            : event.value === 0
+            ? select.zero()
+            : select.positive()
       })
     }
   }
@@ -137,13 +133,14 @@ describe("MachineTest bounded exploration", () => {
       assert.deepStrictEqual(
         explored.transitionCoverage.branches.hits.map(({ branch, branchIndex }) => ({
           branchIndex,
-          title: branch.type === "case" ? branch.title : undefined,
+          key: branch.type === "branch" ? branch.key : undefined,
+          title: branch.type === "branch" ? branch.title : undefined,
           type: branch.type
         })),
         [
-          { branchIndex: 0, title: "negative", type: "case" },
-          { branchIndex: 1, title: "zero", type: "case" },
-          { branchIndex: 2, title: undefined, type: "otherwise" }
+          { branchIndex: 0, key: "negative", title: "negative", type: "branch" },
+          { branchIndex: 1, key: "zero", title: "zero", type: "branch" },
+          { branchIndex: 2, key: "positive", title: "positive", type: "branch" }
         ]
       )
     }))

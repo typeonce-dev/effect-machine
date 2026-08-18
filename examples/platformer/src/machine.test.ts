@@ -178,15 +178,14 @@ describe("platformer history integration", () => {
       expect(definitions.every(({ branches }) => branches.length > 0)).toBe(true)
       expect(rendered).toContain("◇ on: WallJump [reenter]")
       expect(rendered).toContain("└┄ → AirJumpWallLock")
-      expect(rendered).not.toContain("[otherwise] → ∅")
       expect(rendered).toContain(
         "Candidate events: Move, DownPressed, JumpPressed, Pause, WallJump, WallContact, Reset"
       )
       expect(rendered).not.toContain("Observed event samples")
       expect(mermaid).toMatch(/^stateDiagram-v2\n  direction LR/)
       expect(mermaid).toContain("state_13 --> state_15: WallJump [reenter]")
-      expect(mermaid).toContain("state_23 --> state_25: WallContact [left wall]")
-      expect(mermaid).toContain("state_23 --> state_24: WallContact [otherwise]")
+      expect(mermaid).toContain("state_23 --> state_25: WallContact [Left wall]")
+      expect(mermaid).toContain("state_23 --> state_24: WallContact [No wall]")
       expect(mermaid).not.toContain("∅")
     }))
   })

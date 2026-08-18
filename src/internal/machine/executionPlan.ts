@@ -445,11 +445,12 @@ const collectIndexedTransition = (
     }
   }
   const evaluated = evaluate === undefined
-    ? { result: transition(context, enqueue), branchIndex: 0 }
+    ? { result: transition(context, enqueue), branchIndex: 0, branchKey: undefined }
     : evaluate(context, enqueue)
   return {
     state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
     branchIndex: evaluated.branchIndex,
+    branchKey: evaluated.branchKey,
     commands: commands ?? emptyExecutionValues,
     raisedEvents: raisedEvents ?? emptyExecutionValues,
     emittedEvents: emittedEvents ?? emptyExecutionValues
@@ -569,6 +570,7 @@ const collectIndexedEvaluatedTransition = (
     return {
       selection,
       branchIndex: transitionResult.branchIndex,
+      branchKey: transitionResult.branchKey,
       unresolvedTarget: unresolvedTarget as any,
       target: target as any,
       next,
@@ -593,6 +595,7 @@ const collectIndexedEvaluatedTransition = (
   return {
     selection,
     branchIndex: transitionResult.branchIndex,
+    branchKey: transitionResult.branchKey,
     unresolvedTarget: unresolvedTarget as any,
     target: target as any,
     next,
@@ -619,6 +622,7 @@ const indexedMicrostep = (
     trigger: transition.selection.trigger,
     reenter: transition.selection.transition.reenter,
     branchIndex: transition.branchIndex,
+    branchKey: transition.branchKey,
     target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
     resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
   })
@@ -804,6 +808,7 @@ const planIndexedFlatState = (
               trigger: { type: "event", event: event._tag },
               reenter: transition.reenter,
               branchIndex: transitionResult.branchIndex,
+              branchKey: transitionResult.branchKey,
               target: target === undefined ? undefined : getTargetNodePath(target as any),
               resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any)
             }]

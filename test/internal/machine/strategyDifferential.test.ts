@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
@@ -67,7 +67,7 @@ describe("machine planner and runtime strategies", () => {
       label: "flat strategy"
     }))
 
-  it.effect("retains the selected conditional branch across generic and indexed-flat planning", () => {
+  it.effect("retains the selected named branch across generic and indexed-flat planning", () => {
     const states = Machine.states({ Count })
     const machine = Machine.make({
       states: states.states,
@@ -80,21 +80,17 @@ describe("machine planner and runtime strategies", () => {
       Count: {
         on: {
           Select: Machine.transition({
-            cases: (branch) => [
-              branch({
-                title: "negative",
-                when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
-                target: (to) => to.none(),
-                resolve: () => undefined
-              }),
-              branch({
-                title: "zero",
-                when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
-                target: (to) => to.none(),
-                resolve: () => undefined
-              })
-            ],
-            otherwise: { target: (to) => to.none(), resolve: () => undefined }
+            branches: (to) => ({
+              negative: { target: to.none() },
+              zero: { target: to.none() },
+              positive: { target: to.none() }
+            }),
+            resolve: ({ event, select }) =>
+              event.value < 0
+                ? select.negative()
+                : event.value === 0
+                ? select.zero()
+                : select.positive()
           })
         }
       }
@@ -106,7 +102,7 @@ describe("machine planner and runtime strategies", () => {
         machine,
         events,
         expected: "indexed-flat",
-        label: "conditional branch identity"
+        label: "named branch identity"
       })
 
       const initial = yield* Machine.planInitial(machine)
@@ -833,13 +829,14 @@ describe("machine planner and runtime strategies", () => {
             Machine.Machine.ParentEvents<typeof definition>
           >
         > = Machine.transition({
-          cases: (branch) => [branch({
-            title: "worker is stale",
-            when: ({ snapshot }) => snapshot.state === "stale" ? Option.some(snapshot) : Option.none(),
-            target: (to) => to.full.Failed(),
-            resolve: ({ target }) => target(new Failed({}))
-          })],
-          otherwise: { target: (to) => to.none(), resolve: () => undefined }
+          branches: (to) => ({
+            stale: { title: "Worker is stale", target: to.full.Failed() },
+            unchanged: { target: to.none() }
+          }),
+          resolve: ({ snapshot, select }) =>
+            snapshot.state === "stale"
+              ? select.stale(new Failed({}))
+              : select.unchanged()
         })
         const machine = definition.handle({
           Loading: {

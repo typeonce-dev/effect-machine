@@ -47,12 +47,9 @@ export interface TransitionDefinition {
       readonly target: string | undefined
     }
     | {
-      readonly type: "case"
+      readonly type: "branch"
+      readonly key: string
       readonly title: string
-      readonly target: string | undefined
-    }
-    | {
-      readonly type: "otherwise"
       readonly target: string | undefined
     }
   >

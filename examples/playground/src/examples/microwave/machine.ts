@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Option, Schema } from "effect"
+import { Schema } from "effect"
 
 export const MicrowaveState = Schema.TaggedUnion({
   Cooking: { elapsedSeconds: Schema.Number }
@@ -56,16 +56,14 @@ export const MicrowaveMachine = Machine.make({
           Idle: {
             on: {
               PowerPressed: Machine.transition({
-                cases: (branch) => [branch({
-                  title: "door closed",
-                  when: ({ snapshot }) =>
-                    MicrowaveStates.matches(snapshot, "Oven.door.Closed")
-                      ? Option.some(undefined)
-                      : Option.none(),
-                  target: (to) => to.local.Cooking(),
-                  resolve: ({ target }) => target.from({ elapsedSeconds: 0 })
-                })],
-                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                branches: (to) => ({
+                  doorClosed: { title: "Door closed", target: to.local.Cooking() },
+                  unchanged: { target: to.none() }
+                }),
+                resolve: ({ snapshot, select }) =>
+                  MicrowaveStates.matches(snapshot, "Oven.door.Closed")
+                    ? select.doorClosed.from({ elapsedSeconds: 0 })
+                    : select.unchanged()
               })
             }
           },

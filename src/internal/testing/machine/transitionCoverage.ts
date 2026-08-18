@@ -76,10 +76,12 @@ export const makeTransitionCoverageCollector = <M extends AnyMachine>(
     branchOffsets.push(branches.length)
     const definition = definitions[definitionIndex]!
     definition.branches.forEach((branch, branchIndex) => {
+      const branchKey = branch.type === "branch" ? branch.key : undefined
       branches.push({
-        id: `transition:${definitionIndex}:branch:${branchIndex}`,
+        id: `transition:${definitionIndex}:branch:${branchKey ?? "direct"}`,
         definitionIndex,
         branchIndex,
+        branchKey,
         source: definition.source,
         trigger: definition.trigger,
         reenter: definition.reenter,
@@ -100,9 +102,11 @@ export const makeTransitionCoverageCollector = <M extends AnyMachine>(
         if (definitionIndex === -1) continue
         definitionHits.add(definitionIndex)
         const definition = definitions[definitionIndex]!
+        const branch = definition.branches[retained.branchIndex]
         if (
           Number.isSafeInteger(retained.branchIndex) && retained.branchIndex >= 0 &&
-          retained.branchIndex < definition.branches.length
+          retained.branchIndex < definition.branches.length &&
+          retained.branchKey === (branch?.type === "branch" ? branch.key : undefined)
         ) {
           branchHits.add(branchOffsets[definitionIndex]! + retained.branchIndex)
         }

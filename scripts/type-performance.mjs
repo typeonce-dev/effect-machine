@@ -77,16 +77,16 @@ const scenarios = [
     maxMarginalInstantiations: 56_000
   },
   {
-    id: "conditional-cases-control",
-    label: "conditional transition control",
-    file: "conditional-cases-control.ts",
+    id: "named-branches-control",
+    label: "named transition branches control",
+    file: "named-branches-control.ts",
     hidden: true
   },
   {
-    id: "conditional-cases",
-    label: "Machine.transition (10 conditional cases)",
-    file: "conditional-cases.ts",
-    control: "conditional-cases-control",
+    id: "named-branches",
+    label: "Machine.transition (10 named branches)",
+    file: "named-branches.ts",
+    control: "named-branches-control",
     maxInstantiations: 160_000,
     maxMarginalInstantiations: 145_000
   },

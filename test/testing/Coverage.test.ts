@@ -64,13 +64,14 @@ const startupMachine = Machine.make({
 }).handle({
   count: {
     always: Machine.transition({
-      cases: (branch) => [branch({
-        title: "count is zero",
-        when: ({ state }) => state.value === 0 ? Option.some(state) : Option.none(),
-        target: (to) => to.full.count(),
-        resolve: ({ target }) => target(new Count({ value: 1 }))
-      })],
-      otherwise: { target: (to) => to.none(), resolve: () => undefined }
+      branches: (to) => ({
+        zero: { title: "Count is zero", target: to.full.count() },
+        unchanged: { target: to.none() }
+      }),
+      resolve: ({ state, select }) =>
+        state.value === 0
+          ? select.zero(new Count({ value: 1 }))
+          : select.unchanged()
     }),
     on: {
       Add: Machine.transition({
@@ -96,21 +97,17 @@ const branchMachine = Machine.make({
   count: {
     on: {
       Select: Machine.transition({
-        cases: (branch) => [
-          branch({
-            title: "negative",
-            when: ({ event }) => event.value < 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.none(),
-            resolve: () => undefined
-          }),
-          branch({
-            title: "zero",
-            when: ({ event }) => event.value === 0 ? Option.some(event.value) : Option.none(),
-            target: (to) => to.none(),
-            resolve: () => undefined
-          })
-        ],
-        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+        branches: (to) => ({
+          negative: { target: to.none() },
+          zero: { target: to.none() },
+          positive: { target: to.none() }
+        }),
+        resolve: ({ event, select }) =>
+          event.value < 0
+            ? select.negative()
+            : event.value === 0
+            ? select.zero()
+            : select.positive()
       })
     }
   }
@@ -268,7 +265,7 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(combined.scenarios.events, 2)
     }))
 
-  it.effect("attributes identical targetless results to their exact conditional branches", () =>
+  it.effect("attributes identical targetless results to their exact named branches", () =>
     Effect.gen(function*() {
       const negative = yield* MachineTest.run(branchMachine, { events: [new Select({ value: -1 })] })
       const zero = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 0 })] })
@@ -283,15 +280,16 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(complete.transitions.definitions.missing, 0)
       assert.strictEqual(complete.transitions.branches.missing, 0)
       assert.deepStrictEqual(
-        complete.transitions.branches.hits.map(({ id, branchIndex, branch }) => ({
+        complete.transitions.branches.hits.map(({ id, branchIndex, branchKey, branch }) => ({
           id,
           branchIndex,
+          branchKey,
           type: branch.type
         })),
         [
-          { id: "transition:0:branch:0", branchIndex: 0, type: "case" },
-          { id: "transition:0:branch:1", branchIndex: 1, type: "case" },
-          { id: "transition:0:branch:2", branchIndex: 2, type: "otherwise" }
+          { id: "transition:0:branch:negative", branchIndex: 0, branchKey: "negative", type: "branch" },
+          { id: "transition:0:branch:zero", branchIndex: 1, branchKey: "zero", type: "branch" },
+          { id: "transition:0:branch:positive", branchIndex: 2, branchKey: "positive", type: "branch" }
         ]
       )
     }))

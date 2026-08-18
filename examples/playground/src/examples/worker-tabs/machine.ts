@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Option, Schema } from "effect"
+import { Schema } from "effect"
 import { type SharedEvent, SharedMachineEvents } from "./protocol.ts"
 
 export type { SharedEvent } from "./protocol.ts"
@@ -44,16 +44,11 @@ export const SharedMachine = Machine.make({
         resolve: ({ target }) => target.from({ count: 0 })
       }),
       Synchronized: Machine.transition({
-        cases: (branch) => [branch({
-          title: "active",
-          when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
-          target: (to) => to.full.Active(),
-          resolve: ({ match, target }) => target.from({ count: match })
-        })],
-        otherwise: {
-          target: (to) => to.full.Idle(),
-          resolve: ({ event, target }) => target.from({ count: event.count })
-        }
+        branches: (to) => ({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }),
+        resolve: ({ event, select }) =>
+          event.active
+            ? select.active.from({ count: event.count })
+            : select.idle.from({ count: event.count })
       })
     }
   },
@@ -72,16 +67,11 @@ export const SharedMachine = Machine.make({
         resolve: ({ state, target }) => target.from({ count: state.count })
       }),
       Synchronized: Machine.transition({
-        cases: (branch) => [branch({
-          title: "active",
-          when: ({ event }) => event.active ? Option.some(event.count) : Option.none(),
-          target: (to) => to.full.Active(),
-          resolve: ({ match, target }) => target.from({ count: match })
-        })],
-        otherwise: {
-          target: (to) => to.full.Idle(),
-          resolve: ({ event, target }) => target.from({ count: event.count })
-        }
+        branches: (to) => ({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }),
+        resolve: ({ event, select }) =>
+          event.active
+            ? select.active.from({ count: event.count })
+            : select.idle.from({ count: event.count })
       })
     }
   }

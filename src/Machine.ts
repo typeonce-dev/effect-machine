@@ -53,7 +53,6 @@ declare const MachineTypeId: unique symbol
 declare const EventConstructionTypeId: unique symbol
 declare const EmittedEventConstructionTypeId: unique symbol
 declare const EventProtocolTypeId: unique symbol
-declare const TransitionCaseTypeId: unique symbol
 
 const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
 
@@ -3274,13 +3273,9 @@ export declare namespace Machine {
       readonly selection: TransitionTargetSelection<Path | undefined>
     }
     | {
-      readonly type: "case"
+      readonly type: "branch"
+      readonly key: string
       readonly title: string
-      readonly target: Path | undefined
-      readonly selection: TransitionTargetSelection<Path | undefined>
-    }
-    | {
-      readonly type: "otherwise"
       readonly target: Path | undefined
       readonly selection: TransitionTargetSelection<Path | undefined>
     }
@@ -3296,8 +3291,8 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * Every branch exposes its selected target without executing its predicate
-   * or resolver. A compound local or branch target covers its descendants;
+   * Every branch exposes its selected target without executing its resolver.
+   * A compound local or branch target covers its descendants;
    * `undefined` identifies an explicitly targetless branch.
    *
    * @category models
@@ -3343,6 +3338,8 @@ export declare namespace Machine {
     readonly reenter: boolean
     /** Zero-based index of the selected static branch. */
     readonly branchIndex: number
+    /** Stable key of a named branch, or `undefined` for a direct transition. */
+    readonly branchKey: string | undefined
     /** Path returned by the handler, including a choice or history pseudo-state. */
     readonly target: TargetPath | undefined
     /**
@@ -4950,14 +4947,9 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type EventTransitionReturn<Transition> =
-    | (Transition extends { readonly resolve?: infer Resolve } ?
-      NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
-      : never)
-    | (Transition extends { readonly cases: infer Cases extends ReadonlyArray<unknown> } ?
-      EventTransitionReturn<Cases[number]>
-      : never)
-    | (Transition extends { readonly otherwise: infer Otherwise } ? EventTransitionReturn<Otherwise> : never)
+  export type EventTransitionReturn<Transition> = Transition extends { readonly resolve?: infer Resolve } ?
+    NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
+    : never
   /**
    * Extracts the return value from a state's event handlers.
    *
@@ -5173,8 +5165,6 @@ export declare namespace Machine {
     | Effect.Services<ChoiceReturn<Config>>
     | InvokeRequirements<Config>
 
-  type TransitionWhenContext<Context> = Omit<Context, "target">
-
   /** Type evidence retained by {@link transition} without affecting runtime data. */
   export interface TransitionTyped<
     States extends StateSchemas,
@@ -5235,8 +5225,7 @@ export declare namespace Machine {
   > = {
     readonly target: TargetlessSelector
     readonly resolve?: TargetlessTransitionResolver<Events, Emits, Context>
-    readonly cases?: never
-    readonly otherwise?: never
+    readonly branches?: never
     readonly reenter?: never
   }
 
@@ -5252,21 +5241,18 @@ export declare namespace Machine {
 
   export type TransitionResolveContext<
     Context,
-    Selection,
-    Match = never
+    Selection
   > =
     & Omit<Context, "target">
-    & ([Match] extends [never] ? {} : { readonly match: Match })
     & (SelectionKind<Selection> extends "none" ? {} : { readonly target: SelectionBuilder<Selection> })
 
   export type TransitionResolver<
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     Context,
-    Selection,
-    Match = never
+    Selection
   > = (
-    context: TransitionResolveContext<Context, Selection, Match>,
+    context: TransitionResolveContext<Context, Selection>,
     enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
   ) => SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined
 
@@ -5281,51 +5267,95 @@ export declare namespace Machine {
   > = {
     readonly target: (to: TargetSelector<States, StateId>) => Selection
     readonly resolve?: TransitionResolver<Events, Emits, Context, Selection>
-    readonly cases?: never
-    readonly otherwise?: never
+    readonly branches?: never
     readonly reenter?: Reenter
   }
 
-  export type TransitionCaseInput<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Selection extends TargetSelection<any, any, any>,
-    Match
-  > = {
-    readonly title: string
-    readonly when: (context: TransitionWhenContext<Context>) => Option.Option<Match>
-    readonly target: (to: TargetSelector<States, StateId>) => Selection
-    readonly resolve?: TransitionResolver<Events, Emits, Context, Selection, NoInfer<Match>>
-    readonly cases?: never
-    readonly otherwise?: never
-    readonly reenter?: never
+  /** One named destination declared by a branching transition. */
+  export interface TransitionBranchInput<
+    Selection extends TargetSelection<any, any, any> = TargetSelection<any, any, any>
+  > {
+    readonly target: Selection
+    readonly title?: string
   }
 
-  export type TransitionConditionalInput<
+  /** Opaque evidence that a branching resolver selected one declared branch. */
+  export interface SelectedBranch<out Key extends string, out Result> {
+    readonly [Topology.SelectedBranchTypeId]: {
+      readonly key: Types.Covariant<Key>
+      readonly result: Types.Covariant<Result>
+    }
+  }
+
+  type SelectedBranchCallable<Callable, Key extends string> = Callable extends {
+    (...args: infer Arguments1): infer Result1
+    (...args: infer Arguments2): infer Result2
+  } ? {
+      (...args: Arguments1): SelectedBranch<Key, Result1>
+      (...args: Arguments2): SelectedBranch<Key, Result2>
+    }
+    : Callable extends (...args: infer Arguments) => infer Result ? (...args: Arguments) => SelectedBranch<Key, Result>
+    : {}
+
+  type SelectedBranchBuilderProperties<Builder, Key extends string> = {
+    readonly [Property in keyof Builder]: Builder[Property] extends (...args: any) => any ?
+      SelectedBranchCallable<Builder[Property], Key>
+      : Builder[Property]
+  }
+
+  /** Target-specific builder that brands every construction with its branch key. */
+  export type SelectedBranchBuilder<Builder, Key extends string> =
+    & SelectedBranchCallable<Builder, Key>
+    & SelectedBranchBuilderProperties<Builder, Key>
+
+  export type BranchSelectors<Branches extends Readonly<Record<string, TransitionBranchInput>>> = {
+    readonly [Key in Extract<keyof Branches, string>]: SelectedBranchBuilder<
+      SelectionBuilder<Branches[Key]["target"]>,
+      Key
+    >
+  }
+
+  export type BranchSelectionResult<Branches extends Readonly<Record<string, TransitionBranchInput>>> = {
+    readonly [Key in Extract<keyof Branches, string>]: SelectedBranch<
+      Key,
+      SelectedTargetResult<Branches[Key]["target"]>
+    >
+  }[Extract<keyof Branches, string>]
+
+  export type TransitionBranchesResolveContext<
+    Context,
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
+  > = Omit<Context, "target"> & { readonly select: BranchSelectors<Branches> }
+
+  export type TransitionBranchesResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context,
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
+  > = (
+    context: TransitionBranchesResolveContext<Context, Branches>,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) => BranchSelectionResult<Branches>
+
+  export type TransitionBranchesInput<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<States>,
     Context,
     Reenter extends boolean,
-    Cases extends readonly [TransitionCaseTyped, ...ReadonlyArray<TransitionCaseTyped>],
-    OtherwiseSelection extends TargetSelection<any, any, any>
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
   > = {
     readonly target?: never
-    readonly resolve?: never
-    readonly cases: (branch: TransitionCaseConstructor<States, Events, Emits, StateId, Context>) => Cases
-    readonly otherwise: TransitionDirectInput<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      never,
-      OtherwiseSelection
-    >
+    /**
+     * Declares every possible destination under a stable semantic key.
+     *
+     * Branches are captured once in ECMAScript property order. Array-index
+     * keys are rejected so reordering ordinary named properties affects only
+     * presentation order; the key remains the testing and inspection identity.
+     */
+    readonly branches: (to: TargetSelector<States, StateId>) => Branches
+    readonly resolve: TransitionBranchesResolver<Events, Emits, Context, Branches>
     readonly reenter?: Reenter
   }
 
@@ -6516,6 +6546,7 @@ export declare namespace Machine {
 
   type TransitionResultInitialTargetPath<Result> = IsAny<Result> extends true ? never
     : Result extends Effect.Effect<infer Success, any, any> ? TransitionResultInitialTargetPath<Success>
+    : Result extends SelectedBranch<any, infer Selected> ? TransitionResultInitialTargetPath<Selected>
     : Result extends StateConstruction<infer Constructed> ? TransitionResultInitialTargetPath<Constructed>
     : Result extends {
       readonly [Topology.InitialTargetTypeId]: typeof Topology.InitialTargetTypeId
@@ -7925,66 +7956,36 @@ type BoundEffectInvokeResult<
     never
   >
 
-/** Type evidence retained for a case created by a conditional transition's local builder. */
-interface TransitionCaseTyped {
-  readonly [TransitionCaseTypeId]: true
-}
-
-/** Locally bound constructor that preserves each conditional transition case independently. */
-interface TransitionCaseConstructor<
-  States extends Machine.StateSchemas,
-  Events extends ReadonlyArray<Machine.TaggedSchema>,
-  Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  StateId extends Machine.StateNodeIdentifier<States>,
-  Context
-> {
-  <
-    const Selection extends Machine.TargetSelection<any, any, any>,
-    const Match
-  >(
-    config: Machine.TransitionCaseInput<States, Events, Emits, StateId, Context, Selection, Match>
-  ):
-    & Machine.TransitionCaseInput<States, Events, Emits, StateId, Context, Selection, Match>
-    & TransitionCaseTyped
-}
-
-/**
- * Captures one exact transition topology while preserving handler inference.
- *
- * @category constructors
- * @since 0.14.0
- */
-type ConditionalTransitionResult<
+/** Captures one exact named-branch topology while preserving handler inference. */
+type BranchingTransitionResult<
   States extends Machine.StateSchemas,
   Events extends ReadonlyArray<Machine.TaggedSchema>,
   Emits extends ReadonlyArray<Machine.TaggedSchema>,
   StateId extends Machine.StateNodeIdentifier<States>,
   Context,
   Reenter extends boolean,
-  Cases extends readonly [
-    TransitionCaseTyped,
-    ...ReadonlyArray<TransitionCaseTyped>
-  ],
-  OtherwiseSelection extends Machine.TargetSelection<any, any, any>
+  Branches extends Readonly<Record<string, Machine.TransitionBranchInput>>
 > =
-  & Omit<
-    Machine.TransitionConditionalInput<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      Cases,
-      OtherwiseSelection
-    >,
-    "cases"
-  >
-  & { readonly cases: Cases }
+  & Machine.TransitionBranchesInput<States, Events, Emits, StateId, Context, Reenter, Branches>
   & Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter>
 
+type TransitionBranchRecordError<Message extends string, Key extends PropertyKey = never> = {
+  readonly "~effect/Machine/TransitionBranchRecordError": Message
+  readonly key: Key
+}
+
+type InvalidStaticTransitionBranchKey<Branches> = Extract<keyof Branches, "" | number | symbol>
+
+type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never] ?
+  TransitionBranchRecordError<"Branch records must contain at least one branch">
+  : [InvalidStaticTransitionBranchKey<Branches>] extends [never] ? unknown
+  : TransitionBranchRecordError<
+    "Branch keys must be non-empty, non-index strings",
+    InvalidStaticTransitionBranchKey<Branches>
+  >
+
 /**
- * Contextually types direct and conditional transition definitions.
+ * Contextually types direct and branching transition definitions.
  *
  * @category constructors
  * @since 0.14.0
@@ -8010,32 +8011,28 @@ export interface TransitionConstructor {
     const Emits extends ReadonlyArray<Machine.TaggedSchema>,
     StateId extends Machine.StateNodeIdentifier<States>,
     Context,
-    const Cases extends readonly [
-      TransitionCaseTyped,
-      ...ReadonlyArray<TransitionCaseTyped>
-    ],
-    const OtherwiseSelection extends Machine.TargetSelection<any, any, any>,
+    const Branches extends Readonly<Record<string, Machine.TransitionBranchInput>>,
     Reenter extends boolean = never
   >(
-    config: Machine.TransitionConditionalInput<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      Cases,
-      OtherwiseSelection
-    >
-  ): ConditionalTransitionResult<
+    config:
+      & Machine.TransitionBranchesInput<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        Branches
+      >
+      & ValidateTransitionBranchRecord<NoInfer<Branches>>
+  ): BranchingTransitionResult<
     States,
     Events,
     Emits,
     StateId,
     Context,
     Reenter,
-    Cases,
-    OtherwiseSelection
+    Branches
   >
 }
 
@@ -8044,9 +8041,9 @@ export interface TransitionConstructor {
  *
  * It is required for every event, lifecycle, choice, and invocation transition
  * so the destination selected by `target` can contextually type the
- * corresponding resolver. Conditional transitions use the locally bound
- * `branch` constructor so every case independently infers its matched value and
- * selected destination, with no limit on the number of cases.
+ * corresponding resolver. Branching transitions declare every possible
+ * destination up front, then select one through ordinary TypeScript control
+ * flow in `resolve`.
  *
  * ```ts
  * Machine.transition({
@@ -8055,31 +8052,20 @@ export interface TransitionConstructor {
  * })
  *
  * Machine.transition({
- *   cases: (branch) => [
- *     branch({
- *       title: "has cached data",
- *       when: ({ event }) => event.cached,
- *       target: (to) => to.full.Ready(),
- *       resolve: ({ match, target }) => target.from({ data: match })
- *     })
- *   ],
- *   otherwise: {
- *     target: (to) => to.full.Loading(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   branches: (to) => ({
+ *     cached: { target: to.full.Ready() },
+ *     loading: { target: to.full.Loading() }
+ *   }),
+ *   resolve: ({ event, select }) => event.cached
+ *     ? select.cached.from({ data: event.cached })
+ *     : select.loading.from()
  * })
  * ```
  *
  * @category constructors
  * @since 0.14.0
  */
-export const transition: TransitionConstructor = ((config: unknown) => {
-  if (!hasProperty(config, "cases") || typeof config.cases !== "function") return config
-  return {
-    ...config,
-    cases: config.cases(<Case extends object>(branch: Case): Case => branch)
-  }
-}) as TransitionConstructor
+export const transition: TransitionConstructor = ((config: unknown) => config) as TransitionConstructor
 
 /**
  * Sentinel used by direct targetless transition shorthands.
@@ -8912,9 +8898,8 @@ export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.I
  *
  * Event handlers retain their handler-key order within each source state and
  * are followed by eventless and completion handlers. This function does not
- * execute predicates or resolvers. Every direct, conditional, fallback, and
- * targetless branch exposes the destination selected by its required static
- * `target` declaration.
+ * execute resolvers. Every direct, named, and targetless branch exposes the
+ * destination selected by its required static `target` declaration.
  *
  * @category getters
  * @since 0.4.0

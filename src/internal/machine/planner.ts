@@ -71,6 +71,7 @@ export type MicrostepPlan<State, Event, E, R> = {
     readonly trigger: Machine.TransitionTrigger
     readonly reenter: boolean
     readonly branchIndex: number
+    readonly branchKey: string | undefined
     readonly target: string | undefined
     readonly resolvedTarget: string | undefined
   }>
@@ -108,6 +109,7 @@ export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context
 type TransitionEvaluation<States extends Machine.StateSchemas, E, R> = {
   readonly result: Machine.HandlerResult<States, E, R>
   readonly branchIndex: number
+  readonly branchKey: string | undefined
 }
 
 type TransitionEvaluator<States extends Machine.StateSchemas, E, R, Context> = (
@@ -214,11 +216,12 @@ const collectTransition = <
 ) => {
   const collected = makeCollector<Event>(machine)
   const evaluated = evaluate === undefined
-    ? { result: transition(context, collected.enqueue), branchIndex: 0 }
+    ? { result: transition(context, collected.enqueue), branchIndex: 0, branchKey: undefined }
     : evaluate(context, collected.enqueue)
   return {
     state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
     branchIndex: evaluated.branchIndex,
+    branchKey: evaluated.branchKey,
     commands: collected.commands,
     raisedEvents: collected.raisedEvents,
     emittedEvents: collected.emittedEvents
@@ -523,6 +526,7 @@ export type SelectedTransition<States extends Machine.StateSchemas, E, R, Contex
 export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Context> = {
   readonly selection: SelectedTransition<States, E, R, Context>
   readonly branchIndex: number
+  readonly branchKey: string | undefined
   readonly unresolvedTarget:
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
@@ -544,6 +548,7 @@ export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R
     readonly trigger: Machine.TransitionTrigger
     readonly reenter: false
     readonly branchIndex: number
+    readonly branchKey: string | undefined
     readonly target: string
     readonly resolvedTarget: string
   }>
@@ -1154,6 +1159,7 @@ interface ResolvedChoiceTransition {
   readonly trigger: Machine.TransitionTrigger
   readonly reenter: false
   readonly branchIndex: number
+  readonly branchKey: string | undefined
   readonly target: string
   readonly resolvedTarget: string
 }
@@ -1232,6 +1238,7 @@ function resolveChoiceTarget(
         trigger: { type: "choice" },
         reenter: false,
         branchIndex: collected.branchIndex,
+        branchKey: collected.branchKey,
         target: returnedPath,
         resolvedTarget: nested?.target.path ?? returnedPath
       })
@@ -1402,6 +1409,7 @@ const collectEvaluatedTransition = <
     return {
       selection,
       branchIndex: transitionResult.branchIndex,
+      branchKey: transitionResult.branchKey,
       unresolvedTarget,
       target,
       commands: [
@@ -1448,6 +1456,7 @@ const collectEvaluatedTransition = <
   return {
     selection,
     branchIndex: transitionResult.branchIndex,
+    branchKey: transitionResult.branchKey,
     unresolvedTarget,
     target,
     commands: [
@@ -1803,6 +1812,7 @@ const microstep = <
       trigger: transition.selection.trigger,
       reenter: transition.selection.transition.reenter,
       branchIndex: transition.branchIndex,
+      branchKey: transition.branchKey,
       target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
       resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
     },

@@ -137,13 +137,22 @@ const makeWithHandlers = (
 }
 
 type DefinitionBranch = {
-  readonly title?: string
-  readonly when?: (context: any) => Option.Option<unknown>
   readonly target: (selector: unknown) => unknown
   readonly resolve?: (context: any, enqueue: unknown) => unknown
 }
 
 type CapturedBranch = DefinitionBranch & {
+  readonly selection: Topology.TargetSelection
+}
+
+type BranchDeclaration = {
+  readonly title?: string
+  readonly target: unknown
+}
+
+type CapturedNamedBranch = {
+  readonly key: string
+  readonly title: string
   readonly selection: Topology.TargetSelection
 }
 
@@ -336,18 +345,132 @@ const runCapturedBranch = (
   context: Record<string, any>,
   enqueue: unknown,
   stateNodes: Machine.StateNodes,
-  source: string,
-  match?: { readonly value: unknown }
+  source: string
 ): unknown => {
   const selectedTarget = getSelectionBuilder(context.target, branch.selection, stateNodes, source)
   if (branch.resolve === undefined) return constructSelectedTarget(selectedTarget)
   const resolverContext = { ...context }
   if (branch.selection.kind === "none") delete resolverContext.target
   else resolverContext.target = selectedTarget
-  if (match !== undefined) resolverContext.match = match.value
   const resolved = branch.resolve(resolverContext, enqueue)
   validateResolvedSelection(resolved, branch.selection, stateNodes)
   return resolved === undefined ? constructSelectedTarget(selectedTarget) : resolved
+}
+
+const isArrayIndexKey = (key: string): boolean => {
+  const index = Number(key)
+  return Number.isInteger(index) && index >= 0 && index < 0xffff_ffff && String(index) === key
+}
+
+const captureNamedBranches = (
+  declarations: unknown,
+  path: string,
+  trigger: PropertyKey
+): ReadonlyArray<CapturedNamedBranch> => {
+  if (typeof declarations !== "object" || declarations === null || Array.isArray(declarations)) {
+    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" requires a branch record`)
+  }
+  if (Object.getOwnPropertySymbols(declarations).length > 0) {
+    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" cannot use symbol keys`)
+  }
+  const keys = Object.keys(declarations)
+  if (keys.length === 0) {
+    throw new Error(`Machine branching transition for state "${path}" on "${String(trigger)}" requires a branch`)
+  }
+  return Object.freeze(keys.map((key) => {
+    if (key.length === 0 || isArrayIndexKey(key)) {
+      throw new Error(
+        `Machine branching transition for state "${path}" on "${String(trigger)}" requires non-index string branch keys`
+      )
+    }
+    const declaration = (declarations as Record<string, unknown>)[key]
+    if (typeof declaration !== "object" || declaration === null || !hasProperty(declaration, "target")) {
+      throw new Error(`Machine transition branch "${key}" requires a target selection`)
+    }
+    const { target, title } = declaration as BranchDeclaration
+    if (!Topology.isTargetSelection(target)) {
+      throw new Error(`Machine transition branch "${key}" must select exactly one target`)
+    }
+    if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
+      throw new Error(`Machine transition branch "${key}" title must be a non-empty string`)
+    }
+    return Object.freeze({ key, title: title ?? key, selection: target })
+  }))
+}
+
+const wrapSelectedBranchBuilder = (
+  builder: unknown,
+  owner: object,
+  branchIndex: number,
+  branchKey: string
+): unknown => {
+  if (typeof builder === "function") {
+    const wrapped = (...args: ReadonlyArray<unknown>) =>
+      Topology.makeSelectedBranch(owner, branchIndex, branchKey, builder(...args))
+    for (const property of Reflect.ownKeys(builder)) {
+      if (
+        property === "length" || property === "name" || property === "prototype" || property === "caller" ||
+        property === "arguments"
+      ) continue
+      const descriptor = Object.getOwnPropertyDescriptor(builder, property)
+      if (descriptor === undefined) continue
+      if ("value" in descriptor && typeof descriptor.value === "function") {
+        descriptor.value = wrapSelectedBranchBuilder(descriptor.value, owner, branchIndex, branchKey)
+      }
+      Object.defineProperty(wrapped, property, descriptor)
+    }
+    return wrapped
+  }
+  if (typeof builder === "object" && builder !== null) {
+    const wrapped: Record<PropertyKey, unknown> = {}
+    for (const property of Reflect.ownKeys(builder)) {
+      const descriptor = Object.getOwnPropertyDescriptor(builder, property)
+      if (descriptor === undefined) continue
+      if ("value" in descriptor && typeof descriptor.value === "function") {
+        descriptor.value = wrapSelectedBranchBuilder(descriptor.value, owner, branchIndex, branchKey)
+      }
+      Object.defineProperty(wrapped, property, descriptor)
+    }
+    return wrapped
+  }
+  throw new Error(`Machine could not construct transition branch "${branchKey}"`)
+}
+
+const makeBranchSelectors = (
+  context: Record<string, any>,
+  branches: ReadonlyArray<CapturedNamedBranch>,
+  owner: object,
+  stateNodes: Machine.StateNodes,
+  source: string
+): Readonly<Record<string, unknown>> => {
+  const select: Record<string, unknown> = Object.create(null)
+  for (let branchIndex = 0; branchIndex < branches.length; branchIndex++) {
+    const branch = branches[branchIndex]!
+    select[branch.key] = wrapSelectedBranchBuilder(
+      getSelectionBuilder(context.target, branch.selection, stateNodes, source),
+      owner,
+      branchIndex,
+      branch.key
+    )
+  }
+  return Object.freeze(select)
+}
+
+const validateSelectedBranchResult = (
+  result: unknown,
+  selection: Topology.TargetSelection,
+  stateNodes: Machine.StateNodes
+): void => {
+  if (selection.kind === "none") {
+    if (!Topology.isNoTarget(result)) {
+      throw new Error("Machine targetless branch must return its selected targetless builder")
+    }
+    return
+  }
+  if (result === undefined) {
+    throw new Error(`Machine transition branch selected "${selection.path}" without constructing its target`)
+  }
+  validateResolvedSelection(result, selection, stateNodes)
 }
 
 const captureTransition = (
@@ -362,64 +485,53 @@ const captureTransition = (
   const definition = transition as Record<PropertyKey, unknown>
   const selector = makeTargetSelector(stateNodes, path)
   const reenter = definition.reenter === true
-  if (Array.isArray(definition.cases)) {
-    const rawCases = definition.cases as ReadonlyArray<unknown>
-    if (definition.cases.length === 0 || !hasProperty(definition, "otherwise")) {
+  if (hasProperty(definition, "branches")) {
+    const branching = definition as { readonly branches: unknown; readonly resolve?: unknown }
+    if (typeof branching.branches !== "function" || typeof branching.resolve !== "function") {
       throw new Error(
-        `Machine conditional transition for state "${path}" on "${String(trigger)}" requires cases and otherwise`
+        `Machine branching transition for state "${path}" on "${String(trigger)}" requires branches and resolve`
       )
     }
-    const cases = rawCases.map((branch) => {
-      const captured = captureDefinitionBranch(branch, selector, path, trigger)
-      if (typeof captured.title !== "string" || captured.title.length === 0 || typeof captured.when !== "function") {
+    const resolve = branching.resolve
+    const branches = captureNamedBranches(branching.branches(selector), path, trigger)
+    const owner = Object.freeze({})
+    const evaluate = (context: Record<string, any>, enqueue: unknown) => {
+      const resolverContext = { ...context }
+      delete resolverContext.target
+      resolverContext.select = makeBranchSelectors(context, branches, owner, stateNodes, path)
+      const selected = resolve(resolverContext, enqueue)
+      if (!Topology.isSelectedBranch(selected) || selected.owner !== owner) {
         throw new Error(
-          `Machine conditional transition case for state "${path}" on "${String(trigger)}" requires title and when`
+          `Machine branching transition for state "${path}" on "${String(trigger)}" must select one declared branch`
         )
       }
-      return captured
-    })
-    const otherwise = captureDefinitionBranch(definition.otherwise, selector, path, trigger)
-    const evaluate = (context: Record<string, any>, enqueue: unknown) => {
-      const predicateContext = { ...context }
-      delete predicateContext.target
-      for (let branchIndex = 0; branchIndex < cases.length; branchIndex++) {
-        const branch = cases[branchIndex]!
-        const result = branch.when!(predicateContext)
-        if (!Option.isOption(result)) {
-          throw new Error(`Machine conditional transition case "${branch.title}" must return Option`)
-        }
-        if (Option.isSome(result)) {
-          return {
-            result: runCapturedBranch(branch, context, enqueue, stateNodes, path, { value: result.value }),
-            branchIndex
-          }
-        }
+      const branch = branches[selected.branchIndex]
+      if (branch === undefined || selected.branchKey !== branch.key) {
+        throw new Error(`Machine branching transition returned invalid branch evidence`)
       }
+      validateSelectedBranchResult(selected.result, branch.selection, stateNodes)
       return {
-        result: runCapturedBranch(otherwise, context, enqueue, stateNodes, path),
-        branchIndex: cases.length
+        result: selected.result,
+        branchIndex: selected.branchIndex,
+        branchKey: selected.branchKey
       }
     }
     return {
       reenter,
       targets: [
         ...new Set(
-          [...cases, otherwise].flatMap((branch) => branch.selection.path === undefined ? [] : [branch.selection.path])
+          branches.flatMap((branch) => branch.selection.path === undefined ? [] : [branch.selection.path])
         )
       ],
-      branches: [
-        ...cases.map((branch) => ({
-          type: "case" as const,
-          title: branch.title!,
+      branches: branches.map((branch) =>
+        Object.freeze({
+          type: "branch" as const,
+          key: branch.key,
+          title: branch.title,
           target: branch.selection.path,
           selection: transitionTargetSelection(branch.selection)
-        })),
-        {
-          type: "otherwise" as const,
-          target: otherwise.selection.path,
-          selection: transitionTargetSelection(otherwise.selection)
-        }
-      ],
+        })
+      ),
       evaluate,
       transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
     }
@@ -427,7 +539,8 @@ const captureTransition = (
   const branch = captureDefinitionBranch(transition, selector, path, trigger)
   const evaluate = (context: Record<string, any>, enqueue: unknown) => ({
     result: runCapturedBranch(branch, context, enqueue, stateNodes, path),
-    branchIndex: 0
+    branchIndex: 0,
+    branchKey: undefined
   })
   return {
     reenter,

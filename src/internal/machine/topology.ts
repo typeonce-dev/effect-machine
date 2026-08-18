@@ -27,6 +27,8 @@ export const NoTargetTypeId: unique symbol = Symbol("effect/Machine/NoTarget")
 
 export const TargetSelectionTypeId: unique symbol = Symbol("effect/Machine/TargetSelection")
 
+export const SelectedBranchTypeId: unique symbol = Symbol("effect/Machine/SelectedBranch")
+
 interface StateInput {
   readonly [StateInputTypeId]: typeof StateInputTypeId
   readonly input: unknown
@@ -76,6 +78,15 @@ export interface TargetSelection {
   readonly path: string | undefined
 }
 
+/** One branch selection returned by a compiled branching transition. */
+export interface SelectedBranch {
+  readonly [SelectedBranchTypeId]: typeof SelectedBranchTypeId
+  readonly owner: object
+  readonly branchIndex: number
+  readonly branchKey: string
+  readonly result: unknown
+}
+
 export const makeTargetSelection = (
   kind: TargetSelectionKind,
   path?: string,
@@ -89,6 +100,22 @@ export const makeTargetSelection = (
   })
 
 export const isTargetSelection = (u: unknown): u is TargetSelection => hasProperty(u, TargetSelectionTypeId)
+
+export const makeSelectedBranch = (
+  owner: object,
+  branchIndex: number,
+  branchKey: string,
+  result: unknown
+): SelectedBranch =>
+  Object.freeze({
+    [SelectedBranchTypeId]: SelectedBranchTypeId,
+    owner,
+    branchIndex,
+    branchKey,
+    result
+  })
+
+export const isSelectedBranch = (u: unknown): u is SelectedBranch => hasProperty(u, SelectedBranchTypeId)
 
 const noTarget = Object.freeze({
   [NoTargetTypeId]: NoTargetTypeId

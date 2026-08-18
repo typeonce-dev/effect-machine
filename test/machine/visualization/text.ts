@@ -27,9 +27,7 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
       return [
         branch.type === "direct" ?
           `→ ${target}` :
-          branch.type === "case" ?
-          `[${branch.title}] → ${target}` :
-          `[otherwise] → ${target}`
+          `[${branch.title}] → ${target}`
       ]
     })
     if (branches.length === 0) return []

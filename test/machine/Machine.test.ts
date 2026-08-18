@@ -176,6 +176,153 @@ describe("Machine", () => {
       assert.deepStrictEqual(step.entryPaths, [])
     }))
 
+  it.effect("captures named branches once with stable semantic keys", () =>
+    Effect.gen(function*() {
+      class Stable extends Schema.TaggedClass<Stable>("NamedBranchStable")("Stable", {}) {}
+      class Ping extends Schema.TaggedClass<Ping>("NamedBranchPing")("Ping", { route: Schema.Boolean }) {}
+      const states = Machine.states({ Stable })
+      let captures = 0
+      let declarations: any
+      const definition = Machine.make({
+        states: states.states,
+        events: Machine.events(Ping),
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target(new Stable({}))
+        }
+      })
+      const machine = definition.handle({
+        Stable: {
+          on: {
+            Ping: Machine.transition({
+              branches: (to) => {
+                captures++
+                const captured = {
+                  unchanged: { target: to.none() },
+                  refresh: { title: "Refresh stable state", target: to.full.Stable() }
+                }
+                declarations = captured
+                return captured
+              },
+              resolve: ({ event, select }) =>
+                event.route
+                  ? select.refresh(new Stable({}))
+                  : select.unchanged(),
+              reenter: true
+            })
+          }
+        }
+      })
+
+      declarations.refresh.title = "mutated after capture"
+
+      assert.strictEqual(captures, 1)
+      assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
+        source: "Stable",
+        trigger: { type: "event", event: "Ping" },
+        reenter: true,
+        branches: [{
+          type: "branch",
+          key: "unchanged",
+          title: "unchanged",
+          target: undefined,
+          selection: { path: undefined, kind: "none", scope: "local" }
+        }, {
+          type: "branch",
+          key: "refresh",
+          title: "Refresh stable state",
+          target: "Stable",
+          selection: { path: "Stable", kind: "state", scope: "full" }
+        }]
+      }])
+
+      const initial = yield* Machine.planInitial(machine)
+      const unchanged = yield* Machine.plan(machine, initial.state, new Ping({ route: false }))
+      const refresh = yield* Machine.plan(machine, initial.state, new Ping({ route: true }))
+      assert.strictEqual(unchanged.microsteps[0]?.transitions[0]?.branchKey, "unchanged")
+      assert.strictEqual(refresh.microsteps[0]?.transitions[0]?.branchKey, "refresh")
+      assert.deepStrictEqual(unchanged.microsteps[0]?.exitPaths, ["Stable"])
+      assert.deepStrictEqual(unchanged.microsteps[0]?.entryPaths, ["Stable"])
+      assert.strictEqual(captures, 1)
+    }))
+
+  it("rejects branch records without stable string identities", () => {
+    class Stable extends Schema.TaggedClass<Stable>("InvalidBranchStable")("Stable", {}) {}
+    class Ping extends Schema.TaggedClass<Ping>("InvalidBranchPing")("Ping", {}) {}
+    const makeDefinition = () =>
+      Machine.make({
+        states: { Stable },
+        events: Machine.events(Ping),
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target(new Stable({}))
+        }
+      })
+    const handle = (branches: (to: any) => object) => () =>
+      makeDefinition().handle({
+        Stable: {
+          on: {
+            Ping: Machine.transition({
+              branches,
+              resolve: (() => undefined) as any
+            } as any)
+          }
+        }
+      })
+
+    assert.throws(handle(() => ({})), /requires a branch/)
+    assert.throws(handle((to) => [{ target: to.none() }]), /requires a branch record/)
+    assert.throws(handle((to) => ({ "": { target: to.none() } })), /non-index string branch keys/)
+    assert.throws(handle((to) => ({ 0: { target: to.none() } })), /non-index string branch keys/)
+    assert.throws(handle((to) => ({ invalid: { title: "", target: to.none() } })), /non-empty string/)
+    assert.throws(handle(() => ({ invalid: { target: undefined } })), /must select exactly one target/)
+    assert.throws(
+      handle((to) => ({ valid: { target: to.none() }, [Symbol("invalid")]: { target: to.none() } })),
+      /cannot use symbol keys/
+    )
+  })
+
+  it.effect("rejects selected branch evidence from another transition", () =>
+    Effect.gen(function*() {
+      class Stable extends Schema.TaggedClass<Stable>("OwnedBranchStable")("Stable", {}) {}
+      class Capture extends Schema.TaggedClass<Capture>("OwnedBranchCapture")("Capture", {}) {}
+      class Reuse extends Schema.TaggedClass<Reuse>("OwnedBranchReuse")("Reuse", {}) {}
+      let captured: unknown
+      const machine = Machine.make({
+        states: { Stable },
+        events: Machine.events(Capture, Reuse),
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target(new Stable({}))
+        }
+      }).handle({
+        Stable: {
+          on: {
+            Capture: Machine.transition({
+              branches: (to) => ({ unchanged: { target: to.none() } }),
+              resolve: ({ select }) => {
+                captured = select.unchanged()
+                return captured as any
+              }
+            }),
+            Reuse: Machine.transition({
+              branches: (to) => ({ unchanged: { target: to.none() } }),
+              resolve: () => captured as any
+            })
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const first = yield* Machine.plan(machine, initial.state, new Capture({}))
+      const exit = yield* Effect.exit(Machine.plan(machine, first.next, new Reuse({})))
+      assert.strictEqual(exit._tag, "Failure")
+      if (exit._tag === "Failure") {
+        assert(Cause.hasDies(exit.cause))
+        assert.match(String(Cause.squash(exit.cause)), /must select one declared branch/)
+      }
+    }))
+
   const Input = Schema.Struct({
     userId: Schema.String
   })
@@ -5514,13 +5661,14 @@ describe("Machine", () => {
           Machine.Machine.ParentEvents<typeof definition>
         >
       > = Machine.transition({
-        cases: (branch) => [branch({
-          title: "request is ready",
-          when: ({ snapshot }) => snapshot.state === "ready" ? Option.some(snapshot) : Option.none(),
-          target: (to) => to.full.Success(),
-          resolve: ({ snapshot, target }) => target(new Success({ requestId: snapshot.state }))
-        })],
-        otherwise: { target: (to) => to.none(), resolve: () => undefined }
+        branches: (to) => ({
+          ready: { title: "Request is ready", target: to.full.Success() },
+          unchanged: { target: to.none() }
+        }),
+        resolve: ({ snapshot, select }) =>
+          snapshot.state === "ready"
+            ? select.ready(new Success({ requestId: snapshot.state }))
+            : select.unchanged()
       })
       const machine = definition.handle({
         Idle: {

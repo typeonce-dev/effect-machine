@@ -1,5 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { Option, Schema } from "effect"
+import { Schema } from "effect"
 
 // Domain schemas are shared by state payloads and the public physics protocol.
 export const Axis = Schema.Literals([-1, 0, 1])
@@ -206,16 +206,14 @@ export const CharacterMachine = Machine.make({
                   Standing: {
                     on: {
                       Move: Machine.transition({
-                        cases: (branch) => [branch({
-                          title: "moving",
-                          when: ({ event }) => event.axis === 0 ? Option.none() : Option.some(event),
-                          target: (to) => to.local.Running(),
-                          resolve: ({ match, target }) => target.from({ startedAt: match.at })
-                        })],
-                        otherwise: {
-                          target: (to) => to.none(),
-                          resolve: () => undefined
-                        }
+                        branches: (to) => ({
+                          moving: { target: to.local.Running() },
+                          unchanged: { target: to.none() }
+                        }),
+                        resolve: ({ event, select }) =>
+                          event.axis === 0
+                            ? select.unchanged()
+                            : select.moving.from({ startedAt: event.at })
                       }),
                       DownPressed: Machine.transition({
                         target: (to) => to.local.Ducking(),
@@ -226,16 +224,14 @@ export const CharacterMachine = Machine.make({
                   Running: {
                     on: {
                       Move: Machine.transition({
-                        cases: (branch) => [branch({
-                          title: "stopped",
-                          when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
-                          target: (to) => to.local.Standing(),
-                          resolve: ({ target }) => target.from()
-                        })],
-                        otherwise: {
-                          target: (to) => to.none(),
-                          resolve: () => undefined
-                        }
+                        branches: (to) => ({
+                          stopped: { target: to.local.Standing() },
+                          unchanged: { target: to.none() }
+                        }),
+                        resolve: ({ event, select }) =>
+                          event.axis === 0
+                            ? select.stopped.from()
+                            : select.unchanged()
                       }),
                       DownPressed: Machine.transition({
                         target: (to) => to.local.Ducking(),
@@ -246,16 +242,14 @@ export const CharacterMachine = Machine.make({
                   Ducking: {
                     on: {
                       DownReleased: Machine.transition({
-                        cases: (branch) => [branch({
-                          title: "stopped",
-                          when: ({ event }) => event.axis === 0 ? Option.some(undefined) : Option.none(),
-                          target: (to) => to.local.Standing(),
-                          resolve: ({ target }) => target.from()
-                        })],
-                        otherwise: {
-                          target: (to) => to.local.Running(),
-                          resolve: ({ event, target }) => target.from({ startedAt: event.at })
-                        }
+                        branches: (to) => ({
+                          stopped: { target: to.local.Standing() },
+                          running: { target: to.local.Running() }
+                        }),
+                        resolve: ({ event, select }) =>
+                          event.axis === 0
+                            ? select.stopped.from()
+                            : select.running.from({ startedAt: event.at })
                       })
                     }
                   },
@@ -273,16 +267,14 @@ export const CharacterMachine = Machine.make({
                     }),
                     on: {
                       LandingSettled: Machine.transition({
-                        cases: (branch) => [branch({
-                          title: "stopped",
-                          when: ({ state }) => state.resumeAxis === 0 ? Option.some(undefined) : Option.none(),
-                          target: (to) => to.local.Standing(),
-                          resolve: ({ target }) => target.from()
-                        })],
-                        otherwise: {
-                          target: (to) => to.local.Running(),
-                          resolve: ({ state, target }) => target.from({ startedAt: state.landedAt + 140 })
-                        }
+                        branches: (to) => ({
+                          stopped: { target: to.local.Standing() },
+                          running: { target: to.local.Running() }
+                        }),
+                        resolve: ({ state, select }) =>
+                          state.resumeAxis === 0
+                            ? select.stopped.from()
+                            : select.running.from({ startedAt: state.landedAt + 140 })
                       }),
                       Move: Machine.transition({
                         target: (to) => to.local.Landing(),
@@ -422,44 +414,24 @@ export const CharacterMachine = Machine.make({
           Left: {
             on: {
               Move: Machine.transition({
-                cases: (branch) => [branch({
-                  title: "right",
-                  when: ({ event }) => event.axis === 1 ? Option.some(undefined) : Option.none(),
-                  target: (to) => to.local.Right(),
-                  resolve: ({ target }) => target.from()
-                })],
-                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                branches: (to) => ({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }),
+                resolve: ({ event, select }) => event.axis === 1 ? select.right.from() : select.unchanged()
               }),
               WallJump: Machine.transition({
-                cases: (branch) => [branch({
-                  title: "right",
-                  when: ({ event }) => event.push === 1 ? Option.some(undefined) : Option.none(),
-                  target: (to) => to.local.Right(),
-                  resolve: ({ target }) => target.from()
-                })],
-                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                branches: (to) => ({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }),
+                resolve: ({ event, select }) => event.push === 1 ? select.right.from() : select.unchanged()
               })
             }
           },
           Right: {
             on: {
               Move: Machine.transition({
-                cases: (branch) => [branch({
-                  title: "left",
-                  when: ({ event }) => event.axis === -1 ? Option.some(undefined) : Option.none(),
-                  target: (to) => to.local.Left(),
-                  resolve: ({ target }) => target.from()
-                })],
-                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                branches: (to) => ({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }),
+                resolve: ({ event, select }) => event.axis === -1 ? select.left.from() : select.unchanged()
               }),
               WallJump: Machine.transition({
-                cases: (branch) => [branch({
-                  title: "left",
-                  when: ({ event }) => event.push === -1 ? Option.some(undefined) : Option.none(),
-                  target: (to) => to.local.Left(),
-                  resolve: ({ target }) => target.from()
-                })],
-                otherwise: { target: (to) => to.none(), resolve: () => undefined }
+                branches: (to) => ({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }),
+                resolve: ({ event, select }) => event.push === -1 ? select.left.from() : select.unchanged()
               })
             }
           }
@@ -468,24 +440,17 @@ export const CharacterMachine = Machine.make({
       contact: {
         on: {
           WallContact: Machine.transition({
-            cases: (branch) => [
-              branch({
-                title: "left wall",
-                when: ({ event }) => event.wall === -1 ? Option.some(undefined) : Option.none(),
-                target: (to) => to.local.LeftWall(),
-                resolve: ({ target }) => target.from()
-              }),
-              branch({
-                title: "right wall",
-                when: ({ event }) => event.wall === 1 ? Option.some(undefined) : Option.none(),
-                target: (to) => to.local.RightWall(),
-                resolve: ({ target }) => target.from()
-              })
-            ],
-            otherwise: {
-              target: (to) => to.local.NoWall(),
-              resolve: ({ target }) => target.from()
-            }
+            branches: (to) => ({
+              leftWall: { title: "Left wall", target: to.local.LeftWall() },
+              rightWall: { title: "Right wall", target: to.local.RightWall() },
+              noWall: { title: "No wall", target: to.local.NoWall() }
+            }),
+            resolve: ({ event, select }) =>
+              event.wall === -1
+                ? select.leftWall.from()
+                : event.wall === 1
+                ? select.rightWall.from()
+                : select.noWall.from()
           })
         },
         states: {

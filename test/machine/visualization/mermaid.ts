@@ -52,11 +52,7 @@ const branchLabel = (
   definition: TransitionDefinition,
   branch: TransitionDefinition["branches"][number]
 ): string => {
-  const suffix = branch.type === "case" ?
-    ` [${branch.title}]` :
-    branch.type === "otherwise" ?
-    " [otherwise]" :
-    ""
+  const suffix = branch.type === "branch" ? ` [${branch.title}]` : ""
   return escapeText(`${triggerLabel(definition)}${suffix}`)
 }
 
