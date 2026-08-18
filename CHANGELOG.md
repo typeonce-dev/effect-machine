@@ -1,5 +1,30 @@
 # @typeonce/effect-machine
 
+## 0.16.0
+
+### Minor Changes
+
+- 1ca9af3: Replace conditional `cases` and `otherwise` transitions with named `branches`. Each branch declares one static target, while the required synchronous `resolve` function uses ordinary TypeScript control flow to return a typed `select` builder.
+
+  ```ts
+  Machine.transition({
+    branches: (to) => ({
+      moving: { target: to.local.Running() },
+      unchanged: { target: to.none() }
+    }),
+    resolve: ({ event, select }) =>
+      event.axis === 0
+        ? select.unchanged()
+        : select.moving.from({ startedAt: event.at })
+  })
+  ```
+
+  Branch keys are stable inspection, visualization, trace-verification, and coverage identities. Optional branch titles remain presentation metadata.
+
+- 7bb9a45: Add `stream` sources to `Machine.invoke`. Stream values are handled through the typed `onElement` transition one committed parent macrostep at a time, while completion and typed failures use `onDone` and `onFailure`. Leaving the owning state interrupts the Stream and runs its finalizers.
+
+  Add the direct `{ target: Machine.targetless, resolve }` transition shorthand for handlers that keep the current configuration and only enqueue commands.
+
 ## 0.15.0
 
 ### Minor Changes
