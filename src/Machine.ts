@@ -5215,16 +5215,26 @@ export declare namespace Machine {
     }
 
   /** Direct shorthand for a non-reentering targetless transition. */
+  // Keep the context generic so omitting `target` is deferred until a resolver
+  // is actually authored instead of expanding every TransitionConfig eagerly.
+  interface TargetlessTransitionResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context
+  > {
+    <ResolvedContext extends Omit<Context, "target">>(
+      context: ResolvedContext,
+      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+    ): undefined
+  }
+
   export type TargetlessTransitionInput<
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     Context
   > = {
     readonly target: TargetlessSelector
-    readonly resolve?: (
-      context: Omit<Context, "target">,
-      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
-    ) => undefined
+    readonly resolve?: TargetlessTransitionResolver<Events, Emits, Context>
     readonly cases?: never
     readonly otherwise?: never
     readonly reenter?: never
