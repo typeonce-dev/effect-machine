@@ -417,6 +417,53 @@ describe("machine planner and runtime strategies", () => {
       }
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("matches generic and compiled Stream invocation delivery and completion", () =>
+    Effect.gen(function*() {
+      class Streaming extends Schema.TaggedClass<Streaming>("StrategyStreaming")("Streaming", {}) {}
+      class StreamDone extends Schema.TaggedClass<StreamDone>("StrategyStreamDone")("StreamDone", {
+        values: Schema.Array(Schema.Number)
+      }) {}
+      const states = Machine.states({
+        Streaming,
+        StreamDone: { schema: StreamDone, type: "final", output: Schema.Array(Schema.Number) }
+      })
+      const seen: Array<number> = []
+      const definition = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.Streaming(),
+          resolve: ({ target }) => target.from()
+        }
+      })
+      const machine = definition.handle({
+        Streaming: {
+          invoke: definition.invoke({
+            id: "values",
+            stream: () => Stream.fromIterable([1, 2, 3]),
+            onElement: {
+              target: Machine.targetless,
+              resolve: ({ element }) => {
+                seen.push(element)
+              }
+            },
+            onDone: Machine.transition({
+              target: (to) => to.full.StreamDone(),
+              resolve: ({ target }) => target(new StreamDone({ values: [...seen] }))
+            })
+          })
+        },
+        StreamDone: { output: ({ state }) => state.values }
+      })
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        seen.length = 0
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        assert.deepStrictEqual(yield* ref.join, [1, 2, 3])
+        assert.deepStrictEqual(seen, [1, 2, 3])
+      }
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("decodes deferred event constructions in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const Event = Schema.TaggedUnion({ Set: { value: Schema.NonEmptyString } })

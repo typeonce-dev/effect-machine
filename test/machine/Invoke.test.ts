@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Effect, Schema } from "effect"
+import { Cause, Effect, Schema, Stream } from "effect"
 import { Machine } from "../../src/index.js"
 
 class Loading extends Schema.TaggedClass<Loading>("InvokeLoading")("Loading", {}) {}
@@ -11,10 +11,224 @@ class Failed extends Schema.TaggedClass<Failed>("InvokeFailed")("Failed", {
 }) {}
 class Idle extends Schema.TaggedClass<Idle>("InvokeIdle")("Idle", {}) {}
 class Start extends Schema.TaggedClass<Start>("InvokeStart")("Start", {}) {}
+class Collecting extends Schema.TaggedClass<Collecting>("InvokeCollecting")("Collecting", {
+  values: Schema.Array(Schema.Number)
+}) {}
+class Add extends Schema.TaggedClass<Add>("InvokeAdd")("Add", {
+  value: Schema.Number
+}) {}
+class FinishStream extends Schema.TaggedClass<FinishStream>("InvokeFinishStream")("FinishStream", {
+  value: Schema.Number
+}) {}
 
 const States = Machine.states({ Idle, Loading, Complete, Failed })
 
 describe("inline invoke", () => {
+  it.effect("handles Stream elements sequentially before completion", () =>
+    Effect.gen(function*() {
+      const states = Machine.states({ Collecting, Complete })
+      const definition = Machine.make({
+        states: states.states,
+        events: Machine.events(Add),
+        initial: {
+          target: (to) => to.Collecting(),
+          resolve: ({ target }) => target(new Collecting({ values: [] }))
+        }
+      })
+      const machine = definition.handle({
+        Collecting: {
+          invoke: Machine.invoke({
+            id: "numbers",
+            stream: () => Stream.fromIterable([1, 2, 3]),
+            onElement: {
+              target: Machine.targetless,
+              resolve: ({ element }, enqueue) => {
+                enqueue.raise(new Add({ value: element }))
+              }
+            },
+            onDone: Machine.transition({
+              target: (to) => to.full.Complete(),
+              resolve: ({ state, target }) => target(new Complete({ value: state.values.join(",") }))
+            })
+          }),
+          on: {
+            Add: Machine.transition({
+              target: (to) => to.full.Collecting(),
+              resolve: ({ event, state, target }) => target(new Collecting({ values: [...state.values, event.value] }))
+            })
+          }
+        },
+        Complete: {}
+      })
+
+      assert.deepStrictEqual(Machine.transitionDefinitions(machine), [
+        {
+          source: "Collecting",
+          trigger: { type: "event", event: "Add" },
+          reenter: false,
+          branches: [{
+            type: "direct",
+            target: "Collecting",
+            selection: { path: "Collecting", kind: "state", scope: "full" }
+          }]
+        },
+        {
+          source: "Collecting",
+          trigger: { type: "invoke", id: "numbers", outcome: "element" },
+          reenter: false,
+          branches: [{
+            type: "direct",
+            target: undefined,
+            selection: { path: undefined, kind: "none", scope: "local" }
+          }]
+        },
+        {
+          source: "Collecting",
+          trigger: { type: "invoke", id: "numbers", outcome: "done" },
+          reenter: false,
+          branches: [{
+            type: "direct",
+            target: "Complete",
+            selection: { path: "Complete", kind: "state", scope: "full" }
+          }]
+        }
+      ])
+
+      const ref = yield* Machine.start(machine)
+      yield* ref.changes.pipe(
+        Stream.filter((snapshot) => snapshot.state.path === "Complete"),
+        Stream.take(1),
+        Stream.runDrain
+      )
+      assert.deepStrictEqual(yield* ref.state, {
+        path: "Complete" as const,
+        value: new Complete({ value: "1,2,3" })
+      })
+    }))
+
+  it.effect("routes a Stream typed failure through onFailure", () =>
+    Effect.gen(function*() {
+      const definition = Machine.make({
+        states: States.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
+      })
+      const machine = definition.handle({
+        Loading: {
+          invoke: definition.invoke({
+            id: "updates",
+            stream: () => Stream.fail("offline"),
+            onDone: { target: Machine.targetless },
+            onFailure: Machine.transition({
+              target: (to) => to.full.Failed(),
+              resolve: ({ error, target }) => target(new Failed({ message: error }))
+            })
+          })
+        },
+        Complete: {},
+        Failed: {}
+      })
+
+      const ref = yield* Machine.start(machine)
+      yield* ref.changes.pipe(
+        Stream.filter((snapshot) => snapshot.state.path === "Failed"),
+        Stream.take(1),
+        Stream.runDrain
+      )
+      assert.deepStrictEqual(yield* ref.state, {
+        path: "Failed" as const,
+        value: new Failed({ message: "offline" })
+      })
+    }))
+
+  it.effect("fails the owning machine when a Stream defects", () =>
+    Effect.gen(function*() {
+      const defect = new Error("stream defect")
+      const definition = Machine.make({
+        states: States.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
+      })
+      const machine = definition.handle({
+        Loading: {
+          invoke: definition.invoke({
+            id: "updates",
+            stream: () => Stream.die(defect),
+            onDone: { target: Machine.targetless }
+          })
+        },
+        Complete: {},
+        Failed: {}
+      })
+
+      const ref = yield* Machine.start(machine)
+      yield* ref.changes.pipe(Stream.runDrain)
+      const snapshot = yield* ref.snapshot
+      assert.strictEqual(snapshot.status, "error")
+      if (snapshot.status !== "error") return assert.fail("expected an error snapshot")
+      assert.strictEqual(Cause.squash(snapshot.cause), defect)
+    }))
+
+  it.effect("interrupts a Stream before pulling another element after its owner exits", () =>
+    Effect.gen(function*() {
+      let pulls = 0
+      let finalized = false
+      const source = Stream.fromEffect(Effect.sync(() => ++pulls)).pipe(
+        Stream.forever,
+        Stream.ensuring(Effect.sync(() => {
+          finalized = true
+        }))
+      )
+      const definition = Machine.make({
+        states: States.states,
+        events: Machine.events(FinishStream),
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
+      })
+      const machine = definition.handle({
+        Loading: {
+          invoke: definition.invoke({
+            id: "updates",
+            stream: () => source,
+            onElement: {
+              target: Machine.targetless,
+              resolve: ({ element }, enqueue) => {
+                enqueue.raise(new FinishStream({ value: element }))
+              }
+            },
+            onDone: { target: Machine.targetless }
+          }),
+          on: {
+            FinishStream: Machine.transition({
+              target: (to) => to.full.Complete(),
+              resolve: ({ event, target }) => target(new Complete({ value: String(event.value) }))
+            })
+          }
+        },
+        Complete: {},
+        Failed: {}
+      })
+
+      const ref = yield* Machine.start(machine)
+      yield* ref.changes.pipe(
+        Stream.filter((snapshot) => snapshot.state.path === "Complete"),
+        Stream.take(1),
+        Stream.runDrain
+      )
+      yield* Effect.yieldNow
+      assert.strictEqual(pulls, 1)
+      assert.isTrue(finalized)
+      yield* ref.stop
+    }))
+
   it.effect("plans a successful Effect outcome directly", () =>
     Effect.gen(function*() {
       const machine = Machine.make({

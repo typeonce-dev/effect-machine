@@ -355,6 +355,9 @@ interface ProcessAddress<in Event> {
     source: Inspection.Subject | undefined,
     causedBy: Inspection.Causation | undefined
   ) => Effect.Effect<void, StoppedError>
+  readonly [acknowledgedSend]?: (
+    event: Event
+  ) => Effect.Effect<AcknowledgedDelivery<unknown>, unknown | StoppedError>
 }
 
 const isMachineTarget = (value: unknown): value is MachineTarget<unknown> =>
@@ -886,7 +889,15 @@ class OwnedChildRuntimeImpl implements OwnedChildRuntime {
         ...this.self,
         send: (event) => options.sendParent(isCurrent, event),
         sendInspected: (event, source, causedBy) =>
-          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void
+          isCurrent() ? sendMachineTarget(this.self, event, source, causedBy) : Effect.void,
+        ...(this.self[acknowledgedSend] === undefined
+          ? undefined
+          : {
+            [acknowledgedSend]: (event: unknown) =>
+              isCurrent()
+                ? this.self[acknowledgedSend]!(event)
+                : Effect.interrupt
+          })
       }
       const startOptions: StartInternalOptions = {
         detached: true,
@@ -1376,6 +1387,23 @@ const startGenericInternal: <
         Effect.tap(() => Effect.sync(() => publishInspectedSent(inspector, subject!, message)))
       )
     })
+  const sendAcknowledged:
+    | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
+    | undefined = logic.execution?._tag !== "Compiled"
+      ? undefined
+      : (event) =>
+        Effect.uninterruptibleMask((restore) =>
+          Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
+            Effect.flatMap((deferred) => {
+              const offered = inspector === undefined
+                ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
+                : offerInspected!(event, undefined, undefined, deferred)
+              return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
+            }),
+            Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
+          )
+        ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
+
   const self: ProcessAddress<Event> = {
     id,
     sessionId,
@@ -1394,24 +1422,9 @@ const startGenericInternal: <
       : (event) => offerInspected!(event, undefined, undefined),
     ...(inspector === undefined
       ? undefined
-      : { inspectionSubject: subject!, sendInspected: offerInspected! })
+      : { inspectionSubject: subject!, sendInspected: offerInspected! }),
+    ...(sendAcknowledged === undefined ? undefined : { [acknowledgedSend]: sendAcknowledged })
   }
-  const sendAcknowledged:
-    | ((event: Event) => Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>)
-    | undefined = logic.execution?._tag !== "Compiled"
-      ? undefined
-      : (event) =>
-        Effect.uninterruptibleMask((restore) =>
-          Deferred.make<AcknowledgedDelivery<unknown>, unknown>().pipe(
-            Effect.flatMap((deferred) => {
-              const offered = inspector === undefined
-                ? offerDirect({ [AcknowledgedMessageTypeId]: true as const, event, deferred })
-                : offerInspected!(event, undefined, undefined, deferred)
-              return offered.pipe(Effect.andThen(restore(Deferred.await(deferred))))
-            }),
-            Effect.map((delivery) => delivery as AcknowledgedDelivery<State>)
-          )
-        ) as Effect.Effect<AcknowledgedDelivery<State>, Error | StoppedError>
 
   let {
     changes: childChanges,
@@ -2150,6 +2163,7 @@ class CompiledProcess implements MachineRef<any, any, any, any> {
       sessionId,
       stop: Effect.suspend(() => this.stopFromProcess()),
       send: this.send,
+      [acknowledgedSend]: (event) => this.sendAcknowledgedEffect(event),
       ...(inspector === undefined
         ? undefined
         : {

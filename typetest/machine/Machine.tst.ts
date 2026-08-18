@@ -1,4 +1,4 @@
-import { Context, Effect, Option, Schema } from "effect"
+import { Context, Effect, Option, Schema, Stream } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 
@@ -610,6 +610,112 @@ describe("Machine", () => {
           })
         })
       }
+    })
+  })
+
+  it("infers Stream elements, failures, and services through the bound constructor", () => {
+    class StreamFailure {
+      readonly _tag = "StreamFailure"
+    }
+    const updates: Stream.Stream<1, StreamFailure, EntryRequirement> = Stream.fromEffect(
+      Effect.as(EntryRequirement, 1 as const)
+    ).pipe(Stream.concat(Stream.fail(new StreamFailure())))
+    const machine = Machine.make({
+      states: UpStates.states,
+      events: Machine.events(SignIn),
+      initial: {
+        target: (to) => to.down(),
+        resolve: ({ target }) => target(new Down({}))
+      }
+    })
+    const handled = machine.handle({
+      down: {
+        invoke: machine.invoke({
+          id: "updates",
+          stream: ({ state }) => {
+            expect(state).type.toBe<Down>()
+            return updates
+          },
+          onElement: {
+            target: Machine.targetless,
+            resolve: ({ element }) => {
+              expect(element).type.toBe<1>()
+            }
+          },
+          onDone: { target: Machine.targetless },
+          onFailure: {
+            target: Machine.targetless,
+            resolve: ({ error }) => {
+              expect(error).type.toBe<StreamFailure>()
+            }
+          }
+        })
+      }
+    })
+
+    expect<EntryRequirement>().type.toBeAssignableTo<Machine.Machine.Services<typeof handled>>()
+    expect<Machine.Machine.Error<typeof handled>>().type.not.toBe<any>()
+
+    const staticHandled = machine.handle({
+      down: {
+        invoke: Machine.invoke({
+          id: "static-updates",
+          stream: ({ state }) => {
+            expect(state).type.toBe<Down>()
+            return updates
+          },
+          onElement: {
+            target: Machine.targetless,
+            resolve: ({ element }) => {
+              expect(element).type.toBe<1>()
+            }
+          },
+          onDone: { target: Machine.targetless },
+          onFailure: {
+            target: Machine.targetless,
+            resolve: ({ error }) => {
+              expect(error).type.toBe<StreamFailure>()
+            }
+          }
+        })
+      }
+    })
+
+    expect<EntryRequirement>().type.toBeAssignableTo<Machine.Machine.Services<typeof staticHandled>>()
+    expect<Machine.Machine.Error<typeof staticHandled>>().type.not.toBe<any>()
+  })
+
+  it("requires only reachable Stream handlers", () => {
+    type Context = Machine.Machine.InvokeContext<
+      typeof UpStates.states,
+      readonly [typeof SignIn],
+      readonly [],
+      "down"
+    >
+    const values = (_: Context) => Stream.make(1)
+    const failure = (_: Context) => Stream.fail("unavailable" as const)
+
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "missing-element",
+      stream: values,
+      onDone: { target: Machine.targetless }
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "missing-done",
+      stream: values,
+      onElement: { target: Machine.targetless }
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "missing-failure",
+      stream: failure,
+      onDone: { target: Machine.targetless }
+    })
+    expect(Machine.invoke).type.not.toBeCallableWith({
+      id: "unreachable-element",
+      stream: failure,
+      onElement: { target: Machine.targetless },
+      onDone: { target: Machine.targetless },
+      onFailure: { target: Machine.targetless }
     })
   })
 
@@ -2598,14 +2704,30 @@ describe("Machine", () => {
       definition.handle({
         down: {
           on: {
-            SignIn: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            SignIn: {
+              target: Machine.targetless,
+              resolve: ({ event }, enqueue) => {
+                expect(event).type.toBe<SignIn>()
+                expect(enqueue.raise).type.toBeCallableWith(event)
+              }
+            }
           }
         }
       })
     ).type.not.toRaiseError()
+    expect(definition.handle).type.not.toBeCallableWith({
+      down: {
+        on: {
+          SignIn: {
+            target: Machine.targetless,
+            resolve: () => 1
+          }
+        }
+      }
+    })
+    expect(Machine.targetless).type.toBeCallableWith(
+      null as unknown as Machine.Machine.TargetSelector<typeof UpStates.states, "down">
+    )
   })
 
   it("rejects invalid compound initial keys", () => {

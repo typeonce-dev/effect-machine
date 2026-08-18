@@ -413,7 +413,7 @@ synchronous. Conditions use ordinary TypeScript control flow. Callbacks may
 select state and enqueue explicit `raise`, `emit`, `sendTo`, or `stop` commands;
 arbitrary asynchronous Effects do not run inside planning.
 
-## Effects, timers, and child machines
+## Effects, Streams, timers, and child machines
 
 State-scoped work starts on entry and is interrupted on exit:
 
@@ -445,8 +445,9 @@ Waiting: {
 }
 ```
 
-Use `effect` for one Effect, `after` for a cancellable delay, `logic` for a
-reusable process, and `child` for a complete child statechart—all through
+Use `effect` for one Effect, `stream` for a sequence of externally produced
+values, `after` for a cancellable delay, `logic` for a reusable process, and
+`child` for a complete child statechart—all through
 `Machine.invoke({...})`. The helper is an identity at runtime and preserves
 owner-context and source-channel inference across lifecycle handlers, including
 for state-dependent Effects:
@@ -465,6 +466,33 @@ invoke: Machine.invoke({
   })
 })
 ```
+
+A Stream source remains independent of the parent event protocol. Each element
+is mapped by `onElement`, and the next element is not pulled until that parent
+macrostep commits:
+
+```ts
+invoke: Machine.invoke({
+  id: "channel",
+  stream: () => channelMessages,
+  onElement: {
+    target: Machine.targetless,
+    resolve: ({ element }, enqueue) => {
+      enqueue.raise(Events.MessageReceived({ message: element }))
+    }
+  },
+  onDone: { target: Machine.targetless },
+  onFailure: Machine.transition({
+    target: (to) => to.full.Failed(),
+    resolve: ({ error, target }) => target.from({ error })
+  })
+})
+```
+
+`target: Machine.targetless` is the direct shorthand for a non-reentering
+transition that keeps the current configuration. Its optional `resolve`
+callback may enqueue commands and must return `undefined`. Use
+`Machine.transition(...)` for transitions that select state or reenter.
 
 Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
 public input and `parentEvents` protocols contextually. Its source and lifecycle

@@ -42,7 +42,7 @@ describe("Machine activity inspection", () => {
     const definition = Machine.activityDefinitions(machine)[0]!
 
     expect(definition.source).type.toBe<"Loading" | "Dynamic">()
-    expect(definition.type).type.toBe<"process" | "effect" | "timer" | "machine">()
+    expect(definition.type).type.toBe<"process" | "effect" | "stream" | "timer" | "machine">()
   })
 
   it("narrows kind-specific descriptive metadata", () => {
@@ -51,6 +51,9 @@ describe("Machine activity inspection", () => {
     if (definition.type === "timer") {
       expect(definition.id).type.toBe<string>()
       expect(definition.duration).type.toBe<string | "dynamic">()
+    }
+    if (definition.type === "stream") {
+      expect(definition.id).type.toBe<string>()
     }
   })
 })

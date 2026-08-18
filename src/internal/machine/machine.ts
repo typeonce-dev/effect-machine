@@ -465,7 +465,7 @@ const captureInvokeDefinition = (
   if (Array.isArray(invoke)) return invoke.map((item) => captureInvokeDefinition(item, stateNodes, path))
   if (typeof invoke !== "object" || invoke === null) return invoke
   const captured = { ...(invoke as Record<PropertyKey, unknown>) }
-  for (const key of ["onDone", "onFailure", "onSnapshot"] as const) {
+  for (const key of ["onElement", "onDone", "onFailure", "onSnapshot"] as const) {
     if (captured[key] !== undefined) {
       captured[key] = captureTransition(captured[key], stateNodes, path, key)
     }

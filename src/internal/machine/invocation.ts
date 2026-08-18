@@ -6,12 +6,13 @@
 
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
 import type { ChildMachine, Inspection, Logic, Machine } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
-import type * as Runtime from "./runtime.js"
+import * as Runtime from "./runtime.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */
@@ -37,12 +38,35 @@ const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, 
   run: () => effect
 })
 
+const streamLogic = (
+  stream: Stream.Stream<any, any, any>,
+  path: string,
+  id: string
+): Runtime.ProcessLogic<void, never, any, any, void> => ({
+  initial: () => Effect.void,
+  run: ({ parent }) => {
+    const send = parent?.[Runtime.acknowledgedSend]
+    if (send === undefined) {
+      return Effect.die(new Error("Stream invocation requires an acknowledged parent machine"))
+    }
+    return Stream.runForEach(
+      stream,
+      (element) =>
+        send(InvocationEvent.element(path, id, element)).pipe(
+          Effect.asVoid,
+          Effect.catchCause(() => Effect.interrupt)
+        )
+    )
+  }
+})
+
 const resolveValue = (value: unknown, context: Machine.InvokeContext<any, any, any, any>): unknown =>
   typeof value === "function" ? value(context) : value
 
 const resolveOne = (
   raw: Record<PropertyKey, any>,
-  context: Machine.InvokeContext<any, any, any, any>
+  context: Machine.InvokeContext<any, any, any, any>,
+  path: string
 ): AnyConfig => {
   if ("effect" in raw) {
     return {
@@ -78,6 +102,17 @@ const resolveOne = (
       activityKind: "Timer"
     }
   }
+  if ("stream" in raw) {
+    const id = String(raw.id)
+    return {
+      id,
+      src: () =>
+        streamLogic(raw.stream(context), path, id) as unknown as Runtime.ProcessLogic<any, any, any, any, any, any>,
+      onDone: raw.onDone,
+      onFailure: raw.onFailure,
+      activityKind: "Stream"
+    }
+  }
   if ("logic" in raw) {
     return {
       id: String(raw.id),
@@ -103,7 +138,7 @@ const resolveOne = (
       onSnapshot: raw.onSnapshot
     }
   }
-  throw new Error("Machine invoke must define exactly one of effect, after, logic, or child")
+  throw new Error("Machine invoke must define exactly one of effect, stream, after, logic, or child")
 }
 
 /** @internal */
@@ -269,7 +304,7 @@ export const startAll = (
       return InvocationEvent.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).map((definition) =>
         "child" in definition && !("input" in definition)
           ? startStaticChild(scope, ownedChildren, path, definition)
-          : start(scope, ownedChildren, path, resolveOne(definition, context))
+          : start(scope, ownedChildren, path, resolveOne(definition, context, path))
       )
     })
   return effects.length === 0 ? undefined : runSequentialDiscard(effects)

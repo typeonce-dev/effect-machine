@@ -68,6 +68,8 @@ const activityLabel = (definition: ActivityDefinition): string => {
       return `effect / ${definition.id}`
     case "timer":
       return `timer / ${definition.id} (${definition.duration})`
+    case "stream":
+      return `stream / ${definition.id}`
     case "machine": {
       const identity = definition.child.machineId === null ? definition.child.id : definition.child.machineId
       return `machine / ${definition.id} → ${identity}`
