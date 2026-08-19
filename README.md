@@ -620,6 +620,14 @@ const decoded = yield * Machine.decodeSnapshot(machine, encoded)
 const ref = yield * Machine.resume(machine, decoded)
 ```
 
+Decoded snapshots are local runtime values and may contain class instances or
+other process-local data. `encodeSnapshot` is the persistence boundary: it uses
+each declared schema's canonical JSON codec and succeeds only when every active
+state value, completion output, and history value is JSON. Rich values such as
+dates and bigints use their schema-defined JSON representation; cyclic or
+non-JSON values fail with `MachineSchemaEncodeError` instead of escaping to a
+later `JSON.stringify` crash.
+
 Resumption restores logical state, values, completion, and history metadata.
 It creates a fresh runtime: active invokes restart, timers restart at their
 full duration, and prior fibers, subscriptions, queues, and child runtimes are

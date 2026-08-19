@@ -772,7 +772,7 @@ export const observedGraph: <M extends AnyMachine>(
   traceOrTraces: Trace<M> | ReadonlyArray<Trace<M>>
 ) => Effect.Effect<
   ObservedGraph<M>,
-  Machine.MachineSchemaEncodeError,
+  never,
   Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 > = Effect.fnUntraced(function*<M extends AnyMachine>(
   machine: M,
@@ -837,19 +837,24 @@ export const observedGraph: <M extends AnyMachine>(
     }
   })
 
-  const encoded = yield* Effect.forEach(
+  const representations = yield* Effect.forEach(
     occurrences,
     ({ snapshot }) =>
-      (Machine.encodeSnapshot as any)(machine, snapshot) as Effect.Effect<
+      ((Machine.encodeSnapshot as any)(machine, snapshot) as Effect.Effect<
         Machine.Machine.EncodedSnapshot,
         Machine.MachineSchemaEncodeError,
         Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
-      >
+      >).pipe(
+        Effect.match({
+          onFailure: () => ({ identity: snapshot, encoded: undefined }),
+          onSuccess: (encoded) => ({ identity: encoded, encoded })
+        })
+      )
   )
-  const encodedIdentity = makeStructuralIdentityIndex()
-  const occurrenceIds = encoded.map(encodedIdentity)
+  const representationIdentity = makeStructuralIdentityIndex()
+  const occurrenceIds = representations.map(({ identity }) => representationIdentity(identity))
   const grouped = new Map<string, {
-    readonly encoded: Machine.Machine.EncodedSnapshot
+    readonly encoded: Machine.Machine.EncodedSnapshot | undefined
     readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     startup: number
     event: number
@@ -862,7 +867,7 @@ export const observedGraph: <M extends AnyMachine>(
       grouped.set(
         id,
         group = {
-          encoded: encoded[index]!,
+          encoded: representations[index]!.encoded,
           snapshot: occurrence.snapshot,
           startup: 0,
           event: 0,
@@ -879,8 +884,8 @@ export const observedGraph: <M extends AnyMachine>(
       const node = Graph.addNode(mutable, {
         id,
         snapshot: group.snapshot,
-        encoded: group.encoded,
-        configuration: group.encoded.active.map(({ path }) => path) as unknown as ReadonlyArray<StatePath<M>>,
+        ...(group.encoded === undefined ? {} : { encoded: group.encoded }),
+        configuration: rawConfigurationPaths(machine, group.snapshot) as ReadonlyArray<StatePath<M>>,
         observations: {
           total: group.startup + group.event + group.microstep,
           startup: group.startup,

@@ -52,12 +52,13 @@ describe("MachineTest coverage and observed graph", () => {
         MachineTest.ObservedGraphEdge<typeof machine>
       >
     >()
-    expect<Effect.Error<typeof result>>().type.toBe<Machine.MachineSchemaEncodeError>()
+    expect<Effect.Error<typeof result>>().type.toBe<never>()
     expect<Effect.Services<typeof result>>().type.toBe<never>()
 
     type Node = MachineTest.ObservedGraphNode<typeof machine>
     type Edge = MachineTest.ObservedGraphEdge<typeof machine>
     expect<Node["configuration"][number]>().type.toBe<"idle" | "done">()
+    expect<Node["encoded"]>().type.toBe<Machine.Machine.EncodedSnapshot | undefined>()
     expect<Extract<Edge, { readonly _tag: "Event" }>["event"]>().type.toBe<Start>()
   })
 })

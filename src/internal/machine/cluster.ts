@@ -72,6 +72,7 @@ export const RejectionReason = Schema.Literals([
   "InvalidCheckpoint",
   "UnsupportedProcessLocal",
   "TransitionFailure",
+  "SnapshotEncodeFailure",
   "PersistenceFailure",
   "EmissionFailure"
 ])
@@ -341,7 +342,9 @@ export const make = <
             emitted.push(...planned.emittedEvents as any)
           }
 
-          const encoded = yield* internalMachine.encodeSnapshot(rootMachine, current)
+          const encoded = yield* internalMachine.encodeSnapshot(rootMachine, current).pipe(
+            Effect.mapError((error) => reject("SnapshotEncodeFailure", String(error.cause)))
+          )
           if (emitted.length > 0 && layerOptions?.enqueue === undefined) {
             return yield* fail("EmissionFailure", "No durable enqueue handler was configured")
           }

@@ -1933,6 +1933,31 @@ describe("Machine", () => {
         assert.deepStrictEqual(decoded.completed, [{ path: "all.left" as const, output: undefined }])
       }))
 
+    it.effect("distinguishes an omitted output schema from an explicit void codec", () =>
+      Effect.gen(function*() {
+        const states = Machine.states({
+          done: {
+            schema: ParallelLeftDone,
+            type: "final",
+            output: Schema.Void
+          }
+        })
+        const machine = Machine.make({
+          states: states.states,
+          events: Machine.events(),
+          initial: (to) => to.done().resolve(({ target }) => target(new ParallelLeftDone({ id: "done" })))
+        }).handle({
+          done: { output: () => undefined }
+        })
+        const planned = yield* Machine.planInitial(machine)
+
+        const encoded = yield* Machine.encodeSnapshot(machine, planned.state)
+        const decoded = yield* Machine.decodeSnapshot(machine, JSON.parse(JSON.stringify(encoded)))
+
+        assert.deepStrictEqual(encoded.completed, [{ path: "done" as const, output: null }])
+        assert.deepStrictEqual(decoded.completed, [{ path: "done" as const, output: undefined }])
+      }))
+
     it.effect("rejects state values that cannot be encoded", () =>
       Effect.gen(function*() {
         const states = Machine.states({ NonEmptyIdle })

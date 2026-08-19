@@ -24,6 +24,30 @@ describe("ClusterMachine", () => {
     value: Schema.Number
   }) {}
 
+  interface LocalResource {
+    readonly close: () => void
+  }
+
+  const LocalResource = Schema.declare<LocalResource>((value): value is LocalResource =>
+    typeof value === "object" && value !== null && "close" in value && typeof value.close === "function"
+  )
+
+  class ResourceState extends Schema.TaggedClass<ResourceState>("ResourceState")("ResourceState", {
+    resource: LocalResource
+  }) {}
+
+  class ResourceEvent extends Schema.TaggedClass<ResourceEvent>("ResourceEvent")("ResourceEvent", {
+    resource: LocalResource
+  }) {}
+
+  class UnknownEvent extends Schema.TaggedClass<UnknownEvent>("UnknownEvent")("UnknownEvent", {
+    payload: Schema.Unknown
+  }) {}
+
+  class Scheduled extends Schema.TaggedClass<Scheduled>("Scheduled")("Scheduled", {
+    at: Schema.Date
+  }) {}
+
   class PlanningService extends Context.Service<PlanningService, {
     readonly value: number
   }>()("test/ClusterMachine/PlanningService") {}
@@ -108,6 +132,103 @@ describe("ClusterMachine", () => {
 
   it("uses encoded Machine snapshots in checkpoints", () => {
     expect<ClusterMachine.Checkpoint["snapshot"]>().type.toBe<Machine.Machine.EncodedSnapshot>()
+    expect<Machine.Machine.EncodedSnapshotState["value"]>().type.toBe<Schema.Json | undefined>()
+    expect<Machine.Machine.EncodedSnapshotCompletion["output"]>().type.toBe<Schema.Json | undefined>()
+    expect<Machine.Machine.EncodedSnapshotHistoryEntry["values"]>().type.toBe<
+      Readonly<Record<string, Schema.Json>>
+    >()
+  })
+
+  it("requires JSON-encoded state, output, and public input schemas", () => {
+    const resourceStates = Machine.states({ ResourceState })
+    const resourceMachine = Machine.make({
+      states: resourceStates.states,
+      events: Machine.events(ResourceEvent),
+      initial: (to) =>
+        to.ResourceState().resolve(({ target }) => target(new ResourceState({ resource: { close() {} } })))
+    })
+
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "ResourceEntity",
+      resourceMachine,
+      { version: "1" }
+    )
+
+    const unknownEventMachine = Machine.make({
+      states: states.states,
+      events: Machine.events(UnknownEvent),
+      initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+    })
+
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "UnknownEventEntity",
+      unknownEventMachine,
+      { version: "1" }
+    )
+
+    const anyOutputStates = Machine.states({
+      Done: { schema: Done, type: "final", output: Schema.Any }
+    })
+    const anyOutputMachine = Machine.make({
+      states: anyOutputStates.states,
+      events: Machine.events(Reset),
+      initial: (to) => to.Done().resolve(({ target }) => target(new Done({ value: "done" })))
+    }).handle({
+      Done: { output: () => null }
+    })
+
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "AnyOutputEntity",
+      anyOutputMachine,
+      { version: "1" }
+    )
+
+    const neverOutputStates = Machine.states({
+      Done: { schema: Done, type: "final", output: Schema.Never }
+    })
+    const neverOutputMachine = Machine.make({
+      states: neverOutputStates.states,
+      events: Machine.events(Reset),
+      initial: (to) => to.Done().resolve(({ target }) => target(new Done({ value: "done" })))
+    }).handle({
+      Done: {
+        output: () => {
+          throw new Error("unreachable")
+        }
+      }
+    })
+
+    expect(ClusterMachine.make).type.not.toBeCallableWith(
+      "NeverOutputEntity",
+      neverOutputMachine,
+      { version: "1" }
+    )
+
+    const scheduledStates = Machine.states({ Scheduled: Schema.toCodecJson(Scheduled) })
+    const scheduledMachine = Machine.make({
+      states: scheduledStates.states,
+      events: Machine.events(Reset),
+      initial: (to) => to.Scheduled().resolve(({ target }) => target(new Scheduled({ at: new Date("2026-08-19") })))
+    })
+
+    expect(ClusterMachine.make).type.toBeCallableWith(
+      "ScheduledEntity",
+      scheduledMachine,
+      { version: "1" }
+    )
+
+    const internalResourceMachine = Machine.make({
+      states: states.states,
+      events: Machine.events(Reset),
+      internalEvents: Machine.internalEvents(ResourceEvent),
+      initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+    })
+
+    expect(ClusterMachine.make).type.toBeCallableWith(
+      "InternalResourceEntity",
+      internalResourceMachine,
+      { version: "1" }
+    )
   })
 
   it("requires declared output implementations", () => {

@@ -317,7 +317,7 @@ describe("MachineTest trace coverage", () => {
 })
 
 describe("MachineTest observed graph", () => {
-  it.effect("deduplicates encoded snapshots while preserving concrete startup and event edges", () =>
+  it.effect("deduplicates portable snapshots while preserving concrete startup and event edges", () =>
     Effect.gen(function*() {
       const first = yield* MachineTest.run(counterMachine, {
         events: [new Add({ amount: 1 })]
@@ -338,12 +338,8 @@ describe("MachineTest observed graph", () => {
       )
 
       const nodes = Array.from(observed.graph)
-      const zero = nodes.find(([, node]) =>
-        node.encoded.active.some(({ value }) => (value as { readonly value?: number }).value === 0)
-      )!
-      const one = nodes.find(([, node]) =>
-        node.encoded.active.some(({ value }) => (value as { readonly value?: number }).value === 1)
-      )!
+      const zero = nodes.find(([, node]) => (node.snapshot.value as Count).value === 0)!
+      const one = nodes.find(([, node]) => (node.snapshot.value as Count).value === 1)!
       assert.notStrictEqual(zero[1].id, one[1].id)
       const shortest = Graph.dijkstra(observed.graph, {
         source: zero[0],
@@ -402,8 +398,8 @@ describe("MachineTest observed graph", () => {
 
       assert.strictEqual(outside.length, 2)
       assert.notStrictEqual(
-        JSON.stringify(outside[0]!.encoded.history),
-        JSON.stringify(outside[1]!.encoded.history)
+        JSON.stringify(outside[0]!.snapshot.history),
+        JSON.stringify(outside[1]!.snapshot.history)
       )
       assert.notStrictEqual(outside[0]!.id, outside[1]!.id)
     }))
@@ -416,6 +412,7 @@ describe("MachineTest observed graph", () => {
       const observed = yield* MachineTest.observedGraph(opaqueMachine, [first, second])
 
       assert.strictEqual(Graph.nodeCount(observed.graph), 2)
+      assert.ok(Array.from(observed.graph, ([, node]) => node).every((node) => node.encoded === undefined))
       assert.strictEqual(MachineTest.coverage(opaqueMachine, [first, second]).logicalConfigurations.hit, 2)
 
       const firstBuffer = yield* MachineTest.run(opaqueMachine, {

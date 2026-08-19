@@ -31,21 +31,47 @@ const EncodedSnapshotSchema = Schema.Struct({
   _tag: Schema.Literal("MachineSnapshot"),
   active: Schema.Array(Schema.Struct({
     path: Schema.String,
-    value: Schema.optional(Schema.Unknown)
+    value: Schema.optionalKey(Schema.Json)
   })),
-  completed: Schema.optional(Schema.Array(Schema.Struct({
+  completed: Schema.optionalKey(Schema.Array(Schema.Struct({
     path: Schema.String,
-    output: Schema.optional(Schema.Unknown)
+    output: Schema.optionalKey(Schema.Json)
   }))),
-  history: Schema.optional(Schema.Record(
+  history: Schema.optionalKey(Schema.Record(
     Schema.String,
     Schema.Struct({
       mode: Schema.Literals(["shallow", "deep"]),
       active: Schema.Array(Schema.String),
-      values: Schema.Record(Schema.String, Schema.Unknown)
+      values: Schema.Record(Schema.String, Schema.Json)
     })
   ))
 })
+
+const jsonCodecCache = new WeakMap<object, Schema.Top>()
+
+const getJsonCodec = (schema: Schema.Top): Schema.Top => {
+  const key = schema as object
+  const cached = jsonCodecCache.get(key)
+  if (cached !== undefined) return cached
+  const codec = Schema.toCodecJson(schema)
+  jsonCodecCache.set(key, codec)
+  return codec
+}
+
+const encodeError = (
+  machine: Machine.Any,
+  options: {
+    readonly boundary: "state" | "output" | "history"
+    readonly state: string
+  },
+  cause: Schema.SchemaError | Cause.Cause<unknown>
+): MachineSchemaEncodeError =>
+  new MachineSchemaEncodeError({
+    machineId: machine.id,
+    boundary: options.boundary,
+    state: options.state,
+    cause
+  })
 
 const encodeBoundary = (
   machine: Machine.Any,
@@ -55,16 +81,14 @@ const encodeBoundary = (
     readonly boundary: "state" | "output" | "history"
     readonly state: string
   }
-): Effect.Effect<unknown, MachineSchemaEncodeError, unknown> =>
-  Schema.encodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError((cause) =>
-      new MachineSchemaEncodeError({
-        machineId: machine.id,
-        boundary: options.boundary,
-        state: options.state,
-        cause
-      })
-    )
+): Effect.Effect<Schema.Json, MachineSchemaEncodeError, unknown> =>
+  Effect.try({
+    try: () => getJsonCodec(schema),
+    catch: (cause) => encodeError(machine, options, Cause.die(cause))
+  }).pipe(
+    Effect.flatMap((codec) => Schema.encodeUnknownEffect(codec)(value)),
+    Effect.flatMap(Schema.decodeUnknownEffect(Schema.Json)),
+    Effect.mapError((cause) => cause instanceof MachineSchemaEncodeError ? cause : encodeError(machine, options, cause))
   )
 
 const decodeEncodedBoundary = (
@@ -76,14 +100,26 @@ const decodeEncodedBoundary = (
     readonly state: string
   }
 ): Effect.Effect<unknown, MachineSchemaDecodeError, unknown> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError((cause) =>
+  Effect.try({
+    try: () => getJsonCodec(schema),
+    catch: (cause) =>
       new MachineSchemaDecodeError({
         machineId: machine.id,
         boundary: options.boundary,
         state: options.state,
-        cause
+        cause: Cause.die(cause)
       })
+  }).pipe(
+    Effect.flatMap((codec) => Schema.decodeUnknownEffect(codec)(value)),
+    Effect.mapError((cause) =>
+      cause instanceof MachineSchemaDecodeError ?
+        cause :
+        new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: options.boundary,
+          state: options.state,
+          cause
+        })
     )
   )
 
@@ -91,7 +127,7 @@ const getCompletionSchema = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   path: string
-): Schema.Top => {
+): Schema.Top | undefined => {
   const node = getNode(machine, path)
   if (node.type === "compound") {
     const child = getActiveChildPath(machine, configuration, path)
@@ -100,7 +136,7 @@ const getCompletionSchema = (
     }
     return getCompletionSchema(machine, configuration, child)
   }
-  return node.output ?? Schema.Void
+  return node.output
 }
 
 /** Defensively validates and normalizes an in-memory logical snapshot. Unlike
@@ -132,9 +168,17 @@ export const normalizeSnapshotEffect = <const States extends Machine.StateSchema
         throw new Error(`Machine snapshot contains invalid completion "${path}"`)
       }
       completionPaths.add(path)
+      const schema = getCompletionSchema(machine, configuration, path)
+      if (schema === undefined) {
+        if (completion.output !== undefined) {
+          throw new Error(`Machine snapshot contains an output for state "${path}" without an output schema`)
+        }
+        outputs.set(path, undefined)
+        continue
+      }
       outputs.set(
         path,
-        yield* decodeBoundary(machine, getCompletionSchema(machine, configuration, path), completion.output, {
+        yield* decodeBoundary(machine, schema, completion.output, {
           boundary: "output",
           state: path
         })
@@ -242,9 +286,17 @@ export const encodeSnapshot = (
       if (!configuration.active.has(path) || !isActiveFinalNode(machine, configuration, path)) {
         throw new Error(`Machine encoded snapshot contains invalid completion "${path}"`)
       }
+      const schema = getCompletionSchema(machine, configuration, path)
+      if (schema === undefined) {
+        if (output !== undefined) {
+          throw new Error(`Machine snapshot contains an output for state "${path}" without an output schema`)
+        }
+        completed.push({ path })
+        continue
+      }
       const encodedOutput = yield* encodeBoundary(
         machine,
-        getCompletionSchema(machine, configuration, path),
+        schema,
         output,
         {
           boundary: "output",
@@ -289,7 +341,7 @@ export const encodeSnapshot = (
           })
         )
       }
-      const encodedValues: Record<string, unknown> = {}
+      const encodedValues: Record<string, Schema.Json> = {}
       for (const path of record.active) {
         const stateNode = machine.stateNodes.byPath.get(path)
         if (
@@ -338,12 +390,21 @@ export const encodeSnapshot = (
       }
     }
 
-    return {
+    const encoded: Machine.EncodedSnapshot = {
       _tag: "MachineSnapshot" as const,
       active,
       ...(completed.length === 0 ? {} : { completed }),
       ...(Object.keys(history).length === 0 ? {} : { history })
     }
+    return yield* Schema.decodeUnknownEffect(EncodedSnapshotSchema)(encoded).pipe(
+      Effect.mapError((cause) =>
+        new MachineSchemaEncodeError({
+          machineId: machine.id,
+          boundary: "configuration",
+          cause
+        })
+      )
+    )
   }).pipe(Effect.catchCause((cause) => failEncodeCause(machine, cause)))
 
 export const decodeSnapshot = (
@@ -501,11 +562,25 @@ export const decodeSnapshot = (
         throw new Error(`Machine encoded snapshot contains invalid completion "${completion.path}"`)
       }
       completionPaths.add(completion.path)
+      const schema = getCompletionSchema(machine, configuration, completion.path)
+      const hasOutput = Object.prototype.hasOwnProperty.call(completion, "output")
+      if (schema === undefined) {
+        if (hasOutput) {
+          throw new Error(
+            `Machine encoded snapshot contains an output for state "${completion.path}" without an output schema`
+          )
+        }
+        completions.push({ path: completion.path, output: undefined })
+        continue
+      }
+      if (!hasOutput) {
+        throw new Error(`Machine encoded snapshot omits output for state "${completion.path}"`)
+      }
       completions.push({
         path: completion.path,
         output: yield* decodeEncodedBoundary(
           machine,
-          getCompletionSchema(machine, configuration, completion.path),
+          schema,
           completion.output,
           {
             boundary: "output",

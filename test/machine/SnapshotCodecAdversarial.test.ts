@@ -103,7 +103,8 @@ class Editor extends Schema.TaggedClass<Editor>("CodecEditor")("CodecEditor", {
   document: Schema.NonEmptyString
 }) {}
 class Editing extends Schema.TaggedClass<Editing>("CodecEditing")("CodecEditing", {
-  contents: Schema.String
+  contents: Schema.String,
+  payload: Schema.Any
 }) {}
 class Preview extends Schema.TaggedClass<Preview>("CodecPreview")("CodecPreview", {
   page: Schema.Number
@@ -155,11 +156,57 @@ const historySnapshot = () =>
         values: {
           Workspace: new Workspace({ revision: 3 }),
           "Workspace.Editor": new Editor({ document: "doc-1" }),
-          "Workspace.Editor.editing": new Editing({ contents: "hello" })
+          "Workspace.Editor.editing": new Editing({ contents: "hello", payload: null })
         }
       }
     }
   }) as Machine.Machine.Snapshot<typeof HistoryStates.states>
+
+class RichState extends Schema.TaggedClass<RichState>("CodecRichState")("CodecRichState", {
+  createdAt: Schema.Date,
+  sequence: Schema.BigInt,
+  missing: Schema.Undefined
+}) {}
+
+const RichStates = Machine.states({ RichState })
+const richMachine = Machine.make({
+  id: "codec-rich",
+  states: RichStates.states,
+  events: Machine.events(),
+  initial: (to) =>
+    to.RichState().resolve(({ target }) =>
+      target(new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined }))
+    )
+})
+
+interface OpaqueState {
+  readonly _tag: "CodecOpaqueState"
+  readonly resource: object
+}
+
+const OpaqueState = Schema.declare<OpaqueState>((input): input is OpaqueState =>
+  typeof input === "object" && input !== null && "_tag" in input && input._tag === "CodecOpaqueState" &&
+  "resource" in input && typeof input.resource === "object" && input.resource !== null
+)
+
+const OpaqueStates = Machine.states({ OpaqueState })
+const opaqueMachine = Machine.make({
+  id: "codec-opaque",
+  states: OpaqueStates.states,
+  events: Machine.events(),
+  initial: (to) => to.OpaqueState().resolve(({ target }) => target({ _tag: "CodecOpaqueState", resource: {} }))
+})
+
+class OutputDone extends Schema.TaggedClass<OutputDone>("CodecOutputDone")("CodecOutputDone", {}) {}
+const OutputStates = Machine.states({
+  OutputDone: { schema: OutputDone, type: "final", output: Schema.Any }
+})
+const outputMachine = Machine.make({
+  id: "codec-output",
+  states: OutputStates.states,
+  events: Machine.events(),
+  initial: (to) => to.OutputDone().resolve(({ target }) => target(new OutputDone({})))
+})
 
 const expectEncodeFailure = Effect.fnUntraced(function*(snapshot: unknown, boundary?: string) {
   const error = yield* Machine.encodeSnapshot(
@@ -216,6 +263,94 @@ describe("snapshot codec adversarial boundaries", () => {
         { path: "Root.left.done" as const, output: "7" },
         { path: "Root.right.done" as const, output: true }
       ])
+    }))
+
+  it.effect("uses canonical JSON codecs for supported rich state values", () =>
+    Effect.gen(function*() {
+      const snapshot = {
+        path: "RichState" as const,
+        value: new RichState({
+          createdAt: new Date("2026-08-19T12:00:00.000Z"),
+          sequence: 42n,
+          missing: undefined
+        })
+      }
+      const encoded = yield* Machine.encodeSnapshot(richMachine, snapshot)
+
+      assert.deepStrictEqual(encoded.active, [{
+        path: "RichState",
+        value: {
+          _tag: "CodecRichState",
+          createdAt: "2026-08-19T12:00:00.000Z",
+          sequence: "42",
+          missing: null
+        }
+      }])
+      assert.doesNotThrow(() => JSON.stringify(encoded))
+
+      const decoded = yield* Machine.decodeSnapshot(richMachine, JSON.parse(JSON.stringify(encoded)))
+      assert.instanceOf(decoded.value, RichState)
+      assert.instanceOf(decoded.value.createdAt, Date)
+      assert.strictEqual(decoded.value.sequence, 42n)
+      assert.strictEqual(decoded.value.missing, undefined)
+    }))
+
+  it.effect("rejects cyclic state, completion, and history values with typed boundary failures", () =>
+    Effect.gen(function*() {
+      const cyclic: Record<string, unknown> = {}
+      cyclic.self = cyclic
+
+      const assertFailure = (exit: Exit.Exit<unknown, unknown>, boundary: "state" | "output" | "history") => {
+        assert(Exit.isFailure(exit))
+        assert.strictEqual(Cause.hasDies(exit.cause), false)
+        const error = Cause.findErrorOption(exit.cause)
+        assert(Option.isSome(error))
+        assert.instanceOf(error.value, Machine.MachineSchemaEncodeError)
+        assert.strictEqual(error.value.boundary, boundary)
+      }
+
+      assertFailure(
+        yield* Effect.exit(Machine.encodeSnapshot(opaqueMachine, {
+          path: "OpaqueState",
+          value: { _tag: "CodecOpaqueState", resource: cyclic }
+        })),
+        "state"
+      )
+      assertFailure(
+        yield* Effect.exit(Machine.encodeSnapshot(outputMachine, {
+          path: "OutputDone",
+          value: new OutputDone({}),
+          completed: [{ path: "OutputDone", output: cyclic }]
+        })),
+        "output"
+      )
+      for (const output of [undefined, Symbol("local"), () => undefined]) {
+        assertFailure(
+          yield* Effect.exit(Machine.encodeSnapshot(outputMachine, {
+            path: "OutputDone",
+            value: new OutputDone({}),
+            completed: [{ path: "OutputDone", output }]
+          })),
+          "output"
+        )
+      }
+      const snapshot = historySnapshot()
+      assertFailure(
+        yield* Effect.exit(Machine.encodeSnapshot(historyMachine, {
+          ...snapshot,
+          history: {
+            ...snapshot.history,
+            "Workspace.exact": {
+              ...snapshot.history!["Workspace.exact"]!,
+              values: {
+                ...snapshot.history!["Workspace.exact"]!.values,
+                "Workspace.Editor.editing": new Editing({ contents: "hello", payload: cyclic })
+              }
+            }
+          }
+        })),
+        "history"
+      )
     }))
 
   it.effect("round-trips shallow and deep history records through JSON", () =>
