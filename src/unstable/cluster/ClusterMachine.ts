@@ -153,6 +153,7 @@ export const RejectionReason = Schema.Literals([
   "InvalidCheckpoint",
   "UnsupportedProcessLocal",
   "TransitionFailure",
+  "SnapshotEncodeFailure",
   "PersistenceFailure",
   "EmissionFailure"
 ])
@@ -246,6 +247,51 @@ type MachineServices<M extends Machine.Machine.Any> =
 
 type IsAny<A> = 0 extends (1 & A) ? true : false
 
+type IsNever<A> = [A] extends [never] ? true : false
+
+type IsUnknown<A> = IsAny<A> extends true ? false : unknown extends A ? true : false
+
+type IsJsonEncoded<S extends Schema.Top> = IsAny<S["Encoded"]> extends true ? false
+  : IsNever<S["Encoded"]> extends true ? false
+  : IsUnknown<S["Encoded"]> extends true ? false
+  : [S["Encoded"]] extends [Schema.Json] ? true
+  : false
+
+type NonJsonState<States extends Machine.Machine.StateSchemas> = Machine.Machine.ValuedStateIdentifier<States> extends
+  infer StateId
+  ? StateId extends Machine.Machine.ValuedStateIdentifier<States> ?
+    IsJsonEncoded<Machine.Machine.SchemaByIdentifier<States, StateId>> extends true ? never : StateId
+  : never
+  : never
+
+type NonJsonOutput<States extends Machine.Machine.StateSchemas> = Machine.Machine.DeclaredOutputState<States> extends
+  infer StateId
+  ? StateId extends Machine.Machine.DeclaredOutputState<States> ?
+    Machine.Machine.NodeByIdentifier<States, StateId> extends {
+      readonly output: infer Output extends Schema.Top
+    } ? IsJsonEncoded<Output> extends true ? never : StateId
+    : never
+  : never
+  : never
+
+type NonJsonInputEvent<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = {
+  readonly [Index in keyof Events]: Events[Index] extends infer EventSchema extends Machine.Machine.TaggedSchema
+    ? IsJsonEncoded<EventSchema> extends true ? never : Machine.Machine.TagOf<EventSchema>
+    : never
+}[number]
+
+type EnsureJsonEncoded<
+  States extends Machine.Machine.StateSchemas,
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema>
+> = [NonJsonState<States> | NonJsonOutput<States> | NonJsonInputEvent<InputEvents>] extends [never] ? unknown
+  : {
+    readonly "~effect/ClusterMachine/NonJsonEncoded": {
+      readonly states: NonJsonState<States>
+      readonly outputs: NonJsonOutput<States>
+      readonly inputEvents: NonJsonInputEvent<InputEvents>
+    }
+  }
+
 type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Machine.Runtime.Requirement<
   infer RequiredEvents,
   infer RequiredEmits
@@ -303,6 +349,9 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * rejected. Planning-time raised events remain part of the current macrostep.
  * Arbitrary action effects may run again after a crash before checkpoint
  * commit, so the bridge does not provide exactly-once external effects.
+ * State values, completion outputs, and public input events must declare
+ * JSON-compatible encoded representations. Local and internal event protocols
+ * remain unrestricted because they do not cross the Cluster boundary.
  *
  * **Example**
  *
@@ -364,7 +413,8 @@ export const make: <
       ParentEvents
     >
     & EnsureExecutable<States, UnhandledStates, OutputStates>
-    & Machine.Machine.RootCompatible<ParentEvents>,
+    & Machine.Machine.RootCompatible<ParentEvents>
+    & EnsureJsonEncoded<States, InputEvents>,
   options: {
     readonly version: string
   },

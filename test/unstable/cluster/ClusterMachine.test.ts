@@ -346,6 +346,46 @@ describe("ClusterMachine", () => {
       )))
     }))
 
+  it.effect("rejects snapshot encoding failures before persistence", () =>
+    Effect.gen(function*() {
+      interface OpaqueState {
+        readonly _tag: "OpaqueState"
+        readonly resource: object
+      }
+
+      const OpaqueState = Schema.toCodecJson(
+        Schema.declare<OpaqueState>((value): value is OpaqueState =>
+          typeof value === "object" && value !== null && "_tag" in value && value._tag === "OpaqueState"
+        )
+      )
+      const opaqueStates = Machine.states({ OpaqueState })
+      const resource: { self?: unknown } = {}
+      resource.self = resource
+      const opaqueMachine = Machine.make({
+        states: opaqueStates.states,
+        events: Machine.events(Fail),
+        initial: (to) => to.OpaqueState().resolve(({ target }) => target({ _tag: "OpaqueState", resource }))
+      }).handle({
+        OpaqueState: {
+          on: {
+            Fail: (to) => to.full.OpaqueState().resolve(({ state: current, target }) => target(current))
+          }
+        }
+      })
+      const bridge = ClusterMachine.make("SnapshotEncodeFailureEntity", opaqueMachine, { version: "1" })
+      const storage = makeTestStorage()
+
+      yield* Effect.gen(function*() {
+        yield* TestClock.adjust(1)
+        const makeClient = yield* bridge.entity.client
+        const result = yield* makeClient("opaque-1").send(new Fail({}))
+
+        assertRejected(result, "SnapshotEncodeFailure")
+        assert.strictEqual(storage.entries.size, 0)
+        assert.strictEqual(storage.commits, 0)
+      }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
+    }))
+
   it.effect("does not apply a redelivered persisted request twice", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()

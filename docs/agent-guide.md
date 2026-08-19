@@ -1276,6 +1276,22 @@ const decoded = yield* Machine.decodeSnapshot(machine, encoded)
 const ref = yield* Machine.resume(machine, decoded)
 ```
 
+`Machine.Snapshot` is the decoded, process-local representation. It may retain
+`Schema.Class` instances and capabilities that cannot cross a JSON boundary.
+`Machine.EncodedSnapshot` is different: successful `encodeSnapshot` calls
+guarantee canonical `Schema.Json` for every active value, completion output,
+and history value. Schema codecs convert rich values such as `Date`, `bigint`,
+and `undefined` to their declared JSON forms. Cycles, functions, symbols, and
+opaque values without a JSON representation fail with the typed
+`MachineSchemaEncodeError`; they never become a later `JSON.stringify` defect.
+
+Keep DOM nodes, open handles, services, and similar capabilities in an Effect
+service or UI adapter. Local events may carry those values when they stay inside
+one process. Cluster public input events, persisted state, and completion
+outputs are transport protocols and must instead declare JSON-compatible
+encoded forms; use an explicit transform or `Schema.toCodecJson` where the
+canonical codec is the intended wire contract.
+
 Pass only a decoded `Machine.Snapshot` to `resume`; encoded or arbitrary
 transport data belongs at `decodeSnapshot`. Resumption validates and normalizes
 the logical snapshot again, then publishes it as the fresh runtime's first

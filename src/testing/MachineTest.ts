@@ -1935,7 +1935,7 @@ export interface ObservedGraphNodeObservations {
 }
 
 /**
- * One full encoded logical snapshot stored in the observed Effect graph.
+ * One decoded logical snapshot stored in the observed Effect graph.
  *
  * @category models
  * @since 0.4.0
@@ -1943,7 +1943,8 @@ export interface ObservedGraphNodeObservations {
 export interface ObservedGraphNode<M extends AnyMachine> {
   readonly id: string
   readonly snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
-  readonly encoded: Machine.Machine.EncodedSnapshot
+  /** Canonical JSON representation when this local snapshot is portable. */
+  readonly encoded?: Machine.Machine.EncodedSnapshot
   readonly configuration: ReadonlyArray<StatePath<M>>
   readonly observations: ObservedGraphNodeObservations
 }
@@ -2004,9 +2005,11 @@ export interface ObservedGraph<M extends AnyMachine> {
 
 /**
  * Converts concrete planner traces into an observed logical-state graph.
- * Nodes are deduplicated by the public snapshot encoding and every edge is a
- * concrete startup or public-event macrostep. This intentionally does not
- * claim to be a static or exhaustive graph of the machine.
+ * Portable nodes are deduplicated by the public snapshot encoding. If encoding
+ * fails, process-local values are instead compared by cycle-safe structural
+ * identity and `ObservedGraphNode.encoded` is omitted. Every edge is a concrete
+ * startup or public-event macrostep. This intentionally does not claim to be a
+ * static or exhaustive graph of the machine.
  *
  * @category verification
  * @since 0.4.0
@@ -2016,7 +2019,7 @@ export const observedGraph: <M extends AnyMachine>(
   traceOrTraces: Trace<M> | ReadonlyArray<Trace<M>>
 ) => Effect.Effect<
   ObservedGraph<M>,
-  Machine.MachineSchemaEncodeError,
+  never,
   Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
 > = internal.observedGraph
 

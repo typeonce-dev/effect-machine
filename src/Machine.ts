@@ -1878,6 +1878,9 @@ export type RuntimeSnapshot<State, Error = never, Output = never> =
  * one stream may contain unrelated root, child-machine, and `Logic` protocols.
  * The record structure remains a closed discriminated union, while typed
  * application observation continues through `changes` and `emissions`.
+ * Records retain decoded local events and snapshots and are not themselves a
+ * stable JSON export format. Telemetry exporters must project process-local
+ * values into an explicit portable representation.
  *
  * @category models
  * @since 0.13.0
@@ -3963,26 +3966,28 @@ export declare namespace Machine {
    */
   export interface EncodedSnapshotState {
     readonly path: string
-    readonly value?: unknown
+    readonly value?: Schema.Json
   }
 
   /**
    * Encoded output for one completed state path in a normalized machine
-   * snapshot. An omitted output represents `undefined`.
+   * snapshot. An omitted output means the final state declares no output
+   * schema; a declared `Schema.Void` or `Schema.Undefined` output encodes as
+   * canonical JSON `null`.
    *
    * @category models
    * @since 0.4.0
    */
   export interface EncodedSnapshotCompletion {
     readonly path: string
-    readonly output?: unknown
+    readonly output?: Schema.Json
   }
 
   /** Encoded values and paths retained by one history pseudo-state. */
   export interface EncodedSnapshotHistoryEntry {
     readonly mode: "shallow" | "deep"
     readonly active: ReadonlyArray<string>
-    readonly values: Readonly<Record<string, unknown>>
+    readonly values: Readonly<Record<string, Schema.Json>>
   }
 
   /**
@@ -3990,9 +3995,10 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * Active state and completion values use the encoded representations of
-   * their declared schemas. Runtime process state such as children, fibers,
-   * scopes, queues, and subscriptions is not included.
+   * Active state and completion values use the canonical JSON representations
+   * derived from their declared schemas. A successfully encoded snapshot is
+   * safe to pass to JSON-backed persistence and transport. Runtime process state
+   * such as children, fibers, scopes, queues, and subscriptions is not included.
    *
    * @category models
    * @since 0.4.0
@@ -8018,18 +8024,21 @@ export const emittedEvents: {
  *
  * **Details**
  *
- * Each active state value and completed output is encoded with the schema
- * declared for its state path. The result contains no process-local runtime
- * state.
+ * Each active state value and completed output is encoded with the canonical
+ * JSON codec derived from the schema declared for its state path. Success
+ * guarantees that every state, output, and history value is `Schema.Json`.
+ * Non-JSON values, including cyclic process-local capabilities, fail with
+ * {@link MachineSchemaEncodeError} at their declared boundary.
  *
  * **Gotchas**
  *
  * The encoded snapshot does not contain the machine definition, machine
  * version, running children, invoked process state, services, or subscriptions.
  * Store machine identity and migration metadata alongside the result when the
- * snapshot crosses deployment versions. Schema encoding does not by itself
- * guarantee JSON-compatible values; schemas used with JSON-backed storage must
- * have JSON-compatible encoded representations.
+ * snapshot crosses deployment versions. Opaque declarations without a JSON
+ * codec can encode only when their current value is already JSON-compatible.
+ * Define an explicit JSON codec or keep process-local capabilities outside the
+ * logical snapshot.
  *
  * **Example**
  *
