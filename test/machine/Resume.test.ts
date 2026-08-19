@@ -70,10 +70,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Inactive(),
-          resolve: ({ target }) => target(new Inactive({}))
-        }
+        initial: (to) => to.Inactive().resolve(({ target }) => target(new Inactive({})))
       }).handle({
         Root: {
           invoke: Machine.invoke({
@@ -187,7 +184,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Advance),
-        initial: { target: (to) => to.Root.initial(), resolve: () => initial }
+        initial: (to) => to.Root.initial.resolve(() => initial)
       })
         .handle({
           Root: {
@@ -250,10 +247,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Finish),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
@@ -296,7 +290,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: { target: (to) => to.Flow.initial(), resolve: () => logical }
+        initial: (to) => to.Flow.initial.resolve(() => logical)
       })
         .handle({
           Flow: {
@@ -322,10 +316,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.A(),
-          resolve: ({ target }) => target(new A({}))
-        }
+        initial: (to) => to.A().resolve(({ target }) => target(new A({})))
       }).handle({
         A: {
           always: (to) => to.full.B().resolve(({ target }) => target(new B({})))
@@ -351,10 +342,7 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(Cancel),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: {
-          target: (to) => to.Cancelled(),
-          resolve: ({ target }) => target(new Cancelled({}))
-        }
+        initial: (to) => to.Cancelled().resolve(({ target }) => target(new Cancelled({})))
       }).handle({
         Waiting: {
           invoke: Machine.invoke({
@@ -397,10 +385,7 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(LoadedEvent),
-        initial: {
-          target: (to) => to.Loaded(),
-          resolve: ({ target }) => target(new Loaded({ value: "initial" }))
-        }
+        initial: (to) => to.Loaded().resolve(({ target }) => target(new Loaded({ value: "initial" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -435,10 +420,7 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(FailedEvent),
-        initial: {
-          target: (to) => to.Failed(),
-          resolve: ({ target }) => target(new Failed({ message: "initial" }))
-        }
+        initial: (to) => to.Failed().resolve(({ target }) => target(new Failed({ message: "initial" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -477,10 +459,7 @@ describe("Machine.resume", () => {
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(ChildFinish),
-        initial: {
-          target: (to) => to.ChildIdle(),
-          resolve: ({ target }) => target(new ChildIdle({ value: 1 }))
-        }
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({ value: 1 })))
       }).handle({
         ChildIdle: {
           on: {
@@ -495,10 +474,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ChildOutput),
-        initial: {
-          target: (to) => to.ChildOutput(),
-          resolve: ({ target }) => target(new ChildOutput({ value: 0 }))
-        }
+        initial: (to) => to.ChildOutput().resolve(({ target }) => target(new ChildOutput({ value: 0 })))
       }).handle({
         Parent: {
           invoke: Machine.invoke({
@@ -559,7 +535,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: { target: (to) => to.Root.initial(), resolve: () => valid }
+        initial: (to) => to.Root.initial.resolve(() => valid)
       })
       const forged: ReadonlyArray<unknown> = [
         { path: "Missing" as const, value: {} },
@@ -598,10 +574,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Add),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {

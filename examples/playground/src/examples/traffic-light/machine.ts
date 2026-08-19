@@ -25,10 +25,7 @@ export const TrafficLightMachine = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: TrafficLightEvents,
-  initial: {
-    target: (to) => to.Red(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Red().resolve(({ target }) => target.from())
 }).handle({
   Red: {
     invoke: Machine.invoke({

@@ -105,10 +105,7 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target.from()
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target.from())
     })
 
     const nodes = Machine.stateNodes(machine)
@@ -131,10 +128,7 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target(new Idle({}))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Idle")
@@ -149,10 +143,7 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Opaque(),
-        resolve: ({ target }) => target({ _tag: "OpaqueState", value: 1 })
-      }
+      initial: (to) => to.Opaque().resolve(({ target }) => target({ _tag: "OpaqueState", value: 1 }))
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Opaque")
@@ -284,6 +275,34 @@ describe("exact state-definition runtime validation", () => {
       "Machine.make",
       "12",
       "numeric forms"
+    )
+  })
+
+  it("rejects child keys reserved by definition-time target selectors", () => {
+    expectDefinitionError(
+      () =>
+        Machine.states({
+          Root: {
+            initial: "initial",
+            states: { initial: Idle }
+          }
+        } as any),
+      "Machine.states",
+      "Root.initial",
+      "reserved target selector key"
+    )
+    expectDefinitionError(
+      () =>
+        Machine.states({
+          Root: {
+            schema: Root,
+            initial: "with",
+            states: { with: Idle }
+          }
+        } as any),
+      "Machine.states",
+      "Root.with",
+      "reserved local target selector key"
     )
   })
 

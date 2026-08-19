@@ -35,15 +35,12 @@ describe("Machine.EventByTag", () => {
     Machine.make({
       states: states.states,
       events: Machine.events(FiniteUnion),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         on: {
           Alpha: (to) =>
-            to.none().resolve(({ event }) => {
+            to.none.resolve(({ event }) => {
               expect(event).type.toBe<{
                 readonly _tag: "Alpha"
                 readonly payload: string
@@ -52,7 +49,7 @@ describe("Machine.EventByTag", () => {
               return undefined
             }),
           Beta: (to) =>
-            to.none().resolve(({ event }) => {
+            to.none.resolve(({ event }) => {
               expect(event).type.toBe<{
                 readonly _tag: "Beta"
                 readonly payload: string

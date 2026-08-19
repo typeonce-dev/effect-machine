@@ -18,10 +18,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 const machine = Machine.make({
   states: States.states,
   events: TeamEvents,
-  initial: {
-    target: (to) => to.Loading(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Loading().resolve(({ target }) => target.from())
 }).handle({
   Loading: {
     invoke: Machine.invoke({
@@ -39,7 +36,7 @@ const machine = Machine.make({
     invoke: [
       Machine.invoke({
         child: SelectionChild,
-        onDone: { target: Machine.targetless },
+        onDone: (to) => to.none,
         onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
       }),
       Machine.invoke({

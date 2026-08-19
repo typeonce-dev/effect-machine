@@ -33,10 +33,7 @@ describe("Machine event constructor collections", () => {
     states: states.states,
     events,
     internalEvents,
-    initial: {
-      target: (to) => to.Idle(),
-      resolve: ({ target }) => (target.from())
-    }
+    initial: (to) => to.Idle().resolve(({ target }) => (target.from()))
   })
 
   it("derives public constructors and their schema make inputs", () => {
@@ -77,17 +74,13 @@ describe("Machine event constructor collections", () => {
     expect(Machine.make).type.not.toBeCallableWith({
       states: states.states,
       events: internalEvents,
-      initial: {
-        target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
-      }
+      initial: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
     })
     expect(Machine.make).type.not.toBeCallableWith({
       states: states.states,
       events,
       internalEvents: events,
-      initial: {
-        target: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
-      }
+      initial: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
     })
 
     const Reset = Schema.TaggedStruct("Reset", {})
@@ -100,10 +93,7 @@ describe("Machine event constructor collections", () => {
     const openMachine = Machine.make({
       states: states.states,
       events: openEvents,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target.from())
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target.from()))
     })
 
     expect(openEvents.Dynamic).type.toRaiseError()
@@ -124,7 +114,7 @@ describe("Machine event constructor collections", () => {
               id: "load",
               effect: () => Effect.succeed("ready"),
               onDone: (to) =>
-                to.none().resolve(({ output }, enqueue) => {
+                to.none.resolve(({ output }, enqueue) => {
                   enqueue.raise(internalEvents.Loaded({ value: output }))
                   return undefined
                 })
@@ -133,7 +123,7 @@ describe("Machine event constructor collections", () => {
               id: "timeout",
               after: "1 second",
               onDone: (to) =>
-                to.none().resolve((_, enqueue) => {
+                to.none.resolve((_, enqueue) => {
                   enqueue.raise(internalEvents.Failed())
                   return undefined
                 })

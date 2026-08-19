@@ -14,10 +14,7 @@ const machine = Machine.make({
   states: States.states,
   events: Machine.events(Tick),
   input: Schema.Struct({ seed: Schema.Number }),
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ input: input, target }) => (target(new Idle({ value: input.seed })))
-  }
+  initial: (to) => to.Idle().resolve(({ input: input, target }) => (target(new Idle({ value: input.seed }))))
 }).handle({
   Idle: {
     on: {

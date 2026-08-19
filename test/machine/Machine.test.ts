@@ -108,14 +108,9 @@ describe("Machine", () => {
     const definition = Machine.make({
       states: states.states,
       events: Machine.events(Ping),
-      initial: {
-        target: (to) => to.Stable(),
-        resolve: ({ target }) => target(new Stable({}))
-      }
+      initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
     })
-    const transition = { target: Machine.targetless }
-
-    const handlingPing = definition.handle({ Stable: { on: { Ping: transition } } })
+    const handlingPing = definition.handle({ Stable: { on: { Ping: (to) => to.none } } })
     const ignoringPing = definition.handle({ Stable: {} })
 
     assert.isFalse("handle" in handlingPing)
@@ -133,25 +128,26 @@ describe("Machine", () => {
       class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
       const states = Machine.states({ Stable })
       let captures = 0
+      let resolves = 0
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target(new Stable({}))
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
       }).handle({
         Stable: {
           on: {
             Ping: (to) => {
               captures++
-              return to.none()
+              return to.none.resolve(() => {
+                resolves++
+              })
             }
           }
         }
       })
 
       assert.strictEqual(captures, 1)
+      assert.strictEqual(resolves, 0)
 
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "Stable",
@@ -167,6 +163,7 @@ describe("Machine", () => {
 
       const initial = yield* Machine.planInitial(machine)
       const planned = yield* Machine.plan(machine, initial.state, new Ping({}))
+      assert.strictEqual(resolves, 1)
       assert.strictEqual(planned.microsteps.length, 1)
       const step = planned.microsteps[0]!
       assert.isFalse(step.changed)
@@ -182,10 +179,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle, Done },
         events: Machine.events(Finish),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target.from())
       }).handle({
         Idle: { on: { Finish: (to) => to.full.Done() } },
         Done: {}
@@ -206,12 +200,9 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Stable },
         events: Machine.events(Restart),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target.from())
       }).handle({
-        Stable: { on: { Restart: (to) => to.none().reenter() } }
+        Stable: { on: { Restart: (to) => to.none.reenter() } }
       })
 
       assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.reenter, true)
@@ -233,10 +224,7 @@ describe("Machine", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target(new Stable({}))
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
       })
       const machine = definition.handle({
         Stable: {
@@ -244,7 +232,7 @@ describe("Machine", () => {
             Ping: (to) => {
               captures++
               const captured = {
-                unchanged: { target: to.none() },
+                unchanged: { target: to.none },
                 refresh: { title: "Refresh stable state", target: to.full.Stable() }
               }
               declarations = captured
@@ -297,10 +285,7 @@ describe("Machine", () => {
       Machine.make({
         states: { Stable },
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target(new Stable({}))
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
       })
     const handle = (branches: (to: any) => object) => () =>
       makeDefinition().handle({
@@ -312,13 +297,13 @@ describe("Machine", () => {
       })
 
     assert.throws(handle(() => ({})), /requires a branch/)
-    assert.throws(handle((to) => [{ target: to.none() }]), /requires a branch record/)
-    assert.throws(handle((to) => ({ "": { target: to.none() } })), /non-index string branch keys/)
-    assert.throws(handle((to) => ({ 0: { target: to.none() } })), /non-index string branch keys/)
-    assert.throws(handle((to) => ({ invalid: { title: "", target: to.none() } })), /non-empty string/)
+    assert.throws(handle((to) => [{ target: to.none }]), /requires a branch record/)
+    assert.throws(handle((to) => ({ "": { target: to.none } })), /non-index string branch keys/)
+    assert.throws(handle((to) => ({ 0: { target: to.none } })), /non-index string branch keys/)
+    assert.throws(handle((to) => ({ invalid: { title: "", target: to.none } })), /non-empty string/)
     assert.throws(handle(() => ({ invalid: { target: undefined } })), /must select exactly one target/)
     assert.throws(
-      handle((to) => ({ valid: { target: to.none() }, [Symbol("invalid")]: { target: to.none() } })),
+      handle((to) => ({ valid: { target: to.none }, [Symbol("invalid")]: { target: to.none } })),
       /cannot use symbol keys/
     )
   })
@@ -332,19 +317,16 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Stable },
         events: Machine.events(Capture, Reuse),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target(new Stable({}))
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
       }).handle({
         Stable: {
           on: {
             Capture: (to) =>
-              to.branches({ unchanged: { target: to.none() } }).resolve(({ select }) => {
+              to.branches({ unchanged: { target: to.none } }).resolve(({ select }) => {
                 captured = select.unchanged()
                 return captured as any
               }),
-            Reuse: (to) => to.branches({ unchanged: { target: to.none() } }).resolve(() => captured as any)
+            Reuse: (to) => to.branches({ unchanged: { target: to.none } }).resolve(() => captured as any)
           }
         }
       })
@@ -520,10 +502,7 @@ describe("Machine", () => {
         states: states.states,
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       })
 
       const planned = yield* Machine.planInitial(machine, { userId: "user-1" })
@@ -537,10 +516,7 @@ describe("Machine", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
     })
 
     assert.strictEqual(Machine.isMachine(machine), true)
@@ -554,10 +530,7 @@ describe("Machine", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Convert),
-        initial: {
-          target: (to) => to.Submit(),
-          resolve: ({ target }) => target(new Submit({ value: "loaded" }))
-        }
+        initial: (to) => to.Submit().resolve(({ target }) => target(new Submit({ value: "loaded" })))
       })
       const machine = definition.handle({
         Submit: {
@@ -587,10 +560,7 @@ describe("Machine", () => {
       states: states.states,
       events: Machine.events(Submit),
       input: Input,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-      }
+      initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
     }).handle({
       Idle: {
         on: {
@@ -617,10 +587,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: defined.states,
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       })
 
       const planned = yield* Machine.planInitial(machine)
@@ -742,14 +709,13 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Authorize),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.payment.initial.resolve(({ target }) =>
             target(
               payment,
               (payment) => payment.entering(entering)
             )
-        }
+          )
       })
 
       const planned = yield* Machine.planInitial(machine)
@@ -794,9 +760,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.fulfillment.initial.resolve(({ target }) =>
             target(
               fulfillment,
               (fulfillment) =>
@@ -810,7 +775,7 @@ describe("Machine", () => {
                     (shipping) => shipping.quoting(quoting)
                   )
             )
-        }
+          )
       })
 
       const planned = yield* Machine.planInitial(machine)
@@ -865,17 +830,14 @@ describe("Machine", () => {
           states: states.states,
           events,
           internalEvents,
-          initial: {
-            target: (to) => to.Active(),
-            resolve: ({ target }) => target.from({ value: "initial" })
-          }
+          initial: (to) => to.Active().resolve(({ target }) => target.from({ value: "initial" }))
         })
         const machine = definition.handle({
           Active: {
             on: {
               SetValue: (to) => to.full.Active().resolve(({ event, target }) => target.from({ value: event.value })),
               Reset: (to) =>
-                to.none().resolve((_, enqueue) => {
+                to.none.resolve((_, enqueue) => {
                   enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
                   return undefined
                 }),
@@ -940,16 +902,13 @@ describe("Machine", () => {
           id: "deferred-event-failure",
           states: states.states,
           events: Machine.events(Event),
-          initial: {
-            target: (to) => to.Idle(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Idle().resolve(({ target }) => target.from())
         })
         const events = definition.events
         const machine = definition.handle({
           Idle: {
             on: {
-              Submit: { target: Machine.targetless }
+              Submit: (to) => to.none
             }
           }
         })
@@ -994,10 +953,7 @@ describe("Machine", () => {
           states: states.states,
           events: Machine.events(),
           internalEvents: Machine.internalEvents(InternalEvent),
-          initial: {
-            target: (to) => to.Loading(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Loading().resolve(({ target }) => target.from())
         })
         const machine = definition.handle({
           Loading: {
@@ -1042,22 +998,16 @@ describe("Machine", () => {
         const first = Machine.make({
           states: states.states,
           events: Machine.events(FirstEvent),
-          initial: {
-            target: (to) => to.Idle(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Idle().resolve(({ target }) => target.from())
         })
         const second = Machine.make({
           states: states.states,
           events: Machine.events(SecondEvent),
-          initial: {
-            target: (to) => to.Idle(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Idle().resolve(({ target }) => target.from())
         }).handle({
           Idle: {
             on: {
-              Submit: { target: Machine.targetless }
+              Submit: (to) => to.none
             }
           }
         })
@@ -1080,10 +1030,7 @@ describe("Machine", () => {
           id: "from-default",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.idle(),
-            resolve: ({ target }) => target.from({ id: "idle-1" })
-          }
+          initial: (to) => to.idle().resolve(({ target }) => target.from({ id: "idle-1" }))
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -1111,10 +1058,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Event),
-          initial: {
-            target: (to) => to.Idle(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Idle().resolve(({ target }) => target.from())
         }).handle({
           Idle: {
             on: {
@@ -1149,10 +1093,7 @@ describe("Machine", () => {
           id: "from-default-only",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.DefaultOnly(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.DefaultOnly().resolve(({ target }) => target.from())
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -1209,10 +1150,7 @@ describe("Machine", () => {
             Event.cases.Full,
             Event.cases.Finish
           ),
-          initial: {
-            target: (to) => to.Flow.initial(),
-            resolve: ({ target }) => target.from((flow) => flow.Idle.from())
-          }
+          initial: (to) => to.Flow.initial.resolve(({ target }) => target.from((flow) => flow.Idle.from()))
         }).handle({
           Flow: {
             states: {
@@ -1293,15 +1231,14 @@ describe("Machine", () => {
           id: "from-empty-parallel",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.Parallel.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.Parallel.initial.resolve(({ target }) =>
               target.from((parallel) =>
                 parallel
                   .left.from((left) => left.LeftIdle.from())
                   .right.from((right) => right.RightIdle.from())
               )
-          }
+            )
         })
 
         const planned = yield* Machine.planInitial(machine)
@@ -1324,10 +1261,7 @@ describe("Machine", () => {
           id: "from-empty-refinement",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.Blocked(),
-            resolve: ({ target }) => target.from()
-          }
+          initial: (to) => to.Blocked().resolve(({ target }) => target.from())
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1343,10 +1277,7 @@ describe("Machine", () => {
           id: "from-refinement",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target.from({ userId: "" })
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target.from({ userId: "" }))
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1362,10 +1293,7 @@ describe("Machine", () => {
           id: "from-transition-refinement",
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target.from({ userId: "user-1" })
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target.from({ userId: "user-1" }))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1417,10 +1345,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: {
-            target: (to) => to.idle(),
-            resolve: ({ target }) => target.from({ userId: "user-1" })
-          }
+          initial: (to) => to.idle().resolve(({ target }) => target.from({ userId: "user-1" }))
         }).handle({
           idle: {
             on: {
@@ -1482,14 +1407,13 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: {
-            target: (to) => to.payment.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.payment.initial.resolve(({ target }) =>
               target.from(
                 { id: "payment-1" },
                 (payment) => payment.entering.from({ amount: 1 })
               )
-          }
+            )
         }).handle({
           payment: {
             states: {
@@ -1538,14 +1462,13 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(Submit),
-          initial: {
-            target: (to) => to.workflow.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.workflow.initial.resolve(({ target }) =>
               target.from(
                 { id: "workflow-1" },
                 (workflow) => workflow.idle.from({ userId: "user-1" })
               )
-          }
+            )
         }).handle({
           workflow: {
             states: {
@@ -1590,10 +1513,8 @@ describe("Machine", () => {
           states: states.states,
           events: Machine.events(NonEmptySubmit),
           input: NonEmptyInput,
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ input: input, target }) => target(new NonEmptyIdle({ userId: input.userId }))
-          }
+          initial: (to) =>
+            to.NonEmptyIdle().resolve(({ input: input, target }) => target(new NonEmptyIdle({ userId: input.userId })))
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine, { userId: "" as any }))
@@ -1607,10 +1528,8 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
-          }
+          initial: (to) =>
+            to.NonEmptyIdle().resolve(({ target }) => target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" })))
         })
 
         const error = yield* Effect.flip(Machine.planInitial(machine))
@@ -1624,10 +1543,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1653,10 +1569,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1691,10 +1604,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1723,10 +1633,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1763,10 +1670,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         }).handle({
           NonEmptyIdle: {
             on: {
@@ -1812,9 +1716,8 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.all.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.all.initial.resolve(({ target }) =>
               target(
                 new ParallelRoot({ id: "all" }),
                 (all) =>
@@ -1822,7 +1725,7 @@ describe("Machine", () => {
                     .left(new ParallelLeftDone({ id: "left" }))
                     .right(new ParallelRightDone({ id: "right" }))
               )
-          }
+            )
         }).handle({
           all: {
             output: () => ({ summary: "" as any })
@@ -1840,10 +1743,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(NonEmptySubmit),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         })
 
         const error = yield* Effect.flip(
@@ -1867,10 +1767,7 @@ describe("Machine", () => {
           id: "Counter",
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.count(),
-            resolve: ({ target }) => target(new EncodedCount({ count: 1 }))
-          }
+          initial: (to) => to.count().resolve(({ target }) => target(new EncodedCount({ count: 1 })))
         })
         const planned = yield* Machine.planInitial(machine)
 
@@ -1917,9 +1814,8 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.fulfillment.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.fulfillment.initial.resolve(({ target }) =>
               target(
                 new Fulfillment({ id: "fulfillment-1" }),
                 (fulfillment) =>
@@ -1933,7 +1829,7 @@ describe("Machine", () => {
                       (shipping) => shipping.quoting(new QuotingShipping({ postalCode: "12345" }))
                     )
               )
-          }
+            )
         })
         const planned = yield* Machine.planInitial(machine)
 
@@ -1969,9 +1865,8 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.all.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.all.initial.resolve(({ target }) =>
               target(
                 new ParallelRoot({ id: "all" }),
                 (all) =>
@@ -1979,7 +1874,7 @@ describe("Machine", () => {
                     .left(new ParallelLeftDone({ id: "left" }))
                     .right(new ParallelRightDone({ id: "right" }))
               )
-          }
+            )
         }).handle({
           all: {
             states: {
@@ -2016,9 +1911,8 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.all.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.all.initial.resolve(({ target }) =>
               target(
                 new ParallelRoot({ id: "all" }),
                 (all) =>
@@ -2026,7 +1920,7 @@ describe("Machine", () => {
                     .left(new ParallelLeftDone({ id: "left" }))
                     .right(new ParallelRightDone({ id: "right" }))
               )
-          }
+            )
         }).handle({
           all: {
             states: {
@@ -2049,10 +1943,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         })
 
         const error = yield* Machine.encodeSnapshot(machine, {
@@ -2069,10 +1960,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         })
 
         const error = yield* Machine.encodeSnapshot(machine, {
@@ -2090,10 +1978,7 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.NonEmptyIdle(),
-            resolve: ({ target }) => target(new NonEmptyIdle({ userId: "user-1" }))
-          }
+          initial: (to) => to.NonEmptyIdle().resolve(({ target }) => target(new NonEmptyIdle({ userId: "user-1" })))
         })
 
         const error = yield* Machine.decodeSnapshot(machine, {
@@ -2122,14 +2007,13 @@ describe("Machine", () => {
         const machine = Machine.make({
           states: states.states,
           events: Machine.events(),
-          initial: {
-            target: (to) => to.payment.initial(),
-            resolve: ({ target }) =>
+          initial: (to) =>
+            to.payment.initial.resolve(({ target }) =>
               target(
                 new Payment({ id: "payment-1" }),
                 (payment) => payment.entering(new EnteringPayment({ amount: 1 }))
               )
-          }
+            )
         })
 
         const error = yield* Machine.decodeSnapshot(machine, {
@@ -2154,10 +2038,7 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         idle: {
           on: {
@@ -2190,10 +2071,7 @@ describe("Machine", () => {
           b: Duplicate
         },
         events: Machine.events(Submit, Reset),
-        initial: {
-          target: (to) => to.a(),
-          resolve: ({ target }) => target(new Duplicate({ value: "a" }))
-        }
+        initial: (to) => to.a().resolve(({ target }) => target(new Duplicate({ value: "a" })))
       }).handle({
         a: {
           on: {
@@ -2233,10 +2111,7 @@ describe("Machine", () => {
           b: Duplicate
         },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.a(),
-          resolve: ({ target }) => target(new Duplicate({ value: "a" }))
-        }
+        initial: (to) => to.a().resolve(({ target }) => target(new Duplicate({ value: "a" })))
       }).handle({
         a: {
           on: {
@@ -2268,10 +2143,7 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         idle: {
           on: {
@@ -2310,17 +2182,15 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(Authorize),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: entering
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -2369,17 +2239,15 @@ describe("Machine", () => {
         },
         events: Machine.events(Authorize),
         emittedEvents: Machine.emittedEvents(Notice),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: entering
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -2391,7 +2259,7 @@ describe("Machine", () => {
                 Authorize: (to) =>
                   to.branches({
                     authorize: { target: to.local.authorized() },
-                    consume: { target: to.none() }
+                    consume: { target: to.none }
                   }).resolve(({ event, select, decline }, enqueue) => {
                     if (event.code === "child") {
                       return select.authorize(new AuthorizedPayment({ code: event.code }))
@@ -2445,18 +2313,17 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.workflow.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.workflow.initial.resolve(({ target }) =>
             target(new Workflow({}), (workflow) => workflow.waiting(new Waiting({ ready: false })))
-        }
+          )
       }).handle({
         workflow: {
           always: (to) => to.full.finished().resolve(({ target }) => target(new Finished({}))),
           states: {
             waiting: {
               always: (to) =>
-                to.none().resolve(({ state, decline }) => state.ready ? undefined : decline(), { declinable: true })
+                to.none.resolve(({ state, decline }) => state.ready ? undefined : decline(), { declinable: true })
             }
           }
         }
@@ -2475,14 +2342,11 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.Stable(),
-          resolve: ({ target }) => target(new Stable({}))
-        }
+        initial: (to) => to.Stable().resolve(({ target }) => target(new Stable({})))
       }).handle({
         Stable: {
           on: {
-            Ping: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true })
+            Ping: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true })
           }
         }
       })
@@ -2512,10 +2376,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.workflow.initial(),
-          resolve: ({ target }) => target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
-        }
+        initial: (to) =>
+          to.workflow.initial.resolve(({ target }) =>
+            target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
+          )
       }).handle({
         workflow: {
           onDone: (to) => to.full.finished().resolve(({ decline }) => decline(), { declinable: true }),
@@ -2552,10 +2416,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: {
-          target: (to) => to.root.initial(),
-          resolve: ({ target }) => target(new Root({}), (root) => root.left(new Left({})).right(new Right({})))
-        }
+        initial: (to) =>
+          to.root.initial.resolve(({ target }) =>
+            target(new Root({}), (root) => root.left(new Left({})).right(new Right({})))
+          )
       }).handle({
         root: {
           on: {
@@ -2568,13 +2432,13 @@ describe("Machine", () => {
           states: {
             left: {
               on: {
-                Ping: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true })
+                Ping: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true })
               }
             },
             right: {
               on: {
                 Ping: (to) =>
-                  to.none().resolve(({ event, decline }) => event.handleRight ? undefined : decline(), {
+                  to.none.resolve(({ event, decline }) => event.handleRight ? undefined : decline(), {
                     declinable: true
                   })
               }
@@ -2616,17 +2480,15 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(Authorize, Reset),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: entering
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -2683,17 +2545,15 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Reset),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: entering
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -2746,10 +2606,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         idle: {
           on: {
@@ -2843,14 +2700,13 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.workflow.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.workflow.initial.resolve(({ target }) =>
             target(
               workflow,
               (workflow) => workflow.idle(new Idle({ userId: "user-1" }))
             )
-        }
+          )
       }).handle({
         workflow: {
           states: {
@@ -2963,10 +2819,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.app.initial(),
-          resolve: () => initial
-        }
+        initial: (to) => to.app.initial.resolve(() => initial)
       }).handle({
         app: {
           states: {
@@ -3053,9 +2906,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.fulfillment.initial.resolve(({ target }) =>
             target(
               fulfillment,
               (fulfillment) =>
@@ -3069,7 +2921,7 @@ describe("Machine", () => {
                     (shipping) => shipping.quoting(quoting)
                   )
             )
-        }
+          )
       }).handle({
         fulfillment: {
           states: {
@@ -3145,9 +2997,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.fulfillment.initial.resolve(({ target }) =>
             target(
               fulfillment,
               (fulfillment) =>
@@ -3161,7 +3012,7 @@ describe("Machine", () => {
                     (shipping) => shipping.quoting(quoting)
                   )
             )
-        }
+          )
       }).handle({
         fulfillment: {
           states: {
@@ -3242,9 +3093,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.fulfillment.initial.resolve(({ target }) =>
             target(
               fulfillment,
               (fulfillment) =>
@@ -3258,7 +3108,7 @@ describe("Machine", () => {
                     (shipping) => shipping.quoting(quoting)
                   )
             )
-        }
+          )
       }).handle({
         fulfillment: {
           states: {
@@ -3340,9 +3190,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.fulfillment.initial.resolve(({ target }) =>
             target(
               fulfillment,
               (fulfillment) =>
@@ -3356,7 +3205,7 @@ describe("Machine", () => {
                     (shipping) => shipping.quoting(quoting)
                   )
             )
-        }
+          )
       }).handle({
         fulfillment: {
           states: {
@@ -3439,9 +3288,8 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.payment.initial.resolve(({ target }) =>
             target(
               payment,
               (payment) =>
@@ -3450,7 +3298,7 @@ describe("Machine", () => {
                   (inventory) => inventory.checking(new CheckingInventory({ sku: "sku-1" }))
                 )
             )
-        }
+          )
       }).handle({
         payment: {
           states: {
@@ -3509,17 +3357,15 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize, Reset),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: new EnteringPayment({ amount: 100 })
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -3572,17 +3418,15 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Reset),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.authorized" as const,
               value: authorized
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           states: {
@@ -3624,17 +3468,15 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize, Reset),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: new EnteringPayment({ amount: 100 })
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           on: {
@@ -3708,9 +3550,8 @@ describe("Machine", () => {
           failed: Failed
         },
         events: Machine.events(ReserveInventory, Reset),
-        initial: {
-          target: (to) => to.checkout.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.checkout.initial.resolve(() => ({
             path: "checkout" as const,
             value: checkout,
             state: {
@@ -3721,8 +3562,7 @@ describe("Machine", () => {
                 value: new CheckingInventory({ sku: "sku-1" })
               }
             }
-          })
-        }
+          }))
       }).handle({
         checkout: {
           on: {
@@ -3803,9 +3643,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -3826,8 +3665,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           states: {
@@ -3923,9 +3761,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -3946,8 +3783,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           output: ({ outputs }) => ({
@@ -4070,9 +3906,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory, Resolve),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -4093,8 +3928,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           output: ({ outputs }) => outputs,
@@ -4199,9 +4033,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -4222,8 +4055,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           states: {
@@ -4311,9 +4143,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory, Resolve),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -4334,8 +4165,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           states: {
@@ -4399,10 +4229,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       })
 
       const actor = yield* Machine.start(machine)
@@ -4416,10 +4243,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4447,10 +4271,7 @@ describe("Machine", () => {
       states: { Idle, Loading },
       events: Machine.events(Submit, Reset),
       input: Input,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-      }
+      initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
     }).handle({
       Idle: {
         on: {
@@ -4479,10 +4300,7 @@ describe("Machine", () => {
       },
       events: Machine.events(Submit),
       input: Input,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-      }
+      initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
     }).handle({
       Idle: {
         on: {
@@ -4504,10 +4322,7 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4537,10 +4352,7 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4567,10 +4379,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Success: SuccessOutput },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.Success(),
-          resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
       }).handle({
         Success: {
           output: ({ state }) => {
@@ -4604,10 +4413,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Success: SuccessOutput },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.Success(),
-          resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
       }).handle({
         Success: {
           output: ({ state }) => {
@@ -4637,10 +4443,7 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4674,10 +4477,7 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit, Reset),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4709,10 +4509,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle, Loading },
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         Idle: {
           on: {
@@ -4740,10 +4537,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4774,10 +4568,7 @@ describe("Machine", () => {
         },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Success: {}
       })
@@ -4796,14 +4587,11 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
-            Submit: { target: Machine.targetless }
+            Submit: (to) => to.none
           }
         }
       })
@@ -4822,10 +4610,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4869,10 +4654,7 @@ describe("Machine", () => {
         states: { Idle, Success: SuccessOutput },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4907,10 +4689,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit, Reset),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -4934,10 +4713,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestSucceeded),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       })
       const machine = definition.handle({
         Idle: {
@@ -4980,10 +4756,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestSucceeded),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       })
       const machine = definition.handle({
         Idle: {
@@ -5026,20 +4799,14 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "child" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "child" })))
       })
       const Child = Machine.child("shared-child", childMachine)
       const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "parent" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({ child: Child })
@@ -5083,20 +4850,14 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "child" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "child" })))
       }).handle({ Idle: {} })
       const Child = Machine.child("owned-child", childMachine)
       const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "parent" })))
       }).handle({
         Loading: { invoke: Machine.invoke({ child: Child }) }
       })
@@ -5123,23 +4884,18 @@ describe("Machine", () => {
         states: childStates.states,
         events: Machine.events(),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input, target }) => {
+        initial: (to) =>
+          to.Idle().resolve(({ input, target }) => {
             starts += 1
             return target(new Idle({ userId: input.userId }))
-          }
-        }
+          })
       }).handle({ Idle: {} })
       const Child = Machine.child("input-child", childMachine)
       const parentStates = Machine.states({ Loading })
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "parent" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({ child: Child, input: { userId: "configured" } })
@@ -5174,10 +4930,7 @@ describe("Machine", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Success(),
-          resolve: ({ target }) => target(new Success({ requestId: "child-output" }))
-        }
+        initial: (to) => to.Success().resolve(({ target }) => target(new Success({ requestId: "child-output" })))
       }).handle({
         Success: { output: ({ state }) => state.requestId }
       })
@@ -5189,10 +4942,7 @@ describe("Machine", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(ChildFinished),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "parent" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "parent" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -5216,10 +4966,7 @@ describe("Machine", () => {
         states: states.states,
         events: Machine.events(),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {}
       })
@@ -5248,20 +4995,14 @@ describe("Machine", () => {
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "child" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "child" })))
       })
       const Child = Machine.child("child-machine", child)
       const parentStates = Machine.states({ Loading })
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: [
@@ -5290,10 +5031,7 @@ describe("Machine", () => {
       const parent = Machine.make({
         states: parentStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: [
@@ -5326,10 +5064,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Failed: FailedOutput },
         events: Machine.events(Submit, RequestFailed),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -5371,10 +5106,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         Idle: {
           on: {
@@ -5406,10 +5138,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(RequestSucceeded),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -5425,7 +5154,7 @@ describe("Machine", () => {
                     Effect.andThen(Effect.never)
                   )
             }),
-            onFailure: { target: Machine.targetless }
+            onFailure: (to) => to.none
           }),
           on: {
             RequestSucceeded: (to) =>
@@ -5449,10 +5178,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Resolve, RequestSucceeded),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Idle: {
           on: {
@@ -5474,7 +5200,7 @@ describe("Machine", () => {
                     Effect.onInterrupt(() => sendTo(parent, new RequestSucceeded({ value: "stale" })))
                   )
             }),
-            onFailure: { target: Machine.targetless }
+            onFailure: (to) => to.none
           }),
           on: {
             Resolve: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "resolved" })))
@@ -5508,10 +5234,7 @@ describe("Machine", () => {
         states: { Loading, Failed: FailedOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded, RequestFailed),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -5540,10 +5263,7 @@ describe("Machine", () => {
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -5574,10 +5294,7 @@ describe("Machine", () => {
         states: { Loading, Success: SuccessOutput },
         events: Machine.events(),
         internalEvents: Machine.internalEvents(RequestSucceeded),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -5604,10 +5321,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestProgress),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       })
       const onSnapshot: Machine.Machine.InvokeTransition<
         Machine.Machine.States<typeof definition>,
@@ -5671,10 +5385,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -5712,10 +5423,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, RequestProgress),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       })
       const onSnapshot: Machine.Machine.InvokeTransition<
         Machine.Machine.States<typeof definition>,
@@ -5736,7 +5444,7 @@ describe("Machine", () => {
       > = (to) =>
         to.branches({
           ready: { title: "Request is ready", target: to.full.Success() },
-          unchanged: { target: to.none() }
+          unchanged: { target: to.none }
         }).resolve(({ snapshot, select }) =>
           snapshot.state === "ready"
             ? select.ready(new Success({ requestId: snapshot.state }))
@@ -5800,10 +5508,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -5818,7 +5523,7 @@ describe("Machine", () => {
               initial: "pending",
               run: () => Effect.void
             }),
-            onDone: { target: Machine.targetless }
+            onDone: (to) => to.none
           })
         }
       })
@@ -5858,10 +5563,7 @@ describe("Machine", () => {
         states: { Idle, Loading, Success: SuccessOutput },
         events: Machine.events(Submit, Resolve, RequestSucceeded),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           on: {
@@ -5945,17 +5647,15 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(Authorize),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.payment.initial.resolve(() => ({
             path: "payment" as const,
             value: payment,
             state: {
               path: "payment.entering" as const,
               value: entering
             }
-          })
-        }
+          }))
       }).handle({
         payment: {
           invoke: Machine.invoke({
@@ -6069,9 +5769,8 @@ describe("Machine", () => {
           }
         },
         events: Machine.events(ReserveInventory),
-        initial: {
-          target: (to) => to.fulfillment.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.fulfillment.initial.resolve(() => ({
             path: "fulfillment" as const,
             value: fulfillment,
             states: {
@@ -6092,8 +5791,7 @@ describe("Machine", () => {
                 }
               }
             }
-          })
-        }
+          }))
       }).handle({
         fulfillment: {
           invoke: Machine.invoke({
@@ -6161,12 +5859,10 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: () => {
+        initial: (to) =>
+          to.Idle().resolve(() => {
             throw defect
-          }
-        }
+          })
       })
 
       const planningError = yield* Effect.flip(Machine.planInitial(machine))
@@ -6201,10 +5897,7 @@ describe("Machine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.payment.initial(),
-          resolve: () => invalidInitialState as any
-        }
+        initial: (to) => to.payment.initial.resolve(() => invalidInitialState as any)
       })
 
       const planningError = yield* Effect.flip(Machine.planInitial(machine))
@@ -6223,10 +5916,7 @@ describe("Machine", () => {
         states: { Idle, Loading },
         events: Machine.events(Submit),
         input: Input,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ input: input, target }) => target(new Idle({ userId: input.userId }))
-        }
+        initial: (to) => to.Idle().resolve(({ input: input, target }) => target(new Idle({ userId: input.userId })))
       }).handle({
         Idle: {
           always: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" }))),
@@ -6255,10 +5945,7 @@ describe("Machine", () => {
         id: "InitialLoopMachine",
         states: { Idle, Loading },
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         Idle: {
           always: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
@@ -6298,10 +5985,7 @@ describe("Machine", () => {
         id: "CompletionLoopMachine",
         states: states.states,
         events: Machine.events(Submit),
-        initial: {
-          target: (to) => to.idle(),
-          resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-        }
+        initial: (to) => to.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
       }).handle({
         idle: {
           on: {
@@ -6369,14 +6053,13 @@ describe("Machine", () => {
     Machine.make({
       states: ParallelCounterStates.states,
       events: Machine.events(AdvanceCounters),
-      initial: {
-        target: (to) => to.running.initial(),
-        resolve: ({ target }) =>
+      initial: (to) =>
+        to.running.initial.resolve(({ target }) =>
           target(
             new CounterRunning({}),
             (running) => running.left(new LeftCounter({ value: 0 })).right(new RightCounter({ value: 0 }))
           )
-      }
+        )
     }).handle({
       running: {
         states: {
@@ -6405,14 +6088,11 @@ describe("Machine", () => {
     return Machine.make({
       states: states.states,
       events: Machine.events(ConcurrentPing),
-      initial: {
-        target: (to) => to.ConcurrentIdle(),
-        resolve: ({ target }) => target(new ConcurrentIdle({}))
-      }
+      initial: (to) => to.ConcurrentIdle().resolve(({ target }) => target(new ConcurrentIdle({})))
     }).handle({
       ConcurrentIdle: {
         on: {
-          ConcurrentPing: { target: Machine.targetless }
+          ConcurrentPing: (to) => to.none
         }
       }
     })

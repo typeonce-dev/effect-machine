@@ -35,17 +35,14 @@ const makeFlatMachine = () => {
   return Machine.make({
     states: states.states,
     events: Machine.events(Noop, Increment, Reenter, Finish),
-    initial: {
-      target: (to) => to.Count(),
-      resolve: ({ target }) => target(new Count({ value: 0 }))
-    }
+    initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
   }).handle({
     Count: {
       on: {
-        Noop: { target: Machine.targetless },
+        Noop: (to) => to.none,
         Increment: (to) =>
           to.full.Count().resolve(({ state, target }) => target(new Count({ value: state.value + 1 }))),
-        Reenter: (to) => to.none().resolve(() => undefined, { reenter: true }),
+        Reenter: (to) => to.none.resolve(() => undefined, { reenter: true }),
         Finish: (to) => to.full.Done().resolve(({ state, target }) => target(new Done({ value: state.value })))
       }
     },
@@ -67,18 +64,15 @@ describe("machine planner and runtime strategies", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(Select),
-      initial: {
-        target: (to) => to.Count(),
-        resolve: ({ target }) => target(new Count({ value: 0 }))
-      }
+      initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
     }).handle({
       Count: {
         on: {
           Select: (to) =>
             to.branches({
-              negative: { target: to.none() },
-              zero: { target: to.none() },
-              positive: { target: to.none() }
+              negative: { target: to.none },
+              zero: { target: to.none },
+              positive: { target: to.none }
             }).resolve(({ event, select }) =>
               event.value < 0
                 ? select.negative()
@@ -112,10 +106,7 @@ describe("machine planner and runtime strategies", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(Select),
-      initial: {
-        target: (to) => to.Count(),
-        resolve: ({ target }) => target(new Count({ value: 0 }))
-      }
+      initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
     }).handle({
       Count: {
         on: {
@@ -182,14 +173,13 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Advance),
-        initial: {
-          target: (to) => to.Root.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.Root.initial.resolve(({ target }) =>
             target(
               new Root({}),
               (root) => root.Left(new Left({ value: 0 })).Right(new Right({ value: 0 }))
             )
-        }
+          )
       }).handle({
         Root: {
           states: {
@@ -234,14 +224,11 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Enter),
-        initial: {
-          target: (to) => to.Outside(),
-          resolve: ({ target }) => target(new Outside({}))
-        }
+        initial: (to) => to.Outside().resolve(({ target }) => target(new Outside({})))
       }).handle({
         Outside: {
           on: {
-            Enter: (to) => to.full.Opened.initial().resolve(({ target }) => target(new Opened({})))
+            Enter: (to) => to.full.Opened.initial.resolve(({ target }) => target(new Opened({})))
           }
         },
         Opened: {
@@ -317,10 +304,7 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           always: (to) => to.full.Ready().resolve(({ target }) => target(new Ready({})))
@@ -343,10 +327,7 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target.from())
       }).handle({ Idle: {} })
 
       assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
@@ -379,10 +360,8 @@ describe("machine planner and runtime strategies", () => {
         states: states.states,
         events: Machine.events(),
         input: Input,
-        initial: {
-          target: (to) => to.Complete(),
-          resolve: ({ input: input, target }) => target(new Complete({ value: input.value }))
-        }
+        initial: (to) =>
+          to.Complete().resolve(({ input: input, target }) => target(new Complete({ value: input.value })))
       }).handle({
         Complete: { output: ({ state }) => state.value }
       })
@@ -440,22 +419,17 @@ describe("machine planner and runtime strategies", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Streaming(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Streaming().resolve(({ target }) => target.from())
       })
       const machine = definition.handle({
         Streaming: {
           invoke: Machine.invoke({
             id: "values",
             stream: () => Stream.fromIterable([1, 2, 3]),
-            onElement: {
-              target: Machine.targetless,
-              resolve: ({ element }) => {
+            onElement: (to) =>
+              to.none.resolve(({ element }) => {
                 seen.push(element)
-              }
-            },
+              }),
             onDone: (to) => to.full.StreamDone().resolve(({ target }) => target(new StreamDone({ values: [...seen] })))
           })
         },
@@ -477,10 +451,7 @@ describe("machine planner and runtime strategies", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Event),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       })
       const events = definition.events
       const machine = definition.handle({
@@ -531,15 +502,12 @@ describe("machine planner and runtime strategies", () => {
         states: states.states,
         events: Events,
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {
             Publish: (to) =>
-              to.none().resolve(({ parent, self }, enqueue) => {
+              to.none.resolve(({ parent, self }, enqueue) => {
                 assert.strictEqual(parent, undefined)
                 assert.ok(self.sessionId.startsWith("machine:"))
                 enqueue.emit(Emissions.Published({ value } as never))
@@ -581,10 +549,7 @@ describe("machine planner and runtime strategies", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -710,10 +675,7 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Load, Loaded),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {
@@ -761,10 +723,7 @@ describe("machine planner and runtime strategies", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target(new Loading({}))
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -805,10 +764,7 @@ describe("machine planner and runtime strategies", () => {
         const definition = Machine.make({
           states: states.states,
           events: Machine.events(Reenter, Stale),
-          initial: {
-            target: (to) => to.Loading(),
-            resolve: ({ target }) => target(new Loading({ epoch: 0 }))
-          }
+          initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({ epoch: 0 })))
         })
         const machine = definition.handle({
           Loading: {
@@ -833,11 +789,11 @@ describe("machine planner and runtime strategies", () => {
                       )
                 })
               },
-              onFailure: { target: Machine.targetless },
+              onFailure: (to) => to.none,
               onSnapshot: (to) =>
                 to.branches({
                   stale: { title: "Worker is stale", target: to.full.Failed() },
-                  unchanged: { target: to.none() }
+                  unchanged: { target: to.none }
                 }).resolve(({ snapshot, select }) =>
                   snapshot.state === "stale"
                     ? select.stale(new Failed({}))

@@ -37,16 +37,14 @@ describe("Machine transition snapshot context", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(Advance),
-      initial: {
-        target: (to) => to.Root.initial(),
-        resolve: ({ target }) => (target(
+      initial: (to) =>
+        to.Root.initial.resolve(({ target }) => (target(
           new Root({}),
           (root) =>
             root
               .Left(new Left({}), (left) => left.LeftIdle(new LeftIdle({})))
               .Right(new Right({}), (right) => right.RightIdle(new RightIdle({})))
-        ))
-      }
+        )))
     }).handle({
       Root: {
         states: {
@@ -62,7 +60,7 @@ describe("Machine transition snapshot context", () => {
             states: {
               LeftIdle: {
                 always: (to) =>
-                  to.none().resolve(({ snapshot }) => {
+                  to.none.resolve(({ snapshot }) => {
                     expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
                     return undefined
                   }),
@@ -98,10 +96,7 @@ describe("Machine transition snapshot context", () => {
     Machine.make({
       states: choiceStates.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Flow({}), (flow) => flow.Routing()))
-      }
+      initial: (to) => to.Flow.initial.resolve(({ target }) => (target(new Flow({}), (flow) => flow.Routing())))
     }).handle({
       Flow: {
         entry: (context) => {

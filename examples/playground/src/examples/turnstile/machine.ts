@@ -17,10 +17,7 @@ export const TurnstileMachine = Machine.make({
   id: "Turnstile",
   states: TurnstileStates.states,
   events: TurnstileEvents,
-  initial: {
-    target: (to) => to.Locked(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Locked().resolve(({ target }) => target.from())
 }).handle({
   Locked: {
     on: {

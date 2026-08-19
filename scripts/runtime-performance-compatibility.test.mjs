@@ -25,21 +25,22 @@ test("adapts wrapped static transition definitions when that capability is prese
     events: (...schemas) => schemas
   }
   const api = makeEffectMachineBenchmarkApi(Machine)
-  const definition = { target: "selected", resolve: "resolved" }
+  const definition = { target: (to) => to.selected, resolve: "resolved" }
   const legacy = () => undefined
+  const selected = Symbol("selected")
 
-  assert.equal(api.initial(definition, legacy), definition)
-  assert.deepEqual(api.transition(definition, legacy), { static: definition })
-  assert.equal(api.targetless.target, targetless)
+  assert.equal(api.initial(definition, legacy).target({ selected }), selected)
+  assert.equal(api.transition(definition, legacy).static.target({ selected }), selected)
+  assert.deepEqual(api.targetless, { target: targetless })
   assert.equal(calls.length, 1)
 })
 
-test("adapts benchmark definitions to fluent transition selectors", () => {
+test("adapts benchmark definitions to callable fluent transition selectors", () => {
   const calls = []
   const targetless = Object.assign((to) => to.none(), {
     "~effect/Machine/TargetlessSelector": true
   })
-  const Machine = { targetless }
+  const Machine = { targetless, invoke: (config) => config }
   const api = makeEffectMachineBenchmarkApi(Machine)
   const resolve = () => undefined
   const selected = {
@@ -57,8 +58,26 @@ test("adapts benchmark definitions to fluent transition selectors", () => {
 
   assert.equal(transition({ selected }), "resolved")
   assert.deepEqual(calls, [[resolve, { reenter: true, declinable: true }]])
-  assert.equal(api.initial("static", "legacy"), "static")
-  assert.equal(api.targetless.target, targetless)
+  assert.equal(typeof api.initial({ target: (to) => to.selected }, "legacy"), "object")
+  assert.deepEqual(api.targetless, { target: targetless })
+})
+
+test("adapts benchmark definitions to value selectors and target-first initial entry", () => {
+  const calls = []
+  const Machine = { invoke: (config) => config }
+  const api = makeEffectMachineBenchmarkApi(Machine)
+  const selected = {
+    resolve: (resolver) => {
+      calls.push(resolver)
+      return "resolved"
+    }
+  }
+  const resolve = () => undefined
+  const initial = api.initial({ target: (to) => to.selected, resolve }, "legacy")
+
+  assert.equal(initial({ selected }), "resolved")
+  assert.deepEqual(calls, [resolve])
+  assert.equal(api.targetless({ none: selected }), selected)
 })
 
 test("uses the current child invocation capability when available", () => {
@@ -83,7 +102,7 @@ test("uses the current child invocation capability when available", () => {
     config
   })
   assert.deepEqual(calls, [config])
-  assert.equal(makeEffectMachineBenchmarkApi(Machine).targetless({ target: { none: () => noTarget } }), noTarget)
+  assert.equal(makeEffectMachineBenchmarkApi(Machine).targetless({ none: noTarget }), noTarget)
 })
 
 test("adapts lifecycle names for the legacy child invocation capability", () => {

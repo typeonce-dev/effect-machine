@@ -134,6 +134,22 @@ describe("exact state definitions", () => {
     expect<InvalidProperty["Root"]["states"]["Idle"]["details"]>().type.toBe<"nestedUnknown">()
   })
 
+  it("rejects child keys reserved by definition-time target selectors", () => {
+    expect(Machine.states).type.not.toBeCallableWith({
+      Root: {
+        initial: "initial",
+        states: { initial: Idle }
+      }
+    })
+    expect(Machine.states).type.not.toBeCallableWith({
+      Root: {
+        schema: Root,
+        initial: "with",
+        states: { with: Idle }
+      }
+    })
+  })
+
   it("checks reusable state definitions and finite path families against the full tree", () => {
     const TradingSlot = Machine.state({
       initial: "Idle",

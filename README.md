@@ -66,10 +66,7 @@ const CounterDefinition = Machine.make({
   id: "Counter",
   states: States.states,
   events: CounterEvent,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target.from())
 })
 
 const Counter = CounterDefinition.handle({
@@ -166,10 +163,11 @@ const States = Machine.states({
   }
 })
 
-initial: {
-  target: (to) => to.Form.initial(),
-  resolve: ({ target }) => target((form) => form.Editing.from())
-}
+const definition = Machine.make({
+  states: States.states,
+  events: Machine.events(),
+  initial: (to) => to.Form.initial.resolve(({ target }) => target((form) => form.Editing.from()))
+})
 ```
 
 Schema-less states remain active, targetable, matchable, and visible through
@@ -208,10 +206,7 @@ const definition = Machine.make({
   events: CommandEvent,
   internalEvents: InternalEvent,
   emittedEvents: Emissions,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target.from())
 })
 ```
 
@@ -323,10 +318,7 @@ const child = Machine.make({
   states: ChildStates.states,
   events: ChildEvents,
   parentEvents: ParentEvents,
-  initial: {
-    target: (to) => to.Working(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Working().resolve(({ target }) => target.from())
 }).handle({
   Working: {
     on: {
@@ -375,15 +367,21 @@ paths. `parent` always means the owning machine target.
 Every required transition handler selects a target from its inline `to`
 builder. A bare selection uses the target schema's default construction; call
 `.resolve(...)` when construction depends on handler context. An absent handler
-ignores the trigger; `to.none()` handles
+ignores the trigger; `to.none` handles
 it and retains queued commands, raised events, and emitted events without
 selecting a destination. Concrete destinations stay narrowed inside their
 resolver, and `to.branches({...})` gives the resolver only the declared named
 `select` builders. Builders describe the
 next logical configuration. Shared states exit and enter only when paths
 change; call `.reenter()` for resolver-free reentry or pass `{ reenter: true }`
-to `.resolve(...)` when the source must restart. With `to.none()`, reentry
+to `.resolve(...)` when the source must restart. With `to.none`, reentry
 restarts the source while retaining its configuration.
+
+Topology-only definition instructions are values: `to.none`, declared
+`.initial` and history selections, and `to.local.with`. Concrete state and
+choice destinations remain calls such as `to.full.Running()`. Runtime named
+branch builders remain callable, including `select.unchanged()`, because their
+result carries the selected branch evidence.
 
 Use `declinable: true` when a resolver may decide that its transition is not
 enabled. Only that resolver receives `decline()`, and its return type expands to
@@ -477,22 +475,19 @@ macrostep commits:
 invoke: Machine.invoke({
   id: "channel",
   stream: () => channelMessages,
-  onElement: {
-    target: Machine.targetless,
-    resolve: ({ element }, enqueue) => {
+  onElement: (to) =>
+    to.none.resolve(({ element }, enqueue) => {
       enqueue.raise(Events.MessageReceived({ message: element }))
-    }
-  },
-  onDone: { target: Machine.targetless },
+    }),
+  onDone: (to) => to.none,
   onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ error }))
 })
 ```
 
-`target: Machine.targetless` is the direct shorthand for a non-reentering
-transition that keeps the current configuration. Its optional `resolve`
-callback may enqueue commands and must return `undefined`. Use
-the same fluent `to` builder to select a target for transitions that change
-state or reenter.
+`to.none` is the targetless transition value. Return it directly to keep the
+current configuration, or call `.resolve(...)` when the transition only needs
+to enqueue commands. A block resolver may omit its return because it is
+contextually typed to return `undefined`.
 
 Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
 public input and `parentEvents` protocols contextually. Its source and lifecycle
@@ -511,14 +506,13 @@ const machine = Machine.make({
       id: "notify-parent",
       effect: () => saveDocument,
       onDone: (to) =>
-        to.none().resolve(({ parent, self }, enqueue) => {
+        to.none.resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           }
-          return undefined
         }),
-      onFailure: (to) => to.none()
+      onFailure: (to) => to.none
     })
   }
 })

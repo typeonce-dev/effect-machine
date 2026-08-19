@@ -15,15 +15,12 @@ describe("MachineTest probe", () => {
     states: states.states,
     events: Machine.events(PublicEvent),
     internalEvents: Machine.internalEvents(InternalEvent),
-    initial: {
-      target: (to) => to.State(),
-      resolve: ({ target }) => (target(new State({ count: 0 })))
-    }
+    initial: (to) => to.State().resolve(({ target }) => (target(new State({ count: 0 }))))
   }).handle({
     State: {
       on: {
-        PublicEvent: { target: Machine.targetless },
-        InternalEvent: { target: Machine.targetless }
+        PublicEvent: (to) => to.none,
+        InternalEvent: (to) => to.none
       }
     }
   })

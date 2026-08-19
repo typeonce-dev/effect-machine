@@ -9,11 +9,13 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   // The legacy process constructor takes `(initial, transition)`. The static
   // definition constructor is deliberately unary and returns its config.
   const hasStaticTransitions = typeof Machine.transition === "function" && Machine.transition.length === 1
-  const hasFluentTransitions = !hasStaticTransitions && Machine.targetless?.["~effect/Machine/TargetlessSelector"] === true
+  const hasFluentTransitions = !hasStaticTransitions && typeof Machine.invoke === "function"
+  const hasValueSelectors = hasFluentTransitions && Machine.targetless === undefined
   const targetless = ({ target }) => typeof target.none === "function" ? target.none() : undefined
+  const selectInstruction = (selection) => typeof selection === "function" ? selection() : selection
 
   const fluentTransition = (definition) => (to) => {
-    const selection = definition.target(to)
+    const selection = selectInstruction(definition.target(to))
     if (definition.resolve !== undefined) {
       return selection.resolve(definition.resolve, {
         ...(definition.reenter === true ? { reenter: true } : {}),
@@ -23,19 +25,40 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
     return definition.reenter === true ? selection.reenter() : selection
   }
 
+  const fluentInitial = (definition) => (to) => {
+    const selection = selectInstruction(definition.target(to))
+    return definition.resolve === undefined ? selection : selection.resolve(definition.resolve)
+  }
+
+  const objectInitial = (definition) => ({
+    ...definition,
+    target: (to) => selectInstruction(definition.target(to))
+  })
+
+  const objectTransition = (definition) => ({
+    ...definition,
+    target: (to) => selectInstruction(definition.target(to))
+  })
+
   return {
     states: (definitions) =>
       typeof Machine.states === "function" ? Machine.states(definitions) : Machine.defineStates(definitions),
     events: typeof Machine.event === "function"
       ? (...schemas) => schemas
       : (...schemas) => Machine.events(...schemas),
-    initial: (definition, legacy) => hasStaticTransitions || hasFluentTransitions ? definition : legacy,
+    initial: (definition, legacy) => hasValueSelectors
+      ? fluentInitial(definition)
+      : hasStaticTransitions || hasFluentTransitions
+      ? objectInitial(definition)
+      : legacy,
     transition: (definition, legacy) => hasStaticTransitions
-      ? Machine.transition(definition)
+      ? Machine.transition(objectTransition(definition))
       : hasFluentTransitions
       ? fluentTransition(definition)
       : legacy,
-    targetless: hasStaticTransitions || hasFluentTransitions
+    targetless: hasValueSelectors
+      ? (to) => to.none
+      : hasStaticTransitions || hasFluentTransitions
       ? { target: Machine.targetless }
       : targetless,
     invokeChild: typeof Machine.invokeMachine === "function"

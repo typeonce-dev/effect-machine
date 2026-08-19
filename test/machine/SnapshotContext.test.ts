@@ -48,10 +48,8 @@ const initial = {
   }
 }
 
-const initialDefinition = {
-  target: (to: Machine.Machine.InitialSelector<typeof States.states>) => to.System.initial(),
-  resolve: () => initial
-}
+const initialDefinition = (to: Machine.Machine.InitialSelector<typeof States.states>) =>
+  to.System.initial.resolve(() => initial)
 
 describe("Machine transition snapshot context", () => {
   it.effect("lets an effectful event handler inspect a sibling region", () =>
@@ -71,7 +69,7 @@ describe("Machine transition snapshot context", () => {
                     BufferReady: (to) =>
                       to.branches({
                         online: { title: "Network is online", target: to.local.Playing() },
-                        unchanged: { target: to.none() }
+                        unchanged: { target: to.none }
                       }).resolve(({ snapshot, select }) => {
                         captured = snapshot
                         return States.matches(snapshot, "System.Network.Online")
@@ -164,7 +162,7 @@ describe("Machine transition snapshot context", () => {
                   always: (to) =>
                     to.branches({
                       online: { title: "Network is online", target: to.local.Playing() },
-                      unchanged: { target: to.none() }
+                      unchanged: { target: to.none }
                     }).resolve(({ snapshot, select }) => {
                       captured = snapshot
                       return States.matches(snapshot, "System.Network.Online")
@@ -217,9 +215,8 @@ describe("Machine transition snapshot context", () => {
       const machine = Machine.make({
         states: completionStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.System.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.System.initial.resolve(({ target }) =>
             target(
               new System({}),
               (system) =>
@@ -227,7 +224,7 @@ describe("Machine transition snapshot context", () => {
                   .Work(new Work({}), (work) => work.Finished(new Finished({})))
                   .Monitor(new Monitor({}), (monitor) => monitor.Active(new Active({})))
             )
-        }
+          )
       }).handle({
         System: {
           states: {

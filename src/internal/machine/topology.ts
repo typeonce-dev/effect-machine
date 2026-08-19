@@ -106,6 +106,9 @@ export const makeTargetSelection = (
     path
   })
 
+/** Source-independent definition-time selection for an explicitly targetless transition. */
+export const noneTargetSelection: TargetSelection = makeTargetSelection("none", undefined, "local")
+
 export const isTargetSelection = (u: unknown): u is TargetSelection => hasProperty(u, TargetSelectionTypeId)
 
 export const makeSelectedBranch = (

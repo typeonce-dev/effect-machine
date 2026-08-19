@@ -37,14 +37,13 @@ const States = Machine.states({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.root.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.root.initial.resolve(({ target }) =>
       target(new Root({}), (root) =>
         root
           .flow(new Flow({}), (flow) => flow.idle(new Idle({})))
           .side(new Side({})))
-  }
+    )
 })
 
 const ChoiceStates = Machine.states({
@@ -61,10 +60,7 @@ const ChoiceStates = Machine.states({
 const choiceMachine = Machine.make({
   states: ChoiceStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.Flow.initial(),
-    resolve: ({ target }) => target(new ChoiceFlow({}), (flow) => flow.Routing())
-  }
+  initial: (to) => to.Flow.initial.resolve(({ target }) => target(new ChoiceFlow({}), (flow) => flow.Routing()))
 }).handle({
   Flow: {
     states: {

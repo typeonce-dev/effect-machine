@@ -39,10 +39,8 @@ const States = Machine.states({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.Workflow.initial(),
-    resolve: ({ target }) => (target(new Workflow({}), (workflow) => workflow.Idle(new Idle({}))))
-  }
+  initial: (to) =>
+    to.Workflow.initial.resolve(({ target }) => (target(new Workflow({}), (workflow) => workflow.Idle(new Idle({})))))
 })
 
 describe("Machine state annotations", () => {

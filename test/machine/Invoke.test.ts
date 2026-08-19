@@ -29,10 +29,7 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -58,22 +55,17 @@ describe("inline invoke", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Add),
-        initial: {
-          target: (to) => to.Collecting(),
-          resolve: ({ target }) => target(new Collecting({ values: [] }))
-        }
+        initial: (to) => to.Collecting().resolve(({ target }) => target(new Collecting({ values: [] })))
       })
       const machine = definition.handle({
         Collecting: {
           invoke: Machine.invoke({
             id: "numbers",
             stream: () => Stream.fromIterable([1, 2, 3]),
-            onElement: {
-              target: Machine.targetless,
-              resolve: ({ element }, enqueue) => {
+            onElement: (to) =>
+              to.none.resolve(({ element }, enqueue) => {
                 enqueue.raise(new Add({ value: element }))
-              }
-            },
+              }),
             onDone: (to) =>
               to.full.Complete().resolve(({ state, target }) => target(new Complete({ value: state.values.join(",") })))
           }),
@@ -140,17 +132,14 @@ describe("inline invoke", () => {
       const definition = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       })
       const machine = definition.handle({
         Loading: {
           invoke: Machine.invoke({
             id: "updates",
             stream: () => Stream.fail("offline"),
-            onDone: { target: Machine.targetless },
+            onDone: (to) => to.none,
             onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
           })
         },
@@ -176,17 +165,14 @@ describe("inline invoke", () => {
       const definition = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       })
       const machine = definition.handle({
         Loading: {
           invoke: Machine.invoke({
             id: "updates",
             stream: () => Stream.die(defect),
-            onDone: { target: Machine.targetless }
+            onDone: (to) => to.none
           })
         },
         Complete: {},
@@ -214,23 +200,18 @@ describe("inline invoke", () => {
       const definition = Machine.make({
         states: States.states,
         events: Machine.events(FinishStream),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       })
       const machine = definition.handle({
         Loading: {
           invoke: Machine.invoke({
             id: "updates",
             stream: () => source,
-            onElement: {
-              target: Machine.targetless,
-              resolve: ({ element }, enqueue) => {
+            onElement: (to) =>
+              to.none.resolve(({ element }, enqueue) => {
                 enqueue.raise(new FinishStream({ value: element }))
-              }
-            },
-            onDone: { target: Machine.targetless }
+              }),
+            onDone: (to) => to.none
           }),
           on: {
             FinishStream: (to) =>
@@ -258,10 +239,7 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -296,10 +274,7 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Loading(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
           invoke: Machine.invoke({
@@ -323,10 +298,7 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(Start),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target.from())
       }).handle({
         Idle: {
           on: {
@@ -339,7 +311,7 @@ describe("inline invoke", () => {
             effect: (): Effect.Effect<string> => {
               throw defect
             },
-            onDone: { target: Machine.targetless }
+            onDone: (to) => to.none
           })
         },
         Complete: {},
@@ -366,10 +338,7 @@ describe("inline invoke", () => {
       const machine = Machine.make({
         states: States.states,
         events: Machine.events(Start),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target.from())
       }).handle({
         Idle: {
           on: {

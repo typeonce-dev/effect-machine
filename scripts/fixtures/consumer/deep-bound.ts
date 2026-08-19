@@ -49,10 +49,7 @@ const childMachine = Machine.make({
   events: Machine.events(),
   parentEvents: ChildParentEvents,
   input: Schema.Struct({ value: Schema.String }),
-  initial: {
-    target: (to) => to.Done(),
-    resolve: ({ input, target }) => target(ChildState.cases.Done.make({ value: input.value }))
-  }
+  initial: (to) => to.Done().resolve(({ input, target }) => target(ChildState.cases.Done.make({ value: input.value })))
 }).handle({
   Done: {
     entry: ({ parent, state }, enqueue) => {
@@ -95,17 +92,14 @@ const definition = Machine.make({
   internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
   emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ input: { seed: _seed }, target }) => target(State.cases.Idle.make({}))
-  }
+  initial: (to) => to.Idle().resolve(({ input: { seed: _seed }, target }) => target(State.cases.Idle.make({})))
 })
 const machine = definition.handle({
   Idle: {
     invoke: Machine.invoke({
       id: "deep-inline-invoke",
       effect: () => Effect.asVoid(ExternalService),
-      onDone: { target: Machine.targetless }
+      onDone: (to) => to.none
     }),
     on: {
       Begin: (to) =>
@@ -131,14 +125,14 @@ const machine = definition.handle({
                 to.local.Saving().resolve(({ event, target }) =>
                   target(State.cases.Saving.make({ value: event.value }))
                 ),
-              Loaded: { target: Machine.targetless }
+              Loaded: (to) => to.none
             }
           },
           Saving: {
             invoke: Machine.invoke({
               child: Child,
               input: ({ state }) => ({ value: state.value }),
-              onDone: { target: Machine.targetless }
+              onDone: (to) => to.none
             }),
             on: {
               ChildNotice: (to) =>
@@ -242,12 +236,10 @@ const PackagedDeepStates = Machine.states({
 const packagedDeepMachine = Machine.make({
   states: PackagedDeepStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.n0.initial(),
-    resolve: (): never => {
+  initial: (to) =>
+    to.n0.initial.resolve((): never => {
       throw new Error("type-only packaged consumer fixture")
-    }
-  }
+    })
 }).handle({
   n0: {
     states: {

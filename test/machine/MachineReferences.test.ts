@@ -19,13 +19,11 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => {
+        initial: (to) =>
+          to.Idle().resolve(({ target }) => {
             initializations += 1
             return target(new Idle({}))
-          }
-        }
+          })
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -73,10 +71,7 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -115,15 +110,12 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Events,
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {
             Publish: (to) =>
-              to.none().resolve(({ event }, enqueue) => {
+              to.none.resolve(({ event }, enqueue) => {
                 enqueue.emit(Emissions.Published({ value: event.value }))
                 return undefined
               })
@@ -169,15 +161,12 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Events,
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {
             Publish: (to) =>
-              to.none().resolve((_, enqueue) => {
+              to.none.resolve((_, enqueue) => {
                 enqueue.emit(Emissions.Published({ value: "invalid" } as never))
                 return undefined
               })
@@ -226,10 +215,7 @@ describe("machine reference event channels", () => {
         events: ChildEvents,
         parentEvents: ParentEvents,
         emittedEvents: ChildEmissions,
-        initial: {
-          target: (to) => to.Waiting(),
-          resolve: ({ target }) => target(new Waiting({}))
-        }
+        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
         Waiting: {
           on: {
@@ -267,10 +253,7 @@ describe("machine reference event channels", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(ParentEvents, Notice),
-        initial: {
-          target: (to) => to.Awaiting(),
-          resolve: ({ target }) => target(new Awaiting({}))
-        }
+        initial: (to) => to.Awaiting().resolve(({ target }) => target(new Awaiting({})))
       }).handle({
         Awaiting: {
           invoke: Machine.invoke({ child: Child }),
@@ -309,18 +292,15 @@ describe("machine reference event channels", () => {
         states: childStates.states,
         events: Machine.events(),
         parentEvents: ParentEvents,
-        initial: {
-          target: (to) => to.ChildIdle(),
-          resolve: ({ target }) => target(new ChildIdle({}))
-        }
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
       })
       const childMachine = childDefinition.handle({
         ChildIdle: {
           invoke: Machine.invoke({
             id: "notify-ready",
             effect: ({ parent }) => parent === undefined ? Effect.void : parent.send(ParentEvents.ChildReady()),
-            onDone: { target: Machine.targetless },
-            onFailure: { target: Machine.targetless }
+            onDone: (to) => to.none,
+            onFailure: (to) => to.none
           })
         }
       })
@@ -332,15 +312,12 @@ describe("machine reference event channels", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: ParentEvents,
-        initial: {
-          target: (to) => to.ParentWaiting(),
-          resolve: ({ target }) => target(new ParentWaiting({}))
-        }
+        initial: (to) => to.ParentWaiting().resolve(({ target }) => target(new ParentWaiting({})))
       }).handle({
         ParentWaiting: {
           invoke: Machine.invoke({
             child: Child,
-            onFailure: { target: Machine.targetless }
+            onFailure: (to) => to.none
           }),
           on: {
             ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))

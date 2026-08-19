@@ -27,10 +27,7 @@ const makeCounterMachine = () =>
     states: CounterStates.states,
     events: Machine.events(Add),
     internalEvents: Machine.internalEvents(InternalAdd),
-    initial: {
-      target: (to) => to.Counter(),
-      resolve: ({ target }) => target(new Counter({ count: 0 }))
-    }
+    initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
   }).handle({
     Counter: {
       on: {
@@ -50,10 +47,7 @@ const causalMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEvents(InternalAdd),
-  initial: {
-    target: (to) => to.Counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   Counter: {
     on: {
@@ -61,7 +55,7 @@ const causalMachine = Machine.make({
         to.full.Counter().resolve(({ event, state, target }) =>
           target(new Counter({ count: state.count + event.amount }))
         ),
-      Noop: { target: Machine.targetless },
+      Noop: (to) => to.none,
       Burst: (to) =>
         to.full.Counter().resolve(({ state, target }, enqueue) => {
           enqueue.raise(new InternalAdd({ amount: 10 }))
@@ -253,10 +247,7 @@ describe("MachineTest runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: {
-          target: (to) => to.Waiting(),
-          resolve: ({ target }) => target(new Waiting({}))
-        }
+        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
         Waiting: {
           invoke: Machine.invoke({
@@ -737,10 +728,7 @@ describe("MachineTest causal runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: {
-          target: (to) => to.Waiting(),
-          resolve: ({ target }) => target(new Waiting({}))
-        }
+        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
         Waiting: {
           invoke: Machine.invoke({

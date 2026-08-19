@@ -161,12 +161,10 @@ const makeDeepMachine = () =>
   Machine.make({
     states: DeepStates.states,
     events: Machine.events(Advance),
-    initial: {
-      target: (to) => to.Root.initial(),
-      resolve: (): never => {
+    initial: (to) =>
+      to.Root.initial.resolve((): never => {
         throw new Error("type-only")
-      }
-    }
+      })
   })
 
 const atHub = <const Config>(config: Config) =>
@@ -409,12 +407,10 @@ describe("deep handler trees", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.n0.initial(),
-        resolve: (): never => {
+      initial: (to) =>
+        to.n0.initial.resolve((): never => {
           throw new Error("type-only")
-        }
-      }
+        })
     }).handle({
       n0: {
         states: {

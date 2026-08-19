@@ -231,10 +231,7 @@ const States = Machine.states({
   }
 })
 
-initial: {
-  target: (to) => to.Form.initial(),
-  resolve: ({ target }) => target((form) => form.Editing.from())
-}
+initial: (to) => to.Form.initial.resolve(({ target }) => target((form) => form.Editing.from()))
 ```
 
 Schema-less states have the same control semantics as schema-backed states:
@@ -245,7 +242,7 @@ in snapshots. They do not have a state value:
 Idle: {
   on: {
     Start: (to) =>
-      to.full.Form.initial().resolve(({ state, target }) => {
+      to.full.Form.initial.resolve(({ state, target }) => {
         // state: undefined
         return target.from((form) => form.Editing.from())
       })
@@ -329,10 +326,7 @@ const States = Machine.states({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.Done(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Done().resolve(({ target }) => target.from())
 }).handle({
   Done: {
     output: () => "done"
@@ -349,8 +343,11 @@ with `.initial`. This is available on top-level state methods under
 `target.branch`; atomic and final state methods do not expose it:
 
 ```ts
-Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ teamId: "team-1" }))
+Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ teamId: "team-1" }))
 ```
+
+The definition-time `.initial` property is a topology value. The exact
+resolver `target` is still a callable runtime builder.
 
 The selected state's own value is passed directly to `initial(value)` or
 constructed inside planning with `initial.from(input)`. A structural selected
@@ -426,8 +423,11 @@ checkout: {
 Target it without a value:
 
 ```ts
-Resume: (to) => to.history.checkout.exact().resolve(({ target }) => target())
+Resume: (to) => to.history.checkout.exact.resolve(({ target }) => target())
 ```
+
+Each declared history leaf is a topology value; the resolver's selected
+history builder remains callable to construct restoration evidence.
 
 Deep history restores the complete remembered subtree and its decoded values.
 Shallow history restores only parent and direct-child values. If the remembered
@@ -478,6 +478,22 @@ prior effects, machine instances, and timers are not rewound.
 | `target.full`    | The destination may be under any top-level root                            | Nothing is inferred for a newly selected root; build its complete active snapshot |
 | `target.history` | The destination is a declared history pseudo-state                         | Its parent's remembered configuration, or a source-independent complete default containing that owner before the first capture |
 
+Definition-time instructions that only identify topology are values:
+`to.none`, `to.full.Flow.initial`, `to.history.Flow.recent`, and
+`to.local.with`. State and choice destinations remain calls, such as
+`to.full.Running()` and `to.local.Routing()`, because those calls select the
+node. Resolver-time builders also remain callable because they construct and,
+for named branches, brand runtime evidence such as `select.unchanged()`.
+
+Use `to.local.with` when a descendant transition updates the nearest
+schema-backed compound value while retaining that same compound scope:
+
+```ts
+Play: (to) =>
+  to.local.with.resolve(({ containingState, target }) =>
+    target.from({ ...containingState, playing: true }, (flow) => flow.Playing.from()))
+```
+
 Entering an inactive parallel state through `target.local` or `target.branch`
 requires a complete callback with one selection per region. A parallel state
 that is already active remains partially addressable through `target.branch`;
@@ -498,7 +514,7 @@ When no resolver is needed, use the selected target directly and append
 
 ```ts
 Finish: (to) => to.full.Done()
-Restart: (to) => to.none().reenter()
+Restart: (to) => to.none.reenter()
 ```
 
 Do not use `target.full` merely because it is easiest to discover. Prefer the
@@ -578,7 +594,7 @@ microstep, before any selected transition is applied:
 BufferReady: (to) =>
   to.branches({
     online: { target: to.local.Playing() },
-    unchanged: { target: to.none() }
+    unchanged: { target: to.none }
   }).resolve(({ snapshot, select }) =>
     States.matches(snapshot, "Player.Network.Online")
       ? select.online.from()
@@ -637,7 +653,7 @@ synchronously:
 Submit: (to) =>
   to.branches({
     valid: { target: to.local.Saving() },
-    invalid: { target: to.none() }
+    invalid: { target: to.none }
   }).resolve(({ state, select }) => state.valid
     ? select.valid.from({ draft: state.draft })
     : select.invalid()
@@ -649,7 +665,7 @@ its `resolve` method. A branching transition calls `to.branches` with every
 possible target, then uses ordinary TypeScript control flow in `resolve` to return one
 typed `select` builder. Branch keys are stable testing and inspection identities;
 an optional `title` controls presentation and otherwise defaults to the key.
-Selecting a branch whose target is `to.none()` handles the transition without a
+Selecting a branch whose target is `to.none` handles the transition without a
 destination while retaining queued commands, raised events, and emitted events.
 
 Set `declinable: true` only when the resolver may decide that its transition is
@@ -660,7 +676,7 @@ permits its opaque result:
 Submit: (to) =>
   to.branches({
     accepted: { target: to.local.Saving() },
-    consumed: { target: to.none() }
+    consumed: { target: to.none }
   }).resolve(({ event, select, decline }) => {
     if (!belongsToThisState(event)) return decline()
     return event.consume ? select.consumed() : select.accepted.from()
@@ -670,7 +686,7 @@ Submit: (to) =>
 Declining discards that resolver's enqueue buffer and resumes hierarchical
 event or eventless selection at the next eligible ancestor. If no candidate
 accepts, the trigger is unhandled. This is deliberately different from
-`to.none()`, which consumes the trigger. `decline()` is absent and its result is
+`to.none`, which consumes the trigger. `decline()` is absent and its result is
 rejected unless the literal flag is present. Choice and initial routing remain
 total and cannot decline. Static inspection exposes the distinction through
 `TransitionDefinition.acceptance` without executing resolver code. Completion
@@ -683,7 +699,7 @@ array-index and symbol keys are rejected. Treat the string key as semantic:
 reordering named properties may change their display index, but visualizers,
 coverage, and trace verification identify each branch by its key.
 
-`reenter: true` remains meaningful with `to.none()`: the source exits and
+`reenter: true` remains meaningful with `to.none`: the source exits and
 enters again while its logical configuration is retained.
 
 Closed statechart and machine operations use `enqueue`:
@@ -788,11 +804,10 @@ const child = Machine.make({
   Working: {
     on: {
       Finish: (to) =>
-        to.none().resolve(({ parent }, enqueue) => {
+        to.none.resolve(({ parent }, enqueue) => {
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished())
           }
-          return undefined
         })
     }
   }
@@ -868,10 +883,7 @@ const definition = Machine.make({
   states: States.states,
   events: Events,
   internalEvents: InternalEvents,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target.from())
 })
 ```
 
@@ -952,13 +964,11 @@ handles normal Stream completion and `onFailure` handles the typed Stream error:
 invoke: Machine.invoke({
   id: "broadcast-channel",
   stream: () => messages,
-  onElement: {
-    target: Machine.targetless,
-    resolve: ({ element }, enqueue) => {
+  onElement: (to) =>
+    to.none.resolve(({ element }, enqueue) => {
       enqueue.raise(Events.MessageReceived({ message: element }))
-    }
-  },
-  onDone: { target: Machine.targetless },
+    }),
+  onDone: (to) => to.none,
   onFailure: (to) => to.full.Disconnected().resolve(({ error, target }) => target.from({ error }))
 })
 ```
@@ -968,10 +978,9 @@ after the selected parent macrostep commits. Exiting or reentering the owner
 interrupts the Stream and runs its finalizers. A later entry starts a fresh
 Stream. Stream defects and self-interruption fail the owning machine.
 
-The direct `{ target: Machine.targetless, resolve }` shorthand is available
-when a transition only enqueues commands. It is non-reentering and the resolver
-must return `undefined`. Use the same fluent `to` selector for full state
-selection, named branches, and reentry.
+Use `to.none` when a transition keeps the current configuration. Call
+`to.none.resolve(...)` when it also enqueues commands; a block resolver may
+omit its return because it is contextually typed to return `undefined`.
 
 When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
 `Machine.invoke` infers that owner context and the returned Effect's output,
@@ -1002,14 +1011,13 @@ const machine = Machine.make({
       id: "notify-parent",
       effect: () => saveDocument,
       onDone: (to) =>
-        to.none().resolve(({ parent, self }, enqueue) => {
+        to.none.resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           }
-          return undefined
         }),
-      onFailure: (to) => to.none()
+      onFailure: (to) => to.none
     })
   }
 })
@@ -1373,10 +1381,7 @@ reference model when correctness of the expected behavior matters.
 Select the initial root separately from constructing its value:
 
 ```ts
-initial: {
-  target: (to) => to.Idle(),
-  resolve: ({ target }) => target.from()
-}
+initial: (to) => to.Idle().resolve(({ target }) => target.from())
 ```
 
 ### Invoked child expects events not accepted by the parent

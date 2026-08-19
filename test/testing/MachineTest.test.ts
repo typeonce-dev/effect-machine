@@ -29,10 +29,8 @@ const makeTraceMachine = (onAction: () => void) =>
     states: States.states,
     events: Machine.events(Start, Add),
     input: TestInput,
-    initial: {
-      target: (to) => to.Ready(),
-      resolve: ({ input, target }) => target(new Ready({ count: input.userId.length - input.userId.length }))
-    }
+    initial: (to) =>
+      to.Ready().resolve(({ input, target }) => target(new Ready({ count: input.userId.length - input.userId.length })))
   }).handle({
     Idle: {
       on: {
@@ -103,10 +101,7 @@ describe("MachineTest", () => {
       states: States.states,
       events: Machine.events(),
       input: PositiveInput,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
     })
 
     const generated = MachineTest.scenarios(machine)
@@ -124,10 +119,7 @@ describe("MachineTest", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
     })
 
     assert.throws(
@@ -199,9 +191,8 @@ describe("MachineTest", () => {
       const machine = Machine.make({
         states: ParallelStates.states,
         events: Machine.events(Stop),
-        initial: {
-          target: (to) => to.app.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.app.initial.resolve(({ target }) =>
             target(
               new App({}),
               (app) =>
@@ -209,7 +200,7 @@ describe("MachineTest", () => {
                   .left(new Left({}), (left) => left.idle(new LeftIdle({})))
                   .right(new Right({}), (right) => right.idle(new RightIdle({})))
             )
-        }
+          )
       }).handle({
         app: {
           states: {
@@ -261,14 +252,11 @@ describe("MachineTest", () => {
       const machine = Machine.make({
         states: { Idle },
         events: Machine.events(Start),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: () => ({ path: "Idle" as const, value: new Idle({ userId: "user-1" }) })
-        }
+        initial: (to) => to.Idle().resolve(() => ({ path: "Idle" as const, value: new Idle({ userId: "user-1" }) }))
       }).handle({
         Idle: {
           on: {
-            Start: { target: Machine.targetless }
+            Start: (to) => to.none
           }
         }
       })

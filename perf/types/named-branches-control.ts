@@ -13,8 +13,5 @@ export const States = Machine.states(State.cases)
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(Route),
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target(State.cases.Idle.make({}))
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target(State.cases.Idle.make({})))
 })

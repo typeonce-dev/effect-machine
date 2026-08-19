@@ -27,12 +27,12 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
               id: "load-audio",
               effect: ({ state }) => loadAudio(state.url),
               onDone: (to) =>
-                to.none().resolve((_, enqueue) => {
+                to.none.resolve((_, enqueue) => {
                   enqueue.raise(MediaPlayerInternalEvents.LoadSucceeded())
                   return undefined
                 }),
               onFailure: (to) =>
-                to.none().resolve(({ error }, enqueue) => {
+                to.none.resolve(({ error }, enqueue) => {
                   enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
                   return undefined
                 })
@@ -49,9 +49,9 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                 invoke: Machine.invoke({
                   id: "pause-audio",
                   effect: () => pauseAudio,
-                  onDone: { target: Machine.targetless },
+                  onDone: (to) => to.none,
                   onFailure: (to) =>
-                    to.none().resolve(({ error }, enqueue) => {
+                    to.none.resolve(({ error }, enqueue) => {
                       enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
                       return undefined
                     })
@@ -75,9 +75,9 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   Machine.invoke({
                     id: "play-audio",
                     effect: () => playAudio,
-                    onDone: { target: Machine.targetless },
+                    onDone: (to) => to.none,
                     onFailure: (to) =>
-                      to.none().resolve(({ error }, enqueue) => {
+                      to.none.resolve(({ error }, enqueue) => {
                         enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
                         return undefined
                       })
@@ -85,19 +85,15 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   Machine.invoke({
                     id: "analyze-audio",
                     stream: () => analyzeAudio,
-                    onElement: {
-                      target: Machine.targetless,
-                      resolve: ({ element }, enqueue) => {
+                    onElement: (to) =>
+                      to.none.resolve(({ element }, enqueue) => {
                         enqueue.raise(MediaPlayerInternalEvents.LoudnessMeasured(element))
-                      }
-                    },
-                    onDone: { target: Machine.targetless },
-                    onFailure: {
-                      target: Machine.targetless,
-                      resolve: ({ error }, enqueue) => {
+                      }),
+                    onDone: (to) => to.none,
+                    onFailure: (to) =>
+                      to.none.resolve(({ error }, enqueue) => {
                         enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
-                      }
-                    }
+                      })
                   })
                 ],
                 on: {
@@ -170,12 +166,12 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   id: "restart-audio",
                   effect: () => restartAudio,
                   onDone: (to) =>
-                    to.none().resolve((_, enqueue) => {
+                    to.none.resolve((_, enqueue) => {
                       enqueue.raise(MediaPlayerInternalEvents.RestartSucceeded())
                       return undefined
                     }),
                   onFailure: (to) =>
-                    to.none().resolve(({ error }, enqueue) => {
+                    to.none.resolve(({ error }, enqueue) => {
                       enqueue.raise(MediaPlayerInternalEvents.OperationFailed({ message: error.message }))
                       return undefined
                     })
@@ -211,7 +207,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
                   const mediaPlayer = yield* MediaPlayer
                   yield* mediaPlayer.reportError(state.message)
                 }),
-              onDone: { target: Machine.targetless }
+              onDone: (to) => to.none
             })
           }
         }
@@ -223,7 +219,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
             invoke: Machine.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, false),
-              onDone: { target: Machine.targetless }
+              onDone: (to) => to.none
             }),
             on: {
               VolumeChanged: (to) =>
@@ -254,7 +250,7 @@ export const MediaPlayerMachine = MediaPlayerDefinition.handle({
             invoke: Machine.invoke({
               id: "apply-audio-settings",
               effect: ({ state }) => applyAudioSettings(state, true),
-              onDone: { target: Machine.targetless }
+              onDone: (to) => to.none
             }),
             on: {
               VolumeChanged: (to) =>

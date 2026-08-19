@@ -124,18 +124,15 @@ const makeCheckoutMachine = (
   Machine.make({
     states: CheckoutStates.states,
     events: Machine.events(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory),
-    initial: (initial.path === "checkout"
-      ? {
-        target: (to: any) => to.checkout.initial(),
-        resolve: ({ target }: any) =>
-          target(new Checkout({ orderId: "initial" }), (checkout: any) =>
-            checkout.shipping(new Shipping({ address: "initial" })))
-      }
-      : {
-        target: (to: any) =>
-          to.support(),
-        resolve: () => initial
-      }) as any
+    initial: ((to: any) =>
+      initial.path === "checkout"
+        ? to.checkout.initial.resolve(({ target }: any) =>
+          target(
+            new Checkout({ orderId: "initial" }),
+            (checkout: any) => checkout.shipping(new Shipping({ address: "initial" }))
+          )
+        )
+        : to.support().resolve(() => initial)) as any
   }).handle({
     checkout: {
       entry: () => {
@@ -162,7 +159,7 @@ const makeCheckoutMachine = (
         Leave: (to) => to.full.support().resolve(({ target }) => target(new Support({ ticket: "ticket-1" }))),
         GoShipping: (to) =>
           to.local.shipping().resolve(({ event, target }) => target(new Shipping({ address: event.address }))),
-        ReenterHistory: (to) => to.history.checkout.exact().resolve(({ target }) => target(), { reenter: true })
+        ReenterHistory: (to) => to.history.checkout.exact.resolve(({ target }) => target(), { reenter: true })
       },
       states: {
         shipping: {
@@ -208,8 +205,8 @@ const makeCheckoutMachine = (
         lifecycle?.push("exit:support")
       },
       on: {
-        ResumeShallow: (to) => to.history.checkout.recent().resolve(({ target }) => target()),
-        ResumeDeep: (to) => to.history.checkout.exact().resolve(({ target }) => target())
+        ResumeShallow: (to) => to.history.checkout.recent.resolve(({ target }) => target()),
+        ResumeDeep: (to) => to.history.checkout.exact.resolve(({ target }) => target())
       }
     }
   })
@@ -304,14 +301,13 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
   Machine.make({
     states: WorkspaceStates.states,
     events: Machine.events(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
-    initial: {
-      target: (to) => to.workspace.initial(),
-      resolve: ({ target }) =>
+    initial: (to) =>
+      to.workspace.initial.resolve(({ target }) =>
         target(new Workspace({ id: "initial" }), (workspace) =>
           workspace
             .editor(new Editor({ documentId: "initial" }), (editor) => editor.writing(new Writing({ draft: "" })))
             .sidebar(new Sidebar({ width: 0 }), (sidebar) => sidebar.files(new Files({ directory: "/" }))))
-    }
+      )
   }).handle({
     workspace: {
       history: {
@@ -368,8 +364,8 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
     },
     away: {
       on: {
-        ResumeWorkspaceShallow: (to) => to.history.workspace.recent().resolve(({ target }) => target()),
-        ResumeWorkspaceDeep: (to) => to.history.workspace.exact().resolve(({ target }) => target())
+        ResumeWorkspaceShallow: (to) => to.history.workspace.recent.resolve(({ target }) => target()),
+        ResumeWorkspaceDeep: (to) => to.history.workspace.exact.resolve(({ target }) => target())
       }
     }
   })
@@ -418,9 +414,8 @@ const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryState
 const nestedHistoryMachine = Machine.make({
   states: NestedHistoryStates.states,
   events: Machine.events(RestoreEditor, DefaultEditor),
-  initial: {
-    target: (to) => to.workspace.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.workspace.initial.resolve(({ target }) =>
       target(
         new Workspace({ id: "workspace-1" }),
         (workspace) =>
@@ -431,7 +426,7 @@ const nestedHistoryMachine = Machine.make({
             )
             .sidebar(new Search({ query: "untouched" }))
       )
-  }
+    )
 }).handle({
   workspace: {
     states: {
@@ -455,13 +450,13 @@ const nestedHistoryMachine = Machine.make({
           preview: {
             on: {
               RestoreEditor: (to) =>
-                to.history.workspace.editor.exact().resolve(({ target }) => target(), { reenter: true }),
-              DefaultEditor: (to) => to.history.workspace.editor.exact().resolve(({ target }) => target())
+                to.history.workspace.editor.exact.resolve(({ target }) => target(), { reenter: true }),
+              DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
             }
           },
           writing: {
             on: {
-              DefaultEditor: (to) => to.history.workspace.editor.exact().resolve(({ target }) => target())
+              DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
             }
           }
         }

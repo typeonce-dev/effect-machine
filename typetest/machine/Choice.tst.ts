@@ -34,10 +34,8 @@ describe("Machine choice pseudo-states", () => {
     const incomplete = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
-      }
+      initial: (to) =>
+        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
     const complete = incomplete.handle({
@@ -64,10 +62,8 @@ describe("Machine choice pseudo-states", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
-      }
+      initial: (to) =>
+        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     machine.handle({
       Flow: {
@@ -105,10 +101,8 @@ describe("Machine choice pseudo-states", () => {
     const base = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
-      }
+      initial: (to) =>
+        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     const invalidHandlers = [
       { entry: () => undefined },
@@ -131,10 +125,8 @@ describe("Machine choice pseudo-states", () => {
     const base = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
-      }
+      initial: (to) =>
+        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     base.handle({
       Flow: {

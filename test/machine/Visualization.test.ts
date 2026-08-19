@@ -83,7 +83,7 @@ const machineDefinition = Machine.make({
   id: "inspection-example",
   states: States.states,
   events: Machine.events(Start, Disconnect, Refresh),
-  initial: { target: (to) => to.application.initial(), resolve: () => initial }
+  initial: (to) => to.application.initial.resolve(() => initial)
 })
 
 const makeMachine = (unsafeStart = false) =>
@@ -108,7 +108,7 @@ const makeMachine = (unsafeStart = false) =>
                     to.local.running().resolve(({ target }) =>
                       target(new Running({}), (running) => running.editing(new Editing({})))
                     ),
-                Refresh: { target: Machine.targetless }
+                Refresh: (to) => to.none
               }
             },
             running: {
@@ -153,10 +153,7 @@ const lifecycleDefinition = Machine.make({
   id: "lifecycle-inspection",
   states: LifecycleStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.idle(),
-    resolve: ({ target }) => target(new Idle({}))
-  }
+  initial: (to) => to.idle().resolve(({ target }) => target(new Idle({})))
 })
 
 const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined) =>
@@ -190,12 +187,10 @@ describe("Machine structural visualization", () => {
       states: States.states,
       events: Machine.events(),
       input: Schema.String,
-      initial: {
-        target: (to) => to.application.initial(),
-        resolve: () => {
+      initial: (to) =>
+        to.application.initial.resolve(() => {
           throw new Error("initial resolver unexpectedly executed during inspection")
-        }
-      }
+        })
     })
 
     assert.deepStrictEqual(Machine.initialDefinition(inspectOnly), {
@@ -272,17 +267,14 @@ describe("Machine structural visualization", () => {
     const metadataMachine = Machine.make({
       states: { idle: Idle },
       events: Machine.events(Refresh),
-      initial: {
-        target: (to) => to.idle(),
-        resolve: () => ({ path: "idle" as const, value: new Idle({}) })
-      }
+      initial: (to) => to.idle().resolve(() => ({ path: "idle" as const, value: new Idle({}) }))
     }).handle({
       idle: {
         on: {
-          Refresh: (to) => to.none().resolve(() => undefined, { reenter: true })
+          Refresh: (to) => to.none.resolve(() => undefined, { reenter: true })
         },
-        always: { target: Machine.targetless },
-        onDone: { target: Machine.targetless }
+        always: (to) => to.none,
+        onDone: (to) => to.none
       }
     })
 

@@ -41,15 +41,12 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Open, OpenInvalid),
-    initial: {
-      target: (to) => to.closed(),
-      resolve: ({ target }) => target(new Closed({}))
-    }
+    initial: (to) => to.closed().resolve(({ target }) => target(new Closed({})))
   }).handle({
     closed: {
       on: {
-        Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "team-1" })),
-        OpenInvalid: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "" }))
+        Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "team-1" })),
+        OpenInvalid: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "" }))
       }
     },
     opened: {
@@ -77,14 +74,11 @@ const makeParallelMachine = () =>
   Machine.make({
     states: ParallelStates.states,
     events: Machine.events(EnterDashboard),
-    initial: {
-      target: (to) => to.outside(),
-      resolve: ({ target }) => target(new Outside({}))
-    }
+    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
   }).handle({
     outside: {
       on: {
-        EnterDashboard: (to) => to.full.dashboard.initial().resolve(({ target }) => target(new Dashboard({})))
+        EnterDashboard: (to) => to.full.dashboard.initial.resolve(({ target }) => target(new Dashboard({})))
       }
     },
     dashboard: {
@@ -113,14 +107,11 @@ const makeChoiceMachine = () =>
   Machine.make({
     states: ChoiceStates.states,
     events: Machine.events(EnterFlow),
-    initial: {
-      target: (to) => to.outside(),
-      resolve: ({ target }) => target(new Outside({}))
-    }
+    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
   }).handle({
     outside: {
       on: {
-        EnterFlow: (to) => to.full.flow.initial().resolve(({ target }) => target(new Flow({})))
+        EnterFlow: (to) => to.full.flow.initial.resolve(({ target }) => target(new Flow({})))
       }
     },
     flow: {
@@ -144,14 +135,11 @@ const makeStructuralMachine = () =>
   Machine.make({
     states: StructuralStates.states,
     events: Machine.events(EnterFlow),
-    initial: {
-      target: (to) => to.outside(),
-      resolve: ({ target }) => target(new Outside({}))
-    }
+    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
   }).handle({
     outside: {
       on: {
-        EnterFlow: (to) => to.full.group.initial().resolve(({ target }) => target.from())
+        EnterFlow: (to) => to.full.group.initial.resolve(({ target }) => target.from())
       }
     }
   })
@@ -174,17 +162,14 @@ const makeNestedMachine = () =>
   Machine.make({
     states: NestedStates.states,
     events: Machine.events(OpenLocal, OpenBranch),
-    initial: {
-      target: (to) => to.root.initial(),
-      resolve: ({ target }) => target.from((root) => root.closed(new Closed({})))
-    }
+    initial: (to) => to.root.initial.resolve(({ target }) => target.from((root) => root.closed(new Closed({}))))
   }).handle({
     root: {
       states: {
         closed: {
           on: {
-            OpenLocal: (to) => to.local.opened.initial().resolve(({ target }) => target.from({ id: "local" })),
-            OpenBranch: (to) => to.branch.root.opened.initial().resolve(({ target }) => target.from({ id: "branch" }))
+            OpenLocal: (to) => to.local.opened.initial.resolve(({ target }) => target.from({ id: "local" })),
+            OpenBranch: (to) => to.branch.root.opened.initial.resolve(({ target }) => target.from({ id: "branch" }))
           }
         },
         opened: {
@@ -195,6 +180,47 @@ const makeNestedMachine = () =>
   })
 
 describe("declared initial entry", () => {
+  it.effect("captures the target-first selector once and evaluates its resolver only when planned", () =>
+    Effect.gen(function*() {
+      let captures = 0
+      let resolves = 0
+      const definition = Machine.make({
+        states: { closed: Closed },
+        events: Machine.events(),
+        initial: (to) => {
+          captures++
+          return to.closed().resolve(({ target }) => {
+            resolves++
+            return target.from()
+          })
+        }
+      })
+
+      assert.strictEqual(captures, 1)
+      assert.strictEqual(resolves, 0)
+
+      const machine = definition.handle({ closed: {} })
+      const first = yield* Machine.planInitial(machine)
+      const second = yield* Machine.planInitial(machine)
+
+      assert.deepStrictEqual(first.state, { path: "closed", value: new Closed({}) })
+      assert.deepStrictEqual(second.state, first.state)
+      assert.strictEqual(captures, 1)
+      assert.strictEqual(resolves, 2)
+    }))
+
+  it.effect("default-constructs a bare initial destination", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        states: { closed: Closed },
+        events: Machine.events(),
+        initial: (to) => to.closed()
+      }).handle({ closed: {} })
+
+      const initial = yield* Machine.planInitial(machine)
+      assert.deepStrictEqual(initial.state, { path: "closed", value: new Closed({}) })
+    }))
+
   it.effect("enters a compound state's declared initial child and decodes builder inputs", () =>
     Effect.gen(function*() {
       const machine = makeMachine()

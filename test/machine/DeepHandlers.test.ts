@@ -105,10 +105,7 @@ const initial = (() => {
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Advance),
-  initial: {
-    target: (to) => to.n0.initial(),
-    resolve: () => initial
-  }
+  initial: (to) => to.n0.initial.resolve(() => initial)
 }).handle({
   n0: {
     states: {

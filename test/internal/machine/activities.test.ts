@@ -18,10 +18,7 @@ const childMachine = Machine.make({
   id: "document-worker",
   states: childStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.ChildIdle(),
-    resolve: ({ target }) => target(new ChildIdle({}))
-  }
+  initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
 })
 const child = Machine.child("child", childMachine)
 
@@ -32,10 +29,7 @@ const activityMachine = Machine.make({
   id: "activity-inspection",
   states: activityStates.states,
   events: Machine.events(WorkSucceeded, WorkFailed, LoadTimedOut),
-  initial: {
-    target: (to) => to.Loading(),
-    resolve: ({ target }) => target(new Loading({}))
-  }
+  initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
 }).handle({
   Loading: {
     invoke: [
@@ -47,18 +41,18 @@ const activityMachine = Machine.make({
       Machine.invoke({
         id: "load-document",
         effect: () => Effect.fail("unavailable").pipe(Effect.as(1)),
-        onDone: { target: Machine.targetless },
-        onFailure: { target: Machine.targetless }
+        onDone: (to) => to.none,
+        onFailure: (to) => to.none
       }),
       Machine.invoke({
         id: "load-timeout",
         after: timerDuration,
-        onDone: { target: Machine.targetless }
+        onDone: (to) => to.none
       }),
       Machine.invoke({
         id: "updates",
         stream: () => Stream.empty,
-        onDone: { target: Machine.targetless }
+        onDone: (to) => to.none
       }),
       Machine.invoke({ child })
     ]
@@ -182,16 +176,13 @@ describe("machine activity metadata", () => {
         const generated = Machine.make({
           states: activityStates.states,
           events: Machine.events(LoadTimedOut),
-          initial: {
-            target: (to) => to.Loading(),
-            resolve: ({ target }) => target(new Loading({}))
-          }
+          initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
         }).handle({
           Loading: {
             invoke: Machine.invoke({
               id,
               after: durationMillis,
-              onDone: { target: Machine.targetless }
+              onDone: (to) => to.none
             })
           }
         })

@@ -10,10 +10,7 @@ it("uses the public pipeable and inspectable prototypes", () => {
   const machine = Machine.make({
     states: states.states,
     events: Machine.events(Start),
-    initial: {
-      target: (to) => to.Idle(),
-      resolve: ({ target }) => target(new Idle())
-    }
+    initial: (to) => to.Idle().resolve(({ target }) => target(new Idle()))
   })
 
   assert.strictEqual(machine.pipe((value) => value), machine)

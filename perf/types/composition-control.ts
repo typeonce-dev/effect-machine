@@ -65,9 +65,8 @@ export const States = Machine.states({
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.App.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.App.initial.resolve(({ target }) =>
       target(App.make({}), (app) =>
         app.Workspace(
           Workspace.make({}),
@@ -76,5 +75,5 @@ export const machine = Machine.make({
               .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
               .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
         ))
-  }
+    )
 })

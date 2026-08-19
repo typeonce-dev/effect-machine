@@ -26,14 +26,11 @@ describe("Machine inspection", () => {
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Reset),
-    initial: {
-      target: (to) => to.root.initial(),
-      resolve: ({ target }) => target(new Root({}), (root) => root.idle(new Idle({})))
-    }
+    initial: (to) => to.root.initial.resolve(({ target }) => target(new Root({}), (root) => root.idle(new Idle({}))))
   }).handle({
     root: {
       on: {
-        Reset: { target: Machine.targetless }
+        Reset: (to) => to.none
       }
     }
   })
@@ -43,14 +40,11 @@ describe("Machine inspection", () => {
     const executable = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         on: {
-          Reset: { target: Machine.targetless }
+          Reset: (to) => to.none
         }
       }
     })
@@ -153,10 +147,7 @@ describe("Machine inspection", () => {
     const choiceMachine = Machine.make({
       states: ChoiceStates.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Flow.initial(),
-        resolve: ({ target }) => (target(new Root({}), (flow) => flow.Routing()))
-      }
+      initial: (to) => to.Flow.initial.resolve(({ target }) => (target(new Root({}), (flow) => flow.Routing())))
     })
     const flow = Machine.stateNodes(choiceMachine).find((node) => node.type === "compound")!
     const routing = Machine.stateNodes(choiceMachine).find((node) => node.type === "choice")!
@@ -202,10 +193,7 @@ describe("Machine inspection", () => {
     const flat = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: {
-        target: (to) => to.idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
     })
     flat.handle({
       idle: {
