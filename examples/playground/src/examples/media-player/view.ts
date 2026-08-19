@@ -3,7 +3,7 @@ import { Match } from "effect"
 import { MediaPlayerMachine } from "./machine.ts"
 import { initialPlaybackData, type LoudnessSample, type PlaybackData } from "./schemas.ts"
 
-type MediaPlayerSnapshot = Machine.Machine.Snapshot<Machine.Machine.States<typeof MediaPlayerMachine>>
+type MediaPlayerSnapshot = Machine.Snapshot<typeof MediaPlayerMachine>
 type TransportSnapshot = MediaPlayerSnapshot["states"]["transport"]["state"]
 type ReadySnapshot = Extract<TransportSnapshot, { readonly path: "Player.transport.Ready" }>["state"]
 type SettingsSnapshot = MediaPlayerSnapshot["states"]["settings"]["state"]

@@ -582,7 +582,7 @@ type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Mach
   >
 
 type MachineInputArgsOf<M extends Machine.Machine.Any> = [
-  ...Machine.Machine.InputArgs<Machine.Machine.Input<M>>
+  ...Machine.Machine.InputArgs<Machine.Machine.InputSchema<M>>
 ]
 
 type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<

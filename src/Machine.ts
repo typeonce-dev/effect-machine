@@ -2609,12 +2609,26 @@ export declare namespace Machine {
   export type Events<M extends Any> = M[typeof MachineTypeId]["events"]
 
   /**
-   * Extracts the input schema carried by a machine definition.
+   * Extracts the startup input schema carried by a machine definition.
    *
    * @category utility types
-   * @since 0.4.0
+   * @since 0.18.0
    */
-  export type Input<M extends Any> = M[typeof MachineTypeId]["input"]
+  export type InputSchema<M extends Any> = M[typeof MachineTypeId]["input"]
+
+  /**
+   * Extracts the decoded startup input accepted by a machine definition.
+   *
+   * Machines declared with `Schema.Void` do not accept a startup input, so
+   * their extracted input type is `never`.
+   *
+   * @category utility types
+   * @since 0.18.0
+   */
+  export type Input<M extends Any> = InputSchema<M> extends infer Input extends Schema.Top
+    ? Input extends typeof Schema.Void ? never
+    : Input["Type"]
+    : never
 
   /**
    * Extracts state paths that do not yet have handlers.
@@ -6402,10 +6416,10 @@ export declare namespace Machine {
           Machine.OutputStates<Child["machine"]>
         > ? unknown
           : never),
-      ...options: Input<Child["machine"]> extends typeof Schema.Void ? [options?: { readonly input?: never }]
+      ...options: InputSchema<Child["machine"]> extends typeof Schema.Void ? [options?: { readonly input?: never }]
         : [options: {
           readonly input: InvokeSource<
-            Input<Child["machine"]>["Type"],
+            Input<Child["machine"]>,
             InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
           >
         }]
@@ -7540,15 +7554,49 @@ export declare namespace Machine {
   >
 }
 
+type StateSource = Machine.DefinedStates<any> | Machine.Any
+
+type StateSchemasOf<Source extends StateSource> = Source extends Machine.DefinedStates<infer States> ? States
+  : Source extends Machine.Any ? Machine.States<Source>
+  : never
+
 /**
- * Extracts the complete logical snapshot represented by a state definition.
+ * Extracts the complete logical snapshot represented by a state definition or
+ * machine.
  *
  * @category utility types
  * @since 0.15.0
  */
-export type Snapshot<Defined extends Machine.DefinedStates<any>> = Defined extends Machine.DefinedStates<infer States>
-  ? Machine.Snapshot<States>
-  : never
+export type Snapshot<Source extends StateSource> = Machine.Snapshot<StateSchemasOf<Source>>
+
+/**
+ * Extracts the decoded value owned by a schema-backed state path.
+ *
+ * The source may be the object returned by {@link states} or a machine
+ * definition. Control-only state paths are intentionally excluded.
+ *
+ * @category utility types
+ * @since 0.18.0
+ */
+export type Value<
+  Source extends StateSource,
+  Path extends Machine.ValuedStateIdentifier<StateSchemasOf<Source>>
+> = Machine.StateByIdentifier<StateSchemasOf<Source>, Path>
+
+/**
+ * Extracts the logical snapshot rooted at a state path.
+ *
+ * The source may be the object returned by {@link states} or a machine
+ * definition. This is the type-level counterpart of
+ * `DefinedStates.getSnapshot`.
+ *
+ * @category utility types
+ * @since 0.18.0
+ */
+export type SnapshotAt<
+  Source extends StateSource,
+  Path extends Machine.StateIdentifier<StateSchemasOf<Source>>
+> = Machine.SnapshotByIdentifier<StateSchemasOf<Source>, Path>
 
 /**
  * Returns `true` if a value is a `Machine`.
