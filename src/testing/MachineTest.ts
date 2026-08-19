@@ -138,6 +138,10 @@ type ReadyMachine<M extends AnyMachine> =
     Machine.Machine.OutputStates<M>
   >
 
+type RootReadyMachine<M extends AnyMachine> =
+  & ReadyMachine<M>
+  & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<M>>
+
 /**
  * A generated public-input scenario for a machine.
  *
@@ -879,7 +883,7 @@ export { PlannerRuntimeAgreementError } from "../internal/testing/machine/verifi
  * @since 0.4.0
  */
 export const assertPlannerRuntimeAgreement: <M extends AnyMachine, Error, Output>(
-  machine: ReadyMachine<M>,
+  machine: RootReadyMachine<M>,
   transcript: CausalRuntimeEvidence<M, Error, Output>
 ) => Effect.Effect<void, internal.PlannerRuntimeAgreementError<M>, RunServices<M>> =
   internal.assertPlannerRuntimeAgreement
@@ -1462,7 +1466,7 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * @since 0.4.0
  */
 export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
-  machine: ReadyMachine<M>,
+  machine: RootReadyMachine<M>,
   options: ExploreOptions<M, Key>
 ) => Effect.Effect<
   Exploration<M, Key>,
@@ -1643,7 +1647,7 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * @since 0.4.0
  */
 export const run: <M extends AnyMachine>(
-  machine: ReadyMachine<M>,
+  machine: RootReadyMachine<M>,
   scenario: Scenario<M>
 ) => Effect.Effect<Trace<M>, RunFailure<RunError<M>, M>, RunServices<M>> = internal.run
 

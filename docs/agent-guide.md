@@ -38,8 +38,9 @@ declared:
 1. Domain schemas used by state, and by event fields when they are shared.
 2. `Machine.states`, using a tagged state union and `.cases` when state
    schemas need to be reused.
-3. `Machine.events`, `Machine.internalEvents`, `Machine.emittedEvents`, and
-   `parentEvents`; pass `Schema.TaggedUnion({...})` or tagged classes directly.
+3. `Machine.events`, `Machine.internalEvents`, `Machine.emittedEvents`, and any
+   protocol passed to `Machine.parent` or `Machine.optionalParent`; pass
+   `Schema.TaggedUnion({...})` or tagged classes directly.
 4. `Machine.make({...}).handle({...})`.
 5. Child descriptors, then runtime, Atom, or Cluster adapters.
 
@@ -109,8 +110,9 @@ the deferred constructors preserve that identity after decoding.
   lookup. Independently constructed descriptors are equivalent only when both
   their id and machine identity match.
 - `events` is the public machine-input protocol. `internalEvents` contains
-  machine-local raised events. `parentEvents` describes the public events a
-  child may send to its owner. `emittedEvents` describes outward ephemeral
+  machine-local raised events. `parent: Machine.parent(events)` requires an
+  owner, while `parent: Machine.optionalParent(events)` permits a root and
+  exposes an optional owner. `emittedEvents` describes outward ephemeral
   notifications and is never delivered implicitly to a parent.
 - Event tags in `events` and `internalEvents` must be disjoint.
 - Event tags must also be unique within each protocol list.
@@ -127,9 +129,9 @@ its extra control is required:
   externally produced values, `after` for a timer, `logic` for reusable process
   logic, and `child` for a complete child
   statechart. `Machine.invoke({...})` preserves owner state and source channels
-  across sibling lifecycle handlers. Inside `.handle(...)`, `self` and `parent`
-  use the owning definition's exact public input and `parentEvents` protocols;
-  no intermediate definition method is required.
+  across sibling lifecycle handlers. Inside `.handle(...)`, `self` and any
+  declared `parent` use the owning definition's exact protocols; no intermediate
+  definition method is required.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. A logic
   invocation is addressable only when `Machine.invoke` receives that
@@ -574,8 +576,9 @@ only schema-backed paths; use `matches` or `getSnapshot` for any active path.
 `context.containingState` is the immediate typed state value (`undefined` at a
 root or when that state is schema-less). `context.ancestors` contains only
 valued structural ancestors. This is separate from `context.parent`, which is
-the owning machine target or `undefined` for a root machine. Use full state paths
-when another ancestor value is needed:
+present only when declared by the machine. `Machine.parent` makes it a required
+owning-machine target; `Machine.optionalParent` makes it a target or
+`undefined`. Use full state paths when another ancestor value is needed:
 
 ```ts
 ancestors["Route.Ready"]
@@ -798,16 +801,14 @@ export const ParentEvents = Machine.events(ChildFinished)
 
 const child = Machine.make({
   events: ChildEvents,
-  parentEvents: ParentEvents,
+  parent: Machine.parent(ParentEvents),
   // ...
 }).handle({
   Working: {
     on: {
       Finish: (to) =>
         to.none.resolve(({ parent }, enqueue) => {
-          if (parent !== undefined) {
-            enqueue.sendTo(parent, ParentEvents.ChildFinished())
-          }
+          enqueue.sendTo(parent, ParentEvents.ChildFinished())
         })
     }
   }
@@ -819,12 +820,14 @@ const parent = Machine.make({
 })
 ```
 
-Invoking the child under a parent that lacks any required `parentEvents` case
-is a type error. Within child handlers, `parent` accepts only that protocol.
-The same child may run as a root, where `parent` is `undefined`. `self` accepts
-the machine's public inputs. Both are minimal `MachineTarget<Event>` values,
-provided by the shared `MachineReferences<InputEvents, ParentEvents>` handler
-context. Neither machine target is a structural state value; use
+Invoking the child under a parent that lacks any required parent event is a
+type error. Within child handlers, `parent` accepts only that protocol and is
+not optional. Root APIs reject the machine. Use
+`Machine.optionalParent(ParentEvents)` instead when the same definition must
+also run as a root; then `parent` is optional. With no declaration, callbacks
+have no `parent` property. `self` accepts the machine's public inputs. Both
+targets are minimal `MachineTarget<Event>` values. Neither machine target is a
+structural state value; use
 `containingState` and `ancestors` for statechart ancestry.
 
 Atom-backed machines retain the same transient semantics. Use
@@ -996,14 +999,14 @@ invoke: Machine.invoke({
 ```
 
 Inside `.handle(...)`, the constructor receives the owning machine's public
-input and `parentEvents` protocols contextually. Sources and lifecycle handlers
+input and declared parent protocol contextually. Sources and lifecycle handlers
 can send through `self` and `parent` without naming the definition:
 
 ```ts
 const machine = Machine.make({
   events: Commands,
   internalEvents: InternalEvents,
-  parentEvents: ParentEvents,
+  parent: Machine.parent(ParentEvents),
   // ...
 }).handle({
   Saving: {
@@ -1013,9 +1016,7 @@ const machine = Machine.make({
       onDone: (to) =>
         to.none.resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
-          if (parent !== undefined) {
-            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-          }
+          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
         }),
       onFailure: (to) => to.none
     })
@@ -1392,12 +1393,15 @@ the parent's public events:
 ```ts
 export const ChildParentEvents = Machine.events(ChildFinished)
 
-// child
-parentEvents: ChildParentEvents
+// child-only machine
+parent: Machine.parent(ChildParentEvents)
 
 // parent
 events: Machine.events(Submit, ChildParentEvents)
 ```
+
+Use `Machine.optionalParent(ChildParentEvents)` only when the child is also a
+valid independent root and narrow `parent` before sending.
 
 ### An internal event is rejected by `send`
 

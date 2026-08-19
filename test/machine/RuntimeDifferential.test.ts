@@ -188,7 +188,6 @@ describe("pure planning and managed runtime differential", () => {
                     if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
                     const expectedKeys = [
                       "self",
-                      "parent",
                       "state",
                       "containingState",
                       "ancestors",
@@ -199,7 +198,6 @@ describe("pure planning and managed runtime differential", () => {
                     assert.deepStrictEqual(Object.keys(context), expectedKeys)
                     assert.deepStrictEqual(Object.keys(spread), expectedKeys)
                     assert.strictEqual(spread.self, context.self)
-                    assert.strictEqual(spread.parent, context.parent)
                     assert.strictEqual(spread.state, state)
                     assert.strictEqual(spread.containingState, containingState)
                     assert.strictEqual(spread.ancestors, ancestors)

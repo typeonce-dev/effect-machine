@@ -7,13 +7,7 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
-import type {
-  Enqueue,
-  InitialEvent as MachineInitialEvent,
-  Machine,
-  MachineReferences,
-  MachineTarget
-} from "../../Machine.js"
+import type { Enqueue, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
 import { getTargetBuilder, makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
@@ -118,24 +112,42 @@ type TransitionEvaluator<States extends Machine.StateSchemas, E, R, Context> = (
   enqueue: Enqueue<any, any>
 ) => TransitionEvaluation<States, E, R>
 
-const rootMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
-const scopedMachineReferences = new WeakMap<Machine.Any, MachineReferences<any, any>>()
+type PlanningMachineReferences = {
+  readonly self: MachineTarget<any>
+  readonly parent: MachineTarget<any> | undefined
+}
+
+type BehaviorMachineReferences = {
+  readonly self: MachineTarget<any>
+  readonly parent?: MachineTarget<any> | undefined
+}
+
+const rootMachineReferences = new WeakMap<Machine.Any, BehaviorMachineReferences>()
+const scopedMachineReferences = new WeakMap<Machine.Any, BehaviorMachineReferences>()
+
+const exposeMachineReferences = (
+  machine: Machine.Any,
+  machineReferences: PlanningMachineReferences
+): BehaviorMachineReferences =>
+  machine.parent === undefined
+    ? { self: machineReferences.self }
+    : { self: machineReferences.self, parent: machineReferences.parent }
 
 export const withMachineReferences = (
   machine: Machine.Any,
-  machineReferences: MachineReferences<any, any>
+  machineReferences: PlanningMachineReferences
 ): Machine.Any => {
   const scoped = Object.create(machine) as Machine.Any
-  scopedMachineReferences.set(scoped, { self: machineReferences.self, parent: machineReferences.parent })
+  scopedMachineReferences.set(scoped, exposeMachineReferences(machine, machineReferences))
   return scoped
 }
 
 const resolveMachineReferences = (
   machine: Machine.Any,
   configuration: ActiveConfiguration
-): MachineReferences<any, any> => {
+): BehaviorMachineReferences => {
   const scope = configuration.machineReferences
-  if (scope !== undefined) return scope
+  if (scope !== undefined) return exposeMachineReferences(machine, scope)
   const machineScope = scopedMachineReferences.get(machine)
   if (machineScope !== undefined) return machineScope
   const cached = rootMachineReferences.get(machine)
@@ -145,7 +157,7 @@ const resolveMachineReferences = (
     sessionId: "Machine.plan",
     send: () => Effect.fail(new StoppedError())
   }
-  const root = { self, parent: undefined }
+  const root = exposeMachineReferences(machine, { self, parent: undefined })
   rootMachineReferences.set(machine, root)
   return root
 }

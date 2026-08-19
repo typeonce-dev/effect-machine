@@ -2,6 +2,8 @@ import { Effect, Schema, Stream } from "effect"
 import { AtomRegistry } from "effect/unstable/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
+import { MachineTest } from "../../src/testing/index.js"
+import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 
 describe("machine reference event channels", () => {
@@ -30,7 +32,7 @@ describe("machine reference event channels", () => {
     states: states.states,
     events: Events,
     internalEvents: InternalEvents,
-    parentEvents: ParentEvents,
+    parent: Machine.optionalParent(ParentEvents),
     emittedEvents: Emissions,
     initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
   }).handle({
@@ -50,12 +52,32 @@ describe("machine reference event channels", () => {
     expect<
       Machine.MachineReferences<readonly [typeof Ping], readonly [typeof ParentNotice]>["parent"]
     >().type.toBe<Machine.MachineTarget<Machine.Machine.EventInputOf<readonly [typeof ParentNotice]>> | undefined>()
+    expect<keyof Machine.MachineReferences<readonly [typeof Ping], readonly []>>().type.toBe<"self">()
+    expect(Machine.parent).type.not.toBeCallableWith(InternalEvents)
+    expect(Machine.optionalParent).type.not.toBeCallableWith(InternalEvents)
+
+    const independentMachine = Machine.make({
+      states: states.states,
+      events: Events,
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+    }).handle({
+      Idle: {
+        on: {
+          Ping: (to) =>
+            to.none.resolve((context) => {
+              expect<"parent">().type.not.toBeAssignableTo<keyof typeof context>()
+              return undefined
+            })
+        }
+      }
+    })
+    expect(independentMachine.parent).type.toBe<undefined>()
 
     Machine.make({
       states: states.states,
       events: Events,
       internalEvents: InternalEvents,
-      parentEvents: ParentEvents,
+      parent: Machine.optionalParent(ParentEvents),
       emittedEvents: Emissions,
       initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
@@ -136,7 +158,7 @@ describe("machine reference event channels", () => {
       states: states.states,
       events: Events,
       internalEvents: InternalEvents,
-      parentEvents: ParentEvents,
+      parent: Machine.parent(ParentEvents),
       emittedEvents: Emissions,
       initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
@@ -147,29 +169,25 @@ describe("machine reference event channels", () => {
             expect(self.send).type.toBeCallableWith(Events.Ping())
             expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
             expect(self.send).type.not.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
-            if (parent !== undefined) {
-              expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
-              expect(parent.send).type.not.toBeCallableWith(Events.Ping())
-            }
+            expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+            expect(parent.send).type.not.toBeCallableWith(Events.Ping())
             return Effect.void
           },
           onDone: (to) =>
             to.none.resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
-              if (parent !== undefined) {
-                enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
-                expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
-              }
+              enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
+              expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
               return undefined
             })
         })
       }
     })
 
-    Machine.make({
+    const requiredParentMachine = Machine.make({
       states: states.states,
       events: Events,
-      parentEvents: ParentEvents,
+      parent: Machine.parent(ParentEvents),
       initial: (to) => to.Idle().resolve(({ target }) => target.from())
     }).handle({
       Idle: {
@@ -179,14 +197,40 @@ describe("machine reference event channels", () => {
           onFailure: (to) =>
             to.none.resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
-              if (parent !== undefined) {
-                enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
-                expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
-              }
+              enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
+              expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
               return undefined
             })
         })
       }
     })
+
+    expect(Machine.start).type.not.toBeCallableWith(requiredParentMachine)
+    expect(Machine.prepare).type.not.toBeCallableWith(requiredParentMachine)
+    expect(Machine.planInitial).type.not.toBeCallableWith(requiredParentMachine)
+    expect(Machine.plan).type.not.toBeCallableWith(
+      requiredParentMachine,
+      null as unknown as Machine.Machine.Snapshot<typeof states.states>,
+      Events.Ping()
+    )
+    expect(Machine.resume).type.not.toBeCallableWith(
+      requiredParentMachine,
+      null as unknown as Machine.Machine.Snapshot<typeof states.states>
+    )
+    expect(AtomMachine.make).type.not.toBeCallableWith(requiredParentMachine)
+    expect(AtomMachine.resume).type.not.toBeCallableWith(
+      requiredParentMachine,
+      null as unknown as Machine.Machine.Snapshot<typeof states.states>
+    )
+    expect(ClusterMachine.make).type.not.toBeCallableWith("RequiredParent", requiredParentMachine, { version: "1" })
+    expect(MachineTest.run).type.not.toBeCallableWith(requiredParentMachine, { events: [] })
+    expect(MachineTest.explore).type.not.toBeCallableWith(requiredParentMachine, {
+      events: () => [],
+      stateKey: () => "idle"
+    })
+    expect<Machine.Machine.ParentAvailability<typeof requiredParentMachine>>().type.toBe<"required">()
+    expect<Machine.Machine.ParentAvailability<typeof childMachine>>().type.toBe<"optional">()
+    expect(requiredParentMachine.parent.mode).type.toBe<"required">()
+    expect(childMachine.parent.mode).type.toBe<"optional">()
   })
 })

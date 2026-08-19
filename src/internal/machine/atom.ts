@@ -676,7 +676,8 @@ export const make: {
           Machine.Machine.EmitOf<Emits>
         >
       >
-      & EnsureExecutable<States, UnhandledStates, OutputStates>,
+      & EnsureExecutable<States, UnhandledStates, OutputStates>
+      & Machine.Machine.RootCompatible<ParentEvents>,
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
@@ -699,7 +700,8 @@ export const resume: {
     machine:
       & M
       & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
-      & EnsureMachineExecutable<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ): ResumedMachineAtomOf<M, never>
 } = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {

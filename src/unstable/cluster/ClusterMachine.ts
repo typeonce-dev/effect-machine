@@ -342,7 +342,8 @@ export const make: <
   Output,
   Emits extends ReadonlyArray<Machine.Machine.TaggedSchema>,
   OutputStates extends Machine.Machine.StateIdentifier<States>,
-  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = readonly []
 >(
   type: Type,
   machine:
@@ -359,9 +360,11 @@ export const make: <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.Machine.RootCompatible<ParentEvents>,
   options: {
     readonly version: string
   },
@@ -381,7 +384,8 @@ export const make: <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<R | InitialR>,

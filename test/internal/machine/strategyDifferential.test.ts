@@ -507,8 +507,7 @@ describe("machine planner and runtime strategies", () => {
         Idle: {
           on: {
             Publish: (to) =>
-              to.none.resolve(({ parent, self }, enqueue) => {
-                assert.strictEqual(parent, undefined)
+              to.none.resolve(({ self }, enqueue) => {
                 assert.ok(self.sessionId.startsWith("machine:"))
                 enqueue.emit(Emissions.Published({ value } as never))
                 return undefined
@@ -746,6 +745,60 @@ describe("machine planner and runtime strategies", () => {
         })
       }
       assert.deepStrictEqual(results[1], results[0])
+    }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("delivers required parent events in both runtime strategies", () =>
+    Effect.gen(function*() {
+      class ChildIdle extends Schema.TaggedClass<ChildIdle>("StrategyRequiredParentChildIdle")("ChildIdle", {}) {}
+      class ParentWaiting extends Schema.TaggedClass<ParentWaiting>("StrategyRequiredParentWaiting")(
+        "ParentWaiting",
+        {}
+      ) {}
+      class ParentDone extends Schema.TaggedClass<ParentDone>("StrategyRequiredParentDone")("ParentDone", {}) {}
+      class ChildReady extends Schema.TaggedClass<ChildReady>("StrategyRequiredParentReady")("ChildReady", {}) {}
+
+      const ParentEvents = Machine.events(ChildReady)
+      const childStates = Machine.states({ ChildIdle })
+      const childMachine = Machine.make({
+        states: childStates.states,
+        events: Machine.events(),
+        parent: Machine.parent(ParentEvents),
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+      }).handle({
+        ChildIdle: {
+          invoke: Machine.invoke({
+            id: "notify-parent",
+            effect: ({ parent }) => parent.send(ParentEvents.ChildReady()),
+            onDone: (to) => to.none,
+            onFailure: (to) => to.none
+          })
+        }
+      })
+      const Child = Machine.child("required-parent-child", childMachine)
+      const parentStates = Machine.states({
+        ParentWaiting,
+        ParentDone: { schema: ParentDone, type: "final", output: Schema.String }
+      })
+      const parentMachine = Machine.make({
+        states: parentStates.states,
+        events: ParentEvents,
+        initial: (to) => to.ParentWaiting().resolve(({ target }) => target(new ParentWaiting({})))
+      }).handle({
+        ParentWaiting: {
+          invoke: Machine.invoke({ child: Child, onFailure: (to) => to.none }),
+          on: {
+            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
+          }
+        },
+        ParentDone: { output: () => "received" }
+      })
+
+      const outputs: Array<string> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(parentMachine, strategy)
+        outputs.push(yield* ref.join)
+      }
+      assert.deepStrictEqual(outputs, ["received", "received"])
     }) as Effect.Effect<void, unknown, any>)
 
   it.effect("drops stale invoke messages and snapshots after reentry in both runtime strategies", () =>

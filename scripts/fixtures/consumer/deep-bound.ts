@@ -47,15 +47,13 @@ const ChildParentEvents = Machine.events(Internal.cases.ChildNotice)
 const childMachine = Machine.make({
   states: ChildStates.states,
   events: Machine.events(),
-  parentEvents: ChildParentEvents,
+  parent: Machine.parent(ChildParentEvents),
   input: Schema.Struct({ value: Schema.String }),
   initial: (to) => to.Done().resolve(({ input, target }) => target(ChildState.cases.Done.make({ value: input.value })))
 }).handle({
   Done: {
     entry: ({ parent, state }, enqueue) => {
-      if (parent !== undefined) {
-        enqueue.sendTo(parent, ChildParentEvents.ChildNotice({ value: state.value }))
-      }
+      enqueue.sendTo(parent, ChildParentEvents.ChildNotice({ value: state.value }))
     },
     output: ({ state }) => state.value
   }

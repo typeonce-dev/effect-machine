@@ -222,14 +222,14 @@ describe("Machine live inspection", () => {
         id: "child-machine",
         states: childStates.states,
         events: ChildEvents,
-        parentEvents: ParentEvents,
+        parent: Machine.parent(ParentEvents),
         initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
       }).handle({
         ChildIdle: {
           on: {
             Trigger: (to) =>
               to.none.resolve(({ parent }, enqueue) => {
-                if (parent !== undefined) enqueue.sendTo(parent, ParentEvents.ChildReady())
+                enqueue.sendTo(parent, ParentEvents.ChildReady())
                 return undefined
               })
           }
