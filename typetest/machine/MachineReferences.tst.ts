@@ -39,10 +39,7 @@ describe("machine reference event channels", () => {
   }).handle({
     Idle: {
       on: {
-        Ping: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        Ping: { target: Machine.targetless }
       }
     }
   })
@@ -70,9 +67,8 @@ describe("machine reference event channels", () => {
     }).handle({
       Idle: {
         on: {
-          Ping: Machine.transition({
-            target: (to) => to.none(),
-            resolve: ({ parent, self }, enqueue) => {
+          Ping: (to) =>
+            to.none().resolve(({ parent, self }, enqueue) => {
               expect(self.send).type.toBeCallableWith(Events.Ping())
               expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
               expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
@@ -88,8 +84,7 @@ describe("machine reference event channels", () => {
               expect(enqueue.emit).type.toBeCallableWith(Emissions.ValuedPublished({ value: 1 }))
               expect(enqueue.emit).type.not.toBeCallableWith(Events.Ping())
               return undefined
-            }
-          })
+            })
         }
       }
     })
@@ -104,7 +99,9 @@ describe("machine reference event channels", () => {
         resolve: ({ target }) => (target(new Idle({})))
       }
     })
-    compatible.invoke({ child: Child })
+    compatible.handle({
+      Idle: { invoke: Machine.invoke({ child: Child }) }
+    })
 
     const incompatible = Machine.make({
       states: states.states,
@@ -171,17 +168,15 @@ describe("machine reference event channels", () => {
             }
             return Effect.void
           },
-          onDone: Machine.transition({
-            target: (to) => to.none(),
-            resolve: ({ parent, self }, enqueue) => {
+          onDone: (to) =>
+            to.none().resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
               if (parent !== undefined) {
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
               }
               return undefined
-            }
-          })
+            })
         })
       }
     })
@@ -199,17 +194,15 @@ describe("machine reference event channels", () => {
         invoke: Machine.invoke({
           id: "notify-parent-failure",
           effect: () => Effect.fail("failed" as const),
-          onFailure: Machine.transition({
-            target: (to) => to.none(),
-            resolve: ({ parent, self }, enqueue) => {
+          onFailure: (to) =>
+            to.none().resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
               if (parent !== undefined) {
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
               }
               return undefined
-            }
-          })
+            })
         })
       }
     })

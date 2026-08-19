@@ -68,18 +68,16 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   on: {
-                    BufferReady: Machine.transition({
-                      branches: (to) => ({
+                    BufferReady: (to) =>
+                      to.branches({
                         online: { title: "Network is online", target: to.local.Playing() },
                         unchanged: { target: to.none() }
-                      }),
-                      resolve: ({ snapshot, select }) => {
+                      }).resolve(({ snapshot, select }) => {
                         captured = snapshot
                         return States.matches(snapshot, "System.Network.Online")
                           ? select.online(new Playing({}))
                           : select.unchanged()
-                      }
-                    })
+                      })
                   }
                 }
               }
@@ -113,13 +111,11 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Buffering: {
                   on: {
-                    Disconnect: Machine.transition({
-                      target: (to) => to.local.Playing(),
-                      resolve: ({ snapshot, target }) => {
+                    Disconnect: (to) =>
+                      to.local.Playing().resolve(({ snapshot, target }) => {
                         captured.push(snapshot)
                         return target(new Playing({}))
-                      }
-                    })
+                      })
                   }
                 }
               }
@@ -128,13 +124,11 @@ describe("Machine transition snapshot context", () => {
               states: {
                 Online: {
                   on: {
-                    Disconnect: Machine.transition({
-                      target: (to) => to.local.Offline(),
-                      resolve: ({ snapshot, target }) => {
+                    Disconnect: (to) =>
+                      to.local.Offline().resolve(({ snapshot, target }) => {
                         captured.push(snapshot)
                         return target(new Offline({}))
-                      }
-                    })
+                      })
                   }
                 }
               }
@@ -167,18 +161,16 @@ describe("Machine transition snapshot context", () => {
             Playback: {
               states: {
                 Buffering: {
-                  always: Machine.transition({
-                    branches: (to) => ({
+                  always: (to) =>
+                    to.branches({
                       online: { title: "Network is online", target: to.local.Playing() },
                       unchanged: { target: to.none() }
-                    }),
-                    resolve: ({ snapshot, select }) => {
+                    }).resolve(({ snapshot, select }) => {
                       captured = snapshot
                       return States.matches(snapshot, "System.Network.Online")
                         ? select.online(new Playing({}))
                         : select.unchanged()
-                    }
-                  })
+                    })
                 }
               }
             }
@@ -240,13 +232,11 @@ describe("Machine transition snapshot context", () => {
         System: {
           states: {
             Work: {
-              onDone: Machine.transition({
-                target: (to) => to.local.Restarted(),
-                resolve: ({ snapshot, target }) => {
+              onDone: (to) =>
+                to.local.Restarted().resolve(({ snapshot, target }) => {
                   captured = snapshot
                   return target(new Restarted({}))
-                }
-              })
+                })
             }
           }
         }

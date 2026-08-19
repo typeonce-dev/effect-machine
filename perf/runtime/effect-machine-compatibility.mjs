@@ -9,7 +9,19 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   // The legacy process constructor takes `(initial, transition)`. The static
   // definition constructor is deliberately unary and returns its config.
   const hasStaticTransitions = typeof Machine.transition === "function" && Machine.transition.length === 1
+  const hasFluentTransitions = !hasStaticTransitions && Machine.targetless?.["~effect/Machine/TargetlessSelector"] === true
   const targetless = ({ target }) => typeof target.none === "function" ? target.none() : undefined
+
+  const fluentTransition = (definition) => (to) => {
+    const selection = definition.target(to)
+    if (definition.resolve !== undefined) {
+      return selection.resolve(definition.resolve, {
+        ...(definition.reenter === true ? { reenter: true } : {}),
+        ...(definition.declinable === true ? { declinable: true } : {})
+      })
+    }
+    return definition.reenter === true ? selection.reenter() : selection
+  }
 
   return {
     states: (definitions) =>
@@ -17,10 +29,14 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
     events: typeof Machine.event === "function"
       ? (...schemas) => schemas
       : (...schemas) => Machine.events(...schemas),
-    initial: (definition, legacy) => hasStaticTransitions ? definition : legacy,
-    transition: (definition, legacy) => hasStaticTransitions ? Machine.transition(definition) : legacy,
-    targetless: hasStaticTransitions
-      ? Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+    initial: (definition, legacy) => hasStaticTransitions || hasFluentTransitions ? definition : legacy,
+    transition: (definition, legacy) => hasStaticTransitions
+      ? Machine.transition(definition)
+      : hasFluentTransitions
+      ? fluentTransition(definition)
+      : legacy,
+    targetless: hasStaticTransitions || hasFluentTransitions
+      ? { target: Machine.targetless }
       : targetless,
     invokeChild: typeof Machine.invokeMachine === "function"
       ? ({ onSnapshot, onFailure, ...config }) => {

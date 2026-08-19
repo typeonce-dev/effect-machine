@@ -75,22 +75,13 @@ const CounterDefinition = Machine.make({
 const Counter = CounterDefinition.handle({
   Idle: {
     on: {
-      Start: Machine.transition({
-        target: (to) => to.full.Running(),
-        resolve: ({ target }) => target.from({ count: 0 })
-      })
+      Start: (to) => to.full.Running().resolve(({ target }) => target.from({ count: 0 }))
     }
   },
   Running: {
     on: {
-      Increment: Machine.transition({
-        target: (to) => to.full.Running(),
-        resolve: ({ state, target }) => target.from({ count: state.count + 1 })
-      }),
-      Stop: Machine.transition({
-        target: (to) => to.full.Idle(),
-        resolve: ({ target }) => target.from()
-      })
+      Increment: (to) => to.full.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
+      Stop: (to) => to.full.Idle().resolve(({ target }) => target.from())
     }
   }
 })
@@ -153,13 +144,13 @@ When sibling states share fields, remove the source discriminator and pass the
 remaining fields through the target schema:
 
 ```ts
-Submit: Machine.transition({
-  target: (to) => to.local.Saving(),
-  resolve: ({ state, target }) => {
-    const { _tag: _, ...fields } = state
-    return target.from({ ...fields, attempt: 1 })
-  }
-})
+const handlers = {
+  Submit: (to) =>
+    to.local.Saving().resolve(({ state, target }) => {
+      const { _tag: _, ...fields } = state
+      return target.from({ ...fields, attempt: 1 })
+    })
+}
 ```
 
 Omit `schema` when a state represents control flow but owns no data:
@@ -339,15 +330,13 @@ const child = Machine.make({
 }).handle({
   Working: {
     on: {
-      Finish: Machine.transition({
-        target: (to) => to.full.Done(),
-        resolve: ({ parent, target }, enqueue) => {
+      Finish: (to) =>
+        to.full.Done().resolve(({ parent, target }, enqueue) => {
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           }
           return target.from()
-        }
-      })
+        })
     }
   },
   Done: {}
@@ -383,25 +372,31 @@ paths. `parent` always means the owning machine target.
 | `target.full`    | Replacing or selecting a complete root   | Nothing implicit for a newly selected root        |
 | `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
 
-Every required transition handler returns either a concrete target or
-`target.none()`. An absent handler ignores the trigger; `target.none()` handles
+Every required transition handler selects a target from its inline `to`
+builder. A bare selection uses the target schema's default construction; call
+`.resolve(...)` when construction depends on handler context. An absent handler
+ignores the trigger; `to.none()` handles
 it and retains queued commands, raised events, and emitted events without
-selecting a destination. Declared `targets` constrain only concrete
-destinations, so `target.none()` is always permitted. Builders describe the
+selecting a destination. Concrete destinations stay narrowed inside their
+resolver, and `to.branches({...})` gives the resolver only the declared named
+`select` builders. Builders describe the
 next logical configuration. Shared states exit and enter only when paths
-change; use `{ reenter: true, transition }` when the source must restart. With
-`target.none()`, reentry restarts the source while retaining its configuration.
+change; call `.reenter()` for resolver-free reentry or pass `{ reenter: true }`
+to `.resolve(...)` when the source must restart. With `to.none()`, reentry
+restarts the source while retaining its configuration.
 
 Use `declinable: true` when a resolver may decide that its transition is not
 enabled. Only that resolver receives `decline()`, and its return type expands to
 accept the opaque declined result:
 
 ```ts
-Submit: Machine.transition({
-  declinable: true,
-  target: (to) => to.local.Saving(),
-  resolve: ({ event, target, decline }) => accepts(event) ? target.from({ draft: event.draft }) : decline()
-})
+const handlers = {
+  Submit: (to) =>
+    to.local.Saving().resolve(
+      ({ event, target, decline }) => accepts(event) ? target.from({ draft: event.draft }) : decline(),
+      { declinable: true }
+    )
+}
 ```
 
 Declining discards work enqueued by that resolver. Event and eventless dispatch
@@ -444,14 +439,8 @@ Loading: {
   invoke: Machine.invoke({
     id: "save-document",
     effect: () => saveDocument,
-    onDone: Machine.transition({
-      target: (to) => to.full.Saved(),
-      resolve: ({ output, target }) => target.from({ id: output.id })
-    }),
-    onFailure: Machine.transition({
-      target: (to) => to.full.Failed(),
-      resolve: ({ error, target }) => target.from({ message: String(error) })
-    })
+    onDone: (to) => to.full.Saved().resolve(({ output, target }) => target.from({ id: output.id })),
+    onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: String(error) }))
   })
 }
 
@@ -459,10 +448,7 @@ Waiting: {
   invoke: Machine.invoke({
     id: "save-timeout",
     after: "3 seconds",
-    onDone: Machine.transition({
-      target: (to) => to.full.Failed(),
-      resolve: ({ target }) => target.from({ message: "Timed out" })
-    })
+    onDone: (to) => to.full.Failed().resolve(({ target }) => target.from({ message: "Timed out" }))
   })
 }
 ```
@@ -478,14 +464,8 @@ for state-dependent Effects:
 invoke: Machine.invoke({
   id: "load-document",
   effect: ({ state }) => loadDocument(state.documentId),
-  onDone: Machine.transition({
-    target: (to) => to.full.Ready(),
-    resolve: ({ output, target }) => target.from({ document: output })
-  }),
-  onFailure: Machine.transition({
-    target: (to) => to.full.Failed(),
-    resolve: ({ error, target }) => target.from({ message: error.message })
-  })
+  onDone: (to) => to.full.Ready().resolve(({ output, target }) => target.from({ document: output })),
+  onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: error.message }))
 })
 ```
 
@@ -504,17 +484,15 @@ invoke: Machine.invoke({
     }
   },
   onDone: { target: Machine.targetless },
-  onFailure: Machine.transition({
-    target: (to) => to.full.Failed(),
-    resolve: ({ error, target }) => target.from({ error })
-  })
+  onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ error }))
 })
 ```
 
 `target: Machine.targetless` is the direct shorthand for a non-reentering
 transition that keeps the current configuration. Its optional `resolve`
 callback may enqueue commands and must return `undefined`. Use
-`Machine.transition(...)` for transitions that select state or reenter.
+the same fluent `to` builder to select a target for transitions that change
+state or reenter.
 
 Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
 public input and `parentEvents` protocols contextually. Its source and lifecycle
@@ -532,27 +510,23 @@ const machine = Machine.make({
     invoke: Machine.invoke({
       id: "notify-parent",
       effect: () => saveDocument,
-      onDone: Machine.transition({
-        target: (to) => to.none(),
-        resolve: ({ parent, self }, enqueue) => {
+      onDone: (to) =>
+        to.none().resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           }
           return undefined
-        }
-      }),
-      onFailure: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+        }),
+      onFailure: (to) => to.none()
     })
   }
 })
 ```
 
-The machine-bound `definition.invoke(...)` form remains equivalent when a
-definition is already named; it is not required for `self` or `parent` typing.
+The standard `Machine.invoke(...)` form retains exact `self` and `parent`
+typing even when the definition is named separately; no intermediate
+definition method is required.
 
 A direct `invoke: { ... }` object is also supported when its lifecycle handlers
 do not need source-derived context. Reuse one exported

@@ -27,13 +27,12 @@ const counterMachine = Machine.make({
 }).handle({
   count: {
     on: {
-      Add: Machine.transition({
-        declinable: true,
-        target: (to) => to.full.count(),
-        resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.amount })),
-        reenter: true
-      }),
-      Finish: Machine.transition({ target: (to) => to.full.done(), resolve: ({ target }) => target(new Done({})) })
+      Add: (to) =>
+        to.full.count().resolve(
+          ({ event, state, target }) => target(new Count({ value: state.value + event.amount })),
+          { reenter: true, declinable: true }
+        ),
+      Finish: (to) => to.full.done().resolve(({ target }) => target(new Done({})))
     }
   },
   done: {}
@@ -64,21 +63,18 @@ const startupMachine = Machine.make({
   }
 }).handle({
   count: {
-    always: Machine.transition({
-      branches: (to) => ({
+    always: (to) =>
+      to.branches({
         zero: { title: "Count is zero", target: to.full.count() },
         unchanged: { target: to.none() }
-      }),
-      resolve: ({ state, select }) =>
+      }).resolve(({ state, select }) =>
         state.value === 0
           ? select.zero(new Count({ value: 1 }))
           : select.unchanged()
-    }),
+      ),
     on: {
-      Add: Machine.transition({
-        target: (to) => to.full.count(),
-        resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.amount }))
-      })
+      Add: (to) =>
+        to.full.count().resolve(({ event, state, target }) => target(new Count({ value: state.value + event.amount })))
     }
   }
 })
@@ -97,19 +93,18 @@ const branchMachine = Machine.make({
 }).handle({
   count: {
     on: {
-      Select: Machine.transition({
-        branches: (to) => ({
+      Select: (to) =>
+        to.branches({
           negative: { target: to.none() },
           zero: { target: to.none() },
           positive: { target: to.none() }
-        }),
-        resolve: ({ event, select }) =>
+        }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
             : event.value === 0
             ? select.zero()
             : select.positive()
-      })
+        )
     }
   }
 })
@@ -131,18 +126,9 @@ const finiteEventMachine = Machine.make({
 }).handle({
   count: {
     on: {
-      [Tick]: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      }),
-      Alpha: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      }),
-      Beta: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+      [Tick]: { target: Machine.targetless },
+      Alpha: { target: Machine.targetless },
+      Beta: { target: Machine.targetless }
     }
   }
 })

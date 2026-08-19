@@ -89,48 +89,42 @@ const makeMachine = () =>
           states: {
             Empty: {
               on: {
-                SourceSelected: Machine.transition({
-                  target: (to) => to.local.Loading(),
-                  resolve: ({ event, state, target }) => {
+                SourceSelected: (to) =>
+                  to.local.Loading().resolve(({ event, state, target }) => {
                     assert.strictEqual(state, undefined)
                     return target.from({ url: event.url })
-                  }
-                })
+                  })
               }
             },
             Loading: {
               on: {
-                Loaded: Machine.transition({
-                  target: (to) => to.local.Ready(),
-                  resolve: ({ event, state, target }) => {
+                Loaded: (to) =>
+                  to.local.Ready().resolve(({ event, state, target }) => {
                     assert.strictEqual(state._tag, "Loading")
                     return target.from(
                       { duration: event.duration },
                       (ready) => ready.Paused.from()
                     )
-                  }
-                })
+                  })
               }
             },
             Ready: {
               states: {
                 Paused: {
                   on: {
-                    Play: Machine.transition({
-                      target: (to) => to.local.Playing(),
-                      resolve: ({ containingState, state, target }) => {
+                    Play: (to) =>
+                      to.local.Playing().resolve(({ containingState, state, target }) => {
                         assert.strictEqual(state, undefined)
                         return target.from({ position: Math.min(0, containingState.duration) })
-                      }
-                    })
+                      })
                   }
                 },
                 Playing: {
                   on: {
-                    Mute: Machine.transition({
-                      target: (to) => to.branch.player.settings.Muted(),
-                      resolve: ({ event, target }) => target.from({ volume: event.volume })
-                    })
+                    Mute: (to) =>
+                      to.branch.player.settings.Muted().resolve(({ event, target }) =>
+                        target.from({ volume: event.volume })
+                      )
                   }
                 }
               }
@@ -183,20 +177,14 @@ const historyMachine = Machine.make({
       exact: { default: historyFallback }
     },
     on: {
-      Leave: Machine.transition({
-        target: (to) => to.full.away(),
-        resolve: ({ target }) => target.from()
-      })
+      Leave: (to) => to.full.away().resolve(({ target }) => target.from())
     },
     states: {
       section: {
         states: {
           Idle: {
             on: {
-              Edit: Machine.transition({
-                target: (to) => to.local.Editing(),
-                resolve: ({ event, target }) => target.from({ draft: event.draft })
-              })
+              Edit: (to) => to.local.Editing().resolve(({ event, target }) => target.from({ draft: event.draft }))
             }
           }
         }
@@ -205,14 +193,8 @@ const historyMachine = Machine.make({
   },
   away: {
     on: {
-      ResumeShallow: Machine.transition({
-        target: (to) => to.history.flow.recent(),
-        resolve: ({ target }) => target()
-      }),
-      ResumeDeep: Machine.transition({
-        target: (to) => to.history.flow.exact(),
-        resolve: ({ target }) => target()
-      })
+      ResumeShallow: (to) => to.history.flow.recent().resolve(({ target }) => target()),
+      ResumeDeep: (to) => to.history.flow.exact().resolve(({ target }) => target())
     }
   }
 })

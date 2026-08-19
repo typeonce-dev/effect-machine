@@ -248,10 +248,7 @@ describe("snapshot codec adversarial boundaries", () => {
         }
       }).handle({
         Before: {
-          always: Machine.transition({
-            target: (to) => to.full.Boundary(),
-            resolve: ({ target }) => target(new Boundary({}))
-          })
+          always: (to) => to.full.Boundary().resolve(({ target }) => target(new Boundary({})))
         },
         Boundary: {},
         After: {}
@@ -267,10 +264,7 @@ describe("snapshot codec adversarial boundaries", () => {
       }).handle({
         Before: {},
         Boundary: {
-          always: Machine.transition({
-            target: (to) => to.full.After(),
-            resolve: ({ target }) => target(new After({}))
-          })
+          always: (to) => to.full.After().resolve(({ target }) => target(new After({})))
         },
         After: {}
       })

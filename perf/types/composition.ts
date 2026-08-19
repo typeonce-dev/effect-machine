@@ -67,9 +67,8 @@ const handled = machine.handle({
         }
       },
       Route: {
-        choice: Machine.transition({
-          target: (to) => to.full.App(),
-          resolve: ({ target }) =>
+        choice: (to) =>
+          to.full.App().resolve(({ target }) =>
             target(App.make({}), (app) =>
               app.Workspace(
                 Workspace.make({}),
@@ -78,7 +77,7 @@ const handled = machine.handle({
                     .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
                     .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
               ))
-        })
+          )
       }
     }
   }

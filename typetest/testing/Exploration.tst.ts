@@ -22,14 +22,8 @@ describe("MachineTest exploration", () => {
   }).handle({
     counter: {
       on: {
-        Increment: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        Internal: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        Increment: { target: Machine.targetless },
+        Internal: { target: Machine.targetless }
       }
     }
   })

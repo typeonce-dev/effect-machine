@@ -1000,14 +1000,8 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: Machine.transition({
-                      target: (to) => to.local.done(),
-                      resolve: ({ target }) => target({ _tag: "LeftDone", version: 1 })
-                    }),
-                    Exit: Machine.transition({
-                      target: (to) => to.full.outside(),
-                      resolve: ({ target }) => target({ _tag: "Outside", version: 1 })
-                    })
+                    Local: (to) => to.local.done().resolve(({ target }) => target({ _tag: "LeftDone", version: 1 })),
+                    Exit: (to) => to.full.outside().resolve(({ target }) => target({ _tag: "Outside", version: 1 }))
                   }
                 }
               }
@@ -1016,14 +1010,8 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: Machine.transition({
-                      target: (to) => to.local.idle(),
-                      resolve: ({ target }) => target({ _tag: "RightIdle", version: 1 })
-                    }),
-                    Exit: Machine.transition({
-                      target: (to) => to.local.idle(),
-                      resolve: ({ target }) => target({ _tag: "RightIdle", version: 2 })
-                    })
+                    Local: (to) => to.local.idle().resolve(({ target }) => target({ _tag: "RightIdle", version: 1 })),
+                    Exit: (to) => to.local.idle().resolve(({ target }) => target({ _tag: "RightIdle", version: 2 }))
                   }
                 }
               }

@@ -369,14 +369,8 @@ describe("AtomMachine", () => {
     }).handle({
       Idle: {
         on: {
-          Tick: Machine.transition({
-            target: (to) => to.full.Idle(),
-            resolve: ({ target }) => target(new Idle({}))
-          }),
-          InternalTick: Machine.transition({
-            target: (to) => to.full.Idle(),
-            resolve: ({ target }) => target(new Idle({}))
-          })
+          Tick: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({}))),
+          InternalTick: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({})))
         }
       }
     })

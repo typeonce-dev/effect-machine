@@ -69,7 +69,7 @@ const choiceMachine = Machine.make({
   Flow: {
     states: {
       Routing: {
-        choice: Machine.transition({ target: (to) => to.local.Ready(), resolve: ({ target }) => target(new Ready({})) })
+        choice: (to) => to.local.Ready().resolve(({ target }) => target(new Ready({})))
       }
     }
   }

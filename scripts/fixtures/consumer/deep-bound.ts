@@ -102,22 +102,23 @@ const definition = Machine.make({
 })
 const machine = definition.handle({
   Idle: {
-    invoke: definition.invoke({
+    invoke: Machine.invoke({
       id: "deep-inline-invoke",
       effect: () => Effect.asVoid(ExternalService),
-      onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+      onDone: { target: Machine.targetless }
     }),
     on: {
-      Begin: Machine.transition({
-        target: (to) => to.full.Ready(),
-        resolve: ({ target }) =>
+      Begin: (to) =>
+        to.full.Ready().resolve(({ target }) =>
           target(
             State.cases.Ready.make({}),
             (ready) =>
-              ready.Editor(State.cases.Editor.make({}), (editor) =>
-                editor.Editing(State.cases.Editing.make({ value: "ready" })))
+              ready.Editor(
+                State.cases.Editor.make({}),
+                (editor) => editor.Editing(State.cases.Editing.make({ value: "ready" }))
+              )
           )
-      })
+        )
     }
   },
   Ready: {
@@ -126,31 +127,27 @@ const machine = definition.handle({
         states: {
           Editing: {
             on: {
-              Save: Machine.transition({
-                target: (to) => to.local.Saving(),
-                resolve: ({ event, target }) => target(State.cases.Saving.make({ value: event.value }))
-              }),
-              Loaded: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+              Save: (to) =>
+                to.local.Saving().resolve(({ event, target }) =>
+                  target(State.cases.Saving.make({ value: event.value }))
+                ),
+              Loaded: { target: Machine.targetless }
             }
           },
           Saving: {
-            invoke: definition.invoke({
+            invoke: Machine.invoke({
               child: Child,
               input: ({ state }) => ({ value: state.value }),
-              onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+              onDone: { target: Machine.targetless }
             }),
             on: {
-              ChildNotice: Machine.transition({
-                target: (to) => to.local.Saving(),
-                resolve: ({ event, target }, enqueue) => {
+              ChildNotice: (to) =>
+                to.local.Saving().resolve(({ event, target }, enqueue) => {
                   enqueue.emit(Emissions.Notice({ value: event.value }))
                   return target(State.cases.Saving.make({ value: event.value }))
-                }
-              }),
-              ChildCompleted: Machine.transition({
-                target: (to) => to.full.Done(),
-                resolve: ({ event, target }) => target(State.cases.Done.make({ value: event.value }))
-              })
+                }),
+              ChildCompleted: (to) =>
+                to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
             }
           }
         }

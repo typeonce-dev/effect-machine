@@ -1415,11 +1415,10 @@ const makeHandlers = (
     if (node._tag === "History") continue
     if (node._tag === "Choice") {
       handlers[node.key] = {
-        choice: (Machine.transition as any)({
-          target: (to: Record<string, any>) => selectDefinitionTarget(to, path, node.selected, byPath) as any,
-          resolve: ({ target }: { readonly target: any }) =>
-            resolveDefinitionTarget(target, path, node.selected, byPath)
-        } as any)
+        choice: (to: Record<string, any>) =>
+          (selectDefinitionTarget(to, path, node.selected, byPath) as any).resolve(
+            ({ target }: { readonly target: any }) => resolveDefinitionTarget(target, path, node.selected, byPath)
+          )
       }
       continue
     }
@@ -1432,17 +1431,16 @@ const makeHandlers = (
     let onDone: unknown
     for (const transition of transitions.values()) {
       if (transition.source !== path) continue
-      const config = (Machine.transition as any)({
-        ...("reenter" in transition ? { reenter: transition.reenter } : {}),
-        target: (to: Record<string, any>) =>
-          transition.target === undefined
-            ? to.none()
-            : selectDefinitionTarget(to, path, transition.target, byPath),
-        resolve: transition.target === undefined
+      const config = (to: Record<string, any>) => {
+        const selected = transition.target === undefined
+          ? to.none()
+          : selectDefinitionTarget(to, path, transition.target, byPath)
+        const resolve = transition.target === undefined
           ? () => undefined
           : ({ target }: { readonly target: any }) =>
             resolveDefinitionTarget(target, path, transition.target!, byPath, transition.targetValue)
-      } as any)
+        return selected.resolve(resolve, "reenter" in transition ? { reenter: transition.reenter } : undefined)
+      }
       if (transition.trigger.type === "event") on[transition.trigger.event] = config
       else if (transition.trigger.type === "always") always = config
       else onDone = config

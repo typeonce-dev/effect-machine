@@ -87,19 +87,17 @@ export const SelectionMachine = Machine.make({
     states: {
       search: {
         on: {
-          UpdateSearchText: Machine.transition({
-            target: (to) => to.local.with(),
-            resolve: ({ event, target }) =>
-              target.from({ searchText: event.value }, (search) => search.Searching.from()),
-            reenter: true
-          })
+          UpdateSearchText: (to) =>
+            to.local.with().resolve(
+              ({ event, target }) => target.from({ searchText: event.value }, (search) => search.Searching.from()),
+              { reenter: true }
+            )
         },
         states: {
           WithPokemon: {
             on: {
-              ReplacePokemon: Machine.transition({
-                target: (to) => to.full.form(),
-                resolve: ({ event, parent, state, target }, enqueue) => {
+              ReplacePokemon: (to) =>
+                to.full.form().resolve(({ event, parent, state, target }, enqueue) => {
                   if (parent !== undefined) {
                     enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
                   }
@@ -108,38 +106,31 @@ export const SelectionMachine = Machine.make({
                       .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
                       .selection.from((selection) => selection.Unselected.from())
                   )
-                }
-              })
+                })
             }
           },
           Searching: {
             invoke: Machine.invoke({
               id: "search",
               effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
-              onDone: Machine.transition({
-                target: (to) => to.none(),
-                resolve: ({ output }, enqueue) => {
+              onDone: (to) =>
+                to.none().resolve(({ output }, enqueue) => {
                   enqueue.raise(output)
                   return undefined
-                }
-              }),
-              onFailure: Machine.transition({
-                target: (to) => to.local.NoPokemon(),
-                resolve: ({ target }) => target.from()
-              })
+                }),
+              onFailure: (to) => to.local.NoPokemon().resolve(({ target }) => target.from())
             }),
             on: {
-              SearchResult: Machine.transition({
-                branches: (to) => ({
+              SearchResult: (to) =>
+                to.branches({
                   found: { target: to.local.WithPokemon() },
                   notFound: { title: "Not found", target: to.local.NoPokemon() }
-                }),
-                resolve: ({ event, select }) =>
+                }).resolve(({ event, select }) =>
                   Option.match(event.result, {
                     onNone: () => select.notFound.from(),
                     onSome: (pokemon) => select.found.from({ pokemon })
                   })
-              })
+                )
             }
           }
         }
@@ -148,24 +139,20 @@ export const SelectionMachine = Machine.make({
         states: {
           Unselected: {
             on: {
-              SelectPokemon: Machine.transition({
-                target: (to) => to.local.Selected(),
-                resolve: ({ event, target }) => target.from({ id: event.id })
-              })
+              SelectPokemon: (to) => to.local.Selected().resolve(({ event, target }) => target.from({ id: event.id }))
             }
           },
           Selected: {
             on: {
-              SelectPokemon: Machine.transition({
-                branches: (to) => ({
+              SelectPokemon: (to) =>
+                to.branches({
                   alreadySelected: { title: "Already selected", target: to.local.Unselected() },
                   selected: { target: to.local.Selected() }
-                }),
-                resolve: ({ event, select, state }) =>
+                }).resolve(({ event, select, state }) =>
                   state.id === event.id
                     ? select.alreadySelected.from()
                     : select.selected.from({ id: event.id })
-              })
+                )
             }
           }
         }

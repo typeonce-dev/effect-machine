@@ -33,10 +33,7 @@ describe("Machine inspection", () => {
   }).handle({
     root: {
       on: {
-        Reset: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        Reset: { target: Machine.targetless }
       }
     }
   })
@@ -53,10 +50,7 @@ describe("Machine inspection", () => {
     }).handle({
       Idle: {
         on: {
-          Reset: Machine.transition({
-            target: (to) => to.none(),
-            resolve: () => undefined
-          })
+          Reset: { target: Machine.targetless }
         }
       }
     })
@@ -216,10 +210,7 @@ describe("Machine inspection", () => {
     flat.handle({
       idle: {
         on: {
-          Reset: Machine.transition({
-            target: (to) => to.full.running(),
-            resolve: ({ target }) => target(new Running({}))
-          })
+          Reset: (to) => to.full.running().resolve(({ target }) => target(new Running({})))
         }
       }
     })

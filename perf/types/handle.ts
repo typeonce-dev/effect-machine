@@ -24,18 +24,13 @@ const machine = Machine.make({
 }).handle({
   Idle: {
     on: {
-      Start: Machine.transition({
-        target: (to) => to.full.Running(),
-        resolve: ({ target }) => target(State.cases.Running.make({}))
-      })
+      Start: (to) => to.full.Running().resolve(({ target }) => target(State.cases.Running.make({})))
     }
   },
   Running: {
     on: {
-      Finish: Machine.transition({
-        target: (to) => to.full.Done(),
-        resolve: ({ event, target }) => target(State.cases.Done.make({ value: event.value }))
-      })
+      Finish: (to) =>
+        to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
     }
   },
   Done: {}

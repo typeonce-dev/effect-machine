@@ -135,9 +135,8 @@ export const CharacterMachine = Machine.make({
 }).handle({
   Character: {
     on: {
-      Reset: Machine.transition({
-        target: (to) => to.full.Character(),
-        resolve: ({ target }) =>
+      Reset: (to) =>
+        to.full.Character().resolve(({ target }) =>
           target.from((character) =>
             character
               .locomotion.from((locomotion) =>
@@ -146,7 +145,7 @@ export const CharacterMachine = Machine.make({
               .facing.from((facing) => facing.Right.from())
               .contact.from((contact) => contact.NoWall.from())
           )
-      })
+        )
     },
     states: {
       locomotion: {
@@ -168,17 +167,16 @@ export const CharacterMachine = Machine.make({
               }
             },
             on: {
-              Pause: Machine.transition({
-                target: (to) => to.branch.Character.locomotion.Paused(),
-                resolve: ({ event, target }) => target.from({ pausedAt: event.at })
-              })
+              Pause: (to) =>
+                to.branch.Character.locomotion.Paused().resolve(({ event, target }) =>
+                  target.from({ pausedAt: event.at })
+                )
             },
             states: {
               Grounded: {
                 on: {
-                  JumpPressed: Machine.transition({
-                    target: (to) => to.full.Character(),
-                    resolve: ({ event, target }) =>
+                  JumpPressed: (to) =>
+                    to.full.Character().resolve(({ event, target }) =>
                       target.from((character) =>
                         character
                           .locomotion.from((locomotion) =>
@@ -200,98 +198,85 @@ export const CharacterMachine = Machine.make({
                               : contact.NoWall.from()
                           )
                       )
-                  })
+                    )
                 },
                 states: {
                   Standing: {
                     on: {
-                      Move: Machine.transition({
-                        branches: (to) => ({
+                      Move: (to) =>
+                        to.branches({
                           moving: { target: to.local.Running() },
                           unchanged: { target: to.none() }
-                        }),
-                        resolve: ({ event, select }) =>
+                        }).resolve(({ event, select }) =>
                           event.axis === 0
                             ? select.unchanged()
                             : select.moving.from({ startedAt: event.at })
-                      }),
-                      DownPressed: Machine.transition({
-                        target: (to) => to.local.Ducking(),
-                        resolve: ({ event, target }) => target.from({ startedAt: event.at })
-                      })
+                        ),
+                      DownPressed: (to) =>
+                        to.local.Ducking().resolve(({ event, target }) => target.from({ startedAt: event.at }))
                     }
                   },
                   Running: {
                     on: {
-                      Move: Machine.transition({
-                        branches: (to) => ({
+                      Move: (to) =>
+                        to.branches({
                           stopped: { target: to.local.Standing() },
                           unchanged: { target: to.none() }
-                        }),
-                        resolve: ({ event, select }) =>
+                        }).resolve(({ event, select }) =>
                           event.axis === 0
                             ? select.stopped.from()
                             : select.unchanged()
-                      }),
-                      DownPressed: Machine.transition({
-                        target: (to) => to.local.Ducking(),
-                        resolve: ({ event, target }) => target.from({ startedAt: event.at })
-                      })
+                        ),
+                      DownPressed: (to) =>
+                        to.local.Ducking().resolve(({ event, target }) => target.from({ startedAt: event.at }))
                     }
                   },
                   Ducking: {
                     on: {
-                      DownReleased: Machine.transition({
-                        branches: (to) => ({
+                      DownReleased: (to) =>
+                        to.branches({
                           stopped: { target: to.local.Standing() },
                           running: { target: to.local.Running() }
-                        }),
-                        resolve: ({ event, select }) =>
+                        }).resolve(({ event, select }) =>
                           event.axis === 0
                             ? select.stopped.from()
                             : select.running.from({ startedAt: event.at })
-                      })
+                        )
                     }
                   },
                   Landing: {
                     invoke: Machine.invoke({
                       id: "landing-settle",
                       after: "140 millis",
-                      onDone: Machine.transition({
-                        target: (to) => to.none(),
-                        resolve: (_, enqueue) => {
+                      onDone: (to) =>
+                        to.none().resolve((_, enqueue) => {
                           enqueue.raise(InternalEvents.LandingSettled())
                           return undefined
-                        }
-                      })
+                        })
                     }),
                     on: {
-                      LandingSettled: Machine.transition({
-                        branches: (to) => ({
+                      LandingSettled: (to) =>
+                        to.branches({
                           stopped: { target: to.local.Standing() },
                           running: { target: to.local.Running() }
-                        }),
-                        resolve: ({ state, select }) =>
+                        }).resolve(({ state, select }) =>
                           state.resumeAxis === 0
                             ? select.stopped.from()
                             : select.running.from({ startedAt: state.landedAt + 140 })
-                      }),
-                      Move: Machine.transition({
-                        target: (to) => to.local.Landing(),
-                        resolve: ({ event, state, target }) => {
+                        ),
+                      Move: (to) =>
+                        to.local.Landing().resolve(({ event, state, target }) => {
                           const { _tag: _, ...fields } = state
                           return target.from({ ...fields, resumeAxis: event.axis })
-                        }
-                      })
+                        })
                     }
                   }
                 }
               },
               Airborne: {
                 on: {
-                  JumpPressed: Machine.transition({
-                    target: (to) => to.none(),
-                    resolve: ({ event }, enqueue) => {
+                  JumpPressed: (to) =>
+                    to.none().resolve(({ event }, enqueue) => {
                       const push = awayFrom(event.wall)
                       enqueue.raise(
                         push === 0
@@ -299,11 +284,9 @@ export const CharacterMachine = Machine.make({
                           : InternalEvents.WallJump({ at: event.at, push })
                       )
                       return undefined
-                    }
-                  }),
-                  Landed: Machine.transition({
-                    target: (to) => to.branch.Character.locomotion.Playing.Grounded(),
-                    resolve: ({ event, target }) =>
+                    }),
+                  Landed: (to) =>
+                    to.branch.Character.locomotion.Playing.Grounded().resolve(({ event, target }) =>
                       target.from((grounded) =>
                         grounded.Landing.from({
                           impact: event.impact,
@@ -311,40 +294,33 @@ export const CharacterMachine = Machine.make({
                           landedAt: event.at
                         })
                       )
-                  })
+                    )
                 },
                 states: {
                   motion: {
                     on: {
-                      DoubleJump: Machine.transition({
-                        target: (to) => to.local.Jumping(),
-                        resolve: ({ event, target }) => target.from({ startedAt: event.at, push: 0, kind: "Double" })
-                      }),
-                      WallJump: Machine.transition({
-                        target: (to) => to.local.Jumping(),
-                        resolve: ({ event, target }) =>
+                      DoubleJump: (to) =>
+                        to.local.Jumping().resolve(({ event, target }) =>
+                          target.from({ startedAt: event.at, push: 0, kind: "Double" })
+                        ),
+                      WallJump: (to) =>
+                        to.local.Jumping().resolve(({ event, target }) =>
                           target.from({ startedAt: event.at, push: event.push, kind: "Wall" })
-                      })
+                        )
                     },
                     states: {
                       Jumping: {
                         on: {
-                          ApexReached: Machine.transition({
-                            target: (to) => to.local.Falling(),
-                            resolve: ({ event, target }) => target.from({ apexY: event.y })
-                          }),
-                          DownPressed: Machine.transition({
-                            target: (to) => to.local.Diving(),
-                            resolve: ({ event, target }) => target.from({ startedAt: event.at })
-                          })
+                          ApexReached: (to) =>
+                            to.local.Falling().resolve(({ event, target }) => target.from({ apexY: event.y })),
+                          DownPressed: (to) =>
+                            to.local.Diving().resolve(({ event, target }) => target.from({ startedAt: event.at }))
                         }
                       },
                       Falling: {
                         on: {
-                          DownPressed: Machine.transition({
-                            target: (to) => to.local.Diving(),
-                            resolve: ({ event, target }) => target.from({ startedAt: event.at })
-                          })
+                          DownPressed: (to) =>
+                            to.local.Diving().resolve(({ event, target }) => target.from({ startedAt: event.at }))
                         }
                       },
                       Diving: {}
@@ -352,21 +328,15 @@ export const CharacterMachine = Machine.make({
                   },
                   airJump: {
                     on: {
-                      WallJump: Machine.transition({
-                        target: (to) => to.local.AirJumpWallLock(),
-                        resolve: ({ target }) => target.from(),
-                        reenter: true
-                      })
+                      WallJump: (to) =>
+                        to.local.AirJumpWallLock().resolve(({ target }) => target.from(), { reenter: true })
                     },
                     states: {
                       AirJumpGroundLock: {
                         invoke: Machine.invoke({
                           id: "ground-air-jump-unlock",
                           after: "120 millis",
-                          onDone: Machine.transition({
-                            target: (to) => to.local.AirJumpReady(),
-                            resolve: ({ target }) => target.from()
-                          })
+                          onDone: (to) => to.local.AirJumpReady().resolve(({ target }) => target.from())
                         }),
                         on: {}
                       },
@@ -374,22 +344,17 @@ export const CharacterMachine = Machine.make({
                         invoke: Machine.invoke({
                           id: "wall-air-jump-unlock",
                           after: "240 millis",
-                          onDone: Machine.transition({
-                            target: (to) => to.local.AirJumpReady(),
-                            resolve: ({ target }) => target.from()
-                          })
+                          onDone: (to) => to.local.AirJumpReady().resolve(({ target }) => target.from())
                         }),
                         on: {}
                       },
                       AirJumpReady: {
                         on: {
-                          TryAirJump: Machine.transition({
-                            target: (to) => to.local.AirJumpSpent(),
-                            resolve: ({ event, target }, enqueue) => {
+                          TryAirJump: (to) =>
+                            to.local.AirJumpSpent().resolve(({ event, target }, enqueue) => {
                               enqueue.raise(InternalEvents.DoubleJump({ at: event.at }))
                               return target.from()
-                            }
-                          })
+                            })
                         }
                       },
                       AirJumpSpent: {}
@@ -401,10 +366,7 @@ export const CharacterMachine = Machine.make({
           },
           Paused: {
             on: {
-              Resume: Machine.transition({
-                target: (to) => to.history.Character.locomotion.Playing.resume(),
-                resolve: ({ target }) => target()
-              })
+              Resume: (to) => to.history.Character.locomotion.Playing.resume().resolve(({ target }) => target())
             }
           }
         }
@@ -413,45 +375,44 @@ export const CharacterMachine = Machine.make({
         states: {
           Left: {
             on: {
-              Move: Machine.transition({
-                branches: (to) => ({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }),
-                resolve: ({ event, select }) => event.axis === 1 ? select.right.from() : select.unchanged()
-              }),
-              WallJump: Machine.transition({
-                branches: (to) => ({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }),
-                resolve: ({ event, select }) => event.push === 1 ? select.right.from() : select.unchanged()
-              })
+              Move: (to) =>
+                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }).resolve((
+                  { event, select }
+                ) => event.axis === 1 ? select.right.from() : select.unchanged()),
+              WallJump: (to) =>
+                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }).resolve((
+                  { event, select }
+                ) => event.push === 1 ? select.right.from() : select.unchanged())
             }
           },
           Right: {
             on: {
-              Move: Machine.transition({
-                branches: (to) => ({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }),
-                resolve: ({ event, select }) => event.axis === -1 ? select.left.from() : select.unchanged()
-              }),
-              WallJump: Machine.transition({
-                branches: (to) => ({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }),
-                resolve: ({ event, select }) => event.push === -1 ? select.left.from() : select.unchanged()
-              })
+              Move: (to) =>
+                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }).resolve((
+                  { event, select }
+                ) => event.axis === -1 ? select.left.from() : select.unchanged()),
+              WallJump: (to) =>
+                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }).resolve((
+                  { event, select }
+                ) => event.push === -1 ? select.left.from() : select.unchanged())
             }
           }
         }
       },
       contact: {
         on: {
-          WallContact: Machine.transition({
-            branches: (to) => ({
+          WallContact: (to) =>
+            to.branches({
               leftWall: { title: "Left wall", target: to.local.LeftWall() },
               rightWall: { title: "Right wall", target: to.local.RightWall() },
               noWall: { title: "No wall", target: to.local.NoWall() }
-            }),
-            resolve: ({ event, select }) =>
+            }).resolve(({ event, select }) =>
               event.wall === -1
                 ? select.leftWall.from()
                 : event.wall === 1
                 ? select.rightWall.from()
                 : select.noWall.from()
-          })
+            )
         },
         states: {
           NoWall: {},

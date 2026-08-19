@@ -31,35 +31,23 @@ const machine = Machine.make({
 }).handle({
   Counter: {
     on: {
-      Increment: Machine.transition({
-        target: (to) => to.full.Counter(),
-        resolve: ({ event, state, target }) => target(new Counter({ count: state.count + event.amount }))
-      }),
-      Noop: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      }),
-      Decline: Machine.transition({
-        declinable: true,
-        target: (to) => to.none(),
-        resolve: ({ decline }) => decline()
-      }),
-      Reenter: Machine.transition({
-        target: (to) => to.full.Counter(),
-        resolve: ({ state, target }) => target(new Counter({ count: state.count })),
-        reenter: true
-      }),
-      Burst: Machine.transition({
-        target: (to) => to.full.Counter(),
-        resolve: ({ state, target }, enqueue) => {
+      Increment: (to) =>
+        to.full.Counter().resolve(({ event, state, target }) =>
+          target(new Counter({ count: state.count + event.amount }))
+        ),
+      Noop: { target: Machine.targetless },
+      Decline: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true }),
+      Reenter: (to) =>
+        to.full.Counter().resolve(({ state, target }) => target(new Counter({ count: state.count })), {
+          reenter: true
+        }),
+      Burst: (to) =>
+        to.full.Counter().resolve(({ state, target }, enqueue) => {
           enqueue.raise(new RaisedIncrement({}))
           return target(new Counter({ count: state.count + 1 }))
-        }
-      }),
-      RaisedIncrement: Machine.transition({
-        target: (to) => to.full.Counter(),
-        resolve: ({ state, target }) => target(new Counter({ count: state.count + 10 }))
-      })
+        }),
+      RaisedIncrement: (to) =>
+        to.full.Counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 10 })))
     }
   }
 })
@@ -176,10 +164,7 @@ describe("MachineTest probe", () => {
       }).handle({
         Idle: {
           on: {
-            Load: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({}))
-            })
+            Load: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({})))
           }
         },
         Loading: {

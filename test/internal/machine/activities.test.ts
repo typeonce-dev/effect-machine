@@ -47,22 +47,13 @@ const activityMachine = Machine.make({
       Machine.invoke({
         id: "load-document",
         effect: () => Effect.fail("unavailable").pipe(Effect.as(1)),
-        onDone: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        onFailure: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        onDone: { target: Machine.targetless },
+        onFailure: { target: Machine.targetless }
       }),
       Machine.invoke({
         id: "load-timeout",
         after: timerDuration,
-        onDone: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        onDone: { target: Machine.targetless }
       }),
       Machine.invoke({
         id: "updates",
@@ -200,10 +191,7 @@ describe("machine activity metadata", () => {
             invoke: Machine.invoke({
               id,
               after: durationMillis,
-              onDone: Machine.transition({
-                target: (to) => to.none(),
-                resolve: () => undefined
-              })
+              onDone: { target: Machine.targetless }
             })
           }
         })

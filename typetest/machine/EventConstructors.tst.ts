@@ -123,24 +123,20 @@ describe("Machine event constructor collections", () => {
             Machine.invoke({
               id: "load",
               effect: () => Effect.succeed("ready"),
-              onDone: Machine.transition({
-                target: (to) => to.none(),
-                resolve: ({ output }, enqueue) => {
+              onDone: (to) =>
+                to.none().resolve(({ output }, enqueue) => {
                   enqueue.raise(internalEvents.Loaded({ value: output }))
                   return undefined
-                }
-              })
+                })
             }),
             Machine.invoke({
               id: "timeout",
               after: "1 second",
-              onDone: Machine.transition({
-                target: (to) => to.none(),
-                resolve: (_, enqueue) => {
+              onDone: (to) =>
+                to.none().resolve((_, enqueue) => {
                   enqueue.raise(internalEvents.Failed())
                   return undefined
-                }
-              })
+                })
             })
           ]
         }

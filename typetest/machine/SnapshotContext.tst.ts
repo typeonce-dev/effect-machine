@@ -51,34 +51,28 @@ describe("Machine transition snapshot context", () => {
       Root: {
         states: {
           Left: {
-            onDone: Machine.transition({
-              target: (to) => to.local.LeftIdle(),
-              resolve: ({ snapshot, target }) => {
+            onDone: (to) =>
+              to.local.LeftIdle().resolve(({ snapshot, target }) => {
                 expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
                 expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                 expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                 expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                 return target(new LeftIdle({}))
-              }
-            }),
+              }),
             states: {
               LeftIdle: {
-                always: Machine.transition({
-                  target: (to) => to.none(),
-                  resolve: ({ snapshot }) => {
+                always: (to) =>
+                  to.none().resolve(({ snapshot }) => {
                     expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
                     return undefined
-                  }
-                }),
+                  }),
                 on: {
-                  Advance: Machine.transition({
-                    target: (to) => to.local.LeftDone(),
-                    resolve: ({ snapshot, target }) => {
+                  Advance: (to) =>
+                    to.local.LeftDone().resolve(({ snapshot, target }) => {
                       expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
                       expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
                       return target(new LeftDone({}))
-                    }
-                  })
+                    })
                 }
               }
             }
@@ -115,13 +109,11 @@ describe("Machine transition snapshot context", () => {
         },
         states: {
           Routing: {
-            choice: Machine.transition({
-              target: (to) => to.local.Active(),
-              resolve: (context) => {
+            choice: (to) =>
+              to.local.Active().resolve((context) => {
                 expect(context).type.not.toHaveProperty("snapshot")
                 return context.target(new Active({}))
-              }
-            })
+              })
           }
         }
       }

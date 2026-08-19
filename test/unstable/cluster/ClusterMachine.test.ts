@@ -73,9 +73,8 @@ const makeCounter = (state: {
         state.initialEntries += 1
       },
       on: {
-        Increment: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ event, state: current, target }, enqueue) => {
+        Increment: (to) =>
+          to.full.Count().resolve(({ event, state: current, target }, enqueue) => {
             state.actions += 1
             state.inFlight += 1
             state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
@@ -83,33 +82,24 @@ const makeCounter = (state: {
             const value = current.value + event.by
             enqueue.emit(new Changed({ value }))
             return target(new Count({ value }))
-          }
-        }),
-        Fail: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ state: current, target }, enqueue) => {
+          }),
+        Fail: (to) =>
+          to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.emit(new Changed({ value: 999 }))
             return target(current)
-          }
-        }),
-        Finish: Machine.transition({
-          target: (to) => to.full.Done(),
-          resolve: ({ state: current, target }) => target(new Done({ value: current.value }))
-        }),
-        RaiseFromAction: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ state: current, target }, enqueue) => {
+          }),
+        Finish: (to) =>
+          to.full.Done().resolve(({ state: current, target }) => target(new Done({ value: current.value }))),
+        RaiseFromAction: (to) =>
+          to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.raise(new Increment({ by: 1, block: false }))
             return target(current)
-          }
-        }),
-        SpawnFromAction: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ state: current, target }, enqueue) => {
+          }),
+        SpawnFromAction: (to) =>
+          to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.stop(UnsupportedChild)
             return target(current)
-          }
-        })
+          })
       }
     },
     Done: {}
@@ -604,10 +594,7 @@ describe("ClusterMachine", () => {
           invoke: Machine.invoke({
             id: "child",
             effect: () => Effect.void,
-            onDone: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onDone: { target: Machine.targetless }
           })
         }
       })

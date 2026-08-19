@@ -53,14 +53,9 @@ describe("ClusterMachine", () => {
   }).handle({
     Count: {
       on: {
-        Increment: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.by }))
-        }),
-        Reset: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        })
+        Increment: (to) =>
+          to.full.Count().resolve(({ event, state, target }) => target(new Count({ value: state.value + event.by }))),
+        Reset: (to) => to.full.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }
     }
   })

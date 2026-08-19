@@ -136,11 +136,10 @@ const machine = Machine.make({
                                                 states: {
                                                   idle: {
                                                     on: {
-                                                      Advance: Machine.transition({
-                                                        target: (to) => to.local.done(),
-                                                        resolve: ({ event, target }) =>
+                                                      Advance: (to) =>
+                                                        to.local.done().resolve(({ event, target }) =>
                                                           target(new DeepDone({ value: event.value }))
-                                                      })
+                                                        )
                                                     }
                                                   },
                                                   done: {}

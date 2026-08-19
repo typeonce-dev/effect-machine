@@ -31,45 +31,29 @@ const machine = Machine.make({
           const service = yield* PokemonService
           return yield* service.getRandomTeam()
         }),
-      onDone: Machine.transition({
-        target: (to) => to.full.ActiveTeam(),
-        resolve: ({ output, target }) => target.from({ team: output })
-      }),
-      onFailure: Machine.transition({
-        target: (to) => to.full.Failed(),
-        resolve: ({ target }) => target.from()
-      })
+      onDone: (to) => to.full.ActiveTeam().resolve(({ output, target }) => target.from({ team: output })),
+      onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
     })
   },
   ActiveTeam: {
     invoke: [
       Machine.invoke({
         child: SelectionChild,
-        onDone: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        onFailure: Machine.transition({
-          target: (to) => to.full.Failed(),
-          resolve: ({ target }) => target.from()
-        })
+        onDone: { target: Machine.targetless },
+        onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
       }),
       Machine.invoke({
         child: ReplaceChild,
-        onFailure: Machine.transition({
-          target: (to) => to.full.Failed(),
-          resolve: ({ target }) => target.from()
-        })
+        onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
       })
     ],
     on: {
-      ReplaceInTeam: Machine.transition({
-        target: (to) => to.full.ActiveTeam(),
-        resolve: ({ event, target, state }) =>
+      ReplaceInTeam: (to) =>
+        to.full.ActiveTeam().resolve(({ event, target, state }) =>
           target.from({
             team: state.team.map((pokemon) => (pokemon.id === event.id ? event.pokemon : pokemon))
           })
-      })
+        )
     }
   },
   Failed: {}

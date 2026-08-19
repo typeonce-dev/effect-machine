@@ -113,10 +113,7 @@ describe("Machine", () => {
         resolve: ({ target }) => target(new Stable({}))
       }
     })
-    const transition = Machine.transition({
-      target: (to) => to.none(),
-      resolve: () => undefined
-    })
+    const transition = { target: Machine.targetless }
 
     const handlingPing = definition.handle({ Stable: { on: { Ping: transition } } })
     const ignoringPing = definition.handle({ Stable: {} })
@@ -135,12 +132,7 @@ describe("Machine", () => {
       class Stable extends Schema.TaggedClass<Stable>("Stable")("Stable", {}) {}
       class Ping extends Schema.TaggedClass<Ping>("Ping")("Ping", {}) {}
       const states = Machine.states({ Stable })
-      const transition = Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined,
-        reenter: false
-      })
-      const on: any = { Ping: transition }
+      let captures = 0
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
@@ -148,13 +140,18 @@ describe("Machine", () => {
           target: (to) => to.Stable(),
           resolve: ({ target }) => target(new Stable({}))
         }
-      }).handle({ Stable: { on } })
+      }).handle({
+        Stable: {
+          on: {
+            Ping: (to) => {
+              captures++
+              return to.none()
+            }
+          }
+        }
+      })
 
-      delete on.Ping
-      ;(transition as any).reenter = true
-      ;(transition as any).target = () => {
-        throw new Error("captured transition unexpectedly re-evaluated its target selector")
-      }
+      assert.strictEqual(captures, 1)
 
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "Stable",
@@ -177,6 +174,55 @@ describe("Machine", () => {
       assert.deepStrictEqual(step.entryPaths, [])
     }))
 
+  it.effect("uses a bare selected target's default construction", () =>
+    Effect.gen(function*() {
+      class Idle extends Schema.TaggedClass<Idle>("BareTargetIdle")("Idle", {}) {}
+      class Done extends Schema.TaggedClass<Done>("BareTargetDone")("Done", {}) {}
+      class Finish extends Schema.TaggedClass<Finish>("BareTargetFinish")("Finish", {}) {}
+      const machine = Machine.make({
+        states: { Idle, Done },
+        events: Machine.events(Finish),
+        initial: {
+          target: (to) => to.Idle(),
+          resolve: ({ target }) => target.from()
+        }
+      }).handle({
+        Idle: { on: { Finish: (to) => to.full.Done() } },
+        Done: {}
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const planned = yield* Machine.plan(machine, initial.state, new Finish({}))
+
+      assert.deepStrictEqual(planned.next, { path: "Done", value: new Done({}) })
+      assert.deepStrictEqual(planned.microsteps[0]?.exitPaths, ["Idle"])
+      assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Done"])
+    }))
+
+  it.effect("reenters a selected target without requiring a resolver", () =>
+    Effect.gen(function*() {
+      class Stable extends Schema.TaggedClass<Stable>("ResolverFreeReentryStable")("Stable", {}) {}
+      class Restart extends Schema.TaggedClass<Restart>("ResolverFreeReentryRestart")("Restart", {}) {}
+      const machine = Machine.make({
+        states: { Stable },
+        events: Machine.events(Restart),
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target.from()
+        }
+      }).handle({
+        Stable: { on: { Restart: (to) => to.none().reenter() } }
+      })
+
+      assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.reenter, true)
+      const initial = yield* Machine.planInitial(machine)
+      const planned = yield* Machine.plan(machine, initial.state, new Restart({}))
+
+      assert.deepStrictEqual(planned.next, initial.state)
+      assert.deepStrictEqual(planned.microsteps[0]?.exitPaths, ["Stable"])
+      assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Stable"])
+    }))
+
   it.effect("captures named branches once with stable semantic keys", () =>
     Effect.gen(function*() {
       class Stable extends Schema.TaggedClass<Stable>("NamedBranchStable")("Stable", {}) {}
@@ -195,22 +241,18 @@ describe("Machine", () => {
       const machine = definition.handle({
         Stable: {
           on: {
-            Ping: Machine.transition({
-              branches: (to) => {
-                captures++
-                const captured = {
-                  unchanged: { target: to.none() },
-                  refresh: { title: "Refresh stable state", target: to.full.Stable() }
-                }
-                declarations = captured
-                return captured
-              },
-              resolve: ({ event, select }) =>
+            Ping: (to) => {
+              captures++
+              const captured = {
+                unchanged: { target: to.none() },
+                refresh: { title: "Refresh stable state", target: to.full.Stable() }
+              }
+              declarations = captured
+              return to.branches(captured).resolve(({ event, select }) =>
                 event.route
                   ? select.refresh(new Stable({}))
-                  : select.unchanged(),
-              reenter: true
-            })
+                  : select.unchanged(), { reenter: true })
+            }
           }
         }
       })
@@ -264,10 +306,7 @@ describe("Machine", () => {
       makeDefinition().handle({
         Stable: {
           on: {
-            Ping: Machine.transition({
-              branches,
-              resolve: (() => undefined) as any
-            } as any)
+            Ping: ((to: any) => to.branches(branches(to)).resolve((() => undefined) as any)) as any
           }
         }
       })
@@ -300,17 +339,12 @@ describe("Machine", () => {
       }).handle({
         Stable: {
           on: {
-            Capture: Machine.transition({
-              branches: (to) => ({ unchanged: { target: to.none() } }),
-              resolve: ({ select }) => {
+            Capture: (to) =>
+              to.branches({ unchanged: { target: to.none() } }).resolve(({ select }) => {
                 captured = select.unchanged()
                 return captured as any
-              }
-            }),
-            Reuse: Machine.transition({
-              branches: (to) => ({ unchanged: { target: to.none() } }),
-              resolve: () => captured as any
-            })
+              }),
+            Reuse: (to) => to.branches({ unchanged: { target: to.none() } }).resolve(() => captured as any)
           }
         }
       })
@@ -528,13 +562,11 @@ describe("Machine", () => {
       const machine = definition.handle({
         Submit: {
           on: {
-            Convert: Machine.transition({
-              target: (to) => to.full.RequestSucceeded(),
-              resolve: ({ state, target }) => {
+            Convert: (to) =>
+              to.full.RequestSucceeded().resolve(({ state, target }) => {
                 const { _tag: _, ...fields } = state
                 return target.from(fields)
-              }
-            })
+              })
           }
         }
       })
@@ -562,12 +594,10 @@ describe("Machine", () => {
     }).handle({
       Idle: {
         on: {
-          Submit: Machine.transition({
-            target: (to) => to.full.Loading(),
-            resolve: ({ target }) => {
+          Submit: (to) =>
+            to.full.Loading().resolve(({ target }) => {
               return target(new Loading({ requestId: "request-1" }))
-            }
-          })
+            })
         }
       }
     })
@@ -843,37 +873,18 @@ describe("Machine", () => {
         const machine = definition.handle({
           Active: {
             on: {
-              SetValue: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ event, target }) => target.from({ value: event.value })
-              }),
-              Reset: Machine.transition({
-                target: (to) => to.none(),
-                resolve: (_, enqueue) => {
+              SetValue: (to) => to.full.Active().resolve(({ event, target }) => target.from({ value: event.value })),
+              Reset: (to) =>
+                to.none().resolve((_, enqueue) => {
                   enqueue.raise(internalEvents.Loaded({ value: "loaded" }))
                   return undefined
-                }
-              }),
-              Defaulted: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ event, target }) => target.from({ value: event.label ?? "default-label" })
-              }),
-              Loaded: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ event, target }) => target.from({ value: event.value })
-              }),
-              TimedOut: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ target }) => target.from({ value: "timed-out" })
-              }),
-              Alpha: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ event, target }) => target.from({ value: event.value })
-              }),
-              Beta: Machine.transition({
-                target: (to) => to.full.Active(),
-                resolve: ({ event, target }) => target.from({ value: event.value })
-              })
+                }),
+              Defaulted: (to) =>
+                to.full.Active().resolve(({ event, target }) => target.from({ value: event.label ?? "default-label" })),
+              Loaded: (to) => to.full.Active().resolve(({ event, target }) => target.from({ value: event.value })),
+              TimedOut: (to) => to.full.Active().resolve(({ target }) => target.from({ value: "timed-out" })),
+              Alpha: (to) => to.full.Active().resolve(({ event, target }) => target.from({ value: event.value })),
+              Beta: (to) => to.full.Active().resolve(({ event, target }) => target.from({ value: event.value }))
             }
           }
         })
@@ -938,10 +949,7 @@ describe("Machine", () => {
         const machine = definition.handle({
           Idle: {
             on: {
-              Submit: Machine.transition({
-                target: (to) => to.none(),
-                resolve: () => undefined
-              })
+              Submit: { target: Machine.targetless }
             }
           }
         })
@@ -996,20 +1004,14 @@ describe("Machine", () => {
             invoke: Machine.invoke({
               id: "load",
               effect: () => Deferred.await(release),
-              onDone: Machine.transition({
-                target: (to) => to.full.Waiting(),
-                resolve: ({ target }) => target.from()
-              })
+              onDone: (to) => to.full.Waiting().resolve(({ target }) => target.from())
             })
           },
           Waiting: {
             invoke: Machine.invoke({
               id: "timeout",
               after: "1 second",
-              onDone: Machine.transition({
-                target: (to) => to.full.Done(),
-                resolve: ({ target }) => target.from()
-              })
+              onDone: (to) => to.full.Done().resolve(({ target }) => target.from())
             })
           },
           Done: {}
@@ -1055,10 +1057,7 @@ describe("Machine", () => {
         }).handle({
           Idle: {
             on: {
-              Submit: Machine.transition({
-                target: (to) => to.none(),
-                resolve: () => undefined
-              })
+              Submit: { target: Machine.targetless }
             }
           }
         })
@@ -1119,10 +1118,7 @@ describe("Machine", () => {
         }).handle({
           Idle: {
             on: {
-              Submit: Machine.transition({
-                target: (to) => to.full.Done(),
-                resolve: ({ event, target }) => target.from({ requestId: event.requestId })
-              })
+              Submit: (to) => to.full.Done().resolve(({ event, target }) => target.from({ requestId: event.requestId }))
             }
           },
           Done: {}
@@ -1222,27 +1218,15 @@ describe("Machine", () => {
             states: {
               Idle: {
                 on: {
-                  Local: Machine.transition({
-                    target: (to) => to.local.Running(),
-                    resolve: ({ target }) => target.from()
-                  }),
-                  LocalWith: Machine.transition({
-                    target: (to) => to.local.Running(),
-                    resolve: ({ target }) => target.from()
-                  }),
-                  Branch: Machine.transition({
-                    target: (to) => to.branch.Flow.Nested(),
-                    resolve: ({ target }) => target.from((nested) => nested.NestedIdle.from())
-                  }),
-                  Full: Machine.transition({
-                    target: (to) => to.full.Flow(),
-                    resolve: ({ target }) =>
+                  Local: (to) => to.local.Running().resolve(({ target }) => target.from()),
+                  LocalWith: (to) => to.local.Running().resolve(({ target }) => target.from()),
+                  Branch: (to) =>
+                    to.branch.Flow.Nested().resolve(({ target }) => target.from((nested) => nested.NestedIdle.from())),
+                  Full: (to) =>
+                    to.full.Flow().resolve(({ target }) =>
                       target.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from()))
-                  }),
-                  Finish: Machine.transition({
-                    target: (to) => to.local.Done(),
-                    resolve: ({ target }) => target.from()
-                  })
+                    ),
+                  Finish: (to) => to.local.Done().resolve(({ target }) => target.from())
                 }
               },
               Running: {},
@@ -1385,10 +1369,7 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.NonEmptyLoading(),
-                resolve: ({ target }) => target.from({ requestId: "" })
-              })
+              NonEmptySubmit: (to) => to.full.NonEmptyLoading().resolve(({ target }) => target.from({ requestId: "" }))
             }
           }
         })
@@ -1443,9 +1424,8 @@ describe("Machine", () => {
         }).handle({
           idle: {
             on: {
-              Submit: Machine.transition({
-                target: (to) => to.full.fulfillment(),
-                resolve: ({ event, target }) =>
+              Submit: (to) =>
+                to.full.fulfillment().resolve(({ event, target }) =>
                   target.from(
                     { id: event.value },
                     (fulfillment) =>
@@ -1459,7 +1439,7 @@ describe("Machine", () => {
                           (shipping) => shipping.quoted.from({ quoteId: event.value })
                         )
                   )
-              })
+                )
             }
           }
         })
@@ -1515,14 +1495,13 @@ describe("Machine", () => {
             states: {
               entering: {
                 on: {
-                  Submit: Machine.transition({
-                    target: (to) => to.branch.payment(),
-                    resolve: ({ event, target }) =>
+                  Submit: (to) =>
+                    to.branch.payment().resolve(({ event, target }) =>
                       target.from(
                         { id: "payment-2" },
                         (payment) => payment.authorized.from({ code: event.value })
                       )
-                  })
+                    )
                 }
               }
             }
@@ -1572,9 +1551,8 @@ describe("Machine", () => {
             states: {
               idle: {
                 on: {
-                  Submit: Machine.transition({
-                    target: (to) => to.branch.workflow(),
-                    resolve: ({ event, target }) =>
+                  Submit: (to) =>
+                    to.branch.workflow().resolve(({ event, target }) =>
                       target.from(
                         { id: "workflow-2" },
                         (workflow) =>
@@ -1583,7 +1561,7 @@ describe("Machine", () => {
                             (checkout) => checkout.quoted.from({ quoteId: event.value })
                           )
                       )
-                  })
+                    )
                 }
               }
             }
@@ -1653,10 +1631,7 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.NonEmptyIdle(),
-                resolve: ({ state, target }) => target(state)
-              })
+              NonEmptySubmit: (to) => to.full.NonEmptyIdle().resolve(({ state, target }) => target(state))
             }
           }
         })
@@ -1685,10 +1660,7 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.NonEmptyIdle(),
-                resolve: ({ state, target }) => target(state)
-              })
+              NonEmptySubmit: (to) => to.full.NonEmptyIdle().resolve(({ state, target }) => target(state))
             }
           }
         })
@@ -1726,10 +1698,10 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.NonEmptyLoading(),
-                resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyLoading", requestId: "" }))
-              })
+              NonEmptySubmit: (to) =>
+                to.full.NonEmptyLoading().resolve(({ target }) =>
+                  target(unsafeTagged({ _tag: "NonEmptyLoading", requestId: "" }))
+                )
             }
           }
         })
@@ -1758,10 +1730,10 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.NonEmptyIdle(),
-                resolve: ({ target }) => target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
-              })
+              NonEmptySubmit: (to) =>
+                to.full.NonEmptyIdle().resolve(({ target }) =>
+                  target(unsafeTagged({ _tag: "NonEmptyIdle", userId: "" }))
+                )
             }
           }
         })
@@ -1798,10 +1770,8 @@ describe("Machine", () => {
         }).handle({
           NonEmptyIdle: {
             on: {
-              NonEmptySubmit: Machine.transition({
-                target: (to) => to.full.done(),
-                resolve: ({ event, target }) => target(new NonEmptyDone({ requestId: event.value }))
-              })
+              NonEmptySubmit: (to) =>
+                to.full.done().resolve(({ event, target }) => target(new NonEmptyDone({ requestId: event.value })))
             }
           },
           done: {
@@ -2191,11 +2161,10 @@ describe("Machine", () => {
       }).handle({
         idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.loading(),
-              resolve: ({ event, state, target }) =>
+            Submit: (to) =>
+              to.full.loading().resolve(({ event, state, target }) =>
                 target(new Loading({ requestId: `${state.userId}:${event.value}` }))
-            })
+              )
           }
         }
       })
@@ -2228,18 +2197,12 @@ describe("Machine", () => {
       }).handle({
         a: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.b(),
-              resolve: ({ event, target }) => target(new Duplicate({ value: event.value }))
-            })
+            Submit: (to) => to.full.b().resolve(({ event, target }) => target(new Duplicate({ value: event.value })))
           }
         },
         b: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.full.a(),
-              resolve: ({ target }) => target(new Duplicate({ value: "reset" }))
-            })
+            Reset: (to) => to.full.a().resolve(({ target }) => target(new Duplicate({ value: "reset" })))
           }
         }
       })
@@ -2277,10 +2240,7 @@ describe("Machine", () => {
       }).handle({
         a: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.b(),
-              resolve: ({ event, target }) => target(new Duplicate({ value: event.value }))
-            })
+            Submit: (to) => to.full.b().resolve(({ event, target }) => target(new Duplicate({ value: event.value })))
           }
         }
       })
@@ -2315,10 +2275,8 @@ describe("Machine", () => {
       }).handle({
         idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.success(),
-              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
-            })
+            Submit: (to) =>
+              to.full.success().resolve(({ event, target }) => target(new Success({ requestId: event.value })))
           }
         }
       })
@@ -2366,22 +2324,17 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Authorize: Machine.transition({
-              target: (to) => to.full.failed(),
-              resolve: ({ target }) => target(new Failed({ message: "parent" }))
-            })
+            Authorize: (to) => to.full.failed().resolve(({ target }) => target(new Failed({ message: "parent" })))
           },
           states: {
             entering: {
               on: {
-                Authorize: Machine.transition({
-                  target: (to) => to.local.authorized(),
-                  resolve: ({ event, containingState, ancestors, target }) => {
+                Authorize: (to) =>
+                  to.local.authorized().resolve(({ event, containingState, ancestors, target }) => {
                     assert.deepStrictEqual(containingState, payment)
                     assert.deepStrictEqual(ancestors, { payment })
                     return target(new AuthorizedPayment({ code: event.code }))
-                  }
-                })
+                  })
               }
             }
           }
@@ -2430,29 +2383,23 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Authorize: Machine.transition({
-              target: (to) => to.full.failed(),
-              resolve: ({ target }) => target(new Failed({ message: "parent" }))
-            })
+            Authorize: (to) => to.full.failed().resolve(({ target }) => target(new Failed({ message: "parent" })))
           },
           states: {
             entering: {
               on: {
-                Authorize: Machine.transition({
-                  declinable: true,
-                  branches: (to) => ({
+                Authorize: (to) =>
+                  to.branches({
                     authorize: { target: to.local.authorized() },
                     consume: { target: to.none() }
-                  }),
-                  resolve: ({ event, select, decline }, enqueue) => {
+                  }).resolve(({ event, select, decline }, enqueue) => {
                     if (event.code === "child") {
                       return select.authorize(new AuthorizedPayment({ code: event.code }))
                     }
                     if (event.code === "consume") return select.consume()
                     enqueue.emit(new Notice({}))
                     return decline()
-                  }
-                })
+                  }, { declinable: true })
               }
             }
           }
@@ -2505,17 +2452,11 @@ describe("Machine", () => {
         }
       }).handle({
         workflow: {
-          always: Machine.transition({
-            target: (to) => to.full.finished(),
-            resolve: ({ target }) => target(new Finished({}))
-          }),
+          always: (to) => to.full.finished().resolve(({ target }) => target(new Finished({}))),
           states: {
             waiting: {
-              always: Machine.transition({
-                declinable: true,
-                target: (to) => to.none(),
-                resolve: ({ state, decline }) => state.ready ? undefined : decline()
-              })
+              always: (to) =>
+                to.none().resolve(({ state, decline }) => state.ready ? undefined : decline(), { declinable: true })
             }
           }
         }
@@ -2541,11 +2482,7 @@ describe("Machine", () => {
       }).handle({
         Stable: {
           on: {
-            Ping: Machine.transition({
-              declinable: true,
-              target: (to) => to.none(),
-              resolve: ({ decline }) => decline()
-            })
+            Ping: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true })
           }
         }
       })
@@ -2581,11 +2518,7 @@ describe("Machine", () => {
         }
       }).handle({
         workflow: {
-          onDone: Machine.transition({
-            declinable: true,
-            target: (to) => to.full.finished(),
-            resolve: ({ decline }) => decline()
-          }),
+          onDone: (to) => to.full.finished().resolve(({ decline }) => decline(), { declinable: true }),
           states: {
             complete: { output: () => "complete" }
           }
@@ -2626,31 +2559,24 @@ describe("Machine", () => {
       }).handle({
         root: {
           on: {
-            Ping: Machine.transition({
-              target: (to) => to.full.finished(),
-              resolve: ({ target }) => {
+            Ping: (to) =>
+              to.full.finished().resolve(({ target }) => {
                 parentCalls++
                 return target(new Finished({}))
-              }
-            })
+              })
           },
           states: {
             left: {
               on: {
-                Ping: Machine.transition({
-                  declinable: true,
-                  target: (to) => to.none(),
-                  resolve: ({ decline }) => decline()
-                })
+                Ping: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true })
               }
             },
             right: {
               on: {
-                Ping: Machine.transition({
-                  declinable: true,
-                  target: (to) => to.none(),
-                  resolve: ({ event, decline }) => event.handleRight ? undefined : decline()
-                })
+                Ping: (to) =>
+                  to.none().resolve(({ event, decline }) => event.handleRight ? undefined : decline(), {
+                    declinable: true
+                  })
               }
             }
           }
@@ -2704,18 +2630,15 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.full.failed(),
-              resolve: ({ target }) => target(new Failed({ message: "reset" }))
-            })
+            Reset: (to) => to.full.failed().resolve(({ target }) => target(new Failed({ message: "reset" })))
           },
           states: {
             entering: {
               on: {
-                Authorize: Machine.transition({
-                  target: (to) => to.local.authorized(),
-                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
-                })
+                Authorize: (to) =>
+                  to.local.authorized().resolve(({ event, target }) =>
+                    target(new AuthorizedPayment({ code: event.code }))
+                  )
               }
             },
             authorized: {
@@ -2774,10 +2697,7 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.full.idle(),
-              resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-            })
+            Reset: (to) => to.full.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
           }
         }
       })
@@ -2833,9 +2753,8 @@ describe("Machine", () => {
       }).handle({
         idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.fulfillment(),
-              resolve: ({ event, target }) =>
+            Submit: (to) =>
+              to.full.fulfillment().resolve(({ event, target }) =>
                 target(
                   new Fulfillment({ id: event.value }),
                   (fulfillment) =>
@@ -2849,7 +2768,7 @@ describe("Machine", () => {
                         (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
                       )
                 )
-            })
+              )
           }
         }
       })
@@ -2937,9 +2856,8 @@ describe("Machine", () => {
           states: {
             idle: {
               on: {
-                Submit: Machine.transition({
-                  target: (to) => to.local.fulfillment(),
-                  resolve: ({ event, target }) =>
+                Submit: (to) =>
+                  to.local.fulfillment().resolve(({ event, target }) =>
                     target(
                       new Fulfillment({ id: event.value }),
                       (fulfillment) =>
@@ -2953,7 +2871,7 @@ describe("Machine", () => {
                             (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.value }))
                           )
                     )
-                })
+                  )
               }
             }
           }
@@ -3056,9 +2974,8 @@ describe("Machine", () => {
               states: {
                 idle: {
                   on: {
-                    Submit: Machine.transition({
-                      target: (to) => to.branch.app.flow.fulfillment(),
-                      resolve: ({ event, target }) =>
+                    Submit: (to) =>
+                      to.branch.app.flow.fulfillment().resolve(({ event, target }) =>
                         target(
                           new Fulfillment({ id: event.value }),
                           (fulfillment) =>
@@ -3066,7 +2983,7 @@ describe("Machine", () => {
                               .inventory(new Inventory({ warehouse: "warehouse-1" }))
                               .shipping(new Shipping({ address: "Main Street" }))
                         )
-                    })
+                      )
                   }
                 }
               }
@@ -3160,11 +3077,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 }
               }
@@ -3253,15 +3169,14 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.branch.fulfillment.inventory(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.branch.fulfillment.inventory().resolve(({ event, target }) =>
                         target(
                           nextInventory,
                           (inventory) =>
                             inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
                         )
-                    })
+                      )
                   }
                 }
               }
@@ -3351,15 +3266,14 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.branch.fulfillment.inventory(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.branch.fulfillment.inventory().resolve(({ event, target }) =>
                         target(
                           nextInventory,
                           (inventory) =>
                             inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
                         )
-                    })
+                      )
                   }
                 }
               }
@@ -3450,9 +3364,8 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.branch.fulfillment(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.branch.fulfillment().resolve(({ event, target }) =>
                         target(
                           nextFulfillment,
                           (fulfillment) =>
@@ -3462,7 +3375,7 @@ describe("Machine", () => {
                                 inventory.reserved(new InventoryReserved({ reservationId: event.reservationId }))
                             )
                         )
-                    })
+                      )
                   }
                 }
               }
@@ -3545,14 +3458,13 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.branch.payment.shipping(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.branch.payment.shipping().resolve(({ event, target }) =>
                         target(
                           shipping,
                           (shipping) => shipping.quoted(new ShippingQuoted({ quoteId: event.reservationId }))
                         )
-                    })
+                      )
                   }
                 }
               }
@@ -3611,18 +3523,15 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.local.entering(),
-              resolve: ({ target }) => target(new EnteringPayment({ amount: 0 }))
-            })
+            Reset: (to) => to.local.entering().resolve(({ target }) => target(new EnteringPayment({ amount: 0 })))
           },
           states: {
             entering: {
               on: {
-                Authorize: Machine.transition({
-                  target: (to) => to.local.authorized(),
-                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
-                })
+                Authorize: (to) =>
+                  to.local.authorized().resolve(({ event, target }) =>
+                    target(new AuthorizedPayment({ code: event.code }))
+                  )
               }
             },
             authorized: {
@@ -3729,18 +3638,15 @@ describe("Machine", () => {
       }).handle({
         payment: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.full.idle(),
-              resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-            })
+            Reset: (to) => to.full.idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
           },
           states: {
             entering: {
               on: {
-                Authorize: Machine.transition({
-                  target: (to) => to.local.authorized(),
-                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
-                })
+                Authorize: (to) =>
+                  to.local.authorized().resolve(({ event, target }) =>
+                    target(new AuthorizedPayment({ code: event.code }))
+                  )
               }
             },
             authorized: {
@@ -3820,25 +3726,21 @@ describe("Machine", () => {
       }).handle({
         checkout: {
           on: {
-            Reset: Machine.transition({
-              target: (to) => to.full.failed(),
-              resolve: ({ target }) => target(new Failed({ message: "reset" }))
-            })
+            Reset: (to) => to.full.failed().resolve(({ target }) => target(new Failed({ message: "reset" })))
           },
           states: {
             inventory: {
-              onDone: Machine.transition({
-                target: (to) => to.branch.checkout.shipped(),
-                resolve: ({ output, target }) => target(new ShippingQuoted({ quoteId: String(output) }))
-              }),
+              onDone: (to) =>
+                to.branch.checkout.shipped().resolve(({ output, target }) =>
+                  target(new ShippingQuoted({ quoteId: String(output) }))
+                ),
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 },
                 reserved: {
@@ -3933,11 +3835,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 }
               }
@@ -4058,11 +3959,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 },
                 reserved: {
@@ -4074,10 +3974,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.quoted(),
-                      resolve: ({ event, target }) => target(new ShippingQuoted({ quoteId: event.reservationId }))
-                    })
+                    ReserveInventory: (to) =>
+                      to.local.quoted().resolve(({ event, target }) =>
+                        target(new ShippingQuoted({ quoteId: event.reservationId }))
+                      )
                   }
                 },
                 quoted: {
@@ -4203,11 +4103,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 },
                 reserved: {
@@ -4219,10 +4118,8 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    Resolve: Machine.transition({
-                      target: (to) => to.local.quoted(),
-                      resolve: ({ target }) => target(new ShippingQuoted({ quoteId: "quote-1" }))
-                    })
+                    Resolve: (to) =>
+                      to.local.quoted().resolve(({ target }) => target(new ShippingQuoted({ quoteId: "quote-1" })))
                   }
                 },
                 quoted: {
@@ -4334,11 +4231,10 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }) =>
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }) =>
                         target(new InventoryReserved({ reservationId: event.reservationId }))
-                    })
+                      )
                   }
                 }
               }
@@ -4347,10 +4243,10 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.quoted(),
-                      resolve: ({ event, target }) => target(new ShippingQuoted({ quoteId: event.reservationId }))
-                    })
+                    ReserveInventory: (to) =>
+                      to.local.quoted().resolve(({ event, target }) =>
+                        target(new ShippingQuoted({ quoteId: event.reservationId }))
+                      )
                   }
                 }
               }
@@ -4447,17 +4343,15 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.local.reserved(),
-                      resolve: ({ event, target }, enqueue) => {
+                    ReserveInventory: (to) =>
+                      to.local.reserved().resolve(({ event, target }, enqueue) => {
                         enqueue.raise(new Resolve({}))
                         return target(
                           new InventoryReserved({
                             reservationId: event.reservationId
                           })
                         )
-                      }
-                    })
+                      })
                   }
                 }
               }
@@ -4466,10 +4360,8 @@ describe("Machine", () => {
               states: {
                 quoting: {
                   on: {
-                    Resolve: Machine.transition({
-                      target: (to) => to.local.quoted(),
-                      resolve: ({ target }) => target(new ShippingQuoted({ quoteId: "raised" }))
-                    })
+                    Resolve: (to) =>
+                      to.local.quoted().resolve(({ target }) => target(new ShippingQuoted({ quoteId: "raised" })))
                   }
                 }
               }
@@ -4531,10 +4423,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         }
       })
@@ -4565,18 +4454,12 @@ describe("Machine", () => {
     }).handle({
       Idle: {
         on: {
-          Submit: Machine.transition({
-            target: (to) => to.full.Loading(),
-            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-          })
+          Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
         }
       },
       Loading: {
         on: {
-          Reset: Machine.transition({
-            target: (to) => to.full.Idle(),
-            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-          })
+          Reset: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
         }
       }
     })
@@ -4603,10 +4486,7 @@ describe("Machine", () => {
     }).handle({
       Idle: {
         on: {
-          Submit: Machine.transition({
-            target: (to) => to.full.Success(),
-            resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-          })
+          Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
         }
       },
       Success: {}
@@ -4631,10 +4511,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
           }
         },
         Success: {
@@ -4667,10 +4544,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
           }
         },
         Success: {
@@ -4770,10 +4644,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
           }
         },
         Success: {}
@@ -4810,14 +4681,8 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            }),
-            Reset: Machine.transition({
-              target: (to) => to.full.Idle(),
-              resolve: ({ target }) => target(new Idle({ userId: "user-2" }))
-            })
+            Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" }))),
+            Reset: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "user-2" })))
           }
         },
         Success: {}
@@ -4851,10 +4716,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         }
       })
@@ -4885,10 +4747,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         }
       })
@@ -4944,10 +4803,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            Submit: { target: Machine.targetless }
           }
         }
       })
@@ -4973,10 +4829,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         }
       })
@@ -5023,10 +4876,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" })))
           }
         },
         Success: {
@@ -5064,10 +4914,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         }
       })
@@ -5095,20 +4942,15 @@ describe("Machine", () => {
       const machine = definition.handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
-          invoke: definition.invoke({
+          invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.succeed("done:request-1"),
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ requestId: output }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ requestId: output })))
           })
         },
         Success: {
@@ -5146,20 +4988,15 @@ describe("Machine", () => {
       const machine = definition.handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
-          invoke: definition.invoke({
+          invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.succeed("done:request-1"),
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ requestId: output }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ requestId: output })))
           })
         },
         Success: {
@@ -5360,10 +5197,8 @@ describe("Machine", () => {
         Loading: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ requestId: output }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ requestId: output })))
           })
         },
         Success: { output: ({ state }) => state.requestId }
@@ -5498,20 +5333,15 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.fail(error),
-            onFailure: Machine.transition({
-              target: (to) => to.full.Failed(),
-              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
-            })
+            onFailure: (to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
           })
         },
         Failed: {
@@ -5548,20 +5378,15 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.succeed("loaded"),
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ requestId: output }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ requestId: output })))
           })
         },
         Success: {
@@ -5600,16 +5425,11 @@ describe("Machine", () => {
                     Effect.andThen(Effect.never)
                   )
             }),
-            onFailure: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onFailure: { target: Machine.targetless }
           }),
           on: {
-            RequestSucceeded: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
-            })
+            RequestSucceeded: (to) =>
+              to.full.Success().resolve(({ event, target }) => target(new Success({ requestId: event.value })))
           }
         },
         Success: {
@@ -5636,10 +5456,8 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            RequestSucceeded: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
-            })
+            RequestSucceeded: (to) =>
+              to.full.Success().resolve(({ event, target }) => target(new Success({ requestId: event.value })))
           }
         },
         Loading: {
@@ -5656,16 +5474,10 @@ describe("Machine", () => {
                     Effect.onInterrupt(() => sendTo(parent, new RequestSucceeded({ value: "stale" })))
                   )
             }),
-            onFailure: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onFailure: { target: Machine.targetless }
           }),
           on: {
-            Resolve: Machine.transition({
-              target: (to) => to.full.Idle(),
-              resolve: ({ target }) => target(new Idle({ userId: "resolved" }))
-            })
+            Resolve: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "resolved" })))
           }
         },
         Success: {
@@ -5705,10 +5517,8 @@ describe("Machine", () => {
           invoke: Machine.invoke({
             id: "request",
             effect: () => Effect.fail(failure),
-            onFailure: Machine.transition({
-              target: (to) => to.full.Failed(),
-              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
-            })
+            onFailure: (to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
           })
         },
         Failed: {
@@ -5739,10 +5549,8 @@ describe("Machine", () => {
           invoke: Machine.invoke({
             id: "request",
             effect: () => requiredMessage,
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ requestId: output }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ requestId: output })))
           })
         },
         Success: {
@@ -5775,10 +5583,7 @@ describe("Machine", () => {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 hour",
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "timeout" }))
-            })
+            onDone: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "timeout" })))
           })
         },
         Success: {
@@ -5820,17 +5625,14 @@ describe("Machine", () => {
           Machine.Machine.InputEvents<typeof definition>,
           Machine.Machine.ParentEvents<typeof definition>
         >
-      > = Machine.transition({
-        target: (to) => to.full.Success(),
-        resolve: ({ id, snapshot, target }) => target(new Success({ requestId: `${id}:${snapshot.state}` }))
-      })
+      > = (to) =>
+        to.full.Success().resolve(({ id, snapshot, target }) =>
+          target(new Success({ requestId: `${id}:${snapshot.state}` }))
+        )
       const machine = definition.handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
@@ -5876,10 +5678,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
@@ -5934,23 +5733,19 @@ describe("Machine", () => {
           Machine.Machine.InputEvents<typeof definition>,
           Machine.Machine.ParentEvents<typeof definition>
         >
-      > = Machine.transition({
-        branches: (to) => ({
+      > = (to) =>
+        to.branches({
           ready: { title: "Request is ready", target: to.full.Success() },
           unchanged: { target: to.none() }
-        }),
-        resolve: ({ snapshot, select }) =>
+        }).resolve(({ snapshot, select }) =>
           snapshot.state === "ready"
             ? select.ready(new Success({ requestId: snapshot.state }))
             : select.unchanged()
-      })
+        )
       const machine = definition.handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
@@ -6012,10 +5807,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
@@ -6026,10 +5818,7 @@ describe("Machine", () => {
               initial: "pending",
               run: () => Effect.void
             }),
-            onDone: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onDone: { target: Machine.targetless }
           })
         }
       })
@@ -6076,10 +5865,7 @@ describe("Machine", () => {
       }).handle({
         Idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
@@ -6089,14 +5875,9 @@ describe("Machine", () => {
             logic: childLogic
           }),
           on: {
-            Resolve: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ target }) => target(new Success({ requestId: "request-1" }))
-            }),
-            RequestSucceeded: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ event, target }) => target(new Success({ requestId: event.value }))
-            })
+            Resolve: (to) => to.full.Success().resolve(({ target }) => target(new Success({ requestId: "request-1" }))),
+            RequestSucceeded: (to) =>
+              to.full.Success().resolve(({ event, target }) => target(new Success({ requestId: event.value })))
           }
         },
         Success: {
@@ -6194,10 +5975,10 @@ describe("Machine", () => {
                 logic: makeInvokeLogic("entering", enteringStarted)
               }),
               on: {
-                Authorize: Machine.transition({
-                  target: (to) => to.local.authorized(),
-                  resolve: ({ event, target }) => target(new AuthorizedPayment({ code: event.code }))
-                })
+                Authorize: (to) =>
+                  to.local.authorized().resolve(({ event, target }) =>
+                    target(new AuthorizedPayment({ code: event.code }))
+                  )
               }
             },
             authorized: {
@@ -6330,10 +6111,8 @@ describe("Machine", () => {
               states: {
                 checking: {
                   on: {
-                    ReserveInventory: Machine.transition({
-                      target: (to) => to.full.success(),
-                      resolve: ({ target }) => target(new Success({ requestId: "done" }))
-                    })
+                    ReserveInventory: (to) =>
+                      to.full.success().resolve(({ target }) => target(new Success({ requestId: "done" })))
                   }
                 }
               }
@@ -6450,22 +6229,13 @@ describe("Machine", () => {
         }
       }).handle({
         Idle: {
-          always: Machine.transition({
-            target: (to) => to.full.Loading(),
-            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-          }),
+          always: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" }))),
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-            })
+            Submit: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
           }
         },
         Loading: {
-          always: Machine.transition({
-            target: (to) => to.full.Idle(),
-            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-          })
+          always: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
         }
       })
 
@@ -6491,16 +6261,10 @@ describe("Machine", () => {
         }
       }).handle({
         Idle: {
-          always: Machine.transition({
-            target: (to) => to.full.Loading(),
-            resolve: ({ target }) => target(new Loading({ requestId: "request-1" }))
-          })
+          always: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({ requestId: "request-1" })))
         },
         Loading: {
-          always: Machine.transition({
-            target: (to) => to.full.Idle(),
-            resolve: ({ target }) => target(new Idle({ userId: "user-1" }))
-          })
+          always: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
         }
       })
 
@@ -6541,25 +6305,23 @@ describe("Machine", () => {
       }).handle({
         idle: {
           on: {
-            Submit: Machine.transition({
-              target: (to) => to.full.flow(),
-              resolve: ({ target }) =>
+            Submit: (to) =>
+              to.full.flow().resolve(({ target }) =>
                 target(
                   new Loading({ requestId: "request-1" }),
                   (flow) => flow.done(new Success({ requestId: "request-1" }))
                 )
-            })
+              )
           }
         },
         flow: {
-          onDone: Machine.transition({
-            target: (to) => to.full.flow(),
-            resolve: ({ state, target }) =>
+          onDone: (to) =>
+            to.full.flow().resolve(({ state, target }) =>
               target(
                 state,
                 (flow) => flow.done(new Success({ requestId: state.requestId }))
               )
-          })
+            )
         }
       })
 
@@ -6620,18 +6382,18 @@ describe("Machine", () => {
         states: {
           left: {
             on: {
-              AdvanceCounters: Machine.transition({
-                target: (to) => to.branch.running.left(),
-                resolve: ({ state, target }) => target(new LeftCounter({ value: state.value + 1 }))
-              })
+              AdvanceCounters: (to) =>
+                to.branch.running.left().resolve(({ state, target }) =>
+                  target(new LeftCounter({ value: state.value + 1 }))
+                )
             }
           },
           right: {
             on: {
-              AdvanceCounters: Machine.transition({
-                target: (to) => to.branch.running.right(),
-                resolve: ({ state, target }) => target(new RightCounter({ value: state.value + 1 }))
-              })
+              AdvanceCounters: (to) =>
+                to.branch.running.right().resolve(({ state, target }) =>
+                  target(new RightCounter({ value: state.value + 1 }))
+                )
             }
           }
         }
@@ -6650,10 +6412,7 @@ describe("Machine", () => {
     }).handle({
       ConcurrentIdle: {
         on: {
-          ConcurrentPing: Machine.transition({
-            target: (to) => to.none(),
-            resolve: () => undefined
-          })
+          ConcurrentPing: { target: Machine.targetless }
         }
       }
     })

@@ -12,17 +12,12 @@ const complete = machine.handle({
   Idle: {
     entry: () => {},
     on: {
-      Start: Machine.transition({
-        target: (to) => to.full.Done(),
-        resolve: ({ event, target }, enqueue) => {
+      Start: (to) =>
+        to.full.Done().resolve(({ event, target }, enqueue) => {
           enqueue.emit(Notice.make({ value: event.value }))
           return target(Done.make({ value: event.value }))
-        }
-      }),
-      Loaded: Machine.transition({
-        target: (to) => to.full.Done(),
-        resolve: ({ event, target }) => target(Done.make({ value: event.value }))
-      })
+        }),
+      Loaded: (to) => to.full.Done().resolve(({ event, target }) => target(Done.make({ value: event.value })))
     }
   },
   Done: {

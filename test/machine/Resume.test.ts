@@ -196,10 +196,7 @@ describe("Machine.resume", () => {
                 states: {
                   A: {
                     on: {
-                      Advance: Machine.transition({
-                        target: (to) => to.local.B(),
-                        resolve: ({ target }) => target(new LeftB({}))
-                      })
+                      Advance: (to) => to.local.B().resolve(({ target }) => target(new LeftB({})))
                     }
                   }
                 }
@@ -208,10 +205,7 @@ describe("Machine.resume", () => {
                 states: {
                   A: {
                     on: {
-                      Advance: Machine.transition({
-                        target: (to) => to.local.B(),
-                        resolve: ({ target }) => target(new RightB({}))
-                      })
+                      Advance: (to) => to.local.B().resolve(({ target }) => target(new RightB({})))
                     }
                   }
                 }
@@ -263,10 +257,7 @@ describe("Machine.resume", () => {
       }).handle({
         Count: {
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.Done(),
-              resolve: ({ target }) => target(new Done({ value: 9 }))
-            })
+            Finish: (to) => to.full.Done().resolve(({ target }) => target(new Done({ value: 9 })))
           }
         },
         Done: { output: ({ state }) => state.value }
@@ -309,10 +300,7 @@ describe("Machine.resume", () => {
       })
         .handle({
           Flow: {
-            onDone: Machine.transition({
-              target: (to) => to.full.Next(),
-              resolve: ({ target }) => target(new Next({}))
-            })
+            onDone: (to) => to.full.Next().resolve(({ target }) => target(new Next({})))
           },
           Next: {}
         })
@@ -340,10 +328,7 @@ describe("Machine.resume", () => {
         }
       }).handle({
         A: {
-          always: Machine.transition({
-            target: (to) => to.full.B(),
-            resolve: ({ target }) => target(new B({}))
-          })
+          always: (to) => to.full.B().resolve(({ target }) => target(new B({})))
         },
         B: {}
       })
@@ -375,16 +360,10 @@ describe("Machine.resume", () => {
           invoke: Machine.invoke({
             id: "timeout",
             after: "1 second",
-            onDone: Machine.transition({
-              target: (to) => to.full.TimedOut(),
-              resolve: ({ target }) => target(new TimedOut({}))
-            })
+            onDone: (to) => to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
           }),
           on: {
-            Cancel: Machine.transition({
-              target: (to) => to.full.Cancelled(),
-              resolve: ({ target }) => target(new Cancelled({}))
-            })
+            Cancel: (to) => to.full.Cancelled().resolve(({ target }) => target(new Cancelled({})))
           }
         },
         Cancelled: {},
@@ -427,10 +406,7 @@ describe("Machine.resume", () => {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
-            onDone: Machine.transition({
-              target: (to) => to.full.Loaded(),
-              resolve: ({ output, target }) => target(new Loaded({ value: output }))
-            })
+            onDone: (to) => to.full.Loaded().resolve(({ output, target }) => target(new Loaded({ value: output })))
           })
         },
         Loaded: {}
@@ -471,10 +447,8 @@ describe("Machine.resume", () => {
               Ref.update(runs, (n) => n + 1).pipe(
                 Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
               ),
-            onFailure: Machine.transition({
-              target: (to) => to.full.Failed(),
-              resolve: ({ error, target }) => target(new Failed({ message: error.message }))
-            })
+            onFailure: (to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
           })
         },
         Failed: {}
@@ -510,10 +484,8 @@ describe("Machine.resume", () => {
       }).handle({
         ChildIdle: {
           on: {
-            ChildFinish: Machine.transition({
-              target: (to) => to.full.ChildDone(),
-              resolve: ({ state, target }) => target(new ChildDone({ value: state.value + 1 }))
-            })
+            ChildFinish: (to) =>
+              to.full.ChildDone().resolve(({ state, target }) => target(new ChildDone({ value: state.value + 1 })))
           }
         },
         ChildDone: { output: ({ state }) => state.value }
@@ -531,10 +503,8 @@ describe("Machine.resume", () => {
         Parent: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: Machine.transition({
-              target: (to) => to.full.ChildOutput(),
-              resolve: ({ output, target }) => target(new ChildOutput({ value: output }))
-            })
+            onDone: (to) =>
+              to.full.ChildOutput().resolve(({ output, target }) => target(new ChildOutput({ value: output })))
           })
         },
         ChildOutput: {}
@@ -635,10 +605,10 @@ describe("Machine.resume", () => {
       }).handle({
         Count: {
           on: {
-            Add: Machine.transition({
-              target: (to) => to.full.Count(),
-              resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.value }))
-            })
+            Add: (to) =>
+              to.full.Count().resolve(({ event, state, target }) =>
+                target(new Count({ value: state.value + event.value }))
+              )
           }
         }
       })

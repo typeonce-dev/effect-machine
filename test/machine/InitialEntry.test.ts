@@ -48,14 +48,8 @@ const makeMachine = () =>
   }).handle({
     closed: {
       on: {
-        Open: Machine.transition({
-          target: (to) => to.full.opened.initial(),
-          resolve: ({ target }) => target.from({ id: "team-1" })
-        }),
-        OpenInvalid: Machine.transition({
-          target: (to) => to.full.opened.initial(),
-          resolve: ({ target }) => target.from({ id: "" })
-        })
+        Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "team-1" })),
+        OpenInvalid: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "" }))
       }
     },
     opened: {
@@ -90,10 +84,7 @@ const makeParallelMachine = () =>
   }).handle({
     outside: {
       on: {
-        EnterDashboard: Machine.transition({
-          target: (to) => to.full.dashboard.initial(),
-          resolve: ({ target }) => target(new Dashboard({}))
-        })
+        EnterDashboard: (to) => to.full.dashboard.initial().resolve(({ target }) => target(new Dashboard({})))
       }
     },
     dashboard: {
@@ -129,19 +120,13 @@ const makeChoiceMachine = () =>
   }).handle({
     outside: {
       on: {
-        EnterFlow: Machine.transition({
-          target: (to) => to.full.flow.initial(),
-          resolve: ({ target }) => target(new Flow({}))
-        })
+        EnterFlow: (to) => to.full.flow.initial().resolve(({ target }) => target(new Flow({})))
       }
     },
     flow: {
       states: {
         routing: {
-          choice: Machine.transition({
-            target: (to) => to.local.approved(),
-            resolve: ({ target }) => target(new Approved({}))
-          })
+          choice: (to) => to.local.approved().resolve(({ target }) => target(new Approved({})))
         }
       }
     }
@@ -166,10 +151,7 @@ const makeStructuralMachine = () =>
   }).handle({
     outside: {
       on: {
-        EnterFlow: Machine.transition({
-          target: (to) => to.full.group.initial(),
-          resolve: ({ target }) => target.from()
-        })
+        EnterFlow: (to) => to.full.group.initial().resolve(({ target }) => target.from())
       }
     }
   })
@@ -201,14 +183,8 @@ const makeNestedMachine = () =>
       states: {
         closed: {
           on: {
-            OpenLocal: Machine.transition({
-              target: (to) => to.local.opened.initial(),
-              resolve: ({ target }) => target.from({ id: "local" })
-            }),
-            OpenBranch: Machine.transition({
-              target: (to) => to.branch.root.opened.initial(),
-              resolve: ({ target }) => target.from({ id: "branch" })
-            })
+            OpenLocal: (to) => to.local.opened.initial().resolve(({ target }) => target.from({ id: "local" })),
+            OpenBranch: (to) => to.branch.root.opened.initial().resolve(({ target }) => target.from({ id: "branch" }))
           }
         },
         opened: {

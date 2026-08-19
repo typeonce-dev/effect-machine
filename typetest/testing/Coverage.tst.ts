@@ -21,10 +21,7 @@ describe("MachineTest coverage and observed graph", () => {
   }).handle({
     idle: {
       on: {
-        Start: Machine.transition({
-          target: (to) => to.full.done(),
-          resolve: ({ target }) => target(new Done({}))
-        })
+        Start: (to) => to.full.done().resolve(({ target }) => target(new Done({})))
       }
     },
     done: {}

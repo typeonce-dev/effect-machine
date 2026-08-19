@@ -61,21 +61,14 @@ describe("pure planning and managed runtime differential", () => {
       }).handle({
         Count: {
           on: {
-            Cascade: Machine.transition({
-              target: (to) => to.none(),
-              resolve: (_, enqueue) => {
+            Cascade: (to) =>
+              to.none().resolve((_, enqueue) => {
                 enqueue.raise(new Increment({}))
                 return undefined
-              }
-            }),
-            Increment: Machine.transition({
-              target: (to) => to.full.Count(),
-              resolve: ({ state, target }) => target(new Count({ value: state.value + 1 }))
-            }),
-            Finish: Machine.transition({
-              target: (to) => to.full.Done(),
-              resolve: ({ state, target }) => target(new Done({ value: state.value }))
-            })
+              }),
+            Increment: (to) =>
+              to.full.Count().resolve(({ state, target }) => target(new Count({ value: state.value + 1 }))),
+            Finish: (to) => to.full.Done().resolve(({ state, target }) => target(new Done({ value: state.value })))
           }
         },
         Done: { output: ({ state }) => state.value }
@@ -163,43 +156,38 @@ describe("pure planning and managed runtime differential", () => {
       }).handle({
         Running: {
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.Done(),
-              resolve: ({ snapshot, target }) => {
+            Finish: (to) =>
+              to.full.Done().resolve(({ snapshot, target }) => {
                 if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
                 return target(
                   new Done({
                     value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
                   })
                 )
-              }
-            })
+              })
           },
           states: {
             Left: {
               on: {
-                Advance: Machine.transition({
-                  target: (to) => to.branch.Running.Left(),
-                  resolve: ({ state, target }, enqueue) => {
+                Advance: (to) =>
+                  to.branch.Running.Left().resolve(({ state, target }, enqueue) => {
                     enqueue.raise(new Bump({}))
                     return target(new Left({ value: state.value + 1 }))
-                  }
-                })
+                  })
               }
             },
             Right: {
               on: {
-                Advance: Machine.transition({
-                  target: (to) => to.branch.Running.Right(),
-                  resolve: ({ state, target }) => target(new Right({ value: state.value + 10 }))
-                }),
-                Bump: Machine.transition({
-                  target: (to) => to.branch.Running.Right(),
-                  resolve: ({ state, target }) => target(new Right({ value: state.value + 100 }))
-                }),
-                Inspect: Machine.transition({
-                  target: (to) => to.none(),
-                  resolve: (context) => {
+                Advance: (to) =>
+                  to.branch.Running.Right().resolve(({ state, target }) =>
+                    target(new Right({ value: state.value + 10 }))
+                  ),
+                Bump: (to) =>
+                  to.branch.Running.Right().resolve(({ state, target }) =>
+                    target(new Right({ value: state.value + 100 }))
+                  ),
+                Inspect: (to) =>
+                  to.none().resolve((context) => {
                     const { state, containingState, ancestors, snapshot } = context
                     if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
                     const expectedKeys = [
@@ -229,8 +217,7 @@ describe("pure planning and managed runtime differential", () => {
                       right: snapshot.states.Right.value.value
                     })
                     return undefined
-                  }
-                })
+                  })
               }
             }
           }
@@ -478,15 +465,13 @@ describe("pure planning and managed runtime differential", () => {
             enqueue.emit(new Notice({ label: "initial" }))
           },
           on: {
-            Begin: Machine.transition({
-              target: (to) => to.full.Working(),
-              resolve: ({ target }, enqueue) => {
+            Begin: (to) =>
+              to.full.Working().resolve(({ target }, enqueue) => {
                 record("transition:begin")
                 enqueue.emit(new Notice({ label: "transition" }))
                 enqueue.raise(new RaisedOne({}))
                 return target(new Working({}))
-              }
-            })
+              })
           }
         },
         Working: {
@@ -496,22 +481,18 @@ describe("pure planning and managed runtime differential", () => {
             enqueue.raise(new RaisedTwo({}))
           },
           on: {
-            RaisedOne: Machine.transition({
-              target: (to) => to.none(),
-              resolve: (_, enqueue) => {
+            RaisedOne: (to) =>
+              to.none().resolve((_, enqueue) => {
                 record("raised:one")
                 enqueue.emit(new Notice({ label: "raised-one" }))
                 return undefined
-              }
-            }),
-            RaisedTwo: Machine.transition({
-              target: (to) => to.full.Finished(),
-              resolve: ({ target }, enqueue) => {
+              }),
+            RaisedTwo: (to) =>
+              to.full.Finished().resolve(({ target }, enqueue) => {
                 record("raised:two")
                 enqueue.emit(new Notice({ label: "raised-two" }))
                 return target(new Finished({}))
-              }
-            })
+              })
           }
         },
         Finished: {
@@ -596,10 +577,7 @@ describe("pure planning and managed runtime differential", () => {
       }).handle({
         Idle: {
           on: {
-            Go: Machine.transition({
-              target: (to) => to.full.Active(),
-              resolve: ({ target }) => target(new Active({}))
-            })
+            Go: (to) => to.full.Active().resolve(({ target }) => target(new Active({})))
           }
         },
         Active: {}

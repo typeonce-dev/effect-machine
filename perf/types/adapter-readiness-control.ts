@@ -43,10 +43,7 @@ export const machine = Machine.make({
     states: {
       Idle: {},
       Route: {
-        choice: Machine.transition({
-          target: (to) => to.full.Ready(),
-          resolve: ({ target }) => target(Ready.make({}))
-        })
+        choice: (to) => to.full.Ready().resolve(({ target }) => target(Ready.make({})))
       }
     }
   },

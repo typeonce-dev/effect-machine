@@ -128,8 +128,8 @@ its extra control is required:
   logic, and `child` for a complete child
   statechart. `Machine.invoke({...})` preserves owner state and source channels
   across sibling lifecycle handlers. Inside `.handle(...)`, `self` and `parent`
-  use the owning definition's exact public input and `parentEvents` protocols.
-  The bound `definition.invoke({...})` form is equivalent, not required.
+  use the owning definition's exact public input and `parentEvents` protocols;
+  no intermediate definition method is required.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. A logic
   invocation is addressable only when `Machine.invoke` receives that
@@ -244,13 +244,11 @@ in snapshots. They do not have a state value:
 ```ts
 Idle: {
   on: {
-    Start: Machine.transition({
-      target: (to) => to.full.Form.initial(),
-      resolve: ({ state, target }) => {
+    Start: (to) =>
+      to.full.Form.initial().resolve(({ state, target }) => {
         // state: undefined
         return target.from((form) => form.Editing.from())
-      }
-    })
+      })
   }
 }
 
@@ -351,10 +349,7 @@ with `.initial`. This is available on top-level state methods under
 `target.branch`; atomic and final state methods do not expose it:
 
 ```ts
-Open: Machine.transition({
-  target: (to) => to.full.opened.initial(),
-  resolve: ({ target }) => target.from({ teamId: "team-1" })
-})
+Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ teamId: "team-1" }))
 ```
 
 The selected state's own value is passed directly to `initial(value)` or
@@ -431,10 +426,7 @@ checkout: {
 Target it without a value:
 
 ```ts
-Resume: Machine.transition({
-  target: (to) => to.history.checkout.exact(),
-  resolve: ({ target }) => target()
-})
+Resume: (to) => to.history.checkout.exact().resolve(({ target }) => target())
 ```
 
 Deep history restores the complete remembered subtree and its decoded values.
@@ -497,11 +489,16 @@ sets. A `target.full` result with the same active paths can update values withou
 exiting shared states. To force the source to exit and enter again:
 
 ```ts
-Refresh: Machine.transition({
-  target: (to) => to.full.Ready(),
-  reenter: true,
-  resolve: ({ state, target }) => target.from({ value: state.value })
-})
+Refresh: (to) =>
+  to.full.Ready().resolve(({ state, target }) => target.from({ value: state.value }), { reenter: true })
+```
+
+When no resolver is needed, use the selected target directly and append
+`.reenter()` only when restart semantics are intentional:
+
+```ts
+Finish: (to) => to.full.Done()
+Restart: (to) => to.none().reenter()
 ```
 
 Do not use `target.full` merely because it is easiest to discover. Prefer the
@@ -578,16 +575,14 @@ Event, `always`, and `onDone` transition contexts include a fully typed
 microstep, before any selected transition is applied:
 
 ```ts
-BufferReady: Machine.transition({
-  branches: (to) => ({
+BufferReady: (to) =>
+  to.branches({
     online: { target: to.local.Playing() },
     unchanged: { target: to.none() }
-  }),
-  resolve: ({ snapshot, select }) =>
+  }).resolve(({ snapshot, select }) =>
     States.matches(snapshot, "Player.Network.Online")
       ? select.online.from()
       : select.unchanged()
-})
 ```
 
 Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
@@ -622,13 +617,11 @@ When sibling state payloads share fields, destructure away the source
 discriminator and construct the destination through its target builder:
 
 ```ts
-Submit: Machine.transition({
-  target: (to) => to.local.Saving(),
-  resolve: ({ state, target }) => {
+Submit: (to) =>
+  to.local.Saving().resolve(({ state, target }) => {
     const { _tag: _, ...fields } = state
     return target.from({ ...fields, attempt: 1 })
-  }
-})
+  })
 ```
 
 The target schema remains responsible for defaults, transforms, refinements,
@@ -641,21 +634,19 @@ A transition declares every possible branch and resolves the selected target
 synchronously:
 
 ```ts
-Submit: Machine.transition({
-  branches: (to) => ({
+Submit: (to) =>
+  to.branches({
     valid: { target: to.local.Saving() },
     invalid: { target: to.none() }
-  }),
-  resolve: ({ state, select }) => state.valid
+  }).resolve(({ state, select }) => state.valid
     ? select.valid.from({ draft: state.draft })
     : select.invalid()
-})
 ```
 
 Every installed event, `always`, `onDone`, choice, and invoke lifecycle handler
-must use `Machine.transition`. A direct transition declares one `target`. A
-branching transition declares every possible target in a named `branches`
-record, then uses ordinary TypeScript control flow in `resolve` to return one
+receives a bound `to` selector. A direct transition selects one target and calls
+its `resolve` method. A branching transition calls `to.branches` with every
+possible target, then uses ordinary TypeScript control flow in `resolve` to return one
 typed `select` builder. Branch keys are stable testing and inspection identities;
 an optional `title` controls presentation and otherwise defaults to the key.
 Selecting a branch whose target is `to.none()` handles the transition without a
@@ -666,17 +657,14 @@ not enabled. The flag adds a typed `decline()` capability to that resolver and
 permits its opaque result:
 
 ```ts
-Submit: Machine.transition({
-  declinable: true,
-  branches: (to) => ({
+Submit: (to) =>
+  to.branches({
     accepted: { target: to.local.Saving() },
     consumed: { target: to.none() }
-  }),
-  resolve: ({ event, select, decline }) => {
+  }).resolve(({ event, select, decline }) => {
     if (!belongsToThisState(event)) return decline()
     return event.consume ? select.consumed() : select.accepted.from()
-  }
-})
+  }, { declinable: true })
 ```
 
 Declining discards that resolver's enqueue buffer and resumes hierarchical
@@ -701,13 +689,11 @@ enters again while its logical configuration is retained.
 Closed statechart and machine operations use `enqueue`:
 
 ```ts
-Submit: Machine.transition({
-  target: (to) => to.local.Saving(),
-  resolve: ({ target }, enqueue) => {
+Submit: (to) =>
+  to.local.Saving().resolve(({ target }, enqueue) => {
     enqueue.emit(Emissions.SaveRequested())
     return target.from()
-  }
-})
+  })
 ```
 
 Declare emission constructors separately from machine inputs:
@@ -801,15 +787,13 @@ const child = Machine.make({
 }).handle({
   Working: {
     on: {
-      Finish: Machine.transition({
-        target: (to) => to.none(),
-        resolve: ({ parent }, enqueue) => {
+      Finish: (to) =>
+        to.none().resolve(({ parent }, enqueue) => {
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished())
           }
           return undefined
-        }
-      })
+        })
     }
   }
 })
@@ -943,14 +927,9 @@ receive the typed Effect channels and can transition directly:
 invoke: Machine.invoke({
   id: "save",
   effect: () => SaveService.save(draft),
-  onDone: Machine.transition({
-    target: (to) => to.full.Saved(),
-    resolve: ({ output, target }) => target.from({ entry: output })
-  }),
-  onFailure: Machine.transition({
-    target: (to) => to.full.SaveFailed(),
-    resolve: ({ error, target }) => target.from({ message: error.message })
-  })
+  onDone: (to) => to.full.Saved().resolve(({ output, target }) => target.from({ entry: output })),
+  onFailure: (to) =>
+    to.full.SaveFailed().resolve(({ error, target }) => target.from({ message: error.message }))
 })
 ```
 
@@ -980,10 +959,7 @@ invoke: Machine.invoke({
     }
   },
   onDone: { target: Machine.targetless },
-  onFailure: Machine.transition({
-    target: (to) => to.full.Disconnected(),
-    resolve: ({ error, target }) => target.from({ error })
-  })
+  onFailure: (to) => to.full.Disconnected().resolve(({ error, target }) => target.from({ error }))
 })
 ```
 
@@ -994,8 +970,8 @@ Stream. Stream defects and self-interruption fail the owning machine.
 
 The direct `{ target: Machine.targetless, resolve }` shorthand is available
 when a transition only enqueues commands. It is non-reentering and the resolver
-must return `undefined`. Keep `Machine.transition(...)` for full state selection,
-named branches, or reentry.
+must return `undefined`. Use the same fluent `to` selector for full state
+selection, named branches, and reentry.
 
 When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
 `Machine.invoke` infers that owner context and the returned Effect's output,
@@ -1005,14 +981,8 @@ error, and service channels together. No return annotation is needed:
 invoke: Machine.invoke({
   id: "load",
   effect: ({ state }) => LoadService.load(state.userId),
-  onDone: Machine.transition({
-    target: (to) => to.full.Loaded(),
-    resolve: ({ output, target }) => target.from({ user: output })
-  }),
-  onFailure: Machine.transition({
-    target: (to) => to.full.LoadFailed(),
-    resolve: ({ error, target }) => target.from({ error })
-  })
+  onDone: (to) => to.full.Loaded().resolve(({ output, target }) => target.from({ user: output })),
+  onFailure: (to) => to.full.LoadFailed().resolve(({ error, target }) => target.from({ error }))
 })
 ```
 
@@ -1031,28 +1001,23 @@ const machine = Machine.make({
     invoke: Machine.invoke({
       id: "notify-parent",
       effect: () => saveDocument,
-      onDone: Machine.transition({
-        target: (to) => to.none(),
-        resolve: ({ parent, self }, enqueue) => {
+      onDone: (to) =>
+        to.none().resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
           if (parent !== undefined) {
             enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           }
           return undefined
-        }
-      }),
-      onFailure: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+        }),
+      onFailure: (to) => to.none()
     })
   }
 })
 ```
 
-The machine-bound `definition.invoke(...)` form remains equivalent when the
-definition is already named. A direct `invoke: { ... }` object remains available
-when lifecycle handlers do not need source-derived context.
+The standard `Machine.invoke(...)` form retains the owning machine protocols
+even when the definition is named separately. A direct `invoke: { ... }` object
+remains available when lifecycle handlers do not need source-derived context.
 
 A cancellable timer uses the same object:
 
@@ -1060,10 +1025,7 @@ A cancellable timer uses the same object:
 invoke: Machine.invoke({
   id: "clear-status",
   after: "3 seconds",
-  onDone: Machine.transition({
-    target: (to) => to.full.Clear(),
-    resolve: ({ target }) => target()
-  })
+  onDone: (to) => to.full.Clear().resolve(({ target }) => target())
 })
 ```
 
@@ -1090,10 +1052,7 @@ Invoke it from its owning state:
 invoke: Machine.invoke({
   child: Editor,
   input: editorInput,
-  onDone: Machine.transition({
-    target: (to) => to.full.EditorDone(),
-    resolve: ({ output, target }) => target.from({ output })
-  })
+  onDone: (to) => to.full.EditorDone().resolve(({ output, target }) => target.from({ output }))
 })
 ```
 

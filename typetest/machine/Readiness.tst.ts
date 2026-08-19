@@ -164,10 +164,7 @@ describe("executable machine readiness", () => {
         },
         states: {
           Route: {
-            choice: Machine.transition({
-              target: (to) => to.local.Idle(),
-              resolve: ({ target }) => target(new Idle({}))
-            })
+            choice: (to) => to.local.Idle().resolve(({ target }) => target(new Idle({})))
           },
           Done: {
             output: ({ state }) => state.value

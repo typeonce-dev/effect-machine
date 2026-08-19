@@ -28,21 +28,17 @@ describe("machine scheduling", () => {
       }).handle({
         SchedulingActive: {
           on: {
-            StartBurst: Machine.transition({
-              target: (to) => to.full.SchedulingActive(),
-              resolve: ({ state, target }, enqueue) => {
+            StartBurst: (to) =>
+              to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
                 enqueue.raise(new Burst({}))
                 return target(state)
-              }
-            }),
-            Burst: Machine.transition({
-              target: (to) => to.full.SchedulingActive(),
-              resolve: ({ state, target }, enqueue) => {
+              }),
+            Burst: (to) =>
+              to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
                 const count = state.count + 1
                 if (count < burstSize) enqueue.raise(new Burst({}))
                 return target(new SchedulingActive({ count }))
-              }
-            })
+              })
           }
         }
       })

@@ -29,14 +29,14 @@ const makeAccountMachine = (withdraw: (balance: number, amount: number) => numbe
   }).handle({
     account: {
       on: {
-        Withdraw: Machine.transition({
-          target: (to) => to.full.account(),
-          resolve: ({ event, state, target }) => target(new Account({ balance: withdraw(state.balance, event.amount) }))
-        }),
-        Deposit: Machine.transition({
-          target: (to) => to.full.account(),
-          resolve: ({ event, state, target }) => target(new Account({ balance: state.balance + event.amount }))
-        })
+        Withdraw: (to) =>
+          to.full.account().resolve(({ event, state, target }) =>
+            target(new Account({ balance: withdraw(state.balance, event.amount) }))
+          ),
+        Deposit: (to) =>
+          to.full.account().resolve(({ event, state, target }) =>
+            target(new Account({ balance: state.balance + event.amount }))
+          )
       }
     }
   })
