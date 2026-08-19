@@ -1,5 +1,55 @@
 # @typeonce/effect-machine
 
+## 0.17.0
+
+### Minor Changes
+
+- 600149b: Make owning-machine requirements explicit and statically safe. Declare `parent: Machine.parent(ParentEvents)` for a child-only machine; its behavior receives a non-optional `parent`, compatible owners are checked when the child is invoked, and independent root APIs reject the machine.
+
+  Replace `parentEvents: ParentEvents` with `parent: Machine.optionalParent(ParentEvents)` when the same machine must remain valid as either a root or a child. Optional declarations retain the previous `parent | undefined` behavior. Machines without a parent declaration no longer expose `parent` in schema-first behavior contexts.
+
+- a5c910a: Make definition-time topology instructions immutable values. Use `to.none`, declared `.initial` and history properties, and `to.local.with` without an empty call; state and choice destinations such as `to.full.Running()` remain callable.
+
+  Author machine startup through the same target-first grammar: `initial: (to) => to.Flow.initial.resolve(...)`. The selector is captured once and its resolver remains lazy until initial planning.
+
+  Remove `Machine.targetless` and the `{ target: Machine.targetless, resolve }` shorthand. Use `(to) => to.none` or `(to) => to.none.resolve(...)`; block-bodied targetless resolvers may omit an explicit `return undefined`.
+
+- 64f4e36: Replace `Machine.transition(...)` with fluent transition selectors supplied directly to inline handlers. Select a target and optionally attach its resolver, reentry, or named branches without an intermediate wrapper:
+
+  ```ts
+  const handlers = {
+    Start: (to) =>
+      to.full
+        .Running()
+        .resolve(({ event, target }) => target.from({ count: event.count })),
+
+    Route: (to) =>
+      to
+        .branches({
+          running: { target: to.full.Running() },
+          done: { target: to.full.Done() },
+          unchanged: { target: to.none }
+        })
+        .resolve(({ event, select }) => event.cached ? select.done.from() : select.running.from())
+  }
+  ```
+
+  Use `.reenter()` for resolver-free reentry, or pass literal `declinable: true` to `.resolve(...)` when the resolver must receive `decline()`. Bare targets are accepted only when their schemas support default construction.
+
+  Remove the machine-definition `.invoke(...)` method. Use `Machine.invoke(...)` in every state; it now retains the owning state, event, parent-event, output, error, element, snapshot, and service inference directly inside `handle(...)`.
+
+- 752a0b2: Add opt-in declinable transitions for conditional statechart dispatch.
+
+  Set `declinable: true` on `Machine.transition` to expose a typed `decline()` resolver capability. Declining selects no transition, discards operations enqueued by that resolver, and lets hierarchical event or eventless dispatch continue with the next eligible ancestor. `target.none()` remains handled and continues to consume the trigger.
+
+  Declining a completion or invocation outcome ignores that lifecycle occurrence because those triggers do not dispatch to ancestor handlers.
+
+  Static transition definitions now expose `acceptance: "required" | "declinable"` alongside their exact target branches. Choices and initial routing remain total and reject declinable transitions.
+
+### Patch Changes
+
+- 7233677: Fix `AtomMachine` selectors so machines and invoked children with declared emitted events retain typed state selection and matching after `make` or `bind`.
+
 ## 0.16.0
 
 ### Minor Changes
