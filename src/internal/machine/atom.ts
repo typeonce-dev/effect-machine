@@ -106,9 +106,9 @@ const resumeMachineAtomEffect = (
   snapshot: Machine.Machine.Snapshot<any>
 ) => runMachineAtomEffect(get, internalMachine.resume(machine as any, snapshot as any))
 
-type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any> ? State : never
-type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any> ? Error : never
-type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output> ? Output : never
+type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
+type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any, any> ? Error : never
+type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output, any> ? Output : never
 type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer Emitted> ? Emitted : never
 
 export const emissions = <State, Event, Error, Output, StartError, Emitted>(
@@ -235,7 +235,7 @@ const makeChildRuntimeResultAtom = <State, Error, Output, StartError>(
 
 const makeChildRefAtom = <Child extends Machine.ChildMachine.Any, StartError>(
   parentRef: Atom.Atom<
-    AsyncResult.AsyncResult<Option.Option<Machine.MachineRef<any, any, any, any>>, StartError>
+    AsyncResult.AsyncResult<Option.Option<Machine.MachineRef<any, any, any, any, any>>, StartError>
   >,
   child: Child
 ): Atom.Atom<AsyncResult.AsyncResult<Option.Option<Machine.ChildMachine.Ref<Child>>, StartError>> =>
@@ -292,7 +292,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
       return AsyncResult.success(Option.none())
     }
 
-    const handle = result.value.value as unknown as Machine.MachineRef<State, any, Error, Output>
+    const handle = result.value.value as unknown as Machine.MachineRef<State, any, Error, Output, any>
     const cancel = Effect.runCallback(
       handle.changes.pipe(
         Stream.runForEach((snapshot) => Effect.sync(() => get.setSelf(AsyncResult.success(Option.some(snapshot)))))
@@ -363,9 +363,9 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
   }
 }
 
-const makeFromRefAtom = <State, Event, Error, Output, StartError>(
-  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output>, StartError>>
-): MachineAtom<State, Event, Error, Output, StartError> => {
+const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
+  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>>
+): MachineAtom<State, Event, Error, Output, StartError, Emitted> => {
   const snapshot = Atom.readable((
     get
   ): AsyncResult.AsyncResult<Machine.RuntimeSnapshot<State, Error, Output>, StartError> => {
@@ -513,9 +513,10 @@ export const select = <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends ValuedSnapshotIdentifier<State>
 >(
-  self: MachineAtom<State, Event, Error, Output, StartError>,
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
   path: Path
 ): Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
@@ -530,9 +531,10 @@ export const selectSnapshot = <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends SnapshotIdentifier<State>
 >(
-  self: MachineAtom<State, Event, Error, Output, StartError>,
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
   path: Path
 ): Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
@@ -583,9 +585,10 @@ export const matches = <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends SnapshotIdentifier<State>
 >(
-  self: MachineAtom<State, Event, Error, Output, StartError>,
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
   path: Path
 ): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> =>
   Atom.mapResult(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))).pipe(
@@ -708,7 +711,7 @@ const makeWithRuntime = (
   runtime: Atom.AtomRuntime<any, any>,
   machine: Machine.Machine.Any,
   args: ReadonlyArray<unknown>
-): MachineAtom<any, any, any, any, any> => {
+): MachineAtom<any, any, any, any, any, any> => {
   const prepared = runtime.atom(() => internalMachine.prepare(machine as any, ...(args as [])))
   const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
   const result = makeFromRefAtom(ref as any)
@@ -720,7 +723,7 @@ const resumeWithRuntime = (
   runtime: Atom.AtomRuntime<any, any>,
   machine: Machine.Machine.Any,
   snapshot: Machine.Machine.Snapshot<any>
-): MachineAtom<any, any, any, any, any> => {
+): MachineAtom<any, any, any, any, any, any> => {
   const ref = runtime.atom((get) => resumeMachineAtomEffect(get, machine, snapshot))
   return makeFromRefAtom(ref as any)
 }

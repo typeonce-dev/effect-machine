@@ -125,6 +125,9 @@ describe("AtomMachine", () => {
       })
       const registry = yield* makeRegistry
       const bridge = AtomMachine.make(machine)
+      const selected = AtomMachine.select(bridge, "Idle")
+      const selectedSnapshot = AtomMachine.selectSnapshot(bridge, "Idle")
+      const matched = AtomMachine.matches(bridge, "Idle")
       const observed = yield* AtomMachine.emissions(bridge).pipe(
         Stream.take(1),
         Stream.runCollect,
@@ -133,6 +136,12 @@ describe("AtomMachine", () => {
       )
 
       assert.deepStrictEqual(Array.from(yield* Fiber.join(observed)), [new ReadyEmission({})])
+      assert.deepStrictEqual(yield* AtomRegistry.getResult(registry, selected), Option.some(new Idle({})))
+      assert.deepStrictEqual(
+        yield* AtomRegistry.getResult(registry, selectedSnapshot),
+        Option.some({ path: "Idle", value: new Idle({}) })
+      )
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, matched), true)
       assert.strictEqual((yield* AtomRegistry.getResult(registry, bridge.snapshot)).status, "active")
     })))
 
