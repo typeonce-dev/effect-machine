@@ -32,40 +32,32 @@ const activityMachine = Machine.make({
   initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
 }).handle({
   Loading: {
-    invoke: [
-      Machine.invoke({
-        id: "poll-server",
+    invoke: (
+      from
+    ) => [
+      from.logic("poll-server", {
         address: Machine.childAddress("poll-server"),
-        logic: Machine.logic({ initial: undefined, run: () => Effect.never })
+        logic: Machine.logic({
+          initial: undefined,
+          run: () => Effect.never
+        })
       }),
-      Machine.invoke({
-        id: "load-document",
-        effect: () => Effect.fail("unavailable").pipe(Effect.as(1)),
-        onDone: (to) => to.none,
-        onFailure: (to) => to.none
-      }),
-      Machine.invoke({
-        id: "load-timeout",
-        after: timerDuration,
-        onDone: (to) => to.none
-      }),
-      Machine.invoke({
-        id: "updates",
-        stream: () => Stream.empty,
-        onDone: (to) => to.none
-      }),
-      Machine.invoke({ child })
+      from.effect("load-document", () => Effect.fail("unavailable").pipe(Effect.as(1))).onDone((to) => to.none)
+        .onFailure((to) => to.none),
+      from.timer("load-timeout", timerDuration).onDone((to) => to.none),
+      from.stream("updates", () => Stream.empty).onDone((to) => to.none),
+      from.child(child)
     ]
   },
   Dynamic: {
-    invoke: Machine.invoke({
-      id: "context-owned",
-      address: Machine.childAddress("context-owned"),
-      logic: () => {
-        dynamicFactoryEvaluations++
-        return Machine.logic({ initial: undefined, run: () => Effect.never })
-      }
-    })
+    invoke: (from) =>
+      from.logic("context-owned", {
+        address: Machine.childAddress("context-owned"),
+        logic: () => {
+          dynamicFactoryEvaluations++
+          return Machine.logic({ initial: undefined, run: () => Effect.never })
+        }
+      })
   }
 })
 
@@ -179,11 +171,7 @@ describe("machine activity metadata", () => {
           initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
         }).handle({
           Loading: {
-            invoke: Machine.invoke({
-              id,
-              after: durationMillis,
-              onDone: (to) => to.none
-            })
+            invoke: (from) => from.timer(id, durationMillis).onDone((to) => to.none)
           }
         })
         const definition = Machine.activityDefinitions(generated)[0]

@@ -80,7 +80,7 @@ test("adapts benchmark definitions to value selectors and target-first initial e
   assert.equal(api.targetless({ none: selected }), selected)
 })
 
-test("uses the current child invocation capability when available", () => {
+test("uses the object child invocation compatibility capability when available", () => {
   const calls = []
   const noTarget = Symbol("no-target")
   const Machine = {
@@ -103,6 +103,48 @@ test("uses the current child invocation capability when available", () => {
   })
   assert.deepEqual(calls, [config])
   assert.equal(makeEffectMachineBenchmarkApi(Machine).targetless({ none: noTarget }), noTarget)
+})
+
+test("adapts child invocations to the state-local fluent selector", () => {
+  const onSnapshot = () => undefined
+  const onDone = () => undefined
+  const onFailure = () => undefined
+  const calls = []
+  const builder = {
+    onSnapshot: (handler) => {
+      calls.push(["snapshot", handler])
+      return builder
+    },
+    onDone: (handler) => {
+      calls.push(["done", handler])
+      return builder
+    },
+    onFailure: (handler) => {
+      calls.push(["failure", handler])
+      return builder
+    }
+  }
+  const from = {
+    child: (...args) => {
+      calls.push(["child", ...args])
+      return builder
+    }
+  }
+  const config = {
+    child: "counter",
+    input: { seed: 1 },
+    onSnapshot,
+    onDone,
+    onFailure
+  }
+
+  assert.equal(makeEffectMachineBenchmarkApi({}).invokeChild(config)(from), builder)
+  assert.deepEqual(calls, [
+    ["child", "counter", { input: { seed: 1 } }],
+    ["snapshot", onSnapshot],
+    ["done", onDone],
+    ["failure", onFailure]
+  ])
 })
 
 test("adapts lifecycle names for the legacy child invocation capability", () => {

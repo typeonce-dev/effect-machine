@@ -125,17 +125,16 @@ its extra control is required:
 - Bind a shared Atom runtime once with `AtomMachine.bind(runtime)`, then use the
   returned `make` or `resume`. Use `AtomMachine.make(machine)` and
   `AtomMachine.resume(machine, snapshot)` for service-free machines.
-- Use one invocation object: `effect` for one-shot work, `stream` for repeated
-  externally produced values, `after` for a timer, `logic` for reusable process
-  logic, and `child` for a complete child
-  statechart. `Machine.invoke({...})` preserves owner state and source channels
-  across sibling lifecycle handlers. Inside `.handle(...)`, `self` and any
-  declared `parent` use the owning definition's exact protocols; no intermediate
-  definition method is required.
+- Use the state-local `invoke: (from) => ...` selector: `from.effect` for
+  one-shot work, `from.stream` for repeated externally produced values,
+  `from.timer` for a timer, `from.logic` for reusable process logic, and
+  `from.child` for a complete child statechart. Its chain preserves owner state
+  and source channels across lifecycle handlers. Inside `.handle(...)`, `self`
+  and any declared `parent` use the owning definition's exact protocols.
 - Use `Machine.child(id, machine)` for a complete statechart descriptor and
   `Machine.childAddress<Event>(id)` for a low-level process address. A logic
-  invocation is addressable only when `Machine.invoke` receives that
-  address explicitly.
+  invocation is addressable only when `from.logic` receives that address
+  explicitly.
 - Use the callback's `enqueue` argument for `raise`, `emit`, `sendTo`, and
   `stop`. These operations record closed machine commands and do not run Effects.
 
@@ -935,16 +934,18 @@ across both configuration lists.
 
 ## Recoverable state-scoped work
 
-Use `Machine.invoke` with an `effect` for one-shot work. Lifecycle callbacks
-receive the typed Effect channels and can transition directly:
+Use `from.effect` for one-shot work. Lifecycle callbacks receive the typed
+Effect channels and can transition directly:
 
 ```ts
-invoke: Machine.invoke({
-  id: "save",
-  effect: () => SaveService.save(draft),
-  onDone: (to) => to.full.Saved().resolve(({ output, target }) => target.from({ entry: output })),
-  onFailure: (to) =>
-    to.full.SaveFailed().resolve(({ error, target }) => target.from({ message: error.message }))
+machine.handle({
+  Saving: {
+    invoke: (from) =>
+      from.effect("save", () => SaveService.save(draft))
+        .onDone((to) => to.full.Saved().resolve(({ output, target }) => target.from({ entry: output })))
+        .onFailure((to) =>
+          to.full.SaveFailed().resolve(({ error, target }) => target.from({ message: error.message })))
+  }
 })
 ```
 
@@ -964,15 +965,17 @@ events. `onElement` maps each value into an owner transition, while `onDone`
 handles normal Stream completion and `onFailure` handles the typed Stream error:
 
 ```ts
-invoke: Machine.invoke({
-  id: "broadcast-channel",
-  stream: () => messages,
-  onElement: (to) =>
-    to.none.resolve(({ element }, enqueue) => {
-      enqueue.raise(Events.MessageReceived({ message: element }))
-    }),
-  onDone: (to) => to.none,
-  onFailure: (to) => to.full.Disconnected().resolve(({ error, target }) => target.from({ error }))
+machine.handle({
+  Listening: {
+    invoke: (from) =>
+      from.stream("broadcast-channel", () => messages)
+        .onElement((to) =>
+          to.none.resolve(({ element }, enqueue) => {
+            enqueue.raise(Events.MessageReceived({ message: element }))
+          }))
+        .onDone((to) => to.none)
+        .onFailure((to) => to.full.Disconnected().resolve(({ error, target }) => target.from({ error })))
+  }
 })
 ```
 
@@ -985,16 +988,18 @@ Use `to.none` when a transition keeps the current configuration. Call
 `to.none.resolve(...)` when it also enqueues commands; a block resolver may
 omit its return because it is contextually typed to return `undefined`.
 
-When a source function reads `state`, `containingState`, `ancestors`, or the entry `event`,
-`Machine.invoke` infers that owner context and the returned Effect's output,
-error, and service channels together. No return annotation is needed:
+When a source function reads `state`, `containingState`, `ancestors`, or the
+entry `event`, `from.effect` infers that owner context and the returned Effect's
+output, error, and service channels together. No return annotation is needed:
 
 ```ts
-invoke: Machine.invoke({
-  id: "load",
-  effect: ({ state }) => LoadService.load(state.userId),
-  onDone: (to) => to.full.Loaded().resolve(({ output, target }) => target.from({ user: output })),
-  onFailure: (to) => to.full.LoadFailed().resolve(({ error, target }) => target.from({ error }))
+machine.handle({
+  Loading: {
+    invoke: (from) =>
+      from.effect("load", ({ state }) => LoadService.load(state.userId))
+        .onDone((to) => to.full.Loaded().resolve(({ output, target }) => target.from({ user: output })))
+        .onFailure((to) => to.full.LoadFailed().resolve(({ error, target }) => target.from({ error })))
+  }
 })
 ```
 
@@ -1010,42 +1015,44 @@ const machine = Machine.make({
   // ...
 }).handle({
   Saving: {
-    invoke: Machine.invoke({
-      id: "notify-parent",
-      effect: () => saveDocument,
-      onDone: (to) =>
-        to.none.resolve(({ parent, self }, enqueue) => {
-          enqueue.sendTo(self, Commands.Save())
-          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-        }),
-      onFailure: (to) => to.none
-    })
+    invoke: (from) =>
+      from.effect("notify-parent", () => saveDocument)
+        .onDone((to) =>
+          to.none.resolve(({ parent, self }, enqueue) => {
+            enqueue.sendTo(self, Commands.Save())
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+          }))
+        .onFailure((to) => to.none)
   }
 })
 ```
 
-The standard `Machine.invoke(...)` form retains the owning machine protocols
-even when the definition is named separately. A direct `invoke: { ... }` object
-remains available when lifecycle handlers do not need source-derived context.
+The computation, logic, or child descriptor may be named separately. The
+invocation chain remains inline because it is bound to its owning state and
+machine protocols. Return an array of completed chains when a state owns more
+than one activity.
 
-A cancellable timer uses the same object:
+A cancellable timer uses its dedicated source selector:
 
 ```ts
-invoke: Machine.invoke({
-  id: "clear-status",
-  after: "3 seconds",
-  onDone: (to) => to.full.Clear().resolve(({ target }) => target())
+machine.handle({
+  Waiting: {
+    invoke: (from) =>
+      from.timer("clear-status", "3 seconds")
+        .onDone((to) => to.full.Clear().resolve(({ target }) => target()))
+  }
 })
 ```
 
 The timer starts on state entry and is interrupted on exit. Its `onDone` is
-always required. `effect: () => Effect.sleep(...)` has the same scoped
-cancellation behavior, but `after` records timer intent and exposes a static
-duration through `Machine.activityDefinitions`. Effect sources are always
-factories evaluated when their state is entered. For reusable process logic,
-provide `logic`, a state-local lifecycle `id`, and a typed `address`. TypeScript
-checks the address protocol against the logic event protocol. Lifecycle ids and
-addresses serve different purposes and must both be explicit.
+always required. An Effect containing `Effect.sleep(...)` has the same scoped
+cancellation behavior, but `from.timer` records timer intent and exposes a
+static duration through `Machine.activityDefinitions`. Effect sources are
+always factories evaluated when their state is entered. For reusable process
+logic, pass a state-local lifecycle id plus `{ logic, address }` to
+`from.logic`. TypeScript checks the address protocol against the logic event
+protocol. Lifecycle ids and addresses serve different purposes and must both
+be explicit.
 
 ## Invoked child statecharts
 
@@ -1058,10 +1065,12 @@ const Editor = Machine.child("editor", EditorMachine)
 Invoke it from its owning state:
 
 ```ts
-invoke: Machine.invoke({
-  child: Editor,
-  input: editorInput,
-  onDone: (to) => to.full.EditorDone().resolve(({ output, target }) => target.from({ output }))
+machine.handle({
+  Editing: {
+    invoke: (from) =>
+      from.child(Editor, { input: editorInput })
+        .onDone((to) => to.full.EditorDone().resolve(({ output, target }) => target.from({ output })))
+  }
 })
 ```
 
@@ -1089,7 +1098,7 @@ logic that does not have a complete machine descriptor.
 ### Inspecting state-owned activities
 
 Use `Machine.activityDefinitions(machine)` to inspect invokes without running
-them. Static inline `Machine.invoke` definitions expose serializable ownership
+them. Static inline fluent invocation definitions expose serializable ownership
 metadata:
 
 ```ts
@@ -1467,6 +1476,6 @@ The current API does not include:
 - declarative first-class guards;
 - a complete inspectable graph for arbitrary transition Effects.
 
-Use ordinary TypeScript conditions for guards and an inline `Machine.invoke`
-with `after` for state-scoped timers. Do not invent undocumented state-node
-properties such as `guard`.
+Use ordinary TypeScript conditions for guards and inline
+`invoke: (from) => from.timer(...)` chains for state-scoped timers. Do not
+invent undocumented state-node properties such as `guard`.

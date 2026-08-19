@@ -92,13 +92,13 @@ const scenarios = [
   },
   {
     id: "dynamic-invoke-control",
-    label: "dynamic Machine.invoke control",
+    label: "dynamic invocation control",
     file: "dynamic-invoke-control.ts",
     hidden: true
   },
   {
     id: "dynamic-invoke",
-    label: "Machine.invoke (state-dependent Effect)",
+    label: "fluent invocation (state-dependent Effect)",
     file: "dynamic-invoke.ts",
     control: "dynamic-invoke-control",
     maxInstantiations: 122_000,

@@ -41,6 +41,10 @@ const machine = Machine.make({
     }
   },
   Loading: {
+    invoke: (from) => [
+      from.effect("fixture-load", () => Effect.succeed("ready")).onDone((to) => to.none),
+      from.timer("fixture-delay", "1 second").onDone((to) => to.none)
+    ],
     on: {
       Loaded: (to) =>
         to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
@@ -56,16 +60,6 @@ const loadingAtom = AtomMachine.matches(atoms, "Loading")
 const invalidSelector = AtomMachine.select(atoms, "Missing")
 const cluster = ClusterMachine.make("ConsumerEntity", machine, {
   version: "1"
-})
-const invoked = Machine.invoke({
-  id: "fixture-load",
-  effect: () => Effect.succeed("ready"),
-  onDone: (to) => to.none
-})
-const delayed = Machine.invoke({
-  id: "fixture-delay",
-  after: "1 second",
-  onDone: (to) => to.none
 })
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 
@@ -86,8 +80,6 @@ void [
   loadingAtom,
   invalidSelector,
   cluster,
-  invoked,
-  delayed,
   generated,
   constructedStart,
   constructedLoaded,

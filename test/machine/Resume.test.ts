@@ -73,52 +73,39 @@ describe("Machine.resume", () => {
         initial: (to) => to.Inactive().resolve(({ target }) => target(new Inactive({})))
       }).handle({
         Root: {
-          invoke: Machine.invoke({
-            id: "root",
-            address: Machine.childAddress("root"),
-            logic: restoredLogic("root")
-          }),
+          invoke: (from) => from.logic("root", { address: Machine.childAddress("root"), logic: restoredLogic("root") }),
           states: {
             left: {
-              invoke: Machine.invoke({
-                id: "left",
-                address: Machine.childAddress("left"),
-                logic: restoredLogic("left")
-              }),
+              invoke: (from) =>
+                from.logic("left", { address: Machine.childAddress("left"), logic: restoredLogic("left") }),
               states: {
                 On: {
-                  invoke: Machine.invoke({
-                    id: "left-leaf",
-                    address: Machine.childAddress("left-leaf"),
-                    logic: restoredLogic("left-leaf")
-                  })
+                  invoke: (from) =>
+                    from.logic("left-leaf", {
+                      address: Machine.childAddress("left-leaf"),
+                      logic: restoredLogic("left-leaf")
+                    })
                 }
               }
             },
             right: {
-              invoke: Machine.invoke({
-                id: "right",
-                address: Machine.childAddress("right"),
-                logic: restoredLogic("right")
-              }),
+              invoke: (from) =>
+                from.logic("right", { address: Machine.childAddress("right"), logic: restoredLogic("right") }),
               states: {
                 On: {
-                  invoke: Machine.invoke({
-                    id: "right-leaf",
-                    address: Machine.childAddress("right-leaf"),
-                    logic: restoredLogic("right-leaf")
-                  })
+                  invoke: (from) =>
+                    from.logic("right-leaf", {
+                      address: Machine.childAddress("right-leaf"),
+                      logic: restoredLogic("right-leaf")
+                    })
                 }
               }
             }
           }
         },
         Inactive: {
-          invoke: Machine.invoke({
-            id: "inactive",
-            address: Machine.childAddress("inactive"),
-            logic: restoredLogic("inactive")
-          })
+          invoke: (from) =>
+            from.logic("inactive", { address: Machine.childAddress("inactive"), logic: restoredLogic("inactive") })
         }
       })
       const snapshot = {
@@ -345,11 +332,10 @@ describe("Machine.resume", () => {
         initial: (to) => to.Cancelled().resolve(({ target }) => target(new Cancelled({})))
       }).handle({
         Waiting: {
-          invoke: Machine.invoke({
-            id: "timeout",
-            after: "1 second",
-            onDone: (to) => to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
-          }),
+          invoke: (from) =>
+            from.timer("timeout", "1 second").onDone((to) =>
+              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+            ),
           on: {
             Cancel: (to) => to.full.Cancelled().resolve(({ target }) => target(new Cancelled({})))
           }
@@ -388,11 +374,10 @@ describe("Machine.resume", () => {
         initial: (to) => to.Loaded().resolve(({ target }) => target(new Loaded({ value: "initial" })))
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh")),
-            onDone: (to) => to.full.Loaded().resolve(({ output, target }) => target(new Loaded({ value: output })))
-          })
+          invoke: (from) =>
+            from.effect("load", () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh"))).onDone((to) =>
+              to.full.Loaded().resolve(({ output, target }) => target(new Loaded({ value: output })))
+            )
         },
         Loaded: {}
       })
@@ -423,15 +408,13 @@ describe("Machine.resume", () => {
         initial: (to) => to.Failed().resolve(({ target }) => target(new Failed({ message: "initial" })))
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () =>
+          invoke: (from) =>
+            from.effect("load", () =>
               Ref.update(runs, (n) => n + 1).pipe(
                 Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
-              ),
-            onFailure: (to) =>
-              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
-          })
+              )).onFailure((to) =>
+                to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
+              )
         },
         Failed: {}
       })
@@ -477,11 +460,10 @@ describe("Machine.resume", () => {
         initial: (to) => to.ChildOutput().resolve(({ target }) => target(new ChildOutput({ value: 0 })))
       }).handle({
         Parent: {
-          invoke: Machine.invoke({
-            child: Child,
-            onDone: (to) =>
+          invoke: (from) =>
+            from.child(Child).onDone((to) =>
               to.full.ChildOutput().resolve(({ output, target }) => target(new ChildOutput({ value: output })))
-          })
+            )
         },
         ChildOutput: {}
       })

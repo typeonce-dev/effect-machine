@@ -250,11 +250,10 @@ describe("MachineTest runtime commands", () => {
         initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
         Waiting: {
-          invoke: Machine.invoke({
-            id: "timeout",
-            after: "1 second",
-            onDone: (to) => to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
-          })
+          invoke: (from) =>
+            from.timer("timeout", "1 second").onDone((to) =>
+              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+            )
         },
         TimedOut: {}
       })
@@ -731,11 +730,10 @@ describe("MachineTest causal runtime commands", () => {
         initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
         Waiting: {
-          invoke: Machine.invoke({
-            id: "timeout",
-            after: "1 second",
-            onDone: (to) => to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
-          })
+          invoke: (from) =>
+            from.timer("timeout", "1 second").onDone((to) =>
+              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+            )
         },
         TimedOut: {}
       })

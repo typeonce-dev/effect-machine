@@ -244,15 +244,13 @@ export const CharacterMachine = Machine.make({
                     }
                   },
                   Landing: {
-                    invoke: Machine.invoke({
-                      id: "landing-settle",
-                      after: "140 millis",
-                      onDone: (to) =>
+                    invoke: (from) =>
+                      from.timer("landing-settle", "140 millis").onDone((to) =>
                         to.none.resolve((_, enqueue) => {
                           enqueue.raise(InternalEvents.LandingSettled())
                           return undefined
                         })
-                    }),
+                      ),
                     on: {
                       LandingSettled: (to) =>
                         to.branches({
@@ -332,19 +330,17 @@ export const CharacterMachine = Machine.make({
                     },
                     states: {
                       AirJumpGroundLock: {
-                        invoke: Machine.invoke({
-                          id: "ground-air-jump-unlock",
-                          after: "120 millis",
-                          onDone: (to) => to.local.AirJumpReady().resolve(({ target }) => target.from())
-                        }),
+                        invoke: (from) =>
+                          from.timer("ground-air-jump-unlock", "120 millis").onDone((to) =>
+                            to.local.AirJumpReady().resolve(({ target }) => target.from())
+                          ),
                         on: {}
                       },
                       AirJumpWallLock: {
-                        invoke: Machine.invoke({
-                          id: "wall-air-jump-unlock",
-                          after: "240 millis",
-                          onDone: (to) => to.local.AirJumpReady().resolve(({ target }) => target.from())
-                        }),
+                        invoke: (from) =>
+                          from.timer("wall-air-jump-unlock", "240 millis").onDone((to) =>
+                            to.local.AirJumpReady().resolve(({ target }) => target.from())
+                          ),
                         on: {}
                       },
                       AirJumpReady: {

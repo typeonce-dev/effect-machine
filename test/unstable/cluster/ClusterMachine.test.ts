@@ -582,11 +582,7 @@ describe("ClusterMachine", () => {
         initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }).handle({
         Count: {
-          invoke: Machine.invoke({
-            id: "child",
-            effect: () => Effect.void,
-            onDone: (to) => to.none
-          })
+          invoke: (from) => from.effect("child", () => Effect.void).onDone((to) => to.none)
         }
       })
       const bridge = ClusterMachine.make("InvokedCounter", invoked, { version: "1" })

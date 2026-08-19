@@ -24,6 +24,32 @@ class FinishStream extends Schema.TaggedClass<FinishStream>("InvokeFinishStream"
 const States = Machine.states({ Idle, Loading, Complete, Failed })
 
 describe("inline invoke", () => {
+  it("exposes only source-relevant, unhandled lifecycle methods", () => {
+    let inspected = false
+    Machine.make({
+      states: States.states,
+      events: Machine.events(),
+      initial: (to) => to.Loading().resolve(({ target }) => target.from())
+    }).handle({
+      Loading: {
+        invoke: (from) => {
+          const timer = from.timer("timeout", "1 second")
+          assert.isFalse("onFailure" in timer)
+          assert.isFalse("onElement" in timer)
+          assert.isFalse("onSnapshot" in timer)
+          const completed = timer.onDone((to) => to.none)
+          assert.isFalse("onDone" in completed)
+          inspected = true
+          return completed
+        }
+      },
+      Complete: {},
+      Failed: {},
+      Idle: {}
+    })
+    assert.isTrue(inspected)
+  })
+
   it.effect("ignores an invocation outcome when its transition declines", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
@@ -32,11 +58,10 @@ describe("inline invoke", () => {
         initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Effect.succeed("ignored"),
-            onDone: (to) => to.full.Complete().resolve(({ decline }) => decline(), { declinable: true })
-          })
+          invoke: (from) =>
+            from.effect("load", () => Effect.succeed("ignored")).onDone((to) =>
+              to.full.Complete().resolve(({ decline }) => decline(), { declinable: true })
+            )
         },
         Complete: {},
         Failed: {},
@@ -59,16 +84,14 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         Collecting: {
-          invoke: Machine.invoke({
-            id: "numbers",
-            stream: () => Stream.fromIterable([1, 2, 3]),
-            onElement: (to) =>
+          invoke: (from) =>
+            from.stream("numbers", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
               to.none.resolve(({ element }, enqueue) => {
                 enqueue.raise(new Add({ value: element }))
-              }),
-            onDone: (to) =>
+              })
+            ).onDone((to) =>
               to.full.Complete().resolve(({ state, target }) => target(new Complete({ value: state.values.join(",") })))
-          }),
+            ),
           on: {
             Add: (to) =>
               to.full.Collecting().resolve(({ event, state, target }) =>
@@ -136,12 +159,10 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "updates",
-            stream: () => Stream.fail("offline"),
-            onDone: (to) => to.none,
-            onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
-          })
+          invoke: (from) =>
+            from.stream("updates", () => Stream.fail("offline")).onDone((to) => to.none).onFailure((to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
+            )
         },
         Complete: {},
         Failed: {}
@@ -169,11 +190,7 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "updates",
-            stream: () => Stream.die(defect),
-            onDone: (to) => to.none
-          })
+          invoke: (from) => from.stream("updates", () => Stream.die(defect)).onDone((to) => to.none)
         },
         Complete: {},
         Failed: {}
@@ -204,15 +221,12 @@ describe("inline invoke", () => {
       })
       const machine = definition.handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "updates",
-            stream: () => source,
-            onElement: (to) =>
+          invoke: (from) =>
+            from.stream("updates", () => source).onElement((to) =>
               to.none.resolve(({ element }, enqueue) => {
                 enqueue.raise(new FinishStream({ value: element }))
-              }),
-            onDone: (to) => to.none
-          }),
+              })
+            ).onDone((to) => to.none),
           on: {
             FinishStream: (to) =>
               to.full.Complete().resolve(({ event, target }) => target(new Complete({ value: String(event.value) })))
@@ -242,11 +256,10 @@ describe("inline invoke", () => {
         initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Effect.succeed("ready"),
-            onDone: (to) => to.full.Complete().resolve(({ output, target }) => target(new Complete({ value: output })))
-          })
+          invoke: (from) =>
+            from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
+              to.full.Complete().resolve(({ output, target }) => target(new Complete({ value: output })))
+            )
         },
         Complete: {},
         Failed: {}
@@ -277,11 +290,10 @@ describe("inline invoke", () => {
         initial: (to) => to.Loading().resolve(({ target }) => target.from())
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Effect.fail("offline"),
-            onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
-          })
+          invoke: (from) =>
+            from.effect("load", () => Effect.fail("offline")).onFailure((to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
+            )
         },
         Complete: {},
         Failed: {}
@@ -306,13 +318,10 @@ describe("inline invoke", () => {
           }
         },
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: (): Effect.Effect<string> => {
+          invoke: (from) =>
+            from.effect("load", (): Effect.Effect<string> => {
               throw defect
-            },
-            onDone: (to) => to.none
-          })
+            }).onDone((to) => to.none)
         },
         Complete: {},
         Failed: {}
@@ -346,11 +355,7 @@ describe("inline invoke", () => {
           }
         },
         Loading: {
-          invoke: Machine.invoke({
-            id: "worker",
-            address: Machine.childAddress("worker"),
-            logic
-          })
+          invoke: (from) => from.logic("worker", { address: Machine.childAddress("worker"), logic: logic })
         },
         Complete: {},
         Failed: {}

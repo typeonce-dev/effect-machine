@@ -162,13 +162,11 @@ describe("MachineTest probe", () => {
           }
         },
         Loading: {
-          invoke: Machine.invoke({
-            id: "loader",
-            effect: () => {
+          invoke: (from) =>
+            from.effect("loader", () => {
               starts += 1
               return Effect.never
-            }
-          })
+            })
         }
       })
       const ref = yield* Machine.start(invokeMachine)

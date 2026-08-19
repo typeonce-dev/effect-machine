@@ -152,14 +152,14 @@ describe("AtomMachine", () => {
           })
       }).handle({
         Count: {
-          invoke: Machine.invoke({
-            id: "active",
-            address: Machine.childAddress("active"),
-            logic: Machine.logic({
-              initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
-              run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
-            })
-          }),
+          invoke: (from) =>
+            from.logic("active", {
+              address: Machine.childAddress("active"),
+              logic: Machine.logic({
+                initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
+                run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
+              })
+            }),
           on: {
             Finish: (to) =>
               to.full.Count().resolve(({ event, state, target }) =>
@@ -215,10 +215,7 @@ describe("AtomMachine", () => {
           }
         },
         ValueRead: {
-          invoke: Machine.invoke({
-            child: Child,
-            onDone: (to) => to.none
-          }),
+          invoke: (from) => from.child(Child).onDone((to) => to.none),
           on: {
             ReadValue: (to) => to.full.Count().resolve(({ target }) => target(new Count({ value: 0 })))
           }

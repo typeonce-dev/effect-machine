@@ -31,7 +31,7 @@ export interface AnyConfig {
 export const makeKey = (path: string, id: string): string => `${path.length}:${path}${id}`
 
 /** @internal */
-export const makeChildId = (path: string, id: string): string => `Machine.invoke:${makeKey(path, id)}`
+export const makeChildId = (path: string, id: string): string => `Machine.invocation:${makeKey(path, id)}`
 
 const oneShot = (effect: Effect.Effect<any, any, any>): Logic<void, never, any, any, any> => ({
   initial: () => Effect.void,

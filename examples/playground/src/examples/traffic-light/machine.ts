@@ -28,41 +28,37 @@ export const TrafficLightMachine = Machine.make({
   initial: (to) => to.Red().resolve(({ target }) => target.from())
 }).handle({
   Red: {
-    invoke: Machine.invoke({
-      id: "red-timer",
-      after: trafficLightDurations.Red,
-      onDone: (to) => to.full.RedYellow().resolve(({ target }) => target.from())
-    }),
+    invoke: (from) =>
+      from.timer("red-timer", trafficLightDurations.Red).onDone((to) =>
+        to.full.RedYellow().resolve(({ target }) => target.from())
+      ),
     on: {
       Reset: (to) => to.full.Red().resolve(({ target }) => target.from(), { reenter: true })
     }
   },
   RedYellow: {
-    invoke: Machine.invoke({
-      id: "red-yellow-timer",
-      after: trafficLightDurations.RedYellow,
-      onDone: (to) => to.full.Green().resolve(({ target }) => target.from())
-    }),
+    invoke: (from) =>
+      from.timer("red-yellow-timer", trafficLightDurations.RedYellow).onDone((to) =>
+        to.full.Green().resolve(({ target }) => target.from())
+      ),
     on: {
       Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }
   },
   Green: {
-    invoke: Machine.invoke({
-      id: "green-timer",
-      after: trafficLightDurations.Green,
-      onDone: (to) => to.full.Yellow().resolve(({ target }) => target.from())
-    }),
+    invoke: (from) =>
+      from.timer("green-timer", trafficLightDurations.Green).onDone((to) =>
+        to.full.Yellow().resolve(({ target }) => target.from())
+      ),
     on: {
       Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }
   },
   Yellow: {
-    invoke: Machine.invoke({
-      id: "yellow-timer",
-      after: trafficLightDurations.Yellow,
-      onDone: (to) => to.full.Red().resolve(({ target }) => target.from())
-    }),
+    invoke: (from) =>
+      from.timer("yellow-timer", trafficLightDurations.Yellow).onDone((to) =>
+        to.full.Red().resolve(({ target }) => target.from())
+      ),
     on: {
       Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }

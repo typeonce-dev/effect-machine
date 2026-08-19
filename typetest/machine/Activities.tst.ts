@@ -13,18 +13,10 @@ const machine = Machine.make({
   initial: (to) => to.Loading().resolve(({ target }) => (target(new Loading({}))))
 }).handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "timeout",
-      after: "1 second",
-      onDone: (to) => to.none
-    })
+    invoke: (from) => from.timer("timeout", "1 second").onDone((to) => to.none)
   },
   Dynamic: {
-    invoke: Machine.invoke({
-      id: "dynamic",
-      after: () => "2 seconds" as const,
-      onDone: (to) => to.none
-    })
+    invoke: (from) => from.timer("dynamic", () => "2 seconds" as const).onDone((to) => to.none)
   }
 })
 

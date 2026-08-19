@@ -122,14 +122,12 @@ describe("local compound target selection", () => {
         search: {
           states: {
             Searching: {
-              invoke: Machine.invoke({
-                id: "search",
-                effect: () => Effect.succeed("resolved"),
-                onDone: (to) =>
+              invoke: (from) =>
+                from.effect("search", () => Effect.succeed("resolved")).onDone((to) =>
                   to.local.with.resolve(({ output, target }) =>
                     target.from({ query: output }, (search) => search.Updated.from())
                   )
-              })
+                )
             },
             Updated: {}
           }
