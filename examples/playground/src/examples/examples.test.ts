@@ -42,7 +42,7 @@ describe("playground machines", () => {
       yield* ref.stop
     }))
 
-  it.effect("interrupts cooking and opens the door in one parallel macrostep", () =>
+  it.effect("makes cooking with an open door unreachable", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(MicrowaveMachine, {
         events: [
@@ -56,11 +56,12 @@ describe("playground machines", () => {
 
       yield* MachineTest.verify(MicrowaveMachine, trace)
       const opened = trace.steps[1]?.after
-      assert.strictEqual(opened?.states.engine.state.path, "Oven.engine.Idle")
-      assert.strictEqual(opened?.states.door.state.path, "Oven.door.Open")
+      assert.strictEqual(opened?.state.path, "Oven.Open")
       assert.deepStrictEqual(trace.steps[2]?.before, trace.steps[2]?.after)
-      assert.strictEqual(trace.final.states.engine.state.path, "Oven.engine.Cooking")
-      assert.strictEqual(trace.final.states.door.state.path, "Oven.door.Closed")
+      assert.strictEqual(trace.final.state.path, "Oven.Closed")
+      if (trace.final.state.path === "Oven.Closed") {
+        assert.strictEqual(trace.final.state.state.path, "Oven.Closed.Cooking")
+      }
     }))
 
   it.effect("restores worker state from a tab synchronization command", () =>

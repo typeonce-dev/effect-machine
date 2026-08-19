@@ -2,18 +2,16 @@ import { assert, describe, it } from "@effect/vitest"
 import { Machine } from "@typeonce/effect-machine"
 import { MachineTest } from "@typeonce/effect-machine/testing"
 import { Effect, Graph } from "effect"
+import { FastCheck } from "effect/testing"
 import { MediaPlayerMachine } from "./machine.ts"
 
 const everyPublicEvent: ReadonlyArray<Machine.Machine.InputEvent<typeof MediaPlayerMachine>> = [
+  { _tag: "AudioElementMounted" },
+  { _tag: "AudioElementUnmounted" },
   { _tag: "SourceSelected", url: "https://example.com/audio.mp3" },
   { _tag: "PlayRequested" },
   { _tag: "PauseRequested" },
   { _tag: "RestartRequested" },
-  { _tag: "MediaWaiting" },
-  { _tag: "MediaCanPlay" },
-  { _tag: "PlaybackEnded", currentTime: 42 },
-  { _tag: "TimeUpdated", currentTime: 21 },
-  { _tag: "MediaFailed", message: "unsupported codec" },
   { _tag: "VolumeChanged", volume: 0.4 },
   { _tag: "PlaybackRateChanged", playbackRate: 1.5 },
   { _tag: "MuteRequested" },
@@ -21,24 +19,22 @@ const everyPublicEvent: ReadonlyArray<Machine.Machine.InputEvent<typeof MediaPla
 ]
 
 const generated = MachineTest.scenarios(MediaPlayerMachine, {
-  minEvents: 0,
-  maxEvents: 30
+  eventsArbitrary: FastCheck.array(FastCheck.constantFrom(...everyPublicEvent), { maxLength: 30 })
 })
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 
-const settingsEvents = new Set(["VolumeChanged", "PlaybackRateChanged", "MuteRequested", "UnmuteRequested"])
-
 const invariant = MachineTest.invariants(MediaPlayerMachine)
 
 const parallelRegionsAreIndependent = invariant.step(
-  "transport and settings commands stay in their own parallel region",
+  "session and settings commands stay in their own parallel region",
   ({ after, before, event }) => {
-    const transportUnchanged = same(before.states.transport.state, after.states.transport.state)
+    const sessionUnchanged = same(before.states.session.state, after.states.session.state)
     const settingsUnchanged = same(before.states.settings.state, after.states.settings.state)
-    return settingsEvents.has(event._tag)
-      ? transportUnchanged || `settings event ${event._tag} changed transport`
-      : settingsUnchanged || `transport event ${event._tag} changed settings`
+    if (["VolumeChanged", "PlaybackRateChanged", "MuteRequested", "UnmuteRequested"].includes(event._tag)) {
+      return sessionUnchanged || `settings event ${event._tag} changed the session region`
+    }
+    return settingsUnchanged || `session event ${event._tag} changed the settings region`
   }
 )
 
@@ -85,7 +81,7 @@ describe("media-player statechart model", () => {
         Effect.tap((trace) =>
           Effect.sync(() => {
             assert.strictEqual(trace.final.path, "Player")
-            assert.strictEqual(trace.final.states.transport.state.path.startsWith("Player.transport."), true)
+            assert.strictEqual(trace.final.states.session.state.path.startsWith("Player.session."), true)
             assert.strictEqual(trace.final.states.settings.state.path.startsWith("Player.settings."), true)
           })
         ),
@@ -107,9 +103,9 @@ describe("media-player statechart model", () => {
       assert.strictEqual(coverage.transitions.branches.hit > 0, true)
 
       const activated = new Set(coverage.states.activation.hits.map(({ path }) => path))
-      assert.strictEqual(activated.has("Player.transport.Empty"), true)
-      assert.strictEqual(activated.has("Player.transport.Loading"), true)
-      assert.strictEqual(activated.has("Player.transport.Failed"), true)
+      assert.strictEqual(activated.has("Player.session.Unregistered"), true)
+      assert.strictEqual(activated.has("Player.session.Registered"), true)
+      assert.strictEqual(activated.has("Player.session.Registered.Empty"), true)
       assert.strictEqual(activated.has("Player.settings.Audible"), true)
       assert.strictEqual(activated.has("Player.settings.Muted"), true)
     }))
@@ -134,7 +130,7 @@ describe("media-player statechart model", () => {
         events: () => everyPublicEvent,
         stateKey: ({ snapshot }) =>
           JSON.stringify({
-            transport: snapshot.states.transport.state,
+            session: snapshot.states.session.state,
             settings: snapshot.states.settings.state
           }),
         invariants: laws
@@ -142,22 +138,24 @@ describe("media-player statechart model", () => {
 
       assert.deepStrictEqual(explored.completeness, { _tag: "Complete" })
 
-      const loadingAndMuted = yield* MachineTest.assertReachable(
+      const registeredAndMuted = yield* MachineTest.assertReachable(
         explored,
-        "loading media while muted",
+        "registered element while muted",
         ({ configuration }) =>
-          configuration.includes("Player.transport.Loading") &&
+          configuration.includes("Player.session.Registered") &&
           configuration.includes("Player.settings.Muted")
       )
-      assert.deepStrictEqual(loadingAndMuted.trace.scenario.events, [
-        { _tag: "SourceSelected", url: "https://example.com/audio.mp3" },
+      assert.deepStrictEqual(registeredAndMuted.trace.scenario.events, [
+        everyPublicEvent[0],
         { _tag: "MuteRequested" }
       ])
 
       yield* MachineTest.assertUnreachable(
         explored,
-        "Ready without an internal LoadSucceeded event",
-        ({ configuration }) => configuration.includes("Player.transport.Ready")
+        "transport active while the audio element is unregistered",
+        ({ configuration }) =>
+          configuration.includes("Player.session.Unregistered") &&
+          configuration.some((path) => path.startsWith("Player.session.Registered."))
       )
     }))
 })

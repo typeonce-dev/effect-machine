@@ -2,7 +2,8 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { createRootRoute, createRoute, createRouter, Link, Outlet } from "@tanstack/react-router"
 import { Match, Option } from "effect"
 import { AsyncResult } from "effect/unstable/reactivity"
-import { machineAtom, replaceMachineAtom, selectionMachineAtom, States } from "./machine.js"
+import { machineAtom, replaceMachineAtom, selectionMachineAtom } from "./atoms.js"
+import { States } from "./machine.js"
 import { ReplaceEvents, ReplaceStates } from "./machines/replace.ts"
 import { SelectionEvents, SelectionStates } from "./machines/selection.ts"
 import type { Pokemon } from "./pokemon.ts"
@@ -60,13 +61,10 @@ function Selection() {
     <section className="machine-panel">
       <p>Selection state: {state.value.path}</p>
 
-      {Option.all({
-        selected: SelectionStates.get(state.value, "form.selection.Selected"),
-        search: SelectionStates.get(state.value, "form.search")
-      }).pipe(
+      {SelectionStates.get(state.value, "form.Selected").pipe(
         Option.match({
           onNone: () => <p>No Pokémon selected.</p>,
-          onSome: ({ selected: { id }, search: { searchText } }) => (
+          onSome: ({ id, searchText }) => (
             <>
               <p>Selected Pokémon id: {id}</p>
 
@@ -75,16 +73,16 @@ function Selection() {
                 onChange={(event) => send(SelectionEvents.UpdateSearchText({ value: event.target.value }))}
               />
 
-              {SelectionStates.matches(state.value, "form.search.Searching") && <p>Searching…</p>}
+              {SelectionStates.matches(state.value, "form.Selected.Searching") && <p>Searching…</p>}
 
-              {SelectionStates.get(state.value, "form.search.WithPokemon").pipe(
+              {SelectionStates.get(state.value, "form.Selected.WithPokemon").pipe(
                 Option.match({
                   onNone: () => null,
                   onSome: ({ pokemon }) => (
                     <article>
                       <h3>{pokemon.name}</h3>
                       <img src={pokemon.sprites.front_default} alt={pokemon.name} />
-                      <button type="button" onClick={() => send(SelectionEvents.ReplacePokemon({ id }))}>
+                      <button type="button" onClick={() => send(SelectionEvents.ReplacePokemon())}>
                         Replace
                       </button>
                     </article>
@@ -137,7 +135,7 @@ function PokemonGrid({ team }: { team: readonly (typeof Pokemon.Type)[] }) {
       Failure: () => null,
       Success: (current) =>
         current.value.pipe(
-          Option.flatMap((current) => SelectionStates.get(current, "form.selection.Selected")),
+          Option.flatMap((current) => SelectionStates.get(current, "form.Selected")),
           Option.map((current) => current.id),
           Option.getOrNull
         )

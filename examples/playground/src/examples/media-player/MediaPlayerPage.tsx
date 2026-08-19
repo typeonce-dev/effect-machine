@@ -2,35 +2,20 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { Match } from "effect"
 import { useCallback, useEffect, useState } from "react"
 import { ExamplePage } from "../../components/ExamplePage.tsx"
-import { mediaPlayerAtom, mediaPlayerViewAtom, registerMediaPlayerElement } from "./atoms.ts"
-import { MediaPlayerEvents } from "./definition.ts"
-
-interface AudioSource {
-  readonly name: string
-  readonly url: string
-}
-
-const formatTime = (seconds: number): string => {
-  if (!Number.isFinite(seconds)) return "0:00"
-
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`
-}
+import { mediaPlayerAtom, mediaPlayerViewAtom, setMediaPlayerElement } from "./atoms.ts"
+import { MediaPlayerEvents } from "./machine.ts"
 
 export function MediaPlayerPage() {
   const viewResult = useAtomValue(mediaPlayerViewAtom)
   const send = useAtomSet(mediaPlayerAtom.send)
-  const register = useAtomSet(registerMediaPlayerElement)
-  const [source, setSource] = useState<AudioSource>()
+  const setAudioElement = useAtomSet(setMediaPlayerElement)
+  const [source, setSource] = useState<{ readonly name: string; readonly url: string }>()
 
   const registerAudioElement = useCallback(
     (audioRef: HTMLAudioElement | null) => {
-      if (audioRef !== null) {
-        register(audioRef)
-      }
+      setAudioElement(audioRef)
     },
-    [register]
+    [setAudioElement]
   )
 
   useEffect(
@@ -43,7 +28,7 @@ export function MediaPlayerPage() {
   return (
     <ExamplePage
       title="Media player"
-      summary="Coordinate a compound transport lifecycle and independent sound modes inside a parallel Effect statechart."
+      summary="A registered audio session owns the transport lifecycle, while sound settings remain a genuinely independent parallel region."
       machineFile="src/examples/media-player/machine.ts"
     >
       {Match.value(viewResult).pipe(
@@ -51,7 +36,7 @@ export function MediaPlayerPage() {
           Initial: () => <div className="media-player-message">Starting the media player machine…</div>,
           Failure: () => <div className="media-player-message is-error">The media player machine failed to start.</div>,
           Success: ({ value: view }) => {
-            const { settings, status, transport } = view
+            const { session, settings, status, transport } = view
             const { canPause, canPlay, canRestart, isPlaying, loudness, playback } = transport
             const loudnessLevel = Math.min(100, Math.round((loudness?.rms ?? 0) * 220))
             const peakLevel = Math.min(100, Math.round((loudness?.peak ?? 0) * 100))
@@ -86,16 +71,6 @@ export function MediaPlayerPage() {
                   ref={registerAudioElement}
                   className="media-audio-element"
                   preload="auto"
-                  onWaiting={() => send(MediaPlayerEvents.MediaWaiting())}
-                  onCanPlay={() => send(MediaPlayerEvents.MediaCanPlay())}
-                  onError={({ currentTarget }) =>
-                    send(MediaPlayerEvents.MediaFailed({
-                      message: currentTarget.error?.message ?? "The selected audio file could not be loaded"
-                    }))}
-                  onTimeUpdate={({ currentTarget }) =>
-                    send(MediaPlayerEvents.TimeUpdated({ currentTime: currentTarget.currentTime }))}
-                  onEnded={({ currentTarget }) =>
-                    send(MediaPlayerEvents.PlaybackEnded({ currentTime: currentTarget.currentTime }))}
                 />
 
                 <div className="media-player-layout">
@@ -109,7 +84,13 @@ export function MediaPlayerPage() {
 
                     <div className="media-time-row">
                       <span>Current time</span>
-                      <strong>{formatTime(playback.currentTime)}</strong>
+                      <strong>
+                        {Number.isFinite(playback.currentTime)
+                          ? `${Math.floor(playback.currentTime / 60)}:${
+                            String(Math.floor(playback.currentTime % 60)).padStart(2, "0")
+                          }`
+                          : "0:00"}
+                      </strong>
                     </div>
 
                     <div className="media-controls">
@@ -209,6 +190,7 @@ export function MediaPlayerPage() {
                       {JSON.stringify({
                         status,
                         states: {
+                          session,
                           transport: transport.path,
                           settings: settings.path
                         },

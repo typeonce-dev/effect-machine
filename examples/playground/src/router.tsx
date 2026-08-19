@@ -21,14 +21,14 @@ const examples = [
   {
     to: "/microwave" as const,
     title: "Microwave",
-    description: "Door and engine behavior modeled as cooperating parallel regions.",
-    concepts: ["parallel states", "conditions"]
+    description: "A hierarchy that makes cooking with an open door impossible.",
+    concepts: ["compound states", "structural invariants"]
   },
   {
     to: "/media-player" as const,
     title: "Media player",
-    description: "Coordinate parallel transport and sound modes with state-scoped Effects.",
-    concepts: ["parallel states", "compound states", "Effect services"]
+    description: "Keep transport beneath its required audio session while settings remain independent.",
+    concepts: ["resource ownership", "parallel states", "Effect services"]
   },
   {
     to: "/worker-tabs" as const,
