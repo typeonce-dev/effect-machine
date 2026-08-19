@@ -628,7 +628,8 @@ export interface Bound<Services, RuntimeError = never> {
     machine:
       & M
       & EnsureBoundRequirements<Services, NoInfer<M>>
-      & EnsureMachineExecutable<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     ...args: MachineInputArgsOf<M>
   ) => MachineAtomOf<M, RuntimeError>
 
@@ -637,7 +638,8 @@ export interface Bound<Services, RuntimeError = never> {
     machine:
       & M
       & EnsureBoundResumeRequirements<Services, NoInfer<M>>
-      & EnsureMachineExecutable<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ) => ResumedMachineAtomOf<M, RuntimeError>
 }
@@ -714,7 +716,8 @@ export const make: {
           Machine.Machine.EmitOf<Emits>
         >
       >
-      & EnsureExecutable<States, UnhandledStates, OutputStates>,
+      & EnsureExecutable<States, UnhandledStates, OutputStates>
+      & Machine.Machine.RootCompatible<ParentEvents>,
     ...args: [...Machine.Machine.InputArgs<Input>]
   ): MachineAtom<
     Machine.Machine.Snapshot<States>,
@@ -741,7 +744,8 @@ export const resume: {
     machine:
       & M
       & EnsureNoExternalRequirements<MachineResumeRequirementsOf<NoInfer<M>>>
-      & EnsureMachineExecutable<NoInfer<M>>,
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ): ResumedMachineAtomOf<M, never>
 } = internal.resume

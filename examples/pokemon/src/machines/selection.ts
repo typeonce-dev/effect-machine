@@ -72,7 +72,7 @@ export const SelectionEvents = Machine.events(SelectPokemon, UpdateSearchText, S
 export const SelectionMachine = Machine.make({
   states: SelectionStates.states,
   events: SelectionEvents,
-  parentEvents: TeamEvents,
+  parent: Machine.parent(TeamEvents),
   initial: (to) =>
     to.form.initial.resolve(({ target }) =>
       target.from((form) =>
@@ -97,9 +97,7 @@ export const SelectionMachine = Machine.make({
             on: {
               ReplacePokemon: (to) =>
                 to.full.form().resolve(({ event, parent, state, target }, enqueue) => {
-                  if (parent !== undefined) {
-                    enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
-                  }
+                  enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: event.id, pokemon: state.pokemon }))
                   return target.from((form) =>
                     form
                       .search.from({ searchText: "" }, (search) => search.NoPokemon.from())

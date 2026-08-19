@@ -185,7 +185,8 @@ export const make = <
   Output,
   Emits extends ReadonlyArray<Machine.Machine.TaggedSchema>,
   OutputStates extends Machine.Machine.StateIdentifier<States>,
-  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events
+  InputEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = Events,
+  ParentEvents extends ReadonlyArray<Machine.Machine.TaggedSchema> = readonly []
 >(
   type: Type,
   machine:
@@ -202,9 +203,11 @@ export const make = <
       Output,
       Emits,
       OutputStates,
-      InputEvents
+      InputEvents,
+      ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.Machine.RootCompatible<ParentEvents>,
   options: {
     readonly version: string
   },
@@ -224,7 +227,8 @@ export const make = <
     Output,
     Emits,
     OutputStates,
-    InputEvents
+    InputEvents,
+    ParentEvents
   >,
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<R | InitialR>,
@@ -249,6 +253,7 @@ export const make = <
     OutputStates,
     InputEvents
   >
+  const rootMachine = machine as M & EnsureExecutable<States, UnhandledStates, OutputStates>
   const eventSchema = Schema.Union(Protocol.inputEventSchemas(machine) as MachineEvents<M>)
   const rpc = Rpc.make("send", {
     payload: eventSchema,
@@ -305,7 +310,7 @@ export const make = <
                 `Expected version ${options.version}, received ${checkpoint.version}`
               )
             }
-            current = yield* internalMachine.decodeSnapshot(machine, checkpoint.snapshot).pipe(
+            current = yield* internalMachine.decodeSnapshot(rootMachine, checkpoint.snapshot).pipe(
               Effect.mapError((error) => reject("InvalidCheckpoint", String(error.cause)))
             )
           } else if (loaded.processed) {
@@ -313,7 +318,7 @@ export const make = <
           }
 
           if (current === undefined) {
-            const initial = yield* internalMachine.planInitial(machine, ...input as any)
+            const initial = yield* internalMachine.planInitial(rootMachine, ...input)
             if (initial.commands.length > 0) {
               return yield* fail(
                 "UnsupportedProcessLocal",
@@ -324,8 +329,8 @@ export const make = <
             emitted.push(...initial.emittedEvents as any)
           }
 
-          if (!internalMachine.isFinal(machine, current)) {
-            const planned = yield* internalMachine.plan(machine, current, request.payload)
+          if (!internalMachine.isFinal(rootMachine, current)) {
+            const planned = yield* internalMachine.plan(rootMachine, current, request.payload)
             if (planned.commands.length > 0) {
               return yield* fail(
                 "UnsupportedProcessLocal",
@@ -336,7 +341,7 @@ export const make = <
             emitted.push(...planned.emittedEvents as any)
           }
 
-          const encoded = yield* internalMachine.encodeSnapshot(machine, current)
+          const encoded = yield* internalMachine.encodeSnapshot(rootMachine, current)
           if (emitted.length > 0 && layerOptions?.enqueue === undefined) {
             return yield* fail("EmissionFailure", "No durable enqueue handler was configured")
           }

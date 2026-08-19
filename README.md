@@ -308,8 +308,8 @@ Invalid event and emission constructions fail the machine with a typed
 ### Send explicitly between machines
 
 `raise` targets the current machine in the same macrostep. `sendTo` targets a
-machine mailbox and is processed later. A child declares the subset of parent
-inputs it may send with `parentEvents`:
+machine mailbox and is processed later. A machine that requires an owner
+declares the subset of parent inputs it may send with `Machine.parent`:
 
 ```ts
 const ParentEvents = Machine.events(ChildFinished)
@@ -317,16 +317,14 @@ const ParentEvents = Machine.events(ChildFinished)
 const child = Machine.make({
   states: ChildStates.states,
   events: ChildEvents,
-  parentEvents: ParentEvents,
+  parent: Machine.parent(ParentEvents),
   initial: (to) => to.Working().resolve(({ target }) => target.from())
 }).handle({
   Working: {
     on: {
       Finish: (to) =>
         to.full.Done().resolve(({ parent, target }, enqueue) => {
-          if (parent !== undefined) {
-            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-          }
+          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
           return target.from()
         })
     }
@@ -338,10 +336,16 @@ const Child = Machine.child("worker", child)
 const ParentInputs = Machine.events(Start, ParentEvents)
 ```
 
-The same child remains isolated and may be started as a root, where `parent` is
-`undefined`. When `Child` is invoked, the parent definition must accept every
-event in `parentEvents`; otherwise `.handle(...)` is a compile-time error.
+`parent` is statically present in every child callback, and root APIs such as
+`Machine.start`, `Machine.planInitial`, Atom machines, and Cluster machines
+reject this machine. When `Child` is invoked, the parent definition must accept
+every declared parent event; otherwise `.handle(...)` is a compile-time error.
 Inside the child, the parent target accepts only those declared events.
+
+Use `parent: Machine.optionalParent(ParentEvents)` when the same machine is
+intentionally valid both as a root and as a child. In that case `parent` is
+`MachineTarget<...> | undefined` and must be narrowed before sending. When no
+parent declaration is present, callbacks do not expose a `parent` property.
 `emit` never sends to the parent: it only publishes on the emitting machine's
 `emissions` stream.
 
@@ -490,7 +494,7 @@ to enqueue commands. A block resolver may omit its return because it is
 contextually typed to return `undefined`.
 
 Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
-public input and `parentEvents` protocols contextually. Its source and lifecycle
+public input and declared parent protocol contextually. Its source and lifecycle
 callbacks can send through `self` and `parent` while retaining the invoked
 Effect's output and error inference:
 
@@ -498,7 +502,7 @@ Effect's output and error inference:
 const machine = Machine.make({
   events: Commands,
   internalEvents: InternalEvents,
-  parentEvents: ParentEvents
+  parent: Machine.parent(ParentEvents)
   // ...
 }).handle({
   Saving: {
@@ -508,9 +512,7 @@ const machine = Machine.make({
       onDone: (to) =>
         to.none.resolve(({ parent, self }, enqueue) => {
           enqueue.sendTo(self, Commands.Save())
-          if (parent !== undefined) {
-            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-          }
+          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
         }),
       onFailure: (to) => to.none
     })

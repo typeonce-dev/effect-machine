@@ -37,6 +37,42 @@ definition.handle({
   Failed: {}
 })
 
+const requiredParentDefinition = Machine.make({
+  states: States.states,
+  events: Machine.events(),
+  parent: Machine.parent(Machine.events()),
+  initial: (to) => to.Loading()
+})
+
+requiredParentDefinition.handle({
+  Loading: {
+    invoke: Machine.invoke({
+      id: "required-parent",
+      effect: ({ /*required-parent-context*/ ...context }) => Effect.never
+    })
+  },
+  Done: {},
+  Failed: {}
+})
+
+const optionalParentDefinition = Machine.make({
+  states: States.states,
+  events: Machine.events(),
+  parent: Machine.optionalParent(Machine.events()),
+  initial: (to) => to.Loading()
+})
+
+optionalParentDefinition.handle({
+  Loading: {
+    invoke: Machine.invoke({
+      id: "optional-parent",
+      effect: ({ /*optional-parent-context*/ ...context }) => Effect.never
+    })
+  },
+  Done: {},
+  Failed: {}
+})
+
 definition.handle({
   Loading: {
     invoke: Machine.invoke({
@@ -155,7 +191,10 @@ test("contextually completes Effect invocation factories while authoring", () =>
   assert.equal(sourceContext.has("event"), true)
   assert.equal(sourceContext.has("snapshot"), false)
   assert.equal(sourceContext.has("self"), true)
-  assert.equal(sourceContext.has("parent"), true)
+  assert.equal(sourceContext.has("parent"), false)
+
+  assert.equal(completions("required-parent-context").has("parent"), true)
+  assert.equal(completions("optional-parent-context").has("parent"), true)
 
   const done = completions("done-context")
   assert.equal(done.has("output"), true)

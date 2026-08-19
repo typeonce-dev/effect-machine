@@ -35,7 +35,7 @@ export const ReplaceMachine = Machine.make({
   states: ReplaceStates.states,
   events: ReplaceEvents,
   internalEvents: ReplaceInternalEvents,
-  parentEvents: TeamEvents,
+  parent: Machine.parent(TeamEvents),
   initial: (to) => to.Idle().resolve(({ target }) => target.from())
 }).handle({
   Idle: {
@@ -56,9 +56,7 @@ export const ReplaceMachine = Machine.make({
     on: {
       Replaced: (to) =>
         to.full.Idle().resolve(({ event, parent, state, target }, enqueue) => {
-          if (parent !== undefined) {
-            enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
-          }
+          enqueue.sendTo(parent, TeamEvents.ReplaceInTeam({ id: state.id, pokemon: event.pokemon }))
           return target.from()
         })
     }

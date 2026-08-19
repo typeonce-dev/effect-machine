@@ -19,6 +19,8 @@ import type {
   MachineRef,
   MachineSchemaDecodeError,
   MachineSchemaEncodeError,
+  Parent,
+  ParentMode,
   Runtime,
   RuntimeOutcome,
   SpawnOptions,
@@ -49,6 +51,7 @@ export {
 export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId } from "./symbols.js"
 
 const TypeId = "~effect/Machine"
+const ParentTypeId = "~effect/Machine/Parent"
 export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 export const TransitionTypeId: unique symbol = Symbol.for("effect/Machine/Transition")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
@@ -121,7 +124,7 @@ const makeWithHandlers = (
   machine.events = self.events
   machine.internalEvents = self.internalEvents
   machine.emittedEvents = self.emittedEvents
-  machine.parentEvents = self.parentEvents
+  machine.parent = self.parent
   machine.input = self.input
   machine.id = self.id
   machine.initial = self.initial
@@ -1532,7 +1535,7 @@ type MakeConfig<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
+  ParentDeclaration extends Parent.Any | undefined
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
@@ -1546,7 +1549,7 @@ type MakeConfig<
       NoInfer<InternalEvents>
     >
   readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
-  readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
+  readonly parent?: ParentDeclaration
   readonly input?: Input
   readonly initial: unknown
 }
@@ -1559,7 +1562,7 @@ type MakeResult<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
+  ParentDeclaration extends Parent.Any | undefined
 > = Definition<
   States,
   readonly [...InputEvents, ...InternalEvents],
@@ -1570,7 +1573,7 @@ type MakeResult<
   Machine.TerminalOutput<States>,
   Emits,
   InputEvents,
-  ParentEvents
+  Machine.ParentEventsOf<ParentDeclaration>
 >
 
 interface Make {
@@ -1582,11 +1585,11 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const ParentDeclaration extends Parent.Any | undefined = undefined
   >(
-    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>,
+    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
     ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>
+  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -1595,10 +1598,13 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const ParentDeclaration extends Parent.Any | undefined = undefined
   >(
     config:
-      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>, "states">
+      & Omit<
+        MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
+        "states"
+      >
       & { readonly states: InvalidDefinedStateTreeInput<States> }
   ): never
 }
@@ -1611,7 +1617,7 @@ export const make: Make = (<
   InitialE = never,
   InitialR = never,
   const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  const ParentDeclaration extends Parent.Any | undefined = undefined
 >(
   config: {
     readonly id?: string
@@ -1619,18 +1625,18 @@ export const make: Make = (<
     readonly events: Machine.EventProtocol<"public", InputEvents>
     readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
     readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
-    readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
+    readonly parent?: ParentDeclaration
     readonly input?: Input
     readonly initial: unknown
   }
-): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents> => {
+): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration> => {
   StateDefinition.validateStateDefinitions(config.states, "Machine.make")
   const self = Object.create(Proto)
   self.states = config.states
   self.events = config.events
   self.internalEvents = config.internalEvents ?? Protocol.makeEventProtocol("internal", [] as const)
   self.emittedEvents = config.emittedEvents ?? Protocol.makeEventProtocol("emitted", [] as const)
-  self.parentEvents = config.parentEvents ?? Protocol.makeEventProtocol("public", [] as const)
+  self.parent = config.parent
   self.input = config.input
   self.id = config.id
   self.stateNodes = Topology.compileStateNodes(config.states)
@@ -1661,6 +1667,27 @@ export const events = <const Inputs extends ReadonlyArray<Machine.EventProtocolI
     "public",
     flattenEventProtocolInputs("public", inputs)
   ) as Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
+
+const makeParent = <
+  const Mode extends ParentMode,
+  const Events extends ReadonlyArray<Machine.TaggedSchema>
+>(
+  mode: Mode,
+  events: Machine.EventProtocol<"public", Events>
+): Parent<Mode, Events> => {
+  if (!Protocol.isEventProtocol(events, "public")) {
+    throw new Error("Machine parent declarations require a protocol created with Machine.events")
+  }
+  return Object.freeze({ [ParentTypeId]: ParentTypeId, mode, events })
+}
+
+export const parent = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  events: Machine.EventProtocol<"public", Events>
+): Parent<"required", Events> => makeParent("required", events)
+
+export const optionalParent = <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  events: Machine.EventProtocol<"public", Events>
+): Parent<"optional", Events> => makeParent("optional", events)
 
 export const internalEvents = <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"internal">>>(
   ...inputs: Inputs

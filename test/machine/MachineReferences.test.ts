@@ -6,6 +6,18 @@ const collectNext = <A>(stream: Stream.Stream<A>) =>
   stream.pipe(Stream.take(1), Stream.runCollect, Effect.map(Array.from), Effect.forkChild({ startImmediately: true }))
 
 describe("machine reference event channels", () => {
+  it("constructs immutable required and optional parent declarations", () => {
+    class Notice extends Schema.TaggedClass<Notice>("ParentDeclarationNotice")("Notice", {}) {}
+    const Events = Machine.events(Notice)
+    const required = Machine.parent(Events)
+    const optional = Machine.optionalParent(Events)
+
+    assert.deepStrictEqual({ mode: required.mode, events: required.events }, { mode: "required", events: Events })
+    assert.deepStrictEqual({ mode: optional.mode, events: optional.events }, { mode: "optional", events: Events })
+    assert.isTrue(Object.isFrozen(required))
+    assert.isTrue(Object.isFrozen(optional))
+  })
+
   it.effect("observes initial emissions through a prepared machine", () =>
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("PreparedEmissionIdle")("Idle", {}) {}
@@ -189,7 +201,7 @@ describe("machine reference event channels", () => {
       assert.deepStrictEqual(yield* Fiber.join(observed), [])
     }))
 
-  it.effect("types a child parent reference from parentEvents and keeps emissions external", () =>
+  it.effect("keeps an optional parent reference available to root and child runtimes", () =>
     Effect.gen(function*() {
       class Waiting extends Schema.TaggedClass<Waiting>("ParentEventsWaiting")("Waiting", {}) {}
       class Reported extends Schema.TaggedClass<Reported>("ParentEventsReported")("Reported", {}) {}
@@ -213,7 +225,7 @@ describe("machine reference event channels", () => {
       const childMachine = Machine.make({
         states: childStates.states,
         events: ChildEvents,
-        parentEvents: ParentEvents,
+        parent: Machine.optionalParent(ParentEvents),
         emittedEvents: ChildEmissions,
         initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
       }).handle({
@@ -232,6 +244,7 @@ describe("machine reference event channels", () => {
         },
         Reported: {}
       })
+      assert.strictEqual(childMachine.parent?.mode, "optional")
 
       const root = yield* Machine.start(childMachine)
       const rootChanged = yield* root.changes.pipe(
@@ -291,19 +304,20 @@ describe("machine reference event channels", () => {
       const childDefinition = Machine.make({
         states: childStates.states,
         events: Machine.events(),
-        parentEvents: ParentEvents,
+        parent: Machine.parent(ParentEvents),
         initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
       })
       const childMachine = childDefinition.handle({
         ChildIdle: {
           invoke: Machine.invoke({
             id: "notify-ready",
-            effect: ({ parent }) => parent === undefined ? Effect.void : parent.send(ParentEvents.ChildReady()),
+            effect: ({ parent }) => parent.send(ParentEvents.ChildReady()),
             onDone: (to) => to.none,
             onFailure: (to) => to.none
           })
         }
       })
+      assert.strictEqual(childMachine.parent?.mode, "required")
       const Child = Machine.child("bound-invoke-child", childMachine)
       const parentStates = Machine.states({
         ParentWaiting,

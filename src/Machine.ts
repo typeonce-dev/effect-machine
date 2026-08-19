@@ -53,6 +53,9 @@ declare const MachineTypeId: unique symbol
 declare const EventConstructionTypeId: unique symbol
 declare const EmittedEventConstructionTypeId: unique symbol
 declare const EventProtocolTypeId: unique symbol
+declare const ParentModeTypeId: unique symbol
+
+const ParentTypeId = "~effect/Machine/Parent"
 
 const ChildMachineLogicTypeId: typeof internal.ChildMachineLogicTypeId = internal.ChildMachineLogicTypeId
 
@@ -184,16 +187,16 @@ export interface Machine<
   readonly emittedEvents: Machine.EventProtocol<"emitted", Emits>
 
   /**
-   * Public input events accepted by an owning machine when this machine is
-   * running as a child.
+   * Declared owning-machine protocol, or `undefined` when this machine does
+   * not communicate with its owner.
    *
-   * The protocol types the optional `parent` machine target exposed to
-   * handlers and is checked against a concrete parent's public events at
-   * composition boundaries.
+   * Required parents make the machine child-only and expose a non-optional
+   * `parent` target to handlers. Optional parents keep root execution valid
+   * and expose `parent` as possibly absent.
    *
-   * @since 0.10.0
+   * @since 0.17.0
    */
-  readonly parentEvents: Machine.EventProtocol<"public", ParentEvents>
+  readonly parent: Machine.ParentDeclarationOf<ParentEvents>
 
   /**
    * Optional schema used to decode the machine input before initialization.
@@ -463,21 +466,60 @@ export interface MachineTarget<in Event> {
 }
 
 /**
+ * Availability declared for an owning-machine target.
+ *
+ * @category models
+ * @since 0.17.0
+ */
+export type ParentMode = "required" | "optional"
+
+/**
+ * Owning-machine protocol declared by {@link parent} or
+ * {@link optionalParent}.
+ *
+ * @category models
+ * @since 0.17.0
+ */
+export interface Parent<Mode extends ParentMode, Events extends ReadonlyArray<Machine.TaggedSchema>> {
+  readonly [ParentTypeId]: typeof ParentTypeId
+  readonly mode: Mode
+  readonly events: Machine.EventProtocol<"public", Events>
+}
+
+/**
+ * Namespace containing type-level members associated with {@link Parent}.
+ *
+ * @category models
+ * @since 0.17.0
+ */
+export declare namespace Parent {
+  /** Any owning-machine protocol declaration. */
+  export type Any = Parent<ParentMode, ReadonlyArray<Machine.TaggedSchema>>
+}
+
+/**
  * Machine targets available while evaluating machine behavior.
  *
  * @category models
  * @since 0.12.0
  */
-export interface MachineReferences<
+export type MachineReferences<
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
-> {
-  /** Target for the current machine. Sending queues a later mailbox event. */
-  readonly self: MachineTarget<Machine.EventInputOf<InputEvents>>
-
-  /** Target for the owning machine, or `undefined` when running as a root. */
-  readonly parent: MachineTarget<Machine.EventInputOf<ParentEvents>> | undefined
-}
+> =
+  & {
+    /** Target for the current machine. Sending queues a later mailbox event. */
+    readonly self: MachineTarget<Machine.EventInputOf<InputEvents>>
+  }
+  & (Machine.ParentModeOf<ParentEvents> extends "required" ? {
+      /** Required target for the machine that owns this child. */
+      readonly parent: MachineTarget<Machine.EventInputOf<ParentEvents>>
+    } :
+    Machine.ParentModeOf<ParentEvents> extends "optional" ? {
+        /** Target for the owning machine, or `undefined` when running as a root. */
+        readonly parent: MachineTarget<Machine.EventInputOf<ParentEvents>> | undefined
+      } :
+    {})
 
 /**
  * Synchronous commands available while a machine transition is being
@@ -2485,6 +2527,35 @@ export declare namespace Machine {
     readonly parentEvents: ParentEvents
   }
 
+  /** @internal Carries parent availability without widening the event tuple. */
+  export type ParentEventSchemas<
+    Mode extends ParentMode,
+    Events extends ReadonlyArray<TaggedSchema>
+  > = Events & { readonly [ParentModeTypeId]: Mode }
+
+  /** Extracts the parent availability encoded in a machine event tuple. */
+  export type ParentModeOf<Events extends ReadonlyArray<TaggedSchema>> = Events extends
+    { readonly [ParentModeTypeId]: infer Mode extends ParentMode } ? Mode
+    : Events extends readonly [] ? "none"
+    : "optional"
+
+  /** Extracts the event schemas declared by an owning-machine protocol. */
+  export type ParentEventsOf<Declaration extends Parent.Any | undefined> = Declaration extends Parent<
+    infer Mode,
+    infer Events
+  > ? ParentEventSchemas<Mode, Events>
+    : readonly []
+
+  /** Extracts the owning-machine declaration carried by a machine. */
+  export type ParentDeclarationOf<Events extends ReadonlyArray<TaggedSchema>> = ParentModeOf<Events> extends
+    infer Mode ? Mode extends ParentMode ? Parent<Mode, Events> : undefined
+    : never
+
+  /** Constraint applied to APIs that create an independent root runtime. */
+  export type RootCompatible<Events extends ReadonlyArray<TaggedSchema>> = ParentModeOf<Events> extends "required"
+    ? never
+    : unknown
+
   /**
    * Any schema-first machine.
    *
@@ -2505,7 +2576,7 @@ export declare namespace Machine {
     readonly events: EventProtocol.Any<"public">
     readonly internalEvents: EventProtocol.Any<"internal">
     readonly emittedEvents: EventProtocol.Any<"emitted">
-    readonly parentEvents: EventProtocol.Any<"public">
+    readonly parent: Parent.Any | undefined
     readonly input: Schema.Top | undefined
     readonly id: string | undefined
     /** @internal */
@@ -2629,6 +2700,9 @@ export declare namespace Machine {
 
   /** Extracts the public input protocol required from an owning machine. */
   export type ParentEvents<M extends Any> = M[typeof MachineTypeId]["parentEvents"]
+
+  /** Extracts whether a machine requires or optionally accepts an owner. */
+  export type ParentAvailability<M extends Any> = ParentModeOf<M[typeof MachineTypeId]["parentEvents"]>
 
   /** Extracts an internal event schema tuple from the complete and public protocols. */
   export type InternalEventSchemas<
@@ -4577,7 +4651,7 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface HandlerContext<
+  export type HandlerContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4587,7 +4661,7 @@ export declare namespace Machine {
     R,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4610,14 +4684,14 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface StateActionContext<
+  export type StateActionContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4630,14 +4704,14 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface InvokeContext<
+  export type InvokeContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4650,7 +4724,7 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface InvokeSnapshotContext<
+  export type InvokeSnapshotContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4660,7 +4734,7 @@ export declare namespace Machine {
     Output,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4675,7 +4749,7 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface InvokeDoneContext<
+  export type InvokeDoneContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4683,7 +4757,7 @@ export declare namespace Machine {
     Output,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4694,7 +4768,7 @@ export declare namespace Machine {
   }
 
   /** Context passed to a Stream invocation's element transition. */
-  export interface InvokeElementContext<
+  export type InvokeElementContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4702,7 +4776,7 @@ export declare namespace Machine {
     Element,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4713,7 +4787,7 @@ export declare namespace Machine {
   }
 
   /** Context passed to an invocation typed-failure transition. */
-  export interface InvokeFailureContext<
+  export type InvokeFailureContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -4721,7 +4795,7 @@ export declare namespace Machine {
     Error,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly id: string
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
@@ -4737,14 +4811,14 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface AlwaysContext<
+  export type AlwaysContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4768,14 +4842,14 @@ export declare namespace Machine {
    * @category models
    * @since 0.4.0
    */
-  export interface DoneContext<
+  export type DoneContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly state: StateByIdentifier<States, StateId>
     readonly containingState: ParentStateValue<States, StateId>
     readonly ancestors: ParentStateValues<States, StateId>
@@ -4795,14 +4869,14 @@ export declare namespace Machine {
   }
 
   /** Context passed to a transient choice resolver. There is no `state` value. */
-  export interface ChoiceContext<
+  export type ChoiceContext<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
     ChoiceId extends ChoiceIdentifier<States>,
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > extends MachineReferences<InputEvents, ParentEvents> {
+  > = MachineReferences<InputEvents, ParentEvents> & {
     readonly containingState: StateByIdentifier<
       States,
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
@@ -7591,7 +7665,7 @@ type MakeConfig<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
+  ParentDeclaration extends Parent.Any | undefined
 > = {
   readonly id?: string
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
@@ -7605,7 +7679,7 @@ type MakeConfig<
       NoInfer<InternalEvents>
     >
   readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
-  readonly parentEvents?: Machine.EventProtocol<"public", ParentEvents>
+  readonly parent?: ParentDeclaration
   readonly input?: Input
   readonly initial: unknown
 }
@@ -7618,7 +7692,7 @@ type MakeResult<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema>
+  ParentDeclaration extends Parent.Any | undefined
 > = Definition<
   States,
   readonly [...InputEvents, ...InternalEvents],
@@ -7629,7 +7703,7 @@ type MakeResult<
   Machine.TerminalOutput<States>,
   Emits,
   InputEvents,
-  ParentEvents
+  Machine.ParentEventsOf<ParentDeclaration>
 >
 
 interface Make {
@@ -7641,16 +7715,16 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const ParentDeclaration extends Parent.Any | undefined = undefined
   >(
     config:
       & Omit<
-        MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>,
+        MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
         "initial"
       >
       & { readonly initial: Machine.InitialBuilderInput<States, Input["Type"]> },
     ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>
+  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -7659,10 +7733,13 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+    const ParentDeclaration extends Parent.Any | undefined = undefined
   >(
     config:
-      & Omit<MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>, "states">
+      & Omit<
+        MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
+        "states"
+      >
       & { readonly states: InvalidDefinedStateTreeInput<States> }
   ): never
 }
@@ -7685,9 +7762,10 @@ interface Make {
  *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
  * adds raised events and other machine-local deliveries.
- * `Machine.emittedEvents` defines outward ephemeral notifications, while
- * `parentEvents` declares the inputs a child may explicitly send to its owning
- * machine. All descriptors expose deferred constructors while retaining their
+ * `Machine.emittedEvents` defines outward ephemeral notifications. The
+ * `parent` configuration accepts `Machine.parent(events)` for a required owner
+ * or `Machine.optionalParent(events)` for a root-capable machine. All
+ * descriptors expose deferred constructors while retaining their
  * schemas opaquely for runtime validation. Public and internal tags must be
  * disjoint.
  *
@@ -7772,6 +7850,33 @@ export const events: {
     ...inputs: Inputs & ValidateEventProtocolBuilder<"public", Inputs>
   ): Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
 } = internal.events as any
+
+/**
+ * Requires the machine to run as an owned child whose parent accepts the
+ * supplied public event protocol.
+ *
+ * Required-parent machines expose a non-optional `parent` target in behavior
+ * contexts and are rejected by root execution APIs.
+ *
+ * @category constructors
+ * @since 0.17.0
+ */
+export const parent: <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  events: Machine.EventProtocol<"public", Events>
+) => Parent<"required", Events> = internal.parent
+
+/**
+ * Declares public events a machine may send to its owner while preserving the
+ * ability to run that machine as a root.
+ *
+ * Optional-parent machines expose `parent` as a possibly absent target.
+ *
+ * @category constructors
+ * @since 0.17.0
+ */
+export const optionalParent: <const Events extends ReadonlyArray<Machine.TaggedSchema>>(
+  events: Machine.EventProtocol<"public", Events>
+) => Parent<"optional", Events> = internal.optionalParent
 
 /**
  * Defines an internal event protocol and returns deferred constructors for
@@ -8235,7 +8340,7 @@ type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never]
  * `address` must not be repeated.
  *
  * Inside `handle(...)`, the owning definition contextually supplies its public
- * input and `parentEvents` protocols. Invocation sources and lifecycle handlers
+ * input and declared parent protocols. Invocation sources and lifecycle handlers
  * can therefore send through `self` and `parent` without naming the definition.
  * The standard `Machine.invoke(...)` constructor preserves these contexts
  * directly; no intermediate definition method is required.
@@ -8649,7 +8754,8 @@ export const planInitial: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.RootCompatible<ParentEvents>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   & {
@@ -8918,7 +9024,8 @@ export const plan: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.RootCompatible<ParentEvents>,
   state: Machine.Snapshot<States>,
   event: Machine.EventInputOf<InputEvents>
 ) => Effect.Effect<
@@ -9180,7 +9287,8 @@ export const prepare: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.RootCompatible<ParentEvents>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   Prepared<
@@ -9288,7 +9396,8 @@ export const start: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.RootCompatible<ParentEvents>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
   MachineRef<
@@ -9400,7 +9509,8 @@ export const resume: <
       InputEvents,
       ParentEvents
     >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
+    & EnsureExecutable<States, UnhandledStates, OutputStates>
+    & Machine.RootCompatible<ParentEvents>,
   snapshot: Machine.Snapshot<States>
 ) => Effect.Effect<
   MachineRef<

@@ -86,10 +86,14 @@ const getPlanningMachineReferences = (machine: Machine.Any): PlanningMachineRefe
 const resolveMachineReferences = (
   machine: Machine.Any,
   machineReferences: PlanningMachineReferences | undefined
-): PlanningMachineReferences =>
-  machineReferences === undefined
+): { readonly self: MachineTarget<any>; readonly parent?: MachineTarget<any> | undefined } => {
+  const resolved = machineReferences === undefined
     ? getPlanningMachineReferences(machine)
-    : { self: machineReferences.self, parent: machineReferences.parent }
+    : machineReferences
+  return machine.parent === undefined
+    ? { self: resolved.self }
+    : { self: resolved.self, parent: resolved.parent }
+}
 
 const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
   "initialize",
