@@ -165,6 +165,7 @@ describe("platformer history integration", () => {
         source: "Character.locomotion.Playing.Airborne.airJump",
         trigger: { type: "event", event: "WallJump" },
         reenter: true,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "Character.locomotion.Playing.Airborne.airJump.AirJumpWallLock",
