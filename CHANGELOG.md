@@ -1,5 +1,29 @@
 # @typeonce/effect-machine
 
+## 0.18.0
+
+### Minor Changes
+
+- 9e54de3: Add consumer-facing state and startup-input extractors. `Machine.Snapshot`, `Machine.Value`, and `Machine.SnapshotAt` accept either the object returned by `Machine.states` or a machine definition, while preserving exact path validation and excluding control-only paths from `Value`.
+
+  `Machine.Machine.Input<M>` now extracts the decoded startup value and is `never` when the machine uses `Schema.Void`. Code that needs the startup schema should migrate from `Machine.Machine.Input<M>` to `Machine.Machine.InputSchema<M>`; code that previously used `Machine.Machine.Input<M>["Type"]` can use `Machine.Machine.Input<M>` directly.
+
+- d6d19c1: Replace `Machine.invoke` and its object-configuration helper types with state-local fluent invocation chains. Select an Effect, Stream, timer, process logic, or child from the handler's `from` parameter, then handle every reachable lifecycle channel before returning the chain:
+
+  ```ts
+  machine.handle({
+    Loading: {
+      invoke: (from) =>
+        from
+          .effect("load", () => loadUser())
+          .onDone((to) => to.full.Ready())
+          .onFailure((to) => to.full.Failed())
+    }
+  })
+  ```
+
+  Return an array of completed chains for multiple activities. Sources and child descriptors remain reusable, while keeping the invocation declaration local preserves exact owner-state, event, parent, output, failure, element, snapshot, and service inference.
+
 ## 0.17.0
 
 ### Minor Changes
