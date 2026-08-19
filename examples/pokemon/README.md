@@ -1,7 +1,7 @@
 # Pokémon statechart example
 
-A standalone React and Vite application demonstrating parent, child, parallel,
-and invoked Effect machines with a live PokéAPI integration.
+A standalone React and Vite application demonstrating hierarchical parent and
+child workflows and invoked Effect machines with a live PokéAPI integration.
 
 This project installs `@typeonce/effect-machine` from the repository root
 through a local `file:` dependency. It keeps an independent lockfile and

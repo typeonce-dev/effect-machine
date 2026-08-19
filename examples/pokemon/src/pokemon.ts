@@ -18,12 +18,14 @@ export const Pokemon = Schema.Struct({
   })
 })
 
-export class ReplaceInTeam extends Schema.TaggedClass<ReplaceInTeam>("ReplaceInTeam")("ReplaceInTeam", {
-  id: Pokemon.fields.id,
-  pokemon: Pokemon
-}) {}
-
-export const TeamEvents = Machine.events(ReplaceInTeam)
+export const TeamEvents = Machine.events(
+  Schema.TaggedUnion({
+    ReplaceInTeam: {
+      id: Pokemon.fields.id,
+      pokemon: Pokemon
+    }
+  })
+)
 
 export class PokemonService extends Context.Service<PokemonService>()("app/PokemonService", {
   make: Effect.gen(function*() {

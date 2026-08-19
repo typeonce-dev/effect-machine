@@ -54,12 +54,15 @@ testing, or simulation variant.
 
 ```ts
 const State = Schema.TaggedUnion({
-  Idle: {},
   Saving: { draft: Draft },
   Failed: { message: Schema.String }
 })
 
-const States = Machine.states(State.cases)
+const States = Machine.states({
+  Idle: {},
+  Saving: State.cases.Saving,
+  Failed: State.cases.Failed
+})
 export const Event = Machine.events(
   Schema.TaggedUnion({
     Save: {}
@@ -139,6 +142,23 @@ its extra control is required:
   `stop`. These operations record closed machine commands and do not run Effects.
 
 ## Atomic, compound, parallel, and history states
+
+### Topology is a validity boundary
+
+Design the state tree so invalid domain situations cannot be constructed. A
+parallel node is not merely a convenient grouping of related concepts: it
+declares the Cartesian product of its regions. Every combination must be
+meaningful in snapshots, explicit targets, decoding, and resume.
+
+If a handler reads a sibling region to decide whether entering its target is
+legal, treat that as a topology smell and try a compound hierarchy first. Do
+not move the same invariant into a disabled UI control, redundant event field,
+or invoked-service failure. Cross-region reads remain useful for coordinating
+genuinely independent regions and for projecting snapshots into views.
+
+Place an invoked Effect or resource-dependent state beneath the state that
+guarantees the resource exists. Exiting the owner should structurally exit and
+interrupt all dependent work.
 
 ### Inline topology by default; extract only repeated states
 
@@ -234,7 +254,8 @@ machine-bound forms over `.cases.Case.Type`, `typeof States.states`, or
 composing `Machine.Machine.States` with raw-tree path extractors.
 
 An active state does not need a schema unless it owns data. Omit `schema` for
-control-only atomic, compound, parallel, and final states:
+control-only atomic, compound, parallel, and final states. In particular, use
+`{}` instead of an empty tagged-union case or tagged class:
 
 ```ts
 const States = Machine.states({
@@ -258,11 +279,7 @@ in snapshots. They do not have a state value:
 ```ts
 Idle: {
   on: {
-    Start: (to) =>
-      to.full.Form.initial.resolve(({ state, target }) => {
-        // state: undefined
-        return target.from((form) => form.Editing.from())
-      })
+    Start: (to) => to.full.Form.initial
   }
 }
 
@@ -276,6 +293,13 @@ form is reserved for already-decoded schema values. Structural ancestors are
 also omitted from `ancestors`; an immediate structural containing state is
 typed as `undefined`. Add `schema` when a state begins to own data or needs runtime
 validation and persistence for that data.
+
+Declare data-bearing states together with the named
+`const State = Schema.TaggedUnion(...)` pattern, then reference `State.cases`
+from the topology. This keeps the state value protocol visible and reusable.
+Use a named `Schema.TaggedClass` instead when a standalone state benefits from
+class identity. Do not bury one-off tagged schema declarations inside
+`Machine.states`.
 
 Use an atomic state when no child phase can be active beneath it.
 
@@ -326,6 +350,11 @@ Every parallel region needs an active state in initial and full snapshot
 builders. The same rule applies when a local or branch target enters an
 inactive nested parallel state.
 
+This is also a semantic product: `Online + Closed`, `Online + Open`,
+`Offline + Closed`, and `Offline + Open` are all valid configurations in the
+example above. If even one combination must be prevented for correctness, use
+a compound hierarchy or redesign the regions.
+
 Use `type: "final"` for a terminal leaf in `Machine.states`. A final
 child completes its compound parent. Put `onDone` on that completed parent,
 never on the final leaf. The definition owns the output schema and the handler
@@ -362,6 +391,20 @@ with `.initial`. This is available on top-level state methods under
 ```ts
 Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ teamId: "team-1" }))
 ```
+
+Return the `.initial` transition directly when the selected state owns no data
+and the transition has no commands to enqueue:
+
+```ts
+Close: (to) => to.full.closed.initial
+```
+
+Do not manually reconstruct the declared initial descendants at ordinary entry
+transitions. Reserve explicit descendant builders for deliberately non-default
+configurations and for replacing an already-active parallel root with one
+complete canonical configuration. `Machine.make({ initial })` still constructs
+the first complete snapshot through its initial selector; that selector
+statically restricts a compound node to its declared initial child.
 
 The definition-time `.initial` property is a topology value. The exact
 resolver `target` is still a callable runtime builder.
@@ -623,6 +666,11 @@ Use the existing `States.matches`, `States.get`, `States.getWithParents`, and
 `States.getSnapshot` helpers for cross-region reads. Parallel transitions
 selected in one microstep receive the same capture. Synchronous handlers use
 that captured value and cannot consult live runtime state later.
+
+Before using a cross-region read to permit or reject a target, verify that all
+combinations of the parallel regions are valid. If the check excludes an
+invalid combination, move the invariant into a compound hierarchy. Observer,
+view, diagnostic, and test queries do not have this concern.
 
 Do not expect `snapshot` in entry, exit, invoke, initializer, history-default,
 or choice contexts. Choice is an important soundness boundary: a startup or

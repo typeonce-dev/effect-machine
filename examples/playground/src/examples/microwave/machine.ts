@@ -15,22 +15,16 @@ export const MicrowaveEvents = Machine.events(
 
 export const MicrowaveStates = Machine.states({
   Oven: {
-    type: "parallel",
+    initial: "Closed",
     states: {
-      engine: {
+      Closed: {
         initial: "Idle",
         states: {
           Idle: {},
           Cooking: MicrowaveState.cases.Cooking
         }
       },
-      door: {
-        initial: "Closed",
-        states: {
-          Closed: {},
-          Open: {}
-        }
-      }
+      Open: {}
     }
   }
 })
@@ -40,29 +34,18 @@ export const MicrowaveMachine = Machine.make({
   states: MicrowaveStates.states,
   events: MicrowaveEvents,
   initial: (to) =>
-    to.Oven.initial.resolve(({ target }) =>
-      target.from((oven) =>
-        oven
-          .engine.from((engine) => engine.Idle.from())
-          .door.from((door) => door.Closed.from())
-      )
-    )
+    to.Oven.initial.resolve(({ target }) => target.from((oven) => oven.Closed.from((closed) => closed.Idle.from())))
 }).handle({
   Oven: {
     states: {
-      engine: {
+      Closed: {
+        on: {
+          DoorOpened: (to) => to.branch.Oven.Open().resolve(({ target }) => target.from())
+        },
         states: {
           Idle: {
             on: {
-              PowerPressed: (to) =>
-                to.branches({
-                  doorClosed: { title: "Door closed", target: to.local.Cooking() },
-                  unchanged: { target: to.none }
-                }).resolve(({ snapshot, select }) =>
-                  MicrowaveStates.matches(snapshot, "Oven.door.Closed")
-                    ? select.doorClosed.from({ elapsedSeconds: 0 })
-                    : select.unchanged()
-                )
+              PowerPressed: (to) => to.local.Cooking().resolve(({ target }) => target.from({ elapsedSeconds: 0 }))
             }
           },
           Cooking: {
@@ -73,24 +56,14 @@ export const MicrowaveMachine = Machine.make({
                 )
               ),
             on: {
-              PowerPressed: (to) => to.local.Idle().resolve(({ target }) => target.from()),
-              DoorOpened: (to) => to.local.Idle().resolve(({ target }) => target.from())
+              PowerPressed: (to) => to.local.Idle().resolve(({ target }) => target.from())
             }
           }
         }
       },
-      door: {
-        states: {
-          Closed: {
-            on: {
-              DoorOpened: (to) => to.local.Open().resolve(({ target }) => target.from())
-            }
-          },
-          Open: {
-            on: {
-              DoorClosed: (to) => to.local.Closed().resolve(({ target }) => target.from())
-            }
-          }
+      Open: {
+        on: {
+          DoorClosed: (to) => to.local.Closed.initial
         }
       }
     }

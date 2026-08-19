@@ -1,7 +1,5 @@
 import { Machine } from "@typeonce/effect-machine"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { Effect, Schema } from "effect"
-import { Atom } from "effect/unstable/reactivity"
 import { ReplaceMachine } from "./machines/replace.ts"
 import { SelectionMachine } from "./machines/selection.ts"
 import { Pokemon, PokemonService, TeamEvents } from "./pokemon.ts"
@@ -10,12 +8,16 @@ class ActiveTeam extends Schema.TaggedClass<ActiveTeam>("ActiveTeam")("ActiveTea
   team: Schema.Array(Pokemon)
 }) {}
 
-export const States = Machine.states({ Loading: {}, ActiveTeam, Failed: {} })
+export const States = Machine.states({
+  Loading: {},
+  ActiveTeam,
+  Failed: {}
+})
 
 export const SelectionChild = Machine.child("selection", SelectionMachine)
 export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 
-const machine = Machine.make({
+export const machine = Machine.make({
   states: States.states,
   events: TeamEvents,
   initial: (to) => to.Loading().resolve(({ target }) => target.from())
@@ -33,9 +35,7 @@ const machine = Machine.make({
     invoke: (
       from
     ) => [
-      from.child(SelectionChild).onDone((to) => to.none).onFailure((to) =>
-        to.full.Failed().resolve(({ target }) => target.from())
-      ),
+      from.child(SelectionChild).onFailure((to) => to.full.Failed().resolve(({ target }) => target.from())),
       from.child(ReplaceChild).onFailure((to) => to.full.Failed().resolve(({ target }) => target.from()))
     ],
     on: {
@@ -49,9 +49,3 @@ const machine = Machine.make({
   },
   Failed: {}
 })
-
-const atomRuntime = Atom.runtime(PokemonService.layer)
-export const machineAtom = AtomMachine.bind(atomRuntime).make(machine)
-
-export const selectionMachineAtom = machineAtom.child(SelectionChild)
-export const replaceMachineAtom = machineAtom.child(ReplaceChild)

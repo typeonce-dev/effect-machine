@@ -49,11 +49,14 @@ import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema, Stream } from "effect"
 
 const State = Schema.TaggedUnion({
-  Idle: {},
   Running: { count: Schema.Number }
 })
 
-const States = Machine.states(State.cases)
+const States = Machine.states({
+  Idle: {},
+  Running: State.cases.Running
+})
+
 const CounterEvent = Machine.events(
   Schema.TaggedUnion({
     Start: {},
@@ -127,6 +130,23 @@ or `Machine.Snapshot<typeof machine>`, schema-backed state payloads as
 `Machine.Value<typeof States, Path>`, and path-rooted snapshots as
 `Machine.SnapshotAt<typeof States, Path>`.
 
+### Make invalid states unrepresentable
+
+Treat topology as a domain contract, not as file organization. A parallel state
+declares the full Cartesian product of its regions, so use it only when every
+combination has a coherent meaning. If one region must inspect another before
+entering a state safely, prefer a compound hierarchy that makes the forbidden
+combination impossible. `matches` remains useful for views, tests, and genuine
+coordination between independent regions; it should not repair an invalid
+state product.
+
+Keep state-scoped Effects beneath the state that guarantees their resources,
+and enforce command availability in the machine rather than only by disabling
+UI controls. When entering an inactive compound or parallel state's declared
+default, select `.initial`; explicitly construct descendants only for a
+non-default configuration or a complete replacement of an already-active
+parallel root.
+
 ### Construct state through builders
 
 Use `.from(...)` when constructing a new state from fields:
@@ -153,7 +173,8 @@ const handlers = {
 }
 ```
 
-Omit `schema` when a state represents control flow but owns no data:
+Omit `schema` when a state represents control flow but owns no data. Use `{}`
+instead of defining an empty tagged schema:
 
 ```ts
 const States = Machine.states({
@@ -177,6 +198,11 @@ Schema-less states remain active, targetable, matchable, and visible through
 `getSnapshot`, but have no value to read. Their builders expose only `.from`,
 their handler `state` is `undefined`, and `get` / `getWithParents` accept only
 schema-backed paths. Add a schema later if the state starts owning data.
+
+Keep data-bearing state schemas together in a named `Schema.TaggedUnion` and
+reference its cases from the topology. For a standalone state schema whose
+class identity is useful, declare a named `Schema.TaggedClass`. Do not bury
+one-off tagged schema declarations inside `Machine.states`.
 
 Put data on the narrowest state where it is valid. If sibling phases share
 data, put it on their compound parent.
@@ -646,11 +672,11 @@ Each ESM entrypoint is independent and tree-shakeable.
 Every package directly under [`examples/`](./examples) has its own lockfile and
 `check` script.
 
-| Example                             | What it demonstrates                                                                                                                                                                                                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [Playground](./examples/playground) | Five focused React examples: atomic turnstile commands, state-scoped traffic-light timers, microwave safety across parallel regions, a service-backed media player, and a worker-hosted machine synchronized across tabs |
-| [Pokémon](./examples/pokemon)       | Compound and parallel states, invoked child machines, typed emissions, Atom reactivity, and a live Effect service                                                                                                        |
-| [Platformer](./examples/platformer) | Nested parallel statecharts, typed deep history, raised events, state-scoped timers, deterministic model tests, and a playable SVG adapter                                                                               |
+| Example                             | What it demonstrates                                                                                                                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Playground](./examples/playground) | Five focused React examples: atomic turnstile commands, state-scoped traffic-light timers, hierarchical microwave safety, a resource-owned media player, and a worker-hosted machine synchronized across tabs |
+| [Pokémon](./examples/pokemon)       | Compound workflow states, invoked child machines, typed emissions, Atom reactivity, and a live Effect service                                                                                                 |
+| [Platformer](./examples/platformer) | Nested parallel statecharts, typed deep history, raised events, state-scoped timers, deterministic model tests, and a playable SVG adapter                                                                    |
 
 The playground is the shortest path from one concept to working code. The
 standalone examples show larger composition and ownership boundaries.

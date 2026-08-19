@@ -11,7 +11,7 @@ export function MicrowavePage() {
   return (
     <ExamplePage
       title="Microwave"
-      summary="Parallel door and engine regions react to the same event, so opening the door interrupts cooking atomically."
+      summary="The door hierarchy makes cooking with an open door structurally impossible, and leaving Cooking interrupts its timer."
       machineFile="src/examples/microwave/machine.ts"
     >
       {Match.value(stateResult).pipe(
@@ -19,11 +19,10 @@ export function MicrowavePage() {
           Initial: () => <div className="example-message">Starting the microwave…</div>,
           Failure: () => <div className="example-message is-error">The microwave failed to start.</div>,
           Success: ({ value: state }) => {
-            const engine = state.states.engine.state
-            const door = state.states.door.state
-            const cooking = engine.path === "Oven.engine.Cooking"
-            const open = door.path === "Oven.door.Open"
-            const elapsedSeconds = cooking ? engine.value.elapsedSeconds : 0
+            const oven = state.state
+            const open = oven.path === "Oven.Open"
+            const cooking = oven.path === "Oven.Closed" && oven.state.path === "Oven.Closed.Cooking"
+            const elapsedSeconds = cooking ? oven.state.value.elapsedSeconds : 0
             const engineName = cooking ? "Cooking" : "Idle"
             const doorName = open ? "Open" : "Closed"
 
@@ -40,7 +39,7 @@ export function MicrowavePage() {
                   </div>
                 </div>
                 <div className="machine-demo-copy">
-                  <p className="machine-state-label">Parallel configuration</p>
+                  <p className="machine-state-label">Hierarchical safety state</p>
                   <h2>{cooking ? `Cooking · ${elapsedSeconds}s` : open ? "Idle · door open" : "Idle · door closed"}</h2>
                   <p>
                     Engine: <code>{engineName}</code> · Door: <code>{doorName}</code>
