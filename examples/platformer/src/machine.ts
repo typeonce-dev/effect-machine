@@ -331,16 +331,12 @@ export const CharacterMachine = Machine.make({
                     states: {
                       AirJumpGroundLock: {
                         invoke: (from) =>
-                          from.timer("ground-air-jump-unlock", "120 millis").onDone((to) =>
-                            to.local.AirJumpReady().resolve(({ target }) => target.from())
-                          ),
+                          from.timer("ground-air-jump-unlock", "120 millis").onDone((to) => to.local.AirJumpReady()),
                         on: {}
                       },
                       AirJumpWallLock: {
                         invoke: (from) =>
-                          from.timer("wall-air-jump-unlock", "240 millis").onDone((to) =>
-                            to.local.AirJumpReady().resolve(({ target }) => target.from())
-                          ),
+                          from.timer("wall-air-jump-unlock", "240 millis").onDone((to) => to.local.AirJumpReady()),
                         on: {}
                       },
                       AirJumpReady: {
@@ -361,7 +357,7 @@ export const CharacterMachine = Machine.make({
           },
           Paused: {
             on: {
-              Resume: (to) => to.history.Character.locomotion.Playing.resume.resolve(({ target }) => target())
+              Resume: (to) => to.history.Character.locomotion.Playing.resume
             }
           }
         }

@@ -20,7 +20,7 @@ export const ReplaceChild = Machine.child("replace", ReplaceMachine)
 export const machine = Machine.make({
   states: States.states,
   events: TeamEvents,
-  initial: (to) => to.Loading().resolve(({ target }) => target.from())
+  initial: (to) => to.Loading()
 }).handle({
   Loading: {
     invoke: (from) =>
@@ -29,14 +29,14 @@ export const machine = Machine.make({
           const service = yield* PokemonService
           return yield* service.getRandomTeam()
         })).onDone((to) => to.full.ActiveTeam().resolve(({ output, target }) => target.from({ team: output })))
-        .onFailure((to) => to.full.Failed().resolve(({ target }) => target.from()))
+        .onFailure((to) => to.full.Failed())
   },
   ActiveTeam: {
     invoke: (
       from
     ) => [
-      from.child(SelectionChild).onFailure((to) => to.full.Failed().resolve(({ target }) => target.from())),
-      from.child(ReplaceChild).onFailure((to) => to.full.Failed().resolve(({ target }) => target.from()))
+      from.child(SelectionChild).onFailure((to) => to.full.Failed()),
+      from.child(ReplaceChild).onFailure((to) => to.full.Failed())
     ],
     on: {
       ReplaceInTeam: (to) =>

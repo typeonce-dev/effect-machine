@@ -40,7 +40,7 @@ export const MicrowaveMachine = Machine.make({
     states: {
       Closed: {
         on: {
-          DoorOpened: (to) => to.branch.Oven.Open().resolve(({ target }) => target.from())
+          DoorOpened: (to) => to.branch.Oven.Open()
         },
         states: {
           Idle: {
@@ -56,7 +56,7 @@ export const MicrowaveMachine = Machine.make({
                 )
               ),
             on: {
-              PowerPressed: (to) => to.local.Idle().resolve(({ target }) => target.from())
+              PowerPressed: (to) => to.local.Idle()
             }
           }
         }

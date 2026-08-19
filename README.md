@@ -69,7 +69,7 @@ const CounterDefinition = Machine.make({
   id: "Counter",
   states: States.states,
   events: CounterEvent,
-  initial: (to) => to.Idle().resolve(({ target }) => target.from())
+  initial: (to) => to.Idle()
 })
 
 const Counter = CounterDefinition.handle({
@@ -81,7 +81,7 @@ const Counter = CounterDefinition.handle({
   Running: {
     on: {
       Increment: (to) => to.full.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
-      Stop: (to) => to.full.Idle().resolve(({ target }) => target.from())
+      Stop: (to) => to.full.Idle()
     }
   }
 })
@@ -235,7 +235,7 @@ const definition = Machine.make({
   events: CommandEvent,
   internalEvents: InternalEvent,
   emittedEvents: Emissions,
-  initial: (to) => to.Idle().resolve(({ target }) => target.from())
+  initial: (to) => to.Idle()
 })
 ```
 
@@ -347,7 +347,7 @@ const child = Machine.make({
   states: ChildStates.states,
   events: ChildEvents,
   parent: Machine.parent(ParentEvents),
-  initial: (to) => to.Working().resolve(({ target }) => target.from())
+  initial: (to) => to.Working()
 }).handle({
   Working: {
     on: {
@@ -398,9 +398,13 @@ paths. `parent` always means the owning machine target.
 | `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
 
 Every required transition handler selects a target from its inline `to`
-builder. A bare selection uses the target schema's default construction; call
-`.resolve(...)` when construction depends on handler context. An absent handler
-ignores the trigger; `to.none` handles
+builder. Return a bare selection such as `to.full.Idle()` when the selected
+builder supports zero-argument construction; the machine applies the same
+default construction as `target.from()`. This includes empty schemas and
+schemas whose constructor fields are all optional or defaulted. TypeScript
+rejects the bare form when state data or nested configuration is required.
+Call `.resolve(...)` when construction depends on handler context or the
+transition needs to enqueue commands. An absent handler ignores the trigger; `to.none` handles
 it and retains queued commands, raised events, and emitted events without
 selecting a destination. Concrete destinations stay narrowed inside their
 resolver, and `to.branches({...})` gives the resolver only the declared named

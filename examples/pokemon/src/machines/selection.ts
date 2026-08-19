@@ -108,7 +108,7 @@ export const SelectionMachine = Machine.make({
                   to.none.resolve(({ output }, enqueue) => {
                     enqueue.raise(output)
                   })
-                ).onFailure((to) => to.local.NoPokemon().resolve(({ target }) => target.from())),
+                ).onFailure((to) => to.local.NoPokemon()),
             on: {
               SearchResult: (to) =>
                 to.branches({

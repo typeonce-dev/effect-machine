@@ -22,7 +22,7 @@ export const ReplaceMachine = Machine.make({
   events: ReplaceEvents,
   internalEvents: ReplaceInternalEvents,
   parent: Machine.parent(TeamEvents),
-  initial: (to) => to.Idle().resolve(({ target }) => target.from())
+  initial: (to) => to.Idle()
 }).handle({
   Idle: {
     on: {
@@ -45,7 +45,7 @@ export const ReplaceMachine = Machine.make({
           to.none.resolve(({ output }, enqueue) => {
             enqueue.raise(output)
           })
-        ).onFailure((to) => to.full.Idle().resolve(({ target }) => target.from())),
+        ).onFailure((to) => to.full.Idle()),
     on: {
       Replaced: (to) =>
         to.full.Idle().resolve(({ event, parent, state, target }, enqueue) => {
