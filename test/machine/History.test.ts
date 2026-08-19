@@ -159,31 +159,21 @@ const makeCheckoutMachine = (
         }
       },
       on: {
-        Leave: Machine.transition({
-          target: (to) => to.full.support(),
-          resolve: ({ target }) => target(new Support({ ticket: "ticket-1" }))
-        }),
-        GoShipping: Machine.transition({
-          target: (to) => to.local.shipping(),
-          resolve: ({ event, target }) => target(new Shipping({ address: event.address }))
-        }),
-        ReenterHistory: Machine.transition({
-          target: (to) => to.history.checkout.exact(),
-          resolve: ({ target }) => target(),
-          reenter: true
-        })
+        Leave: (to) => to.full.support().resolve(({ target }) => target(new Support({ ticket: "ticket-1" }))),
+        GoShipping: (to) =>
+          to.local.shipping().resolve(({ event, target }) => target(new Shipping({ address: event.address }))),
+        ReenterHistory: (to) => to.history.checkout.exact().resolve(({ target }) => target(), { reenter: true })
       },
       states: {
         shipping: {
           on: {
-            EnterVerifying: Machine.transition({
-              target: (to) => to.local.payment(),
-              resolve: ({ target }) =>
+            EnterVerifying: (to) =>
+              to.local.payment().resolve(({ target }) =>
                 target(
                   new Payment({ attempt: 2 }),
                   (payment) => payment.verifying(new Verifying({ challengeId: "challenge-7" }))
                 )
-            })
+              )
           }
         },
         payment: {
@@ -218,14 +208,8 @@ const makeCheckoutMachine = (
         lifecycle?.push("exit:support")
       },
       on: {
-        ResumeShallow: Machine.transition({
-          target: (to) => to.history.checkout.recent(),
-          resolve: ({ target }) => target()
-        }),
-        ResumeDeep: Machine.transition({
-          target: (to) => to.history.checkout.exact(),
-          resolve: ({ target }) => target()
-        })
+        ResumeShallow: (to) => to.history.checkout.recent().resolve(({ target }) => target()),
+        ResumeDeep: (to) => to.history.checkout.exact().resolve(({ target }) => target())
       }
     }
   })
@@ -365,10 +349,7 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
         }
       },
       on: {
-        LeaveWorkspace: Machine.transition({
-          target: (to) => to.full.away(),
-          resolve: ({ target }) => target(new Away({}))
-        })
+        LeaveWorkspace: (to) => to.full.away().resolve(({ target }) => target(new Away({})))
       },
       states: {
         editor: {
@@ -387,14 +368,8 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
     },
     away: {
       on: {
-        ResumeWorkspaceShallow: Machine.transition({
-          target: (to) => to.history.workspace.recent(),
-          resolve: ({ target }) => target()
-        }),
-        ResumeWorkspaceDeep: Machine.transition({
-          target: (to) => to.history.workspace.exact(),
-          resolve: ({ target }) => target()
-        })
+        ResumeWorkspaceShallow: (to) => to.history.workspace.recent().resolve(({ target }) => target()),
+        ResumeWorkspaceDeep: (to) => to.history.workspace.exact().resolve(({ target }) => target())
       }
     }
   })
@@ -479,23 +454,14 @@ const nestedHistoryMachine = Machine.make({
         states: {
           preview: {
             on: {
-              RestoreEditor: Machine.transition({
-                target: (to) => to.history.workspace.editor.exact(),
-                resolve: ({ target }) => target(),
-                reenter: true
-              }),
-              DefaultEditor: Machine.transition({
-                target: (to) => to.history.workspace.editor.exact(),
-                resolve: ({ target }) => target()
-              })
+              RestoreEditor: (to) =>
+                to.history.workspace.editor.exact().resolve(({ target }) => target(), { reenter: true }),
+              DefaultEditor: (to) => to.history.workspace.editor.exact().resolve(({ target }) => target())
             }
           },
           writing: {
             on: {
-              DefaultEditor: Machine.transition({
-                target: (to) => to.history.workspace.editor.exact(),
-                resolve: ({ target }) => target()
-              })
+              DefaultEditor: (to) => to.history.workspace.editor.exact().resolve(({ target }) => target())
             }
           }
         }

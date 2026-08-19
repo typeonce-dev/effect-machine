@@ -24,18 +24,12 @@ export const TurnstileMachine = Machine.make({
 }).handle({
   Locked: {
     on: {
-      CoinInserted: Machine.transition({
-        target: (to) => to.full.Unlocked(),
-        resolve: ({ target }) => target.from()
-      })
+      CoinInserted: (to) => to.full.Unlocked().resolve(({ target }) => target.from())
     }
   },
   Unlocked: {
     on: {
-      GatePushed: Machine.transition({
-        target: (to) => to.full.Locked(),
-        resolve: ({ target }) => target.from()
-      })
+      GatePushed: (to) => to.full.Locked().resolve(({ target }) => target.from())
     }
   }
 })

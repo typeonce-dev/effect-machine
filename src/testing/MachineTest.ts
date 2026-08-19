@@ -238,10 +238,8 @@ export interface Scenarios<M extends AnyMachine> {
  * }).handle({
  *   Idle: {
  *     on: {
- *       Reset: Machine.transition({
- *         target: (to) => to.full.Idle(),
- *         resolve: ({ target }) => target.from()
- *       })
+ *       Reset: (to) =>
+ *         to.full.Idle().resolve(({ target }) => target.from())
  *     }
  *   }
  * })
@@ -1447,10 +1445,9 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * }).handle({
  *   Count: {
  *     on: {
- *       Increment: Machine.transition({
- *         target: (to) => to.full.Count(),
- *         resolve: ({ state, target }) => target(new Count({ value: state.value + 1 }))
- *       })
+ *       Increment: (to) =>
+ *         to.full.Count().resolve(({ state, target }) =>
+ *           target(new Count({ value: state.value + 1 })))
  *     }
  *   }
  * })

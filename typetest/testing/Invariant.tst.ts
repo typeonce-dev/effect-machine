@@ -20,14 +20,8 @@ describe("MachineTest invariants", () => {
   }).handle({
     idle: {
       on: {
-        Tick: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        Internal: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        Tick: { target: Machine.targetless },
+        Internal: { target: Machine.targetless }
       }
     }
   })

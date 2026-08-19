@@ -75,10 +75,8 @@ const makeCounterMachine = () =>
   }).handle({
     Count: {
       on: {
-        Finish: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ state, event, target }) => target(new Count({ value: state.value + event.by }))
-        })
+        Finish: (to) =>
+          to.full.Count().resolve(({ state, event, target }) => target(new Count({ value: state.value + event.by })))
       }
     },
     Done: {}
@@ -171,10 +169,10 @@ describe("AtomMachine", () => {
             })
           }),
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.Count(),
-              resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.by }))
-            })
+            Finish: (to) =>
+              to.full.Count().resolve(({ event, state, target }) =>
+                target(new Count({ value: state.value + event.by }))
+              )
           }
         },
         Done: {}
@@ -224,25 +222,16 @@ describe("AtomMachine", () => {
       }).handle({
         Count: {
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.ValueRead(),
-              resolve: ({ target }) => target(new ValueRead({ value: "active" }))
-            })
+            Finish: (to) => to.full.ValueRead().resolve(({ target }) => target(new ValueRead({ value: "active" })))
           }
         },
         ValueRead: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onDone: { target: Machine.targetless }
           }),
           on: {
-            ReadValue: Machine.transition({
-              target: (to) => to.full.Count(),
-              resolve: ({ target }) => target(new Count({ value: 0 }))
-            })
+            ReadValue: (to) => to.full.Count().resolve(({ target }) => target(new Count({ value: 0 })))
           }
         }
       })
@@ -557,10 +546,8 @@ describe("AtomMachine", () => {
       }).handle({
         Count: {
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.Done(),
-              resolve: ({ state, event, target }) => target(new Done({ value: state.value + event.by }))
-            })
+            Finish: (to) =>
+              to.full.Done().resolve(({ state, event, target }) => target(new Done({ value: state.value + event.by })))
           }
         },
         Done: {

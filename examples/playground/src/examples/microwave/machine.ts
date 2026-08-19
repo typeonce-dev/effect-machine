@@ -55,36 +55,29 @@ export const MicrowaveMachine = Machine.make({
         states: {
           Idle: {
             on: {
-              PowerPressed: Machine.transition({
-                branches: (to) => ({
+              PowerPressed: (to) =>
+                to.branches({
                   doorClosed: { title: "Door closed", target: to.local.Cooking() },
                   unchanged: { target: to.none() }
-                }),
-                resolve: ({ snapshot, select }) =>
+                }).resolve(({ snapshot, select }) =>
                   MicrowaveStates.matches(snapshot, "Oven.door.Closed")
                     ? select.doorClosed.from({ elapsedSeconds: 0 })
                     : select.unchanged()
-              })
+                )
             }
           },
           Cooking: {
             invoke: Machine.invoke({
               id: "cooking-second",
               after: "1 second",
-              onDone: Machine.transition({
-                target: (to) => to.local.Cooking(),
-                resolve: ({ state, target }) => target.from({ elapsedSeconds: state.elapsedSeconds + 1 })
-              })
+              onDone: (to) =>
+                to.local.Cooking().resolve(({ state, target }) =>
+                  target.from({ elapsedSeconds: state.elapsedSeconds + 1 })
+                )
             }),
             on: {
-              PowerPressed: Machine.transition({
-                target: (to) => to.local.Idle(),
-                resolve: ({ target }) => target.from()
-              }),
-              DoorOpened: Machine.transition({
-                target: (to) => to.local.Idle(),
-                resolve: ({ target }) => target.from()
-              })
+              PowerPressed: (to) => to.local.Idle().resolve(({ target }) => target.from()),
+              DoorOpened: (to) => to.local.Idle().resolve(({ target }) => target.from())
             }
           }
         }
@@ -93,18 +86,12 @@ export const MicrowaveMachine = Machine.make({
         states: {
           Closed: {
             on: {
-              DoorOpened: Machine.transition({
-                target: (to) => to.local.Open(),
-                resolve: ({ target }) => target.from()
-              })
+              DoorOpened: (to) => to.local.Open().resolve(({ target }) => target.from())
             }
           },
           Open: {
             on: {
-              DoorClosed: Machine.transition({
-                target: (to) => to.local.Closed(),
-                resolve: ({ target }) => target.from()
-              })
+              DoorClosed: (to) => to.local.Closed().resolve(({ target }) => target.from())
             }
           }
         }

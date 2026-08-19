@@ -35,44 +35,31 @@ export const SharedMachine = Machine.make({
 }).handle({
   Idle: {
     on: {
-      Started: Machine.transition({
-        target: (to) => to.full.Active(),
-        resolve: ({ state, target }) => target.from({ count: state.count })
-      }),
-      Reset: Machine.transition({
-        target: (to) => to.full.Idle(),
-        resolve: ({ target }) => target.from({ count: 0 })
-      }),
-      Synchronized: Machine.transition({
-        branches: (to) => ({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }),
-        resolve: ({ event, select }) =>
+      Started: (to) => to.full.Active().resolve(({ state, target }) => target.from({ count: state.count })),
+      Reset: (to) => to.full.Idle().resolve(({ target }) => target.from({ count: 0 })),
+      Synchronized: (to) =>
+        to.branches({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }).resolve((
+          { event, select }
+        ) =>
           event.active
             ? select.active.from({ count: event.count })
             : select.idle.from({ count: event.count })
-      })
+        )
     }
   },
   Active: {
     on: {
-      Incremented: Machine.transition({
-        target: (to) => to.full.Active(),
-        resolve: ({ state, target }) => target.from({ count: state.count + 1 })
-      }),
-      Reset: Machine.transition({
-        target: (to) => to.full.Active(),
-        resolve: ({ target }) => target.from({ count: 0 })
-      }),
-      Stopped: Machine.transition({
-        target: (to) => to.full.Idle(),
-        resolve: ({ state, target }) => target.from({ count: state.count })
-      }),
-      Synchronized: Machine.transition({
-        branches: (to) => ({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }),
-        resolve: ({ event, select }) =>
+      Incremented: (to) => to.full.Active().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
+      Reset: (to) => to.full.Active().resolve(({ target }) => target.from({ count: 0 })),
+      Stopped: (to) => to.full.Idle().resolve(({ state, target }) => target.from({ count: state.count })),
+      Synchronized: (to) =>
+        to.branches({ active: { target: to.full.Active() }, idle: { target: to.full.Idle() } }).resolve((
+          { event, select }
+        ) =>
           event.active
             ? select.active.from({ count: event.count })
             : select.idle.from({ count: event.count })
-      })
+        )
     }
   }
 })

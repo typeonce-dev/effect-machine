@@ -21,10 +21,7 @@ const machine = Machine.make({
 }).handle({
   Idle: {
     on: {
-      Tick: Machine.transition({
-        target: (to) => to.full.Idle(),
-        resolve: ({ state, target }) => target(new Idle({ value: state.value + 1 }))
-      })
+      Tick: (to) => to.full.Idle().resolve(({ state, target }) => target(new Idle({ value: state.value + 1 })))
     }
   }
 })

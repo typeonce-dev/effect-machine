@@ -34,20 +34,17 @@ describe("local compound target selection", () => {
       }).handle({
         search: {
           on: {
-            UpdateQuery: Machine.transition({
-              target: (to) => to.local.with(),
-              resolve: ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
-              reenter: true
-            })
+            UpdateQuery: (to) =>
+              to.local.with().resolve(
+                ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
+                { reenter: true }
+              )
           },
           states: {
             Idle: {},
             Updated: {
               on: {
-                Reset: Machine.transition({
-                  target: (to) => to.local.Idle(),
-                  resolve: ({ target }) => target.from()
-                })
+                Reset: (to) => to.local.Idle().resolve(({ target }) => target.from())
               }
             }
           }
@@ -130,10 +127,10 @@ describe("local compound target selection", () => {
               invoke: Machine.invoke({
                 id: "search",
                 effect: () => Effect.succeed("resolved"),
-                onDone: Machine.transition({
-                  target: (to) => to.local.with(),
-                  resolve: ({ output, target }) => target.from({ query: output }, (search) => search.Updated.from())
-                })
+                onDone: (to) =>
+                  to.local.with().resolve(({ output, target }) =>
+                    target.from({ query: output }, (search) => search.Updated.from())
+                  )
               })
             },
             Updated: {}
@@ -190,13 +187,10 @@ describe("local compound target selection", () => {
         states: {
           Idle: {
             on: {
-              Advance: Machine.transition({
-                target: (to) => {
-                  assert.notProperty(to.local, "with")
-                  return to.local.Updated()
-                },
-                resolve: ({ target }) => target.from()
-              })
+              Advance: (to) => {
+                assert.notProperty(to.local, "with")
+                return to.local.Updated().resolve(({ target }) => target.from())
+              }
             }
           },
           Updated: {}

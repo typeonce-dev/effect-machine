@@ -34,23 +34,19 @@ const machine = Machine.make({
 }).handle({
   Idle: {
     on: {
-      Start: Machine.transition({
-        branches: (to) => ({
+      Start: (to) =>
+        to.branches({
           cached: { target: to.full.Loading() },
           measured: { target: to.none() },
           named: { target: to.full.Done() },
           confirmed: { target: to.full.Idle() }
-        }),
-        resolve: ({ select }) => select.cached(State.cases.Loading.make({}))
-      })
+        }).resolve(({ select }) => select.cached(State.cases.Loading.make({})))
     }
   },
   Loading: {
     on: {
-      Loaded: Machine.transition({
-        target: (to) => to.full.Done(),
-        resolve: ({ event, target }) => target(State.cases.Done.make({ value: event.value }))
-      })
+      Loaded: (to) =>
+        to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
     }
   },
   Done: {}
@@ -67,12 +63,12 @@ const cluster = ClusterMachine.make("ConsumerEntity", machine, {
 const invoked = Machine.invoke({
   id: "fixture-load",
   effect: () => Effect.succeed("ready"),
-  onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+  onDone: { target: Machine.targetless }
 })
 const delayed = Machine.invoke({
   id: "fixture-delay",
   after: "1 second",
-  onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+  onDone: { target: Machine.targetless }
 })
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 

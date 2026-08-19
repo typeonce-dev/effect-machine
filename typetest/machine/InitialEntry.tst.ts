@@ -26,73 +26,39 @@ const base = Machine.make({
   }
 })
 
-type Events = readonly [typeof Open]
-type ClosedContext = Machine.Machine.HandlerContext<
-  typeof States.states,
-  Events,
-  readonly [],
-  "closed",
-  "Open",
-  never,
-  never
->
-type ClosedTransition = Machine.Machine.TransitionConfig<
-  typeof States.states,
-  Events,
-  readonly [],
-  "closed",
-  ClosedContext,
-  true
->
-type OpenedInitializeContext = Machine.Machine.StateInitializeContext<
-  typeof States.states,
-  Events,
-  readonly [],
-  "opened"
->
-
 describe("declared initial entry types", () => {
   it("requires initialize at the handle call that returns an initial target", () => {
-    const invalid = Machine.transition({
-      target: (to) => to.full.opened.initial(),
-      resolve: ({ target }) => target(new Opened({ id: "team-1" }))
-    }) satisfies ClosedTransition
-    expect(base.handle).type.not.toBeCallableWith({
+    base.handle({
       closed: {
         on: {
-          Open: invalid
+          Open: (to) => to.full.opened.initial().resolve(({ target }) => target(new Opened({ id: "team-1" })))
         }
       },
+      // @ts-expect-error!
       opened: {}
     })
 
-    const initial = Machine.transition({
-      target: (to) => to.full.opened.initial(),
-      resolve: ({ target }) => target.from({ id: "team-1" })
-    }) satisfies ClosedTransition
-    expect(base.handle).type.toBeCallableWith({
+    base.handle({
       closed: {
         on: {
-          Open: initial
+          Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "team-1" }))
         }
       },
       opened: {
-        initialize: ({ builder }: OpenedInitializeContext) => builder.from({ count: 0 })
+        initialize: ({ builder }) => builder.from({ count: 0 })
       }
     })
 
-    const explicit = Machine.transition({
-      target: (to) => to.full.opened(),
-      resolve: ({ target }) =>
-        target(
-          new Opened({ id: "team-1" }),
-          (opened) => opened.loading(new Loading({}))
-        )
-    }) satisfies ClosedTransition
-    expect(base.handle).type.toBeCallableWith({
+    base.handle({
       closed: {
         on: {
-          Open: explicit
+          Open: (to) =>
+            to.full.opened().resolve(({ target }) =>
+              target(
+                new Opened({ id: "team-1" }),
+                (opened) => opened.loading(new Loading({}))
+              )
+            )
         }
       },
       opened: {}
@@ -103,9 +69,8 @@ describe("declared initial entry types", () => {
     base.handle({
       closed: {
         on: {
-          Open: Machine.transition({
-            target: (to) => to.full.opened(),
-            resolve: ({ target }) => {
+          Open: (to) =>
+            to.full.opened().resolve(({ target }) => {
               expect(target).type.toHaveProperty("initial")
               expect(target.initial).type.not.toBeCallableWith()
               expect(target.initial).type.toBeCallableWith(new Opened({ id: "team-1" }))
@@ -114,8 +79,7 @@ describe("declared initial entry types", () => {
                 new Opened({ id: "team-1" }),
                 (opened) => opened.loading(new Loading({}))
               )
-            }
-          })
+            })
         }
       }
     })

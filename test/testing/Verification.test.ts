@@ -41,10 +41,7 @@ const navigationMachine = Machine.make({
 }).handle({
   off: {
     on: {
-      Go: Machine.transition({
-        target: (to) => to.full.app(),
-        resolve: ({ target }) => target(new App({}), (app) => app.two(new Two({})))
-      })
+      Go: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.two(new Two({}))))
     }
   }
 })
@@ -58,15 +55,9 @@ const raisedNavigationMachine = Machine.make({
   }
 }).handle({
   off: {
-    always: Machine.transition({
-      target: (to) => to.full.app(),
-      resolve: ({ target }) => target(new App({}), (app) => app.one(new One({})))
-    }),
+    always: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({})))),
     on: {
-      Go: Machine.transition({
-        target: (to) => to.full.app(),
-        resolve: ({ target }) => target(new App({}), (app) => app.one(new One({})))
-      })
+      Go: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({}))))
     }
   }
 })
@@ -83,14 +74,9 @@ const counterMachine = Machine.make({
 }).handle({
   counter: {
     on: {
-      Increment: Machine.transition({
-        target: (to) => to.full.counter(),
-        resolve: ({ state, target }) => target(new Counter({ count: state.count + 1 }))
-      }),
-      Noop: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+      Increment: (to) =>
+        to.full.counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 1 }))),
+      Noop: { target: Machine.targetless }
     }
   }
 })
@@ -105,19 +91,18 @@ const conditionalMachine = Machine.make({
 }).handle({
   counter: {
     on: {
-      Select: Machine.transition({
-        branches: (to) => ({
+      Select: (to) =>
+        to.branches({
           negative: { target: to.none() },
           zero: { target: to.full.counter() },
           positive: { target: to.none() }
-        }),
-        resolve: ({ event, select }) =>
+        }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
             : event.value === 0
             ? select.zero(new Counter({ count: 0 }))
             : select.positive()
-      })
+        )
     }
   }
 })
@@ -135,12 +120,12 @@ const invokedMachine = Machine.make({
       Machine.invoke({
         id: "first",
         effect: () => Effect.succeed(1),
-        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+        onDone: { target: Machine.targetless }
       }),
       Machine.invoke({
         id: "second",
         effect: () => Effect.succeed(2),
-        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+        onDone: { target: Machine.targetless }
       })
     ]
   }
@@ -172,16 +157,10 @@ const routedStartupMachine = Machine.make({
   a: {
     states: {
       route: {
-        choice: Machine.transition({
-          target: (to) => to.local.second(),
-          resolve: ({ target }) => target()
-        })
+        choice: (to) => to.local.second().resolve(({ target }) => target())
       },
       second: {
-        choice: Machine.transition({
-          target: (to) => to.full.b(),
-          resolve: ({ target }) => target(new StartupB({}))
-        })
+        choice: (to) => to.full.b().resolve(({ target }) => target(new StartupB({})))
       }
     }
   },
@@ -217,23 +196,14 @@ const choiceResolutionMachine = Machine.make({
     states: {
       ready: {
         on: {
-          Route: Machine.transition({
-            target: (to) => to.local.first(),
-            resolve: ({ target }) => target()
-          })
+          Route: (to) => to.local.first().resolve(({ target }) => target())
         }
       },
       first: {
-        choice: Machine.transition({
-          target: (to) => to.local.second(),
-          resolve: ({ target }) => target()
-        })
+        choice: (to) => to.local.second().resolve(({ target }) => target())
       },
       second: {
-        choice: Machine.transition({
-          target: (to) => to.local.routed(),
-          resolve: ({ target }) => target(new ChoiceRouted({}))
-        })
+        choice: (to) => to.local.routed().resolve(({ target }) => target(new ChoiceRouted({})))
       },
       routed: {}
     }
@@ -254,11 +224,8 @@ const reentryMachine = Machine.make({
 }).handle({
   app: {
     on: {
-      Restart: Machine.transition({
-        target: (to) => to.full.app(),
-        resolve: ({ target }) => target(new App({}), (app) => app.one(new One({}))),
-        reenter: true
-      })
+      Restart: (to) =>
+        to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({}))), { reenter: true })
     }
   }
 })
@@ -366,10 +333,7 @@ const historyMachine = Machine.make({
       }
     },
     on: {
-      Leave: Machine.transition({
-        target: (to) => to.full.away(),
-        resolve: ({ target }) => target(new Away({}))
-      })
+      Leave: (to) => to.full.away().resolve(({ target }) => target(new Away({})))
     },
     states: {
       editor: {
@@ -379,10 +343,7 @@ const historyMachine = Machine.make({
   },
   away: {
     on: {
-      Resume: Machine.transition({
-        target: (to) => to.history.workspace.exact(),
-        resolve: ({ target }) => target()
-      })
+      Resume: (to) => to.history.workspace.exact().resolve(({ target }) => target())
     }
   }
 })
@@ -424,10 +385,7 @@ const structuralHistoryMachine = Machine.make({
       exact: { default: structuralHistoryInitial }
     },
     on: {
-      Leave: Machine.transition({
-        target: (to) => to.full.away(),
-        resolve: ({ target }) => target.from()
-      })
+      Leave: (to) => to.full.away().resolve(({ target }) => target.from())
     }
   }
 })
@@ -486,10 +444,7 @@ const doneTransitionMachine = Machine.make({
   }
 }).handle({
   workflow: {
-    onDone: Machine.transition({
-      target: (to) => to.full.archived(),
-      resolve: ({ target }) => target(new Archived({}))
-    }),
+    onDone: (to) => to.full.archived().resolve(({ target }) => target(new Archived({}))),
     states: {
       finished: {
         output: () => "workflow-output"

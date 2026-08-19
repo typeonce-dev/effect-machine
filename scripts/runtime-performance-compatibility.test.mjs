@@ -11,10 +11,12 @@ test("adapts the state-definition constructor across the public rename", () => {
   assert.deepEqual(legacy.states(definitions), { api: "legacy", states: definitions })
 })
 
-test("adapts static transition definitions only when the new capability is present", () => {
+test("adapts wrapped static transition definitions when that capability is present", () => {
   const calls = []
+  const targetless = (to) => to.none()
   const Machine = {
     logic: () => undefined,
+    targetless,
     transition: (definition) => {
       calls.push(definition)
       return { static: definition }
@@ -28,11 +30,35 @@ test("adapts static transition definitions only when the new capability is prese
 
   assert.equal(api.initial(definition, legacy), definition)
   assert.deepEqual(api.transition(definition, legacy), { static: definition })
-  assert.equal(typeof api.targetless.static.target, "function")
-  assert.equal(typeof api.targetless.static.resolve, "function")
-  assert.equal(api.targetless.static.target({ none: () => "none" }), "none")
-  assert.equal(api.targetless.static.resolve(), undefined)
-  assert.equal(calls.length, 2)
+  assert.equal(api.targetless.target, targetless)
+  assert.equal(calls.length, 1)
+})
+
+test("adapts benchmark definitions to fluent transition selectors", () => {
+  const calls = []
+  const targetless = Object.assign((to) => to.none(), {
+    "~effect/Machine/TargetlessSelector": true
+  })
+  const Machine = { targetless }
+  const api = makeEffectMachineBenchmarkApi(Machine)
+  const resolve = () => undefined
+  const selected = {
+    resolve: (...args) => {
+      calls.push(args)
+      return "resolved"
+    }
+  }
+  const transition = api.transition({
+    target: (to) => to.selected,
+    resolve,
+    reenter: true,
+    declinable: true
+  }, "legacy")
+
+  assert.equal(transition({ selected }), "resolved")
+  assert.deepEqual(calls, [[resolve, { reenter: true, declinable: true }]])
+  assert.equal(api.initial("static", "legacy"), "static")
+  assert.equal(api.targetless.target, targetless)
 })
 
 test("uses the current child invocation capability when available", () => {

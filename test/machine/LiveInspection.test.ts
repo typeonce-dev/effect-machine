@@ -26,13 +26,11 @@ const machine = Machine.make({
 }).handle({
   Idle: {
     on: {
-      Increment: Machine.transition({
-        target: (to) => to.full.Idle(),
-        resolve: ({ event, target }, enqueue) => {
+      Increment: (to) =>
+        to.full.Idle().resolve(({ event, target }, enqueue) => {
           enqueue.emit(Emissions.Notice({ value: event.by }))
           return target(new Idle({}))
-        }
-      })
+        })
     }
   }
 })
@@ -243,13 +241,11 @@ describe("Machine live inspection", () => {
       }).handle({
         ChildIdle: {
           on: {
-            Trigger: Machine.transition({
-              target: (to) => to.none(),
-              resolve: ({ parent }, enqueue) => {
+            Trigger: (to) =>
+              to.none().resolve(({ parent }, enqueue) => {
                 if (parent !== undefined) enqueue.sendTo(parent, ParentEvents.ChildReady())
                 return undefined
-              }
-            })
+              })
           }
         }
       })
@@ -270,10 +266,7 @@ describe("Machine live inspection", () => {
         ParentIdle: {
           invoke: Machine.invoke({ child: Child }),
           on: {
-            ChildReady: Machine.transition({
-              target: (to) => to.full.ParentDone(),
-              resolve: ({ target }) => target(new ParentDone({}))
-            })
+            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
           }
         },
         ParentDone: {}

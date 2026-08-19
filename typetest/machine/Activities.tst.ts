@@ -19,20 +19,14 @@ const machine = Machine.make({
     invoke: Machine.invoke({
       id: "timeout",
       after: "1 second",
-      onDone: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+      onDone: { target: Machine.targetless }
     })
   },
   Dynamic: {
     invoke: Machine.invoke({
       id: "dynamic",
       after: () => "2 seconds" as const,
-      onDone: Machine.transition({
-        target: (to) => to.none(),
-        resolve: () => undefined
-      })
+      onDone: { target: Machine.targetless }
     })
   }
 })

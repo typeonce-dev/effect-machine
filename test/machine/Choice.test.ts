@@ -33,18 +33,15 @@ const machine = Machine.make({
   Flow: {
     states: {
       Routing: {
-        choice: Machine.transition({
-          branches: (to) => {
-            branchFactoryCalls += 1
-            return {
-              perfect: { title: "Score is perfect", target: to.local.Approved() },
-              negative: { title: "Score is negative", target: to.local.Rejected() },
-              zero: { title: "Score is zero", target: to.local.Rejected() },
-              passing: { title: "Score is at least 70", target: to.local.Approved() },
-              failing: { target: to.local.Rejected() }
-            }
-          },
-          resolve: ({ containingState, select }) => {
+        choice: (to) => {
+          branchFactoryCalls += 1
+          return to.branches({
+            perfect: { title: "Score is perfect", target: to.local.Approved() },
+            negative: { title: "Score is negative", target: to.local.Rejected() },
+            zero: { title: "Score is zero", target: to.local.Rejected() },
+            passing: { title: "Score is at least 70", target: to.local.Approved() },
+            failing: { target: to.local.Rejected() }
+          }).resolve(({ containingState, select }) => {
             const score = containingState.score
             return score === 100
               ? select.perfect(new Approved({}))
@@ -55,15 +52,13 @@ const machine = Machine.make({
               : score >= 70
               ? select.passing(new Approved({}))
               : select.failing(new Rejected({}))
-          }
-        })
+          })
+        }
       },
       Approved: {
         on: {
-          Recheck: Machine.transition({
-            target: (to) => to.branch.Flow.initial(),
-            resolve: ({ event, target }) => target(new Flow({ score: event.score }))
-          })
+          Recheck: (to) =>
+            to.branch.Flow.initial().resolve(({ event, target }) => target(new Flow({ score: event.score })))
         }
       }
     }
@@ -167,13 +162,10 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             First: {
-              choice: Machine.transition({ target: (to) => to.local.Second(), resolve: ({ target }) => target() })
+              choice: (to) => to.local.Second().resolve(({ target }) => target())
             },
             Second: {
-              choice: Machine.transition({
-                target: (to) => to.local.Approved(),
-                resolve: ({ target }) => target(new Approved({}))
-              })
+              choice: (to) => to.local.Approved().resolve(({ target }) => target(new Approved({})))
             }
           }
         }
@@ -220,10 +212,10 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             First: {
-              choice: Machine.transition({ target: (to) => to.local.Second(), resolve: ({ target }) => target() })
+              choice: (to) => to.local.Second().resolve(({ target }) => target())
             },
             Second: {
-              choice: Machine.transition({ target: (to) => to.local.First(), resolve: ({ target }) => target() })
+              choice: (to) => to.local.First().resolve(({ target }) => target())
             }
           }
         }
@@ -263,16 +255,10 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             Approved: {
-              always: Machine.transition({
-                target: (to) => to.local.Routing(),
-                resolve: ({ target }) => target()
-              })
+              always: (to) => to.local.Routing().resolve(({ target }) => target())
             },
             Routing: {
-              choice: Machine.transition({
-                target: (to) => to.local.Rejected(),
-                resolve: ({ target }) => target(new Rejected({}))
-              })
+              choice: (to) => to.local.Rejected().resolve(({ target }) => target(new Rejected({})))
             }
           }
         }
@@ -321,16 +307,10 @@ describe("Machine choice pseudo-states", () => {
         }
       }).handle({
         Flow: {
-          onDone: Machine.transition({
-            target: (to) => to.full.Flow(),
-            resolve: ({ state, target }) => target(state, (flow) => flow.Routing())
-          }),
+          onDone: (to) => to.full.Flow().resolve(({ state, target }) => target(state, (flow) => flow.Routing())),
           states: {
             Routing: {
-              choice: Machine.transition({
-                target: (to) => to.local.Rejected(),
-                resolve: ({ target }) => target(new Rejected({}))
-              })
+              choice: (to) => to.local.Rejected().resolve(({ target }) => target(new Rejected({})))
             }
           }
         }
@@ -398,20 +378,14 @@ describe("Machine choice pseudo-states", () => {
             Left: {
               states: {
                 Routing: {
-                  choice: Machine.transition({
-                    target: (to) => to.local.Ready(),
-                    resolve: ({ target }) => target(new Ready({}))
-                  })
+                  choice: (to) => to.local.Ready().resolve(({ target }) => target(new Ready({})))
                 }
               }
             },
             Right: {
               states: {
                 Routing: {
-                  choice: Machine.transition({
-                    target: (to) => to.local.Ready(),
-                    resolve: ({ target }) => target(new RightReady({}))
-                  })
+                  choice: (to) => to.local.Ready().resolve(({ target }) => target(new RightReady({})))
                 }
               }
             }
@@ -464,26 +438,18 @@ describe("Machine choice pseudo-states", () => {
           states: {
             Active: {
               on: {
-                Leave: Machine.transition({
-                  target: (to) => to.full.Outside(),
-                  resolve: ({ target }) => target(new Outside({}))
-                })
+                Leave: (to) => to.full.Outside().resolve(({ target }) => target(new Outside({})))
               }
             },
             Routing: {
-              choice: Machine.transition({
-                target: (to) => to.history.Flow.Recent(),
-                resolve: ({ target }) => target()
-              })
+              choice: (to) => to.history.Flow.Recent().resolve(({ target }) => target())
             }
           }
         },
         Outside: {
           on: {
-            Resume: Machine.transition({
-              target: (to) => to.full.Flow(),
-              resolve: ({ target }) => target(new Flow({ score: 2 }), (flow) => flow.Routing())
-            })
+            Resume: (to) =>
+              to.full.Flow().resolve(({ target }) => target(new Flow({ score: 2 }), (flow) => flow.Routing()))
           }
         }
       })
@@ -532,10 +498,7 @@ describe("Machine choice pseudo-states", () => {
           },
           states: {
             Routing: {
-              choice: Machine.transition({
-                target: (to) => to.history.Flow.Recent(),
-                resolve: ({ target }) => target()
-              })
+              choice: (to) => to.history.Flow.Recent().resolve(({ target }) => target())
             }
           }
         }
@@ -580,19 +543,13 @@ describe("Machine choice pseudo-states", () => {
           },
           states: {
             Routing: {
-              choice: Machine.transition({
-                target: (to) => to.local.Active(),
-                resolve: ({ target }) => target(new Active({}))
-              })
+              choice: (to) => to.local.Active().resolve(({ target }) => target(new Active({})))
             }
           }
         },
         Outside: {
           on: {
-            FallbackChoiceResume: Machine.transition({
-              target: (to) => to.history.Flow.Recent(),
-              resolve: ({ target }) => target()
-            })
+            FallbackChoiceResume: (to) => to.history.Flow.Recent().resolve(({ target }) => target())
           }
         }
       })

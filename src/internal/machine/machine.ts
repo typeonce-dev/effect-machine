@@ -112,8 +112,6 @@ const Proto = {
   }
 }
 
-const makeBoundInvoke = (config: unknown): unknown => config
-
 const makeWithHandlers = (
   self: Definition.Any,
   handlers: Machine.StateConfigs<any, any, any, any, any, any, any>
@@ -131,7 +129,6 @@ const makeWithHandlers = (
   machine.stateNodes = self.stateNodes
   machine.makeTargetBuilder = self.makeTargetBuilder
   machine.handlers = handlers
-  machine.invoke = makeBoundInvoke
   Protocol.copyProtocol(self, machine)
   return machine
 }
@@ -155,6 +152,137 @@ type CapturedNamedBranch = {
   readonly key: string
   readonly title: string
   readonly selection: Topology.TargetSelection
+}
+
+const TransitionBuilderDescriptorTypeId: unique symbol = Symbol("effect/Machine/TransitionBuilderDescriptor")
+
+type DirectTransitionDescriptor = {
+  readonly [TransitionBuilderDescriptorTypeId]: typeof TransitionBuilderDescriptorTypeId
+  readonly type: "direct"
+  readonly selection: Topology.TargetSelection
+  readonly resolve?: (context: any, enqueue: unknown) => unknown
+  readonly reenter: boolean
+  readonly declinable: boolean
+}
+
+type BranchesTransitionDescriptor = {
+  readonly [TransitionBuilderDescriptorTypeId]: typeof TransitionBuilderDescriptorTypeId
+  readonly type: "branches"
+  readonly declarations: unknown
+  readonly resolve: (context: any, enqueue: unknown) => unknown
+  readonly reenter: boolean
+  readonly declinable: boolean
+}
+
+type TransitionBuilderDescriptor = DirectTransitionDescriptor | BranchesTransitionDescriptor
+
+const plainTargetSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
+  Topology.makeTargetSelection(selection.kind, selection.path, selection.scope)
+
+const transitionOptions = (options: unknown): { readonly reenter: boolean; readonly declinable: boolean } => {
+  const configuration = typeof options === "object" && options !== null
+    ? options as { readonly reenter?: unknown; readonly declinable?: unknown }
+    : {}
+  return {
+    reenter: configuration.reenter === true,
+    declinable: configuration.declinable === true
+  }
+}
+
+const makeDirectTransitionDescriptor = (
+  selection: Topology.TargetSelection,
+  resolve: ((context: any, enqueue: unknown) => unknown) | undefined,
+  options: unknown
+): DirectTransitionDescriptor => {
+  const shared: Omit<DirectTransitionDescriptor, "resolve"> = {
+    [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
+    type: "direct",
+    selection: plainTargetSelection(selection),
+    ...transitionOptions(options)
+  }
+  return resolve === undefined
+    ? Object.freeze(shared)
+    : Object.freeze({ ...shared, resolve })
+}
+
+const decorateTransitionSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
+  Object.freeze({
+    ...selection,
+    resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
+      makeDirectTransitionDescriptor(selection, resolve, options),
+    reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true })
+  })
+
+const decorateTransitionSelectorNode = (node: unknown): unknown => {
+  if (typeof node === "function") {
+    const wrapped = ((...args: ReadonlyArray<unknown>) => decorateTransitionSelection(node(...args))) as
+      & ((...args: ReadonlyArray<unknown>) => unknown)
+      & Record<string, unknown>
+    for (const key of Object.keys(node)) {
+      wrapped[key] = decorateTransitionSelectorNode((node as unknown as Record<string, unknown>)[key])
+    }
+    return Object.freeze(wrapped)
+  }
+  if (typeof node === "object" && node !== null) {
+    const wrapped: Record<string, unknown> = {}
+    for (const key of Object.keys(node)) {
+      wrapped[key] = decorateTransitionSelectorNode((node as Record<string, unknown>)[key])
+    }
+    return Object.freeze(wrapped)
+  }
+  return node
+}
+
+const makeTransitionSelector = (
+  stateNodes: Machine.StateNodes,
+  source: string
+): unknown => {
+  const selector = {
+    ...decorateTransitionSelectorNode(makeTargetSelector(stateNodes, source)) as Record<string, unknown>
+  }
+  selector.branches = (declarations: unknown) =>
+    Object.freeze({
+      resolve: (
+        resolve: (context: any, enqueue: unknown) => unknown,
+        options?: unknown
+      ): BranchesTransitionDescriptor =>
+        Object.freeze({
+          [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
+          type: "branches",
+          declarations,
+          resolve,
+          ...transitionOptions(options)
+        })
+    })
+  return Object.freeze(selector)
+}
+
+const normalizeTransitionBuilder = (
+  transition: (selector: unknown) => unknown,
+  stateNodes: Machine.StateNodes,
+  path: string
+): unknown => {
+  const result = transition(makeTransitionSelector(stateNodes, path))
+  if (Topology.isTargetSelection(result)) {
+    const selection = plainTargetSelection(result)
+    return { target: () => selection }
+  }
+  if (!hasProperty(result, TransitionBuilderDescriptorTypeId)) return result
+  const descriptor = result as TransitionBuilderDescriptor
+  if (descriptor.type === "branches") {
+    return {
+      branches: () => descriptor.declarations,
+      resolve: descriptor.resolve,
+      reenter: descriptor.reenter,
+      declinable: descriptor.declinable
+    }
+  }
+  return {
+    target: () => descriptor.selection,
+    resolve: descriptor.resolve,
+    reenter: descriptor.reenter,
+    declinable: descriptor.declinable
+  }
 }
 
 const transitionTargetSelection = (
@@ -310,7 +438,8 @@ const getSelectionBuilder = (
   return builder
 }
 
-const constructSelectedTarget = (builder: any): unknown => typeof builder === "function" ? builder() : builder.from()
+const constructSelectedTarget = (builder: any): unknown =>
+  typeof builder?.from === "function" ? builder.from() : builder()
 
 const validateResolvedSelection = (
   result: unknown,
@@ -402,7 +531,7 @@ const captureNamedBranches = (
     if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
       throw new Error(`Machine transition branch "${key}" title must be a non-empty string`)
     }
-    return Object.freeze({ key, title: title ?? key, selection: target })
+    return Object.freeze({ key, title: title ?? key, selection: plainTargetSelection(target) })
   }))
 }
 
@@ -482,11 +611,14 @@ const validateSelectedBranchResult = (
 }
 
 const captureTransition = (
-  transition: unknown,
+  rawTransition: unknown,
   stateNodes: Machine.StateNodes,
   path: string,
   trigger: PropertyKey
 ): unknown => {
+  const transition = typeof rawTransition === "function"
+    ? normalizeTransitionBuilder(rawTransition as (selector: unknown) => unknown, stateNodes, path)
+    : rawTransition
   if (typeof transition !== "object" || transition === null) {
     throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must be an object`)
   }
@@ -1427,7 +1559,6 @@ export const make: Make = (<
   self.makeTargetBuilder = makeTargetBuilder(config.states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self)
-  self.invoke = makeBoundInvoke
   Protocol.setProtocol(self)
   return self
 }) as Make

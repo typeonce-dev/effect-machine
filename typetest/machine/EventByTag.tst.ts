@@ -42,28 +42,24 @@ describe("Machine.EventByTag", () => {
     }).handle({
       Idle: {
         on: {
-          Alpha: Machine.transition({
-            target: (to) => to.none(),
-            resolve: ({ event }) => {
+          Alpha: (to) =>
+            to.none().resolve(({ event }) => {
               expect(event).type.toBe<{
                 readonly _tag: "Alpha"
                 readonly payload: string
                 readonly count: number
               }>()
               return undefined
-            }
-          }),
-          Beta: Machine.transition({
-            target: (to) => to.none(),
-            resolve: ({ event }) => {
+            }),
+          Beta: (to) =>
+            to.none().resolve(({ event }) => {
               expect(event).type.toBe<{
                 readonly _tag: "Beta"
                 readonly payload: string
                 readonly count: number
               }>()
               return undefined
-            }
-          })
+            })
         }
       }
     })

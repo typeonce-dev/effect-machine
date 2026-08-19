@@ -34,65 +34,40 @@ export const TrafficLightMachine = Machine.make({
     invoke: Machine.invoke({
       id: "red-timer",
       after: trafficLightDurations.Red,
-      onDone: Machine.transition({
-        target: (to) => to.full.RedYellow(),
-        resolve: ({ target }) => target.from()
-      })
+      onDone: (to) => to.full.RedYellow().resolve(({ target }) => target.from())
     }),
     on: {
-      Reset: Machine.transition({
-        target: (to) => to.full.Red(),
-        resolve: ({ target }) => target.from(),
-        reenter: true
-      })
+      Reset: (to) => to.full.Red().resolve(({ target }) => target.from(), { reenter: true })
     }
   },
   RedYellow: {
     invoke: Machine.invoke({
       id: "red-yellow-timer",
       after: trafficLightDurations.RedYellow,
-      onDone: Machine.transition({
-        target: (to) => to.full.Green(),
-        resolve: ({ target }) => target.from()
-      })
+      onDone: (to) => to.full.Green().resolve(({ target }) => target.from())
     }),
     on: {
-      Reset: Machine.transition({
-        target: (to) => to.full.Red(),
-        resolve: ({ target }) => target.from()
-      })
+      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }
   },
   Green: {
     invoke: Machine.invoke({
       id: "green-timer",
       after: trafficLightDurations.Green,
-      onDone: Machine.transition({
-        target: (to) => to.full.Yellow(),
-        resolve: ({ target }) => target.from()
-      })
+      onDone: (to) => to.full.Yellow().resolve(({ target }) => target.from())
     }),
     on: {
-      Reset: Machine.transition({
-        target: (to) => to.full.Red(),
-        resolve: ({ target }) => target.from()
-      })
+      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }
   },
   Yellow: {
     invoke: Machine.invoke({
       id: "yellow-timer",
       after: trafficLightDurations.Yellow,
-      onDone: Machine.transition({
-        target: (to) => to.full.Red(),
-        resolve: ({ target }) => target.from()
-      })
+      onDone: (to) => to.full.Red().resolve(({ target }) => target.from())
     }),
     on: {
-      Reset: Machine.transition({
-        target: (to) => to.full.Red(),
-        resolve: ({ target }) => target.from()
-      })
+      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
     }
   }
 })

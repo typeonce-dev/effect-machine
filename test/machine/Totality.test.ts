@@ -264,10 +264,7 @@ describe("machine operation totality", () => {
       }).handle({
         Value: {
           on: {
-            Finish: Machine.transition({
-              target: (to) => to.full.Done(),
-              resolve: ({ target }) => target({ _tag: "Done" })
-            })
+            Finish: (to) => to.full.Done().resolve(({ target }) => target({ _tag: "Done" }))
           }
         },
         Done: { output: () => 42 }

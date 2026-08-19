@@ -4,8 +4,8 @@ import { machine, State } from "./named-branches-control.js"
 const handled = machine.handle({
   Idle: {
     on: {
-      Route: Machine.transition({
-        branches: (to) => ({
+      Route: (to) =>
+        to.branches({
           length1: { target: to.full.Text() },
           length2: { target: to.full.Count() },
           length3: { target: to.full.Text() },
@@ -17,8 +17,7 @@ const handled = machine.handle({
           length9: { target: to.full.Count() },
           length10: { target: to.full.Idle() },
           unchanged: { target: to.none() }
-        }),
-        resolve: ({ event, select }) => {
+        }).resolve(({ event, select }) => {
           const value = event.value
           switch (value.length) {
             case 1:
@@ -44,8 +43,7 @@ const handled = machine.handle({
             default:
               return select.unchanged()
           }
-        }
-      })
+        })
     }
   },
   Text: {},

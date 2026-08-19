@@ -122,13 +122,11 @@ describe("machine reference event channels", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: Machine.transition({
-              target: (to) => to.none(),
-              resolve: ({ event }, enqueue) => {
+            Publish: (to) =>
+              to.none().resolve(({ event }, enqueue) => {
                 enqueue.emit(Emissions.Published({ value: event.value }))
                 return undefined
-              }
-            })
+              })
           }
         }
       })
@@ -178,13 +176,11 @@ describe("machine reference event channels", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: Machine.transition({
-              target: (to) => to.none(),
-              resolve: (_, enqueue) => {
+            Publish: (to) =>
+              to.none().resolve((_, enqueue) => {
                 enqueue.emit(Emissions.Published({ value: "invalid" } as never))
                 return undefined
-              }
-            })
+              })
           }
         }
       })
@@ -237,17 +233,15 @@ describe("machine reference event channels", () => {
       }).handle({
         Waiting: {
           on: {
-            Trigger: Machine.transition({
-              target: (to) => to.full.Reported(),
-              resolve: ({ parent, target }, enqueue) => {
+            Trigger: (to) =>
+              to.full.Reported().resolve(({ parent, target }, enqueue) => {
                 rootHadParent = parent !== undefined
                 enqueue.emit(ChildEmissions.Notice({ value: 1 }))
                 if (parent !== undefined) {
                   enqueue.sendTo(parent, ParentEvents.ChildReported({ value: 1 }))
                 }
                 return target(new Reported({}))
-              }
-            })
+              })
           }
         },
         Reported: {}
@@ -281,14 +275,9 @@ describe("machine reference event channels", () => {
         Awaiting: {
           invoke: Machine.invoke({ child: Child }),
           on: {
-            ChildReported: Machine.transition({
-              target: (to) => to.full.Finished(),
-              resolve: ({ target }) => target(new Finished({ source: "parent event" }))
-            }),
-            Notice: Machine.transition({
-              target: (to) => to.full.Finished(),
-              resolve: ({ target }) => target(new Finished({ source: "emission" }))
-            })
+            ChildReported: (to) =>
+              to.full.Finished().resolve(({ target }) => target(new Finished({ source: "parent event" }))),
+            Notice: (to) => to.full.Finished().resolve(({ target }) => target(new Finished({ source: "emission" })))
           }
         },
         Finished: { output: ({ state }) => state.source }
@@ -304,7 +293,7 @@ describe("machine reference event channels", () => {
       assert.strictEqual(yield* parent.join, "parent event")
     }))
 
-  it.effect("types and delivers parent input from a machine-bound invocation source", () =>
+  it.effect("types and delivers parent input from a Machine.invoke source", () =>
     Effect.gen(function*() {
       class ChildIdle extends Schema.TaggedClass<ChildIdle>("BoundInvokeChildIdle")("ChildIdle", {}) {}
       class ParentWaiting extends Schema.TaggedClass<ParentWaiting>("BoundInvokeParentWaiting")(
@@ -327,17 +316,11 @@ describe("machine reference event channels", () => {
       })
       const childMachine = childDefinition.handle({
         ChildIdle: {
-          invoke: childDefinition.invoke({
+          invoke: Machine.invoke({
             id: "notify-ready",
             effect: ({ parent }) => parent === undefined ? Effect.void : parent.send(ParentEvents.ChildReady()),
-            onDone: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            }),
-            onFailure: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onDone: { target: Machine.targetless },
+            onFailure: { target: Machine.targetless }
           })
         }
       })
@@ -357,16 +340,10 @@ describe("machine reference event channels", () => {
         ParentWaiting: {
           invoke: Machine.invoke({
             child: Child,
-            onFailure: Machine.transition({
-              target: (to) => to.none(),
-              resolve: () => undefined
-            })
+            onFailure: { target: Machine.targetless }
           }),
           on: {
-            ChildReady: Machine.transition({
-              target: (to) => to.full.ParentDone(),
-              resolve: ({ target }) => target(new ParentDone({}))
-            })
+            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
           }
         },
         ParentDone: { output: () => undefined }

@@ -22,14 +22,8 @@ describe("MachineTest probe", () => {
   }).handle({
     State: {
       on: {
-        PublicEvent: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        InternalEvent: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        PublicEvent: { target: Machine.targetless },
+        InternalEvent: { target: Machine.targetless }
       }
     }
   })

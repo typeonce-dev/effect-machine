@@ -100,15 +100,15 @@ const makeMachine = (unsafeStart = false) =>
             idle: {
               on: {
                 Start: unsafeStart ?
-                  Machine.transition({
-                    target: (to) => to.full.disabled(),
-                    resolve: ({ target }) => ({ ...target(new Disabled({})), path: "application.workflow.idle" }) as any
-                  }) :
-                  Machine.transition({
-                    target: (to) => to.local.running(),
-                    resolve: ({ target }) => target(new Running({}), (running) => running.editing(new Editing({})))
-                  }),
-                Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+                  (to) =>
+                    to.full.disabled().resolve(({ target }) =>
+                      ({ ...target(new Disabled({})), path: "application.workflow.idle" }) as any
+                    ) :
+                  (to) =>
+                    to.local.running().resolve(({ target }) =>
+                      target(new Running({}), (running) => running.editing(new Editing({})))
+                    ),
+                Refresh: { target: Machine.targetless }
               }
             },
             running: {
@@ -120,10 +120,7 @@ const makeMachine = (unsafeStart = false) =>
           states: {
             online: {
               on: {
-                Disconnect: Machine.transition({
-                  target: (to) => to.local.offline(),
-                  resolve: ({ target }) => target(new Offline({}))
-                })
+                Disconnect: (to) => to.local.offline().resolve(({ target }) => target(new Offline({})))
               }
             }
           }
@@ -165,22 +162,18 @@ const lifecycleDefinition = Machine.make({
 const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined) =>
   lifecycleDefinition.handle({
     idle: {
-      always: Machine.transition({
-        target: (to) => to.full.workflow(),
-        resolve: ({ target }) => {
+      always: (to) =>
+        to.full.workflow().resolve(({ target }) => {
           const selected = target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
           return unsafe === "always" ? ({ ...selected, path: "idle" } as any) : selected
-        }
-      })
+        })
     },
     workflow: {
-      onDone: Machine.transition({
-        target: (to) => to.full.disabled(),
-        resolve: ({ target }) => {
+      onDone: (to) =>
+        to.full.disabled().resolve(({ target }) => {
           const selected = target(new Disabled({}))
           return unsafe === "done" ? ({ ...selected, path: "workflow" } as any) : selected
-        }
-      })
+        })
     }
   })
 
@@ -286,10 +279,10 @@ describe("Machine structural visualization", () => {
     }).handle({
       idle: {
         on: {
-          Refresh: Machine.transition({ target: (to) => to.none(), resolve: () => undefined, reenter: true })
+          Refresh: (to) => to.none().resolve(() => undefined, { reenter: true })
         },
-        always: Machine.transition({ target: (to) => to.none(), resolve: () => undefined }),
-        onDone: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+        always: { target: Machine.targetless },
+        onDone: { target: Machine.targetless }
       }
     })
 

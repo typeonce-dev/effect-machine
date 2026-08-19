@@ -36,24 +36,20 @@ const makeTraceMachine = (onAction: () => void) =>
   }).handle({
     Idle: {
       on: {
-        Start: Machine.transition({
-          target: (to) => to.full.Ready(),
-          resolve: ({ target }) => {
+        Start: (to) =>
+          to.full.Ready().resolve(({ target }) => {
             onAction()
             return target(new Ready({ count: 0 }))
-          }
-        })
+          })
       }
     },
     Ready: {
       on: {
-        Add: Machine.transition({
-          target: (to) => to.full.Ready(),
-          resolve: ({ event, state, target }) => {
+        Add: (to) =>
+          to.full.Ready().resolve(({ event, state, target }) => {
             onAction()
             return target(new Ready({ count: state.count + event.amount }))
-          }
-        })
+          })
       }
     }
   })
@@ -221,10 +217,7 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: Machine.transition({
-                      target: (to) => to.full.disabled(),
-                      resolve: ({ target }) => target(new Disabled({}))
-                    })
+                    Stop: (to) => to.full.disabled().resolve(({ target }) => target(new Disabled({})))
                   }
                 }
               }
@@ -233,10 +226,7 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: Machine.transition({
-                      target: (to) => to.full.disabled(),
-                      resolve: ({ target }) => target(new Disabled({}))
-                    })
+                    Stop: (to) => to.full.disabled().resolve(({ target }) => target(new Disabled({})))
                   }
                 }
               }
@@ -278,7 +268,7 @@ describe("MachineTest", () => {
       }).handle({
         Idle: {
           on: {
-            Start: Machine.transition({ target: (to) => to.none(), resolve: () => undefined })
+            Start: { target: Machine.targetless }
           }
         }
       })

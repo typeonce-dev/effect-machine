@@ -44,16 +44,15 @@ describe("Machine choice pseudo-states", () => {
       Flow: {
         states: {
           Routing: {
-            choice: Machine.transition({
-              target: (to) => to.local.Approved(),
-              resolve: (context) => {
+            choice: (to) =>
+              to.local.Approved().resolve((context) => {
+                expect(to.local.Approved()).type.not.toHaveProperty("reenter")
                 expect(context).type.not.toHaveProperty("state")
                 expect(context.containingState).type.toBe<Flow>()
                 expect(context.ancestors.Flow).type.toBe<Flow>()
                 expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
                 return context.target(new Approved({}))
-              }
-            })
+              })
           }
         }
       }
@@ -70,15 +69,18 @@ describe("Machine choice pseudo-states", () => {
         resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
       }
     })
-    const target = (to: Machine.Machine.TargetSelector<typeof States.states, "Flow.Routing">) => to.local.Approved()
-    expect(Machine.transition).type.not.toBeCallableWith({
-      target,
-      resolve: (
-        { target: selectedTarget }: Machine.Machine.TransitionResolveContext<
-          Machine.Machine.ChoiceContext<typeof States.states, readonly [], readonly [], "Flow.Routing">,
-          ReturnType<typeof target>
-        >
-      ) => Effect.succeed(selectedTarget(new Approved({})))
+    machine.handle({
+      Flow: {
+        states: {
+          Routing: {
+            choice: (to) =>
+              to.local.Approved().resolve(({ target }) =>
+                // @ts-expect-error!
+                Effect.succeed(target(new Approved({})))
+              )
+          }
+        }
+      }
     })
   })
 
@@ -125,7 +127,7 @@ describe("Machine choice pseudo-states", () => {
     }
   })
 
-  it("requires Machine.transition and validates the selected result", () => {
+  it("validates the selected choice result", () => {
     const base = Machine.make({
       states: States.states,
       events: Machine.events(),
@@ -134,18 +136,15 @@ describe("Machine choice pseudo-states", () => {
         resolve: ({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing()))
       }
     })
-    const target = (to: Machine.Machine.TargetSelector<typeof States.states, "Flow.Routing">) => to.local.Rejected()
     base.handle({
       Flow: {
         states: {
           Routing: {
-            choice: Machine.transition({
-              target,
-              resolve: ({ target: selectedTarget }) => {
+            choice: (to) =>
+              to.local.Rejected().resolve(({ target: selectedTarget }) => {
                 expect(selectedTarget).type.not.toBeCallableWith(new Approved({}))
                 return selectedTarget(new Rejected({}))
-              }
-            })
+              })
           }
         }
       }

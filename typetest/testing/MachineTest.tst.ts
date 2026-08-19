@@ -25,14 +25,8 @@ describe("MachineTest", () => {
   }).handle({
     idle: {
       on: {
-        PublicEvent: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        }),
-        InternalEvent: Machine.transition({
-          target: (to) => to.none(),
-          resolve: () => undefined
-        })
+        PublicEvent: { target: Machine.targetless },
+        InternalEvent: { target: Machine.targetless }
       }
     }
   })
@@ -121,10 +115,7 @@ describe("MachineTest", () => {
             Effect.gen(function*() {
               yield* InvokeRequirement
             }),
-          onDone: Machine.transition({
-            target: (to) => to.none(),
-            resolve: () => undefined
-          })
+          onDone: { target: Machine.targetless }
         })
       }
     })

@@ -27,18 +27,10 @@ const machine = Machine.make({
 }).handle({
   counter: {
     on: {
-      Increment: Machine.transition({
-        target: (to) => to.full.counter(),
-        resolve: ({ state, target }) => target(new Counter({ count: state.count + 1 }))
-      }),
-      Reset: Machine.transition({
-        target: (to) => to.full.counter(),
-        resolve: ({ target }) => target(new Counter({ count: 0 }))
-      }),
-      Corrupt: Machine.transition({
-        target: (to) => to.full.counter(),
-        resolve: ({ target }) => target(new Counter({ count: -1 }))
-      })
+      Increment: (to) =>
+        to.full.counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 1 }))),
+      Reset: (to) => to.full.counter().resolve(({ target }) => target(new Counter({ count: 0 }))),
+      Corrupt: (to) => to.full.counter().resolve(({ target }) => target(new Counter({ count: -1 })))
     }
   }
 })
@@ -56,19 +48,18 @@ const branchMachine = Machine.make({
 }).handle({
   counter: {
     on: {
-      Select: Machine.transition({
-        branches: (to) => ({
+      Select: (to) =>
+        to.branches({
           negative: { target: to.none() },
           zero: { target: to.none() },
           positive: { target: to.none() }
-        }),
-        resolve: ({ event, select }) =>
+        }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
             : event.value === 0
             ? select.zero()
             : select.positive()
-      })
+        )
     }
   }
 })

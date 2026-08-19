@@ -42,16 +42,11 @@ const makeFlatMachine = () => {
   }).handle({
     Count: {
       on: {
-        Noop: Machine.transition({ target: (to) => to.none(), resolve: () => undefined }),
-        Increment: Machine.transition({
-          target: (to) => to.full.Count(),
-          resolve: ({ state, target }) => target(new Count({ value: state.value + 1 }))
-        }),
-        Reenter: Machine.transition({ target: (to) => to.none(), resolve: () => undefined, reenter: true }),
-        Finish: Machine.transition({
-          target: (to) => to.full.Done(),
-          resolve: ({ state, target }) => target(new Done({ value: state.value }))
-        })
+        Noop: { target: Machine.targetless },
+        Increment: (to) =>
+          to.full.Count().resolve(({ state, target }) => target(new Count({ value: state.value + 1 }))),
+        Reenter: (to) => to.none().resolve(() => undefined, { reenter: true }),
+        Finish: (to) => to.full.Done().resolve(({ state, target }) => target(new Done({ value: state.value })))
       }
     },
     Done: { output: ({ state }) => state.value }
@@ -79,19 +74,18 @@ describe("machine planner and runtime strategies", () => {
     }).handle({
       Count: {
         on: {
-          Select: Machine.transition({
-            branches: (to) => ({
+          Select: (to) =>
+            to.branches({
               negative: { target: to.none() },
               zero: { target: to.none() },
               positive: { target: to.none() }
-            }),
-            resolve: ({ event, select }) =>
+            }).resolve(({ event, select }) =>
               event.value < 0
                 ? select.negative()
                 : event.value === 0
                 ? select.zero()
                 : select.positive()
-          })
+            )
         }
       }
     })
@@ -125,14 +119,11 @@ describe("machine planner and runtime strategies", () => {
     }).handle({
       Count: {
         on: {
-          Select: Machine.transition({
-            declinable: true,
-            target: (to) => to.full.Count(),
-            resolve: ({ event, state, target, decline }) =>
+          Select: (to) =>
+            to.full.Count().resolve(({ event, state, target, decline }) =>
               event.value < 0
                 ? decline()
-                : target(new Count({ value: state.value + event.value }))
-          })
+                : target(new Count({ value: state.value + event.value })), { declinable: true })
         }
       }
     })
@@ -204,18 +195,14 @@ describe("machine planner and runtime strategies", () => {
           states: {
             Left: {
               on: {
-                Advance: Machine.transition({
-                  target: (to) => to.branch.Root.Left(),
-                  resolve: ({ state, target }) => target(new Left({ value: state.value + 1 }))
-                })
+                Advance: (to) =>
+                  to.branch.Root.Left().resolve(({ state, target }) => target(new Left({ value: state.value + 1 })))
               }
             },
             Right: {
               on: {
-                Advance: Machine.transition({
-                  target: (to) => to.branch.Root.Right(),
-                  resolve: ({ state, target }) => target(new Right({ value: state.value + 10 }))
-                })
+                Advance: (to) =>
+                  to.branch.Root.Right().resolve(({ state, target }) => target(new Right({ value: state.value + 10 })))
               }
             }
           }
@@ -254,10 +241,7 @@ describe("machine planner and runtime strategies", () => {
       }).handle({
         Outside: {
           on: {
-            Enter: Machine.transition({
-              target: (to) => to.full.Opened.initial(),
-              resolve: ({ target }) => target(new Opened({}))
-            })
+            Enter: (to) => to.full.Opened.initial().resolve(({ target }) => target(new Opened({})))
           }
         },
         Opened: {
@@ -339,10 +323,7 @@ describe("machine planner and runtime strategies", () => {
         }
       }).handle({
         Idle: {
-          always: Machine.transition({
-            target: (to) => to.full.Ready(),
-            resolve: ({ target }) => target(new Ready({}))
-          })
+          always: (to) => to.full.Ready().resolve(({ target }) => target(new Ready({})))
         },
         Ready: {}
       })
@@ -466,7 +447,7 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = definition.handle({
         Streaming: {
-          invoke: definition.invoke({
+          invoke: Machine.invoke({
             id: "values",
             stream: () => Stream.fromIterable([1, 2, 3]),
             onElement: {
@@ -475,10 +456,7 @@ describe("machine planner and runtime strategies", () => {
                 seen.push(element)
               }
             },
-            onDone: Machine.transition({
-              target: (to) => to.full.StreamDone(),
-              resolve: ({ target }) => target(new StreamDone({ values: [...seen] }))
-            })
+            onDone: (to) => to.full.StreamDone().resolve(({ target }) => target(new StreamDone({ values: [...seen] })))
           })
         },
         StreamDone: { output: ({ state }) => state.values }
@@ -508,10 +486,8 @@ describe("machine planner and runtime strategies", () => {
       const machine = definition.handle({
         Count: {
           on: {
-            Set: Machine.transition({
-              target: (to) => to.full.Count(),
-              resolve: ({ event, target }) => target(new Count({ value: event.value.length }))
-            })
+            Set: (to) =>
+              to.full.Count().resolve(({ event, target }) => target(new Count({ value: event.value.length })))
           }
         }
       })
@@ -562,15 +538,13 @@ describe("machine planner and runtime strategies", () => {
       }).handle({
         Idle: {
           on: {
-            Publish: Machine.transition({
-              target: (to) => to.none(),
-              resolve: ({ parent, self }, enqueue) => {
+            Publish: (to) =>
+              to.none().resolve(({ parent, self }, enqueue) => {
                 assert.strictEqual(parent, undefined)
                 assert.ok(self.sessionId.startsWith("machine:"))
                 enqueue.emit(Emissions.Published({ value } as never))
                 return undefined
-              }
-            })
+              })
           }
         }
       })
@@ -743,20 +717,15 @@ describe("machine planner and runtime strategies", () => {
       }).handle({
         Idle: {
           on: {
-            Load: Machine.transition({
-              target: (to) => to.full.Loading(),
-              resolve: ({ target }) => target(new Loading({}))
-            })
+            Load: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({})))
           }
         },
         Loading: {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Effect.succeed(new Loaded({ value: "complete" })),
-            onDone: Machine.transition({
-              target: (to) => to.full.Success(),
-              resolve: ({ output, target }) => target(new Success({ value: output.value }))
-            })
+            onDone: (to) =>
+              to.full.Success().resolve(({ output, target }) => target(new Success({ value: output.value })))
           })
         },
         Success: { output: ({ state }) => state.value }
@@ -801,10 +770,7 @@ describe("machine planner and runtime strategies", () => {
           invoke: Machine.invoke({
             id: "load",
             effect: () => Effect.fail("unavailable"),
-            onFailure: Machine.transition({
-              target: (to) => to.full.Failed(),
-              resolve: ({ error, target }) => target(new Failed({ error }))
-            })
+            onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target(new Failed({ error })))
           })
         },
         Failed: { output: ({ state }) => state.error }
@@ -844,35 +810,9 @@ describe("machine planner and runtime strategies", () => {
             resolve: ({ target }) => target(new Loading({ epoch: 0 }))
           }
         })
-        const onSnapshot: Machine.Machine.InvokeTransition<
-          Machine.Machine.States<typeof definition>,
-          Machine.Machine.Events<typeof definition>,
-          Machine.Machine.Emits<typeof definition>,
-          "Loading",
-          Machine.Machine.InvokeSnapshotContext<
-            Machine.Machine.States<typeof definition>,
-            Machine.Machine.Events<typeof definition>,
-            Machine.Machine.Emits<typeof definition>,
-            "Loading",
-            string,
-            Machine.StoppedError,
-            never,
-            Machine.Machine.InputEvents<typeof definition>,
-            Machine.Machine.ParentEvents<typeof definition>
-          >
-        > = Machine.transition({
-          branches: (to) => ({
-            stale: { title: "Worker is stale", target: to.full.Failed() },
-            unchanged: { target: to.none() }
-          }),
-          resolve: ({ snapshot, select }) =>
-            snapshot.state === "stale"
-              ? select.stale(new Failed({}))
-              : select.unchanged()
-        })
         const machine = definition.handle({
           Loading: {
-            invoke: {
+            invoke: Machine.invoke({
               id: "worker",
               address: Machine.childAddress("worker"),
               logic: () => {
@@ -893,22 +833,23 @@ describe("machine planner and runtime strategies", () => {
                       )
                 })
               },
-              onFailure: Machine.transition({
-                target: (to) => to.none(),
-                resolve: () => undefined
-              }),
-              onSnapshot
-            },
+              onFailure: { target: Machine.targetless },
+              onSnapshot: (to) =>
+                to.branches({
+                  stale: { title: "Worker is stale", target: to.full.Failed() },
+                  unchanged: { target: to.none() }
+                }).resolve(({ snapshot, select }) =>
+                  snapshot.state === "stale"
+                    ? select.stale(new Failed({}))
+                    : select.unchanged()
+                )
+            }),
             on: {
-              Reenter: Machine.transition({
-                target: (to) => to.full.Loading(),
-                resolve: ({ state, target }) => target(new Loading({ epoch: state.epoch + 1 })),
-                reenter: true
-              }),
-              Stale: Machine.transition({
-                target: (to) => to.full.Failed(),
-                resolve: ({ target }) => target(new Failed({}))
-              })
+              Reenter: (to) =>
+                to.full.Loading().resolve(({ state, target }) => target(new Loading({ epoch: state.epoch + 1 })), {
+                  reenter: true
+                }),
+              Stale: (to) => to.full.Failed().resolve(({ target }) => target(new Failed({})))
             }
           },
           Failed: {}

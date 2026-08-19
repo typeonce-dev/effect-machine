@@ -179,20 +179,17 @@ describe("Machine history states", () => {
     const incomplete = definition.handle({
       support: {
         on: {
-          Resume: Machine.transition({
-            target: (to) => {
-              expect(to.history.checkout.recent).type.toBeCallableWith()
-              expect(to.history.checkout.recent).type.not.toBeCallableWith(new Checkout({ orderId: "new" }))
-              expect(to.full.checkout).type.not.toHaveProperty("recent")
-              expect(to.local).type.not.toHaveProperty("recent")
-              expect(to.branch).type.not.toHaveProperty("recent")
-              return to.history.checkout.exact()
-            },
-            resolve: ({ target }) => {
+          Resume: (to) => {
+            expect(to.history.checkout.recent).type.toBeCallableWith()
+            expect(to.history.checkout.recent).type.not.toBeCallableWith(new Checkout({ orderId: "new" }))
+            expect(to.full.checkout).type.not.toHaveProperty("recent")
+            expect(to.local).type.not.toHaveProperty("recent")
+            expect(to.branch).type.not.toHaveProperty("recent")
+            return to.history.checkout.exact().resolve(({ target }) => {
               expect(target).type.toBeCallableWith()
               return target()
-            }
-          })
+            })
+          }
         }
       }
     })
@@ -214,10 +211,7 @@ describe("Machine history states", () => {
     const incomplete = definition.handle({
       support: {
         on: {
-          Resume: Machine.transition({
-            target: (to) => to.history.checkout.recent(),
-            resolve: ({ target }) => target()
-          })
+          Resume: (to) => to.history.checkout.recent().resolve(({ target }) => target())
         }
       }
     })

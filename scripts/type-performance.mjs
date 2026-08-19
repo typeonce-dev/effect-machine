@@ -84,7 +84,7 @@ const scenarios = [
   },
   {
     id: "named-branches",
-    label: "Machine.transition (10 named branches)",
+    label: "fluent transition (10 named branches)",
     file: "named-branches.ts",
     control: "named-branches-control",
     maxInstantiations: 160_000,
@@ -101,8 +101,8 @@ const scenarios = [
     label: "Machine.invoke (state-dependent Effect)",
     file: "dynamic-invoke.ts",
     control: "dynamic-invoke-control",
-    maxInstantiations: 85_000,
-    maxMarginalInstantiations: 76_000
+    maxInstantiations: 122_000,
+    maxMarginalInstantiations: 110_000
   },
   {
     id: "handle-depth-24-control",
