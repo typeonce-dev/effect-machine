@@ -17,16 +17,16 @@ export const TurnstileMachine = Machine.make({
   id: "Turnstile",
   states: TurnstileStates.states,
   events: TurnstileEvents,
-  initial: (to) => to.Locked().resolve(({ target }) => target.from())
+  initial: (to) => to.Locked()
 }).handle({
   Locked: {
     on: {
-      CoinInserted: (to) => to.full.Unlocked().resolve(({ target }) => target.from())
+      CoinInserted: (to) => to.full.Unlocked()
     }
   },
   Unlocked: {
     on: {
-      GatePushed: (to) => to.full.Locked().resolve(({ target }) => target.from())
+      GatePushed: (to) => to.full.Locked()
     }
   }
 })

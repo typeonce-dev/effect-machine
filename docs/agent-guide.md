@@ -372,7 +372,7 @@ const States = Machine.states({
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: (to) => to.Done().resolve(({ target }) => target.from())
+  initial: (to) => to.Done()
 }).handle({
   Done: {
     output: () => "done"
@@ -483,11 +483,11 @@ checkout: {
 Target it without a value:
 
 ```ts
-Resume: (to) => to.history.checkout.exact.resolve(({ target }) => target())
+Resume: (to) => to.history.checkout.exact
 ```
 
-Each declared history leaf is a topology value; the resolver's selected
-history builder remains callable to construct restoration evidence.
+Each declared history leaf is a topology value and can be returned directly
+when no resolver work is needed.
 
 Deep history restores the complete remembered subtree and its decoded values.
 Shallow history restores only parent and direct-child values. If the remembered
@@ -569,8 +569,11 @@ Refresh: (to) =>
   to.full.Ready().resolve(({ state, target }) => target.from({ value: state.value }), { reenter: true })
 ```
 
-When no resolver is needed, use the selected target directly and append
-`.reenter()` only when restart semantics are intentional:
+When no resolver is needed and the selected builder supports zero-argument
+construction, return the selected target directly. This applies the same
+default construction as `target.from()`; the compiler rejects the shorthand
+when state data or nested configuration is required. Append `.reenter()` only
+when restart semantics are intentional:
 
 ```ts
 Finish: (to) => to.full.Done()
@@ -949,7 +952,7 @@ const definition = Machine.make({
   states: States.states,
   events: Events,
   internalEvents: InternalEvents,
-  initial: (to) => to.Idle().resolve(({ target }) => target.from())
+  initial: (to) => to.Idle()
 })
 ```
 
@@ -1117,7 +1120,7 @@ machine.handle({
   Waiting: {
     invoke: (from) =>
       from.timer("clear-status", "3 seconds")
-        .onDone((to) => to.full.Clear().resolve(({ target }) => target()))
+        .onDone((to) => to.full.Clear())
   }
 })
 ```
@@ -1485,7 +1488,7 @@ reference model when correctness of the expected behavior matters.
 Select the initial root separately from constructing its value:
 
 ```ts
-initial: (to) => to.Idle().resolve(({ target }) => target.from())
+initial: (to) => to.Idle()
 ```
 
 ### Invoked child expects events not accepted by the parent

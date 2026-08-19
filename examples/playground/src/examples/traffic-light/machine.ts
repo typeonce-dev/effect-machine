@@ -25,42 +25,30 @@ export const TrafficLightMachine = Machine.make({
   id: "TrafficLight",
   states: TrafficLightStates.states,
   events: TrafficLightEvents,
-  initial: (to) => to.Red().resolve(({ target }) => target.from())
+  initial: (to) => to.Red()
 }).handle({
   Red: {
-    invoke: (from) =>
-      from.timer("red-timer", trafficLightDurations.Red).onDone((to) =>
-        to.full.RedYellow().resolve(({ target }) => target.from())
-      ),
+    invoke: (from) => from.timer("red-timer", trafficLightDurations.Red).onDone((to) => to.full.RedYellow()),
     on: {
       Reset: (to) => to.full.Red().resolve(({ target }) => target.from(), { reenter: true })
     }
   },
   RedYellow: {
-    invoke: (from) =>
-      from.timer("red-yellow-timer", trafficLightDurations.RedYellow).onDone((to) =>
-        to.full.Green().resolve(({ target }) => target.from())
-      ),
+    invoke: (from) => from.timer("red-yellow-timer", trafficLightDurations.RedYellow).onDone((to) => to.full.Green()),
     on: {
-      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
+      Reset: (to) => to.full.Red()
     }
   },
   Green: {
-    invoke: (from) =>
-      from.timer("green-timer", trafficLightDurations.Green).onDone((to) =>
-        to.full.Yellow().resolve(({ target }) => target.from())
-      ),
+    invoke: (from) => from.timer("green-timer", trafficLightDurations.Green).onDone((to) => to.full.Yellow()),
     on: {
-      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
+      Reset: (to) => to.full.Red()
     }
   },
   Yellow: {
-    invoke: (from) =>
-      from.timer("yellow-timer", trafficLightDurations.Yellow).onDone((to) =>
-        to.full.Red().resolve(({ target }) => target.from())
-      ),
+    invoke: (from) => from.timer("yellow-timer", trafficLightDurations.Yellow).onDone((to) => to.full.Red()),
     on: {
-      Reset: (to) => to.full.Red().resolve(({ target }) => target.from())
+      Reset: (to) => to.full.Red()
     }
   }
 })
