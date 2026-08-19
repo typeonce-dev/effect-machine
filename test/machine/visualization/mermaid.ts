@@ -118,11 +118,17 @@ export const makeMermaidRenderer = <Machine extends MachineValue, Snapshot>(
     const id = ids.get(node.path)
     if (id === undefined) return
 
-    lines.push(`${indent(depth)}state "${stateLabel(node, active)}" as ${id}`)
     const ownedActivities = activities.get(node.path) ?? []
-    if (ownedActivities.length > 0) {
+    const descendants = children.get(node.path) ?? []
+    const renderedActivities = ownedActivities.map((activity) => escapeText(activityLabel(activity))).join(" · ")
+    const label = descendants.length > 0 && renderedActivities.length > 0
+      ? `${stateLabel(node, active)} · ${renderedActivities}`
+      : stateLabel(node, active)
+
+    lines.push(`${indent(depth)}state "${label}" as ${id}`)
+    if (descendants.length === 0 && renderedActivities.length > 0) {
       lines.push(
-        `${indent(depth)}${id}: ${ownedActivities.map((activity) => escapeText(activityLabel(activity))).join(" · ")}`
+        `${indent(depth)}${id}: ${renderedActivities}`
       )
     }
     if (node.type === "choice") {
@@ -130,7 +136,6 @@ export const makeMermaidRenderer = <Machine extends MachineValue, Snapshot>(
       return
     }
 
-    const descendants = children.get(node.path) ?? []
     if (descendants.length > 0) {
       lines.push(`${indent(depth)}state ${id} {`)
       if (node.type === "parallel") {

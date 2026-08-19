@@ -61,7 +61,15 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       branches: [{ type: "direct", target: "Root.Route" }]
     }
   ],
-  activityDefinitions: () => [{ source: "Root.Route", id: "worker %%\nend note", type: "process" }],
+  activityDefinitions: () => [
+    {
+      source: "Root",
+      id: "search",
+      type: "machine",
+      child: { id: "search", machineId: null }
+    },
+    { source: "Root.Route", id: "worker %%\nend note", type: "process" }
+  ],
   configuration: () => states.slice(0, 2),
   enabled: () => ["Continue %%\nnow"]
 }
@@ -74,7 +82,11 @@ describe("Mermaid visualization", () => {
 
     assert.notInclude(rendered, "%%")
     assert.include(rendered, "accTitle: Unsafe #37;#37; Machine")
-    assert.include(rendered, "state \"● Quoted #quot;root#quot; #37;#37; (Root)\" as state_0")
+    assert.include(
+      rendered,
+      "state \"● Quoted #quot;root#quot; #37;#37; (Root) · machine / search → search\" as state_0"
+    )
+    assert.notInclude(rendered, "state_0: machine / search → search")
     assert.include(rendered, "state \"● Choose route (Route)\" as state_1")
     assert.include(rendered, "state state_1 <<choice>>")
     assert.include(rendered, "state_1 --> state_2: choice [approved #37;#37; now]")
