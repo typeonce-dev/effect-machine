@@ -661,6 +661,34 @@ an optional `title` controls presentation and otherwise defaults to the key.
 Selecting a branch whose target is `to.none()` handles the transition without a
 destination while retaining queued commands, raised events, and emitted events.
 
+Set `declinable: true` only when the resolver may decide that its transition is
+not enabled. The flag adds a typed `decline()` capability to that resolver and
+permits its opaque result:
+
+```ts
+Submit: Machine.transition({
+  declinable: true,
+  branches: (to) => ({
+    accepted: { target: to.local.Saving() },
+    consumed: { target: to.none() }
+  }),
+  resolve: ({ event, select, decline }) => {
+    if (!belongsToThisState(event)) return decline()
+    return event.consume ? select.consumed() : select.accepted.from()
+  }
+})
+```
+
+Declining discards that resolver's enqueue buffer and resumes hierarchical
+event or eventless selection at the next eligible ancestor. If no candidate
+accepts, the trigger is unhandled. This is deliberately different from
+`to.none()`, which consumes the trigger. `decline()` is absent and its result is
+rejected unless the literal flag is present. Choice and initial routing remain
+total and cannot decline. Static inspection exposes the distinction through
+`TransitionDefinition.acceptance` without executing resolver code. Completion
+and invocation outcomes have no ancestor candidate; declining one ignores that
+lifecycle occurrence and leaves the current configuration active.
+
 The `branches` callback runs once when handlers are installed. Its record uses
 the deterministic ECMAScript property order for presentation and `branchIndex`;
 array-index and symbol keys are rejected. Treat the string key as semantic:
@@ -1313,9 +1341,10 @@ const step = yield * probe.sendAndAwait(event)
 ```
 
 Inspect `step.before`, `step.after`, `step.plan`, `step.handled`, and
-`step.configurationChanged`. An ignored event has `handled: false` and an
-empty microstep list, but still completes its acknowledgement. A targetless
-handler has `handled: true` even if its before and after snapshots are equal.
+`step.configurationChanged`. An ignored event, including one for which every
+eligible candidate declines, has `handled: false` and an empty microstep list,
+but still completes its acknowledgement. A targetless handler has
+`handled: true` even if its before and after snapshots are equal.
 
 Do not use a probe as a substitute for a domain completion event. The
 acknowledgement covers the submitted event's synchronous macrostep, state

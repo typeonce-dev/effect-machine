@@ -193,6 +193,7 @@ describe("Machine inspection", () => {
 
     const definition = Machine.transitionDefinitions(machine)[0]!
     expect(definition.source).type.toBe<"root" | "root.idle" | "root.recent">()
+    expect(definition.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
     if (definition.trigger.type === "event") {
       expect(definition.trigger.event).type.toBe<"Reset">()
     }

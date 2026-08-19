@@ -157,5 +157,22 @@ describe("Machine choice pseudo-states", () => {
         }
       }
     })
+
+    const declinableChoice = null as unknown as Machine.Machine.TransitionConfig<
+      typeof States.states,
+      readonly [],
+      readonly [],
+      "Flow.Routing",
+      Machine.Machine.ChoiceContext<typeof States.states, readonly [], readonly [], "Flow.Routing">,
+      false,
+      "declinable"
+    >
+    expect(base.handle).type.not.toBeCallableWith({
+      Flow: {
+        states: {
+          Routing: { choice: declinableChoice }
+        }
+      }
+    })
   })
 })

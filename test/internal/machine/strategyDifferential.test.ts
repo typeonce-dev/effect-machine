@@ -113,6 +113,38 @@ describe("machine planner and runtime strategies", () => {
     })
   })
 
+  it.effect("fails closed to generic planning for declinable transitions", () => {
+    const states = Machine.states({ Count })
+    const machine = Machine.make({
+      states: states.states,
+      events: Machine.events(Select),
+      initial: {
+        target: (to) => to.Count(),
+        resolve: ({ target }) => target(new Count({ value: 0 }))
+      }
+    }).handle({
+      Count: {
+        on: {
+          Select: Machine.transition({
+            declinable: true,
+            target: (to) => to.full.Count(),
+            resolve: ({ event, state, target, decline }) =>
+              event.value < 0
+                ? decline()
+                : target(new Count({ value: state.value + event.value }))
+          })
+        }
+      }
+    })
+
+    return verifyPlannerStrategies({
+      machine,
+      events: [new Select({ value: -1 }), new Select({ value: 2 })],
+      expected: "generic",
+      label: "declinable transition"
+    })
+  })
+
   it.effect("reenters the source when an explicit targetless transition requests reentry", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()

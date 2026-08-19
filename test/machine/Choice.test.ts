@@ -626,6 +626,7 @@ describe("Machine choice pseudo-states", () => {
         source: "Flow.Routing",
         trigger: { type: "choice" },
         reenter: false,
+        acceptance: "required",
         branches: [
           {
             type: "branch",

@@ -42,15 +42,25 @@ const states: ReadonlyArray<StateNode> = [
 const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
   stateNodes: () => states,
   initialDefinition: () => ({ target: "Root" }),
-  transitionDefinitions: () => [{
-    source: "Root.Route",
-    trigger: { type: "choice" },
-    reenter: false,
-    branches: [
-      { type: "branch", key: "approved", title: "approved %%\nnow", target: "Root.Done" },
-      { type: "branch", key: "unchanged", title: "unchanged", target: undefined }
-    ]
-  }],
+  transitionDefinitions: () => [
+    {
+      source: "Root.Route",
+      trigger: { type: "choice" },
+      reenter: false,
+      acceptance: "required",
+      branches: [
+        { type: "branch", key: "approved", title: "approved %%\nnow", target: "Root.Done" },
+        { type: "branch", key: "unchanged", title: "unchanged", target: undefined }
+      ]
+    },
+    {
+      source: "Root.Done",
+      trigger: { type: "event", event: "Retry" },
+      reenter: false,
+      acceptance: "declinable",
+      branches: [{ type: "direct", target: "Root.Route" }]
+    }
+  ],
   activityDefinitions: () => [{ source: "Root.Route", id: "worker %%\nend note", type: "process" }],
   configuration: () => states.slice(0, 2),
   enabled: () => ["Continue %%\nnow"]
@@ -68,6 +78,7 @@ describe("Mermaid visualization", () => {
     assert.include(rendered, "state \"● Choose route (Route)\" as state_1")
     assert.include(rendered, "state state_1 <<choice>>")
     assert.include(rendered, "state_1 --> state_2: choice [approved #37;#37; now]")
+    assert.include(rendered, "state_2 --> state_1: Retry [declinable]")
     assert.notMatch(rendered, /state_1 --> .*otherwise/)
     assert.include(rendered, "state_1: process / worker #37;#37; end note")
     assert.notInclude(rendered, "Candidate events")

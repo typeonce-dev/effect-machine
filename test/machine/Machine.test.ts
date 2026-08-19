@@ -160,6 +160,7 @@ describe("Machine", () => {
         source: "Stable",
         trigger: { type: "event", event: "Ping" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: undefined,
@@ -221,6 +222,7 @@ describe("Machine", () => {
         source: "Stable",
         trigger: { type: "event", event: "Ping" },
         reenter: true,
+        acceptance: "required",
         branches: [{
           type: "branch",
           key: "unchanged",
@@ -2393,6 +2395,278 @@ describe("Machine", () => {
         path: "payment.authorized" as const,
         value: new AuthorizedPayment({ code: "auth-1" })
       })
+    }))
+
+  it.effect("lets declinable child handlers yield to ancestors without retaining queued work", () =>
+    Effect.gen(function*() {
+      class Notice extends Schema.TaggedClass<Notice>("DeclineNotice")("Notice", {}) {}
+      const payment = new Payment({ id: "payment-1" })
+      const entering = new EnteringPayment({ amount: 100 })
+      const machine = Machine.make({
+        states: {
+          payment: {
+            schema: Payment,
+            initial: "entering",
+            states: {
+              entering: EnteringPayment,
+              authorized: AuthorizedPayment
+            }
+          },
+          failed: Failed
+        },
+        events: Machine.events(Authorize),
+        emittedEvents: Machine.emittedEvents(Notice),
+        initial: {
+          target: (to) => to.payment.initial(),
+          resolve: () => ({
+            path: "payment" as const,
+            value: payment,
+            state: {
+              path: "payment.entering" as const,
+              value: entering
+            }
+          })
+        }
+      }).handle({
+        payment: {
+          on: {
+            Authorize: Machine.transition({
+              target: (to) => to.full.failed(),
+              resolve: ({ target }) => target(new Failed({ message: "parent" }))
+            })
+          },
+          states: {
+            entering: {
+              on: {
+                Authorize: Machine.transition({
+                  declinable: true,
+                  branches: (to) => ({
+                    authorize: { target: to.local.authorized() },
+                    consume: { target: to.none() }
+                  }),
+                  resolve: ({ event, select, decline }, enqueue) => {
+                    if (event.code === "child") {
+                      return select.authorize(new AuthorizedPayment({ code: event.code }))
+                    }
+                    if (event.code === "consume") return select.consume()
+                    enqueue.emit(new Notice({}))
+                    return decline()
+                  }
+                })
+              }
+            }
+          }
+        }
+      })
+
+      assert.strictEqual(
+        Machine.transitionDefinitions(machine).find(({ source }) => source === "payment.entering")?.acceptance,
+        "declinable"
+      )
+      const initial = yield* Machine.planInitial(machine)
+      const child = yield* Machine.plan(machine, initial.state, new Authorize({ code: "child" }))
+      assert.strictEqual(child.next.path, "payment")
+      if (child.next.path === "payment") assert.strictEqual(child.next.state.path, "payment.authorized")
+      assert.strictEqual(child.microsteps[0]?.transitions[0]?.source, "payment.entering")
+      assert.strictEqual(child.microsteps[0]?.transitions[0]?.branchKey, "authorize")
+
+      const consumed = yield* Machine.plan(machine, initial.state, new Authorize({ code: "consume" }))
+      assert.deepStrictEqual(consumed.next, initial.state)
+      assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.source, "payment.entering")
+      assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.branchKey, "consume")
+      assert.strictEqual(consumed.microsteps[0]?.transitions[0]?.target, undefined)
+
+      const declined = yield* Machine.plan(machine, initial.state, new Authorize({ code: "parent" }))
+      assert.strictEqual(declined.next.path, "failed")
+      assert.strictEqual(declined.microsteps[0]?.transitions[0]?.source, "payment")
+      assert.deepStrictEqual(declined.emittedEvents, [])
+    }))
+
+  it.effect("continues eventless selection at an ancestor when a child declines", () =>
+    Effect.gen(function*() {
+      class Workflow extends Schema.TaggedClass<Workflow>("DeclineWorkflow")("Workflow", {}) {}
+      class Waiting extends Schema.TaggedClass<Waiting>("DeclineWaiting")("Waiting", { ready: Schema.Boolean }) {}
+      class Finished extends Schema.TaggedClass<Finished>("DeclineFinished")("Finished", {}) {}
+      const states = Machine.states({
+        workflow: {
+          schema: Workflow,
+          initial: "waiting",
+          states: { waiting: Waiting }
+        },
+        finished: Finished
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.workflow.initial(),
+          resolve: ({ target }) =>
+            target(new Workflow({}), (workflow) => workflow.waiting(new Waiting({ ready: false })))
+        }
+      }).handle({
+        workflow: {
+          always: Machine.transition({
+            target: (to) => to.full.finished(),
+            resolve: ({ target }) => target(new Finished({}))
+          }),
+          states: {
+            waiting: {
+              always: Machine.transition({
+                declinable: true,
+                target: (to) => to.none(),
+                resolve: ({ state, decline }) => state.ready ? undefined : decline()
+              })
+            }
+          }
+        }
+      })
+
+      const planned = yield* Machine.planInitial(machine)
+      assert.strictEqual(planned.state.path, "finished")
+      assert.strictEqual(planned.microsteps[0]?.transitions[0]?.source, "workflow")
+    }))
+
+  it.effect("treats an event as unhandled when every candidate declines", () =>
+    Effect.gen(function*() {
+      class Stable extends Schema.TaggedClass<Stable>("DeclineStable")("Stable", {}) {}
+      class Ping extends Schema.TaggedClass<Ping>("DeclinePing")("Ping", {}) {}
+      const states = Machine.states({ Stable })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Ping),
+        initial: {
+          target: (to) => to.Stable(),
+          resolve: ({ target }) => target(new Stable({}))
+        }
+      }).handle({
+        Stable: {
+          on: {
+            Ping: Machine.transition({
+              declinable: true,
+              target: (to) => to.none(),
+              resolve: ({ decline }) => decline()
+            })
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      assert.deepStrictEqual(Machine.enabled(machine, initial.state), ["Ping"])
+      const planned = yield* Machine.plan(machine, initial.state, new Ping({}))
+      assert.deepStrictEqual(planned.next, initial.state)
+      assert.deepStrictEqual(planned.microsteps, [])
+    }))
+
+  it.effect("leaves a completed compound state active when onDone declines", () =>
+    Effect.gen(function*() {
+      class Workflow extends Schema.TaggedClass<Workflow>("DeclineDoneWorkflow")("Workflow", {}) {}
+      class Complete extends Schema.TaggedClass<Complete>("DeclineDoneComplete")("Complete", {}) {}
+      class Finished extends Schema.TaggedClass<Finished>("DeclineDoneFinished")("Finished", {}) {}
+      const states = Machine.states({
+        workflow: {
+          schema: Workflow,
+          initial: "complete",
+          states: {
+            complete: { schema: Complete, type: "final", output: Schema.String }
+          }
+        },
+        finished: Finished
+      })
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.workflow.initial(),
+          resolve: ({ target }) => target(new Workflow({}), (workflow) => workflow.complete(new Complete({})))
+        }
+      }).handle({
+        workflow: {
+          onDone: Machine.transition({
+            declinable: true,
+            target: (to) => to.full.finished(),
+            resolve: ({ decline }) => decline()
+          }),
+          states: {
+            complete: { output: () => "complete" }
+          }
+        }
+      })
+
+      const planned = yield* Machine.planInitial(machine)
+      assert.isFalse(planned.done)
+      assert.strictEqual(planned.state.path, "workflow")
+      if (planned.state.path === "workflow") assert.strictEqual(planned.state.state.path, "workflow.complete")
+    }))
+
+  it.effect("preserves descendant preemption when parallel candidates decline", () =>
+    Effect.gen(function*() {
+      class Root extends Schema.TaggedClass<Root>("DeclineParallelRoot")("Root", {}) {}
+      class Left extends Schema.TaggedClass<Left>("DeclineParallelLeft")("Left", {}) {}
+      class Right extends Schema.TaggedClass<Right>("DeclineParallelRight")("Right", {}) {}
+      class Finished extends Schema.TaggedClass<Finished>("DeclineParallelFinished")("Finished", {}) {}
+      class Ping extends Schema.TaggedClass<Ping>("DeclineParallelPing")("Ping", {
+        handleRight: Schema.Boolean
+      }) {}
+      const states = Machine.states({
+        root: {
+          schema: Root,
+          type: "parallel",
+          states: { left: Left, right: Right }
+        },
+        finished: Finished
+      })
+      let parentCalls = 0
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Ping),
+        initial: {
+          target: (to) => to.root.initial(),
+          resolve: ({ target }) => target(new Root({}), (root) => root.left(new Left({})).right(new Right({})))
+        }
+      }).handle({
+        root: {
+          on: {
+            Ping: Machine.transition({
+              target: (to) => to.full.finished(),
+              resolve: ({ target }) => {
+                parentCalls++
+                return target(new Finished({}))
+              }
+            })
+          },
+          states: {
+            left: {
+              on: {
+                Ping: Machine.transition({
+                  declinable: true,
+                  target: (to) => to.none(),
+                  resolve: ({ decline }) => decline()
+                })
+              }
+            },
+            right: {
+              on: {
+                Ping: Machine.transition({
+                  declinable: true,
+                  target: (to) => to.none(),
+                  resolve: ({ event, decline }) => event.handleRight ? undefined : decline()
+                })
+              }
+            }
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const descendant = yield* Machine.plan(machine, initial.state, new Ping({ handleRight: true }))
+      assert.strictEqual(descendant.next.path, "root")
+      assert.deepStrictEqual(descendant.microsteps[0]?.transitions.map(({ source }) => source), ["root.right"])
+      assert.strictEqual(parentCalls, 0)
+
+      const ancestor = yield* Machine.plan(machine, initial.state, new Ping({ handleRight: false }))
+      assert.strictEqual(ancestor.next.path, "finished")
+      assert.deepStrictEqual(ancestor.microsteps[0]?.transitions.map(({ source }) => source), ["root"])
+      assert.strictEqual(parentCalls, 1)
     }))
 
   it.effect("handles parent config and nested states in the same object", () =>

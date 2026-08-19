@@ -53,6 +53,7 @@ import {
   getNode,
   type InitialTarget as InitialTargetInstruction,
   isChoiceTarget,
+  isDeclined,
   isHistoryTarget,
   isInitialTarget,
   isNoTarget,
@@ -104,10 +105,10 @@ export type MacrostepPlan<State, Event, E, R, Output> =
 export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = (
   context: Context,
   enqueue: Enqueue<any, any>
-) => Machine.HandlerResult<States, E, R>
+) => Machine.HandlerResult<States, E, R> | Machine.Declined
 
 type TransitionEvaluation<States extends Machine.StateSchemas, E, R> = {
-  readonly result: Machine.HandlerResult<States, E, R>
+  readonly result: Machine.HandlerResult<States, E, R> | Machine.Declined
   readonly branchIndex: number
   readonly branchKey: string | undefined
 }
@@ -153,6 +154,7 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
   | TransitionHandler<States, E, R, Context>
   | {
     readonly reenter?: boolean
+    readonly declinable?: boolean
     readonly targets?: ReadonlyArray<string>
     readonly transition: TransitionHandler<States, E, R, Context>
     readonly evaluate?: TransitionEvaluator<States, E, R, Context>
@@ -160,6 +162,7 @@ type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
 
 export type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
+  readonly declinable: boolean
   readonly targets: ReadonlyArray<string> | undefined
   readonly transition: TransitionHandler<States, E, R, Context>
   readonly evaluate: TransitionEvaluator<States, E, R, Context> | undefined
@@ -172,9 +175,10 @@ export const normalizeTransition = <States extends Machine.StateSchemas, E, R, C
     return undefined
   }
   return typeof transition === "function"
-    ? { reenter: false, targets: undefined, transition, evaluate: undefined }
+    ? { reenter: false, declinable: false, targets: undefined, transition, evaluate: undefined }
     : {
       reenter: transition.reenter === true,
+      declinable: transition.declinable === true,
       targets: transition.targets,
       transition: transition.transition,
       evaluate: transition.evaluate
@@ -218,7 +222,11 @@ const collectTransition = <
   const evaluated = evaluate === undefined
     ? { result: transition(context, collected.enqueue), branchIndex: 0, branchKey: undefined }
     : evaluate(context, collected.enqueue)
+  if (isDeclined(evaluated.result)) {
+    return { declined: true as const }
+  }
   return {
+    declined: false as const,
     state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
     branchIndex: evaluated.branchIndex,
     branchKey: evaluated.branchKey,
@@ -521,6 +529,29 @@ export type SelectedTransition<States extends Machine.StateSchemas, E, R, Contex
   readonly trigger: Machine.TransitionTrigger
   readonly transition: MicrostepTransition<States, E, R, Context>
   readonly context: Context
+  readonly collected?: {
+    readonly declined: false
+    readonly state: unknown
+    readonly branchIndex: number
+    readonly branchKey: string | undefined
+    readonly commands: ReadonlyArray<RuntimeCommand>
+    readonly raisedEvents: ReadonlyArray<unknown>
+    readonly emittedEvents: ReadonlyArray<unknown>
+  }
+}
+
+const resolveDeclinableCandidate = <States extends Machine.StateSchemas, E, R, Context>(
+  machine: Machine.Any,
+  selection: SelectedTransition<States, E, R, Context>
+): SelectedTransition<States, E, R, Context> | undefined => {
+  if (!selection.transition.declinable) return selection
+  const collected = collectTransition(
+    machine,
+    selection.transition.transition,
+    selection.context,
+    selection.transition.evaluate
+  )
+  return collected.declined ? undefined : { ...selection, collected }
 }
 
 export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R, Context> = {
@@ -759,15 +790,16 @@ const selectAlwaysTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  const evaluatedSources = new Map<string, SelectedTransition<States, E, R, any> | undefined>()
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
       const always = normalizeTransition(machine.handlers[path]?.always)
       if (always !== undefined) {
-        if (!selectedSources.has(path)) {
-          selectedSources.add(path)
-          selected.push({
+        let candidate = evaluatedSources.get(path)
+        if (!evaluatedSources.has(path)) {
+          candidate = resolveDeclinableCandidate(machine, {
             sourcePath: path,
             leafPath: leaf,
             trigger: { type: "always" },
@@ -796,6 +828,12 @@ const selectAlwaysTransitions = <
               target: getTargetBuilder(machine, path)
             }
           })
+          evaluatedSources.set(path, candidate)
+        }
+        if (candidate === undefined) continue
+        if (!selectedSources.has(path)) {
+          selectedSources.add(path)
+          selected.push(candidate as (typeof selected)[number])
         }
         break
       }
@@ -838,7 +876,7 @@ const selectDoneTransitions = <
     const onDone = normalizeTransition(machine.handlers[completion.path]?.onDone)
     if (onDone !== undefined && !selectedSources.has(completion.path)) {
       selectedSources.add(completion.path)
-      selected.push({
+      const candidate = resolveDeclinableCandidate(machine, {
         sourcePath: completion.path,
         leafPath: getActiveLeafPathFrom(machine, configuration, completion.path),
         trigger: { type: "done" },
@@ -857,6 +895,7 @@ const selectDoneTransitions = <
           capturedSnapshot()
         )
       })
+      if (candidate !== undefined) selected.push(candidate)
     }
   }
   return selected
@@ -897,15 +936,16 @@ const selectEventTransitions = <
     >
   > = []
   const selectedSources = new Set<string>()
+  const evaluatedSources = new Map<string, SelectedTransition<States, E, R, any> | undefined>()
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
       const transition = normalizeTransition(machine.handlers[path]?.on?.[event._tag])
       if (transition !== undefined) {
-        if (!selectedSources.has(path)) {
-          selectedSources.add(path)
-          selected.push({
+        let candidate = evaluatedSources.get(path)
+        if (!evaluatedSources.has(path)) {
+          candidate = resolveDeclinableCandidate(machine, {
             sourcePath: path,
             leafPath: leaf,
             trigger: { type: "event", event: event._tag },
@@ -931,6 +971,12 @@ const selectEventTransitions = <
               Machine.TagOf<Events[number]>
             >(machine as any, configuration, path, event, capturedSnapshot())
           })
+          evaluatedSources.set(path, candidate)
+        }
+        if (candidate === undefined) continue
+        if (!selectedSources.has(path)) {
+          selectedSources.add(path)
+          selected.push(candidate as (typeof selected)[number])
         }
         break
       }
@@ -983,13 +1029,14 @@ const selectInvocationTransition = <
       ? { error: event.error }
       : { snapshot: event.snapshot })
   }
-  return [{
+  const candidate = resolveDeclinableCandidate(machine, {
     sourcePath: event.path,
     leafPath: getActiveLeafPathFrom(machine, configuration, event.path),
     trigger: { type: "invoke", id: event.id, outcome: event.type },
     transition: transition as unknown as MicrostepTransition<States, E, R, any>,
     context
-  }]
+  })
+  return candidate === undefined ? [] : [candidate]
 }
 
 export const getTargetNodePath = <const States extends Machine.StateSchemas>(
@@ -1275,12 +1322,15 @@ const collectEvaluatedTransition = <
   selection: SelectedTransition<States, E, R, Context>
 ) => {
   const stateIdentifier = selection.leafPath
-  const transitionResult = collectTransition<States, Event, E, R, Context>(
+  const transitionResult = selection.collected ?? collectTransition<States, Event, E, R, Context>(
     machine,
     selection.transition.transition,
     selection.context,
     selection.transition.evaluate
   )
+  if (transitionResult.declined) {
+    throw new Error("Machine transition returned decline without declaring declinable: true")
+  }
   const unresolvedTarget = transitionResult.state === undefined
     ? undefined
     : transitionResult.state as

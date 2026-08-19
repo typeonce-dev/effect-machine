@@ -13,6 +13,7 @@ class Increment extends Schema.TaggedClass<Increment>("ProbeIncrement")("Increme
 
 class Noop extends Schema.TaggedClass<Noop>("ProbeNoop")("Noop", {}) {}
 class Ignored extends Schema.TaggedClass<Ignored>("ProbeIgnored")("Ignored", {}) {}
+class Decline extends Schema.TaggedClass<Decline>("ProbeDecline")("Decline", {}) {}
 class Burst extends Schema.TaggedClass<Burst>("ProbeBurst")("Burst", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {}) {}
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
@@ -21,7 +22,7 @@ const states = Machine.states({ Counter })
 
 const machine = Machine.make({
   states: states.states,
-  events: Machine.events(Increment, Noop, Ignored, Burst, Reenter),
+  events: Machine.events(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEvents(RaisedIncrement),
   initial: {
     target: (to) => to.Counter(),
@@ -37,6 +38,11 @@ const machine = Machine.make({
       Noop: Machine.transition({
         target: (to) => to.none(),
         resolve: () => undefined
+      }),
+      Decline: Machine.transition({
+        declinable: true,
+        target: (to) => to.none(),
+        resolve: ({ decline }) => decline()
       }),
       Reenter: Machine.transition({
         target: (to) => to.full.Counter(),
@@ -92,6 +98,11 @@ describe("MachineTest probe", () => {
       assert.strictEqual(ignored.plan.microsteps.length, 0)
       assert.strictEqual(ignored.before.value.count, 0)
       assert.strictEqual(ignored.after.value.count, 0)
+
+      const declined = yield* probe.sendAndAwait(new Decline({}))
+      assert.strictEqual(declined.handled, false)
+      assert.strictEqual(declined.configurationChanged, false)
+      assert.strictEqual(declined.plan.microsteps.length, 0)
 
       const targetless = yield* probe.sendAndAwait(new Noop({}))
       assert.strictEqual(targetless.handled, true)

@@ -33,15 +33,16 @@ const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): Readon
     if (branches.length === 0) return []
 
     const reenter = definition.reenter ? " [reenter]" : ""
+    const acceptance = definition.acceptance === "declinable" ? " [declinable]" : ""
     const trigger = definition.trigger.type === "event" ?
-      `◇ on: ${String(definition.trigger.event)}${reenter}`
+      `◇ on: ${String(definition.trigger.event)}${reenter}${acceptance}`
       : definition.trigger.type === "always" ?
-      `◇ always${reenter}`
+      `◇ always${reenter}${acceptance}`
       : definition.trigger.type === "done" ?
-      `◇ done${reenter}`
+      `◇ done${reenter}${acceptance}`
       : definition.trigger.type === "choice" ?
       "◇ choice"
-      : `◇ invoke ${definition.trigger.id} ${definition.trigger.outcome}${reenter}`
+      : `◇ invoke ${definition.trigger.id} ${definition.trigger.outcome}${reenter}${acceptance}`
 
     return [{ trigger, branches }]
   })

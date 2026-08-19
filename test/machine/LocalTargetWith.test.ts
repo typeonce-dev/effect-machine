@@ -58,6 +58,7 @@ describe("local compound target selection", () => {
         source: "search",
         trigger: { type: "event", event: "UpdateQuery" },
         reenter: true,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "search",
@@ -67,6 +68,7 @@ describe("local compound target selection", () => {
         source: "search.Updated",
         trigger: { type: "event", event: "Reset" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "search.Idle",
@@ -143,6 +145,7 @@ describe("local compound target selection", () => {
         source: "search.Searching",
         trigger: { type: "invoke", id: "search", outcome: "done" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "search",

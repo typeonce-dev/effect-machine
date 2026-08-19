@@ -66,6 +66,7 @@ export const makeTransitionCoverageCollector = <M extends AnyMachine>(
       source: definition.source,
       trigger: definition.trigger,
       reenter: definition.reenter,
+      acceptance: definition.acceptance,
       branches: definition.branches
     })
   )
@@ -85,6 +86,7 @@ export const makeTransitionCoverageCollector = <M extends AnyMachine>(
         source: definition.source,
         trigger: definition.trigger,
         reenter: definition.reenter,
+        acceptance: definition.acceptance,
         branch
       })
     })

@@ -47,7 +47,7 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { isInitialTarget, isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import { isDeclined, isInitialTarget, isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
@@ -152,6 +152,7 @@ const compileIndexedExecutionDescriptor = (
     for (const tag of Reflect.ownKeys(config.on)) {
       const transition = normalizeTransition(config.on[tag] as Parameters<typeof normalizeTransition>[0])
       if (transition !== undefined) {
+        if (transition.declinable) return undefined
         byEvent.set(tag, transition)
       }
     }
@@ -447,6 +448,9 @@ const collectIndexedTransition = (
   const evaluated = evaluate === undefined
     ? { result: transition(context, enqueue), branchIndex: 0, branchKey: undefined }
     : evaluate(context, enqueue)
+  if (isDeclined(evaluated.result)) {
+    throw new Error("Machine indexed transition returned decline without declaring declinable: true")
+  }
   return {
     state: isNoTarget(evaluated.result) ? undefined : evaluated.result,
     branchIndex: evaluated.branchIndex,

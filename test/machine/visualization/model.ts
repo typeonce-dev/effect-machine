@@ -41,6 +41,7 @@ export interface TransitionDefinition {
       readonly outcome: "element" | "done" | "failure" | "snapshot"
     }
   readonly reenter: boolean
+  readonly acceptance: "required" | "declinable"
   readonly branches: ReadonlyArray<
     | {
       readonly type: "direct"

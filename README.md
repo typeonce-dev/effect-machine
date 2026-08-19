@@ -383,7 +383,7 @@ paths. `parent` always means the owning machine target.
 | `target.full`    | Replacing or selecting a complete root   | Nothing implicit for a newly selected root        |
 | `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
 
-Every installed transition handler returns either a concrete target or
+Every required transition handler returns either a concrete target or
 `target.none()`. An absent handler ignores the trigger; `target.none()` handles
 it and retains queued commands, raised events, and emitted events without
 selecting a destination. Declared `targets` constrain only concrete
@@ -391,6 +391,28 @@ destinations, so `target.none()` is always permitted. Builders describe the
 next logical configuration. Shared states exit and enter only when paths
 change; use `{ reenter: true, transition }` when the source must restart. With
 `target.none()`, reentry restarts the source while retaining its configuration.
+
+Use `declinable: true` when a resolver may decide that its transition is not
+enabled. Only that resolver receives `decline()`, and its return type expands to
+accept the opaque declined result:
+
+```ts
+Submit: Machine.transition({
+  declinable: true,
+  target: (to) => to.local.Saving(),
+  resolve: ({ event, target, decline }) => accepts(event) ? target.from({ draft: event.draft }) : decline()
+})
+```
+
+Declining discards work enqueued by that resolver. Event and eventless dispatch
+continues with the next eligible ancestor; if no candidate accepts, no
+transition is selected. This differs from `target.none()`, which consumes the
+trigger and prevents an ancestor from handling it. `transitionDefinitions`
+reports each handler's `acceptance` as `"required"` or `"declinable"` while
+preserving the exact declared target branches. Choices and initial routing must
+remain total and cannot use declinable transitions. Completion and invocation
+outcomes have no ancestor candidate: declining one ignores that lifecycle
+occurrence and leaves the current configuration active.
 
 ## Statechart capabilities
 
