@@ -17,10 +17,7 @@ const States = Machine.states(State.cases)
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Event.cases.Start, Event.cases.Finish),
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target(State.cases.Idle.make({}))
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target(State.cases.Idle.make({})))
 }).handle({
   Idle: {
     on: {

@@ -34,10 +34,7 @@ const NavigationStates = Machine.states({
 const navigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: {
-    target: (to) => to.off(),
-    resolve: ({ target }) => target(new Off({}))
-  }
+  initial: (to) => to.off().resolve(({ target }) => target(new Off({})))
 }).handle({
   off: {
     on: {
@@ -49,10 +46,7 @@ const navigationMachine = Machine.make({
 const raisedNavigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: {
-    target: (to) => to.off(),
-    resolve: ({ target }) => target(new Off({}))
-  }
+  initial: (to) => to.off().resolve(({ target }) => target(new Off({})))
 }).handle({
   off: {
     always: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({})))),
@@ -67,16 +61,13 @@ const CounterStates = Machine.states({ counter: Counter })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Increment, Noop),
-  initial: {
-    target: (to) => to.counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
       Increment: (to) =>
         to.full.counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 1 }))),
-      Noop: { target: Machine.targetless }
+      Noop: (to) => to.none
     }
   }
 })
@@ -84,18 +75,15 @@ const counterMachine = Machine.make({
 const conditionalMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Select),
-  initial: {
-    target: (to) => to.counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
       Select: (to) =>
         to.branches({
-          negative: { target: to.none() },
+          negative: { target: to.none },
           zero: { target: to.full.counter() },
-          positive: { target: to.none() }
+          positive: { target: to.none }
         }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
@@ -110,22 +98,19 @@ const conditionalMachine = Machine.make({
 const invokedMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
     invoke: [
       Machine.invoke({
         id: "first",
         effect: () => Effect.succeed(1),
-        onDone: { target: Machine.targetless }
+        onDone: (to) => to.none
       }),
       Machine.invoke({
         id: "second",
         effect: () => Effect.succeed(2),
-        onDone: { target: Machine.targetless }
+        onDone: (to) => to.none
       })
     ]
   }
@@ -149,10 +134,7 @@ const RoutedStartupStates = Machine.states({
 const routedStartupMachine = Machine.make({
   states: RoutedStartupStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.a.initial(),
-    resolve: ({ target }) => target(new StartupA({}), (a) => a.route())
-  }
+  initial: (to) => to.a.initial.resolve(({ target }) => target(new StartupA({}), (a) => a.route()))
 }).handle({
   a: {
     states: {
@@ -187,10 +169,8 @@ const ChoiceResolutionStates = Machine.states({
 const choiceResolutionMachine = Machine.make({
   states: ChoiceResolutionStates.states,
   events: Machine.events(Route),
-  initial: {
-    target: (to) => to.flow.initial(),
-    resolve: ({ target }) => target(new ChoiceFlow({}), (flow) => flow.ready(new ChoiceReady({})))
-  }
+  initial: (to) =>
+    to.flow.initial.resolve(({ target }) => target(new ChoiceFlow({}), (flow) => flow.ready(new ChoiceReady({}))))
 }).handle({
   flow: {
     states: {
@@ -213,14 +193,13 @@ const choiceResolutionMachine = Machine.make({
 const reentryMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Restart),
-  initial: {
-    target: (to) => to.app.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.app.initial.resolve(({ target }) =>
       target(
         new App({}),
         (app) => app.one(new One({}))
       )
-  }
+    )
 }).handle({
   app: {
     on: {
@@ -248,14 +227,13 @@ const ParallelStates = Machine.states({
 const parallelMachine = Machine.make({
   states: ParallelStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.dashboard.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.dashboard.initial.resolve(({ target }) =>
       target(
         new Dashboard({}),
         (dashboard) => dashboard.left(new Left({})).right(new Right({}))
       )
-  }
+    )
 }).handle({ dashboard: {} })
 
 class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {}) {}
@@ -294,9 +272,8 @@ const HistoryStates = Machine.states({
 const historyMachine = Machine.make({
   states: HistoryStates.states,
   events: Machine.events(Leave, Resume),
-  initial: {
-    target: (to) => to.workspace.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.workspace.initial.resolve(({ target }) =>
       target(
         new Workspace({}),
         (workspace) =>
@@ -305,7 +282,7 @@ const historyMachine = Machine.make({
             (editor) => editor.editing(new Editing({ revision: 1 }))
           )
       )
-  }
+    )
 }).handle({
   workspace: {
     history: {
@@ -343,7 +320,7 @@ const historyMachine = Machine.make({
   },
   away: {
     on: {
-      Resume: (to) => to.history.workspace.exact().resolve(({ target }) => target())
+      Resume: (to) => to.history.workspace.exact.resolve(({ target }) => target())
     }
   }
 })
@@ -375,10 +352,10 @@ const structuralHistoryInitial = () => ({
 const structuralHistoryMachine = Machine.make({
   states: StructuralHistoryStates.states,
   events: Machine.events(Leave),
-  initial: {
-    target: (to) => to.workspace.initial(),
-    resolve: ({ target }) => target.from((workspace) => workspace.editor.from((editor) => editor.idle.from()))
-  }
+  initial: (to) =>
+    to.workspace.initial.resolve(({ target }) =>
+      target.from((workspace) => workspace.editor.from((editor) => editor.idle.from()))
+    )
 }).handle({
   workspace: {
     history: {
@@ -403,10 +380,7 @@ const CompletionStates = Machine.states({
 const completionMachine = Machine.make({
   states: CompletionStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.finished(),
-    resolve: ({ target }) => target(new Finished({}))
-  }
+  initial: (to) => to.finished().resolve(({ target }) => target(new Finished({})))
 }).handle({
   finished: {
     output: () => "complete"
@@ -434,14 +408,13 @@ const DoneTransitionStates = Machine.states({
 const doneTransitionMachine = Machine.make({
   states: DoneTransitionStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.workflow.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.workflow.initial.resolve(({ target }) =>
       target(
         new Workflow({}),
         (workflow) => workflow.finished(new Finished({}))
       )
-  }
+    )
 }).handle({
   workflow: {
     onDone: (to) => to.full.archived().resolve(({ target }) => target(new Archived({}))),
@@ -456,14 +429,13 @@ const doneTransitionMachine = Machine.make({
 const nestedCompletionMachine = Machine.make({
   states: DoneTransitionStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.workflow.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.workflow.initial.resolve(({ target }) =>
       target(
         new Workflow({}),
         (workflow) => workflow.finished(new Finished({}))
       )
-  }
+    )
 }).handle({
   workflow: {
     states: {

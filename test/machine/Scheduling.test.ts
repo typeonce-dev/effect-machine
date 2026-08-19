@@ -21,10 +21,7 @@ describe("machine scheduling", () => {
         states: states.states,
         events: Machine.events(StartBurst),
         internalEvents: Machine.internalEvents(Burst),
-        initial: {
-          target: (to) => to.SchedulingActive(),
-          resolve: ({ target }) => target(new SchedulingActive({ count: 0 }))
-        }
+        initial: (to) => to.SchedulingActive().resolve(({ target }) => target(new SchedulingActive({ count: 0 })))
       }).handle({
         SchedulingActive: {
           on: {

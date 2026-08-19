@@ -54,15 +54,12 @@ describe("pure planning and managed runtime differential", () => {
         states: states.states,
         events: Machine.events(Cascade, Ignore, Finish),
         internalEvents: Machine.internalEvents(Increment),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
             Cascade: (to) =>
-              to.none().resolve((_, enqueue) => {
+              to.none.resolve((_, enqueue) => {
                 enqueue.raise(new Increment({}))
                 return undefined
               }),
@@ -145,14 +142,13 @@ describe("pure planning and managed runtime differential", () => {
         states: states.states,
         events: Machine.events(Advance, Inspect, Finish),
         internalEvents: Machine.internalEvents(Bump),
-        initial: {
-          target: (to) => to.Running.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.Running.initial.resolve(({ target }) =>
             target(
               new Running({}),
               (running) => running.Left(new Left({ value: 0 })).Right(new Right({ value: 0 }))
             )
-        }
+          )
       }).handle({
         Running: {
           on: {
@@ -187,7 +183,7 @@ describe("pure planning and managed runtime differential", () => {
                     target(new Right({ value: state.value + 100 }))
                   ),
                 Inspect: (to) =>
-                  to.none().resolve((context) => {
+                  to.none.resolve((context) => {
                     const { state, containingState, ancestors, snapshot } = context
                     if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
                     const expectedKeys = [
@@ -454,10 +450,7 @@ describe("pure planning and managed runtime differential", () => {
         events: Machine.events(Begin),
         internalEvents: Machine.internalEvents(RaisedOne, RaisedTwo),
         emittedEvents: Machine.emittedEvents(Notice),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -482,7 +475,7 @@ describe("pure planning and managed runtime differential", () => {
           },
           on: {
             RaisedOne: (to) =>
-              to.none().resolve((_, enqueue) => {
+              to.none.resolve((_, enqueue) => {
                 record("raised:one")
                 enqueue.emit(new Notice({ label: "raised-one" }))
                 return undefined
@@ -570,10 +563,7 @@ describe("pure planning and managed runtime differential", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ignore, Go),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {

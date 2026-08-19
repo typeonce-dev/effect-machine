@@ -26,10 +26,7 @@ const choiceStates = Machine.states({
 const choiceIncomplete = Machine.make({
   states: choiceStates.states,
   events: Machine.events(Tick),
-  initial: {
-    target: (to) => to.Ready(),
-    resolve: ({ target }) => (target(new Ready({})))
-  }
+  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
 })
 const choiceSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
@@ -48,10 +45,7 @@ const historyStates = Machine.states({
 const historyIncomplete = Machine.make({
   states: historyStates.states,
   events: Machine.events(Tick),
-  initial: {
-    target: (to) => to.Ready(),
-    resolve: ({ target }) => (target(new Ready({})))
-  }
+  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
 })
 const historySnapshot = { path: "Ready" as const, value: new Ready({}) }
 
@@ -67,10 +61,7 @@ const outputStates = Machine.states({
 const outputIncomplete = Machine.make({
   states: outputStates.states,
   events: Machine.events(Tick),
-  initial: {
-    target: (to) => to.Ready(),
-    resolve: ({ target }) => (target(new Ready({})))
-  }
+  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
 })
 const outputSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
@@ -147,10 +138,7 @@ describe("executable machine readiness", () => {
     const complete = Machine.make({
       states: completeStates.states,
       events: Machine.events(Tick),
-      initial: {
-        target: (to) => to.Ready(),
-        resolve: ({ target }) => (target(new Ready({})))
-      }
+      initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
     }).handle({
       Flow: {
         history: {

@@ -14,10 +14,7 @@ describe("MachineTest coverage and observed graph", () => {
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Start),
-    initial: {
-      target: (to) => to.idle(),
-      resolve: ({ target }) => (target(new Idle({})))
-    }
+    initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
   }).handle({
     idle: {
       on: {

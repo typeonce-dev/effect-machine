@@ -27,15 +27,13 @@ describe("local compound target selection", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Events),
-        initial: {
-          target: (to) => to.search.initial(),
-          resolve: ({ target }) => target.from({ query: "" }, (search) => search.Idle.from())
-        }
+        initial: (to) =>
+          to.search.initial.resolve(({ target }) => target.from({ query: "" }, (search) => search.Idle.from()))
       }).handle({
         search: {
           on: {
             UpdateQuery: (to) =>
-              to.local.with().resolve(
+              to.local.with.resolve(
                 ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
                 { reenter: true }
               )
@@ -116,10 +114,10 @@ describe("local compound target selection", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.search.initial(),
-          resolve: ({ target }) => target.from({ query: "pending" }, (search) => search.Searching.from())
-        }
+        initial: (to) =>
+          to.search.initial.resolve(({ target }) =>
+            target.from({ query: "pending" }, (search) => search.Searching.from())
+          )
       }).handle({
         search: {
           states: {
@@ -128,7 +126,7 @@ describe("local compound target selection", () => {
                 id: "search",
                 effect: () => Effect.succeed("resolved"),
                 onDone: (to) =>
-                  to.local.with().resolve(({ output, target }) =>
+                  to.local.with.resolve(({ output, target }) =>
                     target.from({ query: output }, (search) => search.Updated.from())
                   )
               })
@@ -178,10 +176,7 @@ describe("local compound target selection", () => {
     Machine.make({
       states: states.states,
       events: Machine.events(Event),
-      initial: {
-        target: (to) => to.flow.initial(),
-        resolve: ({ target }) => target.from((flow) => flow.Idle.from())
-      }
+      initial: (to) => to.flow.initial.resolve(({ target }) => target.from((flow) => flow.Idle.from()))
     }).handle({
       flow: {
         states: {

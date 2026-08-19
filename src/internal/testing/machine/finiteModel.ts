@@ -1316,7 +1316,7 @@ const selectHistoryTarget = (builder: Record<string, any>, path: string): unknow
   const parts = path.split(".")
   let current: any = builder
   for (let index = 0; index < parts.length - 1; index++) current = current[parts[index]!]
-  return current[parts[parts.length - 1]!]()
+  return current[parts[parts.length - 1]!]
 }
 
 const selectableDefinitionTarget = (
@@ -1356,7 +1356,7 @@ const selectDefinitionTarget = (
   const parts = selectable.split(".")
   for (const part of parts) current = current[part]
   if (typeof current === "function") return current()
-  return current.initial()
+  return current.initial
 }
 
 const resolveDefinitionTarget = (
@@ -1433,7 +1433,7 @@ const makeHandlers = (
       if (transition.source !== path) continue
       const config = (to: Record<string, any>) => {
         const selected = transition.target === undefined
-          ? to.none()
+          ? to.none
           : selectDefinitionTarget(to, path, transition.target, byPath)
         const resolve = transition.target === undefined
           ? () => undefined
@@ -1513,13 +1513,12 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const machine = Machine.make({
     states: defined.states as any,
     events: Machine.events(...eventSchemas) as any,
-    initial: {
-      target: (to: Record<string, any>) => {
-        const selected = to[initial.path]
-        return typeof selected === "function" ? selected() : selected.initial()
-      },
-      resolve: ({ target }: { readonly target: any }) =>
+    initial: (to: Record<string, any>) => {
+      const selected = to[initial.path]
+      const selection = typeof selected === "function" ? selected() : selected.initial
+      return selection.resolve(({ target }: { readonly target: any }) =>
         selectSnapshot({ [initial.path]: target }, initial.path, byPath, [initial.path], 0) as any
+      )
     }
   } as any)
   const transitions = new Map(model.transitions.map((transition) => [

@@ -36,10 +36,7 @@ export const ReplaceMachine = Machine.make({
   events: ReplaceEvents,
   internalEvents: ReplaceInternalEvents,
   parentEvents: TeamEvents,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from()
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target.from())
 }).handle({
   Idle: {
     on: {
@@ -51,9 +48,8 @@ export const ReplaceMachine = Machine.make({
       id: "replaceWithRandom",
       effect: () => replaceWithRandom,
       onDone: (to) =>
-        to.none().resolve(({ output }, enqueue) => {
+        to.none.resolve(({ output }, enqueue) => {
           enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon }))
-          return undefined
         }),
       onFailure: (to) => to.full.Idle().resolve(({ target }) => target.from())
     }),

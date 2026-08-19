@@ -11,12 +11,12 @@ const handled = machine.handle({
           length3: { target: to.full.Text() },
           length4: { target: to.full.Count() },
           length5: { target: to.full.Text() },
-          length6: { target: to.none() },
+          length6: { target: to.none },
           length7: { target: to.full.Count() },
           length8: { target: to.full.Text() },
           length9: { target: to.full.Count() },
           length10: { target: to.full.Idle() },
-          unchanged: { target: to.none() }
+          unchanged: { target: to.none }
         }).resolve(({ event, select }) => {
           const value = event.value
           switch (value.length) {

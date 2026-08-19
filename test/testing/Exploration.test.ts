@@ -20,10 +20,7 @@ const States = Machine.states({ counter: Counter })
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Increment, Reset, Corrupt),
-  initial: {
-    target: (to) => to.counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
@@ -41,18 +38,15 @@ const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof m
 const branchMachine = Machine.make({
   states: States.states,
   events: Machine.events(Select),
-  initial: {
-    target: (to) => to.counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
       Select: (to) =>
         to.branches({
-          negative: { target: to.none() },
-          zero: { target: to.none() },
-          positive: { target: to.none() }
+          negative: { target: to.none },
+          zero: { target: to.none },
+          positive: { target: to.none }
         }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
@@ -393,10 +387,7 @@ describe("MachineTest bounded exploration", () => {
         states: States.states,
         events: Machine.events(Increment),
         input: Seed,
-        initial: {
-          target: (to) => to.counter(),
-          resolve: ({ input, target }) => target(new Counter({ count: input.count }))
-        }
+        initial: (to) => to.counter().resolve(({ input, target }) => target(new Counter({ count: input.count })))
       }).handle({ counter: {} })
       const explored = yield* MachineTest.explore(inputMachine, {
         input: new Seed({ count: 7 }),

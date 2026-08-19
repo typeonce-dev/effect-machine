@@ -12,7 +12,7 @@ const handlers = {
     to.branches({
       running: { target: to.full.Running() },
       done: { target: to.full.Done() },
-      unchanged: { target: to.none() }
+      unchanged: { target: to.none }
     }).resolve(({ event, select }) => event.cached ? select.done.from() : select.running.from())
 }
 ```

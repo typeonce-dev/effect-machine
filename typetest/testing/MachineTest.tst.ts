@@ -18,15 +18,12 @@ describe("MachineTest", () => {
     events: Machine.events(PublicEvent),
     internalEvents: Machine.internalEvents(InternalEvent),
     input: Input,
-    initial: {
-      target: (to) => to.idle(),
-      resolve: ({ target }) => (target(new Idle({})))
-    }
+    initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
   }).handle({
     idle: {
       on: {
-        PublicEvent: { target: Machine.targetless },
-        InternalEvent: { target: Machine.targetless }
+        PublicEvent: (to) => to.none,
+        InternalEvent: (to) => to.none
       }
     }
   })
@@ -54,10 +51,7 @@ describe("MachineTest", () => {
     const noInput = Machine.make({
       states: States.states,
       events: Machine.events(PublicEvent),
-      initial: {
-        target: (to) => to.idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({ idle: {} })
     type Scenario = MachineTest.Scenario<typeof noInput>
     type Options = MachineTest.ScenarioOptions<typeof noInput>
@@ -103,10 +97,7 @@ describe("MachineTest", () => {
     const invokedMachine = Machine.make({
       states: States.states,
       events: Machine.events(PublicEvent),
-      initial: {
-        target: (to) => to.idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       idle: {
         invoke: Machine.invoke({
@@ -115,7 +106,7 @@ describe("MachineTest", () => {
             Effect.gen(function*() {
               yield* InvokeRequirement
             }),
-          onDone: { target: Machine.targetless }
+          onDone: (to) => to.none
         })
       }
     })

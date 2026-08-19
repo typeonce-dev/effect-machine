@@ -140,7 +140,7 @@ const hierarchicalCounterMachine = Machine.make({
   states: HierarchicalStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish),
   initial: benchmarkApi.initial({
-    target: (to) => to.Active.initial(),
+    target: (to) => to.Active.initial,
     resolve: ({ target }) => target.from((active) => active.Count.from({ value: 0 }))
   }, () =>
     HierarchicalStates.initial.Active.from(
@@ -196,7 +196,7 @@ const parallelCounterMachine = Machine.make({
   states: ParallelStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.IncrementLeft, HierarchicalEvent.cases.IncrementRight, HierarchicalEvent.cases.Finish),
   initial: benchmarkApi.initial({
-    target: (to) => to.Active.initial(),
+    target: (to) => to.Active.initial,
     resolve: ({ target }) =>
       target.from((active) =>
         active

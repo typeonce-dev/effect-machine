@@ -73,22 +73,21 @@ export const SelectionMachine = Machine.make({
   states: SelectionStates.states,
   events: SelectionEvents,
   parentEvents: TeamEvents,
-  initial: {
-    target: (to) => to.form.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.form.initial.resolve(({ target }) =>
       target.from((form) =>
         form
           .search.from({ searchText: "" }, (search) => search.NoPokemon.from())
           .selection.from((selection) => selection.Unselected.from())
       )
-  }
+    )
 }).handle({
   form: {
     states: {
       search: {
         on: {
           UpdateSearchText: (to) =>
-            to.local.with().resolve(
+            to.local.with.resolve(
               ({ event, target }) => target.from({ searchText: event.value }, (search) => search.Searching.from()),
               { reenter: true }
             )
@@ -114,9 +113,8 @@ export const SelectionMachine = Machine.make({
               id: "search",
               effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
               onDone: (to) =>
-                to.none().resolve(({ output }, enqueue) => {
+                to.none.resolve(({ output }, enqueue) => {
                   enqueue.raise(output)
-                  return undefined
                 }),
               onFailure: (to) => to.local.NoPokemon().resolve(({ target }) => target.from())
             }),

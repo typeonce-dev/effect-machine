@@ -54,7 +54,7 @@ const topologyMachine = Machine.make({
   id: "codec-topology",
   states: TopologyStates.states,
   events: Machine.events(),
-  initial: { target: (to) => to.Root.initial(), resolve: () => topologyActive() }
+  initial: (to) => to.Root.initial.resolve(() => topologyActive())
 })
 
 const topologyActive = () => ({
@@ -134,10 +134,7 @@ const historyMachine = Machine.make({
   id: "codec-history",
   states: HistoryStates.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.Outside(),
-    resolve: ({ target }) => target(new Outside({}))
-  }
+  initial: (to) => to.Outside().resolve(({ target }) => target(new Outside({})))
 })
 
 const historySnapshot = () =>
@@ -242,10 +239,7 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-original",
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Before(),
-          resolve: ({ target }) => target(new Before({}))
-        }
+        initial: (to) => to.Before().resolve(({ target }) => target(new Before({})))
       }).handle({
         Before: {
           always: (to) => to.full.Boundary().resolve(({ target }) => target(new Boundary({})))
@@ -257,10 +251,7 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-changed",
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Before(),
-          resolve: ({ target }) => target(new Before({}))
-        }
+        initial: (to) => to.Before().resolve(({ target }) => target(new Before({})))
       }).handle({
         Before: {},
         Boundary: {

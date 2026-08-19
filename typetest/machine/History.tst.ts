@@ -148,17 +148,15 @@ describe("Machine history states", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => {
-          expect(to).type.not.toHaveProperty("recent")
-          expect(to).type.not.toHaveProperty("exact")
-          return to.checkout.initial()
-        },
-        resolve: ({ target }) =>
+      initial: (to) => {
+        expect(to).type.not.toHaveProperty("recent")
+        expect(to).type.not.toHaveProperty("exact")
+        return to.checkout.initial.resolve(({ target }) =>
           target(
             new Checkout({ orderId: "order-1" }),
             (checkout) => checkout.shipping(new Shipping({ address: "Main Street" }))
           )
+        )
       }
     })
     expect(States.get).type.not.toBeCallableWith(
@@ -171,21 +169,18 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     })
     const incomplete = definition.handle({
       support: {
         on: {
           Resume: (to) => {
-            expect(to.history.checkout.recent).type.toBeCallableWith()
-            expect(to.history.checkout.recent).type.not.toBeCallableWith(new Checkout({ orderId: "new" }))
+            expect(to.history.checkout.recent).type.not.toBeAssignableTo<() => unknown>()
+            expect(to.history.checkout.recent).type.toHaveProperty("resolve")
             expect(to.full.checkout).type.not.toHaveProperty("recent")
             expect(to.local).type.not.toHaveProperty("recent")
             expect(to.branch).type.not.toHaveProperty("recent")
-            return to.history.checkout.exact().resolve(({ target }) => {
+            return to.history.checkout.exact.resolve(({ target }) => {
               expect(target).type.toBeCallableWith()
               return target()
             })
@@ -203,15 +198,12 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     })
     const incomplete = definition.handle({
       support: {
         on: {
-          Resume: (to) => to.history.checkout.recent().resolve(({ target }) => target())
+          Resume: (to) => to.history.checkout.recent.resolve(({ target }) => target())
         }
       }
     })
@@ -261,10 +253,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     })
 
     machine.handle({
@@ -320,10 +309,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: NestedStates.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.Closed(),
-        resolve: ({ target }) => (target(new Closed({})))
-      }
+      initial: (to) => to.Closed().resolve(({ target }) => (target(new Closed({}))))
     })
 
     const complete = machine.handle({
@@ -449,10 +435,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: NestedStates.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.Closed(),
-        resolve: ({ target }) => (target(new Closed({})))
-      }
+      initial: (to) => to.Closed().resolve(({ target }) => (target(new Closed({}))))
     })
     expect(machine.handle).type.not.toBeCallableWith({
       App: {
@@ -473,10 +456,7 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     })
     const afterDefaults = definition.handle({
       checkout: {
@@ -558,10 +538,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: DeepOnlyStates.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     }).handle({
       checkout: {
         history: {
@@ -612,10 +589,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: ParallelStates.states,
       events: Machine.events(Resume),
-      initial: {
-        target: (to) => to.support(),
-        resolve: ({ target }) => (target(new Support({})))
-      }
+      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
     })
     const complete = machine.handle({
       outer: {

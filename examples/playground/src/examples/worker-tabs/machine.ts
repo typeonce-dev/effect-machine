@@ -28,10 +28,7 @@ export const SharedMachine = Machine.make({
   id: "WorkerHostedMachine",
   states: SharedMachineStates.states,
   events: SharedMachineEvents,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target.from({ count: 0 })
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target.from({ count: 0 }))
 }).handle({
   Idle: {
     on: {

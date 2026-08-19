@@ -29,10 +29,7 @@ export const machine = Machine.make({
   id: "perf-readiness",
   states: States.states,
   events: Machine.events(),
-  initial: {
-    target: (to) => to.Ready(),
-    resolve: ({ target }) => target(Ready.make({}))
-  }
+  initial: (to) => to.Ready().resolve(({ target }) => target(Ready.make({})))
 }).handle({
   Flow: {
     history: {

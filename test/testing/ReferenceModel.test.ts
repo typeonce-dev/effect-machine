@@ -985,14 +985,13 @@ describe("MachineTest finite-model reference interpreter", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Local, Exit),
-        initial: {
-          target: (to) => to.root.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.root.initial.resolve(({ target }) =>
             target({ _tag: "Root", version: 0 }, (regions) =>
               regions
                 .left({ _tag: "Left", version: 0 }, (left) => left.idle({ _tag: "LeftIdle", version: 0 }))
                 .right({ _tag: "Right", version: 0 }, (right) => right.idle({ _tag: "RightIdle", version: 0 })))
-        }
+          )
       }).handle({
         root: {
           states: {

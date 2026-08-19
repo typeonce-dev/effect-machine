@@ -32,14 +32,11 @@ describe("machine reference event channels", () => {
     internalEvents: InternalEvents,
     parentEvents: ParentEvents,
     emittedEvents: Emissions,
-    initial: {
-      target: (to) => to.Idle(),
-      resolve: ({ target }) => (target(new Idle({})))
-    }
+    initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
   }).handle({
     Idle: {
       on: {
-        Ping: { target: Machine.targetless }
+        Ping: (to) => to.none
       }
     }
   })
@@ -60,15 +57,12 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parentEvents: ParentEvents,
       emittedEvents: Emissions,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         on: {
           Ping: (to) =>
-            to.none().resolve(({ parent, self }, enqueue) => {
+            to.none.resolve(({ parent, self }, enqueue) => {
               expect(self.send).type.toBeCallableWith(Events.Ping())
               expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
               expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
@@ -94,10 +88,7 @@ describe("machine reference event channels", () => {
     const compatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, ParentEvents),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     })
     compatible.handle({
       Idle: { invoke: Machine.invoke({ child: Child }) }
@@ -106,10 +97,7 @@ describe("machine reference event channels", () => {
     const incompatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, OtherParentEvent),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     })
     expect(incompatible.handle).type.not.toBeCallableWith({
       Idle: { invoke: Machine.invoke({ child: Child }) }
@@ -150,10 +138,7 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parentEvents: ParentEvents,
       emittedEvents: Emissions,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         invoke: Machine.invoke({
@@ -169,7 +154,7 @@ describe("machine reference event channels", () => {
             return Effect.void
           },
           onDone: (to) =>
-            to.none().resolve(({ parent, self }, enqueue) => {
+            to.none.resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
               if (parent !== undefined) {
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
@@ -185,17 +170,14 @@ describe("machine reference event channels", () => {
       states: states.states,
       events: Events,
       parentEvents: ParentEvents,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target.from()
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target.from())
     }).handle({
       Idle: {
         invoke: Machine.invoke({
           id: "notify-parent-failure",
           effect: () => Effect.fail("failed" as const),
           onFailure: (to) =>
-            to.none().resolve(({ parent, self }, enqueue) => {
+            to.none.resolve(({ parent, self }, enqueue) => {
               enqueue.sendTo(self, Events.Ping())
               if (parent !== undefined) {
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))

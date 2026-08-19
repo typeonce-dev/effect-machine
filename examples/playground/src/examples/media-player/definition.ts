@@ -8,9 +8,8 @@ export const MediaPlayerDefinition = Machine.make({
   states: MediaPlayerStates.states,
   events: MediaPlayerEvents,
   internalEvents: MediaPlayerInternalEvents,
-  initial: {
-    target: (to) => to.Player.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.Player.initial.resolve(({ target }) =>
       target.from((player) =>
         player
           .transport.from((transport) => transport.Empty.from())
@@ -21,5 +20,5 @@ export const MediaPlayerDefinition = Machine.make({
             })
           )
       )
-  }
+    )
 })

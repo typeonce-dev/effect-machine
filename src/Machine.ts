@@ -592,6 +592,7 @@ type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Run
 const InvokeTypeId: typeof internal.InvokeTypeId = internal.InvokeTypeId
 const TransitionTypeId: typeof internal.TransitionTypeId = internal.TransitionTypeId
 declare const TransitionBuilderTypeId: unique symbol
+declare const InitialBuilderTypeId: unique symbol
 
 type StateDefinitionError<
   Message extends string,
@@ -717,6 +718,29 @@ type ValidateOutputSchema<Node> = "output" extends keyof Node ? Node extends { r
   : StateDefinitionError<"State output must be a schema">
   : unknown
 
+type SelectorChildKey<Children extends Machine.StateSchemas> = ActiveStateKey<Children> | ChoiceStateKey<Children>
+
+type ValidateInitialSelectorChild<Children extends Machine.StateSchemas, Path extends PropertyKey> = "initial" extends
+  SelectorChildKey<Children> ? StateDefinitionError<
+    "Active and choice child states cannot use the reserved target selector key \"initial\"",
+    StateDefinitionPath<Extract<Path, string>, "initial">,
+    "initial"
+  >
+  : unknown
+
+type ValidateWithSelectorChild<
+  Node extends Machine.StateNodeConfig,
+  Children extends Machine.StateSchemas,
+  Path extends PropertyKey
+> = Node extends { readonly schema: Machine.TaggedSchema } ?
+  "with" extends SelectorChildKey<Children> ? StateDefinitionError<
+      "Schema-backed compound child states cannot use the reserved local target selector key \"with\"",
+      StateDefinitionPath<Extract<Path, string>, "with">,
+      "with"
+    >
+  : unknown
+  : unknown
+
 type ValidateStateNodeWithChildren<
   Node extends Machine.StateNodeConfig,
   Children,
@@ -724,8 +748,9 @@ type ValidateStateNodeWithChildren<
 > = Children extends Machine.StateSchemas ?
   Node extends { readonly type: "final" } ? StateDefinitionError<"Final states cannot declare child states">
   : Node extends { readonly type: "parallel" } ?
-    "initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
-    : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> } & ValidateOutputSchema<Node>
+      & ValidateInitialSelectorChild<Children, Path>
+      & ("initial" extends keyof Node ? StateDefinitionError<"Parallel states cannot declare an initial child">
+        : { readonly states: ValidateStateTree<Children, true, Extract<Path, string>> } & ValidateOutputSchema<Node>)
   : "output" extends keyof Node ? StateDefinitionError<"Only final and parallel states can declare output">
   : ValidateCompoundStateNode<Node, Children, Path>
   : StateDefinitionError<"Child states must be a state tree">
@@ -735,9 +760,12 @@ type ValidateCompoundStateNode<
   Children extends Machine.StateSchemas,
   Path extends PropertyKey
 > = Node extends { readonly initial: infer Initial } ?
-  Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> ? {
-      readonly states: ValidateStateTree<Children, true, Extract<Path, string>>
-    }
+  Initial extends ActiveStateKey<Children> | ChoiceStateKey<Children> ?
+      & ValidateInitialSelectorChild<Children, Path>
+      & ValidateWithSelectorChild<Node, Children, Path>
+      & {
+        readonly states: ValidateStateTree<Children, true, Extract<Path, string>>
+      }
   : StateDefinitionError<
     "Compound initial must be one of its direct child keys",
     Path,
@@ -4402,11 +4430,14 @@ export declare namespace Machine {
     readonly "~effect/Machine/TargetSelectionResult"?: Types.Covariant<Result>
   }
 
-  type SelectionMethod<Builder, Path extends string, Kind extends Topology.TargetSelectionKind = "state"> = () =>
+  type SelectionValue<Builder, Path extends string, Kind extends Topology.TargetSelectionKind = "state"> =
     TargetSelection<Builder, Path, Kind>
 
+  type SelectionMethod<Builder, Path extends string, Kind extends Topology.TargetSelectionKind = "state"> = () =>
+    SelectionValue<Builder, Path, Kind>
+
   type InitialSelectionMethod<Builder, Path extends string> = Builder extends { readonly initial: infer Initial } ? {
-      readonly initial: SelectionMethod<Initial, Path, "initial">
+      readonly initial: SelectionValue<Initial, Path, "initial">
     }
     : {}
 
@@ -4486,7 +4517,7 @@ export declare namespace Machine {
       LocalTargetBuilder<States, Source> extends infer Builder ?
           & SelectionTreeWithPrefix<States, Children, Scope, "local", Builder>
           & ("with" extends keyof Builder ? {
-              readonly with: SelectionMethod<Builder["with"], Scope>
+              readonly with: SelectionValue<Builder["with"], Scope>
             }
             : {})
       : {}
@@ -4500,7 +4531,7 @@ export declare namespace Machine {
     Builder
   > = {
     readonly [Key in Extract<HistoryContainingKey<States>, keyof Builder>]: States[Key] extends HistoryStateNodeConfig ?
-      SelectionMethod<
+      SelectionValue<
         Builder[Key],
         JoinPath<Prefix, Key>,
         "history"
@@ -4514,12 +4545,17 @@ export declare namespace Machine {
       : never
   }
 
-  /** Definition-time topology selector available to an ordinary transition. */
+  /**
+   * Definition-time topology selector available to an ordinary transition.
+   * Topology-only instructions (`none`, declared `initial` and history
+   * selections, and `local.with`) are values. State and choice destinations
+   * remain callable selection methods.
+   */
   export interface TargetSelector<
     States extends StateSchemas,
     Source extends StateNodeIdentifier<States>
   > {
-    readonly none: SelectionMethod<TargetBuilder<States, Source>["none"], never, "none">
+    readonly none: SelectionValue<TargetBuilder<States, Source>["none"], never, "none">
     readonly local: LocalTargetSelector<States, Source>
     readonly branch: BranchTargetSelector<States, Source>
     readonly full: FullTargetSelector<States>
@@ -4527,10 +4563,10 @@ export declare namespace Machine {
   }
 
   /** Definition-time selector that can choose only a valid top-level initial entry. */
-  export type InitialSelector<States extends StateSchemas> = {
+  type InitialTargetSelector<States extends StateSchemas> = {
     readonly [Key in Extract<ActiveStateKey<States>, keyof InitialBuilder<States>>]: States[Key] extends
       { readonly states: StateSchemas } ? {
-        readonly initial: SelectionMethod<InitialBuilder<States>[Key], Key, "initial">
+        readonly initial: SelectionValue<InitialBuilder<States>[Key], Key, "initial">
       }
       : SelectionMethod<InitialBuilder<States>[Key], Key>
   }
@@ -5192,14 +5228,6 @@ export declare namespace Machine {
     }
   }
 
-  /** Type evidence for a targetless transition reusable in every owning context. */
-  export interface TargetlessTransitionTyped<Acceptance extends TransitionAcceptance = "required"> {
-    readonly [TransitionTypeId]: {
-      readonly targetless: true
-      readonly acceptance: Types.Covariant<Acceptance>
-    }
-  }
-
   /** The only transition value accepted by machine handler APIs. */
   export type TransitionConfig<
     States extends StateSchemas,
@@ -5209,35 +5237,7 @@ export declare namespace Machine {
     Context,
     Reenter extends boolean = false,
     Acceptance extends TransitionAcceptance = "required"
-  > =
-    | TargetlessTransitionInput<Events, Emits, Context>
-    | TransitionBuilderInput<States, Events, Emits, StateId, Context, Reenter, Acceptance>
-
-  /** Direct shorthand for a non-reentering targetless transition. */
-  // Keep the context generic so omitting `target` is deferred until a resolver
-  // is actually authored instead of expanding every TransitionConfig eagerly.
-  interface TargetlessTransitionResolver<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context
-  > {
-    <ResolvedContext extends Omit<Context, "target">>(
-      context: ResolvedContext,
-      enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
-    ): undefined
-  }
-
-  export type TargetlessTransitionInput<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context
-  > = {
-    readonly target: TargetlessSelector
-    readonly resolve?: TargetlessTransitionResolver<Events, Emits, Context>
-    readonly branches?: never
-    readonly reenter?: never
-    readonly declinable?: false
-  }
+  > = TransitionBuilderInput<States, Events, Emits, StateId, Context, Reenter, Acceptance>
 
   export type SelectionBuilder<Selection> = Selection extends TargetSelection<infer Builder, any, any> ? Builder : never
   export type SelectionKind<Selection> = Selection extends TargetSelection<any, any, infer Kind> ? Kind : never
@@ -5395,8 +5395,7 @@ export declare namespace Machine {
     Result,
     Acceptance extends TransitionAcceptance
   > =
-    & ([Exclude<Result, undefined | Declined>] extends [never] ? TargetlessTransitionTyped<Acceptance>
-      : TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>)
+    & TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
     & TransitionBuilderEvidence<Result, Acceptance>
 
   interface TransitionResolveRequired<
@@ -5500,6 +5499,47 @@ export declare namespace Machine {
       : {}
       : {})
 
+  /** @internal Type evidence retained by a machine initial-entry declaration. */
+  export interface InitialBuilderEvidence<out Selection> {
+    readonly [InitialBuilderTypeId]: Types.Covariant<Selection>
+  }
+
+  /** A selected machine initial entry with its exact resolver target. */
+  export type InitialTransitionTarget<Input, Selection extends TargetSelection<any, any, any>> =
+    & Selection
+    & (SelectionSupportsDefaultConstruction<Selection> extends true ? InitialBuilderEvidence<Selection> : {})
+    & {
+      readonly resolve: (
+        resolve: (context: {
+          readonly input: Input
+          readonly target: SelectionBuilder<Selection>
+        }) => SelectedTargetResult<Selection>
+      ) => InitialBuilderEvidence<Selection>
+    }
+
+  type InitialSelectorNode<Input, Node> = Node extends (...args: infer Args) => infer Selection ?
+    Selection extends TargetSelection<any, any, any> ?
+        & ((...args: Args) => InitialTransitionTarget<Input, Selection>)
+        & {
+          readonly [Key in keyof Node]: InitialSelectorNode<Input, Node[Key]>
+        }
+    : never
+    : Node extends TargetSelection<any, any, any> ? InitialTransitionTarget<Input, Node>
+    : {
+      readonly [Key in keyof Node]: InitialSelectorNode<Input, Node[Key]>
+    }
+
+  /** Definition-time selector for a machine's top-level initial entry. */
+  export type InitialSelector<States extends StateSchemas, Input = void> = InitialSelectorNode<
+    Input,
+    InitialTargetSelector<States>
+  >
+
+  /** Target-first initial-entry declaration accepted by {@link make}. */
+  export type InitialBuilderInput<States extends StateSchemas, Input> = (
+    to: InitialSelector<States, Input>
+  ) => InitialBuilderEvidence<TargetSelection<any, any, any>>
+
   type TransitionSelectorNode<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -5533,6 +5573,16 @@ export declare namespace Machine {
           >
         }
     : never
+    : Node extends TargetSelection<any, any, any> ? TransitionTarget<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        Acceptance,
+        Node
+      >
     : {
       readonly [Key in keyof Node]: TransitionSelectorNode<
         States,
@@ -5645,10 +5695,7 @@ export declare namespace Machine {
   > = (
     to: TransitionSelector<States, Events, Emits, StateId, Context, Reenter, Acceptance>
   ) =>
-    & (
-      | TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
-      | TargetlessTransitionTyped<Acceptance>
-    )
+    & TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
     & TransitionBuilderEvidence<any, Acceptance>
 
   export type InvokeTransition<
@@ -7527,10 +7574,7 @@ export const state: StateConstructor = internal.state as StateConstructor
  * Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.idle().resolve(({ target }) => target.from())
  * })
  * ```
  *
@@ -7538,20 +7582,6 @@ export const state: StateConstructor = internal.state as StateConstructor
  * @since 0.4.0
  */
 export const states: StatesConstructor = internal.states
-
-type InitialDirectInput<
-  States extends Machine.StateSchemas,
-  Input,
-  Selection extends Machine.TargetSelection<any, any, any>
-> = {
-  readonly target: (to: Machine.InitialSelector<States>) => Selection
-  readonly resolve?: (context: {
-    readonly input: Input
-    readonly target: Machine.SelectionBuilder<Selection>
-  }) => Machine.SelectedTargetResult<Selection>
-  readonly cases?: never
-  readonly otherwise?: never
-}
 
 type MakeConfig<
   States extends Machine.StateSchemas,
@@ -7611,15 +7641,14 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const InitialSelection extends Machine.TargetSelection<any, any, any> = Machine.TargetSelection<any, any, any>
+    const ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
   >(
     config:
       & Omit<
         MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>,
         "initial"
       >
-      & { readonly initial: InitialDirectInput<States, Input["Type"], InitialSelection> },
+      & { readonly initial: Machine.InitialBuilderInput<States, Input["Type"]> },
     ..._validation: ValidateDefinedStates<NoInfer<States>>
   ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentEvents>
   <
@@ -7649,6 +7678,11 @@ interface Make {
  * `states` or is passed inline. Call `handle` on the returned definition
  * to implement state behavior with ordinary TypeScript control flow.
  *
+ * `initial` is a target-first callback. Its outer selector runs once while the
+ * definition is captured; an attached `.resolve(...)` callback remains lazy
+ * until initial planning. Return a bare selected state when its schema supports
+ * default construction.
+ *
  * `Machine.events` defines the public input protocol. `Machine.internalEvents`
  * adds raised events and other machine-local deliveries.
  * `Machine.emittedEvents` defines outward ephemeral notifications, while
@@ -7677,10 +7711,7 @@ interface Make {
  * const counter = Machine.make({
  *   states: States.states,
  *   events: Events,
- *   initial: {
- *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target(new Count({ value: 0 }))
- *   }
+ *   initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
  * }).handle({
  *   Count: {
  *     on: {
@@ -7840,10 +7871,7 @@ export const emittedEvents: {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Idle().resolve(({ target }) => target.from())
  * }).handle({ Idle: {} })
  *
  * const encoded = Effect.gen(function*() {
@@ -7925,10 +7953,7 @@ export const encodeSnapshot: <
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Idle().resolve(({ target }) => target.from())
  * }).handle({ Idle: {} })
  *
  * const roundTrip = Effect.gen(function*() {
@@ -8188,47 +8213,6 @@ type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never]
     "Branch keys must be non-empty, non-index strings",
     InvalidStaticTransitionBranchKey<Branches>
   >
-
-/**
- * Sentinel used by direct targetless transition shorthands.
- *
- * This is the concise form of `target: (to) => to.none()`.
- *
- * ```ts
- * onElement: {
- *   target: Machine.targetless,
- *   resolve: ({ element }, enqueue) => {
- *     enqueue.raise(new MeasurementReceived({ value: element }))
- *   }
- * }
- *
- * onDone: { target: Machine.targetless }
- * ```
- *
- * @category constructors
- * @since 0.16.0
- */
-export interface TargetlessSelector {
-  readonly "~effect/Machine/TargetlessSelector": true
-  <
-    const States extends Machine.StateSchemas,
-    StateId extends Machine.StateNodeIdentifier<States>
-  >(to: Machine.TargetSelector<States, StateId>): ReturnType<Machine.TargetSelector<States, StateId>["none"]>
-}
-
-/**
- * Selects no transition target while keeping enqueue operations explicit.
- *
- * Use as the `target` of a direct handler object when the handler should keep
- * the current state configuration and only raise, emit, or send events.
- *
- * @category constructors
- * @since 0.16.0
- */
-export const targetless: TargetlessSelector = Object.assign(
-  (to: Machine.TargetSelector<any, any>) => to.none(),
-  { "~effect/Machine/TargetlessSelector": true as const }
-)
 
 /**
  * Preserves inference for a state-owned invocation configuration.
@@ -8621,10 +8605,7 @@ export const invoke: {
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Idle().resolve(({ target }) => target.from())
  * }).handle({ Idle: {} })
  *
  * const initialState = Effect.map(Machine.planInitial(machine), (plan) => plan.state)
@@ -8882,10 +8863,7 @@ export const enabled: <
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(Toggle),
- *   initial: {
- *     target: (to) => to.Off(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Off().resolve(({ target }) => target.from())
  * }).handle({
  *   Off: {
  *     on: {
@@ -9263,10 +9241,7 @@ export const prepare: <
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Idle().resolve(({ target }) => target.from())
  * }).handle({ Idle: {} })
  *
  * const state = Effect.gen(function*() {
@@ -9376,10 +9351,7 @@ export const start: <
  * const machine = Machine.make({
  *   states: States.states,
  *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
+ *   initial: (to) => to.Idle().resolve(({ target }) => target.from())
  * }).handle({ Idle: {} })
  *
  * const resumed = Effect.gen(function*() {

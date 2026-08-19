@@ -46,10 +46,7 @@ describe("ClusterMachine", () => {
     id: "Counter",
     states: states.states,
     events: Machine.events(Increment, Reset),
-    initial: {
-      target: (to) => to.Count(),
-      resolve: ({ target }) => (target(new Count({ value: 0 })))
-    }
+    initial: (to) => to.Count().resolve(({ target }) => (target(new Count({ value: 0 }))))
   }).handle({
     Count: {
       on: {
@@ -71,10 +68,7 @@ describe("ClusterMachine", () => {
       states: states.states,
       events: Machine.events(Increment),
       internalEvents: Machine.internalEvents(Reset),
-      initial: {
-        target: (to) => to.Count(),
-        resolve: ({ target }) => (target(new Count({ value: 0 })))
-      }
+      initial: (to) => to.Count().resolve(({ target }) => (target(new Count({ value: 0 }))))
     })
     const internalBridge = ClusterMachine.make("InternalCounterEntity", internalMachine, {
       version: "1"
@@ -96,10 +90,7 @@ describe("ClusterMachine", () => {
       states: states.states,
       events: Machine.events(Reset),
       input: Input,
-      initial: {
-        target: (to) => to.Count(),
-        resolve: ({ input: input, target }) => (target(new Count({ value: input.value })))
-      }
+      initial: (to) => to.Count().resolve(({ input: input, target }) => (target(new Count({ value: input.value }))))
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -130,10 +121,7 @@ describe("ClusterMachine", () => {
     const incomplete = Machine.make({
       states: outputStates.states,
       events: Machine.events(Reset),
-      initial: {
-        target: (to) => to.Done(),
-        resolve: ({ target }) => (target(new Done({ value: "done" })))
-      }
+      initial: (to) => to.Done().resolve(({ target }) => (target(new Done({ value: "done" }))))
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -172,10 +160,7 @@ describe("ClusterMachine", () => {
     const contextualMachine = Machine.make({
       states: contextualStates.states,
       events: Machine.events(Reset),
-      initial: {
-        target: (to) => to.ContextualCount(),
-        resolve: ({ target }) => (target(new ContextualCount({ value: 0 })))
-      }
+      initial: (to) => to.ContextualCount().resolve(({ target }) => (target(new ContextualCount({ value: 0 }))))
     })
     const layer = ClusterMachine.make("ContextualCounter", contextualMachine, { version: "1" }).toLayer()
 

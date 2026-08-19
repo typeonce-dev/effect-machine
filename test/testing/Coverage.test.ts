@@ -20,10 +20,7 @@ const CounterStates = Machine.states({ count: Count, done: Done })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Finish),
-  initial: {
-    target: (to) => to.count(),
-    resolve: ({ target }) => target(new Count({ value: 0 }))
-  }
+  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
@@ -47,26 +44,20 @@ const opaqueMachine = Machine.make({
   states: OpaqueStates.states,
   events: Machine.events(),
   input: Schema.Any,
-  initial: {
-    target: (to) => to.opaque(),
-    resolve: ({ input: payload, target }) => target(new Opaque({ payload }))
-  }
+  initial: (to) => to.opaque().resolve(({ input: payload, target }) => target(new Opaque({ payload })))
 })
 
 const StartupStates = Machine.states({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Add),
-  initial: {
-    target: (to) => to.count(),
-    resolve: ({ target }) => target(new Count({ value: 0 }))
-  }
+  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
 }).handle({
   count: {
     always: (to) =>
       to.branches({
         zero: { title: "Count is zero", target: to.full.count() },
-        unchanged: { target: to.none() }
+        unchanged: { target: to.none }
       }).resolve(({ state, select }) =>
         state.value === 0
           ? select.zero(new Count({ value: 1 }))
@@ -86,18 +77,15 @@ class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
 const branchMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Select),
-  initial: {
-    target: (to) => to.count(),
-    resolve: ({ target }) => target(new Count({ value: 0 }))
-  }
+  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
       Select: (to) =>
         to.branches({
-          negative: { target: to.none() },
-          zero: { target: to.none() },
-          positive: { target: to.none() }
+          negative: { target: to.none },
+          zero: { target: to.none },
+          positive: { target: to.none }
         }).resolve(({ event, select }) =>
           event.value < 0
             ? select.negative()
@@ -119,26 +107,20 @@ const EventStates = Machine.states({ count: Count })
 const finiteEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(TickEvent, ChoiceEvent),
-  initial: {
-    target: (to) => to.count(),
-    resolve: ({ target }) => target(new Count({ value: 0 }))
-  }
+  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
-      [Tick]: { target: Machine.targetless },
-      Alpha: { target: Machine.targetless },
-      Beta: { target: Machine.targetless }
+      [Tick]: (to) => to.none,
+      Alpha: (to) => to.none,
+      Beta: (to) => to.none
     }
   }
 })
 const openEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(OpenEvent),
-  initial: {
-    target: (to) => to.count(),
-    resolve: ({ target }) => target(new Count({ value: 0 }))
-  }
+  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
 }).handle({ count: {} })
 
 const event = (_tag: string): { readonly _tag: string } => ({ _tag })

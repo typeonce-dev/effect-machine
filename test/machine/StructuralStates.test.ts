@@ -73,15 +73,14 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(SourceSelected, Loaded, Play, Mute),
-    initial: {
-      target: (to) => to.player.initial(),
-      resolve: ({ target }) =>
+    initial: (to) =>
+      to.player.initial.resolve(({ target }) =>
         target.from((player) =>
           player
             .transport.from((transport) => transport.Empty.from())
             .settings.from((settings) => settings.Audible.from({ volume: 1 }))
         )
-    }
+      )
   }).handle({
     player: {
       states: {
@@ -166,10 +165,8 @@ const historyFallback = () => ({
 const historyMachine = Machine.make({
   states: HistoryStates.states,
   events: Machine.events(Edit, Leave, ResumeShallow, ResumeDeep),
-  initial: {
-    target: (to) => to.flow.initial(),
-    resolve: ({ target }) => target.from((flow) => flow.section.from((section) => section.Idle.from()))
-  }
+  initial: (to) =>
+    to.flow.initial.resolve(({ target }) => target.from((flow) => flow.section.from((section) => section.Idle.from())))
 }).handle({
   flow: {
     history: {
@@ -193,8 +190,8 @@ const historyMachine = Machine.make({
   },
   away: {
     on: {
-      ResumeShallow: (to) => to.history.flow.recent().resolve(({ target }) => target()),
-      ResumeDeep: (to) => to.history.flow.exact().resolve(({ target }) => target())
+      ResumeShallow: (to) => to.history.flow.recent.resolve(({ target }) => target()),
+      ResumeDeep: (to) => to.history.flow.exact.resolve(({ target }) => target())
     }
   }
 })
@@ -330,10 +327,7 @@ describe("structural active states", () => {
       const machine = Machine.make({
         states: FinalStates.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Done(),
-          resolve: ({ target }) => target.from()
-        }
+        initial: (to) => to.Done().resolve(({ target }) => target.from())
       }).handle({
         Done: {
           output: ({ state }) => {

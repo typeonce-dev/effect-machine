@@ -176,8 +176,18 @@ type BranchesTransitionDescriptor = {
 
 type TransitionBuilderDescriptor = DirectTransitionDescriptor | BranchesTransitionDescriptor
 
+const InitialBuilderDescriptorTypeId: unique symbol = Symbol("effect/Machine/InitialBuilderDescriptor")
+
+type InitialBuilderDescriptor = {
+  readonly [InitialBuilderDescriptorTypeId]: typeof InitialBuilderDescriptorTypeId
+  readonly selection: Topology.TargetSelection
+  readonly resolve: (context: any) => unknown
+}
+
 const plainTargetSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
-  Topology.makeTargetSelection(selection.kind, selection.path, selection.scope)
+  selection.kind === "none"
+    ? Topology.noneTargetSelection
+    : Topology.makeTargetSelection(selection.kind, selection.path, selection.scope)
 
 const transitionOptions = (options: unknown): { readonly reenter: boolean; readonly declinable: boolean } => {
   const configuration = typeof options === "object" && options !== null
@@ -213,7 +223,49 @@ const decorateTransitionSelection = (selection: Topology.TargetSelection): Topol
     reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true })
   })
 
+const noneTransitionSelection = decorateTransitionSelection(Topology.noneTargetSelection)
+
+const makeInitialBuilderDescriptor = (
+  selection: Topology.TargetSelection,
+  resolve: (context: any) => unknown
+): InitialBuilderDescriptor =>
+  Object.freeze({
+    [InitialBuilderDescriptorTypeId]: InitialBuilderDescriptorTypeId,
+    selection: plainTargetSelection(selection),
+    resolve
+  })
+
+const decorateInitialSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
+  Object.freeze({
+    ...selection,
+    resolve: (resolve: (context: any) => unknown) => makeInitialBuilderDescriptor(selection, resolve)
+  })
+
+const decorateInitialSelectorNode = (node: unknown): unknown => {
+  if (Topology.isTargetSelection(node)) return decorateInitialSelection(node)
+  if (typeof node === "function") {
+    const wrapped = ((...args: ReadonlyArray<unknown>) => decorateInitialSelection(node(...args))) as
+      & ((...args: ReadonlyArray<unknown>) => unknown)
+      & Record<string, unknown>
+    for (const key of Object.keys(node)) {
+      wrapped[key] = decorateInitialSelectorNode((node as unknown as Record<string, unknown>)[key])
+    }
+    return Object.freeze(wrapped)
+  }
+  if (typeof node === "object" && node !== null) {
+    const wrapped: Record<string, unknown> = {}
+    for (const key of Object.keys(node)) {
+      wrapped[key] = decorateInitialSelectorNode((node as Record<string, unknown>)[key])
+    }
+    return Object.freeze(wrapped)
+  }
+  return node
+}
+
 const decorateTransitionSelectorNode = (node: unknown): unknown => {
+  if (Topology.isTargetSelection(node)) {
+    return node === Topology.noneTargetSelection ? noneTransitionSelection : decorateTransitionSelection(node)
+  }
   if (typeof node === "function") {
     const wrapped = ((...args: ReadonlyArray<unknown>) => decorateTransitionSelection(node(...args))) as
       & ((...args: ReadonlyArray<unknown>) => unknown)
@@ -301,6 +353,12 @@ const makeSelectionMethod = (
 ): () => Topology.TargetSelection =>
 () => Topology.makeTargetSelection(kind, path, scope)
 
+const makeSelectionValue = (
+  kind: Topology.TargetSelectionKind,
+  path: string | undefined,
+  scope: Topology.TargetSelectionScope
+): Topology.TargetSelection => Topology.makeTargetSelection(kind, path, scope)
+
 const addSelectionChildren = (
   builder: Record<string, unknown>,
   stateNodes: Machine.StateNodes,
@@ -323,7 +381,7 @@ const makeSelectionNode = (
   const method = makeSelectionMethod(kind, path, scope) as unknown as Record<string, unknown>
   if (node.type !== "atomic" && node.type !== "final" && node.type !== "choice" && node.type !== "history") {
     Object.defineProperty(method, "initial", {
-      value: makeSelectionMethod("initial", path, scope),
+      value: makeSelectionValue("initial", path, scope),
       enumerable: true
     })
     if (scope === "local" || scope === "branch") {
@@ -341,7 +399,7 @@ const makeHistorySelectionTree = (
   for (const node of stateNodes.byPath.values()) {
     if (node.parent !== parent) continue
     if (node.type === "history") {
-      builder[node.key] = makeSelectionMethod("history", node.path, "full")
+      builder[node.key] = makeSelectionValue("history", node.path, "full")
     } else if (node.type !== "choice") {
       const children = makeHistorySelectionTree(stateNodes, node.path)
       if (Object.keys(children).length > 0) builder[node.key] = children
@@ -368,12 +426,12 @@ const makeTargetSelector = (
   if (localScope !== undefined) {
     const localScopeNode = getTargetBuilderNode(stateNodes, localScope)
     if (localScopeNode.schema !== undefined) {
-      local.with = makeSelectionMethod("state", localScope, "local")
+      local.with = makeSelectionValue("state", localScope, "local")
     }
     addSelectionChildren(local, stateNodes, localScope, "local")
   }
   return {
-    none: makeSelectionMethod("none", undefined, "local"),
+    none: Topology.noneTargetSelection,
     local,
     branch,
     full,
@@ -616,9 +674,12 @@ const captureTransition = (
   path: string,
   trigger: PropertyKey
 ): unknown => {
-  const transition = typeof rawTransition === "function"
-    ? normalizeTransitionBuilder(rawTransition as (selector: unknown) => unknown, stateNodes, path)
-    : rawTransition
+  if (typeof rawTransition !== "function") {
+    throw new Error(
+      `Machine transition for state "${path}" on "${String(trigger)}" must be a target-first callback`
+    )
+  }
+  const transition = normalizeTransitionBuilder(rawTransition as (selector: unknown) => unknown, stateNodes, path)
   if (typeof transition !== "object" || transition === null) {
     throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must be an object`)
   }
@@ -1339,10 +1400,12 @@ const makeInitialSelector = (stateNodes: Machine.StateNodes): unknown => {
   const selector: Record<string, unknown> = {}
   for (const node of stateNodes.byPath.values()) {
     if (node.parent === undefined && node.type !== "history" && node.type !== "choice") {
-      selector[node.key] = makeSelectionNode(stateNodes, node.path, "initial")
+      selector[node.key] = node.type === "atomic" || node.type === "final"
+        ? makeSelectionMethod("state", node.path, "initial")
+        : Object.freeze({ initial: makeSelectionValue("initial", node.path, "initial") })
     }
   }
-  return selector
+  return Object.freeze(selector)
 }
 
 const getInitialSelectionBuilder = (
@@ -1361,15 +1424,37 @@ const getInitialSelectionBuilder = (
 }
 
 const captureInitialBranch = (
-  branch: unknown,
-  selector: unknown,
+  definition: unknown,
+  stateNodes: Machine.StateNodes,
   initialBuilder: Record<string, any>
-): CapturedBranch & { readonly builder: (...args: ReadonlyArray<any>) => unknown } => {
-  const captured = captureDefinitionBranch(branch, selector, "<machine>", "initial")
-  if (captured.selection.kind !== "state" && captured.selection.kind !== "initial") {
+): {
+  readonly selection: Topology.TargetSelection
+  readonly resolve?: (context: any) => unknown
+  readonly builder: (...args: ReadonlyArray<any>) => unknown
+} => {
+  if (typeof definition !== "function") {
+    throw new Error("Machine initial definition must be a target-first callback")
+  }
+  const result = definition(decorateInitialSelectorNode(makeInitialSelector(stateNodes)))
+  let selection: Topology.TargetSelection
+  let resolve: ((context: any) => unknown) | undefined
+  if (Topology.isTargetSelection(result)) {
+    selection = plainTargetSelection(result)
+  } else if (hasProperty(result, InitialBuilderDescriptorTypeId)) {
+    const descriptor = result as InitialBuilderDescriptor
+    selection = descriptor.selection
+    resolve = descriptor.resolve
+  } else {
+    throw new Error("Machine initial definition must select exactly one target")
+  }
+  if (selection.kind !== "state" && selection.kind !== "initial") {
     throw new Error("Machine initial target must select a top-level state or its declared initial entry")
   }
-  return { ...captured, builder: getInitialSelectionBuilder(initialBuilder, captured.selection) }
+  const captured = {
+    selection,
+    builder: getInitialSelectionBuilder(initialBuilder, selection)
+  }
+  return resolve === undefined ? Object.freeze(captured) : Object.freeze({ ...captured, resolve })
 }
 
 const validateInitialSelection = (result: unknown, selection: Topology.TargetSelection): void => {
@@ -1391,17 +1476,13 @@ const compileInitial = (
   readonly initial: (input?: unknown) => unknown
   readonly definition: Machine.InitialDefinition
 } => {
-  if (typeof definition !== "object" || definition === null) {
-    throw new Error("Machine initial definition must be an object")
-  }
-  const selector = makeInitialSelector(stateNodes)
   const initialBuilder = makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Record<string, any>
-  const branch = captureInitialBranch(definition, selector, initialBuilder)
+  const branch = captureInitialBranch(definition, stateNodes, initialBuilder)
   return {
     initial: (input?: unknown) => {
       const result = branch.resolve === undefined
-        ? branch.builder()
-        : branch.resolve({ input, target: branch.builder }, undefined)
+        ? constructSelectedTarget(branch.builder)
+        : branch.resolve({ input, target: branch.builder })
       validateInitialSelection(result, branch.selection)
       return result
     },

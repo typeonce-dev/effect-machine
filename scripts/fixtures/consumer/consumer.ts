@@ -27,17 +27,14 @@ const machine = Machine.make({
   states: States.states,
   events: PublicEvents,
   internalEvents: InternalEvents,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target(State.cases.Idle.make({}))
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target(State.cases.Idle.make({})))
 }).handle({
   Idle: {
     on: {
       Start: (to) =>
         to.branches({
           cached: { target: to.full.Loading() },
-          measured: { target: to.none() },
+          measured: { target: to.none },
           named: { target: to.full.Done() },
           confirmed: { target: to.full.Idle() }
         }).resolve(({ select }) => select.cached(State.cases.Loading.make({})))
@@ -63,12 +60,12 @@ const cluster = ClusterMachine.make("ConsumerEntity", machine, {
 const invoked = Machine.invoke({
   id: "fixture-load",
   effect: () => Effect.succeed("ready"),
-  onDone: { target: Machine.targetless }
+  onDone: (to) => to.none
 })
 const delayed = Machine.invoke({
   id: "fixture-delay",
   after: "1 second",
-  onDone: { target: Machine.targetless }
+  onDone: (to) => to.none
 })
 const generated = MachineTest.scenarios(machine, { minEvents: 1, maxEvents: 2 })
 

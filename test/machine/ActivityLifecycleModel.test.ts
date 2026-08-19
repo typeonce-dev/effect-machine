@@ -73,10 +73,7 @@ describe("machine activity lifecycle model", () => {
             const machine = Machine.make({
               states: states.states,
               events: Machine.events(Enter, Leave, Restart),
-              initial: {
-                target: (to) => to.Idle(),
-                resolve: ({ target }) => target(new Idle({}))
-              }
+              initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
             }).handle({
               Idle: {
                 on: {
@@ -88,8 +85,8 @@ describe("machine activity lifecycle model", () => {
                   id: "activity",
                   address: Machine.childAddress("activity"),
                   logic: probe.logic("active", { _tag: "Blocked" }),
-                  onDone: { target: Machine.targetless },
-                  onFailure: { target: Machine.targetless }
+                  onDone: (to) => to.none,
+                  onFailure: (to) => to.none
                 }),
                 on: {
                   Leave: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({}))),
@@ -148,10 +145,7 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Completed),
-        initial: {
-          target: (to) => to.Active(),
-          resolve: ({ target }) => target(new Active({}))
-        }
+        initial: (to) => to.Active().resolve(({ target }) => target(new Active({})))
       }).handle({
         Active: {
           invoke: Machine.invoke({
@@ -159,7 +153,7 @@ describe("machine activity lifecycle model", () => {
             address: Machine.childAddress("immediate"),
             logic: probe.immediate("immediate", (epoch) => new Completed({ epoch })),
             onDone: (to) => to.full.Done().resolve(({ output, target }) => target(new Done({ epoch: output.epoch }))),
-            onFailure: { target: Machine.targetless }
+            onFailure: (to) => to.none
           })
         },
         Done: {
@@ -187,10 +181,7 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(Restart, QueueBarrier),
         internalEvents: Machine.internalEvents(Completed),
-        initial: {
-          target: (to) => to.Active(),
-          resolve: ({ target }) => target(new EpochActive({ acknowledged: 0 }))
-        }
+        initial: (to) => to.Active().resolve(({ target }) => target(new EpochActive({ acknowledged: 0 })))
       }).handle({
         Active: {
           invoke: Machine.invoke({
@@ -200,8 +191,8 @@ describe("machine activity lifecycle model", () => {
               _tag: "StaleOnCancel",
               event: (epoch) => new Completed({ epoch })
             }),
-            onDone: { target: Machine.targetless },
-            onFailure: { target: Machine.targetless }
+            onDone: (to) => to.none,
+            onFailure: (to) => to.none
           }),
           on: {
             Restart: (to) =>
@@ -289,9 +280,8 @@ describe("machine activity lifecycle model", () => {
           }
         },
         events: Machine.events(LeaveLeft),
-        initial: {
-          target: (to) => to.Root.initial(),
-          resolve: () => ({
+        initial: (to) =>
+          to.Root.initial.resolve(() => ({
             path: "Root" as const,
             value: new Root({}),
             states: {
@@ -306,8 +296,7 @@ describe("machine activity lifecycle model", () => {
                 state: { path: "Root.right.active" as const, value: new RightActive({}) }
               }
             }
-          })
-        }
+          }))
       }).handle({
         Root: {
           states: {
@@ -318,8 +307,8 @@ describe("machine activity lifecycle model", () => {
                     id: "left-activity",
                     address: Machine.childAddress("left-activity"),
                     logic: probe.logic("left", { _tag: "Blocked" }),
-                    onDone: { target: Machine.targetless },
-                    onFailure: { target: Machine.targetless }
+                    onDone: (to) => to.none,
+                    onFailure: (to) => to.none
                   }),
                   on: {
                     LeaveLeft: (to) => to.local.idle().resolve(({ target }) => target(new LeftIdle({})))
@@ -334,8 +323,8 @@ describe("machine activity lifecycle model", () => {
                     id: "right-activity",
                     address: Machine.childAddress("right-activity"),
                     logic: probe.logic("right", { _tag: "Blocked" }),
-                    onDone: { target: Machine.targetless },
-                    onFailure: { target: Machine.targetless }
+                    onDone: (to) => to.none,
+                    onFailure: (to) => to.none
                   })
                 }
               }
@@ -375,10 +364,7 @@ describe("machine activity lifecycle model", () => {
         states: states.states,
         events: Machine.events(Leave),
         internalEvents: Machine.internalEvents(TimerFired),
-        initial: {
-          target: (to) => to.Active(),
-          resolve: ({ target }) => target(new Active({}))
-        }
+        initial: (to) => to.Active().resolve(({ target }) => target(new Active({})))
       }).handle({
         Idle: {},
         Active: {
@@ -387,8 +373,8 @@ describe("machine activity lifecycle model", () => {
               id: "timed-activity",
               address: Machine.childAddress("timed-activity"),
               logic: probe.logic("timed", { _tag: "Blocked" }),
-              onDone: { target: Machine.targetless },
-              onFailure: { target: Machine.targetless }
+              onDone: (to) => to.none,
+              onFailure: (to) => to.none
             }),
             Machine.invoke({
               id: "deadline",
@@ -424,10 +410,7 @@ describe("machine activity lifecycle model", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Active(),
-          resolve: ({ target }) => target(new Active({}))
-        }
+        initial: (to) => to.Active().resolve(({ target }) => target(new Active({})))
       }).handle({
         Active: {
           invoke: [
@@ -435,9 +418,9 @@ describe("machine activity lifecycle model", () => {
               id: "failing",
               address: Machine.childAddress("failing"),
               logic: probe.logic("failing", { _tag: "Failure" }),
-              onDone: { target: Machine.targetless },
+              onDone: (to) => to.none,
               onFailure: (to) =>
-                to.none().resolve(({ error }) => {
+                to.none.resolve(({ error }) => {
                   throw error
                 })
             }),
@@ -445,8 +428,8 @@ describe("machine activity lifecycle model", () => {
               id: "sibling",
               address: Machine.childAddress("sibling"),
               logic: probe.logic("sibling", { _tag: "Blocked" }),
-              onDone: { target: Machine.targetless },
-              onFailure: { target: Machine.targetless }
+              onDone: (to) => to.none,
+              onFailure: (to) => to.none
             })
           ]
         }
@@ -476,10 +459,7 @@ describe("machine activity lifecycle model", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Active(),
-          resolve: ({ target }) => target(new Active({}))
-        }
+        initial: (to) => to.Active().resolve(({ target }) => target(new Active({})))
       }).handle({
         Active: {
           invoke: [
@@ -487,15 +467,15 @@ describe("machine activity lifecycle model", () => {
               id: "first",
               address: Machine.childAddress("first"),
               logic: probe.logic("first", { _tag: "Blocked" }),
-              onDone: { target: Machine.targetless },
-              onFailure: { target: Machine.targetless }
+              onDone: (to) => to.none,
+              onFailure: (to) => to.none
             }),
             Machine.invoke({
               id: "second",
               address: Machine.childAddress("second"),
               logic: probe.logic("second", { _tag: "Blocked" }),
-              onDone: { target: Machine.targetless },
-              onFailure: { target: Machine.targetless }
+              onDone: (to) => to.none,
+              onFailure: (to) => to.none
             })
           ]
         }

@@ -19,10 +19,7 @@ const machine = Machine.make({
   states: states.states,
   events: Events,
   emittedEvents: Emissions,
-  initial: {
-    target: (to) => to.Idle(),
-    resolve: ({ target }) => target(new Idle({}))
-  }
+  initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
 }).handle({
   Idle: {
     on: {
@@ -105,12 +102,10 @@ describe("Machine live inspection", () => {
       const invalid = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: () => {
+        initial: (to) =>
+          to.Idle().resolve(() => {
             throw new Error("boom")
-          }
-        }
+          })
       }).handle({ Idle: {} })
       const prepared = yield* Machine.prepare(invalid)
       const collected = yield* prepared.inspection.pipe(
@@ -133,10 +128,7 @@ describe("Machine live inspection", () => {
         id: "activity-root",
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           invoke: Machine.invoke({ id: "worker", effect: () => Effect.never })
@@ -185,16 +177,13 @@ describe("Machine live inspection", () => {
         id: "stream-activity-root",
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           invoke: Machine.invoke({
             id: "updates",
             stream: () => Stream.never,
-            onDone: { target: Machine.targetless }
+            onDone: (to) => to.none
           })
         }
       })
@@ -234,15 +223,12 @@ describe("Machine live inspection", () => {
         states: childStates.states,
         events: ChildEvents,
         parentEvents: ParentEvents,
-        initial: {
-          target: (to) => to.ChildIdle(),
-          resolve: ({ target }) => target(new ChildIdle({}))
-        }
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
       }).handle({
         ChildIdle: {
           on: {
             Trigger: (to) =>
-              to.none().resolve(({ parent }, enqueue) => {
+              to.none.resolve(({ parent }, enqueue) => {
                 if (parent !== undefined) enqueue.sendTo(parent, ParentEvents.ChildReady())
                 return undefined
               })
@@ -258,10 +244,7 @@ describe("Machine live inspection", () => {
         id: "parent-machine",
         states: parentStates.states,
         events: Machine.events(ParentEvents),
-        initial: {
-          target: (to) => to.ParentIdle(),
-          resolve: ({ target }) => target(new ParentIdle({}))
-        }
+        initial: (to) => to.ParentIdle().resolve(({ target }) => target(new ParentIdle({})))
       }).handle({
         ParentIdle: {
           invoke: Machine.invoke({ child: Child }),

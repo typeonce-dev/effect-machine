@@ -14,7 +14,9 @@ const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
 const definition = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: { target: (to) => to.Loading(), resolve: ({ target }) => target.from() }
+  initial: (to) =>
+    to./*initial-selector*/Loading()./*initial-operations*/resolve(({ /*initial-context*/ ...context }) =>
+      context.target./*initial-exact-target*/from())
 })
 
 definition.handle({
@@ -41,8 +43,8 @@ definition.handle({
       id: "updates",
       stream: () => Stream.make(1),
       onElement: (to) =>
-        to.none().resolve(({ /*element-context*/ ...context }) => undefined),
-      onDone: (to) => to.none()
+        to.none.resolve(({ /*element-context*/ ...context }) => undefined),
+      onDone: (to) => to.none
     })
   },
   Done: {},
@@ -63,14 +65,14 @@ definition.handle({
 
 definition.handle({
   Loading: {
-    always: (to) => to./*transition-selector*/none()
+    always: (to) => to./*transition-selector*/none
   }
 })
 
 definition.handle({
   Loading: {
     always: (to) =>
-      to.none().resolve(({ /*targetless-context*/ ...context }) => undefined)
+      to.none.resolve(({ /*targetless-context*/ ...context }) => undefined)
   }
 })
 
@@ -90,7 +92,7 @@ definition.handle({
           title: "ready",
           target: to./*branch-target-scopes*/full.Done()
         },
-        unchanged: { target: to.none() }
+        unchanged: { target: to.none }
       }).resolve(({ /*branch-resolve-context*/ ...context }) =>
         context.select./*branch-select-keys*/ready.from())
   }
@@ -99,14 +101,14 @@ definition.handle({
 definition.handle({
   Loading: {
     always: (to) =>
-      to.none().resolve(({ /*required-context*/ ...context }) => undefined)
+      to.none.resolve(({ /*required-context*/ ...context }) => undefined)
   }
 })
 
 definition.handle({
   Loading: {
     always: (to) =>
-      to.none().resolve(({ /*declinable-context*/ ...context }) => context.decline(), {
+      to.none.resolve(({ /*declinable-context*/ ...context }) => context.decline(), {
         declinable: true
       })
   }
@@ -187,6 +189,22 @@ test("contextually completes Stream element handlers while authoring", () => {
 })
 
 test("contextually completes transition definitions while authoring", () => {
+  const initialSelector = completions("initial-selector")
+  assert.equal(initialSelector.has("Loading"), true)
+  assert.equal(initialSelector.has("none"), false)
+
+  const initialOperations = completions("initial-operations")
+  assert.equal(initialOperations.has("resolve"), true)
+  assert.equal(initialOperations.has("reenter"), false)
+
+  const initialContext = completions("initial-context")
+  assert.equal(initialContext.has("input"), true)
+  assert.equal(initialContext.has("target"), true)
+
+  const initialTarget = completions("initial-exact-target")
+  assert.equal(initialTarget.has("from"), true)
+  assert.equal(initialTarget.has("Done"), false)
+
   const selector = completions("transition-selector")
   assert.equal(selector.has("none"), true)
   assert.equal(selector.has("branches"), true)

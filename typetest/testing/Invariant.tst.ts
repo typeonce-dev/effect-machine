@@ -13,15 +13,12 @@ describe("MachineTest invariants", () => {
     states: States.states,
     events: Machine.events(Tick),
     internalEvents: Machine.internalEvents(Internal),
-    initial: {
-      target: (to) => to.idle(),
-      resolve: ({ target }) => (target(new Idle({ count: 0 })))
-    }
+    initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({ count: 0 }))))
   }).handle({
     idle: {
       on: {
-        Tick: { target: Machine.targetless },
-        Internal: { target: Machine.targetless }
+        Tick: (to) => to.none,
+        Internal: (to) => to.none
       }
     }
   })

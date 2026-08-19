@@ -68,10 +68,7 @@ const makeCounterMachine = () =>
   Machine.make({
     states: CounterStates.states,
     events: Machine.events(Finish),
-    initial: {
-      target: (to) => to.Count(),
-      resolve: ({ target }) => target(new Count({ value: 0 }))
-    }
+    initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
   }).handle({
     Count: {
       on: {
@@ -109,10 +106,7 @@ describe("AtomMachine", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -151,13 +145,11 @@ describe("AtomMachine", () => {
       const machine = Machine.make({
         states: CounterStates.states,
         events: Machine.events(Finish),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => {
+        initial: (to) =>
+          to.Count().resolve(({ target }) => {
             initialCalls += 1
             return target(new Count({ value: 0 }))
-          }
-        }
+          })
       }).handle({
         Count: {
           invoke: Machine.invoke({
@@ -215,10 +207,7 @@ describe("AtomMachine", () => {
       const parent = Machine.make({
         states: { Count, ValueRead },
         events: Machine.events(Finish, ReadValue),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 0 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
@@ -228,7 +217,7 @@ describe("AtomMachine", () => {
         ValueRead: {
           invoke: Machine.invoke({
             child: Child,
-            onDone: { target: Machine.targetless }
+            onDone: (to) => to.none
           }),
           on: {
             ReadValue: (to) => to.full.Count().resolve(({ target }) => target(new Count({ value: 0 })))
@@ -403,14 +392,13 @@ describe("AtomMachine", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: {
-          target: (to) => to.Ready.initial(),
-          resolve: ({ target }) =>
+        initial: (to) =>
+          to.Ready.initial.resolve(({ target }) =>
             target(new Ready({}), (ready) =>
               ready
                 .editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
                 .network(new Network({}), (network) => network.Online(new Online({}))))
-        }
+          )
       }).handle({
         Ready: {
           states: {
@@ -539,10 +527,7 @@ describe("AtomMachine", () => {
           }
         },
         events: Machine.events(Finish),
-        initial: {
-          target: (to) => to.Count(),
-          resolve: ({ target }) => target(new Count({ value: 1 }))
-        }
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 1 })))
       }).handle({
         Count: {
           on: {

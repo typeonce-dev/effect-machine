@@ -39,15 +39,14 @@ export const MicrowaveMachine = Machine.make({
   id: "Microwave",
   states: MicrowaveStates.states,
   events: MicrowaveEvents,
-  initial: {
-    target: (to) => to.Oven.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.Oven.initial.resolve(({ target }) =>
       target.from((oven) =>
         oven
           .engine.from((engine) => engine.Idle.from())
           .door.from((door) => door.Closed.from())
       )
-  }
+    )
 }).handle({
   Oven: {
     states: {
@@ -58,7 +57,7 @@ export const MicrowaveMachine = Machine.make({
               PowerPressed: (to) =>
                 to.branches({
                   doorClosed: { title: "Door closed", target: to.local.Cooking() },
-                  unchanged: { target: to.none() }
+                  unchanged: { target: to.none }
                 }).resolve(({ snapshot, select }) =>
                   MicrowaveStates.matches(snapshot, "Oven.door.Closed")
                     ? select.doorClosed.from({ elapsedSeconds: 0 })

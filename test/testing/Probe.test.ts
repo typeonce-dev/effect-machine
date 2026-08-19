@@ -24,10 +24,7 @@ const machine = Machine.make({
   states: states.states,
   events: Machine.events(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEvents(RaisedIncrement),
-  initial: {
-    target: (to) => to.Counter(),
-    resolve: ({ target }) => target(new Counter({ count: 0 }))
-  }
+  initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   Counter: {
     on: {
@@ -35,8 +32,8 @@ const machine = Machine.make({
         to.full.Counter().resolve(({ event, state, target }) =>
           target(new Counter({ count: state.count + event.amount }))
         ),
-      Noop: { target: Machine.targetless },
-      Decline: (to) => to.none().resolve(({ decline }) => decline(), { declinable: true }),
+      Noop: (to) => to.none,
+      Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
       Reenter: (to) =>
         to.full.Counter().resolve(({ state, target }) => target(new Counter({ count: state.count })), {
           reenter: true
@@ -157,10 +154,7 @@ describe("MachineTest probe", () => {
       const invokeMachine = Machine.make({
         states: invokeStates.states,
         events: Machine.events(Load),
-        initial: {
-          target: (to) => to.Idle(),
-          resolve: ({ target }) => target(new Idle({}))
-        }
+        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
           on: {

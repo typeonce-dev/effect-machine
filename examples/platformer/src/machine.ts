@@ -120,9 +120,8 @@ export const CharacterMachine = Machine.make({
   states: CharacterStates.states,
   events: CharacterEvents,
   internalEvents: InternalEvents,
-  initial: {
-    target: (to) => to.Character.initial(),
-    resolve: ({ target }) =>
+  initial: (to) =>
+    to.Character.initial.resolve(({ target }) =>
       target.from((character) =>
         character
           .locomotion.from((locomotion) =>
@@ -131,7 +130,7 @@ export const CharacterMachine = Machine.make({
           .facing.from((facing) => facing.Right.from())
           .contact.from((contact) => contact.NoWall.from())
       )
-  }
+    )
 }).handle({
   Character: {
     on: {
@@ -206,7 +205,7 @@ export const CharacterMachine = Machine.make({
                       Move: (to) =>
                         to.branches({
                           moving: { target: to.local.Running() },
-                          unchanged: { target: to.none() }
+                          unchanged: { target: to.none }
                         }).resolve(({ event, select }) =>
                           event.axis === 0
                             ? select.unchanged()
@@ -221,7 +220,7 @@ export const CharacterMachine = Machine.make({
                       Move: (to) =>
                         to.branches({
                           stopped: { target: to.local.Standing() },
-                          unchanged: { target: to.none() }
+                          unchanged: { target: to.none }
                         }).resolve(({ event, select }) =>
                           event.axis === 0
                             ? select.stopped.from()
@@ -249,7 +248,7 @@ export const CharacterMachine = Machine.make({
                       id: "landing-settle",
                       after: "140 millis",
                       onDone: (to) =>
-                        to.none().resolve((_, enqueue) => {
+                        to.none.resolve((_, enqueue) => {
                           enqueue.raise(InternalEvents.LandingSettled())
                           return undefined
                         })
@@ -276,7 +275,7 @@ export const CharacterMachine = Machine.make({
               Airborne: {
                 on: {
                   JumpPressed: (to) =>
-                    to.none().resolve(({ event }, enqueue) => {
+                    to.none.resolve(({ event }, enqueue) => {
                       const push = awayFrom(event.wall)
                       enqueue.raise(
                         push === 0
@@ -366,7 +365,7 @@ export const CharacterMachine = Machine.make({
           },
           Paused: {
             on: {
-              Resume: (to) => to.history.Character.locomotion.Playing.resume().resolve(({ target }) => target())
+              Resume: (to) => to.history.Character.locomotion.Playing.resume.resolve(({ target }) => target())
             }
           }
         }
@@ -376,11 +375,11 @@ export const CharacterMachine = Machine.make({
           Left: {
             on: {
               Move: (to) =>
-                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }).resolve((
+                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none } }).resolve((
                   { event, select }
                 ) => event.axis === 1 ? select.right.from() : select.unchanged()),
               WallJump: (to) =>
-                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none() } }).resolve((
+                to.branches({ right: { target: to.local.Right() }, unchanged: { target: to.none } }).resolve((
                   { event, select }
                 ) => event.push === 1 ? select.right.from() : select.unchanged())
             }
@@ -388,11 +387,11 @@ export const CharacterMachine = Machine.make({
           Right: {
             on: {
               Move: (to) =>
-                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }).resolve((
+                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none } }).resolve((
                   { event, select }
                 ) => event.axis === -1 ? select.left.from() : select.unchanged()),
               WallJump: (to) =>
-                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none() } }).resolve((
+                to.branches({ left: { target: to.local.Left() }, unchanged: { target: to.none } }).resolve((
                   { event, select }
                 ) => event.push === -1 ? select.left.from() : select.unchanged())
             }

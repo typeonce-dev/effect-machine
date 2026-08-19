@@ -74,9 +74,8 @@ describe("structural active state types", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.player.initial(),
-        resolve: ({ target }) => {
+      initial: (to) =>
+        to.player.initial.resolve(({ target }) => {
           expect(target.from).type.not.toBeCallableWith({}, () => undefined)
           expect<typeof target extends (...args: ReadonlyArray<any>) => any ? true : false>().type.toBe<false>()
 
@@ -103,8 +102,7 @@ describe("structural active state types", () => {
               .transport.from((transport) => transport.Empty.from())
               .settings.from((settings) => settings.Audible.from({ volume: 1 }))
           )
-        }
-      }
+        })
     })
   })
 
@@ -129,14 +127,12 @@ describe("structural active state types", () => {
     Machine.make({
       states: States.states,
       events: Machine.events(Select, Loaded, Play),
-      initial: {
-        target: (to) => to.player.initial(),
-        resolve: ({ target }) => (target.from((player) =>
+      initial: (to) =>
+        to.player.initial.resolve(({ target }) => (target.from((player) =>
           player
             .transport.from((transport) => transport.Empty.from())
             .settings.from((settings) => settings.Audible.from({ volume: 1 }))
-        ))
-      }
+        )))
     }).handle({
       player: {
         states: {
@@ -176,7 +172,8 @@ describe("structural active state types", () => {
                   Paused: {
                     on: {
                       Play: (to) =>
-                        to.local.with().resolve(({ containingState, ancestors, state, target }) => {
+                        to.local.with.resolve(({ containingState, ancestors, state, target }) => {
+                          expect(to.local.with).type.not.toBeAssignableTo<() => unknown>()
                           expect(state).type.toBe<undefined>()
                           expect(containingState).type.toBe<Ready>()
                           expect(ancestors).type.toBe<{ readonly "player.transport.Ready": Ready }>()

@@ -113,10 +113,7 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Tick),
-    initial: {
-      target: (to) => to.Idle(),
-      resolve: ({ target }) => (target(new Idle({})))
-    }
+    initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
   }).handle({
     Idle: {}
   })
@@ -126,10 +123,7 @@ const makeEmittingMachine = () =>
     states: States.states,
     events: Machine.events(Tick),
     emittedEvents: Emissions,
-    initial: {
-      target: (to) => to.Idle(),
-      resolve: ({ target }) => target(new Idle({}))
-    }
+    initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
   }).handle({
     Idle: {}
   })
@@ -141,10 +135,7 @@ describe("AtomMachine", () => {
     const parentMachine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         invoke: Machine.invoke({ child: Child })
@@ -188,10 +179,7 @@ describe("AtomMachine", () => {
       states: States.states,
       events: Machine.events(),
       emittedEvents: Emissions,
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => target(new Idle({}))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
     }).handle({
       Idle: {
         invoke: Machine.invoke({ child: Child })
@@ -362,10 +350,7 @@ describe("AtomMachine", () => {
       states: States.states,
       events: Machine.events(Tick),
       internalEvents: Machine.internalEvents(InternalTick),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
         on: {
@@ -393,10 +378,7 @@ describe("AtomMachine", () => {
     const incomplete = Machine.make({
       states: OutputStates.states,
       events: Machine.events(Tick),
-      initial: {
-        target: (to) => to.Idle(),
-        resolve: ({ target }) => (target(new Idle({})))
-      }
+      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     })
     const runtime = Atom.runtime(Layer.empty)
     const bound = AtomMachine.bind(runtime)

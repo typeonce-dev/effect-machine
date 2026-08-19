@@ -20,10 +20,7 @@ const States = Machine.states({
 const base = Machine.make({
   states: States.states,
   events: Machine.events(Open),
-  initial: {
-    target: (to) => to.closed(),
-    resolve: ({ target }) => (target(new Closed({})))
-  }
+  initial: (to) => to.closed().resolve(({ target }) => (target(new Closed({}))))
 })
 
 describe("declared initial entry types", () => {
@@ -31,7 +28,7 @@ describe("declared initial entry types", () => {
     base.handle({
       closed: {
         on: {
-          Open: (to) => to.full.opened.initial().resolve(({ target }) => target(new Opened({ id: "team-1" })))
+          Open: (to) => to.full.opened.initial.resolve(({ target }) => target(new Opened({ id: "team-1" })))
         }
       },
       // @ts-expect-error!
@@ -41,7 +38,7 @@ describe("declared initial entry types", () => {
     base.handle({
       closed: {
         on: {
-          Open: (to) => to.full.opened.initial().resolve(({ target }) => target.from({ id: "team-1" }))
+          Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "team-1" }))
         }
       },
       opened: {
@@ -71,6 +68,7 @@ describe("declared initial entry types", () => {
         on: {
           Open: (to) =>
             to.full.opened().resolve(({ target }) => {
+              expect(to.full.opened.initial).type.not.toBeAssignableTo<() => unknown>()
               expect(target).type.toHaveProperty("initial")
               expect(target.initial).type.not.toBeCallableWith()
               expect(target.initial).type.toBeCallableWith(new Opened({ id: "team-1" }))
