@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, type Option, Schema } from "effect"
+import { Context, Effect, Layer, type Option, Schema, Stream } from "effect"
 import { AsyncResult, Atom } from "effect/unstable/reactivity"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../../src/index.js"
@@ -9,6 +9,8 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
 class InternalTick extends Schema.TaggedClass<InternalTick>("InternalTick")("InternalTick", {}) {}
+
+class Published extends Schema.TaggedClass<Published>("Published")("Published", {}) {}
 
 class Done extends Schema.TaggedClass<Done>("Done")("Done", {
   value: Schema.String
@@ -63,6 +65,7 @@ interface RuntimeFailure {
 }
 
 const States = Machine.states({ Idle })
+const Emissions = Machine.emittedEvents(Published)
 
 const NestedStates = Machine.states({
   Dormant,
@@ -118,6 +121,19 @@ const makeMachine = () =>
     Idle: {}
   })
 
+const makeEmittingMachine = () =>
+  Machine.make({
+    states: States.states,
+    events: Machine.events(Tick),
+    emittedEvents: Emissions,
+    initial: {
+      target: (to) => to.Idle(),
+      resolve: ({ target }) => target(new Idle({}))
+    }
+  }).handle({
+    Idle: {}
+  })
+
 describe("AtomMachine", () => {
   it("derives invoked child protocols from the child descriptor", () => {
     const childMachine = makeMachine()
@@ -140,6 +156,65 @@ describe("AtomMachine", () => {
     expect<typeof child.send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
       Machine.Machine.EventInput<Tick>
     >()
+  })
+
+  it("preserves emitted protocols across root and child selectors", () => {
+    const machine = makeEmittingMachine()
+    const direct = AtomMachine.make(machine)
+    const bound = AtomMachine.bind(Atom.runtime(Layer.empty)).make(machine)
+    const directSelected = AtomMachine.select(direct, "Idle")
+    const directSnapshot = AtomMachine.selectSnapshot(direct, "Idle")
+    const directMatched = AtomMachine.matches(direct, "Idle")
+    const boundSelected = AtomMachine.select(bound, "Idle")
+    const boundSnapshot = AtomMachine.selectSnapshot(bound, "Idle")
+    const boundMatched = AtomMachine.matches(bound, "Idle")
+
+    expect<Atom.Success<typeof directSelected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof directSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
+    expect<Atom.Success<typeof directMatched>>().type.toBe<boolean>()
+    expect<Atom.Success<typeof boundSelected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof boundSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
+    expect<Atom.Success<typeof boundMatched>>().type.toBe<boolean>()
+    expect(AtomMachine.select).type.not.toBeCallableWith(direct, "Missing")
+    expect(AtomMachine.selectSnapshot).type.not.toBeCallableWith(direct, "Missing")
+    expect(AtomMachine.matches).type.not.toBeCallableWith(direct, "Missing")
+
+    const Child = Machine.child("emitting-child", machine)
+    const parentMachine = Machine.make({
+      states: States.states,
+      events: Machine.events(),
+      emittedEvents: Emissions,
+      initial: {
+        target: (to) => to.Idle(),
+        resolve: ({ target }) => target(new Idle({}))
+      }
+    }).handle({
+      Idle: {
+        invoke: Machine.invoke({ child: Child })
+      }
+    })
+    const parent = AtomMachine.make(parentMachine)
+    const child = parent.child(Child)
+    const derivedChild = null as unknown as AtomMachine.ChildOf<typeof parent, typeof Child>
+    const childSelected = AtomMachine.selectChild(child, "Idle")
+    const childSnapshot = AtomMachine.selectSnapshotChild(child, "Idle")
+    const childMatched = AtomMachine.matchesChild(child, "Idle")
+    const childEmissions = AtomMachine.childEmissions(child)
+
+    expect<typeof derivedChild>().type.toBe<typeof child>()
+    expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof childSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
+    expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
+    expect<Stream.Success<typeof childEmissions>>().type.toBe<Published>()
+    expect(AtomMachine.selectChild).type.not.toBeCallableWith(child, "Missing")
+    expect(AtomMachine.selectSnapshotChild).type.not.toBeCallableWith(child, "Missing")
+    expect(AtomMachine.matchesChild).type.not.toBeCallableWith(child, "Missing")
   })
 
   it("derives fail-aware results, selectors, and child bridge types", () => {

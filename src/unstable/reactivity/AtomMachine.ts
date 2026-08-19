@@ -159,11 +159,11 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   ) => ChildMachineAtom<Child, StartError>
 }
 
-type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any> ? State : never
+type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
 
-type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any> ? Error : never
+type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any, any> ? Error : never
 
-type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output> ? Output : never
+type RefOutput<Ref> = Ref extends Machine.MachineRef<any, any, any, infer Output, any> ? Output : never
 type RefEmitted<Ref> = Ref extends Machine.MachineRef<any, any, any, any, infer Emitted> ? Emitted : never
 
 /**
@@ -305,7 +305,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
   ) => ChildMachineAtom<Nested, StartError>
 }
 
-type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, infer StartError> ? StartError
+type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, never, any, any, infer StartError, any> ? StartError
   : Bridge extends ChildMachineAtom<any, infer StartError> ? StartError
   : never
 
@@ -317,7 +317,7 @@ type BridgeStartError<Bridge> = Bridge extends MachineAtom<any, any, any, any, i
  * @since 0.4.0
  */
 export type ChildOf<
-  Parent extends MachineAtom<any, any, any, any, any> | ChildMachineAtom<any, any>,
+  Parent extends MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
   Child extends Machine.ChildMachine.Any
 > = ChildMachineAtom<Child, BridgeStartError<Parent>>
 
@@ -389,8 +389,9 @@ export const select: <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends ValuedSnapshotIdentifier<State>
->(self: MachineAtom<State, Event, Error, Output, StartError>, path: Path) => Atom.Atom<
+>(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path) => Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
 > = internal.select
 
@@ -410,8 +411,9 @@ export const selectSnapshot: <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends SnapshotIdentifier<State>
->(self: MachineAtom<State, Event, Error, Output, StartError>, path: Path) => Atom.Atom<
+>(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path) => Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
 > = internal.selectSnapshot
 
@@ -503,9 +505,10 @@ export const matches: <
   Error,
   Output,
   StartError,
+  Emitted,
   const Path extends SnapshotIdentifier<State>
 >(
-  self: MachineAtom<State, Event, Error, Output, StartError>,
+  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
   path: Path
 ) => Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> = internal.matches
 
