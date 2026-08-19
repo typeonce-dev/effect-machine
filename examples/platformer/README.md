@@ -73,7 +73,7 @@ only `Airborne` interprets the wall sample as a wall jump. It turns and pushes
 away, refreshes the air jump through `WallLock`, and the same wall may be used
 again after physically returning to it. Movement phases own their timestamps,
 and both landing and capability locks demonstrate state-scoped
-inline `Machine.invoke({ after: ... })` timers.
+inline `invoke: (from) => from.timer(...)` chains.
 
 Keyboard commands and physics facts share a typed `Schema.TaggedUnion`
 protocol. The adapter executes velocity and floor collision, then reports

@@ -107,15 +107,14 @@ export const SelectionMachine = Machine.make({
             }
           },
           Searching: {
-            invoke: Machine.invoke({
-              id: "search",
-              effect: ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText),
-              onDone: (to) =>
+            invoke: (from) =>
+              from.effect("search", ({ ancestors }) => searchPokemon(ancestors["form.search"].searchText)).onDone((
+                to
+              ) =>
                 to.none.resolve(({ output }, enqueue) => {
                   enqueue.raise(output)
-                }),
-              onFailure: (to) => to.local.NoPokemon().resolve(({ target }) => target.from())
-            }),
+                })
+              ).onFailure((to) => to.local.NoPokemon().resolve(({ target }) => target.from())),
             on: {
               SearchResult: (to) =>
                 to.branches({

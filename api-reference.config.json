@@ -30,7 +30,6 @@
         "encodeSnapshot",
         "events",
         "internalEvents",
-        "invoke",
         "make",
         "plan",
         "planInitial",

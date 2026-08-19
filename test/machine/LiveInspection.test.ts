@@ -131,7 +131,7 @@ describe("Machine live inspection", () => {
         initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
-          invoke: Machine.invoke({ id: "worker", effect: () => Effect.never })
+          invoke: (from) => from.effect("worker", () => Effect.never)
         }
       })
       const prepared = yield* Machine.prepare(active)
@@ -180,11 +180,7 @@ describe("Machine live inspection", () => {
         initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
       }).handle({
         Idle: {
-          invoke: Machine.invoke({
-            id: "updates",
-            stream: () => Stream.never,
-            onDone: (to) => to.none
-          })
+          invoke: (from) => from.stream("updates", () => Stream.never).onDone((to) => to.none)
         }
       })
       const prepared = yield* Machine.prepare(active)
@@ -247,7 +243,7 @@ describe("Machine live inspection", () => {
         initial: (to) => to.ParentIdle().resolve(({ target }) => target(new ParentIdle({})))
       }).handle({
         ParentIdle: {
-          invoke: Machine.invoke({ child: Child }),
+          invoke: (from) => from.child(Child),
           on: {
             ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
           }

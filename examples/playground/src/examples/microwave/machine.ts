@@ -66,14 +66,12 @@ export const MicrowaveMachine = Machine.make({
             }
           },
           Cooking: {
-            invoke: Machine.invoke({
-              id: "cooking-second",
-              after: "1 second",
-              onDone: (to) =>
+            invoke: (from) =>
+              from.timer("cooking-second", "1 second").onDone((to) =>
                 to.local.Cooking().resolve(({ state, target }) =>
                   target.from({ elapsedSeconds: state.elapsedSeconds + 1 })
                 )
-            }),
+              ),
             on: {
               PowerPressed: (to) => to.local.Idle().resolve(({ target }) => target.from()),
               DoorOpened: (to) => to.local.Idle().resolve(({ target }) => target.from())

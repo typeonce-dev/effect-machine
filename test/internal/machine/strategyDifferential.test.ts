@@ -423,15 +423,14 @@ describe("machine planner and runtime strategies", () => {
       })
       const machine = definition.handle({
         Streaming: {
-          invoke: Machine.invoke({
-            id: "values",
-            stream: () => Stream.fromIterable([1, 2, 3]),
-            onElement: (to) =>
+          invoke: (from) =>
+            from.stream("values", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
               to.none.resolve(({ element }) => {
                 seen.push(element)
-              }),
-            onDone: (to) => to.full.StreamDone().resolve(({ target }) => target(new StreamDone({ values: [...seen] })))
-          })
+              })
+            ).onDone((to) =>
+              to.full.StreamDone().resolve(({ target }) => target(new StreamDone({ values: [...seen] })))
+            )
         },
         StreamDone: { output: ({ state }) => state.values }
       })
@@ -682,12 +681,10 @@ describe("machine planner and runtime strategies", () => {
           }
         },
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Effect.succeed(new Loaded({ value: "complete" })),
-            onDone: (to) =>
+          invoke: (from) =>
+            from.effect("load", () => Effect.succeed(new Loaded({ value: "complete" }))).onDone((to) =>
               to.full.Success().resolve(({ output, target }) => target(new Success({ value: output.value })))
-          })
+            )
         },
         Success: { output: ({ state }) => state.value }
       })
@@ -725,11 +722,10 @@ describe("machine planner and runtime strategies", () => {
         initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
       }).handle({
         Loading: {
-          invoke: Machine.invoke({
-            id: "load",
-            effect: () => Effect.fail("unavailable"),
-            onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target(new Failed({ error })))
-          })
+          invoke: (from) =>
+            from.effect("load", () => Effect.fail("unavailable")).onFailure((to) =>
+              to.full.Failed().resolve(({ error, target }) => target(new Failed({ error })))
+            )
         },
         Failed: { output: ({ state }) => state.error }
       })
@@ -766,12 +762,9 @@ describe("machine planner and runtime strategies", () => {
         initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
       }).handle({
         ChildIdle: {
-          invoke: Machine.invoke({
-            id: "notify-parent",
-            effect: ({ parent }) => parent.send(ParentEvents.ChildReady()),
-            onDone: (to) => to.none,
-            onFailure: (to) => to.none
-          })
+          invoke: (from) =>
+            from.effect("notify-parent", ({ parent }) => parent.send(ParentEvents.ChildReady())).onDone((to) => to.none)
+              .onFailure((to) => to.none)
         }
       })
       const Child = Machine.child("required-parent-child", childMachine)
@@ -785,7 +778,7 @@ describe("machine planner and runtime strategies", () => {
         initial: (to) => to.ParentWaiting().resolve(({ target }) => target(new ParentWaiting({})))
       }).handle({
         ParentWaiting: {
-          invoke: Machine.invoke({ child: Child, onFailure: (to) => to.none }),
+          invoke: (from) => from.child(Child).onFailure((to) => to.none),
           on: {
             ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
           }
@@ -821,29 +814,28 @@ describe("machine planner and runtime strategies", () => {
         })
         const machine = definition.handle({
           Loading: {
-            invoke: Machine.invoke({
-              id: "worker",
-              address: Machine.childAddress("worker"),
-              logic: () => {
-                generation += 1
-                const current = generation
-                return Machine.logic({
-                  initial: "active",
-                  run: ({ parent, sendTo, setState }) =>
-                    parent === undefined ?
-                      Effect.die("worker expected an owning machine") :
-                      (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
-                        Effect.andThen(Effect.never),
-                        Effect.onInterrupt(() =>
-                          setState("stale").pipe(
-                            Effect.andThen(sendTo(parent, new Stale({})))
+            invoke: (from) =>
+              from.logic("worker", {
+                address: Machine.childAddress("worker"),
+                logic: () => {
+                  generation += 1
+                  const current = generation
+                  return Machine.logic({
+                    initial: "active",
+                    run: ({ parent, sendTo, setState }) =>
+                      parent === undefined ?
+                        Effect.die("worker expected an owning machine") :
+                        (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
+                          Effect.andThen(Effect.never),
+                          Effect.onInterrupt(() =>
+                            setState("stale").pipe(
+                              Effect.andThen(sendTo(parent, new Stale({})))
+                            )
                           )
                         )
-                      )
-                })
-              },
-              onFailure: (to) => to.none,
-              onSnapshot: (to) =>
+                  })
+                }
+              }).onFailure((to) => to.none).onSnapshot((to) =>
                 to.branches({
                   stale: { title: "Worker is stale", target: to.full.Failed() },
                   unchanged: { target: to.none }
@@ -852,7 +844,7 @@ describe("machine planner and runtime strategies", () => {
                     ? select.stale(new Failed({}))
                     : select.unchanged()
                 )
-            }),
+              ),
             on: {
               Reenter: (to) =>
                 to.full.Loading().resolve(({ state, target }) => target(new Loading({ epoch: state.epoch + 1 })), {

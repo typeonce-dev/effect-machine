@@ -44,15 +44,12 @@ export const ReplaceMachine = Machine.make({
     }
   },
   Replacing: {
-    invoke: Machine.invoke({
-      id: "replaceWithRandom",
-      effect: () => replaceWithRandom,
-      onDone: (to) =>
+    invoke: (from) =>
+      from.effect("replaceWithRandom", () => replaceWithRandom).onDone((to) =>
         to.none.resolve(({ output }, enqueue) => {
           enqueue.raise(ReplaceInternalEvents.Replaced({ pokemon: output.pokemon }))
-        }),
-      onFailure: (to) => to.full.Idle().resolve(({ target }) => target.from())
-    }),
+        })
+      ).onFailure((to) => to.full.Idle().resolve(({ target }) => target.from())),
     on: {
       Replaced: (to) =>
         to.full.Idle().resolve(({ event, parent, state, target }, enqueue) => {

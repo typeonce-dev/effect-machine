@@ -95,6 +95,18 @@ describe("Machine", () => {
     },
     down: Down
   })
+  type DownInvokeSelector = Machine.Machine.InvokeSelector<
+    typeof UpStates.states,
+    readonly [typeof SignIn],
+    readonly [],
+    "down"
+  >
+  type DownInvoke = Machine.Machine.InvokeBuilderInput<
+    typeof UpStates.states,
+    readonly [typeof SignIn],
+    readonly [],
+    "down"
+  >
 
   const NestedParallelStates = Machine.states({
     root: {
@@ -529,6 +541,7 @@ describe("Machine", () => {
   })
 
   it("invoke infers one-shot outputs from factories in the owning state", () => {
+    expect(Machine).type.not.toHaveProperty("invoke")
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
@@ -537,25 +550,19 @@ describe("Machine", () => {
 
     machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "valid",
-          effect: () => Effect.succeed(1),
-          onDone: (to) => to.full.down().resolve(({ target }) => target(new Down({})))
-        })
+        invoke: (from) =>
+          from.effect("valid", () => Effect.succeed(1)).onDone((to) =>
+            to.full.down().resolve(({ target }) => target(new Down({})))
+          )
       }
     })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "invalid",
-      effect: () => Effect.succeed(1)
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "direct-effect",
-      effect: Effect.succeed(1),
-      onDone: () => undefined
-    })
+    const incomplete = (from: DownInvokeSelector) => from.effect("invalid", () => Effect.succeed(1))
+    const from = null as unknown as DownInvokeSelector
+    expect(incomplete).type.not.toBeAssignableTo<DownInvoke>()
+    expect(from.effect).type.not.toBeCallableWith("direct-effect", Effect.succeed(1))
   })
 
-  it("contextually types dynamic Effect sources through Machine.invoke", () => {
+  it("contextually types dynamic Effect sources through the fluent invocation builder", () => {
     const machine = Machine.make({
       states: UpStates.states,
       events: Machine.events(SignIn),
@@ -564,19 +571,16 @@ describe("Machine", () => {
 
     machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "dynamic",
-          effect: ({ state }) => {
+        invoke: (from) =>
+          from.effect("dynamic", ({ state }) => {
             expect(state).type.toBe<Down>()
             return Effect.succeed(state._tag)
-          },
-          onDone: (to) => to.full.down().resolve(({ target }) => target(new Down({})))
-        })
+          }).onDone((to) => to.full.down().resolve(({ target }) => target(new Down({}))))
       }
     })
   })
 
-  it("infers Stream elements, failures, and services through Machine.invoke", () => {
+  it("infers Stream elements, failures, and services through the fluent invocation builder", () => {
     class StreamFailure {
       readonly _tag = "StreamFailure"
     }
@@ -590,22 +594,19 @@ describe("Machine", () => {
     })
     const handled = machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "updates",
-          stream: ({ state }) => {
+        invoke: (from) =>
+          from.stream("updates", ({ state }) => {
             expect(state).type.toBe<Down>()
             return updates
-          },
-          onElement: (to) =>
+          }).onElement((to) =>
             to.none.resolve(({ element }) => {
               expect(element).type.toBe<1>()
-            }),
-          onDone: (to) => to.none,
-          onFailure: (to) =>
+            })
+          ).onDone((to) => to.none).onFailure((to) =>
             to.none.resolve(({ error }) => {
               expect(error).type.toBe<StreamFailure>()
             })
-        })
+          )
       }
     })
 
@@ -614,22 +615,19 @@ describe("Machine", () => {
 
     const staticHandled = machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "static-updates",
-          stream: ({ state }) => {
+        invoke: (from) =>
+          from.stream("static-updates", ({ state }) => {
             expect(state).type.toBe<Down>()
             return updates
-          },
-          onElement: (to) =>
+          }).onElement((to) =>
             to.none.resolve(({ element }) => {
               expect(element).type.toBe<1>()
-            }),
-          onDone: (to) => to.none,
-          onFailure: (to) =>
+            })
+          ).onDone((to) => to.none).onFailure((to) =>
             to.none.resolve(({ error }) => {
               expect(error).type.toBe<StreamFailure>()
             })
-        })
+          )
       }
     })
 
@@ -647,31 +645,18 @@ describe("Machine", () => {
     const values = (_: Context) => Stream.make(1)
     const failure = (_: Context) => Stream.fail("unavailable" as const)
 
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-element",
-      stream: values,
-      onDone: (to: any) => to.none
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-done",
-      stream: values,
-      onElement: (to: any) => to.none
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-failure",
-      stream: failure,
-      onDone: (to: any) => to.none
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "unreachable-element",
-      stream: failure,
-      onElement: (to: any) => to.none,
-      onDone: (to: any) => to.none,
-      onFailure: (to: any) => to.none
-    })
+    const missingElement = (from: DownInvokeSelector) => from.stream("missing-element", values).onDone((to) => to.none)
+    const missingDone = (from: DownInvokeSelector) => from.stream("missing-done", values).onElement((to) => to.none)
+    const missingFailure = (from: DownInvokeSelector) => from.stream("missing-failure", failure).onDone((to) => to.none)
+    const from = null as unknown as DownInvokeSelector
+
+    expect(missingElement).type.not.toBeAssignableTo<DownInvoke>()
+    expect(missingDone).type.not.toBeAssignableTo<DownInvoke>()
+    expect(missingFailure).type.not.toBeAssignableTo<DownInvoke>()
+    expect(from.stream("unreachable-element", failure)).type.not.toHaveProperty("onElement")
   })
 
-  it("infers dynamic Machine.invoke Effect channels from the source return", () => {
+  it("infers dynamic Effect invocation channels from the source return", () => {
     class LoadFailure {
       readonly _tag = "LoadFailure"
     }
@@ -684,20 +669,16 @@ describe("Machine", () => {
 
     machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "dynamic",
-          effect: ({ state }) => {
+        invoke: (from) =>
+          from.effect("dynamic", ({ state }) => {
             expect(state).type.toBe<Down>()
             return load(state._tag)
-          },
-          onDone: (to) => to.none,
-          onFailure: (to) => to.none
-        })
+          }).onDone((to) => to.none).onFailure((to) => to.none)
       }
     })
   })
 
-  it("requires only reachable handlers for dynamic Machine.invoke Effects", () => {
+  it("requires only reachable handlers for dynamic Effect invocations", () => {
     class LoadFailure {
       readonly _tag = "LoadFailure"
     }
@@ -709,37 +690,26 @@ describe("Machine", () => {
 
     machine.handle({
       down: {
-        invoke: [
-          Machine.invoke({
-            id: "success",
-            effect: ({ state }) => Effect.succeed(state._tag),
-            onDone: (to) => to.none
-          }),
-          Machine.invoke({
-            id: "failure",
-            effect: ({ state }) => Effect.fail(new LoadFailure()).pipe(Effect.annotateLogs("state", state._tag)),
-            onFailure: (to) => to.none
-          }),
-          Machine.invoke({
-            id: "never",
-            effect: ({ state }) => Effect.never.pipe(Effect.annotateLogs("state", state._tag))
-          }),
-          Machine.invoke({
-            id: "requirements",
-            effect: ({ state }) => Effect.as(EntryRequirement, state._tag),
-            onDone: (to) => to.none
-          })
+        invoke: (
+          from
+        ) => [
+          from.effect("success", ({ state }) => Effect.succeed(state._tag)).onDone((to) => to.none),
+          from.effect(
+            "failure",
+            ({ state }) => Effect.fail(new LoadFailure()).pipe(Effect.annotateLogs("state", state._tag))
+          ).onFailure((to) => to.none),
+          from.effect("never", ({ state }) => Effect.never.pipe(Effect.annotateLogs("state", state._tag))),
+          from.effect("requirements", ({ state }) => Effect.as(EntryRequirement, state._tag)).onDone((to) => to.none)
         ]
       }
     })
 
     const requirementsHandled = machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "requirements-only",
-          effect: ({ state }) => Effect.as(EntryRequirement, state._tag),
-          onDone: (to) => to.none
-        })
+        invoke: (from) =>
+          from.effect("requirements-only", ({ state }) => Effect.as(EntryRequirement, state._tag)).onDone((to) =>
+            to.none
+          )
       }
     })
 
@@ -748,7 +718,7 @@ describe("Machine", () => {
     expect<unknown>().type.not.toBeAssignableTo<Machine.Machine.Services<typeof requirementsHandled>>()
   })
 
-  it("rejects unreachable and missing handlers for dynamic Machine.invoke Effects", () => {
+  it("rejects unreachable and missing handlers for dynamic Effect invocations", () => {
     type Context = Machine.Machine.InvokeContext<
       typeof UpStates.states,
       readonly [typeof SignIn],
@@ -759,36 +729,19 @@ describe("Machine", () => {
     const failure = (_: Context) => Effect.fail("unavailable" as const)
     const pending = (_: Context) => Effect.never
 
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-done",
-      effect: success
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "unreachable-failure",
-      effect: success,
-      onDone: () => undefined,
-      onFailure: () => undefined
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-failure",
-      effect: failure
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "unreachable-done",
-      effect: failure,
-      onDone: () => undefined,
-      onFailure: () => undefined
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "pending-done",
-      effect: pending,
-      onDone: () => undefined
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "pending-failure",
-      effect: pending,
-      onFailure: () => undefined
-    })
+    const missingDone = (from: DownInvokeSelector) => from.effect("missing-done", success)
+    const missingFailure = (from: DownInvokeSelector) => from.effect("missing-failure", failure)
+    const from = null as unknown as DownInvokeSelector
+    const successful = from.effect("unreachable-failure", success)
+    const failed = from.effect("unreachable-done", failure)
+    const never = from.effect("pending", pending)
+
+    expect(missingDone).type.not.toBeAssignableTo<DownInvoke>()
+    expect(missingFailure).type.not.toBeAssignableTo<DownInvoke>()
+    expect(successful).type.not.toHaveProperty("onFailure")
+    expect(failed).type.not.toHaveProperty("onDone")
+    expect(never).type.not.toHaveProperty("onDone")
+    expect(never).type.not.toHaveProperty("onFailure")
   })
 
   it("separates public input events from the complete internal protocol", () => {
@@ -854,27 +807,30 @@ describe("Machine", () => {
       initial: (to) => to.down().resolve(({ target }) => (target(new Down({}))))
     })
 
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "missing-failure",
-      effect: failure
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "unreachable-failure",
-      effect: () => Effect.succeed("user-1"),
-      onDone: () => undefined,
-      onFailure: () => undefined
-    })
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      id: "erased-failure",
-      effect: erasedFailure
-    })
+    type Selector = Machine.Machine.InvokeSelector<
+      typeof UpStates.states,
+      readonly [typeof SignIn, typeof SignInCompleted],
+      readonly [],
+      "down",
+      readonly [typeof SignIn]
+    >
+    type Invoke = Machine.Machine.InvokeBuilderInput<
+      typeof UpStates.states,
+      readonly [typeof SignIn, typeof SignInCompleted],
+      readonly [],
+      "down",
+      readonly [typeof SignIn]
+    >
+    const missingFailure = (from: Selector) => from.effect("missing-failure", failure)
+    const erased = (from: Selector) => from.effect("erased-failure", erasedFailure)
+    const from = null as unknown as Selector
+
+    expect(missingFailure).type.not.toBeAssignableTo<Invoke>()
+    expect(erased).type.not.toBeAssignableTo<Invoke>()
+    expect(from.effect("unreachable-failure", () => Effect.succeed("user-1"))).type.not.toHaveProperty("onFailure")
     machine.handle({
       down: {
-        invoke: Machine.invoke({
-          id: "erased-failure",
-          effect: erasedFailure,
-          onFailure: (to) => to.none
-        })
+        invoke: (from) => from.effect("erased-failure", erasedFailure).onFailure((to) => to.none)
       }
     })
   })
@@ -929,80 +885,37 @@ describe("Machine", () => {
       events: Machine.events(SignIn),
       initial: (to) => to.down().resolve(({ target }) => (target(new Down({}))))
     })
-
-    type ChildArgs = Machine.Machine.ChildInvokeArgs<
+    type ParentInvokeSelector = Machine.Machine.InvokeSelector<
       typeof UpStates.states,
       readonly [typeof SignIn],
       readonly [],
-      "down",
-      typeof Child.machine,
-      typeof Child
+      "down"
     >
-    const onSnapshot: NonNullable<ChildArgs["onSnapshot"]> = (to) =>
-      to.none.resolve(({ snapshot }) => {
-        expect(snapshot.state).type.toBe<Machine.Machine.Snapshot<typeof childStates.states>>()
-        return undefined
-      })
-    const onDone: ChildArgs["onDone"] = (to) =>
-      to.none.resolve(({ output, state }) => {
-        expect(output).type.toBe<SignIn>()
-        expect(state).type.toBe<Down>()
-        return undefined
-      })
 
     parent.handle({
       down: {
-        invoke: Machine.invoke({
-          child: Child,
-          input: { userId: "child" },
-          onSnapshot,
-          onDone
-        })
+        invoke: (from: ParentInvokeSelector) =>
+          from.child(Child, { input: { userId: "child" } }).onSnapshot((to) =>
+            to.none.resolve(({ snapshot }) => {
+              expect(snapshot.state).type.toBe<Machine.Machine.Snapshot<typeof childStates.states>>()
+              return undefined
+            })
+          ).onDone((to) =>
+            to.none.resolve(({ output, state }) => {
+              expect(output).type.toBe<SignIn>()
+              expect(state).type.toBe<Down>()
+              return undefined
+            })
+          )
       }
     })
     expect(parent.handle).type.not.toBeCallableWith({
       down: { invoke: { child: Child, onDone: () => undefined } }
     })
 
-    const incompatibleEmits = Machine.make({
-      states: childStates.states,
-      events: Machine.events(SignIn),
-      emittedEvents: Machine.emittedEvents(Down),
-      input: ChildInput,
-      initial: (to) => to.done().resolve(({ target }) => (target(new Down({}))))
-    }).handle({
-      done: {
-        output: () => new SignIn({ userId: "child" })
-      }
-    })
-    expect(parent.handle).type.not.toBeCallableWith({
-      down: {
-        invoke: {
-          child: Machine.child("incompatible", incompatibleEmits),
-          input: { userId: "child" },
-          onDone: () => undefined
-        }
-      }
-    })
-    expect(parent.handle).type.not.toBeCallableWith({
-      down: {
-        invoke: {
-          child: Child,
-          input: { userId: "child" },
-          onSnapshot: () => new Down({}),
-          onDone: () => undefined
-        }
-      }
-    })
-    expect(parent.handle).type.not.toBeCallableWith({
-      down: {
-        invoke: {
-          child: Child,
-          input: { userId: "child" },
-          onDone: () => new Down({})
-        }
-      }
-    })
+    const childBuilder = (null as unknown as ParentInvokeSelector).child(Child, { input: { userId: "child" } })
+    expect(childBuilder.onSnapshot).type.not.toBeCallableWith(() => new Down({}))
+    expect(childBuilder.onDone).type.not.toBeCallableWith(() => new Down({}))
   })
 
   it("types nested invocation output handlers against their owning state", () => {
@@ -1018,11 +931,7 @@ describe("Machine", () => {
           auth: {
             states: {
               signedOut: {
-                invoke: Machine.invoke({
-                  id: "nested",
-                  effect: () => Effect.succeed(Option.some(1)),
-                  onDone: (to) => to.none
-                })
+                invoke: (from) => from.effect("nested", () => Effect.succeed(Option.some(1))).onDone((to) => to.none)
               }
             }
           },
@@ -1600,10 +1509,8 @@ describe("Machine", () => {
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(machine)
     expect(Machine.start).type.not.toBeCallableWith(machine)
-    expect(Machine.invoke).type.not.toBeCallableWith({
-      child: Machine.child("incomplete", machine),
-      onDone: () => undefined
-    })
+    const from = null as unknown as DownInvokeSelector
+    expect(from.child).type.not.toBeCallableWith(Machine.child("incomplete", machine))
     expect(machine).type.not.toBeAssignableTo<ForgedCompleteMachine>()
 
     const complete = machine.handle({

@@ -21,28 +21,22 @@ const machine = Machine.make({
   initial: (to) => to.Loading().resolve(({ target }) => target.from())
 }).handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "load-team",
-      effect: () =>
+    invoke: (from) =>
+      from.effect("load-team", () =>
         Effect.gen(function*() {
           const service = yield* PokemonService
           return yield* service.getRandomTeam()
-        }),
-      onDone: (to) => to.full.ActiveTeam().resolve(({ output, target }) => target.from({ team: output })),
-      onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
-    })
+        })).onDone((to) => to.full.ActiveTeam().resolve(({ output, target }) => target.from({ team: output })))
+        .onFailure((to) => to.full.Failed().resolve(({ target }) => target.from()))
   },
   ActiveTeam: {
-    invoke: [
-      Machine.invoke({
-        child: SelectionChild,
-        onDone: (to) => to.none,
-        onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
-      }),
-      Machine.invoke({
-        child: ReplaceChild,
-        onFailure: (to) => to.full.Failed().resolve(({ target }) => target.from())
-      })
+    invoke: (
+      from
+    ) => [
+      from.child(SelectionChild).onDone((to) => to.none).onFailure((to) =>
+        to.full.Failed().resolve(({ target }) => target.from())
+      ),
+      from.child(ReplaceChild).onFailure((to) => to.full.Failed().resolve(({ target }) => target.from()))
     ],
     on: {
       ReplaceInTeam: (to) =>

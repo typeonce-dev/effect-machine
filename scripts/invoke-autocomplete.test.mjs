@@ -21,17 +21,15 @@ const definition = Machine.make({
 
 definition.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "load",
-      effect: ({ /*invoke-source-context*/ ...context }) =>
-        Effect.fail("offline").pipe(Effect.as(context.state._tag)),
-      onDone: (to) =>
+    invoke: (from) =>
+      from./*invoke-sources*/effect("load", ({ /*invoke-source-context*/ ...context }) =>
+        Effect.fail("offline").pipe(Effect.as(context.event._tag)))
+      .onDone((to) =>
         to.full./*done-target*/Done()./*selected-operations*/resolve(({ /*done-context*/ ...context }) =>
-          context.target./*done-exact-target*/from()),
-      onFailure: (to) =>
+          context.target./*done-exact-target*/from()))
+      .onFailure((to) =>
         to.full.Failed().resolve(({ /*failure-context*/ ...context }) =>
-          context.target.from())
-    })
+          context.target.from()))
   },
   Done: {},
   Failed: {}
@@ -46,10 +44,8 @@ const requiredParentDefinition = Machine.make({
 
 requiredParentDefinition.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "required-parent",
-      effect: ({ /*required-parent-context*/ ...context }) => Effect.never
-    })
+    invoke: (from) =>
+      from.effect("required-parent", ({ /*required-parent-context*/ ...context }) => Effect.never)
   },
   Done: {},
   Failed: {}
@@ -64,10 +60,8 @@ const optionalParentDefinition = Machine.make({
 
 optionalParentDefinition.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "optional-parent",
-      effect: ({ /*optional-parent-context*/ ...context }) => Effect.never
-    })
+    invoke: (from) =>
+      from.effect("optional-parent", ({ /*optional-parent-context*/ ...context }) => Effect.never)
   },
   Done: {},
   Failed: {}
@@ -75,13 +69,11 @@ optionalParentDefinition.handle({
 
 definition.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "updates",
-      stream: () => Stream.make(1),
-      onElement: (to) =>
-        to.none.resolve(({ /*element-context*/ ...context }) => undefined),
-      onDone: (to) => to.none
-    })
+    invoke: (from) =>
+      from.stream("updates", () => Stream.make(1))
+      .onElement((to) =>
+        to.none.resolve(({ /*element-context*/ ...context }) => undefined))
+      .onDone((to) => to.none)
   },
   Done: {},
   Failed: {}
@@ -89,11 +81,10 @@ definition.handle({
 
 definition.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "incomplete",
-      effect: () => Effect.fail("offline").pipe(Effect.as(1)),
-      /*invoke-properties*/
-    })
+    invoke: (from) =>
+      from.effect("incomplete", () => Effect.fail("offline").pipe(Effect.as(1)))
+      ./*invoke-properties*/onDone((to) => to.none)
+      .onFailure((to) => to.none)
   },
   Done: {},
   Failed: {}
@@ -177,6 +168,11 @@ const host = {
 }
 
 const service = ts.createLanguageService(host)
+const diagnostics = service.getSemanticDiagnostics(virtualFile)
+assert.deepEqual(
+  diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
+  []
+)
 
 const completions = (marker) => {
   const position = source.indexOf(`/*${marker}*/`)
@@ -185,6 +181,15 @@ const completions = (marker) => {
 }
 
 test("contextually completes Effect invocation factories while authoring", () => {
+  const sources = completions("invoke-sources")
+  assert.deepEqual([...sources].filter((name) => ["effect", "stream", "timer", "logic", "child"].includes(name)).sort(), [
+    "child",
+    "effect",
+    "logic",
+    "stream",
+    "timer"
+  ])
+
   const sourceContext = completions("invoke-source-context")
   assert.equal(sourceContext.has("state"), true)
   assert.equal(sourceContext.has("ancestors"), true)
@@ -218,6 +223,8 @@ test("contextually completes Effect invocation factories while authoring", () =>
   const properties = completions("invoke-properties")
   assert.equal(properties.has("onDone"), true)
   assert.equal(properties.has("onFailure"), true)
+  assert.equal(properties.has("onElement"), false)
+  assert.equal(properties.has("onSnapshot"), false)
 })
 
 test("contextually completes Stream element handlers while authoring", () => {

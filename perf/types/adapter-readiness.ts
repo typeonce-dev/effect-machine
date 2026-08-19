@@ -31,7 +31,7 @@ type BoundAtomEventIsExact = Expect<
 void Machine.planInitial(machine)
 void Machine.start(machine)
 void Machine.resume(machine, snapshot)
-void Machine.invoke({ child })
+void child
 void resumedAtom
 void cluster
 void boundResumedAtom

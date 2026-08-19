@@ -10,7 +10,7 @@ describe("machine invocation ownership", () => {
   it("derives stable child addresses in the invocation namespace", () => {
     assert.strictEqual(
       makeChildId("root.child", "worker"),
-      "Machine.invoke:10:root.childworker"
+      "Machine.invocation:10:root.childworker"
     )
   })
 })

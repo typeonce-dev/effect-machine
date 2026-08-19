@@ -437,37 +437,35 @@ arbitrary asynchronous Effects do not run inside planning.
 State-scoped work starts on entry and is interrupted on exit:
 
 ```ts
-Loading: {
-  invoke: Machine.invoke({
-    id: "save-document",
-    effect: () => saveDocument,
-    onDone: (to) => to.full.Saved().resolve(({ output, target }) => target.from({ id: output.id })),
-    onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: String(error) }))
-  })
-}
-
-Waiting: {
-  invoke: Machine.invoke({
-    id: "save-timeout",
-    after: "3 seconds",
-    onDone: (to) => to.full.Failed().resolve(({ target }) => target.from({ message: "Timed out" }))
-  })
-}
+machine.handle({
+  Loading: {
+    invoke: (from) =>
+      from.effect("save-document", () => saveDocument)
+        .onDone((to) => to.full.Saved().resolve(({ output, target }) => target.from({ id: output.id })))
+        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
+  },
+  Waiting: {
+    invoke: (from) =>
+      from.timer("save-timeout", "3 seconds")
+        .onDone((to) => to.full.Failed().resolve(({ target }) => target.from({ message: "Timed out" })))
+  }
+})
 ```
 
-Use `effect` for one Effect, `stream` for a sequence of externally produced
-values, `after` for a cancellable delay, `logic` for a reusable process, and
-`child` for a complete child statechart—all through
-`Machine.invoke({...})`. The helper is an identity at runtime and preserves
-owner-context and source-channel inference across lifecycle handlers, including
-for state-dependent Effects:
+The state-local `from` selector starts an `effect`, `stream`, `timer`, reusable
+`logic`, or complete `child` statechart. The selected source determines which
+lifecycle methods the chain requires and which methods are available. For
+example, an Effect with non-`never` output and error channels must handle both;
+the completed chain is the value returned by the callback:
 
 ```ts
-invoke: Machine.invoke({
-  id: "load-document",
-  effect: ({ state }) => loadDocument(state.documentId),
-  onDone: (to) => to.full.Ready().resolve(({ output, target }) => target.from({ document: output })),
-  onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: error.message }))
+machine.handle({
+  Loading: {
+    invoke: (from) =>
+      from.effect("load-document", ({ state }) => loadDocument(state.documentId))
+        .onDone((to) => to.full.Ready().resolve(({ output, target }) => target.from({ document: output })))
+        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: error.message })))
+  }
 })
 ```
 
@@ -476,15 +474,18 @@ is mapped by `onElement`, and the next element is not pulled until that parent
 macrostep commits:
 
 ```ts
-invoke: Machine.invoke({
-  id: "channel",
-  stream: () => channelMessages,
-  onElement: (to) =>
-    to.none.resolve(({ element }, enqueue) => {
-      enqueue.raise(Events.MessageReceived({ message: element }))
-    }),
-  onDone: (to) => to.none,
-  onFailure: (to) => to.full.Failed().resolve(({ error, target }) => target.from({ error }))
+machine.handle({
+  Listening: {
+    invoke: (from) =>
+      from.stream("channel", () => channelMessages)
+        .onElement((to) =>
+          to.none.resolve(({ element }, enqueue) => {
+            enqueue.raise(Events.MessageReceived({ message: element }))
+          })
+        )
+        .onDone((to) => to.none)
+        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ error })))
+  }
 })
 ```
 
@@ -493,10 +494,10 @@ current configuration, or call `.resolve(...)` when the transition only needs
 to enqueue commands. A block resolver may omit its return because it is
 contextually typed to return `undefined`.
 
-Inside `.handle(...)`, `Machine.invoke(...)` receives the owning machine's
-public input and declared parent protocol contextually. Its source and lifecycle
-callbacks can send through `self` and `parent` while retaining the invoked
-Effect's output and error inference:
+Inside `.handle(...)`, `from` receives the owning machine's public input and
+declared parent protocol contextually. Source and lifecycle callbacks can send
+through `self` and `parent` while retaining the invoked Effect's output and
+error inference:
 
 ```ts
 const machine = Machine.make({
@@ -506,36 +507,47 @@ const machine = Machine.make({
   // ...
 }).handle({
   Saving: {
-    invoke: Machine.invoke({
-      id: "notify-parent",
-      effect: () => saveDocument,
-      onDone: (to) =>
-        to.none.resolve(({ parent, self }, enqueue) => {
-          enqueue.sendTo(self, Commands.Save())
-          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-        }),
-      onFailure: (to) => to.none
-    })
+    invoke: (from) =>
+      from.effect("notify-parent", () => saveDocument)
+        .onDone((to) =>
+          to.none.resolve(({ parent, self }, enqueue) => {
+            enqueue.sendTo(self, Commands.Save())
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+          })
+        )
+        .onFailure((to) => to.none)
   }
 })
 ```
 
-The standard `Machine.invoke(...)` form retains exact `self` and `parent`
-typing even when the definition is named separately; no intermediate
-definition method is required.
+Return an array of completed chains to compose multiple state-owned activities.
+The source computation itself, process logic, or `Machine.child(id, machine)`
+descriptor can be named and reused; the invocation chain stays local so its
+transitions retain the exact owning state and machine protocols.
 
-A direct `invoke: { ... }` object is also supported when its lifecycle handlers
-do not need source-derived context. Reuse one exported
-`Machine.child(id, machine)` descriptor for invocation, `sendTo`, and child
-lookup.
+```ts
+const refreshCache = Cache.refresh
+
+machine.handle({
+  Active: {
+    invoke: (from) => [
+      from.effect("refresh-cache", () => refreshCache).onDone((to) => to.none).onFailure((to) => to.none),
+      from.timer("expire-session", "5 minutes").onDone((to) => to.full.Expired())
+    ]
+  }
+})
+```
 
 `onDone` is required for a non-`never` output, and `onFailure` is required for a
-non-`never` typed error; each handler is omitted when its channel is `never`.
-Defects, interruption, and source-construction failures terminate the owning
-runtime. Effect sources are always factories evaluated when their state is
-entered. Use `effect: () => Effect.sleep(...)` for a generic Effect, while
-`after` keeps timers explicit and makes static durations visible through
-activity inspection.
+non-`never` typed error. Streams additionally require `onElement` when their
+element channel is non-`never` and always require `onDone`; logic and child
+chains optionally expose `onSnapshot`. A handled method disappears from the
+next builder step, so every reachable lifecycle channel is handled exactly
+once. Defects, interruption, and source-construction failures terminate the
+owning runtime. Effect sources are factories evaluated when their state is
+entered. Use an Effect containing `Effect.sleep(...)` for generic work, while
+`from.timer(...)` keeps timer intent explicit and makes static durations visible
+through activity inspection.
 
 ## Reactivity
 

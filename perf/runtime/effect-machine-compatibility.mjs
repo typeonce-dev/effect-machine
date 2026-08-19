@@ -9,7 +9,8 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   // The legacy process constructor takes `(initial, transition)`. The static
   // definition constructor is deliberately unary and returns its config.
   const hasStaticTransitions = typeof Machine.transition === "function" && Machine.transition.length === 1
-  const hasFluentTransitions = !hasStaticTransitions && typeof Machine.invoke === "function"
+  const hasFluentTransitions = !hasStaticTransitions && typeof Machine.invokeMachine !== "function"
+  const hasFluentInvocations = typeof Machine.invoke !== "function" && typeof Machine.invokeMachine !== "function"
   const hasValueSelectors = hasFluentTransitions && Machine.targetless === undefined
   const targetless = ({ target }) => typeof target.none === "function" ? target.none() : undefined
   const selectInstruction = (selection) => typeof selection === "function" ? selection() : selection
@@ -61,7 +62,17 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       : hasStaticTransitions || hasFluentTransitions
       ? { target: Machine.targetless }
       : targetless,
-    invokeChild: typeof Machine.invokeMachine === "function"
+    invokeChild: hasFluentInvocations
+      ? (config) => (from) => {
+        let invoked = config.input === undefined
+          ? from.child(config.child)
+          : from.child(config.child, { input: config.input })
+        if (config.onSnapshot !== undefined) invoked = invoked.onSnapshot(config.onSnapshot)
+        if (config.onDone !== undefined) invoked = invoked.onDone(config.onDone)
+        if (config.onFailure !== undefined) invoked = invoked.onFailure(config.onFailure)
+        return invoked
+      }
+      : typeof Machine.invokeMachine === "function"
       ? ({ onSnapshot, onFailure, ...config }) => {
         if (onFailure !== undefined) {
           throw new Error("The legacy child invocation API cannot handle failures as parent transitions")

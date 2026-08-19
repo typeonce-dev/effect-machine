@@ -54,6 +54,7 @@ const TypeId = "~effect/Machine"
 const ParentTypeId = "~effect/Machine/Parent"
 export const InvokeTypeId: unique symbol = Symbol.for("effect/Machine/Invoke")
 export const TransitionTypeId: unique symbol = Symbol.for("effect/Machine/Transition")
+const InvokeBuilderDescriptorTypeId: unique symbol = Symbol("effect/Machine/InvokeBuilderDescriptor")
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type IsAny<A> = 0 extends 1 & A ? true : false
 type MachineRuntimeRequirement = internalRuntime.MachineRuntime
@@ -788,20 +789,75 @@ const captureEventHandlers = (
   return captured
 }
 
+interface InvokeBuilderDescriptor {
+  readonly [InvokeBuilderDescriptorTypeId]: typeof InvokeBuilderDescriptorTypeId
+  readonly config: Readonly<Record<PropertyKey, unknown>>
+}
+
+type InvokeBuilderChannel = "onDone" | "onFailure" | "onElement" | "onSnapshot"
+
+const makeInvokeBuilder = (
+  config: Readonly<Record<PropertyKey, unknown>>,
+  channels: ReadonlyArray<InvokeBuilderChannel>
+): InvokeBuilderDescriptor => {
+  const builder: Record<PropertyKey, unknown> = {
+    [InvokeBuilderDescriptorTypeId]: InvokeBuilderDescriptorTypeId as typeof InvokeBuilderDescriptorTypeId,
+    config
+  }
+  for (const channel of channels) {
+    if (!hasProperty(config, channel)) {
+      builder[channel] = (handler: unknown) => makeInvokeBuilder({ ...config, [channel]: handler }, channels)
+    }
+  }
+  return Object.freeze(builder) as unknown as InvokeBuilderDescriptor
+}
+
+const invokeSelector = Object.freeze({
+  effect: (id: string, effect: unknown) => makeInvokeBuilder({ id, effect }, ["onDone", "onFailure"]),
+  stream: (id: string, stream: unknown) => makeInvokeBuilder({ id, stream }, ["onElement", "onDone", "onFailure"]),
+  timer: (id: string, after: unknown) => makeInvokeBuilder({ id, after }, ["onDone"]),
+  logic: (id: string, options: Readonly<Record<PropertyKey, unknown>>) =>
+    makeInvokeBuilder({ id, ...options }, ["onSnapshot", "onDone", "onFailure"]),
+  child: (child: unknown, options?: Readonly<Record<PropertyKey, unknown>>) =>
+    makeInvokeBuilder(options === undefined ? { child } : { child, ...options }, [
+      "onSnapshot",
+      "onDone",
+      "onFailure"
+    ])
+})
+
+const invokeBuilderConfig = (value: unknown, path: string): Readonly<Record<PropertyKey, unknown>> => {
+  if (
+    typeof value !== "object" || value === null ||
+    !hasProperty(value, InvokeBuilderDescriptorTypeId) ||
+    value[InvokeBuilderDescriptorTypeId] !== InvokeBuilderDescriptorTypeId
+  ) {
+    throw new Error(`Machine invocation for state "${path}" must be constructed from its source selector`)
+  }
+  return (value as unknown as InvokeBuilderDescriptor).config
+}
+
 const captureInvokeDefinition = (
   invoke: unknown,
   stateNodes: Machine.StateNodes,
   path: string
 ): unknown => {
-  if (Array.isArray(invoke)) return invoke.map((item) => captureInvokeDefinition(item, stateNodes, path))
-  if (typeof invoke !== "object" || invoke === null) return invoke
-  const captured = { ...(invoke as Record<PropertyKey, unknown>) }
-  for (const key of ["onElement", "onDone", "onFailure", "onSnapshot"] as const) {
-    if (captured[key] !== undefined) {
-      captured[key] = captureTransition(captured[key], stateNodes, path, key)
-    }
+  if (typeof invoke !== "function") {
+    throw new Error(`Machine invocation for state "${path}" must be a source-first callback`)
   }
-  return captured
+  const authored = invoke(invokeSelector)
+  const definitions = Array.isArray(authored) ? authored : [authored]
+  const capturedDefinitions = definitions.map((definition) => {
+    const captured = { ...invokeBuilderConfig(definition, path) }
+    for (const key of ["onElement", "onDone", "onFailure", "onSnapshot"] as const) {
+      if (captured[key] !== undefined) {
+        captured[key] = captureTransition(captured[key], stateNodes, path, key)
+      }
+    }
+    return captured
+  })
+  if (Array.isArray(authored)) return capturedDefinitions
+  return capturedDefinitions[0]
 }
 
 const flattenHandlers = (

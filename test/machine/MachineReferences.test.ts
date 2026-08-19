@@ -269,7 +269,7 @@ describe("machine reference event channels", () => {
         initial: (to) => to.Awaiting().resolve(({ target }) => target(new Awaiting({})))
       }).handle({
         Awaiting: {
-          invoke: Machine.invoke({ child: Child }),
+          invoke: (from) => from.child(Child),
           on: {
             ChildReported: (to) =>
               to.full.Finished().resolve(({ target }) => target(new Finished({ source: "parent event" }))),
@@ -289,7 +289,7 @@ describe("machine reference event channels", () => {
       assert.strictEqual(yield* parent.join, "parent event")
     }))
 
-  it.effect("types and delivers parent input from a Machine.invoke source", () =>
+  it.effect("types and delivers parent input from an invocation source", () =>
     Effect.gen(function*() {
       class ChildIdle extends Schema.TaggedClass<ChildIdle>("BoundInvokeChildIdle")("ChildIdle", {}) {}
       class ParentWaiting extends Schema.TaggedClass<ParentWaiting>("BoundInvokeParentWaiting")(
@@ -309,12 +309,9 @@ describe("machine reference event channels", () => {
       })
       const childMachine = childDefinition.handle({
         ChildIdle: {
-          invoke: Machine.invoke({
-            id: "notify-ready",
-            effect: ({ parent }) => parent.send(ParentEvents.ChildReady()),
-            onDone: (to) => to.none,
-            onFailure: (to) => to.none
-          })
+          invoke: (from) =>
+            from.effect("notify-ready", ({ parent }) => parent.send(ParentEvents.ChildReady())).onDone((to) => to.none)
+              .onFailure((to) => to.none)
         }
       })
       assert.strictEqual(childMachine.parent?.mode, "required")
@@ -329,10 +326,7 @@ describe("machine reference event channels", () => {
         initial: (to) => to.ParentWaiting().resolve(({ target }) => target(new ParentWaiting({})))
       }).handle({
         ParentWaiting: {
-          invoke: Machine.invoke({
-            child: Child,
-            onFailure: (to) => to.none
-          }),
+          invoke: (from) => from.child(Child).onFailure((to) => to.none),
           on: {
             ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
           }

@@ -8,22 +8,20 @@ interface User {
 
 const invoked = machine.handle({
   Loading: {
-    invoke: Machine.invoke({
-      id: "load-user",
-      effect: ({ state }) => loadUser(state.userId),
-      onDone: (to) =>
+    invoke: (from) =>
+      from.effect("load-user", ({ state }) => loadUser(state.userId)).onDone((to) =>
         to.none.resolve(({ output }) => {
           const user: User = output
           void user
           return undefined
-        }),
-      onFailure: (to) =>
+        })
+      ).onFailure((to) =>
         to.none.resolve(({ error }) => {
           const loadError: LoadError = error
           void loadError
           return undefined
         })
-    })
+      )
   }
 })
 

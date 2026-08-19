@@ -138,7 +138,7 @@ describe("AtomMachine", () => {
       initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
     }).handle({
       Idle: {
-        invoke: Machine.invoke({ child: Child })
+        invoke: (from) => from.child(Child)
       }
     })
     const child = AtomMachine.make(parentMachine).child(Child)
@@ -182,7 +182,7 @@ describe("AtomMachine", () => {
       initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
     }).handle({
       Idle: {
-        invoke: Machine.invoke({ child: Child })
+        invoke: (from) => from.child(Child)
       }
     })
     const parent = AtomMachine.make(parentMachine)

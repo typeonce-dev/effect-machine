@@ -101,17 +101,11 @@ const invokedMachine = Machine.make({
   initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
 }).handle({
   counter: {
-    invoke: [
-      Machine.invoke({
-        id: "first",
-        effect: () => Effect.succeed(1),
-        onDone: (to) => to.none
-      }),
-      Machine.invoke({
-        id: "second",
-        effect: () => Effect.succeed(2),
-        onDone: (to) => to.none
-      })
+    invoke: (
+      from
+    ) => [
+      from.effect("first", () => Effect.succeed(1)).onDone((to) => to.none),
+      from.effect("second", () => Effect.succeed(2)).onDone((to) => to.none)
     ]
   }
 })

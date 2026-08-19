@@ -94,11 +94,7 @@ const definition = Machine.make({
 })
 const machine = definition.handle({
   Idle: {
-    invoke: Machine.invoke({
-      id: "deep-inline-invoke",
-      effect: () => Effect.asVoid(ExternalService),
-      onDone: (to) => to.none
-    }),
+    invoke: (from) => from.effect("deep-inline-invoke", () => Effect.asVoid(ExternalService)).onDone((to) => to.none),
     on: {
       Begin: (to) =>
         to.full.Ready().resolve(({ target }) =>
@@ -127,11 +123,8 @@ const machine = definition.handle({
             }
           },
           Saving: {
-            invoke: Machine.invoke({
-              child: Child,
-              input: ({ state }) => ({ value: state.value }),
-              onDone: (to) => to.none
-            }),
+            invoke: (from) =>
+              from.child(Child, { input: ({ state }) => ({ value: state.value }) }).onDone((to) => to.none),
             on: {
               ChildNotice: (to) =>
                 to.local.Saving().resolve(({ event, target }, enqueue) => {
