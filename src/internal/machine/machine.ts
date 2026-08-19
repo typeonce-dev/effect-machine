@@ -139,6 +139,7 @@ const makeWithHandlers = (
 type DefinitionBranch = {
   readonly target: (selector: unknown) => unknown
   readonly resolve?: (context: any, enqueue: unknown) => unknown
+  readonly declinable?: boolean
 }
 
 type CapturedBranch = DefinitionBranch & {
@@ -352,7 +353,14 @@ const runCapturedBranch = (
   const resolverContext = { ...context }
   if (branch.selection.kind === "none") delete resolverContext.target
   else resolverContext.target = selectedTarget
+  if (branch.declinable === true) resolverContext.decline = Topology.makeDeclined
   const resolved = branch.resolve(resolverContext, enqueue)
+  if (Topology.isDeclined(resolved)) {
+    if (branch.declinable !== true) {
+      throw new Error(`Machine transition for state "${source}" returned decline without declaring declinable: true`)
+    }
+    return resolved
+  }
   validateResolvedSelection(resolved, branch.selection, stateNodes)
   return resolved === undefined ? constructSelectedTarget(selectedTarget) : resolved
 }
@@ -485,6 +493,7 @@ const captureTransition = (
   const definition = transition as Record<PropertyKey, unknown>
   const selector = makeTargetSelector(stateNodes, path)
   const reenter = definition.reenter === true
+  const declinable = definition.declinable === true
   if (hasProperty(definition, "branches")) {
     const branching = definition as { readonly branches: unknown; readonly resolve?: unknown }
     if (typeof branching.branches !== "function" || typeof branching.resolve !== "function") {
@@ -499,7 +508,18 @@ const captureTransition = (
       const resolverContext = { ...context }
       delete resolverContext.target
       resolverContext.select = makeBranchSelectors(context, branches, owner, stateNodes, path)
+      if (declinable) resolverContext.decline = Topology.makeDeclined
       const selected = resolve(resolverContext, enqueue)
+      if (Topology.isDeclined(selected)) {
+        if (!declinable) {
+          throw new Error(
+            `Machine branching transition for state "${path}" on "${
+              String(trigger)
+            }" returned decline without declaring declinable: true`
+          )
+        }
+        return { result: selected, branchIndex: -1, branchKey: undefined }
+      }
       if (!Topology.isSelectedBranch(selected) || selected.owner !== owner) {
         throw new Error(
           `Machine branching transition for state "${path}" on "${String(trigger)}" must select one declared branch`
@@ -518,6 +538,7 @@ const captureTransition = (
     }
     return {
       reenter,
+      declinable,
       targets: [
         ...new Set(
           branches.flatMap((branch) => branch.selection.path === undefined ? [] : [branch.selection.path])
@@ -544,6 +565,7 @@ const captureTransition = (
   })
   return {
     reenter,
+    declinable,
     targets: branch.selection.path === undefined ? [] : [branch.selection.path],
     branches: [{
       type: "direct" as const,

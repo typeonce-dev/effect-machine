@@ -1337,6 +1337,51 @@ describe("Machine", () => {
       }
     })
 
+    machine.handle({
+      down: {
+        on: {
+          SignIn: Machine.transition({
+            declinable: true,
+            branches: (to) => ({
+              accepted: { target: to.full.down() },
+              consumed: { target: to.none() }
+            }),
+            resolve: (context) => {
+              expect(context.decline()).type.toBe<Machine.Machine.Declined>()
+              if (context.event.userId === "decline") return context.decline()
+              if (context.event.userId === "consume") return context.select.consumed()
+              return context.select.accepted(new Down({}))
+            }
+          })
+        }
+      }
+    })
+
+    machine.handle({
+      down: {
+        on: {
+          SignIn: Machine.transition({
+            target: (to) => to.none(),
+            resolve: (context) => {
+              expect(context).type.not.toHaveProperty("decline")
+              return undefined
+            }
+          })
+        }
+      }
+    })
+
+    const declined = null as unknown as Machine.Machine.Declined
+    expect(Machine.transition).type.not.toBeCallableWith({
+      target: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => to.none(),
+      resolve: () => declined
+    })
+    expect(Machine.transition).type.not.toBeCallableWith({
+      declinable: true as boolean,
+      target: (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => to.none(),
+      resolve: () => declined
+    })
+
     const target = (to: Machine.Machine.TargetSelector<typeof UpStates.states, "down">) => to.none()
     type BranchesInput = Machine.Machine.TransitionBranchesInput<
       typeof UpStates.states,

@@ -3306,6 +3306,7 @@ export declare namespace Machine {
     readonly source: SourcePath
     readonly trigger: TransitionTrigger<EventTag>
     readonly reenter: boolean
+    readonly acceptance: TransitionAcceptance
     readonly branches: ReadonlyArray<TransitionBranch<TargetPath>>
   }
 
@@ -4183,6 +4184,24 @@ export declare namespace Machine {
   export interface NoTarget {
     readonly [Topology.NoTargetTypeId]: typeof Topology.NoTargetTypeId
   }
+
+  /**
+   * Opaque result returned when a declinable transition does not accept the
+   * current event or lifecycle outcome.
+   *
+   * Declining selects no transition and discards operations enqueued by that
+   * resolver. Hierarchical event and eventless dispatch continues with the
+   * next eligible ancestor candidate.
+   *
+   * @category models
+   * @since 0.17.0
+   */
+  export interface Declined {
+    readonly [Topology.DeclinedTypeId]: typeof Topology.DeclinedTypeId
+  }
+
+  /** Static acceptance contract of one transition definition. */
+  export type TransitionAcceptance = "required" | "declinable"
 
   /**
    * Transition instruction that restores a history pseudo-state's parent.
@@ -5172,17 +5191,20 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<States>,
     Context,
-    Reenter extends boolean
+    Reenter extends boolean,
+    Acceptance extends TransitionAcceptance = "required"
   > {
     readonly [TransitionTypeId]: {
       readonly owner: Types.Covariant<readonly [States, Events, Emits, StateId, Context]>
+      readonly acceptance: Types.Covariant<Acceptance>
     }
   }
 
   /** Type evidence for a targetless transition reusable in every owning context. */
-  export interface TargetlessTransitionTyped {
+  export interface TargetlessTransitionTyped<Acceptance extends TransitionAcceptance = "required"> {
     readonly [TransitionTypeId]: {
       readonly targetless: true
+      readonly acceptance: Types.Covariant<Acceptance>
     }
   }
 
@@ -5193,11 +5215,12 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<States>,
     Context,
-    Reenter extends boolean = false
+    Reenter extends boolean = false,
+    Acceptance extends TransitionAcceptance = "required"
   > =
     & (
-      | TransitionTyped<States, Events, Emits, StateId, Context, Reenter>
-      | TargetlessTransitionTyped
+      | TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
+      | TargetlessTransitionTyped<Acceptance>
       | TargetlessTransitionInput<Events, Emits, Context>
     )
     & {
@@ -5227,6 +5250,7 @@ export declare namespace Machine {
     readonly resolve?: TargetlessTransitionResolver<Events, Emits, Context>
     readonly branches?: never
     readonly reenter?: never
+    readonly declinable?: false
   }
 
   export type SelectionBuilder<Selection> = Selection extends TargetSelection<infer Builder, any, any> ? Builder : never
@@ -5245,6 +5269,11 @@ export declare namespace Machine {
   > =
     & Omit<Context, "target">
     & (SelectionKind<Selection> extends "none" ? {} : { readonly target: SelectionBuilder<Selection> })
+
+  /** Context capability available only to explicitly declinable resolvers. */
+  export interface DeclineCapability {
+    readonly decline: () => Declined
+  }
 
   export type TransitionResolver<
     Events extends ReadonlyArray<TaggedSchema>,
@@ -5269,6 +5298,35 @@ export declare namespace Machine {
     readonly resolve?: TransitionResolver<Events, Emits, Context, Selection>
     readonly branches?: never
     readonly reenter?: Reenter
+    readonly declinable?: false
+  }
+
+  export type DeclinableTransitionResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context,
+    Selection
+  > = (
+    context: TransitionResolveContext<Context, Selection> & DeclineCapability,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) =>
+    | (SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined)
+    | Declined
+
+  export type DeclinableTransitionDirectInput<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, any>
+  > = {
+    readonly target: (to: TargetSelector<States, StateId>) => Selection
+    readonly resolve: DeclinableTransitionResolver<Events, Emits, Context, Selection>
+    readonly branches?: never
+    readonly reenter?: Reenter
+    readonly declinable: true
   }
 
   /** One named destination declared by a branching transition. */
@@ -5357,6 +5415,33 @@ export declare namespace Machine {
     readonly branches: (to: TargetSelector<States, StateId>) => Branches
     readonly resolve: TransitionBranchesResolver<Events, Emits, Context, Branches>
     readonly reenter?: Reenter
+    readonly declinable?: false
+  }
+
+  export type DeclinableTransitionBranchesResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context,
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
+  > = (
+    context: TransitionBranchesResolveContext<Context, Branches> & DeclineCapability,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) => BranchSelectionResult<Branches> | Declined
+
+  export type DeclinableTransitionBranchesInput<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
+  > = {
+    readonly target?: never
+    readonly branches: (to: TargetSelector<States, StateId>) => Branches
+    readonly resolve: DeclinableTransitionBranchesResolver<Events, Emits, Context, Branches>
+    readonly reenter?: Reenter
+    readonly declinable: true
   }
 
   export type InvokeTransition<
@@ -5365,7 +5450,7 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     StateId extends StateNodeIdentifier<States>,
     Context
-  > = TransitionConfig<States, Events, Emits, StateId, Context, true>
+  > = TransitionConfig<States, Events, Emits, StateId, Context, true, TransitionAcceptance>
 
   export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
 
@@ -6011,14 +6096,18 @@ export declare namespace Machine {
       Events,
       Emits,
       StateId,
-      AlwaysContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+      AlwaysContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
+      false,
+      TransitionAcceptance
     >
     readonly onDone?: TransitionConfig<
       States,
       Events,
       Emits,
       StateId,
-      DoneContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
+      DoneContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
+      false,
+      TransitionAcceptance
     >
     readonly on?: {
       readonly [EventTag in TagOf<Events[number]>]?: TransitionConfig<
@@ -6027,7 +6116,8 @@ export declare namespace Machine {
         Emits,
         StateId,
         HandlerContext<States, Events, Emits, StateId, EventTag, E, R, InputEvents, ParentEvents>,
-        true
+        true,
+        TransitionAcceptance
       >
     }
     readonly initialize?: StateInitializeHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
@@ -7022,7 +7112,8 @@ export declare namespace Machine {
         Emits,
         StateId,
         HandlerContext<States, Events, Emits, StateId, EventTag, E, R>,
-        true
+        true,
+        TransitionAcceptance
       >
     >
   >
@@ -7056,14 +7147,18 @@ export declare namespace Machine {
       Events,
       Emits,
       StateId,
-      AlwaysContext<States, Events, Emits, StateId>
+      AlwaysContext<States, Events, Emits, StateId>,
+      false,
+      TransitionAcceptance
     >
     readonly onDone?: TransitionConfig<
       States,
       Events,
       Emits,
       StateId,
-      DoneContext<States, Events, Emits, StateId>
+      DoneContext<States, Events, Emits, StateId>,
+      false,
+      TransitionAcceptance
     >
     readonly output?:
       | ((context: FinalOutputContext<States, Events, StateId>) => unknown)
@@ -7964,10 +8059,32 @@ type BranchingTransitionResult<
   StateId extends Machine.StateNodeIdentifier<States>,
   Context,
   Reenter extends boolean,
-  Branches extends Readonly<Record<string, Machine.TransitionBranchInput>>
+  Branches extends Readonly<Record<string, Machine.TransitionBranchInput>>,
+  Acceptance extends Machine.TransitionAcceptance = "required"
 > =
-  & Machine.TransitionBranchesInput<States, Events, Emits, StateId, Context, Reenter, Branches>
-  & Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter>
+  & (Acceptance extends "declinable" ? Machine.DeclinableTransitionBranchesInput<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      Branches
+    >
+    : Machine.TransitionBranchesInput<States, Events, Emits, StateId, Context, Reenter, Branches>)
+  & Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
+
+type DirectTransitionEvidence<
+  States extends Machine.StateSchemas,
+  Events extends ReadonlyArray<Machine.TaggedSchema>,
+  Emits extends ReadonlyArray<Machine.TaggedSchema>,
+  StateId extends Machine.StateNodeIdentifier<States>,
+  Context,
+  Reenter extends boolean,
+  Selection,
+  Acceptance extends Machine.TransitionAcceptance
+> = Machine.SelectionKind<Selection> extends "none" ? Machine.TargetlessTransitionTyped<Acceptance>
+  : Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
 
 type TransitionBranchRecordError<Message extends string, Key extends PropertyKey = never> = {
   readonly "~effect/Machine/TransitionBranchRecordError": Message
@@ -8000,11 +8117,53 @@ export interface TransitionConstructor {
     const Selection extends Machine.TargetSelection<any, any, any>,
     Reenter extends boolean = never
   >(
+    config: Machine.DeclinableTransitionDirectInput<States, Events, Emits, StateId, Context, Reenter, Selection>
+  ):
+    & Machine.DeclinableTransitionDirectInput<States, Events, Emits, StateId, Context, Reenter, Selection>
+    & DirectTransitionEvidence<States, Events, Emits, StateId, Context, Reenter, Selection, "declinable">
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    StateId extends Machine.StateNodeIdentifier<States>,
+    Context,
+    const Selection extends Machine.TargetSelection<any, any, any>,
+    Reenter extends boolean = never
+  >(
     config: Machine.TransitionDirectInput<States, Events, Emits, StateId, Context, Reenter, Selection>
   ):
     & Machine.TransitionDirectInput<States, Events, Emits, StateId, Context, Reenter, Selection>
-    & (Machine.SelectionKind<Selection> extends "none" ? Machine.TargetlessTransitionTyped
-      : Machine.TransitionTyped<States, Events, Emits, StateId, Context, Reenter>)
+    & DirectTransitionEvidence<States, Events, Emits, StateId, Context, Reenter, Selection, "required">
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    StateId extends Machine.StateNodeIdentifier<States>,
+    Context,
+    const Branches extends Readonly<Record<string, Machine.TransitionBranchInput>>,
+    Reenter extends boolean = never
+  >(
+    config:
+      & Machine.DeclinableTransitionBranchesInput<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        Branches
+      >
+      & ValidateTransitionBranchRecord<NoInfer<Branches>>
+  ): BranchingTransitionResult<
+    States,
+    Events,
+    Emits,
+    StateId,
+    Context,
+    Reenter,
+    Branches,
+    "declinable"
+  >
   <
     const States extends Machine.StateSchemas,
     const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -8059,6 +8218,14 @@ export interface TransitionConstructor {
  *   resolve: ({ event, select }) => event.cached
  *     ? select.cached.from({ data: event.cached })
  *     : select.loading.from()
+ * })
+ *
+ * Machine.transition({
+ *   declinable: true,
+ *   target: (to) => to.full.Ready(),
+ *   resolve: ({ event, target, decline }) => event.accepted
+ *     ? target.from()
+ *     : decline()
  * })
  * ```
  *
@@ -8899,7 +9066,8 @@ export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.I
  * Event handlers retain their handler-key order within each source state and
  * are followed by eventless and completion handlers. This function does not
  * execute resolvers. Every direct, named, and targetless branch exposes the
- * destination selected by its required static `target` declaration.
+ * destination selected by its required static `target` declaration, while
+ * `acceptance` reports whether the resolver may decline the transition.
  *
  * @category getters
  * @since 0.4.0
@@ -8952,7 +9120,12 @@ export const configuration: <M extends Machine.Any>(
 > = internal.configuration
 
 /**
- * Returns the event tags handled by the current state snapshot.
+ * Returns event tags with at least one structurally eligible handler in the
+ * current state snapshot.
+ *
+ * A `declinable` handler may still reject a concrete event at planning time,
+ * so this is a static candidate query rather than a guarantee that every value
+ * with the returned tag will be handled.
  *
  * @category getters
  * @since 0.4.0

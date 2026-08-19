@@ -243,6 +243,7 @@ describe("Machine structural visualization", () => {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Start" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "application.workflow.running",
@@ -253,6 +254,7 @@ describe("Machine structural visualization", () => {
         source: "application.workflow.idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: undefined,
@@ -263,6 +265,7 @@ describe("Machine structural visualization", () => {
         source: "application.connection.online",
         trigger: { type: "event", event: "Disconnect" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "application.connection.offline",
@@ -295,6 +298,7 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "event", event: "Refresh" },
         reenter: true,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: undefined,
@@ -305,6 +309,7 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "always" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: undefined,
@@ -315,6 +320,7 @@ describe("Machine structural visualization", () => {
         source: "idle",
         trigger: { type: "done" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: undefined,
@@ -336,6 +342,7 @@ describe("Machine structural visualization", () => {
           source: "idle",
           trigger: { type: "always" },
           reenter: false,
+          acceptance: "required",
           branches: [{
             type: "direct",
             target: "workflow",
@@ -346,6 +353,7 @@ describe("Machine structural visualization", () => {
           source: "workflow",
           trigger: { type: "done" },
           reenter: false,
+          acceptance: "required",
           branches: [{
             type: "direct",
             target: "disabled",

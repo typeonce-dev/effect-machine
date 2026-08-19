@@ -45,7 +45,9 @@ const triggerLabel = (definition: TransitionDefinition): string => {
     definition.trigger.type === "invoke" ?
     `invoke ${definition.trigger.id} ${definition.trigger.outcome}` :
     definition.trigger.type
-  return `${trigger}${definition.reenter ? " [reenter]" : ""}`
+  return `${trigger}${definition.reenter ? " [reenter]" : ""}${
+    definition.acceptance === "declinable" ? " [declinable]" : ""
+  }`
 }
 
 const branchLabel = (

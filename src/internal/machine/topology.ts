@@ -25,6 +25,8 @@ export const ChoiceTargetTypeId: unique symbol = Symbol("effect/Machine/ChoiceTa
 
 export const NoTargetTypeId: unique symbol = Symbol("effect/Machine/NoTarget")
 
+export const DeclinedTypeId: unique symbol = Symbol("effect/Machine/Declined")
+
 export const TargetSelectionTypeId: unique symbol = Symbol("effect/Machine/TargetSelection")
 
 export const SelectedBranchTypeId: unique symbol = Symbol("effect/Machine/SelectedBranch")
@@ -64,6 +66,11 @@ export interface ChoiceTarget {
 /** Internal marker returned by an explicitly targetless transition. */
 export interface NoTarget {
   readonly [NoTargetTypeId]: typeof NoTargetTypeId
+}
+
+/** Internal marker returned when a declinable transition is not enabled. */
+export interface Declined {
+  readonly [DeclinedTypeId]: typeof DeclinedTypeId
 }
 
 export type TargetSelectionKind = "state" | "initial" | "history" | "choice" | "none"
@@ -124,6 +131,14 @@ const noTarget = Object.freeze({
 export const makeNoTarget = (): Machine.NoTarget => noTarget
 
 export const isNoTarget = (u: unknown): u is Machine.NoTarget => hasProperty(u, NoTargetTypeId)
+
+const declined = Object.freeze({
+  [DeclinedTypeId]: DeclinedTypeId
+}) as Declined
+
+export const makeDeclined = (): Machine.Declined => declined
+
+export const isDeclined = (u: unknown): u is Machine.Declined => hasProperty(u, DeclinedTypeId)
 
 export const makeHistoryTarget = (path: string, parent: string): HistoryTarget => ({
   [HistoryTargetTypeId]: HistoryTargetTypeId,
@@ -441,6 +456,11 @@ const transitionBranches = (handler: unknown): ReadonlyArray<Machine.TransitionB
     ? Array.from(handler.branches as ReadonlyArray<Machine.TransitionBranch>)
     : []
 
+const transitionAcceptance = (handler: unknown): Machine.TransitionAcceptance =>
+  typeof handler === "object" && handler !== null && "declinable" in handler && handler.declinable === true
+    ? "declinable"
+    : "required"
+
 export const transitionDefinitions = (
   machine: Machine.Any
 ): ReadonlyArray<Machine.TransitionDefinition> => {
@@ -457,6 +477,7 @@ export const transitionDefinitions = (
           source: node.path,
           trigger: { type: "choice" },
           reenter: false,
+          acceptance: "required",
           branches: transitionBranches(choice)
         })
       }
@@ -468,6 +489,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "event", event },
         reenter: hasProperty(handler, "reenter") && handler.reenter === true,
+        acceptance: transitionAcceptance(handler),
         branches: transitionBranches(handler)
       })
     }
@@ -476,6 +498,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "always" },
         reenter: false,
+        acceptance: transitionAcceptance(config.always),
         branches: transitionBranches(config.always)
       })
     }
@@ -484,6 +507,7 @@ export const transitionDefinitions = (
         source: node.path,
         trigger: { type: "done" },
         reenter: false,
+        acceptance: transitionAcceptance(config.onDone),
         branches: transitionBranches(config.onDone)
       })
     }
@@ -507,6 +531,7 @@ export const transitionDefinitions = (
             source: node.path,
             trigger: { type: "invoke", id, outcome },
             reenter: typeof handler === "object" && handler !== null && handler.reenter === true,
+            acceptance: transitionAcceptance(handler),
             branches: transitionBranches(handler)
           })
         }

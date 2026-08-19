@@ -28,6 +28,7 @@ const counterMachine = Machine.make({
   count: {
     on: {
       Add: Machine.transition({
+        declinable: true,
         target: (to) => to.full.count(),
         resolve: ({ event, state, target }) => target(new Count({ value: state.value + event.amount })),
         reenter: true
@@ -241,6 +242,8 @@ describe("MachineTest trace coverage", () => {
       const partial = MachineTest.coverage(counterMachine, addTrace)
       assert.strictEqual(partial.events.available, true)
       if (!partial.events.available) return
+      assert.strictEqual(partial.transitions.definitions.hits[0]?.acceptance, "declinable")
+      assert.strictEqual(partial.transitions.branches.hits[0]?.acceptance, "declinable")
       assert.deepStrictEqual(partial.states.activation.misses.map(({ path }) => path), ["done"])
       assert.deepStrictEqual(
         partial.transitions.definitions.misses.map(({ source, trigger }) => ({ source, trigger })),

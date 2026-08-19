@@ -152,6 +152,7 @@ const compileIndexedExecutionDescriptor = (
     for (const tag of Reflect.ownKeys(config.on)) {
       const transition = normalizeTransition(config.on[tag] as Parameters<typeof normalizeTransition>[0])
       if (transition !== undefined) {
+        if (transition.declinable) return undefined
         byEvent.set(tag, transition)
       }
     }

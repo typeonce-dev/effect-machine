@@ -39,8 +39,10 @@ describe("MachineTest coverage and observed graph", () => {
     expect(result.states.activation.hits[0]!.path).type.toBe<"idle" | "done">()
     expect(result.transitions.definitions.hits[0]!.source).type.toBe<"idle" | "done">()
     expect(result.transitions.definitions.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
+    expect(result.transitions.definitions.hits[0]!.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
     expect(result.transitions.branches.hits[0]!.source).type.toBe<"idle" | "done">()
     expect(result.transitions.branches.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
+    expect(result.transitions.branches.hits[0]!.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
     expect(result.transitions.branches.hits[0]!.branch).type.toBe<
       Machine.Machine.TransitionBranch<"idle" | "done">
     >()

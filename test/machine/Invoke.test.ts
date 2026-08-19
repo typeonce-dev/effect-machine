@@ -24,6 +24,38 @@ class FinishStream extends Schema.TaggedClass<FinishStream>("InvokeFinishStream"
 const States = Machine.states({ Idle, Loading, Complete, Failed })
 
 describe("inline invoke", () => {
+  it.effect("ignores an invocation outcome when its transition declines", () =>
+    Effect.gen(function*() {
+      const machine = Machine.make({
+        states: States.states,
+        events: Machine.events(),
+        initial: {
+          target: (to) => to.Loading(),
+          resolve: ({ target }) => target.from()
+        }
+      }).handle({
+        Loading: {
+          invoke: Machine.invoke({
+            id: "load",
+            effect: () => Effect.succeed("ignored"),
+            onDone: Machine.transition({
+              declinable: true,
+              target: (to) => to.full.Complete(),
+              resolve: ({ decline }) => decline()
+            })
+          })
+        },
+        Complete: {},
+        Failed: {},
+        Idle: {}
+      })
+
+      assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.acceptance, "declinable")
+      const ref = yield* Machine.start(machine)
+      for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
+      assert.deepStrictEqual(yield* ref.state, { path: "Loading" as const, value: new Loading({}) })
+    }))
+
   it.effect("handles Stream elements sequentially before completion", () =>
     Effect.gen(function*() {
       const states = Machine.states({ Collecting, Complete })
@@ -66,6 +98,7 @@ describe("inline invoke", () => {
           source: "Collecting",
           trigger: { type: "event", event: "Add" },
           reenter: false,
+          acceptance: "required",
           branches: [{
             type: "direct",
             target: "Collecting",
@@ -76,6 +109,7 @@ describe("inline invoke", () => {
           source: "Collecting",
           trigger: { type: "invoke", id: "numbers", outcome: "element" },
           reenter: false,
+          acceptance: "required",
           branches: [{
             type: "direct",
             target: undefined,
@@ -86,6 +120,7 @@ describe("inline invoke", () => {
           source: "Collecting",
           trigger: { type: "invoke", id: "numbers", outcome: "done" },
           reenter: false,
+          acceptance: "required",
           branches: [{
             type: "direct",
             target: "Complete",
@@ -257,6 +292,7 @@ describe("inline invoke", () => {
         source: "Loading",
         trigger: { type: "invoke", id: "load", outcome: "done" },
         reenter: false,
+        acceptance: "required",
         branches: [{
           type: "direct",
           target: "Complete",

@@ -1703,6 +1703,7 @@ export interface TransitionDefinitionCoverageItem<
   readonly source: SourcePath
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
+  readonly acceptance: Machine.Machine.TransitionAcceptance
   readonly branches: ReadonlyArray<Machine.Machine.TransitionBranch<TargetPath>>
 }
 
@@ -1725,6 +1726,7 @@ export interface TransitionBranchCoverageItem<
   readonly source: SourcePath
   readonly trigger: Machine.Machine.TransitionTrigger<EventTag>
   readonly reenter: boolean
+  readonly acceptance: Machine.Machine.TransitionAcceptance
   readonly branch: Machine.Machine.TransitionBranch<TargetPath>
 }
 
