@@ -34,7 +34,7 @@ import { makeTransitionCoverageCollector } from "./transitionCoverage.js"
 
 type AnyMachine = Machine.Machine.Any
 
-type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>["Type"]
+type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>
 
 type ReadyMachine<M extends AnyMachine> =
   & M

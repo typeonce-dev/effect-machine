@@ -122,7 +122,7 @@ export const interpretModel: (model: FiniteModel, events: ReadonlyArray<string>)
 
 type AnyMachine = Machine.Machine.Any
 
-type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>["Type"]
+type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>
 
 type StatePath<M extends AnyMachine> = Machine.Machine.StateIdentifier<Machine.Machine.States<M>>
 
@@ -151,7 +151,7 @@ type RootReadyMachine<M extends AnyMachine> =
  * @category models
  * @since 0.4.0
  */
-export type Scenario<M extends AnyMachine> = Machine.Machine.Input<M> extends typeof Schema.Void ? {
+export type Scenario<M extends AnyMachine> = Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
     readonly events: ReadonlyArray<Machine.Machine.InputEvent<M>>
   }
   : {
@@ -174,7 +174,7 @@ export type ScenarioOptions<M extends AnyMachine> =
     readonly maxEvents?: number
     readonly eventsArbitrary?: FastCheck.Arbitrary<ReadonlyArray<Machine.Machine.InputEvent<M>>>
   }
-  & (Machine.Machine.Input<M> extends typeof Schema.Void ? {
+  & (Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
       readonly inputArbitrary?: never
     }
     : {
@@ -1410,7 +1410,7 @@ interface ExploreOptionsBase<M extends AnyMachine, Key extends ExplorationKey> {
  */
 export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = ExplorationKey> =
   & ExploreOptionsBase<M, Key>
-  & (Machine.Machine.Input<M> extends typeof Schema.Void ? {
+  & (Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
       readonly input?: never
     }
     : {

@@ -25,7 +25,10 @@ const complete = machine.handle({
   }
 })
 
-type InputIsExact = Expect<Equal<Machine.Machine.Input<typeof complete>["Type"], { readonly seed: number }>>
+type InputSchemaIsExact = Expect<
+  Equal<Machine.Machine.InputSchema<typeof complete>["Type"], { readonly seed: number }>
+>
+type InputIsExact = Expect<Equal<Machine.Machine.Input<typeof complete>, { readonly seed: number }>>
 type InputEventIsExact = Expect<Equal<Machine.Machine.InputEvent<typeof complete>, typeof Start.Type>>
 type EventIsExact = Expect<Equal<Machine.Machine.Event<typeof complete>, typeof Start.Type | typeof Loaded.Type>>
 type EmitIsExact = Expect<Equal<Machine.Machine.Emit<typeof complete>, typeof Notice.Type>>
@@ -51,6 +54,7 @@ export type {
   InitialServicesAreExact,
   InputEventIsExact,
   InputIsExact,
+  InputSchemaIsExact,
   OutputIsExact,
   OutputIsNotAny,
   OutputStatesAreExact,

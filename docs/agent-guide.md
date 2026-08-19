@@ -217,6 +217,22 @@ const offeredIfSlot = (
 Do not derive this type with `Parameters<typeof States.get>[0]`; that depends
 on overload order and does not express ownership by the state definition.
 
+The same extractor accepts a machine when that is the object exported at the
+consumer boundary. Use `Value` for a decoded schema-backed state payload and
+`SnapshotAt` for the snapshot rooted at one active path:
+
+```ts
+type Complete = Machine.Snapshot<typeof machine>
+type Session = Machine.Value<typeof States, "root.trading.InSession">
+type Trading = Machine.SnapshotAt<typeof machine, "root.trading">
+```
+
+`Value` accepts only paths that own a schema, matching `States.get`.
+`SnapshotAt` also accepts structural paths, matching `States.getSnapshot`.
+Both reject stale or misspelled paths. Prefer these definition- or
+machine-bound forms over `.cases.Case.Type`, `typeof States.states`, or
+composing `Machine.Machine.States` with raw-tree path extractors.
+
 An active state does not need a schema unless it owns data. Omit `schema` for
 control-only atomic, compound, parallel, and final states:
 
@@ -918,7 +934,13 @@ Use the exported utility types when another API must preserve the boundary:
 ```ts
 type PublicEvent = Machine.Machine.InputEvent<typeof definition>
 type AnyHandledEvent = Machine.Machine.Event<typeof definition>
+type StartupInput = Machine.Machine.Input<typeof definition>
+type StartupInputSchema = Machine.Machine.InputSchema<typeof definition>
 ```
+
+`Input` is the decoded value accepted at startup. It is `never` for a machine
+whose input schema is `Schema.Void`; use `InputSchema` only when an API needs
+the schema object itself.
 
 `MachineRef.send`, `machineAtom.send`, and `Machine.plan` accept decoded public
 events or constructions returned by `Machine.events`. Transition handlers
@@ -931,6 +953,14 @@ distinction.
 Cluster RPC payloads are additionally decoded against the public `events`
 schemas at the transport boundary. Never repeat an `_tag` within a list or
 across both configuration lists.
+
+Do not extract `enqueue`, target builders, transition contexts, command or
+inspection unions, or event-construction `ReturnType`s into application helper
+APIs. Keep commands inside transition resolvers, where the owning state,
+protocols, references, and capabilities are inferred. Likewise, do not add
+Atom `State` or `Event` aliases: selectors infer from their bridge, while
+consumer props use `Snapshot`, `Value`, or `InputEvent` from the exported state
+definition or machine.
 
 ## Recoverable state-scoped work
 

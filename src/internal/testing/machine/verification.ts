@@ -152,7 +152,7 @@ export const interpretModel = ReferenceModel.interpretModel
 
 type AnyMachine = Machine.Machine.Any
 
-type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>["Type"]
+type InputValue<M extends AnyMachine> = Machine.Machine.Input<M>
 
 type StatePath<M extends AnyMachine> = Machine.Machine.StateIdentifier<Machine.Machine.States<M>>
 

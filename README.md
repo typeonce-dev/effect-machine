@@ -122,7 +122,10 @@ Keep one-off topology inline in `Machine.states`. Use `Machine.state` only when
 the same active state definition is mounted more than once; tagged schemas are
 already reusable without it. For repeated finite regions, derive names with
 `States.path(...)` so every literal in the path family is checked against the
-complete tree. Type full-snapshot helpers as `Machine.Snapshot<typeof States>`.
+complete tree. Type full-snapshot helpers as `Machine.Snapshot<typeof States>`
+or `Machine.Snapshot<typeof machine>`, schema-backed state payloads as
+`Machine.Value<typeof States, Path>`, and path-rooted snapshots as
+`Machine.SnapshotAt<typeof States, Path>`.
 
 ### Construct state through builders
 

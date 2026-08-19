@@ -61,4 +61,4 @@ export const SharedMachine = Machine.make({
   }
 })
 
-export type SharedSnapshot = Machine.Machine.Snapshot<typeof SharedMachineStates.states>
+export type SharedSnapshot = Machine.Snapshot<typeof SharedMachineStates>
