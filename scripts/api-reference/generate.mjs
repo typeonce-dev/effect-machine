@@ -115,7 +115,7 @@ const generateDataset = async (config, outputDirectory) => {
     await application.generateJson(project, jsonPath)
 
     const reflection = readJson(jsonPath)
-    const normalized = normalizeApiModule(reflection)
+    const normalized = normalizeApiModule(reflection, module.usageSections, module.referenceSections)
     validateApiDocumentation(module.export, normalized, module.examples)
     if (
       normalized.name.length === 0 ||
@@ -130,6 +130,8 @@ const generateDataset = async (config, outputDirectory) => {
       source: relativePosix(packageDirectory, module.source),
       json: relativePosix(packageOutputDirectory, jsonPath),
       sha256: hashFile(jsonPath),
+      ...(module.usageSections.length === 0 ? {} : { usageSections: module.usageSections }),
+      ...(module.referenceSections.length === 0 ? {} : { referenceSections: module.referenceSections }),
       ...(module.barrel === undefined ? {} : { barrel: module.barrel })
     })
   }
@@ -139,7 +141,7 @@ const generateDataset = async (config, outputDirectory) => {
   const packageSourceUrl = `${repositoryUrl}/tree/${revision}${packageSourcePath === "" ? "" : `/${packageSourcePath}`}`
   const packageManifestOutput = join(packageOutputDirectory, "manifest.json")
   writeJson(packageManifestOutput, {
-    schemaVersion: 4,
+    schemaVersion: 6,
     channel: config.channel,
     name: packageManifest.name,
     version: packageManifest.version,
@@ -178,7 +180,7 @@ export const validateDataset = (outputDirectory) => {
     const packageManifestPath = safeResolve(outputDirectory, packageEntry.manifest)
     const packageManifest = readJson(packageManifestPath)
     if (
-      packageManifest.schemaVersion !== 4 ||
+      packageManifest.schemaVersion !== 6 ||
       packageManifest.channel !== dataset.channel ||
       packageManifest.revision !== dataset.revision ||
       packageManifest.name !== packageEntry.name ||
@@ -197,7 +199,10 @@ export const validateDataset = (outputDirectory) => {
       if (reflection.schemaVersion !== "2.0" || reflection.variant !== "project") {
         throw new Error(`Invalid TypeDoc reflection: ${reflectionPath}`)
       }
-      validateApiDocumentation(module.export, normalizeApiModule(reflection))
+      validateApiDocumentation(
+        module.export,
+        normalizeApiModule(reflection, module.usageSections ?? [], module.referenceSections ?? [])
+      )
     }
   }
   return dataset
@@ -215,7 +220,73 @@ const readConfig = (path) => {
   if (config.modules.some((module) => module.examples !== undefined && !Array.isArray(module.examples))) {
     throw new Error("API reference module examples must be an array")
   }
+  for (const module of config.modules) {
+    validateUsageSections(module)
+    validateReferenceSections(module)
+  }
   return config
+}
+
+const validateReferenceSections = (module) => {
+  if (module.referenceSections === undefined) return
+  if (!Array.isArray(module.referenceSections)) {
+    throw new Error(`Module ${module.export} referenceSections must be an array`)
+  }
+  for (const section of module.referenceSections) {
+    if (
+      typeof section.title !== "string" || section.title.length === 0 ||
+      (section.description !== undefined && typeof section.description !== "string") ||
+      !Array.isArray(section.entries) || section.entries.length === 0
+    ) {
+      throw new Error(`Module ${module.export} has an invalid reference section`)
+    }
+    for (const entry of section.entries) {
+      const declaration = typeof entry.declaration === "string" && entry.declaration.length > 0
+      const reflection = typeof entry.reflection === "string" && entry.reflection.length > 0
+      if (
+        declaration === reflection ||
+        (entry.label !== undefined && typeof entry.label !== "string") ||
+        (entry.kind !== undefined && typeof entry.kind !== "string") ||
+        (entry.owner !== undefined && typeof entry.owner !== "string") ||
+        (entry.ownerKind !== undefined && typeof entry.ownerKind !== "string") ||
+        (entry.usageSections !== undefined && (
+          !Array.isArray(entry.usageSections) ||
+          entry.usageSections.some((title) => typeof title !== "string" || title.length === 0) ||
+          typeof entry.owner !== "string"
+        ))
+      ) {
+        throw new Error(`Module ${module.export} has an invalid reference entry in ${section.title}`)
+      }
+    }
+  }
+}
+
+const validateUsageSections = (module) => {
+  if (module.usageSections === undefined) return
+  if (!Array.isArray(module.usageSections)) throw new Error(`Module ${module.export} usageSections must be an array`)
+  for (const section of module.usageSections) {
+    if (
+      typeof section.owner !== "string" || section.owner.length === 0 ||
+      typeof section.title !== "string" || section.title.length === 0 ||
+      (section.ownerKind !== undefined && typeof section.ownerKind !== "string") ||
+      !Array.isArray(section.roots) || section.roots.length === 0
+    ) {
+      throw new Error(`Module ${module.export} has an invalid usage section`)
+    }
+    for (const root of section.roots) {
+      const reflection = typeof root.reflection === "string" && root.reflection.length > 0
+      const parameter = typeof root.declaration === "string" && root.declaration.length > 0 &&
+        typeof root.parameter === "string" && root.parameter.length > 0
+      if (
+        reflection === parameter ||
+        (root.label !== undefined && typeof root.label !== "string") ||
+        (root.members !== undefined && (!Array.isArray(root.members) || root.members.some((name) => typeof name !== "string"))) ||
+        (root.nested !== undefined && typeof root.nested !== "boolean")
+      ) {
+        throw new Error(`Module ${module.export} has an invalid usage root in ${section.title}`)
+      }
+    }
+  }
 }
 
 const resolveEntry = (packageDirectory, entry) => {
@@ -225,7 +296,9 @@ const resolveEntry = (packageDirectory, entry) => {
     ...entry,
     source,
     outputPath: exportPathToOutputPath(entry.export),
-    examples: entry.examples ?? []
+    examples: entry.examples ?? [],
+    usageSections: entry.usageSections ?? [],
+    referenceSections: entry.referenceSections ?? []
   }
 }
 

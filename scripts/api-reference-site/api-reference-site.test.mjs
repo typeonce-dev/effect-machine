@@ -10,6 +10,7 @@ import {
   parseChangelog,
   parseChangeset,
   renderChangelogPage,
+  renderGuidePage,
   renderIndexPage,
   renderLayout,
   renderMarkdown,
@@ -194,6 +195,156 @@ test("renders collapsible category navigation with declaration anchors", () => {
   assert.match(html, /<h3 id="make">make<\/h3>/)
 })
 
+test("renders declaration-owned usage sections and documented members in the guide", () => {
+  const declaration = {
+    name: "make",
+    kind: "variable",
+    description: "Creates a machine.",
+    examples: [],
+    see: [],
+    usageSections: [{
+      owner: "make",
+      title: "Machine configuration",
+      description: "Parameters accepted by make.",
+      roots: [{
+        label: "Configuration",
+        description: "Complete machine configuration.",
+        examples: [],
+        members: [{
+          name: "id",
+          signature: "readonly id?: string",
+          description: "Stable definition identifier.",
+          sourceUrl: "https://github.com/example/repo/blob/main/src/Machine.ts#L1",
+          examples: [],
+          parameters: [],
+          members: []
+        }]
+      }]
+    }]
+  }
+  const module = {
+    api: {
+      declarationCount: 1,
+      description: "State machine APIs",
+      referenceSections: [{
+        title: "Create the definition",
+        description: "Construct the machine.",
+        entries: [{ origin: { type: "declaration", name: "make", kind: "variable" }, api: declaration }]
+      }],
+      groups: [{ category: "constructors", declarations: [declaration] }]
+    },
+    export: "./Machine",
+    label: "Machine",
+    route: "Machine"
+  }
+  const html = renderGuidePage({ ...site, modules: [module], guideModule: module })
+  assert.doesNotMatch(html, />Machine configuration<\//)
+  assert.match(html, /href="#make-usage-machine-configuration-configuration">Configuration<\/a>/)
+  assert.match(html, /<h4 id="make-usage-machine-configuration-configuration">Configuration<\/h4>/)
+  assert.match(html, /id="make-usage-machine-configuration-configuration-id" aria-labelledby="make-usage-machine-configuration-configuration-id-title"/)
+  assert.match(html, /<h5 id="make-usage-machine-configuration-configuration-id-title">id<\/h5>/)
+  assert.match(html, /<span class="syntax-keyword">readonly<\/span> id/)
+  assert.match(html, /<span class="syntax-type">string<\/span>/)
+  assert.match(html, /Stable definition identifier\./)
+  assert.doesNotMatch(html, />Usage reference</)
+  assert.ok(html.indexOf("id-title") < html.indexOf("Copy id signature"))
+  assert.ok(html.indexOf("Copy id signature") < html.indexOf("Stable definition identifier."))
+  assert.ok(html.indexOf(">Source</") < html.indexOf("Copy id signature"))
+})
+
+test("renders the ordered workflow only in the standalone guide", () => {
+  const states = {
+    name: "states",
+    kind: "variable",
+    description: "Defines state topology.",
+    examples: [],
+    see: [],
+    usageSections: []
+  }
+  const make = {
+    name: "make",
+    kind: "variable",
+    description: "Creates a definition.",
+    examples: [],
+    see: [],
+    usageSections: []
+  }
+  const handlerUsage = {
+    owner: "Definition",
+    ownerKind: "interface",
+    title: "State handler configuration",
+    description: "State-local behavior.",
+    roots: []
+  }
+  const definition = {
+    name: "Definition",
+    kind: "interface",
+    description: "Reusable definition model.",
+    examples: [],
+    see: [],
+    usageSections: [handlerUsage]
+  }
+  const helper = {
+    name: "helper",
+    kind: "function",
+    description: "Supporting helper.",
+    examples: [],
+    see: [],
+    usageSections: []
+  }
+  const handle = {
+    name: "handle",
+    kind: "method",
+    description: "Adds typed state handlers.",
+    examples: [],
+    see: [],
+    usageSections: [handlerUsage]
+  }
+  const module = {
+    api: {
+      declarationCount: 4,
+      description: "State machine APIs",
+      referenceSections: [{
+        title: "Define state topology",
+        description: "Start with the states.",
+        entries: [{ origin: { type: "declaration", name: "states", kind: "variable" }, api: states }]
+      }, {
+        title: "Create the definition",
+        description: "Construct and implement the machine.",
+        entries: [
+          { origin: { type: "declaration", name: "make", kind: "variable" }, api: make },
+          { origin: { type: "reflection", reflection: "Definition.handle" }, api: handle }
+        ]
+      }],
+      groups: [
+        { category: "constructors", declarations: [helper, make, states] },
+        { category: "models", declarations: [definition] }
+      ]
+    },
+    export: "./Machine",
+    label: "Machine",
+    route: "Machine"
+  }
+
+  const guideSite = { ...site, modules: [module], guideModule: module }
+  const guideHtml = renderGuidePage(guideSite)
+  assert.ok(guideHtml.indexOf("Define state topology") < guideHtml.indexOf('id="states"'))
+  assert.ok(guideHtml.indexOf('id="states"') < guideHtml.indexOf("Create the definition"))
+  assert.match(guideHtml, /<h3 id="handle">handle<\/h3>/)
+  assert.doesNotMatch(guideHtml, /id="helper"/)
+  assert.match(guideHtml, /class="navigation-guide is-current"/)
+  assert.ok(guideHtml.indexOf("navigation-changelog") < guideHtml.indexOf("navigation-guide is-current"))
+
+  const moduleHtml = renderModulePage(guideSite, module)
+  assert.match(moduleHtml, /<h3 id="helper">helper<\/h3>/)
+  assert.match(moduleHtml, /<h3 id="make">make<\/h3>/)
+  assert.match(moduleHtml, /<h3 id="states">states<\/h3>/)
+  assert.match(moduleHtml, /<h3 id="definition">Definition<\/h3>/)
+  assert.doesNotMatch(moduleHtml, /Define state topology/)
+  assert.doesNotMatch(moduleHtml, /State handler configuration/)
+  assert.doesNotMatch(moduleHtml, /id="handle"/)
+})
+
 test("renders canonical and social metadata without exposing the internal channel", () => {
   const html = renderLayout(site, {
     content: '<section class="reference-hero"><div class="eyebrow">API reference</div></section>',
@@ -264,11 +415,13 @@ test("keeps the internal Effect channel out of the homepage label", () => {
 
 test("generates manifest, robots, and sitemap URLs from the deployment base", () => {
   const manifest = siteManifest(site)
+  const siteWithGuide = { ...site, guideModule: site.modules[0] }
   assert.equal(manifest.start_url, "/docs/")
   assert.equal(manifest.icons[2].purpose, "maskable")
   assert.match(renderRobots(site), /Sitemap: https:\/\/docs\.example\.com\/docs\/sitemap\.xml/)
   assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/Machine\/<\/loc>/)
   assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/changelog\/<\/loc>/)
+  assert.match(renderSitemap(siteWithGuide), /<loc>https:\/\/docs\.example\.com\/docs\/guide\/<\/loc>/)
 })
 
 test("accepts only pathless HTTPS production origins", () => {

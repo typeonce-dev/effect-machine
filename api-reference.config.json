@@ -25,6 +25,146 @@
       "export": "./Machine",
       "source": "src/Machine.ts",
       "barrel": ".",
+      "referenceSections": [
+        {
+          "title": "Define state topology",
+          "description": "Declare the complete state tree and its schema-backed values before constructing the machine.",
+          "entries": [
+            { "declaration": "states" },
+            { "declaration": "state" }
+          ]
+        },
+        {
+          "title": "Define event protocols",
+          "description": "Describe public input, machine-local events, outward notifications, and parent ownership.",
+          "entries": [
+            { "declaration": "events" },
+            { "declaration": "internalEvents" },
+            { "declaration": "emittedEvents" },
+            { "declaration": "parent" },
+            { "declaration": "optionalParent" }
+          ]
+        },
+        {
+          "title": "Create the definition",
+          "description": "Combine topology and protocols into a reusable machine definition with an explicit initial target.",
+          "entries": [
+            { "declaration": "make" }
+          ]
+        },
+        {
+          "title": "Implement state behavior",
+          "description": "Attach state-local actions, transitions, output, and invoked lifecycles to the definition.",
+          "entries": [
+            {
+              "reflection": "Definition.handle",
+              "label": "handle",
+              "kind": "method",
+              "owner": "Definition",
+              "ownerKind": "interface",
+              "usageSections": [
+                "State handler configuration",
+                "Transition declarations",
+                "Handler and resolver contexts",
+                "State invocation"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Run and observe",
+          "description": "Start or resume an executable machine and subscribe to its state over time.",
+          "entries": [
+            { "declaration": "start" },
+            { "declaration": "resume" },
+            { "declaration": "watch" }
+          ]
+        }
+      ],
+      "usageSections": [
+        {
+          "owner": "states",
+          "title": "State node configuration",
+          "description": "Properties accepted while declaring the state tree passed to `Machine.states`.",
+          "roots": [
+            { "reflection": "Machine.AtomicStateNodeConfig", "label": "Atomic and final states" },
+            { "reflection": "Machine.CompoundStateNodeConfig", "label": "Compound states" },
+            { "reflection": "Machine.ParallelStateNodeConfig", "label": "Parallel states" },
+            { "reflection": "Machine.HistoryStateNodeConfig", "label": "History states" },
+            { "reflection": "Machine.ChoiceStateNodeConfig", "label": "Choice states" },
+            { "reflection": "Machine.StateNodeAnnotations", "label": "Annotations" }
+          ]
+        },
+        {
+          "owner": "make",
+          "title": "Machine definition configuration",
+          "description": "Parameters accepted by `Machine.make` and its initial-state declaration.",
+          "roots": [
+            { "declaration": "make", "parameter": "config", "label": "Configuration" },
+            { "reflection": "Machine.InitialTransitionTarget", "label": "Initial target resolution" }
+          ]
+        },
+        {
+          "owner": "Definition",
+          "ownerKind": "interface",
+          "title": "State handler configuration",
+          "description": "Properties accepted for each state inside `Definition.handle`.",
+          "roots": [
+            { "reflection": "Machine.ActiveStateConfig", "label": "Active states" },
+            { "reflection": "Machine.FinalStateConfig", "label": "Final states" },
+            { "reflection": "Machine.ChoiceStateConfig", "label": "Choice states", "members": ["choice"] },
+            { "reflection": "Machine.HandlerNode", "label": "Nested handler tree", "members": ["states", "history"] },
+            { "reflection": "Machine.OutputHandlerConfig", "label": "Output functions", "members": ["output"] },
+            { "reflection": "Machine.HistoryDefaultEntry", "label": "History defaults" }
+          ]
+        },
+        {
+          "owner": "Definition",
+          "ownerKind": "interface",
+          "title": "Transition declarations",
+          "description": "Target selection, resolution, branching, and commands available to state and invocation transitions.",
+          "roots": [
+            { "reflection": "Machine.TargetSelector", "label": "Target selection" },
+            { "reflection": "Machine.TargetBuilder", "label": "Resolver target construction" },
+            { "reflection": "Machine.TransitionSelector", "label": "Named branch selection", "nested": true },
+            { "reflection": "Machine.TransitionTarget", "label": "Selected target" },
+            { "reflection": "Machine.TransitionBranchInput", "label": "Named branches" },
+            { "reflection": "Machine.DeclineCapability", "label": "Declinable transitions" },
+            { "reflection": "Enqueue", "label": "Enqueued commands" }
+          ]
+        },
+        {
+          "owner": "Definition",
+          "ownerKind": "interface",
+          "title": "Handler and resolver contexts",
+          "description": "Values supplied to state actions, transitions, completion handlers, choices, and output functions.",
+          "roots": [
+            { "reflection": "MachineReferences", "label": "Machine references" },
+            { "reflection": "Machine.HandlerContext", "label": "Event handlers" },
+            { "reflection": "Machine.StateActionContext", "label": "Entry and exit actions" },
+            { "reflection": "Machine.AlwaysContext", "label": "Eventless transitions" },
+            { "reflection": "Machine.DoneContext", "label": "State completion" },
+            { "reflection": "Machine.ChoiceContext", "label": "Choice resolution" },
+            { "reflection": "Machine.FinalOutputContext", "label": "Final output" },
+            { "reflection": "Machine.ParallelOutputContext", "label": "Parallel output" }
+          ]
+        },
+        {
+          "owner": "Definition",
+          "ownerKind": "interface",
+          "title": "State invocation",
+          "description": "State-owned Effect, Stream, timer, logic, and child lifecycles declared through `invoke`.",
+          "roots": [
+            { "reflection": "Machine.InvokeSelector", "label": "Invocation sources" },
+            { "reflection": "Machine.InvokeBuilder", "label": "Lifecycle handlers" },
+            { "reflection": "Machine.InvokeContext", "label": "Source context" },
+            { "reflection": "Machine.InvokeDoneContext", "label": "Completion context" },
+            { "reflection": "Machine.InvokeFailureContext", "label": "Failure context" },
+            { "reflection": "Machine.InvokeElementContext", "label": "Stream element context" },
+            { "reflection": "Machine.InvokeSnapshotContext", "label": "Child snapshot context" }
+          ]
+        }
+      ],
       "examples": [
         "decodeSnapshot",
         "encodeSnapshot",

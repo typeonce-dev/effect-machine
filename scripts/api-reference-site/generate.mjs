@@ -51,13 +51,17 @@ const readSiteModel = (inputDirectory, config) => {
   const packageManifestPath = safeResolve(inputDirectory, packageEntry.manifest)
   const packageDirectory = dirname(packageManifestPath)
   const packageManifest = readJson(packageManifestPath)
-  if (packageManifest.schemaVersion !== 4 || !Array.isArray(packageManifest.modules)) {
+  if (packageManifest.schemaVersion !== 6 || !Array.isArray(packageManifest.modules)) {
     throw new Error("Unsupported API reference package manifest")
   }
 
   const modules = packageManifest.modules.map((entry) => {
     const reflection = readJson(safeResolve(packageDirectory, entry.json))
-    const api = normalizeApiModule(reflection)
+    const api = normalizeApiModule(
+      reflection,
+      entry.usageSections ?? [],
+      entry.referenceSections ?? []
+    )
     const route = moduleRoute(entry.json)
     const segments = entry.export.replace(/^\.\//, "").split("/")
     return {
@@ -76,6 +80,7 @@ const readSiteModel = (inputDirectory, config) => {
     revision: dataset.revision,
     package: packageManifest,
     modules,
+    guideModule: modules.find((module) => (module.api.referenceSections ?? []).length > 0),
     navigation: groupNavigation(modules),
     changelog
   }
@@ -98,6 +103,9 @@ const groupNavigation = (modules) => {
 const writeSite = (outputDirectory, site) => {
   writePage(join(outputDirectory, "index.html"), renderIndexPage(site))
   writePage(join(outputDirectory, "changelog", "index.html"), renderChangelogPage(site))
+  if (site.guideModule !== undefined) {
+    writePage(join(outputDirectory, "guide", "index.html"), renderGuidePage(site))
+  }
   for (const module of site.modules) {
     writePage(join(outputDirectory, module.route, "index.html"), renderModulePage(site, module))
   }
@@ -203,9 +211,9 @@ export const renderModulePage = (site, module) => {
     <details class="page-toc__group">
       <summary>
         <span>${escapeHtml(titleCase(group.category))}</span>
-        <small>${group.declarations.length}</small>
-      </summary>
-      <nav aria-label="${escapeAttribute(titleCase(group.category))} APIs">
+      <small>${group.declarations.length}</small>
+    </summary>
+    <nav aria-label="${escapeAttribute(titleCase(group.category))} APIs">
         ${group.declarations.map((declaration) => `
           <a href="#${declarationIds.get(declaration)}">${escapeHtml(declaration.name)}</a>`).join("")}
       </nav>
@@ -217,7 +225,13 @@ export const renderModulePage = (site, module) => {
         <span>${group.declarations.length}</span>
       </div>
       ${group.declarations.map((declaration) =>
-    renderDeclaration(declaration, declarationIds.get(declaration))).join("")}
+    renderDeclaration(
+      {
+        ...declaration,
+        usageSections: []
+      },
+      declarationIds.get(declaration)
+    )).join("")}
     </section>`).join("")
   const content = `
     <article class="module-reference" data-pagefind-meta="module:${escapeAttribute(module.label)}">
@@ -253,27 +267,89 @@ export const renderModulePage = (site, module) => {
   })
 }
 
-const renderDeclaration = (declaration, id) => {
-  const examples = declaration.examples.map((example, index) => `
-    <section class="example">
-      <div class="example__heading">
-        <strong>${escapeHtml(example.title ?? `Example${declaration.examples.length > 1 ? ` ${index + 1}` : ""}`)}</strong>
-        <span>${escapeHtml(example.language)}</span>
+export const renderGuidePage = (site) => {
+  const module = site.guideModule
+  if (module === undefined) throw new Error("The guide reference requires a configured guide module")
+  const declarationIds = uniqueDeclarationIds(module.api.groups)
+  const entryIds = referenceIds(module.api.referenceSections, declarationIds)
+  const entryCount = module.api.referenceSections.reduce((count, section) => count + section.entries.length, 0)
+  const content = `
+    <article class="guide-reference" data-pagefind-meta="type:guide">
+      <header class="guide-header">
+        <div class="breadcrumbs">
+          <a href="${siteUrl(site, "")}">API</a>
+          <span aria-hidden="true">/</span>
+          <span>Guide reference</span>
+        </div>
+        <h1>Machine authoring guide</h1>
+        <p>The core APIs and nested parameters used to define, implement, and run a machine, organized in authoring order.</p>
+        <div class="module-meta">
+          <span>${module.api.referenceSections.length} sections</span>
+          <span>${entryCount} core APIs</span>
+          <code>${escapeHtml(module.export)}</code>
+        </div>
+      </header>
+      <div class="guide-sections">
+        ${module.api.referenceSections.map((section) => `
+          <section class="workflow-section" aria-labelledby="workflow-${slugify(section.title)}">
+            <header class="workflow-section__header">
+              <h2 id="workflow-${slugify(section.title)}">${escapeHtml(section.title)}</h2>
+              ${renderMarkdown(section.description)}
+            </header>
+            <div class="workflow-section__entries">
+              ${section.entries.map((entry) =>
+    renderDeclaration(entry.api, entryIds.get(entry), { core: true })).join("")}
+            </div>
+          </section>`).join("")}
       </div>
-      <div class="code-block">
-        <button class="copy-button" type="button" aria-label="Copy example code">Copy</button>
-        <pre><code>${highlightCode(example.source, example.language)}</code></pre>
-      </div>
-    </section>`).join("")
+    </article>`
+  return renderLayout(site, {
+    title: `Machine authoring guide · ${site.title}`,
+    description: "Core Effect Machine APIs and nested authoring parameters in usage order.",
+    content,
+    currentRoute: "guide",
+    pageKind: "guide",
+    toc: renderGuideToc(module.api.referenceSections, entryIds)
+  })
+}
+
+const referenceIds = (sections, declarationIds) => {
+  const ids = new Map()
+  const used = new Set(declarationIds.values())
+  for (const section of sections) {
+    for (const entry of section.entries) {
+      if (entry.origin.type === "declaration") {
+        ids.set(entry, declarationIds.get(entry.api))
+        continue
+      }
+      const base = slugify(entry.api.name)
+      let id = base
+      for (let suffix = 2; used.has(id); suffix++) id = `${base}-${suffix}`
+      used.add(id)
+      ids.set(entry, id)
+    }
+  }
+  return ids
+}
+
+const renderDeclaration = (
+  declaration,
+  id,
+  { core = false, headingLevel = 3, usageHeadingLevel = 4 } = {}
+) => {
+  const examples = renderExamples(declaration.examples)
+  const usageSections = (declaration.usageSections ?? [])
+    .map((section) => renderUsageSection(section, id, usageHeadingLevel))
+    .join("")
   const see = declaration.see.flatMap((entry) => entry.split("\n"))
     .map((entry) => entry.replace(/^\s*-\s*/, "").trim())
     .filter(Boolean)
   return `
-    <article class="declaration" aria-labelledby="${id}" data-pagefind-meta="kind:${escapeAttribute(declaration.kind)}">
+    <article class="declaration${core ? " declaration--core" : ""}" aria-labelledby="${id}" data-pagefind-meta="kind:${escapeAttribute(declaration.kind)}">
       <header class="declaration__header">
         <div class="declaration__title">
           <a class="anchor" href="#${id}" aria-label="Link to ${escapeAttribute(declaration.name)}">#</a>
-          <h3 id="${id}">${escapeHtml(declaration.name)}</h3>
+          <h${headingLevel} id="${id}">${escapeHtml(declaration.name)}</h${headingLevel}>
           <span class="kind kind--${slugify(declaration.kind)}">${escapeHtml(declaration.kind)}</span>
         </div>
         ${declaration.sourceUrl === undefined ? "" : sourceLink(declaration.sourceUrl, "Source")}
@@ -290,6 +366,7 @@ const renderDeclaration = (declaration, id) => {
           ${renderMarkdown(declaration.deprecated)}
         </aside>`}
       ${examples}
+      ${usageSections}
       ${see.length === 0 ? "" : `
         <div class="see-also">
           <strong>See also</strong>
@@ -298,6 +375,115 @@ const renderDeclaration = (declaration, id) => {
       ${declaration.since === undefined ? "" : `<div class="since">Since v${escapeHtml(declaration.since)}</div>`}
     </article>`
 }
+
+const renderExamples = (examples) => examples.map((example, index) => `
+    <section class="example">
+      <div class="example__heading">
+        <strong>${escapeHtml(example.title ?? `Example${examples.length > 1 ? ` ${index + 1}` : ""}`)}</strong>
+        <span>${escapeHtml(example.language)}</span>
+      </div>
+      <div class="code-block">
+        <button class="copy-button" type="button" aria-label="Copy example code">Copy</button>
+        <pre><code>${highlightCode(example.source, example.language)}</code></pre>
+      </div>
+    </section>`).join("")
+
+const usageSectionId = (declarationId, section) => `${declarationId}-usage-${slugify(section.title)}`
+const usageRootId = (sectionId, root) => `${sectionId}-${slugify(root.label)}`
+const usageMemberId = (parentId, member) => `${parentId}-${slugify(member.name)}`
+
+const renderUsageSection = (section, declarationId, headingLevel = 4) => {
+  const id = usageSectionId(declarationId, section)
+  return `
+    <div class="usage-section" id="${id}" data-pagefind-meta="type:configuration">
+      <div class="usage-roots">
+        ${section.roots.map((root) => renderUsageRoot(root, id, headingLevel)).join("")}
+      </div>
+    </div>`
+}
+
+const renderUsageRoot = (root, sectionId, headingLevel = 5) => {
+  const id = usageRootId(sectionId, root)
+  return `
+    <section class="usage-root" aria-labelledby="${id}">
+      <header class="usage-root__header">
+        <h${Math.min(headingLevel, 6)} id="${id}">${escapeHtml(root.label)}</h${Math.min(headingLevel, 6)}>
+        ${root.sourceUrl === undefined ? "" : sourceLink(root.sourceUrl, "Source")}
+      </header>
+      <div class="usage-root__description">${renderMarkdown(root.description)}</div>
+      ${renderExamples(root.examples ?? [])}
+      <div class="usage-members">
+        ${root.members.map((member) => renderUsageMember(member, 0, id, headingLevel + 1)).join("")}
+      </div>
+    </section>`
+}
+
+const renderUsageMember = (member, depth, parentId, headingLevel) => {
+  const hasSignature = member.signature !== undefined && member.signature.length > 0
+  const id = usageMemberId(parentId, member)
+  const titleId = `${id}-title`
+  const titleLevel = Math.min(headingLevel, 6)
+  return `
+  <article class="usage-member usage-member--depth-${Math.min(depth, 2)}" id="${id}" aria-labelledby="${titleId}" data-pagefind-meta="parameter:${escapeAttribute(member.name)}">
+    <header class="usage-member__header">
+      <h${titleLevel} id="${titleId}">${escapeHtml(member.name)}</h${titleLevel}>
+      ${member.sourceUrl === undefined ? "" : sourceLink(member.sourceUrl, "Source")}
+    </header>
+    ${hasSignature ? `
+      <div class="code-block code-block--usage-signature">
+        <button class="copy-button" type="button" aria-label="Copy ${escapeAttribute(member.name)} signature">Copy</button>
+        <pre><code>${highlightCode(member.signature, "typescript")}</code></pre>
+      </div>` : ""}
+    <div class="usage-member__description">${renderMarkdown(member.description)}</div>
+    ${member.defaultValue === undefined ? "" : `
+      <div class="usage-member__default"><strong>Default</strong> ${renderInlineMarkdown(member.defaultValue)}</div>`}
+    ${member.deprecated === undefined ? "" : `
+      <aside class="callout callout--deprecated"><strong>Deprecated</strong>${renderMarkdown(member.deprecated)}</aside>`}
+    ${renderExamples(member.examples ?? [])}
+    ${member.parameters.length === 0 ? "" : `
+      <dl class="usage-parameters">
+        ${member.parameters.map((parameter) => `
+          <div><dt><code>${escapeHtml(parameter.signature)}</code></dt><dd>${renderMarkdown(parameter.description)}</dd></div>`).join("")}
+      </dl>`}
+    ${member.members.length === 0 ? "" : `
+      <div class="usage-members usage-members--nested">
+        ${member.members.map((child) => renderUsageMember(child, depth + 1, id, titleLevel + 1)).join("")}
+      </div>`}
+    ${member.since === undefined ? "" : `<div class="since">Since v${escapeHtml(member.since)}</div>`}
+  </article>`
+}
+
+const renderGuideToc = (sections, entryIds) => sections.map((section) => `
+  <section class="guide-toc-section">
+    <a class="guide-toc-section__link" href="#workflow-${slugify(section.title)}">${escapeHtml(section.title)}</a>
+    <div class="guide-toc-section__entries">
+      ${section.entries.map((entry) => {
+  const declarationId = entryIds.get(entry)
+  return `
+        <div class="guide-toc-entry">
+          <a class="guide-toc-entry__link" href="#${declarationId}">${escapeHtml(entry.api.name)}</a>
+          ${(entry.api.usageSections ?? []).map((usageSection) => {
+    const sectionId = usageSectionId(declarationId, usageSection)
+    return usageSection.roots.map((root) => {
+      const rootId = usageRootId(sectionId, root)
+      return `
+                <div class="guide-toc-root">
+                  <a class="guide-toc-root__link" href="#${rootId}">${escapeHtml(root.label)}</a>
+                  ${renderGuideMemberLinks(root.members, rootId, 0)}
+                </div>`
+    }).join("")
+  }).join("")}
+        </div>`
+}).join("")}
+    </div>
+  </section>`).join("")
+
+const renderGuideMemberLinks = (members, parentId, depth) => members.map((member) => {
+  const id = usageMemberId(parentId, member)
+  return `
+    <a class="guide-toc-member guide-toc-member--depth-${Math.min(depth, 2)}" href="#${id}">${escapeHtml(member.name)}</a>
+    ${renderGuideMemberLinks(member.members, id, depth + 1)}`
+}).join("")
 
 export const renderLayout = (site, { content, currentRoute, description, pageKind, title, toc = "" }) => {
   const pageDescription = description ?? site.description
@@ -410,6 +596,8 @@ const renderNavigation = (site, currentRoute) => `
     </div>
     <a class="navigation-overview${currentRoute === "" ? " is-current" : ""}" href="${siteUrl(site, "")}">Overview</a>
     <a class="navigation-changelog${currentRoute === "changelog" ? " is-current" : ""}" href="${siteUrl(site, "changelog")}">Changelog</a>
+    ${site.guideModule === undefined ? "" : `
+      <a class="navigation-guide${currentRoute === "guide" ? " is-current" : ""}" href="${siteUrl(site, "guide")}">Guide reference</a>`}
     ${site.navigation.map((group) => `
       <section>
         <h2>${escapeHtml(group.label)}</h2>
@@ -728,7 +916,7 @@ Sitemap: ${absoluteSiteUrl(site, "sitemap.xml")}
 
 export const renderSitemap = (site) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${["", "changelog/", ...site.modules.map((module) => `${module.route}/`)]
+${["", "changelog/", ...(site.guideModule === undefined ? [] : ["guide/"]), ...site.modules.map((module) => `${module.route}/`)]
     .map((route) => `  <url><loc>${escapeXml(absoluteSiteUrl(site, route))}</loc></url>`)
     .join("\n")}
 </urlset>
@@ -830,6 +1018,7 @@ const validateSite = (outputDirectory, site) => {
   for (const path of [
     "index.html",
     "changelog/index.html",
+    ...(site.guideModule === undefined ? [] : ["guide/index.html"]),
     "assets/styles.css",
     "assets/client.js",
     "apple-touch-icon.png",
