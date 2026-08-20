@@ -2,9 +2,9 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-rc.109
-  "@effect/atom-react": 4.0.0-rc.109
-  "@effect/vitest": 4.0.0-rc.109
+  effect: 4.0.0-rc.110
+  "@effect/atom-react": 4.0.0-rc.110
+  "@effect/vitest": 4.0.0-rc.110
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:

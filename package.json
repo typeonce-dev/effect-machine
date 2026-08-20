@@ -71,14 +71,14 @@
     "release": "pnpm build && changeset publish"
   },
   "peerDependencies": {
-    "effect": "4.0.0-rc.109"
+    "effect": "4.0.0-rc.110"
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0-rc.110",
     "@types/node": "25.7.0",
     "dprint": "0.55.2",
-    "effect": "4.0.0-rc.109",
+    "effect": "4.0.0-rc.110",
     "pagefind": "1.5.2",
     "tinybench": "2.9.0",
     "tstyche": "7.2.1",
