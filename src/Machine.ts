@@ -278,6 +278,20 @@ export interface Definition<
    * captured by value, so later mutation of the supplied objects cannot alter
    * the resulting machine.
    *
+   * **Example**
+   *
+   * ```ts
+   * const counter = definition.handle({
+   *   Count: {
+   *     on: {
+   *       Increment: (to) =>
+   *         to.full.Count().resolve(({ event, state, target }) =>
+   *           target(new Count({ value: state.value + event.by })))
+   *     }
+   *   }
+   * })
+   * ```
+   *
    * @since 0.4.0
    */
   readonly handle: Machine.Handler<
@@ -523,8 +537,10 @@ export type MachineReferences<
 
 /**
  * Synchronous commands available while a machine transition is being
- * selected. Enqueuing only records statechart and machine operations; it never
- * executes an Effect.
+ * selected.
+ *
+ * Enqueuing records statechart and machine operations for the selected
+ * transition. It never executes an Effect while the transition is evaluated.
  *
  * @category models
  * @since 0.4.0
@@ -2915,8 +2931,11 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export interface StateNodeAnnotations extends Schema.Annotations.Annotations {
+    /** Human-readable label used by visualization and documentation tooling. */
     readonly title?: string | undefined
+    /** Short explanation of the state node's domain meaning. */
     readonly description?: string | undefined
+    /** Longer documentation text associated with the state node. */
     readonly documentation?: string | undefined
   }
 
@@ -2930,22 +2949,29 @@ export declare namespace Machine {
   export type PseudoStateAnnotations = SchemaLessStateAnnotations
 
   /**
-   * Configuration accepted for an atomic object state node. Omit `schema` when
-   * the state owns no value; a schema-less final may still declare `output`.
+   * Configuration accepted for an atomic object state node.
+   *
+   * Omit `schema` when the state owns no value. A schema-less final may still
+   * declare `output`.
    *
    * @category models
    * @since 0.4.0
    */
   export type AtomicStateNodeConfig =
     | {
+      /** Tagged schema that owns the state's decoded value. */
       readonly schema: TaggedSchema
+      /** Declares an ordinary active state. Omitted values default to `"active"`. */
       readonly type?: "active"
+      /** Atomic active states cannot declare terminal output. */
       readonly output?: never
+      /** Schema-backed states take their annotations from the schema. */
       readonly annotations?: never
     }
     | {
       readonly schema: TaggedSchema
       readonly type: "final"
+      /** Optional schema describing the terminal value produced by this final state. */
       readonly output?: Schema.Top
       readonly annotations?: never
     }
@@ -2953,12 +2979,15 @@ export declare namespace Machine {
       readonly schema?: never
       readonly type?: "active"
       readonly output?: never
+      /** Descriptive metadata for a schema-less state. */
       readonly annotations?: SchemaLessStateAnnotations
     }
     | {
       readonly schema?: never
       readonly type: "final"
+      /** Optional schema describing the terminal value produced by this final state. */
       readonly output?: Schema.Top
+      /** Descriptive metadata for a schema-less state. */
       readonly annotations?: SchemaLessStateAnnotations
     }
 
@@ -2971,10 +3000,15 @@ export declare namespace Machine {
    */
   export type CompoundStateNodeConfig =
     | {
+      /** Tagged schema that owns the compound state's decoded value. */
       readonly schema: TaggedSchema
+      /** Compound states are ordinary active states. */
       readonly type?: "active"
+      /** Direct child selected when the compound state is entered initially. */
       readonly initial: string
+      /** Nested state nodes owned by this compound state. */
       readonly states: StateTree
+      /** Schema-backed states take their annotations from the schema. */
       readonly annotations?: never
     }
     | {
@@ -2982,6 +3016,7 @@ export declare namespace Machine {
       readonly type?: "active"
       readonly initial: string
       readonly states: StateTree
+      /** Descriptive metadata for a schema-less state. */
       readonly annotations?: SchemaLessStateAnnotations
     }
 
@@ -2994,10 +3029,15 @@ export declare namespace Machine {
    */
   export type ParallelStateNodeConfig =
     | {
+      /** Tagged schema that owns the parallel state's decoded value. */
       readonly schema: TaggedSchema
+      /** Selects parallel-region semantics for the node. */
       readonly type: "parallel"
+      /** Optional schema describing the value produced after every region completes. */
       readonly output?: Schema.Top
+      /** Child regions that are entered and remain active simultaneously. */
       readonly states: StateTree
+      /** Schema-backed states take their annotations from the schema. */
       readonly annotations?: never
     }
     | {
@@ -3005,6 +3045,7 @@ export declare namespace Machine {
       readonly type: "parallel"
       readonly output?: Schema.Top
       readonly states: StateTree
+      /** Descriptive metadata for a schema-less state. */
       readonly annotations?: SchemaLessStateAnnotations
     }
 
@@ -3021,9 +3062,16 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export interface HistoryStateNodeConfig {
+    /** Selects history pseudo-state semantics. */
     readonly type: "history"
-    /** Defaults to shallow history. */
+    /**
+     * Restores only the direct child for shallow history or the complete
+     * descendant configuration for deep history.
+     *
+     * @defaultValue `"shallow"`
+     */
     readonly history?: "shallow" | "deep"
+    /** Descriptive metadata used by visualization and documentation tooling. */
     readonly annotations?: SchemaLessStateAnnotations
   }
 
@@ -3038,7 +3086,9 @@ export declare namespace Machine {
    * @since 0.4.0
    */
   export interface ChoiceStateNodeConfig {
+    /** Selects transient choice pseudo-state semantics. */
     readonly type: "choice"
+    /** Descriptive metadata used by visualization and documentation tooling. */
     readonly annotations?: SchemaLessStateAnnotations
   }
 
@@ -4642,18 +4692,26 @@ export declare namespace Machine {
 
   /**
    * Definition-time topology selector available to an ordinary transition.
+   *
    * Topology-only instructions (`none`, declared `initial` and history
-   * selections, and `local.with`) are values. State and choice destinations
-   * remain callable selection methods.
+   * selections, and `local.with`) are values.
+   *
+   * State and choice destinations remain callable selection methods so their
+   * target-specific resolver APIs retain exact inference.
    */
   export interface TargetSelector<
     States extends StateSchemas,
     Source extends StateNodeIdentifier<States>
   > {
+    /** Handles the trigger without selecting a destination. */
     readonly none: SelectionValue<TargetBuilder<States, Source>["none"], never, "none">
+    /** Selects a destination inside the nearest active compound scope. */
     readonly local: LocalTargetSelector<States, Source>
+    /** Selects a destination elsewhere under the currently active root. */
     readonly branch: BranchTargetSelector<States, Source>
+    /** Selects a complete destination under any top-level state. */
     readonly full: FullTargetSelector<States>
+    /** Restores a shallow or deep history pseudo-state. */
     readonly history: HistorySelectionTree<States, States, "", HistoryTargetBuilder<States>>
   }
 
@@ -4683,11 +4741,15 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Value owned by the state whose handler is running. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
+    /** Event that selected this handler, narrowed by its `_tag`. */
     readonly event: EventByTag<Events, EventTag>
 
     /**
@@ -4713,9 +4775,13 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Value owned by the state entering or exiting. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Event or initial-entry marker responsible for the lifecycle action. */
     readonly event: LifecycleEvent<Events>
   }
 
@@ -4733,9 +4799,13 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Value owned by the state that owns this invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Event or initial-entry marker responsible for starting the invocation. */
     readonly event: LifecycleEvent<Events>
   }
 
@@ -4756,11 +4826,17 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Parent-local invocation identifier. */
     readonly id: string
+    /** Current value of the state that owns the invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Builders for selecting the owning machine's next state. */
     readonly target: TargetBuilder<States, StateId>
+    /** Latest active lifecycle snapshot published by the invoked logic or child. */
     readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
   }
 
@@ -4779,12 +4855,19 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Parent-local invocation identifier. */
     readonly id: string
+    /** Current value of the state that owns the invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
+    /** Builders for selecting the owning machine's next state. */
     readonly target: TargetBuilder<States, StateId>
+    /** Successful output produced by the invocation. */
     readonly output: Output
   }
 
@@ -4798,12 +4881,19 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Parent-local invocation identifier. */
     readonly id: string
+    /** Current value of the state that owns the Stream invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
+    /** Builders for selecting the owning machine's next state. */
     readonly target: TargetBuilder<States, StateId>
+    /** Next element emitted by the invoked Stream. */
     readonly element: Element
   }
 
@@ -4817,12 +4907,19 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Parent-local invocation identifier. */
     readonly id: string
+    /** Current value of the state that owns the invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
+    /** Builders for selecting the owning machine's next state. */
     readonly target: TargetBuilder<States, StateId>
+    /** Typed failure produced by the invocation. */
     readonly error: Error
   }
 
@@ -4840,11 +4937,15 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Current value of the state evaluating the eventless transition. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
+    /** Lifecycle event retained while the eventless transition is evaluated. */
     readonly event: LifecycleEvent<Events>
 
     /**
@@ -4871,12 +4972,17 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Current value of the state whose child configuration completed. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete logical configuration captured at the start of this microstep. */
     readonly snapshot: Snapshot<States>
+    /** Lifecycle event retained while state completion is processed. */
     readonly event: LifecycleEvent<Events>
+    /** Output produced by the completed final child or parallel regions. */
     readonly output: CompletionOutputByIdentifier<States, StateId>
 
     /**
@@ -4898,17 +5004,21 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Value owned by the choice node's immediate schema-backed parent. */
     readonly containingState: StateByIdentifier<
       States,
       Extract<ImmediateParentStateIdentifier<ChoiceId>, StateIdentifier<States>>
     >
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: {
       readonly [Parent in Extract<ParentStateIdentifier<ChoiceId>, ValuedStateIdentifier<States>>]: StateByIdentifier<
         States,
         Parent
       >
     }
+    /** Lifecycle event that led to the transient choice. */
     readonly event: LifecycleEvent<Events>
+    /** Builders for selecting the concrete destination of this choice. */
     readonly target: TargetBuilder<States, ChoiceId>
   }
 
@@ -4923,9 +5033,13 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
   > {
+    /** Decoded value owned by the final state. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Lifecycle event responsible for entering the final state. */
     readonly event: LifecycleEvent<Events>
   }
 
@@ -4958,10 +5072,15 @@ export declare namespace Machine {
     Events extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>
   > {
+    /** Decoded value owned by the completed parallel state. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
+    /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
+    /** Lifecycle event retained while parallel completion is processed. */
     readonly event: LifecycleEvent<Events>
+    /** Completion output from every direct parallel region. */
     readonly outputs: ParallelOutputRegions<States, StateId>
   }
 
@@ -5366,6 +5485,7 @@ export declare namespace Machine {
 
   /** Context capability available only to explicitly declinable resolvers. */
   export interface DeclineCapability {
+    /** Declines this candidate and continues hierarchical transition selection. */
     readonly decline: () => Declined
   }
 
@@ -5395,7 +5515,9 @@ export declare namespace Machine {
   export interface TransitionBranchInput<
     Selection extends TargetSelection<any, any, any> = TargetSelection<any, any, any>
   > {
+    /** Exact topology destination available to the branching resolver. */
     readonly target: Selection
+    /** Optional human-readable branch label used by visualization tooling. */
     readonly title?: string
   }
 
@@ -5475,16 +5597,25 @@ export declare namespace Machine {
     }
   }
 
-  type TransitionReenterOption<Reenter extends boolean> = [Reenter] extends [true] ? { readonly reenter?: boolean }
+  type TransitionReenterOption<Reenter extends boolean> = [Reenter] extends [true] ? {
+      /** Forces the source state to exit and enter even when active paths remain unchanged. */
+      readonly reenter?: boolean
+    }
     : { readonly reenter?: never }
 
   type TransitionRequiredOptions<Reenter extends boolean> =
     & TransitionReenterOption<Reenter>
-    & { readonly declinable?: false }
+    & {
+      /** Keeps the transition required. The resolver cannot return `decline()`. */
+      readonly declinable?: false
+    }
 
   type TransitionDeclinableOptions<Reenter extends boolean> =
     & TransitionReenterOption<Reenter>
-    & { readonly declinable: true }
+    & {
+      /** Adds `decline()` to the resolver context and permits declining this candidate. */
+      readonly declinable: true
+    }
 
   type BuiltTransition<
     States extends StateSchemas,
@@ -5548,7 +5679,23 @@ export declare namespace Machine {
     >
   }
 
-  /** A selected transition target with target-specific resolver operations. */
+  /**
+   * A selected transition target with target-specific resolver operations.
+   *
+   * **Example** (Updating state while reentering)
+   *
+   * ```ts
+   * Reset: (to) =>
+   *   to.full.Ready().resolve(
+   *     ({ target }) => target.from(),
+   *     { reenter: true }
+   *   )
+   * ```
+   *
+   * @inlineType TransitionRequiredOptions
+   * @inlineType TransitionDeclinableOptions
+   * @inlineType TransitionReenterOption
+   */
   export type TransitionTarget<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -5572,6 +5719,10 @@ export declare namespace Machine {
       >
       : {})
     & {
+      /**
+       * Evaluates state construction and queued commands only after this
+       * transition has been selected.
+       */
       readonly resolve:
         & TransitionResolveRequired<States, Events, Emits, StateId, Context, Reenter, Selection>
         & ("declinable" extends Acceptance ? TransitionResolveDeclinable<
@@ -5586,6 +5737,7 @@ export declare namespace Machine {
           : {})
     }
     & ([Reenter] extends [true] ? SelectionSupportsDefaultConstruction<Selection> extends true ? {
+          /** Reenters the source using the selected target's default construction. */
           readonly reenter: () => BuiltTransition<
             States,
             Events,
@@ -5610,9 +5762,12 @@ export declare namespace Machine {
     & Selection
     & (SelectionSupportsDefaultConstruction<Selection> extends true ? InitialBuilderEvidence<Selection> : {})
     & {
+      /** Lazily constructs the selected initial state from decoded machine input. */
       readonly resolve: (
         resolve: (context: {
+          /** Decoded value supplied when the machine is started. */
           readonly input: Input
+          /** Builder specialized to the selected initial destination. */
           readonly target: SelectionBuilder<Selection>
         }) => SelectedTargetResult<Selection>
       ) => InitialBuilderEvidence<Selection>
@@ -5766,9 +5921,11 @@ export declare namespace Machine {
       TargetSelector<States, StateId>
     >
     & {
+      /** Declares a closed set of named destinations for one resolver. */
       readonly branches: <const Branches extends Readonly<Record<string, TransitionBranchInput>>>(
         branches: Branches & ValidateTransitionBranchRecord<NoInfer<Branches>>
       ) => {
+        /** Resolves exactly one declared branch after this transition is selected. */
         readonly resolve:
           & TransitionBranchesResolveRequired<States, Events, Emits, StateId, Context, Reenter, Branches>
           & ("declinable" extends Acceptance ? TransitionBranchesResolveDeclinable<
@@ -5988,6 +6145,7 @@ export declare namespace Machine {
     & InvokeTyped<Output, Error, Requirements, InitialError, ChildEmits, ChildParentEvent, Outcomes>
     & { readonly [InvokeBuilderTypeId]: true }
 
+  /** Lifecycle handlers exposed according to the selected invocation source. */
   type InvokeBuilder<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -6023,6 +6181,7 @@ export declare namespace Machine {
       >
       : {})
     & ("done" extends Pending ? {
+        /** Handles successful completion and exposes the invocation output. */
         readonly onDone: <
           const Handler extends InvokeTransition<
             States,
@@ -6062,6 +6221,7 @@ export declare namespace Machine {
       }
       : {})
     & ("failure" extends Pending ? {
+        /** Handles typed failure and exposes the invocation error. */
         readonly onFailure: <
           const Handler extends InvokeTransition<
             States,
@@ -6101,6 +6261,7 @@ export declare namespace Machine {
       }
       : {})
     & ("element" extends Pending ? {
+        /** Handles each backpressured element emitted by an invoked Stream. */
         readonly onElement: <
           const Handler extends InvokeTransition<
             States,
@@ -6140,6 +6301,7 @@ export declare namespace Machine {
       }
       : {})
     & ([SnapshotHandler] extends [never] ? {} : {
+      /** Handles each active snapshot published by invoked logic or a child machine. */
       readonly onSnapshot: <const Handler extends SnapshotHandler>(handler: Handler & SnapshotHandler) => InvokeBuilder<
         States,
         Events,
@@ -6309,6 +6471,23 @@ export declare namespace Machine {
    * chain becomes returnable from `invoke` only after every reachable required
    * channel has been handled.
    *
+   * **Example** (Invoking an Effect)
+   *
+   * ```ts
+   * invoke: (from) =>
+   *   from.effect("load-user", () => loadUser).onDone((to) =>
+   *     to.full.Ready().resolve(({ output, target }) => target.from({ user: output }))
+   *   ).onFailure((to) =>
+   *     to.full.Failed().resolve(({ error, target }) => target.from({ error }))
+   *   )
+   * ```
+   *
+   * @inlineType EffectInvokeBuilder
+   * @inlineType StreamInvokeBuilder
+   * @inlineType LogicInvokeBuilder
+   * @inlineType ChildInvokeBuilder
+   * @inlineType InvokeBuilder
+   *
    * @category models
    * @since 0.18.0
    */
@@ -6320,7 +6499,12 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > {
-    /** Starts a fresh Effect each time the owning state is entered. */
+    /**
+     * Starts a fresh Effect each time the owning state is entered.
+     *
+     * @param id Parent-local lifecycle identifier.
+     * @param source Lazy Effect factory evaluated on every entry.
+     */
     readonly effect: <
       const Source extends (
         context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
@@ -6330,7 +6514,12 @@ export declare namespace Machine {
       source: Source
     ) => EffectInvokeBuilder<States, Events, Emits, StateId, InputEvents, ParentEvents, Source>
 
-    /** Starts a fresh, backpressured Stream each time the owning state is entered. */
+    /**
+     * Starts a fresh, backpressured Stream each time the owning state is entered.
+     *
+     * @param id Parent-local lifecycle identifier.
+     * @param source Lazy Stream factory evaluated on every entry.
+     */
     readonly stream: <
       const Source extends (
         context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
@@ -6340,7 +6529,12 @@ export declare namespace Machine {
       source: Source
     ) => StreamInvokeBuilder<States, Events, Emits, StateId, InputEvents, ParentEvents, Source>
 
-    /** Starts a cancellable state-scoped timer. */
+    /**
+     * Starts a cancellable state-scoped timer.
+     *
+     * @param id Parent-local lifecycle identifier.
+     * @param duration Duration input or context-dependent duration factory.
+     */
     readonly timer: (
       id: InvokeLifecycleId,
       duration: InvokeSource<
@@ -6365,7 +6559,12 @@ export declare namespace Machine {
       never
     >
 
-    /** Starts reusable process logic at a typed parent-local address. */
+    /**
+     * Starts reusable process logic at a typed parent-local address.
+     *
+     * @param id Parent-local lifecycle identifier.
+     * @param options Address and reusable logic value or factory.
+     */
     readonly logic: {
       <
         const Source extends (
@@ -6375,9 +6574,11 @@ export declare namespace Machine {
       >(
         id: InvokeLifecycleId,
         options: {
+          /** Typed parent-local address used to send events to this logic. */
           readonly address:
             & Address
             & ChildAddress.Compatibility<Address, LogicEventOf<ReturnType<NoInfer<Source>>>>
+          /** Context-dependent factory that returns reusable process logic. */
           readonly logic: Source
         },
         ..._validation: ReturnType<Source> extends { readonly initial: unknown; readonly run: unknown } ? [] : [
@@ -6395,7 +6596,9 @@ export declare namespace Machine {
       <const Source, Address extends ChildAddress<never>>(
         id: InvokeLifecycleId,
         options: {
+          /** Typed parent-local address used to send events to this logic. */
           readonly address: Address & ChildAddress.Compatibility<Address, LogicEventOf<NoInfer<Source>>>
+          /** Reusable process logic started when the owning state enters. */
           readonly logic: Source
         },
         ..._validation: Source extends { readonly initial: unknown; readonly run: unknown } ? [] : [
@@ -6412,7 +6615,12 @@ export declare namespace Machine {
       >
     }
 
-    /** Starts a complete child statechart represented by a reusable descriptor. */
+    /**
+     * Starts a complete child statechart represented by a reusable descriptor.
+     *
+     * @param child Reusable descriptor created with `Machine.child`.
+     * @param options Input construction for a child with a non-void input schema.
+     */
     readonly child: <const Child extends ChildMachine.Any>(
       child:
         & Child
@@ -6424,6 +6632,7 @@ export declare namespace Machine {
           : never),
       ...options: InputSchema<Child["machine"]> extends typeof Schema.Void ? [options?: { readonly input?: never }]
         : [options: {
+          /** Child input value or factory evaluated from the owning state context. */
           readonly input: InvokeSource<
             Input<Child["machine"]>,
             InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
@@ -6461,12 +6670,14 @@ export declare namespace Machine {
       }
     >
 
+  /** Output construction available to final and output-producing parallel states. */
   type OutputHandlerConfig<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     StateId extends StateIdentifier<States>,
     Context
   > = NodeByIdentifier<States, StateId> extends { readonly output: Schema.Top } ? {
+      /** Constructs the decoded output declared by the state's `output` schema. */
       readonly output: (context: Context) => OutputByIdentifier<States, StateId>
     }
     : {
@@ -6490,6 +6701,22 @@ export declare namespace Machine {
   /**
    * Configuration accepted for a non-final state.
    *
+   * **Example** (State actions, events, and invocation)
+   *
+   * ```ts
+   * machine.handle({
+   *   Loading: {
+   *     entry: (_, enqueue) => enqueue.emit({ _tag: "Started" }),
+   *     invoke: (from) =>
+   *       from.effect("load", () => load).onDone((to) => to.full.Ready()),
+   *     on: { Cancel: (to) => to.full.Idle() }
+   *   }
+   * })
+   * ```
+   *
+   * @inlineType ActiveOutputHandlerConfig
+   * @inlineType OutputHandlerConfig
+   *
    * @category models
    * @since 0.4.0
    */
@@ -6503,15 +6730,19 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = {
+    /** Runs synchronously when the state is entered and may enqueue commands. */
     readonly entry?: (
       context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
     ) => StateActionResult<any, any>
+    /** Runs synchronously before the state is exited and may enqueue commands. */
     readonly exit?: (
       context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
     ) => StateActionResult<any, any>
+    /** Starts state-owned Effect, Stream, timer, logic, or child lifecycles. */
     readonly invoke?: InvokeBuilderInput<States, Events, Emits, StateId, InputEvents, ParentEvents>
+    /** Eventless transition evaluated after the state becomes stable. */
     readonly always?: TransitionConfig<
       States,
       Events,
@@ -6521,6 +6752,7 @@ export declare namespace Machine {
       false,
       TransitionAcceptance
     >
+    /** Transition evaluated after this compound or parallel state completes. */
     readonly onDone?: TransitionConfig<
       States,
       Events,
@@ -6530,6 +6762,7 @@ export declare namespace Machine {
       false,
       TransitionAcceptance
     >
+    /** Event handlers keyed by the `_tag` of the machine's public or internal events. */
     readonly on?: {
       readonly [EventTag in TagOf<Events[number]>]?: TransitionConfig<
         States,
@@ -6541,6 +6774,7 @@ export declare namespace Machine {
         TransitionAcceptance
       >
     }
+    /** Supplies missing direct initial-child values required by implicit entry and shallow history. */
     readonly initialize?: StateInitializeHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
   } & ActiveOutputHandlerConfig<States, Events, StateId>
 
@@ -6665,8 +6899,11 @@ export declare namespace Machine {
     Emits extends ReadonlyArray<TaggedSchema>,
     ParentId extends StateIdentifier<States>
   > {
+    /** Lifecycle event that attempted to restore this history node. */
     readonly event: LifecycleEvent<Events>
+    /** Complete target builder rooted at the history owner. */
     readonly target: HistoryDefaultTargetBuilder<States, ParentId>
+    /** State path whose child configuration is restored by this history node. */
     readonly owner: ParentId
   }
 
@@ -6689,7 +6926,26 @@ export declare namespace Machine {
     | CompleteSnapshotContaining<States, ParentId>
     | StateConstruction<CompleteSnapshotContaining<States, ParentId>>
 
-  /** Default implementations keyed by direct history child. */
+  /**
+   * Fallback implementation for one direct history pseudo-state.
+   *
+   * @inline
+   */
+  interface HistoryDefaultEntry<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    ParentId extends StateIdentifier<States>
+  > {
+    /** Builds the complete fallback configuration used before history is first captured. */
+    readonly default: HistoryDefaultHandler<States, Events, Emits, ParentId>
+  }
+
+  /**
+   * Default implementations keyed by direct history child.
+   *
+   * @inlineType HistoryDefaultEntry
+   */
   export type HistoryDefaultConfig<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -6697,9 +6953,7 @@ export declare namespace Machine {
     ParentId extends StateIdentifier<States>,
     Children extends StateSchemas
   > = {
-    readonly [Key in HistoryStateKey<Children>]?: {
-      readonly default: HistoryDefaultHandler<States, Events, Emits, ParentId>
-    }
+    readonly [Key in HistoryStateKey<Children>]?: HistoryDefaultEntry<States, Events, Emits, ParentId>
   }
 
   /** Required implementation for a choice pseudo-state. */
@@ -6711,6 +6965,7 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > {
+    /** Required transition that resolves this transient choice to a concrete destination. */
     readonly choice: TransitionConfig<
       States,
       Events,
@@ -6731,6 +6986,8 @@ export declare namespace Machine {
   /**
    * Configuration accepted for a final state.
    *
+   * @inlineType OutputHandlerConfig
+   *
    * @category models
    * @since 0.4.0
    */
@@ -6742,6 +6999,7 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = {
+    /** Runs synchronously when the final state is entered and may enqueue commands. */
     readonly entry?: (
       context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
       enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
@@ -6824,6 +7082,7 @@ export declare namespace Machine {
     }
     : { readonly [Key in Path]?: Validation }
 
+  /** Nested handler-tree structure shared by active and final state configs. */
   type HandlerNode<
     AllStates extends StateSchemas,
     Node,
@@ -6845,6 +7104,7 @@ export declare namespace Machine {
             readonly history?: never
           }
         : {
+          /** Child-state handlers nested according to the declared state topology. */
           readonly states?: HandlerTree<
             AllStates,
             Children,
@@ -6856,6 +7116,7 @@ export declare namespace Machine {
             ParentEvents,
             Extract<StateId, StateIdentifier<AllStates>>
           >
+          /** First-use defaults keyed by direct history pseudo-state. */
           readonly history?: HistoryDefaultConfig<
             AllStates,
             Events,
@@ -7739,20 +8000,28 @@ type MakeConfig<
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
   ParentDeclaration extends Parent.Any | undefined
 > = {
+  /** Stable definition identifier used by inspection and visualization. */
   readonly id?: string
+  /** State topology and value schemas, normally supplied by `Machine.states`. */
   readonly states: States & DefineStateTreeInput<NoInfer<States>>
+  /** Public events accepted by independently running machine references. */
   readonly events:
     & Machine.EventProtocol<"public", InputEvents>
     & ValidateInputEventProtocol<NoInfer<InputEvents>>
+  /** Machine-local events used by raised events and other internal deliveries. */
   readonly internalEvents?:
     & Machine.EventProtocol<"internal", InternalEvents>
     & ValidateInternalEventProtocol<
       NoInfer<InputEvents>,
       NoInfer<InternalEvents>
     >
+  /** Ephemeral notifications that handlers may publish to observers. */
   readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
+  /** Required or optional owning-machine protocol for this definition. */
   readonly parent?: ParentDeclaration
+  /** Schema used to decode input before initial-state construction. */
   readonly input?: Input
+  /** Target-first declaration that constructs the initial active configuration. */
   readonly initial: unknown
 }
 
@@ -7778,7 +8047,9 @@ type MakeResult<
   Machine.ParentEventsOf<ParentDeclaration>
 >
 
+/** @inline */
 interface Make {
+  /** @param config Complete schema-first machine definition. */
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -7797,6 +8068,7 @@ interface Make {
       & { readonly initial: Machine.InitialBuilderInput<States, Input["Type"]> },
     ..._validation: ValidateDefinedStates<NoInfer<States>>
   ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
+  /** @param config Invalid state tree retained only to report its validation error at the call site. */
   <
     const States extends Machine.StateSchemas,
     const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -7874,6 +8146,7 @@ interface Make {
  * ```
  *
  * @see {@link states} for typed state-tree helpers.
+ * @inlineType MakeConfig
  * @category constructors
  * @since 0.4.0
  */

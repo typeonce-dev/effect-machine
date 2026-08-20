@@ -82,6 +82,8 @@
 }
 
 html {
+  max-width: 100%;
+  overflow-x: clip;
   scroll-behavior: smooth;
   scroll-padding-top: 6rem;
 }
@@ -90,6 +92,8 @@ body {
   background: var(--background);
   color: var(--text);
   margin: 0;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 a {
@@ -261,7 +265,9 @@ kbd {
   grid-template-columns: var(--width-navigation) minmax(0, 1fr) var(--width-toc);
   margin: 0 auto;
   max-width: 100rem;
+  min-width: 0;
   min-height: calc(100vh - 4rem);
+  width: 100%;
 }
 
 .module-navigation {
@@ -312,7 +318,8 @@ kbd {
   padding: 0.55rem 0.65rem;
 }
 
-.module-navigation .navigation-changelog {
+.module-navigation .navigation-changelog,
+.module-navigation .navigation-guide {
   margin-top: 0.15rem;
 }
 
@@ -352,9 +359,11 @@ kbd {
 
 .reference-hero,
 .module-reference,
+.guide-reference,
 .changelog {
   margin: 0 auto;
   max-width: 64rem;
+  min-width: 0;
 }
 
 .reference-hero {
@@ -387,6 +396,7 @@ h3 {
 
 .reference-hero h1,
 .module-header h1,
+.guide-header h1,
 .changelog-header h1 {
   font-size: clamp(2.35rem, 4.5vw, 4.2rem);
   line-height: 0.95;
@@ -395,6 +405,7 @@ h3 {
 
 .reference-hero > p,
 .module-header > p,
+.guide-header > p,
 .changelog-header > p {
   color: var(--text-soft);
   font-size: 1.06rem;
@@ -563,6 +574,49 @@ h3 {
   font-size: 0.62rem;
 }
 
+.guide-toc-section + .guide-toc-section {
+  margin-top: 1.1rem;
+}
+
+.page-toc .guide-toc-section__link {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.guide-toc-section__entries,
+.guide-toc-root {
+  display: grid;
+  gap: 0.02rem;
+}
+
+.page-toc .guide-toc-entry__link {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding-left: 1.05rem;
+}
+
+.page-toc .guide-toc-root__link {
+  color: var(--text-soft);
+  font-size: 0.67rem;
+  font-weight: 650;
+  padding-left: 1.45rem;
+}
+
+.page-toc .guide-toc-member {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.63rem;
+  padding-block: 0.22rem;
+  padding-left: 1.85rem;
+}
+
+.page-toc .guide-toc-member--depth-1 {
+  padding-left: 2.25rem;
+}
+
+.page-toc .guide-toc-member--depth-2 {
+  padding-left: 2.65rem;
+}
+
 .breadcrumbs {
   color: var(--muted);
   display: flex;
@@ -664,6 +718,7 @@ h3 {
 
 .api-group {
   margin-top: 5rem;
+  min-width: 0;
 }
 
 .api-group__heading {
@@ -675,9 +730,49 @@ h3 {
   padding-bottom: 0.8rem;
 }
 
-.api-group__heading h2 {
+.api-group__heading h2,
+.api-group__heading h3 {
   font-size: 1.65rem;
   margin: 0;
+}
+
+.guide-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 3rem;
+}
+
+.workflow-section__header p {
+  color: var(--text-soft);
+  line-height: 1.7;
+  margin-bottom: 0;
+  max-width: 45rem;
+}
+
+.workflow-section {
+  min-width: 0;
+  padding-top: 6rem;
+}
+
+.workflow-section + .workflow-section {
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+}
+
+.workflow-section__header {
+  margin-bottom: 1.25rem;
+}
+
+.workflow-section__header h2 {
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  margin-bottom: 0.7rem;
+}
+
+.workflow-section__entries {
+  min-width: 0;
+}
+
+.declaration--core {
+  padding: 3.75rem 0 4.25rem;
 }
 
 .api-group__heading span {
@@ -687,6 +782,7 @@ h3 {
 
 .declaration {
   border-bottom: 1px solid var(--border);
+  min-width: 0;
   padding: 2.8rem 0 3.2rem;
 }
 
@@ -706,7 +802,8 @@ h3 {
   min-width: 0;
 }
 
-.declaration__title h3 {
+.declaration__title h3,
+.declaration__title h4 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 1.25rem;
   margin: 0;
@@ -736,11 +833,14 @@ h3 {
   border: 1px solid var(--border);
   border-radius: 0.65rem;
   margin: 1rem 0 1.4rem;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
   position: relative;
 }
 
 .code-block pre {
+  max-width: 100%;
   margin: 0;
   overflow-x: auto;
   padding: 1.15rem 3.5rem 1.15rem 1.15rem;
@@ -846,6 +946,123 @@ h3 {
 
 .example__heading span {
   color: var(--muted);
+}
+
+.usage-section {
+  margin-top: 5.75rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.usage-root__description,
+.usage-member__description,
+.usage-parameters dd {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.usage-root__description p,
+.usage-member__description p {
+  margin: 0;
+}
+
+.usage-roots {
+  display: grid;
+  gap: 7rem;
+  min-width: 0;
+}
+
+.usage-root {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.usage-root__header,
+.usage-member__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.usage-root__header h4,
+.usage-root__header h5,
+.usage-root__header h6 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.usage-root__description {
+  margin-top: 0.6rem;
+}
+
+.usage-members {
+  display: grid;
+  gap: 5.5rem;
+  margin-top: 4.5rem;
+  min-width: 0;
+}
+
+.usage-members--nested {
+  gap: 4.5rem;
+  margin-left: 1rem;
+  margin-top: 4.5rem;
+  padding-left: 1rem;
+}
+
+.usage-member {
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+}
+
+.usage-member__header h5,
+.usage-member__header h6 {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.02rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-member__header .source-link {
+  font-size: 0.72rem;
+}
+
+.code-block--usage-signature {
+  margin: 1.15rem 0 1.2rem;
+}
+
+.code-block--usage-signature pre {
+  padding-block: 0.75rem;
+}
+
+.usage-member__default {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin-top: 0.45rem;
+}
+
+.usage-parameters {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+}
+
+.usage-parameters > div {
+  display: grid;
+  gap: 0.3rem;
+  grid-template-columns: minmax(8rem, 0.45fr) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.usage-parameters dt,
+.usage-parameters dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.usage-parameters code {
+  overflow-wrap: anywhere;
 }
 
 .see-also {
@@ -1034,6 +1251,7 @@ h3 {
 
   .reference-hero h1,
   .module-header h1,
+  .guide-header h1,
   .changelog-header h1 {
     font-size: clamp(2.15rem, 11vw, 3.35rem);
   }
@@ -1057,6 +1275,36 @@ h3 {
   .declaration__title {
     align-items: start;
     flex-wrap: wrap;
+  }
+
+  .workflow-section {
+    padding-top: 3.5rem;
+  }
+
+  .workflow-section + .workflow-section {
+    margin-top: 1rem;
+  }
+
+  .usage-section {
+    margin-top: 4.5rem;
+  }
+
+  .usage-roots {
+    gap: 5.5rem;
+  }
+
+  .usage-members {
+    gap: 4.5rem;
+    margin-top: 3.5rem;
+  }
+
+  .usage-members--nested {
+    margin-left: 0.35rem;
+    padding-left: 0.75rem;
+  }
+
+  .usage-parameters > div {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .anchor {

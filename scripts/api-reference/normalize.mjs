@@ -5,9 +5,26 @@ import { ReflectionKind } from "typedoc"
  * Raw TypeDoc JSON remains the generated artifact; this adapter isolates a
  * future site from TypeDoc's complete reflection schema.
  */
-export const normalizeApiModule = (reflection) => {
+export const normalizeApiModule = (
+  reflection,
+  configuredUsageSections = [],
+  configuredReferenceSections = []
+) => {
   const moduleReflection = reflection.children?.find((child) => child.children !== undefined)
-  const declarations = (moduleReflection?.children ?? []).map(normalizeDeclaration)
+  const usageSections = normalizeUsageSections(moduleReflection, configuredUsageSections)
+  const declarations = (moduleReflection?.children ?? []).map((declaration) => ({
+    ...normalizeDeclaration(declaration),
+    usageSections: usageSections.filter((section) =>
+      section.owner === declaration.name &&
+      (section.ownerKind === undefined || section.ownerKind === reflectionKindName(declaration.kind))
+    )
+  }))
+  const referenceSections = normalizeReferenceSections(
+    moduleReflection,
+    configuredReferenceSections,
+    declarations,
+    usageSections
+  )
   const groups = groupBy(declarations, (declaration) => declaration.category)
   const versions = declarations.flatMap((declaration) => declaration.since === undefined ? [] : [declaration.since])
 
@@ -17,6 +34,7 @@ export const normalizeApiModule = (reflection) => {
     since: versions.toSorted(compareVersions)[0],
     sourceUrl: declarations.find((declaration) => declaration.sourceUrl !== undefined)?.sourceUrl,
     declarationCount: declarations.length,
+    referenceSections,
     groups: [...groups]
       .map(([category, groupedDeclarations]) => ({
         category,
@@ -45,6 +63,29 @@ export const validateApiDocumentation = (moduleExport, api, requiredExamples = [
     } else if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(declaration.since)) {
       violations.push(`${declaration.name}: invalid @since ${JSON.stringify(declaration.since)}`)
     }
+    for (const section of declaration.usageSections ?? []) {
+      for (const root of section.roots) {
+        if (root.description === undefined) {
+          violations.push(`${declaration.name}.${section.title}.${root.label}: missing summary`)
+        }
+        if (root.members.length === 0) {
+          violations.push(`${declaration.name}.${section.title}.${root.label}: no documented members`)
+        }
+        visitUsageMembers(root.members, (member, path) => {
+          if (member.description === undefined) {
+            violations.push(`${declaration.name}.${section.title}.${root.label}.${path}: missing summary`)
+          }
+        })
+      }
+    }
+  }
+
+  for (const section of api.referenceSections ?? []) {
+    for (const entry of section.entries) {
+      if (entry.api.description === undefined) {
+        violations.push(`${section.title}.${entry.api.name}: missing summary`)
+      }
+    }
   }
 
   const declarationsByName = new Map(declarations.map((declaration) => [declaration.name, declaration]))
@@ -61,6 +102,286 @@ export const validateApiDocumentation = (moduleExport, api, requiredExamples = [
     throw new Error(`Incomplete API documentation for ${moduleExport}:\n- ${violations.join("\n- ")}`)
   }
 }
+
+const normalizeReferenceSections = (moduleReflection, configuredSections, declarations, usageSections) => {
+  if (configuredSections.length === 0) return []
+  const index = reflectionIndex(moduleReflection)
+  return configuredSections.map((section) => ({
+    title: section.title,
+    description: section.description,
+    entries: section.entries.map((entry) => {
+      if (entry.declaration !== undefined) {
+        const matches = declarations.filter((declaration) =>
+          declaration.name === entry.declaration &&
+          (entry.kind === undefined || declaration.kind === entry.kind)
+        )
+        if (matches.length !== 1) {
+          throw new Error(
+            `Could not uniquely resolve core API declaration: ${entry.declaration}${
+              entry.kind === undefined ? "" : ` (${entry.kind})`
+            }`
+          )
+        }
+        return {
+          origin: { type: "declaration", name: matches[0].name, kind: matches[0].kind },
+          api: matches[0]
+        }
+      }
+
+      const reflection = index.get(entry.reflection)
+      if (reflection === undefined) {
+        throw new Error(`Could not resolve core API reflection: ${entry.reflection}`)
+      }
+      const selectedUsageSections = usageSections.filter((usageSection) =>
+        usageSection.owner === entry.owner &&
+        (entry.ownerKind === undefined || usageSection.ownerKind === entry.ownerKind) &&
+        (entry.usageSections === undefined || entry.usageSections.includes(usageSection.title))
+      )
+      if (
+        entry.usageSections !== undefined &&
+        selectedUsageSections.length !== entry.usageSections.length
+      ) {
+        throw new Error(`Could not resolve every usage section configured for ${entry.reflection}`)
+      }
+      return {
+        origin: { type: "reflection", reflection: entry.reflection },
+        api: normalizeReferenceReflection(reflection, entry, selectedUsageSections)
+      }
+    })
+  }))
+}
+
+const normalizeReferenceReflection = (reflection, entry, usageSections) => {
+  const comment = declarationComment(reflection)
+  return {
+    name: entry.label ?? reflection.name,
+    kind: entry.kind ?? reflectionKindName(reflection.kind),
+    category: "Core API",
+    signature: usageMemberSignature(reflection),
+    description: commentMarkdown(comment),
+    since: blockTagText(comment?.blockTags, "@since"),
+    deprecated: blockTagText(comment?.blockTags, "@deprecated"),
+    see: blockTagTexts(comment?.blockTags, "@see"),
+    examples: codeExamples(reflection),
+    sourceUrl: firstSourceUrl(reflection.sources),
+    usageSections
+  }
+}
+
+const visitUsageMembers = (members, visit, prefix = "") => {
+  for (const member of members) {
+    const path = prefix.length === 0 ? member.name : `${prefix}.${member.name}`
+    visit(member, path)
+    visitUsageMembers(member.members, visit, path)
+  }
+}
+
+const normalizeUsageSections = (moduleReflection, configuredSections) => {
+  if (configuredSections.length === 0) return []
+  const index = reflectionIndex(moduleReflection)
+  const topLevel = new Map((moduleReflection?.children ?? []).map((reflection) => [reflection.name, reflection]))
+  return configuredSections.map((section) => ({
+    owner: section.owner,
+    ownerKind: section.ownerKind,
+    title: section.title,
+    description: section.description,
+    roots: section.roots.map((root) => {
+      const reflection = root.reflection === undefined
+        ? findParameter(topLevel.get(root.declaration), root.parameter)
+        : index.get(root.reflection)
+      if (reflection === undefined) {
+        const locator = root.reflection ?? `${root.declaration} parameter ${root.parameter}`
+        throw new Error(`Could not resolve API usage root: ${locator}`)
+      }
+      return normalizeUsageRoot(reflection, root.label ?? reflection.name, root)
+    })
+  }))
+}
+
+const reflectionIndex = (moduleReflection) => {
+  const index = new Map()
+  const visit = (reflection, path) => {
+    for (const child of reflection?.children ?? []) {
+      const childPath = child.name === "__type" ? path : [...path, child.name]
+      if (child.name !== "__type") index.set(childPath.join("."), child)
+      visit(child, childPath)
+      for (const signature of child.signatures ?? []) visitSignature(signature, childPath)
+      visitType(child.type, childPath)
+    }
+  }
+  const visitSignature = (signature, path) => {
+    for (const parameter of signature.parameters ?? []) {
+      visitType(parameter.type, [...path, parameter.name])
+    }
+    visitType(signature.type, path)
+  }
+  const visitType = (type, path) => {
+    if (type === undefined) return
+    if (type.type === "reflection") {
+      visit(type.declaration, path)
+      for (const signature of type.declaration.signatures ?? []) visitSignature(signature, path)
+      return
+    }
+    for (const childType of childTypes(type)) visitType(childType, path)
+  }
+  visit(moduleReflection, [])
+  return index
+}
+
+const findParameter = (reflection, name) => {
+  let found
+  const visit = (value) => {
+    if (found !== undefined || value === undefined) return
+    for (const parameter of value.parameters ?? []) {
+      if (parameter.name === name) {
+        found = parameter
+        return
+      }
+      visitType(parameter.type)
+    }
+    for (const signature of value.signatures ?? []) visit(signature)
+    for (const child of value.children ?? []) visit(child)
+    visitType(value.type)
+  }
+  const visitType = (type) => {
+    if (found !== undefined || type === undefined) return
+    if (type.type === "reflection") visit(type.declaration)
+    for (const childType of childTypes(type)) visitType(childType)
+  }
+  visit(reflection)
+  return found
+}
+
+const normalizeUsageRoot = (reflection, label, options) => ({
+  label,
+  name: reflection.name,
+  kind: reflectionKindName(reflection.kind),
+  description: commentMarkdown(declarationComment(reflection)),
+  examples: codeExamples(reflection),
+  members: normalizeUsageMembers(reflection, 0, options.nested === true ? 1 : 0)
+    .filter((member) => options.members === undefined || options.members.includes(member.name)),
+  sourceUrl: firstSourceUrl(reflection.sources)
+})
+
+const normalizeUsageMembers = (reflection, depth, maxDepth) => {
+  if (depth > maxDepth) return []
+  const members = memberReflections(reflection)
+    .filter(isDocumentableUsageMember)
+    .map((member) => normalizeUsageMember(member, depth, maxDepth))
+  return mergeUsageMembers(members)
+}
+
+const normalizeUsageMember = (member, depth, maxDepth) => {
+  const comment = declarationComment(member)
+  return {
+    name: member.name,
+    signature: usageMemberSignature(member),
+    description: commentMarkdown(comment),
+    since: blockTagText(comment?.blockTags, "@since"),
+    deprecated: blockTagText(comment?.blockTags, "@deprecated"),
+    defaultValue: blockTagText(comment?.blockTags, "@defaultValue") ?? blockTagText(comment?.blockTags, "@default"),
+    examples: codeExamples(member),
+    parameters: normalizeUsageParameters(member),
+    members: normalizeUsageMembersFromMember(member, depth + 1, maxDepth),
+    sourceUrl: firstSourceUrl(member.sources)
+  }
+}
+
+const normalizeUsageParameters = (member) => {
+  const parameters = (member.signatures ?? []).flatMap((signature) => signature.parameters ?? [])
+  return mergeBy(parameters.map((parameter) => ({
+    name: parameter.name,
+    signature: formatParameter(parameter),
+    description: commentMarkdown(parameter.comment),
+    sourceUrl: firstSourceUrl(parameter.sources)
+  })), (parameter) => parameter.name)
+}
+
+const normalizeUsageMembersFromMember = (member, depth, maxDepth) => {
+  if (depth > maxDepth) return []
+  const nested = []
+  collectTypeMembers(member.type, nested, true)
+  for (const signature of member.signatures ?? []) collectTypeMembers(signature.type, nested, true)
+  return mergeUsageMembers(
+    nested.filter(isDocumentableUsageMember).map((child) => normalizeUsageMember(child, depth, maxDepth))
+  )
+}
+
+const memberReflections = (reflection) => {
+  const members = [...reflection.children ?? []]
+  collectTypeMembers(reflection.type, members, false)
+  return members
+}
+
+const collectTypeMembers = (type, members, includeReturnTypes) => {
+  if (type === undefined) return
+  if (type.type === "reflection") {
+    members.push(...type.declaration.children ?? [])
+    if (includeReturnTypes) {
+      for (const signature of type.declaration.signatures ?? []) collectTypeMembers(signature.type, members, true)
+    }
+    return
+  }
+  for (const childType of childTypes(type)) collectTypeMembers(childType, members, includeReturnTypes)
+}
+
+const childTypes = (type) => {
+  switch (type.type) {
+    case "array":
+      return [type.elementType]
+    case "conditional":
+      return [type.trueType, type.falseType]
+    case "indexedAccess":
+      return [type.objectType, type.indexType]
+    case "intersection":
+    case "union":
+      return type.types ?? []
+    case "mapped":
+    case "optional":
+    case "rest":
+    case "typeOperator":
+      return [type.elementType ?? type.target ?? type.parameterType]
+    case "reference":
+    case "tuple":
+      return type.typeArguments ?? type.elements ?? []
+    default:
+      return []
+  }
+}
+
+const isDocumentableUsageMember = (member) =>
+  member.name !== "__type" &&
+  !member.name.startsWith("[") &&
+  !member.name.startsWith("~effect/") &&
+  blockTagText(member.comment?.blockTags, "@internal") === undefined &&
+  member.comment?.modifierTags?.includes("@internal") !== true &&
+  !isNeverMember(member)
+
+const isNeverMember = (member) => member.type?.type === "intrinsic" && member.type.name === "never"
+
+const usageMemberSignature = (member) => {
+  const signatures = formatMember(member, 0)
+    .map((signature) => signature.replace(/;$/, ""))
+  return signatures.length === 0 ? undefined : signatures.join("\n")
+}
+
+const mergeUsageMembers = (members) => {
+  const groups = groupBy(members, (member) => member.name)
+  return [...groups].map(([, variants]) => {
+    const first = variants.find((variant) => variant.description !== undefined) ?? variants[0]
+    return {
+      ...first,
+      signature: unique(variants.flatMap((variant) => variant.signature === undefined ? [] : [variant.signature])).join("\n"),
+      parameters: mergeBy(variants.flatMap((variant) => variant.parameters), (parameter) => parameter.name),
+      members: mergeUsageMembers(variants.flatMap((variant) => variant.members)),
+      sourceUrl: variants.find((variant) => variant.sourceUrl !== undefined)?.sourceUrl
+    }
+  }).toSorted((left, right) => left.name.localeCompare(right.name))
+}
+
+const mergeBy = (values, keyOf) => [...new Map(values.map((value) => [keyOf(value), value])).values()]
+
+const unique = (values) => [...new Set(values.filter(Boolean))]
 
 const groupBy = (values, keyOf) => {
   const groups = new Map()
