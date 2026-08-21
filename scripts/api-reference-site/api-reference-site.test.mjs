@@ -9,6 +9,7 @@ import {
   normalizeOrigin,
   parseChangelog,
   parseChangeset,
+  renderAgentGuidePage,
   renderChangelogPage,
   renderGuidePage,
   renderIndexPage,
@@ -49,6 +50,39 @@ Then reuse \`value\`.`)
   assert.match(html, /syntax-keyword">const<\/span>/)
   assert.match(html, /syntax-string">&quot;safe&quot;<\/span>/)
   assert.match(html, /<p>Then reuse <code>value<\/code>\.<\/p>/)
+})
+
+test("renders the agent guide Markdown below the changelog navigation", () => {
+  const html = renderAgentGuidePage({
+    ...site,
+    agentGuide: `# Effect Machine agent guide
+
+Read [Effect Atom patterns](./effect-atom-react.md).
+
+## Create a machine
+
+- Define states.
+- \`Machine.events\` declares the public messages the machine accepts and returns
+  typed event constructors.
+
+\`\`\`ts
+const machine = Machine.make({}).handle({})
+\`\`\``,
+    guideModule: site.modules[0]
+  })
+  assert.match(html, /class="navigation-agent-guide is-current"/)
+  assert.match(html, /class="navigation-guide" href="\/docs\/guide">Machine API<\/a>/)
+  assert.ok(html.indexOf("navigation-changelog") < html.indexOf("navigation-agent-guide is-current"))
+  assert.ok(html.indexOf("navigation-agent-guide is-current") < html.indexOf("navigation-guide"))
+  assert.match(html, /<h1 id="effect-machine-agent-guide">Effect Machine agent guide<\/h1>/)
+  assert.match(html, /<h2 id="create-a-machine">Create a machine<\/h2>/)
+  assert.match(html, /<li><code>Machine\.events<\/code> declares the public messages the machine accepts and returns typed event constructors\.<\/li>/)
+  assert.match(html, /href="#create-a-machine">Create a machine<\/a>/)
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine\/blob\/main\/docs\/effect-atom-react\.md"/
+  )
+  assert.match(html, /class="code-block code-block--markdown"/)
 })
 
 test("assigns deterministic unique anchors to duplicate declarations", () => {
@@ -421,6 +455,7 @@ test("generates manifest, robots, and sitemap URLs from the deployment base", ()
   assert.match(renderRobots(site), /Sitemap: https:\/\/docs\.example\.com\/docs\/sitemap\.xml/)
   assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/Machine\/<\/loc>/)
   assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/changelog\/<\/loc>/)
+  assert.match(renderSitemap(site), /<loc>https:\/\/docs\.example\.com\/docs\/agent-guide\/<\/loc>/)
   assert.match(renderSitemap(siteWithGuide), /<loc>https:\/\/docs\.example\.com\/docs\/guide\/<\/loc>/)
 })
 
