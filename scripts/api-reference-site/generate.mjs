@@ -73,6 +73,7 @@ const readSiteModel = (inputDirectory, config) => {
     }
   })
   const changelog = readChangelog(packageManifest.name)
+  const agentGuide = readFileSync(join(repositoryDirectory, "docs", "agent-guide.md"), "utf8")
 
   return {
     ...config,
@@ -82,7 +83,8 @@ const readSiteModel = (inputDirectory, config) => {
     modules,
     guideModule: modules.find((module) => (module.api.referenceSections ?? []).length > 0),
     navigation: groupNavigation(modules),
-    changelog
+    changelog,
+    agentGuide
   }
 }
 
@@ -103,6 +105,7 @@ const groupNavigation = (modules) => {
 const writeSite = (outputDirectory, site) => {
   writePage(join(outputDirectory, "index.html"), renderIndexPage(site))
   writePage(join(outputDirectory, "changelog", "index.html"), renderChangelogPage(site))
+  writePage(join(outputDirectory, "agent-guide", "index.html"), renderAgentGuidePage(site))
   if (site.guideModule !== undefined) {
     writePage(join(outputDirectory, "guide", "index.html"), renderGuidePage(site))
   }
@@ -184,6 +187,31 @@ export const renderChangelogPage = (site) => {
     currentRoute: "changelog",
     pageKind: "changelog",
     toc
+  })
+}
+
+export const renderAgentGuidePage = (site) => {
+  const resolveLink = (href) => href.startsWith("./") && href.endsWith(".md")
+    ? `${site.package.repositoryUrl}/blob/main/docs/${href.slice(2)}`
+    : href
+  const content = `
+    <article class="agent-guide" data-pagefind-meta="type:agent-guide">
+      <div class="breadcrumbs">
+        <a href="${siteUrl(site, "")}">API</a>
+        <span aria-hidden="true">/</span>
+        <span>Agent guide</span>
+      </div>
+      <div class="agent-guide__content">
+        ${renderMarkdownDocument(site.agentGuide, { resolveLink })}
+      </div>
+    </article>`
+  return renderLayout(site, {
+    title: `Agent guide · ${site.title}`,
+    description: "Statechart modeling patterns for agents working with Effect Machine.",
+    content,
+    currentRoute: "agent-guide",
+    pageKind: "agent-guide",
+    toc: renderDocumentToc(site.agentGuide)
   })
 }
 
@@ -596,8 +624,9 @@ const renderNavigation = (site, currentRoute) => `
     </div>
     <a class="navigation-overview${currentRoute === "" ? " is-current" : ""}" href="${siteUrl(site, "")}">Overview</a>
     <a class="navigation-changelog${currentRoute === "changelog" ? " is-current" : ""}" href="${siteUrl(site, "changelog")}">Changelog</a>
+    <a class="navigation-agent-guide${currentRoute === "agent-guide" ? " is-current" : ""}" href="${siteUrl(site, "agent-guide")}">Agent guide</a>
     ${site.guideModule === undefined ? "" : `
-      <a class="navigation-guide${currentRoute === "guide" ? " is-current" : ""}" href="${siteUrl(site, "guide")}">Guide reference</a>`}
+      <a class="navigation-guide${currentRoute === "guide" ? " is-current" : ""}" href="${siteUrl(site, "guide")}">Machine API</a>`}
     ${site.navigation.map((group) => `
       <section>
         <h2>${escapeHtml(group.label)}</h2>
@@ -653,6 +682,81 @@ export const renderMarkdown = (value) => {
   flushProse()
   return output.join("")
 }
+
+export const renderMarkdownDocument = (value, { resolveLink = (href) => href } = {}) => {
+  if (value === undefined || value.trim().length === 0) return ""
+  const lines = value.trim().replaceAll("\r\n", "\n").split("\n")
+  const output = []
+  const prose = []
+  const flushProse = () => {
+    if (prose.length === 0) return
+    output.push(renderDocumentProseMarkdown(prose.join("\n"), resolveLink))
+    prose.length = 0
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const fence = /^\s*```([^`]*)\s*$/u.exec(lines[index])
+    if (fence === null) {
+      prose.push(lines[index])
+      continue
+    }
+    flushProse()
+    const source = []
+    for (index += 1; index < lines.length && !/^\s*```\s*$/u.test(lines[index]); index++) {
+      source.push(lines[index])
+    }
+    output.push(renderMarkdownCodeBlock(source.join("\n"), fence[1].trim()))
+  }
+  flushProse()
+  return output.join("")
+}
+
+const renderDocumentProseMarkdown = (value, resolveLink) => {
+  if (value.trim().length === 0) return ""
+  return value.trim().split(/\n\s*\n/).map((block) => {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean)
+    const heading = lines.length === 1 ? /^(#{1,6})\s+(.+)$/u.exec(lines[0]) : undefined
+    if (heading !== undefined && heading !== null) {
+      const level = heading[1].length
+      return `<h${level} id="${slugify(heading[2])}">${renderDocumentInlineMarkdown(heading[2], resolveLink)}</h${level}>`
+    }
+    if (/^[-*]\s+/.test(lines[0])) return renderDocumentList(lines, /^[-*]\s+/, "ul", resolveLink)
+    if (/^\d+\.\s+/.test(lines[0])) return renderDocumentList(lines, /^\d+\.\s+/, "ol", resolveLink)
+    return `<p>${renderDocumentInlineMarkdown(lines.join(" "), resolveLink)}</p>`
+  }).join("")
+}
+
+const renderDocumentList = (lines, marker, tag, resolveLink) => {
+  const items = []
+  for (const line of lines) {
+    if (marker.test(line)) items.push(line.replace(marker, ""))
+    else if (items.length > 0) items[items.length - 1] += ` ${line}`
+  }
+  return `<${tag}>${items.map((item) =>
+    `<li>${renderDocumentInlineMarkdown(item, resolveLink)}</li>`).join("")}</${tag}>`
+}
+
+const renderDocumentInlineMarkdown = (value, resolveLink) => {
+  const links = []
+  const tokenized = value.replace(/\[([^\]]+)]\(([^)]+)\)/g, (_, label, href) => {
+    const token = `@@DOCUMENT_LINK_${links.length}@@`
+    links.push({ token, label, href })
+    return token
+  })
+  let rendered = renderInlineMarkdown(tokenized)
+  for (const link of links) {
+    rendered = rendered.replaceAll(
+      link.token,
+      `<a href="${escapeAttribute(resolveLink(link.href))}">${renderInlineMarkdown(link.label)}</a>`
+    )
+  }
+  return rendered
+}
+
+const renderDocumentToc = (markdown) => [...markdown.matchAll(/^##\s+(.+)$/gmu)]
+  .map((heading) =>
+    `<a href="#${slugify(heading[1])}">${renderInlineMarkdown(heading[1])}</a>`
+  )
+  .join("")
 
 const renderProseMarkdown = (value) => {
   if (value.trim().length === 0) return ""
@@ -916,7 +1020,7 @@ Sitemap: ${absoluteSiteUrl(site, "sitemap.xml")}
 
 export const renderSitemap = (site) => `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${["", "changelog/", ...(site.guideModule === undefined ? [] : ["guide/"]), ...site.modules.map((module) => `${module.route}/`)]
+${["", "changelog/", "agent-guide/", ...(site.guideModule === undefined ? [] : ["guide/"]), ...site.modules.map((module) => `${module.route}/`)]
     .map((route) => `  <url><loc>${escapeXml(absoluteSiteUrl(site, route))}</loc></url>`)
     .join("\n")}
 </urlset>
@@ -1018,6 +1122,7 @@ const validateSite = (outputDirectory, site) => {
   for (const path of [
     "index.html",
     "changelog/index.html",
+    "agent-guide/index.html",
     ...(site.guideModule === undefined ? [] : ["guide/index.html"]),
     "assets/styles.css",
     "assets/client.js",

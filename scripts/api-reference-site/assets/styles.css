@@ -319,6 +319,7 @@ kbd {
 }
 
 .module-navigation .navigation-changelog,
+.module-navigation .navigation-agent-guide,
 .module-navigation .navigation-guide {
   margin-top: 0.15rem;
 }
@@ -360,6 +361,7 @@ kbd {
 .reference-hero,
 .module-reference,
 .guide-reference,
+.agent-guide,
 .changelog {
   margin: 0 auto;
   max-width: 64rem;
@@ -739,6 +741,59 @@ h3 {
 .guide-header {
   border-bottom: 1px solid var(--border);
   padding-bottom: 3rem;
+}
+
+.agent-guide__content > h1 {
+  border-bottom: 1px solid var(--border);
+  font-size: clamp(2.35rem, 4.5vw, 4.2rem);
+  line-height: 0.95;
+  margin-bottom: 2rem;
+  padding-bottom: 2.5rem;
+}
+
+.agent-guide__content > h2 {
+  border-top: 1px solid var(--border);
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  margin-top: 4.5rem;
+  padding-top: 4rem;
+}
+
+.agent-guide__content > h1 + p,
+.agent-guide__content > h2 + p {
+  color: var(--text-soft);
+  font-size: 1.02rem;
+}
+
+.agent-guide__content p,
+.agent-guide__content li {
+  color: var(--text-soft);
+  line-height: 1.75;
+}
+
+.agent-guide__content ul,
+.agent-guide__content ol {
+  padding-left: 1.4rem;
+}
+
+.agent-guide__content li + li {
+  margin-top: 0.45rem;
+}
+
+.agent-guide__content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.agent-guide__content p code,
+.agent-guide__content li code {
+  background: var(--code);
+  border: 1px solid var(--border);
+  border-radius: 0.28rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84em;
+  padding: 0.1em 0.3em;
 }
 
 .workflow-section__header p {
