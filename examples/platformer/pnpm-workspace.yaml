@@ -2,7 +2,7 @@ packages:
   - "."
 
 overrides:
-  effect: 4.0.0-rc.110
+  effect: 4.0.0-rc.111
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
