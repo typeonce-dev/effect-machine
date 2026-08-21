@@ -1,5 +1,12 @@
 # @typeonce/effect-machine
 
+## 0.19.1
+
+### Patch Changes
+
+- 9377142: Upgrade the exact Effect peer dependency and companion Effect packages to `4.0.0-rc.111`.
+- 3348d88: Add focused guides for statechart modeling and Effect Atom ownership in React applications, and publish the statechart guide on the documentation website.
+
 ## 0.19.0
 
 ### Minor Changes
