@@ -5,8 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  effect: 4.0.0-rc.110
-  '@effect/vitest': 4.0.0-rc.110
+  effect: 4.0.0-rc.111
+  '@effect/vitest': 4.0.0-rc.111
 
 importers:
 
@@ -16,8 +16,8 @@ importers:
         specifier: 2.31.0
         version: 2.31.0(@types/node@25.7.0)
       '@effect/vitest':
-        specifier: 4.0.0-rc.110
-        version: 4.0.0-rc.110(effect@4.0.0-rc.110)(vitest@4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0)))
+        specifier: 4.0.0-rc.111
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0)))
       '@types/node':
         specifier: 25.7.0
         version: 25.7.0
@@ -25,8 +25,8 @@ importers:
         specifier: 0.55.2
         version: 0.55.2
       effect:
-        specifier: 4.0.0-rc.110
-        version: 4.0.0-rc.110
+        specifier: 4.0.0-rc.111
+        version: 4.0.0-rc.111
       pagefind:
         specifier: 1.5.2
         version: 1.5.2
@@ -191,10 +191,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@effect/vitest@4.0.0-rc.110':
-    resolution: {integrity: sha512-ZvceBAWOPDnLgQgoObxPZOBuRTaRhBUR0K8sT4vfwwnf6Sv92GvCFp+WmfFV31j58Inf2p+wU1C3o9TNC1MZrQ==}
+  '@effect/vitest@4.0.0-rc.111':
+    resolution: {integrity: sha512-YDaEVT+grREBVMzykRNFtJwGxy02achzT0WXZYwMJA4ukzuB9krkgQ5roc3N6zhC3NQq/j4IyM32/Pcov7AhHw==}
     peerDependencies:
-      effect: 4.0.0-rc.110
+      effect: 4.0.0-rc.111
       vitest: '>=4.1.0 <5.0.0'
 
   '@emnapi/core@1.11.1':
@@ -550,8 +550,8 @@ packages:
     resolution: {integrity: sha512-1d4D4SB9KiD2qFnBWbl3aoYjLvPVpZoth28yxTT00xJv2yXugdz0Xoyv7sGG0w0hzE6hQZMgd6B333GnySDpGQ==}
     hasBin: true
 
-  effect@4.0.0-rc.110:
-    resolution: {integrity: sha512-ega6FTJ8CS2of7tHZiADvgyJyV999Q6tZ9juE56V81O0jw6flRwydaPNtyfvP2a5LL9PZrse8A1jnNUD5sWVHg==}
+  effect@4.0.0-rc.111:
+    resolution: {integrity: sha512-ASd5L58EIR0CUNueZNKKjSsyOCd+2alxOAIaTcHaqkJkPsaYSsw5Cg/cfANk5K4Jr2YsX756xvX11shzqsreWA==}
 
   enquirer@2.4.1:
     resolution: {integrity: sha512-rRqJg/6gd538VHvR3PSrdRBb/1Vy2YfzHqzvbhGIQpDRKIa4FgV/54b5Q1xYSxOOwKvjXweS26E0Q+nAMwp2pQ==}
@@ -794,8 +794,8 @@ packages:
     resolution: {integrity: sha512-4kmO/MdyUIkLIvTPr8VHLil4AtoKIoniWPIEk5+CDy0xnWC84azhSFmuJ7PxZdsYtiP5kEeQsORAVIeMgxT+Hw==}
     hasBin: true
 
-  msgpackr@2.0.4:
-    resolution: {integrity: sha512-o1C5KRmuRt+apqMr1HuGSqWStZoRBUpEsCsl15uM9VdAF1qHLtvMOU2En747EnTyEl6c4pzPewRMFF31s1CNbA==}
+  msgpackr@2.0.5:
+    resolution: {integrity: sha512-cef05H/dSYpLpqp3sj/qyZh5vhUYCalnaLO7j1yOmpsR0y/XwLVtK7r5gn+U/F7CTEfMowcGhlUQJDLcLf7jcA==}
 
   nanoid@3.3.16:
     resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
@@ -1312,9 +1312,9 @@ snapshots:
   '@dprint/win32-x64@0.55.2':
     optional: true
 
-  '@effect/vitest@4.0.0-rc.110(effect@4.0.0-rc.110)(vitest@4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0)))':
+  '@effect/vitest@4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0)))':
     dependencies:
-      effect: 4.0.0-rc.110
+      effect: 4.0.0-rc.111
       vitest: 4.1.10(@types/node@25.7.0)(vite@8.1.5(@types/node@25.7.0)(yaml@2.9.0))
 
   '@emnapi/core@1.11.1':
@@ -1632,11 +1632,11 @@ snapshots:
       '@dprint/win32-arm64': 0.55.2
       '@dprint/win32-x64': 0.55.2
 
-  effect@4.0.0-rc.110:
+  effect@4.0.0-rc.111:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
-      msgpackr: 2.0.4
+      msgpackr: 2.0.5
 
   enquirer@2.4.1:
     dependencies:
@@ -1854,7 +1854,7 @@ snapshots:
       '@msgpackr-extract/msgpackr-extract-win32-x64': 3.0.4
     optional: true
 
-  msgpackr@2.0.4:
+  msgpackr@2.0.5:
     optionalDependencies:
       msgpackr-extract: 3.0.4
 

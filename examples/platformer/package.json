@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@typeonce/effect-machine": "file:../..",
-    "effect": "4.0.0-rc.110"
+    "effect": "4.0.0-rc.111"
   },
   "devDependencies": {
     "typescript": "6.0.3",
