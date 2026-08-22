@@ -52,6 +52,7 @@ import {
   isInitialTarget,
   isNoTarget,
   isSnapshot,
+  isStateUpdate,
   isTarget,
   makeChoiceTarget,
   makeTarget,
@@ -76,6 +77,11 @@ export type MicrostepPlan<State, Event, E, R> = {
   readonly exitPaths: ReadonlyArray<string>
   readonly entryPaths: ReadonlyArray<string>
   readonly changed: boolean
+}
+
+type SettlingMicrostep<State, Event, E, R> = MicrostepPlan<State, Event, E, R> & {
+  /** Internal signal that eventless stabilization must run again. */
+  readonly stabilize: boolean
 }
 
 export type MacrostepPlan<State, Event, E, R, Output> =
@@ -580,10 +586,15 @@ export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R
     | Machine.Snapshot<States>
     | Machine.Target<States, Machine.StateIdentifier<States>>
     | undefined
+  readonly update: {
+    readonly path: string
+    readonly value: unknown
+  } | undefined
   readonly commands: ReadonlyArray<RuntimeCommand>
   readonly raisedEvents: ReadonlyArray<Event>
   readonly emittedEvents: ReadonlyArray<unknown>
   readonly changed: boolean
+  readonly stabilize: boolean
   readonly exitPaths: ReadonlyArray<string>
   readonly entryPaths: ReadonlyArray<string>
   readonly choiceTransitions: ReadonlyArray<{
@@ -1143,7 +1154,9 @@ export const removeConflictingTransitions = <
     let preempted = false
     const transitionsToRemove = new Set<EvaluatedTransition<States, Event, E, R, Context>>()
     for (const selected of filtered) {
-      if (hasPathIntersection(transition.exitPaths, selected.exitPaths)) {
+      const writesSameState = transition.update !== undefined && selected.update !== undefined &&
+        transition.update.path === selected.update.path
+      if (hasPathIntersection(transition.exitPaths, selected.exitPaths) || writesSameState) {
         if (isDescendantOf(transition.selection.sourcePath, selected.selection.sourcePath)) {
           transitionsToRemove.add(selected)
         } else {
@@ -1344,6 +1357,7 @@ const collectEvaluatedTransition = <
     throw new Error("Machine transition returned decline without declaring declinable: true")
   }
   const unresolvedTarget = transitionResult.state === undefined
+      || isStateUpdate(transitionResult.state)
     ? undefined
     : transitionResult.state as
       | Machine.Snapshot<States>
@@ -1356,6 +1370,21 @@ const collectEvaluatedTransition = <
     selection.transition.targets,
     unresolvedTarget
   )
+  const update = isStateUpdate(transitionResult.state)
+    ? (() => {
+      const node = getNode(machine, transitionResult.state.path)
+      if (
+        !state.active.has(node.path) || node.schema === undefined ||
+        (node.type !== "compound" && node.type !== "parallel")
+      ) {
+        throw new Error(`Machine state update owner "${node.path}" must be an active valued compound or parallel state`)
+      }
+      return {
+        path: node.path,
+        value: decodeStateValueSync(machine, node, transitionResult.state.value)
+      }
+    })()
+    : undefined
   const choiceResolution = unresolvedTarget === undefined
     ? undefined
     : resolveChoiceTarget(
@@ -1456,7 +1485,10 @@ const collectEvaluatedTransition = <
     ? getTargetNodePath(target)
     : getTargetNodePath(unresolvedTarget)
   let stateAfterTransition = target === undefined
-    ? state
+    ? update === undefined ? state : {
+      ...state,
+      values: new Map(state.values).set(update.path, update.value)
+    }
     : normalizeTargetConfigurationSync<States>(machine, state, target)
   for (const additionalTarget of additionalChoiceTargets) {
     stateAfterTransition = normalizeTargetConfigurationSync<States>(
@@ -1466,6 +1498,7 @@ const collectEvaluatedTransition = <
     )
   }
   const changed = selection.transition.reenter || !hasSameActivePaths(state, stateAfterTransition)
+  const stabilize = changed || update !== undefined
 
   if (!changed) {
     return {
@@ -1474,6 +1507,7 @@ const collectEvaluatedTransition = <
       branchKey: transitionResult.branchKey,
       unresolvedTarget,
       target,
+      update,
       commands: [
         ...transitionResult.commands,
         ...(choiceResolution?.commands ?? []),
@@ -1496,6 +1530,7 @@ const collectEvaluatedTransition = <
         ...additionalTargetEmittedEvents
       ],
       changed,
+      stabilize,
       exitPaths: [],
       entryPaths: [],
       choiceTransitions: [
@@ -1521,6 +1556,7 @@ const collectEvaluatedTransition = <
     branchKey: transitionResult.branchKey,
     unresolvedTarget,
     target,
+    update,
     commands: [
       ...transitionResult.commands,
       ...(choiceResolution?.commands ?? []),
@@ -1543,6 +1579,7 @@ const collectEvaluatedTransition = <
       ...additionalTargetEmittedEvents
     ],
     changed,
+    stabilize,
     exitPaths: reenteredHistoryTarget !== undefined
       ? sortExitPaths(
         machine,
@@ -1744,7 +1781,8 @@ export const planInitialSync = <
       emittedEvents: [...choiceResolution.emittedEvents, ...initialHistoryEmittedEvents],
       exitPaths: [],
       entryPaths: [],
-      changed: false
+      changed: false,
+      stabilize: false
     }]
   )
 
@@ -1850,7 +1888,8 @@ const microstep = <
       emittedEvents: [],
       exitPaths: [],
       entryPaths: [],
-      changed: false
+      changed: false,
+      stabilize: false
     }
   }
 
@@ -1881,6 +1920,17 @@ const microstep = <
     ...transition.choiceTransitions
   ])
   let stateAfterTransition = state
+  // Updates never reactivate topology. Apply every retained value write to the
+  // original active configuration before any control target becomes
+  // authoritative.
+  for (const transition of sortedTransitions) {
+    if (transition.update !== undefined) {
+      stateAfterTransition = {
+        ...stateAfterTransition,
+        values: new Map(stateAfterTransition.values).set(transition.update.path, transition.update.value)
+      }
+    }
+  }
   // Value-only targets are evaluated against the original configuration. If
   // one is applied after a control-changing transition, it can resurrect a
   // branch that the changing transition exited. Apply value-only updates
@@ -1901,6 +1951,7 @@ const microstep = <
   }
 
   const changed = transitions.some((transition) => transition.changed)
+  const stabilize = transitions.some((transition) => transition.stabilize)
   const transitionActions = sortedTransitions
     .flatMap((transition) => transition.commands)
   const transitionRaisedEvents = sortedTransitions
@@ -1918,7 +1969,8 @@ const microstep = <
       emittedEvents: transitionEmittedEvents,
       exitPaths: [],
       entryPaths: [],
-      changed: false
+      changed: false,
+      stabilize
     }
   }
 
@@ -1951,7 +2003,8 @@ const microstep = <
     emittedEvents: [...exit.emittedEvents, ...transitionEmittedEvents, ...entry.emittedEvents],
     exitPaths,
     entryPaths,
-    changed: true
+    changed: true,
+    stabilize
   }
 }
 
@@ -1974,7 +2027,7 @@ const settle = <
   commands: Array<RuntimeCommand>,
   raisedEvents: Array<Machine.EventOf<Events>>,
   emittedEvents: Array<unknown>,
-  microsteps: Array<MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R>>
+  microsteps: Array<SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R>>
 ) => {
   let currentState = state
   let currentEvent = event
@@ -2010,7 +2063,7 @@ const settle = <
       pendingCompletions.length === 0 ? [] : [pendingCompletions.shift()!]
     )
     if (done.length > 0) {
-      const doneStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
+      const doneStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2021,7 +2074,7 @@ const settle = <
       emittedEvents.push(...doneStep.emittedEvents)
       microsteps.push(doneStep)
       currentState = doneStep.next
-      shouldRunAlways = doneStep.changed
+      shouldRunAlways = doneStep.stabilize
       continue
     }
     if (isActiveFinalConfiguration(machine, currentState)) {
@@ -2038,7 +2091,7 @@ const settle = <
       ? selectAlwaysTransitions<States, Events, Emits, E, R>(machine, currentState, currentEvent)
       : []
     if (always.length > 0) {
-      const alwaysStep: MicrostepPlan<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
+      const alwaysStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2049,7 +2102,7 @@ const settle = <
       emittedEvents.push(...alwaysStep.emittedEvents)
       microsteps.push(alwaysStep)
       currentState = alwaysStep.next
-      shouldRunAlways = alwaysStep.changed
+      shouldRunAlways = alwaysStep.stabilize
       continue
     }
 

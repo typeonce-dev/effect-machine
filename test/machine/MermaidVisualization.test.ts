@@ -49,8 +49,20 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       reenter: false,
       acceptance: "required",
       branches: [
-        { type: "branch", key: "approved", title: "approved %%\nnow", target: "Root.Done" },
-        { type: "branch", key: "unchanged", title: "unchanged", target: undefined }
+        {
+          type: "branch",
+          key: "approved",
+          title: "approved %%\nnow",
+          target: "Root.Done",
+          selection: { kind: "state", scope: "local", path: "Root.Done" }
+        },
+        {
+          type: "branch",
+          key: "unchanged",
+          title: "unchanged",
+          target: undefined,
+          selection: { kind: "none", scope: "local", path: undefined }
+        }
       ]
     },
     {
@@ -58,7 +70,11 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       trigger: { type: "event", event: "Retry" },
       reenter: false,
       acceptance: "declinable",
-      branches: [{ type: "direct", target: "Root.Route" }]
+      branches: [{
+        type: "direct",
+        target: "Root.Route",
+        selection: { kind: "choice", scope: "local", path: "Root.Route" }
+      }]
     }
   ],
   activityDefinitions: () => [

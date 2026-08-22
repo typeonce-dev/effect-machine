@@ -46,12 +46,22 @@ export interface TransitionDefinition {
     | {
       readonly type: "direct"
       readonly target: string | undefined
+      readonly selection: {
+        readonly kind: "state" | "initial" | "history" | "choice" | "update" | "none"
+        readonly scope: "local" | "branch" | "full" | "initial" | undefined
+        readonly path: string | undefined
+      }
     }
     | {
       readonly type: "branch"
       readonly key: string
       readonly title: string
       readonly target: string | undefined
+      readonly selection: {
+        readonly kind: "state" | "initial" | "history" | "choice" | "update" | "none"
+        readonly scope: "local" | "branch" | "full" | "initial" | undefined
+        readonly path: string | undefined
+      }
     }
   >
 }

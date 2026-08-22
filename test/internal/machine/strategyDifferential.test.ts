@@ -138,6 +138,126 @@ describe("machine planner and runtime strategies", () => {
       assert.deepStrictEqual(planned.microsteps[0]?.entryPaths, ["Count"])
     }))
 
+  it.effect("matches generic and indexed-hierarchical state updates", () => {
+    class Root extends Schema.TaggedClass<Root>("StrategyUpdateRoot")("Root", { revision: Schema.Number }) {}
+    class Work extends Schema.TaggedClass<Work>("StrategyUpdateWork")("Work", {}) {}
+    class Left extends Schema.TaggedClass<Left>("StrategyUpdateLeft")("Left", { value: Schema.Number }) {}
+    class Right extends Schema.TaggedClass<Right>("StrategyUpdateRight")("Right", { value: Schema.Number }) {}
+    class Leaf extends Schema.TaggedClass<Leaf>("StrategyUpdateLeaf")("Leaf", {}) {}
+    class Outside extends Schema.TaggedClass<Outside>("StrategyUpdateOutside")("Outside", {}) {}
+    class UpdateRegions extends Schema.TaggedClass<UpdateRegions>("StrategyUpdateRegions")("UpdateRegions", {}) {}
+    class Compete extends Schema.TaggedClass<Compete>("StrategyUpdateCompete")("Compete", {}) {}
+    class ExitRoot extends Schema.TaggedClass<ExitRoot>("StrategyUpdateExitRoot")("ExitRoot", {}) {}
+    class ReenterUpdate extends Schema.TaggedClass<ReenterUpdate>("StrategyUpdateReenter")("ReenterUpdate", {}) {}
+    const states = Machine.states({
+      Root: {
+        schema: Root,
+        initial: "Work",
+        states: {
+          Work: {
+            schema: Work,
+            type: "parallel",
+            states: {
+              Left: {
+                schema: Left,
+                initial: "Leaf",
+                states: { Leaf }
+              },
+              Right: {
+                schema: Right,
+                initial: "Leaf",
+                states: { Leaf }
+              }
+            }
+          }
+        }
+      },
+      Outside
+    })
+    const machine = Machine.make({
+      states: states.states,
+      events: Machine.events(UpdateRegions, Compete, ExitRoot, ReenterUpdate),
+      initial: (to) =>
+        to.Root.initial.resolve(({ target }) =>
+          target(
+            new Root({ revision: 0 }),
+            (root) =>
+              root.Work(new Work({}), (work) =>
+                work.Left(new Left({ value: 0 }), (left) => left.Leaf(new Leaf({})))
+                  .Right(new Right({ value: 0 }), (right) => right.Leaf(new Leaf({}))))
+          )
+        )
+    }).handle({
+      Root: {
+        states: {
+          Work: {
+            states: {
+              Left: {
+                states: {
+                  Leaf: {
+                    on: {
+                      UpdateRegions: (to) =>
+                        to.local.update(({ ancestors, target }) =>
+                          target(new Left({ value: ancestors["Root.Work.Left"].value + 1 }))
+                        ),
+                      Compete: (to) => to.branch.Root.update(({ target }) => target(new Root({ revision: 1 }))),
+                      ExitRoot: (to) => to.branch.Root.update(({ target }) => target(new Root({ revision: 3 }))),
+                      ReenterUpdate: (to) =>
+                        to.local.update(
+                          ({ ancestors, target }) => target(new Left({ value: ancestors["Root.Work.Left"].value + 1 })),
+                          { reenter: true }
+                        )
+                    }
+                  }
+                }
+              },
+              Right: {
+                states: {
+                  Leaf: {
+                    on: {
+                      UpdateRegions: (to) =>
+                        to.local.update(({ ancestors, target }) =>
+                          target(new Right({ value: ancestors["Root.Work.Right"].value + 2 }))
+                        ),
+                      Compete: (to) => to.branch.Root.update(({ target }) => target(new Root({ revision: 2 }))),
+                      ExitRoot: (to) => to.full.Outside().resolve(({ target }) => target(new Outside({})))
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    return Effect.gen(function*() {
+      yield* verifyPlannerStrategies({
+        machine,
+        events: [new UpdateRegions({}), new ReenterUpdate({}), new Compete({}), new ExitRoot({})],
+        expected: "indexed-hierarchical",
+        label: "state updates"
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const updated = yield* Machine.plan(machine, initial.state, new UpdateRegions({}))
+      if (updated.next.path !== "Root") throw new Error("expected Root")
+      assert.strictEqual(updated.next.state.states.Left.value.value, 1)
+      assert.strictEqual(updated.next.state.states.Right.value.value, 2)
+
+      const reentered = yield* Machine.plan(machine, updated.next, new ReenterUpdate({}))
+      assert.deepStrictEqual(reentered.microsteps[0]?.exitPaths, ["Root.Work.Left.Leaf"])
+      assert.deepStrictEqual(reentered.microsteps[0]?.entryPaths, ["Root.Work.Left.Leaf"])
+
+      const competed = yield* Machine.plan(machine, reentered.next, new Compete({}))
+      if (competed.next.path !== "Root") throw new Error("expected Root")
+      assert.strictEqual(competed.next.value.revision, 1)
+
+      const exited = yield* Machine.plan(machine, competed.next, new ExitRoot({}))
+      assert.strictEqual(exited.next.path, "Outside")
+    })
+  })
+
   it.effect("retains indexed execution microstep evidence without widening frozen execution values", () =>
     Effect.gen(function*() {
       const machine = makeFlatMachine()

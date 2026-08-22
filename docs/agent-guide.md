@@ -388,6 +388,23 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
+When only an active compound or parallel state's value changes, use its static
+update selection instead of reconstructing its active descendants:
+
+```ts
+Changed: (to) =>
+  to.local.update(({ ancestors, target }) =>
+    target.from({ revision: ancestors.document.revision + 1 })
+  )
+```
+
+`to.local.update` addresses the nearest valued compound scope.
+`to.branch.<path>.update` addresses a valued compound or parallel ancestor of
+the handler source. Both preserve the complete active descendant
+configuration. Neither runs lifecycle actions or restarts state-owned work by
+default. Use an event handled inside a parallel sibling when that sibling owns
+the value that must change.
+
 ## Test paths and invariants
 
 Test the statechart as a graph. Send domain events, inspect reached states, and

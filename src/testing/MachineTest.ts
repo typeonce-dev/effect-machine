@@ -1822,6 +1822,8 @@ export interface MicrostepCoverageEvidence {
   readonly total: number
   readonly changed: number
   readonly targetless: number
+  /** Retained state-value update operations. */
+  readonly updates: number
   readonly raised: number
   readonly emitted: number
   readonly eventTriggered: number

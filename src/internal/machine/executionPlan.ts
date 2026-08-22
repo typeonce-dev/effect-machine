@@ -47,7 +47,7 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { isInitialTarget, isNoTarget, isSnapshot, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import { isInitialTarget, isNoTarget, isSnapshot, isStateUpdate, isTarget, TargetSnapshotTypeId } from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
@@ -548,7 +548,25 @@ const collectIndexedEvaluatedTransition = (
     selection.context,
     selection.transition.evaluate
   )
-  const unresolvedTarget = transitionResult.state
+  const update = isStateUpdate(transitionResult.state)
+    ? (() => {
+      const index = descriptor.indexByPath.get(transitionResult.state.path)
+      const node = index === undefined ? undefined : descriptor.nodes[index]
+      if (
+        index === undefined || node === undefined || state.active[index] !== 1 || node.schema === undefined ||
+        (node.type !== "compound" && node.type !== "parallel")
+      ) {
+        throw new Error(
+          `Machine state update owner "${transitionResult.state.path}" must be an active valued compound or parallel state`
+        )
+      }
+      return {
+        path: node.path,
+        value: decodeStateValueSync(machine, node, transitionResult.state.value)
+      }
+    })()
+    : undefined
+  const unresolvedTarget = update === undefined ? transitionResult.state : undefined
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
@@ -568,9 +586,14 @@ const collectIndexedEvaluatedTransition = (
     throw new Error("Machine expected indexed transition target to be a snapshot or target builder result")
   }
   const next = target === undefined
-    ? state
+    ? update === undefined ? state : (() => {
+      const next = copyOwnedIndexedState(state)
+      next.values[descriptor.indexByPath.get(update.path)!] = update.value
+      return next
+    })()
     : normalizeIndexedTargetStateSync(machine, descriptor, state, target as any, selection.leafIndex)
   const changed = selection.transition.reenter || !hasSameIndexedActive(state, next)
+  const stabilize = changed || update !== undefined
   if (!changed) {
     return {
       selection,
@@ -578,11 +601,13 @@ const collectIndexedEvaluatedTransition = (
       branchKey: transitionResult.branchKey,
       unresolvedTarget: unresolvedTarget as any,
       target: target as any,
+      update,
       next,
       commands: [...transitionResult.commands, ...(initialResolution?.commands ?? [])],
       raisedEvents: [...transitionResult.raisedEvents, ...(initialResolution?.raisedEvents ?? [])],
       emittedEvents: [...transitionResult.emittedEvents, ...(initialResolution?.emittedEvents ?? [])],
       changed: false,
+      stabilize,
       exitPaths: [],
       entryPaths: [],
       choiceTransitions: initialResolution?.transitions ?? []
@@ -603,11 +628,13 @@ const collectIndexedEvaluatedTransition = (
     branchKey: transitionResult.branchKey,
     unresolvedTarget: unresolvedTarget as any,
     target: target as any,
+    update,
     next,
     commands: [...transitionResult.commands, ...(initialResolution?.commands ?? [])],
     raisedEvents: [...transitionResult.raisedEvents, ...(initialResolution?.raisedEvents ?? [])],
     emittedEvents: [...transitionResult.emittedEvents, ...(initialResolution?.emittedEvents ?? [])],
     changed: true,
+    stabilize,
     exitPaths: getExitPaths(machine, activeConfigurationFromIndexedState(descriptor, state), boundary),
     entryPaths: getEntryPaths(machine, activeConfigurationFromIndexedState(descriptor, next), boundary),
     choiceTransitions: initialResolution?.transitions ?? []
@@ -663,6 +690,13 @@ const indexedMicrostep = (
   if (transitions.length === 1) {
     next = transitions[0]!.next
   } else {
+    for (const transition of transitions) {
+      if (transition.update !== undefined) {
+        const values = next.values.slice()
+        values[descriptor.indexByPath.get(transition.update.path)!] = transition.update.value
+        next = { ...next, values }
+      }
+    }
     const applicationOrder = [
       ...transitions.filter((transition) => !transition.changed),
       ...transitions.filter((transition) => transition.changed)

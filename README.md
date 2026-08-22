@@ -420,6 +420,47 @@ choice destinations remain calls such as `to.full.Running()`. Runtime named
 branch builders remain callable, including `select.unchanged()`, because their
 result carries the selected branch evidence.
 
+### Update an active scope value
+
+Use `to.local.update(...)` to replace the value owned by the nearest active
+compound scope without rebuilding its active child. Use
+`to.branch.<path>.update(...)` for a valued compound or parallel ancestor of the
+handler source:
+
+```ts
+Increment: ;
+;((to) =>
+  to.branch.root.session.update(({ ancestors, target }) => target.from({ count: ancestors["root.session"].count + 1 })))
+```
+
+The update keeps the exact active descendants, their values, history records,
+completion outputs, and unrelated parallel regions. It runs no exit or entry
+actions and does not restart state-owned work. Eventless stabilization still
+runs, so an `always` transition can react to the new value.
+
+`update` is callable when used directly and is also a static selection for a
+named branch:
+
+```ts
+to.branches({
+  changed: { target: to.local.update },
+  unchanged: { target: to.none }
+}).resolve(({ select, event }) =>
+  event.changed
+    ? select.changed.from({ count: event.count })
+    : select.unchanged()
+)
+```
+
+The resolver must return `target(value)` or `target.from(input)`. It may return
+`decline()` only with `{ declinable: true }`. Pass `{ reenter: true }` on event
+or invocation transitions when the handler source should exit and enter again.
+Reentry applies to that source, not to the ancestor whose value changed.
+
+The selector omits `update` for schema-less scopes, atomic and final states,
+inactive branches, parallel sibling regions, and choice resolvers. Updating a
+parallel sibling requires an event handled by that region.
+
 Use `declinable: true` when a resolver may decide that its transition is not
 enabled. Only that resolver receives `decline()`, and its return type expands to
 accept the opaque declined result:

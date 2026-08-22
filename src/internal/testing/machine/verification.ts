@@ -475,7 +475,7 @@ const targetWithinSelection = (
   nodeByPath: ReadonlyMap<string, Machine.Machine.StateNode>
 ): boolean => {
   const selection = branch.selection
-  if (selection.kind === "none") return target === undefined
+  if (selection.kind === "none" || selection.kind === "update") return target === undefined
   if (target === undefined || selection.path === undefined) return false
   if (target === selection.path) return true
   const selectedNode = nodeByPath.get(selection.path)
@@ -564,6 +564,7 @@ export const coverage = <M extends AnyMachine>(
   const exitHits = new Set<number>()
 
   const transitionCoverage = makeTransitionCoverageCollector(machine)
+  const transitionDefinitions = Machine.transitionDefinitions(machine)
 
   const declaredEvents = publicEventTags(machine)
   const declaredEventTags = declaredEvents.tags
@@ -577,6 +578,7 @@ export const coverage = <M extends AnyMachine>(
   let microsteps = 0
   let changedMicrosteps = 0
   let targetlessTransitions = 0
+  let stateUpdates = 0
   let raisedEvents = 0
   let emittedEvents = 0
   let eventTriggered = 0
@@ -630,7 +632,13 @@ export const coverage = <M extends AnyMachine>(
     hitPaths(microstep.exitPaths, exitHits)
     observeSnapshot(microstep.next)
     for (const retained of microstep.transitions) {
-      if (retained.target === undefined) targetlessTransitions += 1
+      const definition = transitionDefinitions.find((candidate) =>
+        candidate.source === retained.source && candidate.reenter === retained.reenter &&
+        sameTransitionTrigger(candidate.trigger, retained.trigger)
+      )
+      const branch = definition?.branches[retained.branchIndex]
+      if (branch?.selection.kind === "update") stateUpdates += 1
+      else if (retained.target === undefined) targetlessTransitions += 1
       if (retained.trigger.type === "event") eventTriggered += 1
       else if (retained.trigger.type === "always") alwaysTriggered += 1
       else if (retained.trigger.type === "done") doneTriggered += 1
@@ -718,6 +726,7 @@ export const coverage = <M extends AnyMachine>(
       total: microsteps,
       changed: changedMicrosteps,
       targetless: targetlessTransitions,
+      updates: stateUpdates,
       raised: raisedEvents,
       emitted: emittedEvents,
       eventTriggered,
@@ -1598,7 +1607,11 @@ export const verify = <M extends AnyMachine>(
       const resolvedTarget = transition.resolvedTarget === undefined ? undefined : String(transition.resolvedTarget)
       const targetNode = target === undefined ? undefined : byPath.get(target)
       let expected = target
-      let explanation = target === undefined ? "an unresolved targetless transition" : `target "${target}"`
+      let explanation = branches[index]?.selection.kind === "update"
+        ? `update owner "${String(branches[index]?.selection.path)}"`
+        : target === undefined
+        ? "an unresolved targetless transition"
+        : `target "${target}"`
 
       if (transition.trigger.type === "choice") {
         explanation = target === undefined ? "a targetless choice edge" : `choice edge target "${target}"`
