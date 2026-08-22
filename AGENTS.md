@@ -61,14 +61,6 @@ pnpm perf:runtime
 
 Use the pull request performance workflows to compare against the base branch; do not draw conclusions from a single noisy benchmark run. Record the relevant checks and performance result in the pull request.
 
-When an example changes, run its own check from the example directory:
-
-```sh
-pnpm check
-```
-
-Every package directly below `examples/` must have a `check` script and a committed lockfile.
-
 ## Pull request conventions
 
 - Add or update a changeset for changes under `src/` or changes to `package.json`, following the changelog-writing guide in `.changeset/README.md`.
