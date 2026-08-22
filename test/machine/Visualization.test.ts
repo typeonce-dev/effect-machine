@@ -108,7 +108,7 @@ const makeMachine = (unsafeStart = false) =>
                     to.local.running().resolve(({ target }) =>
                       target(new Running({}), (running) => running.editing(new Editing({})))
                     ),
-                Refresh: (to) => to.none
+                Refresh: (to) => to.local.update(({ target }) => target(new Workflow({})))
               }
             },
             running: {
@@ -246,7 +246,7 @@ describe("Machine structural visualization", () => {
         branches: [{
           type: "direct",
           target: undefined,
-          selection: { path: undefined, kind: "none", scope: "local" }
+          selection: { path: "application.workflow", kind: "update", scope: "local" }
         }]
       },
       {
@@ -376,8 +376,10 @@ describe("Machine structural visualization", () => {
         "├─ ● application [parallel]",
         "│  ├─ ● workflow [compound, initial: idle]",
         "│  │  ├─ ● idle",
-        "│  │  │  └─ ◇ on: Start",
-        "│  │  │     └┄ → running",
+        "│  │  │  ├─ ◇ on: Start",
+        "│  │  │  │  └┄ → running",
+        "│  │  │  └─ ◇ on: Refresh",
+        "│  │  │     └┄ update application.workflow",
         "│  │  ├─ ○ running [compound, initial: editing]",
         "│  │  │  ├─ ○ editing",
         "│  │  │  └─ ○ complete [final]",
@@ -405,6 +407,7 @@ describe("Machine structural visualization", () => {
     assert.include(rendered, "state \"○ recent [history: shallow]\" as state_6")
     assert.include(rendered, "[*] --> state_0")
     assert.include(rendered, "state_2 --> state_3: Start")
+    assert.include(rendered, "state_2: Refresh / update application.workflow")
     assert.include(rendered, "state_8 --> state_9: Disconnect")
     assert.notMatch(rendered, /state_\d+ --> state_\d+: Refresh/)
     assert.notInclude(rendered, "Candidate events")

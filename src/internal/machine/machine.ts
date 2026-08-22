@@ -227,6 +227,15 @@ const decorateTransitionSelection = (selection: Topology.TargetSelection): Topol
     reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true })
   })
 
+const decorateStateUpdateSelection = (selection: Topology.TargetSelection): Topology.TargetSelection => {
+  const update = (
+    resolve: (context: any, enqueue: unknown) => unknown,
+    options?: unknown
+  ) => makeDirectTransitionDescriptor(selection, resolve, options)
+  Object.assign(update, selection)
+  return Object.freeze(update) as unknown as Topology.TargetSelection
+}
+
 const noneTransitionSelection = decorateTransitionSelection(Topology.noneTargetSelection)
 
 const makeInitialBuilderDescriptor = (
@@ -268,6 +277,7 @@ const decorateInitialSelectorNode = (node: unknown): unknown => {
 
 const decorateTransitionSelectorNode = (node: unknown): unknown => {
   if (Topology.isTargetSelection(node)) {
+    if (node.kind === "update") return decorateStateUpdateSelection(node)
     return node === Topology.noneTargetSelection ? noneTransitionSelection : decorateTransitionSelection(node)
   }
   if (typeof node === "function") {
@@ -363,22 +373,29 @@ const makeSelectionValue = (
   scope: Topology.TargetSelectionScope
 ): Topology.TargetSelection => Topology.makeTargetSelection(kind, path, scope)
 
+const makeStateUpdateSelection = (
+  path: string,
+  scope: "local" | "branch"
+): Topology.TargetSelection => Topology.makeTargetSelection("update", path, scope)
+
 const addSelectionChildren = (
   builder: Record<string, unknown>,
   stateNodes: Machine.StateNodes,
   parent: string,
-  scope: "local" | "branch"
+  scope: "local" | "branch",
+  source?: string
 ): void => {
   for (const node of stateNodes.byPath.values()) {
     if (node.parent !== parent || node.type === "history") continue
-    builder[node.key] = makeSelectionNode(stateNodes, node.path, scope)
+    builder[node.key] = makeSelectionNode(stateNodes, node.path, scope, source)
   }
 }
 
 const makeSelectionNode = (
   stateNodes: Machine.StateNodes,
   path: string,
-  scope: Topology.TargetSelectionScope
+  scope: Topology.TargetSelectionScope,
+  source?: string
 ): unknown => {
   const node = getTargetBuilderNode(stateNodes, path)
   const kind: Topology.TargetSelectionKind = node.type === "choice" ? "choice" : "state"
@@ -389,7 +406,17 @@ const makeSelectionNode = (
       enumerable: true
     })
     if (scope === "local" || scope === "branch") {
-      addSelectionChildren(method, stateNodes, path, scope)
+      addSelectionChildren(method, stateNodes, path, scope, source)
+    }
+    if (
+      scope === "branch" && source !== undefined && node.schema !== undefined &&
+      (source === path || source.startsWith(`${path}.`)) &&
+      getTargetBuilderNode(stateNodes, source).type !== "choice"
+    ) {
+      Object.defineProperty(method, "update", {
+        value: makeStateUpdateSelection(path, "branch"),
+        enumerable: true
+      })
     }
   }
   return method
@@ -424,13 +451,16 @@ const makeTargetSelector = (
   }
   const branch: Record<string, unknown> = {}
   const root = getTargetBuilderNode(stateNodes, source.split(".")[0]!)
-  branch[root.key] = makeSelectionNode(stateNodes, root.path, "branch")
+  branch[root.key] = makeSelectionNode(stateNodes, root.path, "branch", source)
   const local: Record<string, unknown> = {}
   const localScope = getLocalTargetScope(stateNodes, source)
   if (localScope !== undefined) {
     const localScopeNode = getTargetBuilderNode(stateNodes, localScope)
     if (localScopeNode.schema !== undefined) {
       local.with = makeSelectionValue("state", localScope, "local")
+      if (getTargetBuilderNode(stateNodes, source).type !== "choice") {
+        local.update = makeStateUpdateSelection(localScope, "local")
+      }
     }
     addSelectionChildren(local, stateNodes, localScope, "local")
   }
@@ -469,6 +499,13 @@ const getSelectionBuilder = (
   source: string
 ): unknown => {
   if (selection.kind === "none") return target.none
+  if (selection.kind === "update") {
+    return withFrom(
+      (value: unknown) => Topology.makeStateUpdate(selection.path!, value),
+      "leaf",
+      true
+    )
+  }
   let builder: any
   let parts = selection.path!.split(".")
   if (selection.kind === "history") {
@@ -514,6 +551,12 @@ const validateResolvedSelection = (
     }
     return
   }
+  if (selection.kind === "update") {
+    if (!Topology.isStateUpdate(result) || result.path !== selection.path) {
+      throw new Error(`Machine state update for "${selection.path}" must return its selected update builder`)
+    }
+    return
+  }
   if (result === undefined) return
   const resultPath = typeof result === "object" && result !== null && hasProperty(result, "path") &&
       typeof result.path === "string"
@@ -555,6 +598,9 @@ const runCapturedBranch = (
   validateResolvedSelection(resolved, branch.selection, stateNodes)
   return resolved === undefined ? constructSelectedTarget(selectedTarget) : resolved
 }
+
+const topologyTargetPath = (selection: Topology.TargetSelection): string | undefined =>
+  selection.kind === "update" ? undefined : selection.path
 
 const isArrayIndexKey = (key: string): boolean => {
   const index = Number(key)
@@ -738,7 +784,9 @@ const captureTransition = (
       declinable,
       targets: [
         ...new Set(
-          branches.flatMap((branch) => branch.selection.path === undefined ? [] : [branch.selection.path])
+          branches.flatMap((branch) =>
+            topologyTargetPath(branch.selection) === undefined ? [] : [branch.selection.path!]
+          )
         )
       ],
       branches: branches.map((branch) =>
@@ -746,7 +794,7 @@ const captureTransition = (
           type: "branch" as const,
           key: branch.key,
           title: branch.title,
-          target: branch.selection.path,
+          target: topologyTargetPath(branch.selection),
           selection: transitionTargetSelection(branch.selection)
         })
       ),
@@ -763,10 +811,10 @@ const captureTransition = (
   return {
     reenter,
     declinable,
-    targets: branch.selection.path === undefined ? [] : [branch.selection.path],
+    targets: topologyTargetPath(branch.selection) === undefined ? [] : [branch.selection.path!],
     branches: [{
       type: "direct" as const,
-      target: branch.selection.path,
+      target: topologyTargetPath(branch.selection),
       selection: transitionTargetSelection(branch.selection)
     }],
     evaluate,

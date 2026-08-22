@@ -29,6 +29,8 @@ export const DeclinedTypeId: unique symbol = Symbol("effect/Machine/Declined")
 
 export const TargetSelectionTypeId: unique symbol = Symbol("effect/Machine/TargetSelection")
 
+export const StateUpdateTypeId: unique symbol = Symbol("effect/Machine/StateUpdate")
+
 export const SelectedBranchTypeId: unique symbol = Symbol("effect/Machine/SelectedBranch")
 
 interface StateInput {
@@ -73,7 +75,7 @@ export interface Declined {
   readonly [DeclinedTypeId]: typeof DeclinedTypeId
 }
 
-export type TargetSelectionKind = "state" | "initial" | "history" | "choice" | "none"
+export type TargetSelectionKind = "state" | "initial" | "history" | "choice" | "update" | "none"
 
 export type TargetSelectionScope = "local" | "branch" | "full" | "initial"
 
@@ -110,6 +112,21 @@ export const makeTargetSelection = (
 export const noneTargetSelection: TargetSelection = makeTargetSelection("none", undefined, "local")
 
 export const isTargetSelection = (u: unknown): u is TargetSelection => hasProperty(u, TargetSelectionTypeId)
+
+export interface StateUpdate {
+  readonly [StateUpdateTypeId]: typeof StateUpdateTypeId
+  readonly path: string
+  readonly value: unknown
+}
+
+export const makeStateUpdate = (path: string, value: unknown): StateUpdate =>
+  Object.freeze({
+    [StateUpdateTypeId]: StateUpdateTypeId,
+    path,
+    value
+  })
+
+export const isStateUpdate = (u: unknown): u is StateUpdate => hasProperty(u, StateUpdateTypeId)
 
 export const makeSelectedBranch = (
   owner: object,

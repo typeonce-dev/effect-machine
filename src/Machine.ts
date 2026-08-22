@@ -3577,9 +3577,10 @@ export declare namespace Machine {
    *
    * **Details**
    *
-   * Every branch exposes its selected target without executing its resolver.
-   * A compound local or branch target covers its descendants;
-   * `undefined` identifies an explicitly targetless branch.
+   * Every branch exposes its static selection without executing its resolver.
+   * A compound local or branch target covers its descendants. An `update`
+   * selection keeps `target` undefined and records its value owner in
+   * `selection.path`; `none` identifies an explicitly targetless branch.
    *
    * @category models
    * @since 0.4.0
@@ -4462,6 +4463,33 @@ export declare namespace Machine {
   }
 
   /**
+   * Opaque instruction that replaces one active compound or parallel state's
+   * value without changing its active descendants.
+   *
+   * @category models
+   * @since 0.21.0
+   */
+  export interface StateUpdate<
+    States extends StateSchemas,
+    StateId extends ValuedStateIdentifier<States>
+  > {
+    readonly [Topology.StateUpdateTypeId]: typeof Topology.StateUpdateTypeId
+    readonly path: StateId
+    readonly value: StateByIdentifier<States, StateId>
+  }
+
+  /** @internal */
+  type StateUpdateBuilder<
+    States extends StateSchemas,
+    StateId extends ValuedStateIdentifier<States>
+  > =
+    & ((value: StateByIdentifier<States, StateId>) => StateUpdate<States, StateId>)
+    & FromMethod<
+      readonly [input: SchemaByIdentifier<States, StateId>["~type.make.in"]],
+      StateUpdate<States, StateId>
+    >
+
+  /**
    * Opaque result returned by an explicitly targetless transition.
    *
    * The transition remains handled and retains its queued commands, raised
@@ -4745,6 +4773,45 @@ export declare namespace Machine {
         & SelectionTreeWithPrefix<AllStates, Children, Path, Scope, Builder>
     : SelectionMethod<Builder, Path>
 
+  /** @internal */
+  type StateUpdateSelectionForNode<
+    AllStates extends StateSchemas,
+    Node,
+    Path extends string
+  > = Node extends { readonly states: StateSchemas } ? NodeSchema<Node> extends never ? {}
+    : {
+      readonly update: SelectionValue<
+        StateUpdateBuilder<AllStates, Extract<Path, ValuedStateIdentifier<AllStates>>>,
+        Path,
+        "update"
+      >
+    }
+    : {}
+
+  /** @internal */
+  type BranchUpdateSelectionPath<
+    AllStates extends StateSchemas,
+    Node,
+    Path extends string,
+    Rest extends string
+  > =
+    & StateUpdateSelectionForNode<AllStates, Node, Path>
+    & (Node extends { readonly states: infer Children extends StateSchemas } ?
+      Rest extends `${infer Head}.${infer Tail}` ? Head extends keyof Children ? {
+            readonly [Key in Head]: BranchUpdateSelectionPath<
+              AllStates,
+              Children[Head],
+              JoinPath<Path, Head>,
+              Tail
+            >
+          }
+        : {}
+      : Rest extends keyof Children ? {
+          readonly [Key in Rest]: StateUpdateSelectionForNode<AllStates, Children[Rest], JoinPath<Path, Rest>>
+        }
+      : {}
+      : {})
+
   type FullSelectionNode<
     AllStates extends StateSchemas,
     Node,
@@ -4769,13 +4836,17 @@ export declare namespace Machine {
     Source extends StateNodeIdentifier<States>,
     Root extends string = Source extends `${infer Head}.${string}` ? Head : Source
   > = Root extends ActiveStateKey<States> ? Root extends keyof BranchTargetBuilder<States, Source> ? {
-        readonly [Key in Root]: SelectionNode<
-          States,
-          States[Key],
-          Key,
-          "branch",
-          BranchTargetBuilder<States, Source>[Key]
-        >
+        readonly [Key in Root]:
+          & SelectionNode<
+            States,
+            States[Key],
+            Key,
+            "branch",
+            BranchTargetBuilder<States, Source>[Key]
+          >
+          & (Source extends ChoiceIdentifier<States> ? {}
+            : Source extends `${Key}.${infer Rest}` ? BranchUpdateSelectionPath<States, States[Key], Key, Rest>
+            : StateUpdateSelectionForNode<States, States[Key], Key>)
       }
     : {}
     : {}
@@ -4783,14 +4854,21 @@ export declare namespace Machine {
   type LocalTargetSelector<
     States extends StateSchemas,
     Source extends StateNodeIdentifier<States>
-  > = NearestCompoundScope<States, Source> extends infer Scope extends StateIdentifier<States> ?
-    ChildrenOf<States, Scope> extends infer Children extends StateSchemas ?
-      LocalTargetBuilder<States, Source> extends infer Builder ?
-          & SelectionTreeWithPrefix<States, Children, Scope, "local", Builder>
-          & ("with" extends keyof Builder ? {
-              readonly with: SelectionValue<Builder["with"], Scope>
-            }
-            : {})
+  > = NearestCompoundScope<States, Source> extends infer Scope ? [Scope] extends [never] ? {}
+    : Scope extends StateIdentifier<States> ?
+      ChildrenOf<States, Scope> extends infer Children extends StateSchemas ?
+        LocalTargetBuilder<States, Source> extends infer Builder ?
+            & SelectionTreeWithPrefix<States, Children, Scope, "local", Builder>
+            & ("with" extends keyof Builder ? {
+                readonly with: SelectionValue<Builder["with"], Scope>
+              }
+              : {})
+            & (Source extends ChoiceIdentifier<States> ? {}
+              : Scope extends ValuedStateIdentifier<States> ? {
+                  readonly update: SelectionValue<StateUpdateBuilder<States, Scope>, Scope, "update">
+                }
+              : {})
+        : {}
       : {}
     : {}
     : {}
@@ -4831,9 +4909,9 @@ export declare namespace Machine {
   > {
     /** Handles the trigger without selecting a destination. */
     readonly none: SelectionValue<TargetBuilder<States, Source>["none"], never, "none">
-    /** Selects a destination inside the nearest active compound scope. */
+    /** Selects a destination or updates the nearest active compound scope. */
     readonly local: LocalTargetSelector<States, Source>
-    /** Selects a destination elsewhere under the currently active root. */
+    /** Selects a destination or updates a valued active ancestor under the current root. */
     readonly branch: BranchTargetSelector<States, Source>
     /** Selects a complete destination under any top-level state. */
     readonly full: FullTargetSelector<States>
@@ -5243,9 +5321,9 @@ export declare namespace Machine {
    * **Details**
    *
    * Handlers return snapshots for complete state replacement, target builder
-   * results for path-safe partial transitions, or `target.none()` for an
-   * explicitly targetless transition. Raw decoded state values and `void` are
-   * not accepted at transition boundaries.
+   * results for path-safe partial transitions, state-value updates, or
+   * `target.none()` for an explicitly targetless transition. Raw decoded state
+   * values and `void` are not accepted at transition boundaries.
    *
    * @category utility types
    * @since 0.4.0
@@ -5255,11 +5333,13 @@ export declare namespace Machine {
     | Target<States, StateIdentifier<States>>
     | HistoryTarget<States, HistoryIdentifier<States>>
     | ChoiceTarget<States, ChoiceIdentifier<States>>
+    | StateUpdate<States, ValuedStateIdentifier<States>>
     | StateConstruction<
       | Snapshot<States>
       | Target<States, StateIdentifier<States>>
       | HistoryTarget<States, HistoryIdentifier<States>>
       | ChoiceTarget<States, ChoiceIdentifier<States>>
+      | StateUpdate<States, ValuedStateIdentifier<States>>
     >
     | NoTarget
 
@@ -5639,6 +5719,28 @@ export declare namespace Machine {
     | (SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined)
     | Declined
 
+  /** @internal */
+  type StateUpdateResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context,
+    Selection
+  > = (
+    context: TransitionResolveContext<Context, Selection>,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) => SelectedTargetResult<Selection>
+
+  /** @internal */
+  type DeclinableStateUpdateResolver<
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    Context,
+    Selection
+  > = (
+    context: TransitionResolveContext<Context, Selection> & DeclineCapability,
+    enqueue: Enqueue<EventOf<Events>, EmitOf<Emits>>
+  ) => SelectedTargetResult<Selection> | Declined
+
   /** One named destination declared by a branching transition. */
   export interface TransitionBranchInput<
     Selection extends TargetSelection<any, any, any> = TargetSelection<any, any, any>
@@ -5880,6 +5982,80 @@ export declare namespace Machine {
       : {}
       : {})
 
+  /** @internal */
+  interface StateUpdateTransitionRequired<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, "update">
+  > {
+    (
+      resolve: StateUpdateResolver<Events, Emits, Context, Selection>,
+      options?: TransitionRequiredOptions<Reenter>
+    ): BuiltTransition<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      SelectedTargetResult<Selection>,
+      "required"
+    >
+  }
+
+  /** @internal */
+  interface StateUpdateTransitionDeclinable<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, "update">
+  > {
+    (
+      resolve: DeclinableStateUpdateResolver<Events, Emits, Context, Selection>,
+      options: TransitionDeclinableOptions<Reenter>
+    ): BuiltTransition<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      SelectedTargetResult<Selection> | Declined,
+      "declinable"
+    >
+  }
+
+  /** @internal */
+  type StateUpdateTransition<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Acceptance extends TransitionAcceptance,
+    Selection extends TargetSelection<any, any, "update">
+  > =
+    & Selection
+    & StateUpdateTransitionRequired<States, Events, Emits, StateId, Context, Reenter, Selection>
+    & ("declinable" extends Acceptance ? StateUpdateTransitionDeclinable<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        Selection
+      >
+      : {})
+
   /** @internal Type evidence retained by a machine initial-entry declaration. */
   export interface InitialBuilderEvidence<out Selection> {
     readonly [InitialBuilderTypeId]: Types.Covariant<Selection>
@@ -5933,19 +6109,18 @@ export declare namespace Machine {
     Reenter extends boolean,
     Acceptance extends TransitionAcceptance,
     Node
-  > = Node extends (...args: infer Args) => infer Selection ? Selection extends TargetSelection<any, any, any> ?
-        & ((...args: Args) => TransitionTarget<
-          States,
-          Events,
-          Emits,
-          StateId,
-          Context,
-          Reenter,
-          Acceptance,
-          Selection
-        >)
-        & {
-          readonly [Key in keyof Node]: TransitionSelectorNode<
+  > = Node extends TargetSelection<any, any, "update"> ? StateUpdateTransition<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      Acceptance,
+      Node
+    >
+    : Node extends (...args: infer Args) => infer Selection ? Selection extends TargetSelection<any, any, any> ?
+          & ((...args: Args) => TransitionTarget<
             States,
             Events,
             Emits,
@@ -5953,10 +6128,21 @@ export declare namespace Machine {
             Context,
             Reenter,
             Acceptance,
-            Node[Key]
-          >
-        }
-    : never
+            Selection
+          >)
+          & {
+            readonly [Key in keyof Node]: TransitionSelectorNode<
+              States,
+              Events,
+              Emits,
+              StateId,
+              Context,
+              Reenter,
+              Acceptance,
+              Node[Key]
+            >
+          }
+      : never
     : Node extends TargetSelection<any, any, any> ? TransitionTarget<
         States,
         Events,
@@ -8760,9 +8946,10 @@ export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.I
  *
  * Event handlers retain their handler-key order within each source state and
  * are followed by eventless and completion handlers. This function does not
- * execute resolvers. Every direct, named, and targetless branch exposes the
- * destination selected by its required static `target` declaration, while
- * `acceptance` reports whether the resolver may decline the transition.
+ * execute resolvers. Every branch exposes its static selection. State updates
+ * retain the updated owner in `selection.path` while leaving `target`
+ * undefined because they do not change topology. `acceptance` reports whether
+ * the resolver may decline the transition.
  *
  * @category getters
  * @since 0.4.0

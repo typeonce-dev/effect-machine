@@ -21,6 +21,13 @@ interface TransitionLabel {
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<TransitionLabel> =>
   definitions.flatMap((definition) => {
     const branches = definition.branches.flatMap((branch) => {
+      if (branch.selection.kind === "update" && branch.selection.path !== undefined) {
+        return [
+          branch.type === "direct"
+            ? `update ${branch.selection.path}`
+            : `[${branch.title}] update ${branch.selection.path}`
+        ]
+      }
       if (branch.target === undefined) return []
 
       const target = branch.target.slice(branch.target.lastIndexOf(".") + 1)
