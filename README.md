@@ -582,6 +582,46 @@ entered. Use an Effect containing `Effect.sleep(...)` for generic work, while
 `from.timer(...)` keeps timer intent explicit and makes static durations visible
 through activity inspection.
 
+### Spawn dynamic child machines
+
+Use `from.child(...)` when a state owns a fixed child lifecycle. Use the
+`children` context inside an invoked Effect when the machine process owns an
+open set of children that must survive state changes:
+
+```ts
+const Plant = Machine.childFamily(plantMachine)
+
+const central = Machine.make({
+  events: Machine.events(ResourcesOffered, PlantBroken)
+  // ...
+}).handle({
+  Commissioning: {
+    invoke: (from) =>
+      from.effect("commission-wave", ({ children, state }) =>
+        Effect.forEach(
+          state.plants,
+          (input) => children.spawn(Plant(input.id), { input }),
+          { discard: true }
+        ))
+        .onDone((to) => to.full.Operating())
+        .onFailure((to) => to.full.CommissioningFailed())
+  }
+})
+```
+
+`children.spawn` completes after initialization. The new child remains owned
+by the machine process after the commissioning Effect completes or its state
+exits. `children.sendTo` and `children.stop` address one active child from an
+Effect; transition resolvers use `enqueue.sendTo` and `enqueue.stop` with the
+same descriptor. Duplicate active ids fail with `ChildAlreadyExistsError` and
+do not replace the existing child. Earlier successful spawns remain active if
+a later spawn in the same wave fails.
+
+The child machine's declared `Machine.parent(...)` events must be accepted by
+the owner. This is checked at each spawn call even though ids and cardinality
+remain dynamic. `scope.spawn(child, { input })` provides the same descriptor
+form for lower-level process logic, where the process event protocol is known.
+
 ## Reactivity
 
 `AtomMachine` runs one lazy machine instance per `AtomRegistry`:
@@ -602,6 +642,15 @@ The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 `AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
 equality-aware derivations. React applications using `@effect/atom-react` need
 a `RegistryProvider`.
+
+Descriptors reconstructed from a `Machine.childFamily` resolve the same child
+bridge by machine identity and id:
+
+```ts
+const Plant = Machine.childFamily(plantMachine)
+const plantAtom = centralAtom.child(Plant(selectedPlantId))
+const brokenAtom = AtomMachine.matchesChild(plantAtom, "Broken")
+```
 
 Emissions stay streams rather than becoming retained atom state:
 

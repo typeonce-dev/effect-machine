@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
@@ -879,6 +879,56 @@ describe("machine planner and runtime strategies", () => {
         assert.strictEqual(generation, 2)
         yield* ref.stop
       }
+    }) as Effect.Effect<void, unknown, any>)
+
+  it.effect("keeps dynamically spawned child machines across generic and compiled state changes", () =>
+    Effect.gen(function*() {
+      class ChildIdle extends Schema.TaggedClass<ChildIdle>("StrategyDynamicChildIdle")("ChildIdle", {}) {}
+      const childMachine = Machine.make({
+        states: { ChildIdle },
+        events: Machine.events(),
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+      }).handle({ ChildIdle: {} })
+      const Child = Machine.childFamily(childMachine)
+      class Commissioning extends Schema.TaggedClass<Commissioning>("StrategyDynamicCommissioning")(
+        "Commissioning",
+        {}
+      ) {}
+      class Operating extends Schema.TaggedClass<Operating>("StrategyDynamicOperating")("Operating", {}) {}
+      const machine = Machine.make({
+        states: { Commissioning, Operating },
+        events: Machine.events(),
+        initial: (to) => to.Commissioning().resolve(({ target }) => target(new Commissioning({})))
+      }).handle({
+        Commissioning: {
+          invoke: (from) =>
+            from.effect("commission", ({ children }) => children.spawn(Child("runtime"))).onDone((to) =>
+              to.full.Operating()
+            ).onFailure((to) => to.none)
+        },
+        Operating: {}
+      })
+
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
+
+      const results: Array<unknown> = []
+      for (const strategy of ["generic", "compiled"] as const) {
+        const ref = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* ref.changes.pipe(
+          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.path === "Operating"),
+          Stream.take(1),
+          Stream.runDrain
+        )
+        const child = yield* ref.child(Child("runtime"))
+        assert(Option.isSome(child))
+        results.push({
+          parent: yield* ref.state,
+          child: yield* child.value.state
+        })
+        yield* ref.stop
+        assert.strictEqual((yield* child.value.snapshot).status, "stopped")
+      }
+      assert.deepStrictEqual(results[1], results[0])
     }) as Effect.Effect<void, unknown, any>)
 
   it.effect("compares generated eligible models across canonical and indexed planners", () =>

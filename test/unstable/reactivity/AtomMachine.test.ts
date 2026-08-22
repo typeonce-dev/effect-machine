@@ -225,6 +225,7 @@ describe("AtomMachine", () => {
       const childAtoms = parentAtoms.child(Child)
       assert.strictEqual(parentAtoms.child(Child), childAtoms)
       const Alias = Machine.child("counter", childMachine)
+      assert.strictEqual(parentAtoms.child(Alias), childAtoms)
       const Impostor = Machine.child("counter", makeCounterMachine())
       const impostorAtoms = parentAtoms.child(Impostor)
       const selectedCount = AtomMachine.selectChild(childAtoms, "Count")
@@ -299,6 +300,40 @@ describe("AtomMachine", () => {
       assert(Option.isNone(yield* waitForResult(registry, selectedCount, Option.isNone)))
       assert(Option.isNone(yield* waitForResult(registry, selectedCountSnapshot, Option.isNone)))
       assert.strictEqual(yield* AtomRegistry.getResult(registry, countMatches), false)
+    })))
+
+  it.effect("reactively exposes a dynamically spawned child by family and runtime id", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const childMachine = makeCounterMachine()
+      const Child = Machine.childFamily(childMachine)
+      const parent = Machine.make({
+        states: { Count },
+        events: Machine.events(),
+        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+      }).handle({
+        Count: {
+          invoke: (from) =>
+            from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
+              .onFailure((to) => to.none)
+        }
+      })
+      const parentAtoms = AtomMachine.make(parent)
+      const childAtoms = parentAtoms.child(Child("dynamic"))
+      assert.strictEqual(parentAtoms.child(Child("dynamic")), childAtoms)
+      assert.strictEqual(parentAtoms.child(Machine.child("dynamic", childMachine)), childAtoms)
+      const selected = AtomMachine.selectChild(childAtoms, "Count")
+      const matches = AtomMachine.matchesChild(childAtoms, "Count")
+
+      yield* mount(registry, childAtoms.state)
+      const active = yield* waitForResult(registry, selected, Option.isSome)
+      assert(Option.isSome(active))
+      assert.strictEqual(active.value.value, 0)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, matches), true)
+
+      yield* Effect.sync(() => registry.set(childAtoms.stop, undefined))
+      assert(Option.isNone(yield* waitForResult(registry, childAtoms.ref, Option.isNone)))
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, matches), false)
     })))
 
   it.effect("exposes snapshots and sends events", () =>

@@ -18,9 +18,10 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
-import type { Inspection, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
+import type { ChildMachine, Inspection, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
+import { ChildMachineLogicTypeId } from "./symbols.js"
 
 type ChildDescriptor = {
   readonly id: string
@@ -376,7 +377,7 @@ const sendMachineTarget = (
 export interface ProcessScope<Event> {
   readonly self: ProcessAddress<Event>
   readonly parent: ProcessAddress<unknown> | undefined
-  readonly spawn: ProcessSpawn
+  readonly spawn: ProcessSpawn<Event>
   readonly sendParent: (event: unknown) => Effect.Effect<void, StoppedError>
   readonly emit: (event: unknown) => Effect.Effect<void>
   readonly sendTo: {
@@ -552,7 +553,15 @@ export interface ProcessLogic<
   run(context: ProcessContext<State, Event>): Effect.Effect<Output, Error, Requirements>
 }
 
-export interface ProcessSpawn {
+export interface ProcessSpawn<OwnerEvent = unknown> {
+  <const Child extends ChildMachine.Any>(
+    child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, OwnerEvent>,
+    ...options: ChildMachine.SpawnArgs<Child>
+  ): Effect.Effect<
+    ChildMachine.Ref<Child>,
+    ChildAlreadyExistsError | ChildMachine.StartError<Child>,
+    ChildMachine.StartRequirements<Child>
+  >
   <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
   ): Effect.Effect<
@@ -1207,6 +1216,14 @@ const makeChildRuntimeSync = (
     })
   }
 
+  function spawn<const Child extends ChildMachine.Any>(
+    child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, unknown>,
+    ...options: ChildMachine.SpawnArgs<Child>
+  ): Effect.Effect<
+    ChildMachine.Ref<Child>,
+    ChildAlreadyExistsError | ChildMachine.StartError<Child>,
+    ChildMachine.StartRequirements<Child>
+  >
   function spawn<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
     logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
   ): Effect.Effect<
@@ -1232,32 +1249,44 @@ const makeChildRuntimeSync = (
     ChildAlreadyExistsError | ChildInitialError,
     Exclude<ChildRequirements, Scope.Scope>
   >
-  function spawn<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
-    logic: ProcessLogic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>,
-    spawnOptions?: {
+  function spawn(
+    logicOrChild: ProcessLogic<any, any, any, any, any, any> | ChildMachine.Any,
+    options?: {
       readonly id: string
       readonly descriptor?: ChildDescriptor
       readonly onOutcome?: (
-        outcome: RuntimeOutcome<ChildState, ChildError, ChildOutput>
+        outcome: RuntimeOutcome<any, any, any>
       ) => Effect.Effect<void>
       readonly [activeSnapshotObserver]?: (
-        snapshot: Extract<RuntimeSnapshot<ChildState, ChildError, ChildOutput>, { readonly status: "active" }>
+        snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
       ) => Effect.Effect<void>
       readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
-    }
-  ): Effect.Effect<
-    MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
-    ChildAlreadyExistsError | ChildInitialError,
-    Exclude<ChildRequirements, Scope.Scope>
-  > {
+    } | { readonly input?: unknown }
+  ): Effect.Effect<MachineRef<any, any, any, any>, any, any> {
+    const descriptor = typeof logicOrChild === "object" && logicOrChild !== null &&
+        ChildMachineLogicTypeId in logicOrChild
+      ? logicOrChild as ChildMachine.Any
+      : undefined
+    const logic = descriptor === undefined
+      ? logicOrChild as ProcessLogic<any, any, any, any, any, any>
+      : descriptor[ChildMachineLogicTypeId](
+        (options as { readonly input?: unknown } | undefined)?.input
+      ) as unknown as ProcessLogic<any, any, any, any, any, any>
+    const spawnOptions = descriptor === undefined
+      ? options as {
+        readonly id: string
+        readonly descriptor?: ChildDescriptor
+        readonly onOutcome?: (outcome: RuntimeOutcome<any, any, any>) => Effect.Effect<void>
+        readonly [activeSnapshotObserver]?: (
+          snapshot: Extract<RuntimeSnapshot<any, any, any>, { readonly status: "active" }>
+        ) => Effect.Effect<void>
+        readonly [sendParentOverride]?: (event: unknown) => Effect.Effect<void, StoppedError>
+      } | undefined
+      : { id: descriptor.id, descriptor }
     const token = Symbol()
     const key = spawnOptions?.id ?? token
     let startedChild: MachineRef<any, any, any, any> | undefined
-    return Effect.suspend((): Effect.Effect<
-      MachineRef<ChildState, ChildEvent, ChildError, ChildOutput>,
-      ChildAlreadyExistsError | ChildInitialError,
-      Exclude<ChildRequirements, Scope.Scope>
-    > => {
+    return Effect.suspend(() => {
       if (registry.closed) {
         return Effect.interrupt
       }

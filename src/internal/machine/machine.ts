@@ -2124,15 +2124,30 @@ export const transition = <State, Event, Error = never, Requirements = never>(
 export const child = <const Id extends string, M extends Machine.Any>(
   id: Id,
   machine: M
+): ChildMachine<Id, M> =>
+  makeChild(id, machine, (input) =>
+    machine.input === undefined
+      ? (internalProcess.toProcessLogic as any)(machine)
+      : (internalProcess.toProcessLogic as any)(machine, input))
+
+const makeChild = <const Id extends string, M extends Machine.Any>(
+  id: Id,
+  machine: M,
+  makeLogic: (input?: unknown) => Logic<any, any, any, any, any, any>
 ): ChildMachine<Id, M> => ({
   [ChildMachineTypeId]: ChildMachineTypeId,
   id,
   machine,
-  [ChildMachineLogicTypeId]: (input) =>
+  [ChildMachineLogicTypeId]: makeLogic
+})
+
+export const childFamily = <M extends Machine.Any>(machine: M): ChildMachine.Family<M> => {
+  const makeLogic = (input?: unknown): Logic<any, any, any, any, any, any> =>
     machine.input === undefined
       ? (internalProcess.toProcessLogic as any)(machine)
       : (internalProcess.toProcessLogic as any)(machine, input)
-})
+  return (id) => makeChild(id, machine, makeLogic)
+}
 
 export const childAddress = <Event = never>(id: string): ChildAddress<Event> => id as ChildAddress<Event>
 
@@ -2174,10 +2189,7 @@ export const spawn: {
     SpawnError<Options>,
     ChildInitialError
   >
-} = ((
-  logic: Logic<any, any, any, any, any, any>,
-  options?: SpawnOptions
-) =>
+} = ((logic: Logic<any, any, any, any, any, any>, options?: SpawnOptions) =>
   Effect.flatMap(
     internalRuntime.MachineRuntime,
     (runtime) => options === undefined ? runtime.spawn(logic) : (runtime.spawn as any)(logic, options)

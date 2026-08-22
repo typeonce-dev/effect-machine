@@ -200,3 +200,31 @@ the inferred dialog events.
 
 Use `dialogId` in atom labels for diagnostics. Do not pass it into
 `dialogMachine` as unused fake input.
+
+## 4. Selecting process-owned child machines
+
+Bind a machine definition once when a parent owns a runtime-sized set of child
+machines:
+
+```ts
+const Plant = Machine.childFamily(plantMachine)
+
+export const centralMachineAtom = machineAtoms.make(centralMachine)
+
+export const plantScopeFamily = Atom.family((plantId: string) => {
+  const plant = centralMachineAtom.child(Plant(plantId))
+
+  return {
+    stateAtom: plant.state,
+    isBrokenAtom: AtomMachine.matchesChild(plant, "Broken"),
+    sendAtom: plant.send,
+    stopAtom: plant.stop
+  }
+})
+```
+
+`Plant(plantId)` may be reconstructed wherever the id is available. Child
+lookup and bridge reuse match by machine identity and id, not descriptor object
+identity. Before the parent spawns that child, selectors contain `Option.none`
+and `matchesChild` is `false`. They follow the child after startup and return to
+the inactive values after it stops.

@@ -7,7 +7,7 @@
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import type { ChildMachine, Inspection, Logic, Machine } from "../../Machine.js"
+import type { ChildMachine, ChildOwner, Inspection, Logic, Machine } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
 import * as InvocationEvent from "./invocationEvent.js"
@@ -62,6 +62,16 @@ const streamLogic = (
 
 const resolveValue = (value: unknown, context: Machine.InvokeContext<any, any, any, any>): unknown =>
   typeof value === "function" ? value(context) : value
+
+const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
+  spawn:
+    ((descriptor: ChildMachine.Any, options?: { readonly input?: unknown }) =>
+      (scope.spawn as any)(descriptor, options)) as ChildOwner<any>["spawn"],
+  sendTo: ((descriptor: ChildMachine.Any, event: unknown) => scope.sendTo(descriptor, event)) as ChildOwner<
+    any
+  >["sendTo"],
+  stop: ((descriptor: ChildMachine.Any) => scope.stopChild(descriptor)) as ChildOwner<any>["stop"]
+})
 
 const resolveOne = (
   raw: Record<PropertyKey, any>,
@@ -291,11 +301,13 @@ export const startAll = (
   paths: ReadonlyArray<string>,
   event: Machine.LifecycleEvent<any>
 ): Effect.Effect<void, any, any> | undefined => {
+  const children = makeChildOwner(scope)
   const effects = Planner.sortEntryPaths(machine, paths)
     .filter((path) => configuration.active.has(path))
     .flatMap((path) => {
       const context = {
         ...(Configuration.getMachineReferences(configuration) ?? { self: scope.self, parent: scope.parent }),
+        children,
         state: configuration.values.get(path),
         containingState: Configuration.getParentValue(machine, configuration, path),
         ancestors: Configuration.getParentValues(machine, configuration, path),

@@ -2265,7 +2265,15 @@ export declare namespace Logic {
    * @category models
    * @since 0.4.0
    */
-  export interface Spawn {
+  export interface Spawn<OwnerEvent = unknown> {
+    <const Child extends ChildMachine.Any>(
+      child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, OwnerEvent>,
+      ...options: ChildMachine.SpawnArgs<Child>
+    ): Effect.Effect<
+      ChildMachine.Ref<Child>,
+      ChildAlreadyExistsError | ChildMachine.StartError<Child>,
+      ChildMachine.StartRequirements<Child>
+    >
     <ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError = never>(
       logic: Logic<ChildState, ChildEvent, ChildError, ChildRequirements, ChildOutput, ChildInitialError>
     ): Effect.Effect<
@@ -2305,7 +2313,7 @@ export declare namespace Logic {
     readonly parent: Address<unknown> | undefined
 
     /** Starts a child process owned by this scope. */
-    readonly spawn: Spawn
+    readonly spawn: Spawn<Event>
 
     /** Sends an event to a machine target or typed parent-local child address. */
     readonly sendTo: {
@@ -2345,6 +2353,7 @@ export declare namespace Logic {
 
 const ChildAddressTypeId = "~effect/Machine/ChildAddress"
 const ChildAddressCompatibilityErrorTypeId = "~effect/Machine/ChildAddressCompatibilityError"
+const ChildParentCompatibilityErrorTypeId = "~effect/Machine/ChildParentCompatibilityError"
 const ChildMachineTypeId = "~effect/Machine/ChildMachine"
 type InvokeLifecycleId = string & { readonly [ChildAddressTypeId]?: never }
 
@@ -2390,6 +2399,95 @@ export declare namespace ChildMachine {
   export type Any = ChildMachine<string, Machine.Any>
 
   /**
+   * Bound constructor for an open family of child descriptors that share one
+   * machine definition.
+   *
+   * @category models
+   * @since 0.20.0
+   */
+  export interface Family<M extends Machine.Any> {
+    <const Id extends string>(id: Id): ChildMachine<Id, M>
+  }
+
+  /**
+   * Ensures a child machine's declared owner protocol is accepted by the
+   * process that will own it.
+   *
+   * @category utility types
+   * @since 0.20.0
+   */
+  export type ParentCompatibility<Child extends Any, OwnerEvent> = Child extends ChildMachine<string, infer M> ?
+    Machine.Any extends M ? {
+        readonly [ChildParentCompatibilityErrorTypeId]: {
+          readonly child: unknown
+          readonly owner: OwnerEvent
+        }
+      }
+    : [Machine.EventOf<Machine.ParentEvents<M>>] extends [OwnerEvent] ? unknown :
+    {
+      readonly [ChildParentCompatibilityErrorTypeId]: {
+        readonly child: Machine.EventOf<Machine.ParentEvents<M>>
+        readonly owner: OwnerEvent
+      }
+    }
+    : never
+
+  /**
+   * Ensures the selected child machine has complete handlers and outputs.
+   *
+   * @category utility types
+   * @since 0.20.0
+   */
+  export type Executable<Child extends Any> = Child["machine"] extends EnsureExecutable<
+    Machine.States<Child["machine"]>,
+    Machine.UnhandledStates<Child["machine"]>,
+    Machine.OutputStates<Child["machine"]>
+  > ? unknown
+    : never
+
+  /**
+   * Startup arguments accepted while spawning a child machine.
+   *
+   * @category utility types
+   * @since 0.20.0
+   */
+  export type SpawnArgs<Child extends Any> = Machine.InputSchema<Child["machine"]> extends typeof Schema.Void ?
+    [options?: { readonly input?: never }]
+    : [options: { readonly input: Machine.Input<Child["machine"]> }]
+
+  /**
+   * Typed failures that may occur before a spawned child becomes active.
+   *
+   * @category utility types
+   * @since 0.20.0
+   */
+  export type StartError<Child extends Any> = Child extends ChildMachine<string, infer M> ?
+      | Machine.InitialError<M>
+      | Machine.Error<M>
+      | ActionError<Machine.InitialServices<M> | Machine.Services<M>>
+      | InfiniteTransitionError
+      | MachineSchemaDecodeError
+      | StartupError
+      | StoppedError
+    : never
+
+  /**
+   * Services needed to initialize a spawned child machine.
+   *
+   * @category utility types
+   * @since 0.20.0
+   */
+  export type StartRequirements<Child extends Any> = Child extends ChildMachine<string, infer M> ? Exclude<
+      ExcludeCompatibleRuntime<
+        Exclude<ExecutionServices<Machine.InitialServices<M> | Machine.Services<M>>, MachineRuntimeRequirement>,
+        Machine.Event<M>,
+        Machine.Emit<M>
+      >,
+      Scope.Scope
+    >
+    : never
+
+  /**
    * Running machine reference selected by a child descriptor.
    *
    * @category utility types
@@ -2416,6 +2514,34 @@ export declare namespace ChildMachine {
    */
   export type Event<Child> = Child extends ChildMachine<string, infer M> ? Machine.EventInput<Machine.InputEvent<M>>
     : never
+}
+
+/**
+ * Effectful operations for child machines owned directly by the current
+ * machine process.
+ *
+ * @category models
+ * @since 0.20.0
+ */
+export interface ChildOwner<OwnerEvent> {
+  /** Starts a process-owned child and returns once initialization succeeds. */
+  readonly spawn: <const Child extends ChildMachine.Any>(
+    child: Child & ChildMachine.Executable<Child> & ChildMachine.ParentCompatibility<Child, OwnerEvent>,
+    ...options: ChildMachine.SpawnArgs<Child>
+  ) => Effect.Effect<
+    ChildMachine.Ref<Child>,
+    ChildAlreadyExistsError | ChildMachine.StartError<Child>,
+    ChildMachine.StartRequirements<Child>
+  >
+
+  /** Sends an event to one active child. Missing children are ignored. */
+  readonly sendTo: <Child extends ChildMachine.Any>(
+    child: Child,
+    event: ChildMachine.Event<Child>
+  ) => Effect.Effect<void, StoppedError>
+
+  /** Stops one active child. Missing children are ignored. */
+  readonly stop: <Child extends ChildMachine.Any>(child: Child) => Effect.Effect<void>
 }
 
 /**
@@ -4799,6 +4925,8 @@ export declare namespace Machine {
     InputEvents extends ReadonlyArray<TaggedSchema> = Events,
     ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
   > = MachineReferences<InputEvents, ParentEvents> & {
+    /** Process-owned child operations for dynamic child machine lifecycles. */
+    readonly children: ChildOwner<EventOf<InputEvents>>
     /** Value owned by the state that owns this invocation. */
     readonly state: StateByIdentifier<States, StateId>
     /** Value owned by the nearest schema-backed ancestor, when one exists. */
@@ -8916,6 +9044,17 @@ export const logic: <
  */
 export const child: <const Id extends string, M extends Machine.Any>(id: Id, machine: M) => ChildMachine<Id, M> =
   internal.child
+
+/**
+ * Binds one machine definition to an open family of runtime child ids.
+ *
+ * Descriptors created by the returned function are interchangeable with
+ * {@link child} descriptors for the same id and machine definition.
+ *
+ * @category constructors
+ * @since 0.20.0
+ */
+export const childFamily: <M extends Machine.Any>(machine: M) => ChildMachine.Family<M> = internal.childFamily
 
 /**
  * Creates a typed parent-local address for lower-level child process logic.

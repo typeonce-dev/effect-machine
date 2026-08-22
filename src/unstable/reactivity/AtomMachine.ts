@@ -148,9 +148,9 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   readonly stop: Atom.Writable<AsyncResult.AsyncResult<void, StartError | NotReadyError>, void>
 
   /**
-   * Creates a reactive bridge for a directly invoked child machine.
-   * Reusing the same descriptor returns the same live bridge while it remains
-   * referenced.
+   * Creates a reactive bridge for a directly owned child machine.
+   * Descriptors with the same id and machine definition return the same live
+   * bridge while it remains referenced.
    *
    * @since 0.4.0
    */
@@ -206,7 +206,8 @@ export const childEmissions: <Child extends Machine.ChildMachine.Any, StartError
 > = internal.childEmissions
 
 /**
- * Reactive access to one invoked child machine selected by its descriptor.
+ * Reactive access to one directly owned child machine selected by its
+ * descriptor.
  *
  * **Details**
  *
@@ -295,8 +296,9 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
     void
   >
   /**
-   * Creates a reactive bridge for a directly owned nested child. Reusing the
-   * same descriptor returns the same live bridge while it remains referenced.
+   * Creates a reactive bridge for a directly owned nested child. Descriptors
+   * with the same id and machine definition return the same live bridge while
+   * it remains referenced.
    *
    * @since 0.4.0
    */
@@ -418,7 +420,7 @@ export const selectSnapshot: <
 > = internal.selectSnapshot
 
 /**
- * Selects the typed value for an active state path in an invoked child.
+ * Selects the typed value for an active state path in a directly owned child.
  *
  * Valid paths and their selected value types are inferred from the child
  * bridge. An inactive child produces `Option.none()`. Keep the returned atom
@@ -513,7 +515,7 @@ export const matches: <
 ) => Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> = internal.matches
 
 /**
- * Returns whether a state path is active in an invoked child.
+ * Returns whether a state path is active in a directly owned child.
  *
  * Valid paths are inferred from the child bridge snapshot.
  * An inactive child produces `false`. Keep the returned atom stable when
