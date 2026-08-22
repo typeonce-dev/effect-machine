@@ -315,6 +315,37 @@ machine.
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
+### Choose state-owned or process-owned children
+
+Use `from.child(...)` when the child belongs to one state and must stop when
+that state exits. Use a child family and `children.spawn(...)` when runtime
+events determine the ids or cardinality and the children must survive owner
+state changes:
+
+```ts
+const Worker = Machine.childFamily(workerMachine)
+
+Commissioning: {
+  invoke: (from) =>
+    from.effect("start-workers", ({ children, state }) =>
+      Effect.forEach(
+        state.workers,
+        (input) => children.spawn(Worker(input.id), { input }),
+        { discard: true }
+      )
+    )
+    .onDone((to) => to.full.Running())
+    .onFailure((to) => to.full.Failed())
+}
+```
+
+The Effect owns the startup attempt. The machine process owns every child that
+starts successfully. Leaving `Commissioning` does not stop those children.
+Stop one with `children.stop(Worker(id))` inside an Effect or
+`enqueue.stop(Worker(id))` inside a transition. A duplicate active id fails
+instead of replacing the existing child, and a partially successful group is
+not rolled back automatically.
+
 ## Keep transition decisions synchronous
 
 A transition should choose the next state from the current snapshot and event.

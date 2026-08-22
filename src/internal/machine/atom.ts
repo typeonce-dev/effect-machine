@@ -342,15 +342,7 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     }
   )
 
-  const childFamily = Atom.family((nested: Machine.ChildMachine.Any) =>
-    makeChildFromRefAtom(
-      makeChildRefAtom(ref as any, nested),
-      nested
-    )
-  )
-  const child = <Nested extends Machine.ChildMachine.Any>(
-    nested: Nested
-  ): ChildMachineAtom<Nested, StartError> => childFamily(nested) as ChildMachineAtom<Nested, StartError>
+  const child = makeChildSelector<StartError>(ref as any)
 
   return {
     ref,
@@ -360,6 +352,30 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
     send,
     stop,
     child
+  }
+}
+
+const makeChildSelector = <StartError>(
+  parentRef: Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<Machine.MachineRef<any, any, any, any, any>>, StartError>
+  >
+) => {
+  const byMachine = new WeakMap<object, (id: string) => ChildMachineAtom<Machine.ChildMachine.Any, StartError>>()
+  return <Child extends Machine.ChildMachine.Any>(descriptor: Child): ChildMachineAtom<Child, StartError> => {
+    let family = byMachine.get(descriptor.machine)
+    if (family === undefined) {
+      const machine = descriptor.machine
+      const atoms = Atom.family((id: string) => {
+        const child = internalMachine.child(id, machine)
+        return makeChildFromRefAtom(
+          makeChildRefAtom(parentRef as any, child),
+          child
+        )
+      })
+      family = (id) => atoms(id) as ChildMachineAtom<Machine.ChildMachine.Any, StartError>
+      byMachine.set(machine, family)
+    }
+    return family(descriptor.id) as ChildMachineAtom<Child, StartError>
   }
 }
 
@@ -438,15 +454,7 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
   )
 
   const optionalRef = Atom.mapResult(ref, Option.some)
-  const childFamily = Atom.family((descriptor: Machine.ChildMachine.Any) =>
-    makeChildFromRefAtom(
-      makeChildRefAtom(optionalRef as any, descriptor),
-      descriptor
-    )
-  )
-  const child = <Child extends Machine.ChildMachine.Any>(
-    descriptor: Child
-  ): ChildMachineAtom<Child, StartError> => childFamily(descriptor) as ChildMachineAtom<Child, StartError>
+  const child = makeChildSelector<StartError>(optionalRef as any)
 
   return {
     ref,
