@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs"
+import { appendFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -18,18 +18,8 @@ const relevantDependenciesChanged = (beforePackageJson, afterPackageJson) => {
   return [...performanceDependencies].some((dependency) => before[dependency] !== after[dependency])
 }
 
-const changedExampleNames = (changedFiles, availableExamples) => {
-  const available = new Set(availableExamples)
-  return [...new Set(
-    changedFiles
-      .map((path) => /^examples\/([^/]+)\//.exec(path)?.[1])
-      .filter((name) => name !== undefined && available.has(name))
-  )].sort()
-}
-
 export const classifyChanges = ({
   afterPackageJson,
-  availableExamples,
   beforePackageJson,
   changedFiles
 }) => {
@@ -58,21 +48,7 @@ export const classifyChanges = ({
       path === "tsconfig.build.json" ||
       path === ".github/workflows/runtime-performance.yml"
     )
-  const allExamples = sourceChanged ||
-    classifierChanged ||
-    changedFiles.some((path) =>
-      path === "package.json" ||
-      path === "pnpm-workspace.yaml" ||
-      path === "tsconfig.build.json" ||
-      path === "scripts/list-examples.mjs" ||
-      path === ".github/workflows/ci.yml"
-    )
-  const examples = allExamples
-    ? [...availableExamples].sort()
-    : changedExampleNames(changedFiles, availableExamples)
-
   return {
-    examples,
     runtimePerformance,
     typePerformance
   }
@@ -81,20 +57,6 @@ export const classifyChanges = ({
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" })
 
 const readPackageJsonAt = (revision) => JSON.parse(git("show", `${revision}:package.json`))
-
-const readAvailableExamples = () => {
-  const examplesRoot = resolve(import.meta.dirname, "..", "examples")
-  return readdirSync(examplesRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .filter((entry) => existsSync(resolve(examplesRoot, entry.name, "package.json")))
-    .map((entry) => {
-      const packageJson = JSON.parse(readFileSync(resolve(examplesRoot, entry.name, "package.json"), "utf8"))
-      if (typeof packageJson.scripts?.check !== "string") {
-        throw new Error(`examples/${entry.name}/package.json must define a check script`)
-      }
-      return entry.name
-    })
-}
 
 const main = () => {
   const options = {
@@ -127,18 +89,12 @@ const main = () => {
   ).trim().split("\n").filter(Boolean)
   const result = classifyChanges({
     afterPackageJson: readPackageJsonAt(options.head),
-    availableExamples: readAvailableExamples(),
     beforePackageJson: readPackageJsonAt(options.base),
     changedFiles
   })
   const output = [
     `type_performance=${result.typePerformance}`,
-    `runtime_performance=${result.runtimePerformance}`,
-    `examples_required=${result.examples.length > 0}`,
-    `examples=${JSON.stringify(result.examples.map((example) => ({
-      example,
-      directory: `examples/${example}`
-    })))}`
+    `runtime_performance=${result.runtimePerformance}`
   ].join("\n")
 
   if (options.githubOutput === undefined) {

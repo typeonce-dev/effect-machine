@@ -679,20 +679,6 @@ import { MachineTest } from "@typeonce/effect-machine/testing"
 
 Each ESM entrypoint is independent and tree-shakeable.
 
-## Examples
-
-Every package directly under [`examples/`](./examples) has its own lockfile and
-`check` script.
-
-| Example                             | What it demonstrates                                                                                                                                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Playground](./examples/playground) | Five focused React examples: atomic turnstile commands, state-scoped traffic-light timers, hierarchical microwave safety, a resource-owned media player, and a worker-hosted machine synchronized across tabs |
-| [Pokémon](./examples/pokemon)       | Compound workflow states, invoked child machines, typed emissions, Atom reactivity, and a live Effect service                                                                                                 |
-| [Platformer](./examples/platformer) | Nested parallel statecharts, typed deep history, raised events, state-scoped timers, deterministic model tests, and a playable SVG adapter                                                                    |
-
-The playground is the shortest path from one concept to working code. The
-standalone examples show larger composition and ownership boundaries.
-
 ## Reference and development
 
 - [API reference](https://effect-machine.typeonce.dev)

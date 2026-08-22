@@ -10,7 +10,6 @@
 ## Validation
 
 - [ ] `pnpm check`
-- [ ] Relevant example checks, when examples changed
 - [ ] Automated type-performance measurement passed or was not required
 - [ ] Automated runtime- and memory-performance measurement passed or was not required
 
