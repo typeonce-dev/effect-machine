@@ -1,10 +1,12 @@
 import "./styles.css"
 import { Machine } from "../../src/index.js"
 import { machine, snapshot } from "./example-machine.js"
-import { makeTextTreeRenderer, type TreeItem, type TreeItemKind } from "./text-tree.js"
+import { type TreeItem, type TreeItemKind, visualizationDocumentToTextTree } from "./text-tree.js"
+import { makeVisualizationDocument } from "./visualization-document.js"
 
-const renderTextTree = makeTextTreeRenderer<typeof machine, typeof snapshot>(Machine)
-const tree = renderTextTree(machine, snapshot)
+const buildDocument = makeVisualizationDocument<typeof machine, typeof snapshot>(Machine)
+const visualization = buildDocument(machine, snapshot)
+const tree = visualizationDocumentToTextTree(visualization)
 const root = document.querySelector<HTMLDivElement>("#app")
 if (root === null) throw new Error("Visualizer root element was not found")
 

@@ -11,8 +11,9 @@ result, replace the exports in `src/example-machine.ts` or import your machine t
 `src/main.ts`:
 
 ```ts
-const renderTextTree = makeTextTreeRenderer<typeof machine, typeof snapshot>(Machine)
-const tree = renderTextTree(machine, snapshot)
+const buildDocument = makeVisualizationDocument<typeof machine, typeof snapshot>(Machine)
+const visualization = buildDocument(machine, snapshot)
+const tree = visualizationDocumentToTextTree(visualization)
 ```
 
 The snapshot is optional. Without one, the same structural tree is rendered with every state inactive and without candidate
