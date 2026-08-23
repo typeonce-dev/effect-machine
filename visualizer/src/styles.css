@@ -135,6 +135,18 @@ button {
   color: #fff;
 }
 
+.topology-node.is-related-target > .state-row {
+  background: rgb(75 125 255 / 9%);
+}
+
+.topology-node.is-related-source > .state-row {
+  background: rgb(172 104 224 / 8%);
+}
+
+.topology-node.is-related-update > .state-row {
+  background: rgb(240 163 91 / 8%);
+}
+
 .state-disclosure {
   color: #737a84;
   font-size: 11px;
@@ -258,6 +270,38 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.breadcrumbs {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 16px;
+}
+
+.breadcrumb-separator {
+  color: #555c65;
+}
+
+.state-link {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  color: #9bbfff;
+  background: transparent;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
+
+.state-link:hover,
+.state-link:focus-visible {
+  color: #d5e4ff;
+  text-decoration: underline;
+  outline: none;
+}
+
 .metadata {
   display: grid;
   grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
@@ -353,8 +397,33 @@ button {
 }
 
 .branch-row .metadata,
-.activity-card .metadata {
+.activity-card .metadata,
+.incoming-card .metadata {
   margin-top: 10px;
+}
+
+.incoming-card {
+  padding-bottom: 12px;
+}
+
+.incoming-card .metadata {
+  padding: 0 12px;
+}
+
+.branch-updates {
+  display: grid;
+  grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+  gap: 8px 16px;
+  margin-top: 9px;
+  font-size: 11px;
+}
+
+.branch-updates-label {
+  color: #727983;
+}
+
+.branch-updates .state-link + .state-link {
+  grid-column: 2;
 }
 
 .activity-card {
