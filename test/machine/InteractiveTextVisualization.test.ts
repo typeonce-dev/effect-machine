@@ -3,6 +3,7 @@ import { Machine } from "../../src/index.js"
 import { machine, snapshot } from "../../visualizer/src/example-machine.js"
 import { textTreeToString } from "../../visualizer/src/text-tree.js"
 import { makeVisualizationDocument } from "../../visualizer/src/visualization-document.js"
+import { makeVisualizerModel } from "../../visualizer/src/visualizer-model.js"
 import { makeTextRenderer } from "./visualization/text.js"
 
 const renderText = makeTextRenderer<typeof machine, typeof snapshot>(Machine)
@@ -60,5 +61,30 @@ describe("Interactive text visualization", () => {
 
   it("preserves the static text renderer output", () => {
     assert.strictEqual(textTreeToString(buildDocument(machine, snapshot)), renderText(machine, snapshot))
+  })
+
+  it("projects a state-only topology and structured state inspection", () => {
+    const model = makeVisualizerModel(buildDocument(machine, snapshot))
+    const application = model.roots[0]
+    const workflow = application?.children[0]
+    const idle = workflow?.children[0]
+    const inspection = idle === undefined ? undefined : model.inspectState(idle.path)
+
+    assert.deepStrictEqual(
+      model.roots.map((root) => root.path),
+      ["application", "disabled"]
+    )
+    assert.strictEqual(application?.active, true)
+    assert.strictEqual(application?.initial, true)
+    assert.deepStrictEqual(
+      workflow?.children.map((child) => child.path),
+      ["application.workflow.idle", "application.workflow.running", "application.workflow.recent"]
+    )
+    assert.strictEqual(idle?.transitionCount, 2)
+    assert.strictEqual(inspection?.outgoing.length, 2)
+    assert.deepStrictEqual(
+      inspection?.breadcrumbs.map((item) => item.path),
+      ["application", "application.workflow", "application.workflow.idle"]
+    )
   })
 })
