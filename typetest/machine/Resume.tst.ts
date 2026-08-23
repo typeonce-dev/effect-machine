@@ -14,11 +14,11 @@ const machine = Machine.make({
   states: States.states,
   events: Machine.events(Tick),
   input: Schema.Struct({ seed: Schema.Number }),
-  initial: (to) => to.Idle().resolve(({ input: input, target }) => (target(new Idle({ value: input.seed }))))
+  initial: (to) => to.Idle().resolve(({ input: input, target }) => (target.decoded(new Idle({ value: input.seed }))))
 }).handle({
   Idle: {
     on: {
-      Tick: (to) => to.full.Idle().resolve(({ state, target }) => target(new Idle({ value: state.value + 1 })))
+      Tick: (to) => to.full.Idle().resolve(({ state, target }) => target.decoded(new Idle({ value: state.value + 1 })))
     }
   }
 })

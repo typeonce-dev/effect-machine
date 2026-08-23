@@ -21,20 +21,21 @@ interface TransitionLabel {
 const triggerLabels = (definitions: ReadonlyArray<TransitionDefinition>): ReadonlyArray<TransitionLabel> =>
   definitions.flatMap((definition) => {
     const branches = definition.branches.flatMap((branch) => {
-      if (branch.selection.kind === "update" && branch.selection.path !== undefined) {
+      if (branch.target === undefined && branch.updates.length > 0) {
         return [
           branch.type === "direct"
-            ? `update ${branch.selection.path}`
-            : `[${branch.title}] update ${branch.selection.path}`
+            ? `update ${branch.updates.join(", ")}`
+            : `[${branch.title}] update ${branch.updates.join(", ")}`
         ]
       }
       if (branch.target === undefined) return []
 
       const target = branch.target.slice(branch.target.lastIndexOf(".") + 1)
+      const updates = branch.updates.length === 0 ? "" : ` / update ${branch.updates.join(", ")}`
       return [
         branch.type === "direct" ?
-          `→ ${target}` :
-          `[${branch.title}] → ${target}`
+          `→ ${target}${updates}` :
+          `[${branch.title}] → ${target}${updates}`
       ]
     })
     if (branches.length === 0) return []

@@ -34,11 +34,12 @@ const NavigationStates = Machine.states({
 const navigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: (to) => to.off().resolve(({ target }) => target(new Off({})))
+  initial: (to) => to.off().resolve(({ target }) => target.decoded(new Off({})))
 }).handle({
   off: {
     on: {
-      Go: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.two(new Two({}))))
+      Go: (to) =>
+        to.full.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.two.decoded(new Two({}))))
     }
   }
 })
@@ -46,12 +47,14 @@ const navigationMachine = Machine.make({
 const raisedNavigationMachine = Machine.make({
   states: NavigationStates.states,
   events: Machine.events(Go),
-  initial: (to) => to.off().resolve(({ target }) => target(new Off({})))
+  initial: (to) => to.off().resolve(({ target }) => target.decoded(new Off({})))
 }).handle({
   off: {
-    always: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({})))),
+    always: (to) =>
+      to.full.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({})))),
     on: {
-      Go: (to) => to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({}))))
+      Go: (to) =>
+        to.full.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({}))))
     }
   }
 })
@@ -61,12 +64,12 @@ const CounterStates = Machine.states({ counter: Counter })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Increment, Noop),
-  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
       Increment: (to) =>
-        to.full.counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 1 }))),
+        to.full.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
       Noop: (to) => to.none
     }
   }
@@ -75,7 +78,7 @@ const counterMachine = Machine.make({
 const conditionalMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Select),
-  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
@@ -88,7 +91,7 @@ const conditionalMachine = Machine.make({
           event.value < 0
             ? select.negative()
             : event.value === 0
-            ? select.zero(new Counter({ count: 0 }))
+            ? select.zero.decoded(new Counter({ count: 0 }))
             : select.positive()
         )
     }
@@ -98,7 +101,7 @@ const conditionalMachine = Machine.make({
 const invokedMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(),
-  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   counter: {
     invoke: (
@@ -128,7 +131,7 @@ const RoutedStartupStates = Machine.states({
 const routedStartupMachine = Machine.make({
   states: RoutedStartupStates.states,
   events: Machine.events(),
-  initial: (to) => to.a.initial.resolve(({ target }) => target(new StartupA({}), (a) => a.route()))
+  initial: (to) => to.a.initial.resolve(({ target }) => target.decoded(new StartupA({}), (a) => a.route()))
 }).handle({
   a: {
     states: {
@@ -136,7 +139,7 @@ const routedStartupMachine = Machine.make({
         choice: (to) => to.local.second().resolve(({ target }) => target())
       },
       second: {
-        choice: (to) => to.full.b().resolve(({ target }) => target(new StartupB({})))
+        choice: (to) => to.full.b().resolve(({ target }) => target.decoded(new StartupB({})))
       }
     }
   },
@@ -164,7 +167,9 @@ const choiceResolutionMachine = Machine.make({
   states: ChoiceResolutionStates.states,
   events: Machine.events(Route),
   initial: (to) =>
-    to.flow.initial.resolve(({ target }) => target(new ChoiceFlow({}), (flow) => flow.ready(new ChoiceReady({}))))
+    to.flow.initial.resolve(({ target }) =>
+      target.decoded(new ChoiceFlow({}), (flow) => flow.ready.decoded(new ChoiceReady({})))
+    )
 }).handle({
   flow: {
     states: {
@@ -177,7 +182,7 @@ const choiceResolutionMachine = Machine.make({
         choice: (to) => to.local.second().resolve(({ target }) => target())
       },
       second: {
-        choice: (to) => to.local.routed().resolve(({ target }) => target(new ChoiceRouted({})))
+        choice: (to) => to.local.routed().resolve(({ target }) => target.decoded(new ChoiceRouted({})))
       },
       routed: {}
     }
@@ -189,16 +194,18 @@ const reentryMachine = Machine.make({
   events: Machine.events(Restart),
   initial: (to) =>
     to.app.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new App({}),
-        (app) => app.one(new One({}))
+        (app) => app.one.decoded(new One({}))
       )
     )
 }).handle({
   app: {
     on: {
       Restart: (to) =>
-        to.full.app().resolve(({ target }) => target(new App({}), (app) => app.one(new One({}))), { reenter: true })
+        to.full.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({}))), {
+          reenter: true
+        })
     }
   }
 })
@@ -223,9 +230,9 @@ const parallelMachine = Machine.make({
   events: Machine.events(),
   initial: (to) =>
     to.dashboard.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new Dashboard({}),
-        (dashboard) => dashboard.left(new Left({})).right(new Right({}))
+        (dashboard) => dashboard.left.decoded(new Left({})).right.decoded(new Right({}))
       )
     )
 }).handle({ dashboard: {} })
@@ -268,12 +275,12 @@ const historyMachine = Machine.make({
   events: Machine.events(Leave, Resume),
   initial: (to) =>
     to.workspace.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new Workspace({}),
         (workspace) =>
-          workspace.editor(
+          workspace.editor.decoded(
             new Editor({}),
-            (editor) => editor.editing(new Editing({ revision: 1 }))
+            (editor) => editor.editing.decoded(new Editing({ revision: 1 }))
           )
       )
     )
@@ -282,33 +289,33 @@ const historyMachine = Machine.make({
     history: {
       recent: {
         default: ({ target }) =>
-          target.workspace(
+          target.workspace.decoded(
             new Workspace({}),
             (workspace) =>
-              workspace.editor(
+              workspace.editor.decoded(
                 new Editor({}),
-                (editor) => editor.editing(new Editing({ revision: 0 }))
+                (editor) => editor.editing.decoded(new Editing({ revision: 0 }))
               )
           )
       },
       exact: {
         default: ({ target }) =>
-          target.workspace(
+          target.workspace.decoded(
             new Workspace({}),
             (workspace) =>
-              workspace.editor(
+              workspace.editor.decoded(
                 new Editor({}),
-                (editor) => editor.editing(new Editing({ revision: 0 }))
+                (editor) => editor.editing.decoded(new Editing({ revision: 0 }))
               )
           )
       }
     },
     on: {
-      Leave: (to) => to.full.away().resolve(({ target }) => target(new Away({})))
+      Leave: (to) => to.full.away().resolve(({ target }) => target.decoded(new Away({})))
     },
     states: {
       editor: {
-        initialize: ({ builder }) => builder(new Editing({ revision: 0 }))
+        initialize: ({ builder }) => builder.decoded(new Editing({ revision: 0 }))
       }
     }
   },
@@ -374,7 +381,7 @@ const CompletionStates = Machine.states({
 const completionMachine = Machine.make({
   states: CompletionStates.states,
   events: Machine.events(),
-  initial: (to) => to.finished().resolve(({ target }) => target(new Finished({})))
+  initial: (to) => to.finished().resolve(({ target }) => target.decoded(new Finished({})))
 }).handle({
   finished: {
     output: () => "complete"
@@ -404,14 +411,14 @@ const doneTransitionMachine = Machine.make({
   events: Machine.events(),
   initial: (to) =>
     to.workflow.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new Workflow({}),
-        (workflow) => workflow.finished(new Finished({}))
+        (workflow) => workflow.finished.decoded(new Finished({}))
       )
     )
 }).handle({
   workflow: {
-    onDone: (to) => to.full.archived().resolve(({ target }) => target(new Archived({}))),
+    onDone: (to) => to.full.archived().resolve(({ target }) => target.decoded(new Archived({}))),
     states: {
       finished: {
         output: () => "workflow-output"
@@ -425,9 +432,9 @@ const nestedCompletionMachine = Machine.make({
   events: Machine.events(),
   initial: (to) =>
     to.workflow.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new Workflow({}),
-        (workflow) => workflow.finished(new Finished({}))
+        (workflow) => workflow.finished.decoded(new Finished({}))
       )
     )
 }).handle({
@@ -1144,7 +1151,8 @@ describe("MachineTest.verify", () => {
         branchIndex: 0,
         branchKey: undefined,
         target: undefined,
-        resolvedTarget: undefined
+        resolvedTarget: undefined,
+        updates: []
       }
       const microstep: MachineTest.Microstep<typeof invokedMachine> = {
         next: trace.initial.startingState,

@@ -37,14 +37,14 @@ describe("dynamic child machines", () => {
         parent: Machine.parent(PlantOwnerEvents),
         initial: (to) =>
           to.PlantActive().resolve(({ input, target }) =>
-            target(new PlantActive({ id: input.id, produced: input.production }))
+            target.decoded(new PlantActive({ id: input.id, produced: input.production }))
           )
       }).handle({
         PlantActive: {
           on: {
             Produce: (to) =>
               to.full.PlantActive().resolve(({ event, state, target }) =>
-                target(new PlantActive({ ...state, produced: state.produced + event.amount }))
+                target.decoded(new PlantActive({ ...state, produced: state.produced + event.amount }))
               ),
             Report: (to) =>
               to.none.resolve(({ parent, state }, enqueue) => {
@@ -73,7 +73,8 @@ describe("dynamic child machines", () => {
         states: parentStates.states,
         events: Machine.events(PlantOwnerEvents, Grow, Decommission),
         input: Schema.Array(PlantInput),
-        initial: (to) => to.Commissioning().resolve(({ input, target }) => target(new Commissioning({ plants: input })))
+        initial: (to) =>
+          to.Commissioning().resolve(({ input, target }) => target.decoded(new Commissioning({ plants: input })))
       }).handle({
         Commissioning: {
           invoke: (from) =>
@@ -82,16 +83,20 @@ describe("dynamic child machines", () => {
                 state.plants,
                 (input) => children.spawn(Plant(input.id), { input }),
                 { discard: true }
-              )).onDone((to) => to.full.Operating().resolve(({ target }) => target(new Operating({ reports: 0 }))))
+              )).onDone((to) =>
+                to.full.Operating().resolve(({ target }) => target.decoded(new Operating({ reports: 0 })))
+              )
               .onFailure((to) => to.none)
         },
         Operating: {
           on: {
             PlantReported: (to) =>
-              to.full.Operating().resolve(({ state, target }) => target(new Operating({ reports: state.reports + 1 }))),
+              to.full.Operating().resolve(({ state, target }) =>
+                target.decoded(new Operating({ reports: state.reports + 1 }))
+              ),
             Grow: (to) =>
               to.full.Commissioning().resolve(({ event, target }) =>
-                target(new Commissioning({ plants: event.plants }))
+                target.decoded(new Commissioning({ plants: event.plants }))
               ),
             Decommission: (to) =>
               to.none.resolve(({ event }, enqueue) => {
@@ -198,7 +203,7 @@ describe("dynamic child machines", () => {
       const childMachine = Machine.make({
         states: { ChildIdle },
         events: Machine.events(),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
       }).handle({ ChildIdle: {} })
       const Child = Machine.childFamily(childMachine)
       class Starting extends Schema.TaggedClass<Starting>("DynamicDuplicateStarting")("Starting", {}) {}
@@ -209,7 +214,7 @@ describe("dynamic child machines", () => {
       const parentMachine = Machine.make({
         states: { Starting, DuplicateRejected },
         events: Machine.events(),
-        initial: (to) => to.Starting().resolve(({ target }) => target(new Starting({})))
+        initial: (to) => to.Starting().resolve(({ target }) => target.decoded(new Starting({})))
       }).handle({
         Starting: {
           invoke: (from) =>
@@ -238,7 +243,8 @@ describe("dynamic child machines", () => {
         states: { WorkerIdle },
         events: Machine.events(),
         input: Input,
-        initial: (to) => to.WorkerIdle().resolve(({ input, target }) => target(new WorkerIdle({ id: input.id })))
+        initial: (to) =>
+          to.WorkerIdle().resolve(({ input, target }) => target.decoded(new WorkerIdle({ id: input.id })))
       }).handle({ WorkerIdle: {} })
       const Worker = Machine.childFamily(workerMachine)
       let scoped: Machine.ChildMachine.Ref<ReturnType<typeof Worker>> | undefined
@@ -264,7 +270,7 @@ describe("dynamic child machines", () => {
       const parentMachine = Machine.make({
         states: { Running },
         events: Machine.events(),
-        initial: (to) => to.Running().resolve(({ target }) => target(new Running({})))
+        initial: (to) => to.Running().resolve(({ target }) => target.decoded(new Running({})))
       }).handle({
         Running: {
           invoke: (from) => from.logic("supervisor", { address: Supervisor, logic: supervisorLogic })
@@ -297,12 +303,14 @@ describe("dynamic child machines", () => {
       const unitMachine = Machine.make({
         states: { UnitActive },
         events: Machine.events(Increment),
-        initial: (to) => to.UnitActive().resolve(({ target }) => target(new UnitActive({ count: 0 })))
+        initial: (to) => to.UnitActive().resolve(({ target }) => target.decoded(new UnitActive({ count: 0 })))
       }).handle({
         UnitActive: {
           on: {
             Increment: (to) =>
-              to.full.UnitActive().resolve(({ state, target }) => target(new UnitActive({ count: state.count + 1 })))
+              to.full.UnitActive().resolve(({ state, target }) =>
+                target.decoded(new UnitActive({ count: state.count + 1 }))
+              )
           }
         }
       })
@@ -312,7 +320,7 @@ describe("dynamic child machines", () => {
       const parentMachine = Machine.make({
         states: { Managing, Ready },
         events: Machine.events(),
-        initial: (to) => to.Managing().resolve(({ target }) => target(new Managing({})))
+        initial: (to) => to.Managing().resolve(({ target }) => target.decoded(new Managing({})))
       }).handle({
         Managing: {
           invoke: (from) =>

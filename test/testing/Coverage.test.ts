@@ -20,16 +20,16 @@ const CounterStates = Machine.states({ count: Count, done: Done })
 const counterMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Finish),
-  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
+  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
       Add: (to) =>
         to.full.count().resolve(
-          ({ event, state, target }) => target(new Count({ value: state.value + event.amount })),
+          ({ event, state, target }) => target.decoded(new Count({ value: state.value + event.amount })),
           { reenter: true, declinable: true }
         ),
-      Finish: (to) => to.full.done().resolve(({ target }) => target(new Done({})))
+      Finish: (to) => to.full.done().resolve(({ target }) => target.decoded(new Done({})))
     }
   },
   done: {}
@@ -44,14 +44,14 @@ const opaqueMachine = Machine.make({
   states: OpaqueStates.states,
   events: Machine.events(),
   input: Schema.Any,
-  initial: (to) => to.opaque().resolve(({ input: payload, target }) => target(new Opaque({ payload })))
+  initial: (to) => to.opaque().resolve(({ input: payload, target }) => target.decoded(new Opaque({ payload })))
 })
 
 const StartupStates = Machine.states({ count: Count })
 const startupMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Add),
-  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
+  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
 }).handle({
   count: {
     always: (to) =>
@@ -60,12 +60,14 @@ const startupMachine = Machine.make({
         unchanged: { target: to.none }
       }).resolve(({ state, select }) =>
         state.value === 0
-          ? select.zero(new Count({ value: 1 }))
+          ? select.zero.decoded(new Count({ value: 1 }))
           : select.unchanged()
       ),
     on: {
       Add: (to) =>
-        to.full.count().resolve(({ event, state, target }) => target(new Count({ value: state.value + event.amount })))
+        to.full.count().resolve(({ event, state, target }) =>
+          target.decoded(new Count({ value: state.value + event.amount }))
+        )
     }
   }
 })
@@ -77,7 +79,7 @@ class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
 const branchMachine = Machine.make({
   states: StartupStates.states,
   events: Machine.events(Select),
-  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
+  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
@@ -107,7 +109,7 @@ const EventStates = Machine.states({ count: Count })
 const finiteEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(TickEvent, ChoiceEvent),
-  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
+  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
 }).handle({
   count: {
     on: {
@@ -120,7 +122,7 @@ const finiteEventMachine = Machine.make({
 const openEventMachine = Machine.make({
   states: EventStates.states,
   events: Machine.events(OpenEvent),
-  initial: (to) => to.count().resolve(({ target }) => target(new Count({ value: 0 })))
+  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
 }).handle({ count: {} })
 
 const event = (_tag: string): { readonly _tag: string } => ({ _tag })

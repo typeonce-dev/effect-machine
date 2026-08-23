@@ -135,7 +135,7 @@ const historyMachine = Machine.make({
   id: "codec-history",
   states: HistoryStates.states,
   events: Machine.events(),
-  initial: (to) => to.Outside().resolve(({ target }) => target(new Outside({})))
+  initial: (to) => to.Outside().resolve(({ target }) => target.decoded(new Outside({})))
 })
 
 const historySnapshot = () =>
@@ -175,7 +175,9 @@ const richMachine = Machine.make({
   events: Machine.events(),
   initial: (to) =>
     to.RichState().resolve(({ target }) =>
-      target(new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined }))
+      target.decoded(
+        new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
+      )
     )
 })
 
@@ -194,7 +196,7 @@ const opaqueMachine = Machine.make({
   id: "codec-opaque",
   states: OpaqueStates.states,
   events: Machine.events(),
-  initial: (to) => to.OpaqueState().resolve(({ target }) => target({ _tag: "CodecOpaqueState", resource: {} }))
+  initial: (to) => to.OpaqueState().resolve(({ target }) => target.decoded({ _tag: "CodecOpaqueState", resource: {} }))
 })
 
 class OutputDone extends Schema.TaggedClass<OutputDone>("CodecOutputDone")("CodecOutputDone", {}) {}
@@ -205,7 +207,7 @@ const outputMachine = Machine.make({
   id: "codec-output",
   states: OutputStates.states,
   events: Machine.events(),
-  initial: (to) => to.OutputDone().resolve(({ target }) => target(new OutputDone({})))
+  initial: (to) => to.OutputDone().resolve(({ target }) => target.decoded(new OutputDone({})))
 })
 
 const expectEncodeFailure = Effect.fnUntraced(function*(snapshot: unknown, boundary?: string) {
@@ -374,10 +376,10 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-original",
         states: states.states,
         events: Machine.events(),
-        initial: (to) => to.Before().resolve(({ target }) => target(new Before({})))
+        initial: (to) => to.Before().resolve(({ target }) => target.decoded(new Before({})))
       }).handle({
         Before: {
-          always: (to) => to.full.Boundary().resolve(({ target }) => target(new Boundary({})))
+          always: (to) => to.full.Boundary().resolve(({ target }) => target.decoded(new Boundary({})))
         },
         Boundary: {},
         After: {}
@@ -386,11 +388,11 @@ describe("snapshot codec adversarial boundaries", () => {
         id: "codec-automatic-changed",
         states: states.states,
         events: Machine.events(),
-        initial: (to) => to.Before().resolve(({ target }) => target(new Before({})))
+        initial: (to) => to.Before().resolve(({ target }) => target.decoded(new Before({})))
       }).handle({
         Before: {},
         Boundary: {
-          always: (to) => to.full.After().resolve(({ target }) => target(new After({})))
+          always: (to) => to.full.After().resolve(({ target }) => target.decoded(new After({})))
         },
         After: {}
       })

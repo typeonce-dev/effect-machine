@@ -34,5 +34,6 @@ export const States = Machine.states({
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(Start, Finish),
-  initial: (to) => to.Flow.initial.resolve(({ target }) => target(Flow.make({}), (flow) => flow.Idle(Idle.make({}))))
+  initial: (to) =>
+    to.Flow.initial.resolve(({ target }) => target.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({}))))
 })

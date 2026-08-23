@@ -113,7 +113,7 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Tick),
-    initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+    initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
   }).handle({
     Idle: {}
   })
@@ -123,7 +123,7 @@ const makeEmittingMachine = () =>
     states: States.states,
     events: Machine.events(Tick),
     emittedEvents: Emissions,
-    initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+    initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
   }).handle({
     Idle: {}
   })
@@ -135,7 +135,7 @@ describe("AtomMachine", () => {
     const parentMachine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         invoke: (from) => from.child(Child)
@@ -179,7 +179,7 @@ describe("AtomMachine", () => {
       states: States.states,
       events: Machine.events(),
       emittedEvents: Emissions,
-      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
     }).handle({
       Idle: {
         invoke: (from) => from.child(Child)
@@ -350,12 +350,12 @@ describe("AtomMachine", () => {
       states: States.states,
       events: Machine.events(Tick),
       internalEvents: Machine.internalEvents(InternalTick),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         on: {
-          Tick: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({}))),
-          InternalTick: (to) => to.full.Idle().resolve(({ target }) => target(new Idle({})))
+          Tick: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
+          InternalTick: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({})))
         }
       }
     })
@@ -378,7 +378,7 @@ describe("AtomMachine", () => {
     const incomplete = Machine.make({
       states: OutputStates.states,
       events: Machine.events(Tick),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     })
     const runtime = Atom.runtime(Layer.empty)
     const bound = AtomMachine.bind(runtime)

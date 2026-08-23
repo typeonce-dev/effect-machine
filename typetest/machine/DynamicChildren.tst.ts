@@ -18,7 +18,7 @@ describe("dynamic child machines", () => {
     events: Machine.events(ChildEvent),
     input: Input,
     parent: Machine.parent(ParentEvents),
-    initial: (to) => to.ChildIdle().resolve(({ input, target }) => target(new ChildIdle({ id: input.id })))
+    initial: (to) => to.ChildIdle().resolve(({ input, target }) => target.decoded(new ChildIdle({ id: input.id })))
   }).handle({
     ChildIdle: {
       on: { ChildEvent: (to) => to.none }
@@ -28,7 +28,7 @@ describe("dynamic child machines", () => {
   const voidChildMachine = Machine.make({
     states: { ChildIdle },
     events: Machine.events(),
-    initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({ id: "void" })))
+    initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({ id: "void" })))
   }).handle({ ChildIdle: {} })
   const VoidChild = Machine.childFamily(voidChildMachine)
 
@@ -43,7 +43,7 @@ describe("dynamic child machines", () => {
     Machine.make({
       states: { ParentIdle },
       events: Machine.events(ParentNotice, OtherEvent),
-      initial: (to) => to.ParentIdle().resolve(({ target }) => target(new ParentIdle({})))
+      initial: (to) => to.ParentIdle().resolve(({ target }) => target.decoded(new ParentIdle({})))
     }).handle({
       ParentIdle: {
         invoke: (from) =>
@@ -75,7 +75,7 @@ describe("dynamic child machines", () => {
     Machine.make({
       states: { ParentIdle },
       events: Machine.events(OtherEvent),
-      initial: (to) => to.ParentIdle().resolve(({ target }) => target(new ParentIdle({})))
+      initial: (to) => to.ParentIdle().resolve(({ target }) => target.decoded(new ParentIdle({})))
     }).handle({
       ParentIdle: {
         invoke: (from) =>

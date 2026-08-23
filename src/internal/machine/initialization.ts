@@ -14,11 +14,19 @@ const getNode = (machine: Machine.Any, path: string): Machine.StateNode => {
 }
 
 const withFrom = <Method extends (value: unknown) => unknown>(method: Method) => {
-  Object.defineProperty(method, "from", {
+  const builder = {}
+  Object.defineProperty(builder, "decoded", {
+    value: method,
+    enumerable: false
+  })
+  Object.defineProperty(builder, "from", {
     value: (...args: ReadonlyArray<unknown>) => method(Topology.makeStateInput(args.length === 0 ? {} : args[0])),
     enumerable: false
   })
-  return method as Method & { readonly from: (...args: ReadonlyArray<unknown>) => unknown }
+  return builder as {
+    readonly decoded: Method
+    readonly from: (...args: ReadonlyArray<unknown>) => unknown
+  }
 }
 
 const makeCompletion = (values: Readonly<Record<string, unknown>>): object => {

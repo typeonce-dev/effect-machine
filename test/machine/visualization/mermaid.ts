@@ -166,14 +166,19 @@ export const makeMermaidRenderer = <Machine extends MachineValue, Snapshot>(
     const source = ids.get(definition.source)
     if (source === undefined) continue
     for (const branch of definition.branches) {
-      if (branch.selection.kind === "update" && branch.selection.path !== undefined) {
+      if (branch.target === undefined && branch.updates.length > 0) {
         lines.push(
-          `  ${source}: ${branchLabel(definition, branch)} / update ${escapeText(branch.selection.path)}`
+          `  ${source}: ${branchLabel(definition, branch)} / update ${escapeText(branch.updates.join(", "))}`
         )
         continue
       }
       const target = branch.target === undefined ? undefined : ids.get(branch.target)
-      if (target !== undefined) lines.push(`  ${source} --> ${target}: ${branchLabel(definition, branch)}`)
+      if (target !== undefined) {
+        const updates = branch.updates.length === 0
+          ? ""
+          : ` / update ${escapeText(branch.updates.join(", "))}`
+        lines.push(`  ${source} --> ${target}: ${branchLabel(definition, branch)}${updates}`)
+      }
     }
   }
 

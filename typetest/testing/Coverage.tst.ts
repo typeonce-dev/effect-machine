@@ -14,11 +14,11 @@ describe("MachineTest coverage and observed graph", () => {
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Start),
-    initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
+    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
   }).handle({
     idle: {
       on: {
-        Start: (to) => to.full.done().resolve(({ target }) => target(new Done({})))
+        Start: (to) => to.full.done().resolve(({ target }) => target.decoded(new Done({})))
       }
     },
     done: {}

@@ -987,10 +987,16 @@ describe("MachineTest finite-model reference interpreter", () => {
         events: Machine.events(Local, Exit),
         initial: (to) =>
           to.root.initial.resolve(({ target }) =>
-            target({ _tag: "Root", version: 0 }, (regions) =>
+            target.decoded({ _tag: "Root", version: 0 }, (regions) =>
               regions
-                .left({ _tag: "Left", version: 0 }, (left) => left.idle({ _tag: "LeftIdle", version: 0 }))
-                .right({ _tag: "Right", version: 0 }, (right) => right.idle({ _tag: "RightIdle", version: 0 })))
+                .left.decoded(
+                  { _tag: "Left", version: 0 },
+                  (left) => left.idle.decoded({ _tag: "LeftIdle", version: 0 })
+                )
+                .right.decoded(
+                  { _tag: "Right", version: 0 },
+                  (right) => right.idle.decoded({ _tag: "RightIdle", version: 0 })
+                ))
           )
       }).handle({
         root: {
@@ -999,8 +1005,10 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: (to) => to.local.done().resolve(({ target }) => target({ _tag: "LeftDone", version: 1 })),
-                    Exit: (to) => to.full.outside().resolve(({ target }) => target({ _tag: "Outside", version: 1 }))
+                    Local: (to) =>
+                      to.local.done().resolve(({ target }) => target.decoded({ _tag: "LeftDone", version: 1 })),
+                    Exit: (to) =>
+                      to.full.outside().resolve(({ target }) => target.decoded({ _tag: "Outside", version: 1 }))
                   }
                 }
               }
@@ -1009,8 +1017,10 @@ describe("MachineTest finite-model reference interpreter", () => {
               states: {
                 idle: {
                   on: {
-                    Local: (to) => to.local.idle().resolve(({ target }) => target({ _tag: "RightIdle", version: 1 })),
-                    Exit: (to) => to.local.idle().resolve(({ target }) => target({ _tag: "RightIdle", version: 2 }))
+                    Local: (to) =>
+                      to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 1 })),
+                    Exit: (to) =>
+                      to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 2 }))
                   }
                 }
               }

@@ -102,16 +102,16 @@ const NestedStates = Machine.states({
 const completeNestedFallback = (
   target: Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
 ) =>
-  target.App(
+  target.App.decoded(
     new App({ session: "fallback" }),
     (app) => {
       expect(app).type.not.toHaveProperty("Settings")
-      return app.Workspace(
+      return app.Workspace.decoded(
         new Workspace({}),
         (workspace) =>
           workspace
-            .Editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
-            .Sidebar(new Sidebar({}))
+            .Editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
+            .Sidebar.decoded(new Sidebar({}))
       )
     }
   )
@@ -152,9 +152,9 @@ describe("Machine history states", () => {
         expect(to).type.not.toHaveProperty("recent")
         expect(to).type.not.toHaveProperty("exact")
         return to.checkout.initial.resolve(({ target }) =>
-          target(
+          target.decoded(
             new Checkout({ orderId: "order-1" }),
-            (checkout) => checkout.shipping(new Shipping({ address: "Main Street" }))
+            (checkout) => checkout.shipping.decoded(new Shipping({ address: "Main Street" }))
           )
         )
       }
@@ -169,7 +169,7 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     })
     const incomplete = definition.handle({
       support: {
@@ -198,7 +198,7 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     })
     const incomplete = definition.handle({
       support: {
@@ -219,17 +219,17 @@ describe("Machine history states", () => {
               expect(target).type.toBe<
                 Machine.Machine.HistoryDefaultTargetBuilder<typeof States.states, "checkout">
               >()
-              return target.checkout(
+              return target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
             }
           },
           exact: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           }
         },
@@ -239,7 +239,7 @@ describe("Machine history states", () => {
               expect(state).type.toBe<Payment>()
               expect(containingState).type.toBe<Checkout>()
               expect(ancestors).type.toBe<{ readonly checkout: Checkout }>()
-              return builder(new CardEntry({ cardNumber: `attempt-${state.attempt}` }))
+              return builder.decoded(new CardEntry({ cardNumber: `attempt-${state.attempt}` }))
             }
           }
         }
@@ -253,7 +253,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     })
 
     machine.handle({
@@ -262,17 +262,17 @@ describe("Machine history states", () => {
           recent: {
             default: ({ target }) => {
               expect(target).type.not.toHaveProperty("support")
-              return target.checkout(
+              return target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
             }
           },
           exact: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           }
         }
@@ -284,8 +284,8 @@ describe("Machine history states", () => {
         states: {
           payment: {
             initialize: ({ builder }) => {
-              expect(builder).type.not.toBeCallableWith(new Verifying({ challengeId: "wrong-child" }))
-              return builder(new CardEntry({ cardNumber: "" }))
+              expect(builder.decoded).type.not.toBeCallableWith(new Verifying({ challengeId: "wrong-child" }))
+              return builder.decoded(new CardEntry({ cardNumber: "" }))
             }
           }
         }
@@ -309,7 +309,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: NestedStates.states,
       events: Machine.events(Resume),
-      initial: (to) => to.Closed().resolve(({ target }) => (target(new Closed({}))))
+      initial: (to) => to.Closed().resolve(({ target }) => (target.decoded(new Closed({}))))
     })
 
     const complete = machine.handle({
@@ -435,7 +435,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: NestedStates.states,
       events: Machine.events(Resume),
-      initial: (to) => to.Closed().resolve(({ target }) => (target(new Closed({}))))
+      initial: (to) => to.Closed().resolve(({ target }) => (target.decoded(new Closed({}))))
     })
     expect(machine.handle).type.not.toBeCallableWith({
       App: {
@@ -456,23 +456,23 @@ describe("Machine history states", () => {
     const definition = Machine.make({
       states: States.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     })
     const afterDefaults = definition.handle({
       checkout: {
         history: {
           recent: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           },
           exact: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           }
         }
@@ -485,22 +485,22 @@ describe("Machine history states", () => {
         history: {
           recent: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           },
           exact: {
             default: ({ target }) =>
-              target.checkout(
+              target.checkout.decoded(
                 new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping(new Shipping({ address: "" }))
+                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
               )
           }
         },
         states: {
           payment: {
-            initialize: ({ state, builder }) => builder(new CardEntry({ cardNumber: String(state.attempt) }))
+            initialize: ({ state, builder }) => builder.decoded(new CardEntry({ cardNumber: String(state.attempt) }))
           }
         }
       }
@@ -538,7 +538,7 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: DeepOnlyStates.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     }).handle({
       checkout: {
         history: {
@@ -589,22 +589,22 @@ describe("Machine history states", () => {
     const machine = Machine.make({
       states: ParallelStates.states,
       events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target(new Support({}))))
+      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
     })
     const complete = machine.handle({
       outer: {
         history: {
           recent: {
             default: ({ target }) =>
-              target.outer(
+              target.outer.decoded(
                 new Checkout({ orderId: "fallback" }),
                 (outer) =>
-                  outer.all(
+                  outer.all.decoded(
                     new Payment({ attempt: 1 }),
                     (all) =>
                       all
-                        .shipping(new Shipping({ address: "" }))
-                        .card(new CardEntry({ cardNumber: "" }))
+                        .shipping.decoded(new Shipping({ address: "" }))
+                        .card.decoded(new CardEntry({ cardNumber: "" }))
                   )
               )
           }
@@ -614,8 +614,8 @@ describe("Machine history states", () => {
             initialize: ({ state, builder }) => {
               expect(state).type.toBe<Payment>()
               return builder
-                .shipping(new Shipping({ address: `attempt-${state.attempt}` }))
-                .card(new CardEntry({ cardNumber: "" }))
+                .shipping.decoded(new Shipping({ address: `attempt-${state.attempt}` }))
+                .card.decoded(new CardEntry({ cardNumber: "" }))
             }
           }
         }
@@ -632,7 +632,7 @@ describe("Machine history states", () => {
               readonly [typeof Resume],
               readonly [],
               "outer.all"
-            >) => builder.shipping(new Shipping({ address: "missing-card" }))
+            >) => builder.shipping.decoded(new Shipping({ address: "missing-card" }))
           }
         }
       }

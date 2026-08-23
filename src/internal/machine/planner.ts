@@ -47,6 +47,7 @@ import {
   getNode,
   type InitialTarget as InitialTargetInstruction,
   isChoiceTarget,
+  isCombinedTarget,
   isDeclined,
   isHistoryTarget,
   isInitialTarget,
@@ -70,6 +71,7 @@ export type MicrostepPlan<State, Event, E, R> = {
     readonly branchKey: string | undefined
     readonly target: string | undefined
     readonly resolvedTarget: string | undefined
+    readonly updates: ReadonlyArray<string>
   }>
   readonly commands: ReadonlyArray<RuntimeCommand>
   readonly raisedEvents: ReadonlyArray<Event>
@@ -605,6 +607,7 @@ export type EvaluatedTransition<States extends Machine.StateSchemas, Event, E, R
     readonly branchKey: string | undefined
     readonly target: string
     readonly resolvedTarget: string
+    readonly updates: ReadonlyArray<string>
   }>
 }
 
@@ -1234,6 +1237,7 @@ interface ResolvedChoiceTransition {
   readonly branchKey: string | undefined
   readonly target: string
   readonly resolvedTarget: string
+  readonly updates: ReadonlyArray<string>
 }
 
 function resolveChoiceTarget(
@@ -1312,7 +1316,8 @@ function resolveChoiceTarget(
         branchIndex: collected.branchIndex,
         branchKey: collected.branchKey,
         target: returnedPath,
-        resolvedTarget: nested?.target.path ?? returnedPath
+        resolvedTarget: nested?.target.path ?? returnedPath,
+        updates: []
       })
       commands.push(...collected.commands)
       raisedEvents.push(...collected.raisedEvents)
@@ -1356,10 +1361,12 @@ const collectEvaluatedTransition = <
   if (transitionResult.declined) {
     throw new Error("Machine transition returned decline without declaring declinable: true")
   }
-  const unresolvedTarget = transitionResult.state === undefined
-      || isStateUpdate(transitionResult.state)
+  const combined = isCombinedTarget(transitionResult.state) ? transitionResult.state : undefined
+  const transitionState = combined?.target ?? transitionResult.state
+  const unresolvedTarget = transitionState === undefined
+      || isStateUpdate(transitionState)
     ? undefined
-    : transitionResult.state as
+    : transitionState as
       | Machine.Snapshot<States>
       | Machine.Target<States, Machine.StateIdentifier<States>>
       | Machine.HistoryTarget<States, Machine.HistoryIdentifier<States>>
@@ -1370,9 +1377,10 @@ const collectEvaluatedTransition = <
     selection.transition.targets,
     unresolvedTarget
   )
-  const update = isStateUpdate(transitionResult.state)
+  const stateUpdate = combined?.update ?? (isStateUpdate(transitionState) ? transitionState : undefined)
+  const update = stateUpdate !== undefined
     ? (() => {
-      const node = getNode(machine, transitionResult.state.path)
+      const node = getNode(machine, stateUpdate.path)
       if (
         !state.active.has(node.path) || node.schema === undefined ||
         (node.type !== "compound" && node.type !== "parallel")
@@ -1381,7 +1389,7 @@ const collectEvaluatedTransition = <
       }
       return {
         path: node.path,
-        value: decodeStateValueSync(machine, node, transitionResult.state.value)
+        value: decodeStateValueSync(machine, node, stateUpdate.value)
       }
     })()
     : undefined
@@ -1496,6 +1504,15 @@ const collectEvaluatedTransition = <
       stateAfterTransition,
       additionalTarget
     )
+  }
+  if (combined !== undefined && update !== undefined && !stateAfterTransition.active.has(update.path)) {
+    throw new Error(`Machine combined target exited its updating owner "${update.path}"`)
+  }
+  if (update !== undefined) {
+    stateAfterTransition = {
+      ...stateAfterTransition,
+      values: new Map(stateAfterTransition.values).set(update.path, update.value)
+    }
   }
   const changed = selection.transition.reenter || !hasSameActivePaths(state, stateAfterTransition)
   const stabilize = changed || update !== undefined
@@ -1915,7 +1932,8 @@ const microstep = <
       branchIndex: transition.branchIndex,
       branchKey: transition.branchKey,
       target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
-      resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
+      resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target),
+      updates: transition.update === undefined ? [] : [transition.update.path]
     },
     ...transition.choiceTransitions
   ])

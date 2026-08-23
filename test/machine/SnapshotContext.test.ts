@@ -73,7 +73,7 @@ describe("Machine transition snapshot context", () => {
                       }).resolve(({ snapshot, select }) => {
                         captured = snapshot
                         return States.matches(snapshot, "System.Network.Online")
-                          ? select.online(new Playing({}))
+                          ? select.online.decoded(new Playing({}))
                           : select.unchanged()
                       })
                   }
@@ -112,7 +112,7 @@ describe("Machine transition snapshot context", () => {
                     Disconnect: (to) =>
                       to.local.Playing().resolve(({ snapshot, target }) => {
                         captured.push(snapshot)
-                        return target(new Playing({}))
+                        return target.decoded(new Playing({}))
                       })
                   }
                 }
@@ -125,7 +125,7 @@ describe("Machine transition snapshot context", () => {
                     Disconnect: (to) =>
                       to.local.Offline().resolve(({ snapshot, target }) => {
                         captured.push(snapshot)
-                        return target(new Offline({}))
+                        return target.decoded(new Offline({}))
                       })
                   }
                 }
@@ -166,7 +166,7 @@ describe("Machine transition snapshot context", () => {
                     }).resolve(({ snapshot, select }) => {
                       captured = snapshot
                       return States.matches(snapshot, "System.Network.Online")
-                        ? select.online(new Playing({}))
+                        ? select.online.decoded(new Playing({}))
                         : select.unchanged()
                     })
                 }
@@ -217,12 +217,12 @@ describe("Machine transition snapshot context", () => {
         events: Machine.events(),
         initial: (to) =>
           to.System.initial.resolve(({ target }) =>
-            target(
+            target.decoded(
               new System({}),
               (system) =>
                 system
-                  .Work(new Work({}), (work) => work.Finished(new Finished({})))
-                  .Monitor(new Monitor({}), (monitor) => monitor.Active(new Active({})))
+                  .Work.decoded(new Work({}), (work) => work.Finished.decoded(new Finished({})))
+                  .Monitor.decoded(new Monitor({}), (monitor) => monitor.Active.decoded(new Active({})))
             )
           )
       }).handle({
@@ -232,7 +232,7 @@ describe("Machine transition snapshot context", () => {
               onDone: (to) =>
                 to.local.Restarted().resolve(({ snapshot, target }) => {
                   captured = snapshot
-                  return target(new Restarted({}))
+                  return target.decoded(new Restarted({}))
                 })
             }
           }

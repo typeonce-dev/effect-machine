@@ -38,12 +38,12 @@ describe("Machine transition snapshot context", () => {
       states: States.states,
       events: Machine.events(Advance),
       initial: (to) =>
-        to.Root.initial.resolve(({ target }) => (target(
+        to.Root.initial.resolve(({ target }) => (target.decoded(
           new Root({}),
           (root) =>
             root
-              .Left(new Left({}), (left) => left.LeftIdle(new LeftIdle({})))
-              .Right(new Right({}), (right) => right.RightIdle(new RightIdle({})))
+              .Left.decoded(new Left({}), (left) => left.LeftIdle.decoded(new LeftIdle({})))
+              .Right.decoded(new Right({}), (right) => right.RightIdle.decoded(new RightIdle({})))
         )))
     }).handle({
       Root: {
@@ -55,7 +55,7 @@ describe("Machine transition snapshot context", () => {
                 expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                 expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                 expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                return target(new LeftIdle({}))
+                return target.decoded(new LeftIdle({}))
               }),
             states: {
               LeftIdle: {
@@ -69,7 +69,7 @@ describe("Machine transition snapshot context", () => {
                     to.local.LeftDone().resolve(({ snapshot, target }) => {
                       expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
                       expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
-                      return target(new LeftDone({}))
+                      return target.decoded(new LeftDone({}))
                     })
                 }
               }
@@ -96,7 +96,7 @@ describe("Machine transition snapshot context", () => {
     Machine.make({
       states: choiceStates.states,
       events: Machine.events(),
-      initial: (to) => to.Flow.initial.resolve(({ target }) => (target(new Flow({}), (flow) => flow.Routing())))
+      initial: (to) => to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({}), (flow) => flow.Routing())))
     }).handle({
       Flow: {
         entry: (context) => {
@@ -107,7 +107,7 @@ describe("Machine transition snapshot context", () => {
             choice: (to) =>
               to.local.Active().resolve((context) => {
                 expect(context).type.not.toHaveProperty("snapshot")
-                return context.target(new Active({}))
+                return context.target.decoded(new Active({}))
               })
           }
         }

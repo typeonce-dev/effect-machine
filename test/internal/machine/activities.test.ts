@@ -18,7 +18,7 @@ const childMachine = Machine.make({
   id: "document-worker",
   states: childStates.states,
   events: Machine.events(),
-  initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+  initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
 })
 const child = Machine.child("child", childMachine)
 
@@ -29,7 +29,7 @@ const activityMachine = Machine.make({
   id: "activity-inspection",
   states: activityStates.states,
   events: Machine.events(WorkSucceeded, WorkFailed, LoadTimedOut),
-  initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
+  initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({})))
 }).handle({
   Loading: {
     invoke: (
@@ -168,7 +168,7 @@ describe("machine activity metadata", () => {
         const generated = Machine.make({
           states: activityStates.states,
           events: Machine.events(LoadTimedOut),
-          initial: (to) => to.Loading().resolve(({ target }) => target(new Loading({})))
+          initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({})))
         }).handle({
           Loading: {
             invoke: (from) => from.timer(id, durationMillis).onDone((to) => to.none)

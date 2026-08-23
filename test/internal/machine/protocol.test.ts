@@ -41,7 +41,7 @@ describe("machine protocols", () => {
         states: states.states,
         events: Machine.events(PublicEvent),
         internalEvents: Machine.internalEvents(InternalEvent),
-        initial: (to) => to.ProtocolIdle().resolve(({ target }) => target(new ProtocolIdle({})))
+        initial: (to) => to.ProtocolIdle().resolve(({ target }) => target.decoded(new ProtocolIdle({})))
       }).handle({})
 
       assert.strictEqual(Object.hasOwn(machine, "eventSchemas"), false)

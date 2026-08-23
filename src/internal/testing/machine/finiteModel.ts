@@ -1234,7 +1234,10 @@ const selectSnapshot = (
   if (state.node._tag === "Choice") {
     return (builder[state.node.key] as () => unknown)()
   }
-  const method = builder[state.node.key] as (value: unknown, selector?: (builder: any) => unknown) => unknown
+  const method = builder[state.node.key].decoded as (
+    value: unknown,
+    selector?: (builder: any) => unknown
+  ) => unknown
   const value = stateValue(state, path === requestedParts?.join(".") ? requestedValue : undefined)
   if (state.node._tag === "Atomic" || state.node._tag === "Final") return method(value)
 
@@ -1473,14 +1476,15 @@ const makeHandlers = (
           ...(Object.keys(history).length === 0 ? {} : { history }),
           ...(node._tag === "Compound"
             ? {
-              initialize: ({ builder }: any) => builder(stateValue(byPath.get(`${path}.${node.initial}`)!))
+              initialize: ({ builder }: any) => builder.decoded(stateValue(byPath.get(`${path}.${node.initial}`)!))
             }
             : {
               initialize: ({ builder }: any) =>
                 node.states
                   .filter((child) => child._tag !== "History" && child._tag !== "Choice")
                   .reduce(
-                    (current: any, child) => current[child.key](stateValue(byPath.get(`${path}.${child.key}`)!)),
+                    (current: any, child) =>
+                      current[child.key].decoded(stateValue(byPath.get(`${path}.${child.key}`)!)),
                     builder
                   )
             }),

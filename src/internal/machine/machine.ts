@@ -191,7 +191,7 @@ type InitialBuilderDescriptor = {
 const plainTargetSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
   selection.kind === "none"
     ? Topology.noneTargetSelection
-    : Topology.makeTargetSelection(selection.kind, selection.path, selection.scope)
+    : Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, selection.updatePath)
 
 const transitionOptions = (options: unknown): { readonly reenter: boolean; readonly declinable: boolean } => {
   const configuration = typeof options === "object" && options !== null
@@ -224,7 +224,22 @@ const decorateTransitionSelection = (selection: Topology.TargetSelection): Topol
     ...selection,
     resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
       makeDirectTransitionDescriptor(selection, resolve, options),
-    reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true })
+    reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true }),
+    updating: (owner: unknown) => {
+      if (typeof owner !== "function") {
+        throw new Error("Machine updating owner must be a state selector")
+      }
+      const ownerSelection = owner()
+      if (
+        !Topology.isTargetSelection(ownerSelection) || ownerSelection.kind !== "state" ||
+        ownerSelection.scope !== "branch"
+      ) {
+        throw new Error("Machine updating owner must be addressed by one branch state selector")
+      }
+      return decorateTransitionSelection(
+        Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, ownerSelection.path)
+      )
+    }
   })
 
 const decorateStateUpdateSelection = (selection: Topology.TargetSelection): Topology.TargetSelection => {
@@ -360,6 +375,11 @@ const transitionTargetSelection = (
     scope: selection.scope
   })
 
+const selectionUpdates = (selection: Topology.TargetSelection): ReadonlyArray<string> =>
+  selection.updatePath === undefined ?
+    selection.kind === "update" && selection.path !== undefined ? [selection.path] : []
+    : [selection.updatePath]
+
 const makeSelectionMethod = (
   kind: Topology.TargetSelectionKind,
   path: string | undefined,
@@ -476,6 +496,7 @@ const makeTargetSelector = (
 const captureDefinitionBranch = (
   branch: unknown,
   selector: unknown,
+  stateNodes: Machine.StateNodes,
   path: string,
   trigger: PropertyKey
 ): CapturedBranch => {
@@ -489,7 +510,56 @@ const captureDefinitionBranch = (
   if (!Topology.isTargetSelection(selection)) {
     throw new Error(`Machine transition for state "${path}" on "${String(trigger)}" must select exactly one target`)
   }
+  if (selection.updatePath !== undefined) {
+    const owner = stateNodes.byPath.get(selection.updatePath)
+    if (
+      selection.kind !== "state" || (selection.scope !== "local" && selection.scope !== "branch") ||
+      selection.path === undefined || owner === undefined || owner.schema === undefined ||
+      (owner.type !== "compound" && owner.type !== "parallel") ||
+      !Configuration.isDescendantOf(path, owner.path) ||
+      !Configuration.isDescendantOf(selection.path, owner.path)
+    ) {
+      throw new Error(
+        `Machine updating owner "${selection.updatePath}" must be a valued ancestor retained by source "${path}" and target "${selection.path}"`
+      )
+    }
+  }
   return { ...(branch as DefinitionBranch), selection }
+}
+
+const makeUpdatingConstruction = (
+  target: unknown,
+  ownerPath: string
+): { readonly update: (update: unknown) => Topology.CombinedTarget } =>
+  Object.freeze({
+    update: (update: unknown) => {
+      if (!Topology.isStateUpdate(update) || update.path !== ownerPath) {
+        throw new Error(`Machine combined target must update its declared owner "${ownerPath}"`)
+      }
+      return Topology.makeCombinedTarget(target, update)
+    }
+  })
+
+const makeUpdatingTargetBuilder = (
+  builder: unknown,
+  ownerPath: string
+): unknown => {
+  if (typeof builder !== "object" || builder === null) {
+    throw new Error("Machine combined target requires a state construction builder")
+  }
+  const updating: Record<PropertyKey, unknown> = {}
+  for (const property of Reflect.ownKeys(builder)) {
+    const descriptor = Object.getOwnPropertyDescriptor(builder, property)
+    if (descriptor === undefined) continue
+    if (
+      (property === "from" || property === "decoded") && "value" in descriptor && typeof descriptor.value === "function"
+    ) {
+      const construct = descriptor.value
+      descriptor.value = (...args: ReadonlyArray<unknown>) => makeUpdatingConstruction(construct(...args), ownerPath)
+    }
+    Object.defineProperty(updating, property, descriptor)
+  }
+  return Object.freeze(updating)
 }
 
 const getSelectionBuilder = (
@@ -534,7 +604,7 @@ const getSelectionBuilder = (
   ) {
     throw new Error(`Machine could not construct selected transition target "${selection.path}"`)
   }
-  return builder
+  return selection.updatePath === undefined ? builder : makeUpdatingTargetBuilder(builder, selection.updatePath)
 }
 
 const constructSelectedTarget = (builder: any): unknown =>
@@ -557,10 +627,18 @@ const validateResolvedSelection = (
     }
     return
   }
+  if (selection.updatePath !== undefined) {
+    if (!Topology.isCombinedTarget(result) || result.update.path !== selection.updatePath) {
+      throw new Error(`Machine target updating "${selection.updatePath}" must return target construction .update(...)`)
+    }
+  } else if (Topology.isCombinedTarget(result)) {
+    throw new Error("Machine combined target requires an updating owner declaration")
+  }
   if (result === undefined) return
-  const resultPath = typeof result === "object" && result !== null && hasProperty(result, "path") &&
-      typeof result.path === "string"
-    ? result.path
+  const target = Topology.isCombinedTarget(result) ? result.target : result
+  const resultPath = typeof target === "object" && target !== null && hasProperty(target, "path") &&
+      typeof target.path === "string"
+    ? target.path
     : undefined
   const selectedNode = selection.path === undefined ? undefined : stateNodes.byPath.get(selection.path)
   const acceptsDescendant = (selection.scope === "local" || selection.scope === "branch") &&
@@ -587,6 +665,26 @@ const runCapturedBranch = (
   const resolverContext = { ...context }
   if (branch.selection.kind === "none") delete resolverContext.target
   else resolverContext.target = selectedTarget
+  if (branch.selection.kind === "update") {
+    const ownerPath = branch.selection.path!
+    delete resolverContext.target
+    resolverContext.current = context.ancestors[ownerPath] ?? context.state
+    resolverContext.owner = getSelectionBuilder(
+      context.target,
+      makeStateUpdateSelection(ownerPath, branch.selection.scope === "local" ? "local" : "branch"),
+      stateNodes,
+      source
+    )
+  } else if (branch.selection.updatePath !== undefined) {
+    const ownerPath = branch.selection.updatePath
+    resolverContext.current = context.ancestors[ownerPath]
+    resolverContext.owner = getSelectionBuilder(
+      context.target,
+      makeStateUpdateSelection(ownerPath, "branch"),
+      stateNodes,
+      source
+    )
+  }
   if (branch.declinable === true) resolverContext.decline = Topology.makeDeclined
   const resolved = branch.resolve(resolverContext, enqueue)
   if (Topology.isDeclined(resolved)) {
@@ -635,6 +733,9 @@ const captureNamedBranches = (
     const { target, title } = declaration as BranchDeclaration
     if (!Topology.isTargetSelection(target)) {
       throw new Error(`Machine transition branch "${key}" must select exactly one target`)
+    }
+    if (target.updatePath !== undefined) {
+      throw new Error(`Machine transition branch "${key}" cannot declare an updating target`)
     }
     if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
       throw new Error(`Machine transition branch "${key}" title must be a non-empty string`)
@@ -795,14 +896,15 @@ const captureTransition = (
           key: branch.key,
           title: branch.title,
           target: topologyTargetPath(branch.selection),
-          selection: transitionTargetSelection(branch.selection)
+          selection: transitionTargetSelection(branch.selection),
+          updates: selectionUpdates(branch.selection)
         })
       ),
       evaluate,
       transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
     }
   }
-  const branch = captureDefinitionBranch(transition, selector, path, trigger)
+  const branch = captureDefinitionBranch(transition, selector, stateNodes, path, trigger)
   const evaluate = (context: Record<string, any>, enqueue: unknown) => ({
     result: runCapturedBranch(branch, context, enqueue, stateNodes, path),
     branchIndex: 0,
@@ -815,7 +917,8 @@ const captureTransition = (
     branches: [{
       type: "direct" as const,
       target: topologyTargetPath(branch.selection),
-      selection: transitionTargetSelection(branch.selection)
+      selection: transitionTargetSelection(branch.selection),
+      updates: selectionUpdates(branch.selection)
     }],
     evaluate,
     transition: (context: Record<string, any>, enqueue: unknown) => evaluate(context, enqueue).result
@@ -1022,8 +1125,18 @@ const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) =
   method: Method,
   kind: FromMethodKind,
   valued: boolean
-): Method & { readonly from: (...args: ReadonlyArray<any>) => unknown } => {
-  Object.defineProperty(method, "from", {
+): {
+  readonly decoded?: Method
+  readonly from: (...args: ReadonlyArray<any>) => unknown
+} => {
+  const builder: Record<string, unknown> = {}
+  if (valued) {
+    Object.defineProperty(builder, "decoded", {
+      value: method,
+      enumerable: false
+    })
+  }
+  Object.defineProperty(builder, "from", {
     value: (...args: ReadonlyArray<any>) => {
       if (!valued) {
         return method(undefined, ...args)
@@ -1035,7 +1148,10 @@ const withFrom = <Method extends (value: unknown, ...args: ReadonlyArray<any>) =
     },
     enumerable: false
   })
-  return method as Method & { readonly from: (...args: ReadonlyArray<any>) => unknown }
+  return builder as {
+    readonly decoded?: Method
+    readonly from: (...args: ReadonlyArray<any>) => unknown
+  }
 }
 
 const withInitial = <Builder extends object>(
@@ -1518,13 +1634,13 @@ const makeInitialSelector = (stateNodes: Machine.StateNodes): unknown => {
 const getInitialSelectionBuilder = (
   initialBuilder: Record<string, any>,
   selection: Topology.TargetSelection
-): (...args: ReadonlyArray<any>) => unknown => {
+): Record<string, any> => {
   const path = selection.path
   if (path === undefined || path.includes(".")) {
     throw new Error("Machine initial target must select one top-level state")
   }
   const builder = initialBuilder[path]
-  if (typeof builder !== "function") {
+  if (typeof builder !== "object" || builder === null || typeof builder.from !== "function") {
     throw new Error(`Machine could not construct selected initial state "${path}"`)
   }
   return builder
@@ -1537,7 +1653,7 @@ const captureInitialBranch = (
 ): {
   readonly selection: Topology.TargetSelection
   readonly resolve?: (context: any) => unknown
-  readonly builder: (...args: ReadonlyArray<any>) => unknown
+  readonly builder: Record<string, any>
 } => {
   if (typeof definition !== "function") {
     throw new Error("Machine initial definition must be a target-first callback")

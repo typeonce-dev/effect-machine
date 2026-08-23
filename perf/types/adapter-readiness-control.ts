@@ -29,18 +29,18 @@ export const machine = Machine.make({
   id: "perf-readiness",
   states: States.states,
   events: Machine.events(),
-  initial: (to) => to.Ready().resolve(({ target }) => target(Ready.make({})))
+  initial: (to) => to.Ready().resolve(({ target }) => target.from(Ready.make({})))
 }).handle({
   Flow: {
     history: {
       recent: {
-        default: ({ target }) => target.Flow(Flow.make({}), (flow) => flow.Idle(Idle.make({})))
+        default: ({ target }) => target.Flow.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({})))
       }
     },
     states: {
       Idle: {},
       Route: {
-        choice: (to) => to.full.Ready().resolve(({ target }) => target(Ready.make({})))
+        choice: (to) => to.full.Ready().resolve(({ target }) => target.from(Ready.make({})))
       }
     }
   },

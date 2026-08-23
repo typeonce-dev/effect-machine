@@ -24,27 +24,27 @@ const machine = Machine.make({
   states: states.states,
   events: Machine.events(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEvents(RaisedIncrement),
-  initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   Counter: {
     on: {
       Increment: (to) =>
         to.full.Counter().resolve(({ event, state, target }) =>
-          target(new Counter({ count: state.count + event.amount }))
+          target.decoded(new Counter({ count: state.count + event.amount }))
         ),
       Noop: (to) => to.none,
       Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
       Reenter: (to) =>
-        to.full.Counter().resolve(({ state, target }) => target(new Counter({ count: state.count })), {
+        to.full.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count })), {
           reenter: true
         }),
       Burst: (to) =>
         to.full.Counter().resolve(({ state, target }, enqueue) => {
           enqueue.raise(new RaisedIncrement({}))
-          return target(new Counter({ count: state.count + 1 }))
+          return target.decoded(new Counter({ count: state.count + 1 }))
         }),
       RaisedIncrement: (to) =>
-        to.full.Counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 10 })))
+        to.full.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 10 })))
     }
   }
 })
@@ -154,11 +154,11 @@ describe("MachineTest probe", () => {
       const invokeMachine = Machine.make({
         states: invokeStates.states,
         events: Machine.events(Load),
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           on: {
-            Load: (to) => to.full.Loading().resolve(({ target }) => target(new Loading({})))
+            Load: (to) => to.full.Loading().resolve(({ target }) => target.decoded(new Loading({})))
           }
         },
         Loading: {

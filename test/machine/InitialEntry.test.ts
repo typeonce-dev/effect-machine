@@ -41,7 +41,7 @@ const makeMachine = () =>
   Machine.make({
     states: States.states,
     events: Machine.events(Open, OpenInvalid),
-    initial: (to) => to.closed().resolve(({ target }) => target(new Closed({})))
+    initial: (to) => to.closed().resolve(({ target }) => target.decoded(new Closed({})))
   }).handle({
     closed: {
       on: {
@@ -74,11 +74,11 @@ const makeParallelMachine = () =>
   Machine.make({
     states: ParallelStates.states,
     events: Machine.events(EnterDashboard),
-    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
+    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
   }).handle({
     outside: {
       on: {
-        EnterDashboard: (to) => to.full.dashboard.initial.resolve(({ target }) => target(new Dashboard({})))
+        EnterDashboard: (to) => to.full.dashboard.initial.resolve(({ target }) => target.decoded(new Dashboard({})))
       }
     },
     dashboard: {
@@ -107,17 +107,17 @@ const makeChoiceMachine = () =>
   Machine.make({
     states: ChoiceStates.states,
     events: Machine.events(EnterFlow),
-    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
+    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
   }).handle({
     outside: {
       on: {
-        EnterFlow: (to) => to.full.flow.initial.resolve(({ target }) => target(new Flow({})))
+        EnterFlow: (to) => to.full.flow.initial.resolve(({ target }) => target.decoded(new Flow({})))
       }
     },
     flow: {
       states: {
         routing: {
-          choice: (to) => to.local.approved().resolve(({ target }) => target(new Approved({})))
+          choice: (to) => to.local.approved().resolve(({ target }) => target.decoded(new Approved({})))
         }
       }
     }
@@ -135,7 +135,7 @@ const makeStructuralMachine = () =>
   Machine.make({
     states: StructuralStates.states,
     events: Machine.events(EnterFlow),
-    initial: (to) => to.outside().resolve(({ target }) => target(new Outside({})))
+    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
   }).handle({
     outside: {
       on: {
@@ -162,7 +162,7 @@ const makeNestedMachine = () =>
   Machine.make({
     states: NestedStates.states,
     events: Machine.events(OpenLocal, OpenBranch),
-    initial: (to) => to.root.initial.resolve(({ target }) => target.from((root) => root.closed(new Closed({}))))
+    initial: (to) => to.root.initial.resolve(({ target }) => target.from((root) => root.closed.decoded(new Closed({}))))
   }).handle({
     root: {
       states: {
@@ -292,7 +292,8 @@ describe("declared initial entry", () => {
         branchIndex: 0,
         branchKey: undefined,
         target: "flow",
-        resolvedTarget: "flow"
+        resolvedTarget: "flow",
+        updates: []
       }, {
         source: "flow.routing",
         trigger: { type: "choice" },
@@ -300,7 +301,8 @@ describe("declared initial entry", () => {
         branchIndex: 0,
         branchKey: undefined,
         target: "flow.approved",
-        resolvedTarget: "flow.approved"
+        resolvedTarget: "flow.approved",
+        updates: []
       }])
     }))
 

@@ -27,7 +27,7 @@ const machine = Machine.make({
   states: States.states,
   events: PublicEvents,
   internalEvents: InternalEvents,
-  initial: (to) => to.Idle().resolve(({ target }) => target(State.cases.Idle.make({})))
+  initial: (to) => to.Idle().resolve(({ target }) => target.decoded(State.cases.Idle.make({})))
 }).handle({
   Idle: {
     on: {
@@ -37,7 +37,7 @@ const machine = Machine.make({
           measured: { target: to.none },
           named: { target: to.full.Done() },
           confirmed: { target: to.full.Idle() }
-        }).resolve(({ select }) => select.cached(State.cases.Loading.make({})))
+        }).resolve(({ select }) => select.cached.decoded(State.cases.Loading.make({})))
     }
   },
   Loading: {
@@ -47,7 +47,7 @@ const machine = Machine.make({
     ],
     on: {
       Loaded: (to) =>
-        to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
+        to.full.Done().resolve(({ event, target }) => target.decoded(State.cases.Done.make({ value: event.value })))
     }
   },
   Done: {}

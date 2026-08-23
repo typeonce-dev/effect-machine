@@ -26,7 +26,7 @@ const choiceStates = Machine.states({
 const choiceIncomplete = Machine.make({
   states: choiceStates.states,
   events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
+  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
 })
 const choiceSnapshot = { path: "Ready" as const, value: new Ready({}) }
 
@@ -45,7 +45,7 @@ const historyStates = Machine.states({
 const historyIncomplete = Machine.make({
   states: historyStates.states,
   events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
+  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
 })
 const historySnapshot = { path: "Ready" as const, value: new Ready({}) }
 
@@ -61,7 +61,7 @@ const outputStates = Machine.states({
 const outputIncomplete = Machine.make({
   states: outputStates.states,
   events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
+  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
 })
 const outputSnapshot = { path: "Ready" as const, value: new Ready({}) }
 type InvokeSelector = Machine.Machine.InvokeSelector<
@@ -138,21 +138,21 @@ describe("executable machine readiness", () => {
     const complete = Machine.make({
       states: completeStates.states,
       events: Machine.events(Tick),
-      initial: (to) => to.Ready().resolve(({ target }) => (target(new Ready({}))))
+      initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
     }).handle({
       Flow: {
         history: {
           recent: {
             default: ({ target }) =>
-              target.Flow(
+              target.Flow.decoded(
                 new Flow({}),
-                (flow) => flow.Idle(new Idle({}))
+                (flow) => flow.Idle.decoded(new Idle({}))
               )
           }
         },
         states: {
           Route: {
-            choice: (to) => to.local.Idle().resolve(({ target }) => target(new Idle({})))
+            choice: (to) => to.local.Idle().resolve(({ target }) => target.decoded(new Idle({})))
           },
           Done: {
             output: ({ state }) => state.value

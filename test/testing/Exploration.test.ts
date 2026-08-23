@@ -20,14 +20,14 @@ const States = Machine.states({ counter: Counter })
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Increment, Reset, Corrupt),
-  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
       Increment: (to) =>
-        to.full.counter().resolve(({ state, target }) => target(new Counter({ count: state.count + 1 }))),
-      Reset: (to) => to.full.counter().resolve(({ target }) => target(new Counter({ count: 0 }))),
-      Corrupt: (to) => to.full.counter().resolve(({ target }) => target(new Counter({ count: -1 })))
+        to.full.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
+      Reset: (to) => to.full.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 }))),
+      Corrupt: (to) => to.full.counter().resolve(({ target }) => target.decoded(new Counter({ count: -1 })))
     }
   }
 })
@@ -38,7 +38,7 @@ const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof m
 const branchMachine = Machine.make({
   states: States.states,
   events: Machine.events(Select),
-  initial: (to) => to.counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   counter: {
     on: {
@@ -387,7 +387,8 @@ describe("MachineTest bounded exploration", () => {
         states: States.states,
         events: Machine.events(Increment),
         input: Seed,
-        initial: (to) => to.counter().resolve(({ input, target }) => target(new Counter({ count: input.count })))
+        initial: (to) =>
+          to.counter().resolve(({ input, target }) => target.decoded(new Counter({ count: input.count })))
       }).handle({ counter: {} })
       const explored = yield* MachineTest.explore(inputMachine, {
         input: new Seed({ count: 7 }),

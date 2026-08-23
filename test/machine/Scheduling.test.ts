@@ -21,20 +21,21 @@ describe("machine scheduling", () => {
         states: states.states,
         events: Machine.events(StartBurst),
         internalEvents: Machine.internalEvents(Burst),
-        initial: (to) => to.SchedulingActive().resolve(({ target }) => target(new SchedulingActive({ count: 0 })))
+        initial: (to) =>
+          to.SchedulingActive().resolve(({ target }) => target.decoded(new SchedulingActive({ count: 0 })))
       }).handle({
         SchedulingActive: {
           on: {
             StartBurst: (to) =>
               to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
                 enqueue.raise(new Burst({}))
-                return target(state)
+                return target.decoded(state)
               }),
             Burst: (to) =>
               to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
                 const count = state.count + 1
                 if (count < burstSize) enqueue.raise(new Burst({}))
-                return target(new SchedulingActive({ count }))
+                return target.decoded(new SchedulingActive({ count }))
               })
           }
         }

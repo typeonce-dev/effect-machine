@@ -31,6 +31,8 @@ export const TargetSelectionTypeId: unique symbol = Symbol("effect/Machine/Targe
 
 export const StateUpdateTypeId: unique symbol = Symbol("effect/Machine/StateUpdate")
 
+export const CombinedTargetTypeId: unique symbol = Symbol("effect/Machine/CombinedTarget")
+
 export const SelectedBranchTypeId: unique symbol = Symbol("effect/Machine/SelectedBranch")
 
 interface StateInput {
@@ -85,6 +87,7 @@ export interface TargetSelection {
   readonly kind: TargetSelectionKind
   readonly scope: TargetSelectionScope | undefined
   readonly path: string | undefined
+  readonly updatePath?: string
 }
 
 /** One branch selection returned by a compiled branching transition. */
@@ -99,13 +102,15 @@ export interface SelectedBranch {
 export const makeTargetSelection = (
   kind: TargetSelectionKind,
   path?: string,
-  scope?: TargetSelectionScope
+  scope?: TargetSelectionScope,
+  updatePath?: string
 ): TargetSelection =>
   Object.freeze({
     [TargetSelectionTypeId]: TargetSelectionTypeId as typeof TargetSelectionTypeId,
     kind,
     scope,
-    path
+    path,
+    ...(updatePath === undefined ? {} : { updatePath })
   })
 
 /** Source-independent definition-time selection for an explicitly targetless transition. */
@@ -127,6 +132,21 @@ export const makeStateUpdate = (path: string, value: unknown): StateUpdate =>
   })
 
 export const isStateUpdate = (u: unknown): u is StateUpdate => hasProperty(u, StateUpdateTypeId)
+
+export interface CombinedTarget {
+  readonly [CombinedTargetTypeId]: typeof CombinedTargetTypeId
+  readonly target: unknown
+  readonly update: StateUpdate
+}
+
+export const makeCombinedTarget = (target: unknown, update: StateUpdate): CombinedTarget =>
+  Object.freeze({
+    [CombinedTargetTypeId]: CombinedTargetTypeId,
+    target,
+    update
+  })
+
+export const isCombinedTarget = (u: unknown): u is CombinedTarget => hasProperty(u, CombinedTargetTypeId)
 
 export const makeSelectedBranch = (
   owner: object,

@@ -34,7 +34,7 @@ describe("machine reference event channels", () => {
         initial: (to) =>
           to.Idle().resolve(({ target }) => {
             initializations += 1
-            return target(new Idle({}))
+            return target.decoded(new Idle({}))
           })
       }).handle({
         Idle: {
@@ -83,7 +83,7 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -122,7 +122,7 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Events,
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           on: {
@@ -173,7 +173,7 @@ describe("machine reference event channels", () => {
         states: states.states,
         events: Events,
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           on: {
@@ -227,7 +227,7 @@ describe("machine reference event channels", () => {
         events: ChildEvents,
         parent: Machine.optionalParent(ParentEvents),
         emittedEvents: ChildEmissions,
-        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
+        initial: (to) => to.Waiting().resolve(({ target }) => target.decoded(new Waiting({})))
       }).handle({
         Waiting: {
           on: {
@@ -238,7 +238,7 @@ describe("machine reference event channels", () => {
                 if (parent !== undefined) {
                   enqueue.sendTo(parent, ParentEvents.ChildReported({ value: 1 }))
                 }
-                return target(new Reported({}))
+                return target.decoded(new Reported({}))
               })
           }
         },
@@ -266,14 +266,15 @@ describe("machine reference event channels", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: Machine.events(ParentEvents, Notice),
-        initial: (to) => to.Awaiting().resolve(({ target }) => target(new Awaiting({})))
+        initial: (to) => to.Awaiting().resolve(({ target }) => target.decoded(new Awaiting({})))
       }).handle({
         Awaiting: {
           invoke: (from) => from.child(Child),
           on: {
             ChildReported: (to) =>
-              to.full.Finished().resolve(({ target }) => target(new Finished({ source: "parent event" }))),
-            Notice: (to) => to.full.Finished().resolve(({ target }) => target(new Finished({ source: "emission" })))
+              to.full.Finished().resolve(({ target }) => target.decoded(new Finished({ source: "parent event" }))),
+            Notice: (to) =>
+              to.full.Finished().resolve(({ target }) => target.decoded(new Finished({ source: "emission" })))
           }
         },
         Finished: { output: ({ state }) => state.source }
@@ -305,7 +306,7 @@ describe("machine reference event channels", () => {
         states: childStates.states,
         events: Machine.events(),
         parent: Machine.parent(ParentEvents),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
       })
       const childMachine = childDefinition.handle({
         ChildIdle: {
@@ -323,12 +324,12 @@ describe("machine reference event channels", () => {
       const parentMachine = Machine.make({
         states: parentStates.states,
         events: ParentEvents,
-        initial: (to) => to.ParentWaiting().resolve(({ target }) => target(new ParentWaiting({})))
+        initial: (to) => to.ParentWaiting().resolve(({ target }) => target.decoded(new ParentWaiting({})))
       }).handle({
         ParentWaiting: {
           invoke: (from) => from.child(Child).onFailure((to) => to.none),
           on: {
-            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
+            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
           }
         },
         ParentDone: { output: () => undefined }

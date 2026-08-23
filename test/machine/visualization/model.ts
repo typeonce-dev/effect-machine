@@ -51,6 +51,7 @@ export interface TransitionDefinition {
         readonly scope: "local" | "branch" | "full" | "initial" | undefined
         readonly path: string | undefined
       }
+      readonly updates: ReadonlyArray<string>
     }
     | {
       readonly type: "branch"
@@ -62,6 +63,7 @@ export interface TransitionDefinition {
         readonly scope: "local" | "branch" | "full" | "initial" | undefined
         readonly path: string | undefined
       }
+      readonly updates: ReadonlyArray<string>
     }
   >
 }

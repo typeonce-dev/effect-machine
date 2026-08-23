@@ -19,14 +19,14 @@ const machine = Machine.make({
   states: states.states,
   events: Events,
   emittedEvents: Emissions,
-  initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+  initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
 }).handle({
   Idle: {
     on: {
       Increment: (to) =>
         to.full.Idle().resolve(({ event, target }, enqueue) => {
           enqueue.emit(Emissions.Notice({ value: event.by }))
-          return target(new Idle({}))
+          return target.decoded(new Idle({}))
         })
     }
   }
@@ -85,7 +85,8 @@ describe("Machine live inspection", () => {
           branchIndex: 0,
           branchKey: undefined,
           target: "Idle",
-          resolvedTarget: "Idle"
+          resolvedTarget: "Idle",
+          updates: []
         }])
       }
 
@@ -128,7 +129,7 @@ describe("Machine live inspection", () => {
         id: "activity-root",
         states: states.states,
         events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           invoke: (from) => from.effect("worker", () => Effect.never)
@@ -177,7 +178,7 @@ describe("Machine live inspection", () => {
         id: "stream-activity-root",
         states: states.states,
         events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           invoke: (from) => from.stream("updates", () => Stream.never).onDone((to) => to.none)
@@ -219,7 +220,7 @@ describe("Machine live inspection", () => {
         states: childStates.states,
         events: ChildEvents,
         parent: Machine.parent(ParentEvents),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({})))
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
       }).handle({
         ChildIdle: {
           on: {
@@ -240,12 +241,12 @@ describe("Machine live inspection", () => {
         id: "parent-machine",
         states: parentStates.states,
         events: Machine.events(ParentEvents),
-        initial: (to) => to.ParentIdle().resolve(({ target }) => target(new ParentIdle({})))
+        initial: (to) => to.ParentIdle().resolve(({ target }) => target.decoded(new ParentIdle({})))
       }).handle({
         ParentIdle: {
           invoke: (from) => from.child(Child),
           on: {
-            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target(new ParentDone({})))
+            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
           }
         },
         ParentDone: {}
