@@ -9,7 +9,6 @@
   --line: #292d34;
   --muted: #8e949e;
   --accent: #f0a35b;
-  --accent-soft: #34271c;
 }
 
 * {
@@ -79,11 +78,16 @@ button {
   cursor: pointer;
 }
 
-.secondary-button:hover,
-.secondary-button:focus-visible {
+.secondary-button:not(:disabled):hover,
+.secondary-button:not(:disabled):focus-visible {
   color: #fff;
   background: #1b1e23;
   outline: none;
+}
+
+.secondary-button:disabled {
+  color: #50545c;
+  cursor: default;
 }
 
 .tree {
@@ -112,19 +116,28 @@ button {
   margin: 0;
 }
 
+.tree-item.is-selected,
+.tree-leaf.is-selected {
+  background: rgb(75 125 255 / 14%);
+}
+
+.tree-item.is-selected > summary {
+  color: #fff;
+}
+
 .tree-row {
   display: flex;
   width: fit-content;
   min-width: 100%;
-  min-height: 29px;
+  min-height: 34px;
   align-items: baseline;
-  padding: 1px 10px 1px 4px;
+  padding: 4px 10px 4px 4px;
   border: 0;
-  border-radius: 4px;
   color: inherit;
   background: transparent;
   text-align: left;
   cursor: pointer;
+  user-select: none;
 }
 
 summary.tree-row {
@@ -141,12 +154,6 @@ summary.tree-row::marker {
   color: #fff;
   background: #1b1e23;
   outline: none;
-}
-
-.tree-row.is-selected {
-  color: #fff;
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 var(--accent);
 }
 
 .tree-leaf {

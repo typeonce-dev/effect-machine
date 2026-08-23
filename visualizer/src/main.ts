@@ -22,10 +22,24 @@ const createElement = <Tag extends keyof HTMLElementTagNameMap>(
 const detailTitle = createElement("h2", "detail-title", "Select a line")
 const detailKind = createElement("span", "detail-kind", "Details")
 const detailList = createElement("dl", "detail-list")
+const clearSelectionButton = createElement("button", "secondary-button", "Clear selection")
+clearSelectionButton.type = "button"
+clearSelectionButton.disabled = true
 
-const selectItem = (item: TreeItem, row: HTMLElement): void => {
-  document.querySelectorAll(".tree-row.is-selected").forEach((element) => element.classList.remove("is-selected"))
-  row.classList.add("is-selected")
+const clearSelection = (): void => {
+  document.querySelectorAll(".is-selected").forEach((element) => element.classList.remove("is-selected"))
+  detailTitle.textContent = "Select a line"
+  detailKind.textContent = "Details"
+  detailList.replaceChildren()
+  clearSelectionButton.disabled = true
+}
+
+clearSelectionButton.addEventListener("click", clearSelection)
+
+const selectItem = (item: TreeItem, selection: HTMLElement): void => {
+  document.querySelectorAll(".is-selected").forEach((element) => element.classList.remove("is-selected"))
+  selection.classList.add("is-selected")
+  clearSelectionButton.disabled = false
   detailTitle.textContent = item.label
   detailKind.textContent = item.kind
   detailList.replaceChildren()
@@ -47,9 +61,9 @@ const renderRow = (item: TreeItem, prefix: string, isLast: boolean): HTMLElement
     disclosure.open = true
     const summary = createElement("summary", "tree-row")
     summary.append(createElement("span", "tree-line", line))
-    summary.addEventListener("click", () => selectItem(item, summary))
+    summary.addEventListener("click", () => selectItem(item, disclosure))
     disclosure.append(summary)
-    const childPrefix = `${prefix}${isLast ? "   " : "│  "}`
+    const childPrefix = `${prefix}   `
     item.children.forEach((child, index) => {
       disclosure.append(renderRow(child, childPrefix, index === item.children.length - 1))
     })
@@ -78,7 +92,7 @@ expandButton.addEventListener("click", () => setAllDisclosures(true))
 const collapseButton = createElement("button", "secondary-button", "Collapse all")
 collapseButton.type = "button"
 collapseButton.addEventListener("click", () => setAllDisclosures(false))
-actions.append(expandButton, collapseButton)
+actions.append(clearSelectionButton, expandButton, collapseButton)
 toolbar.append(actions)
 
 const workspace = createElement("section", "workspace")
