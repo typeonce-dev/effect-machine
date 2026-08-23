@@ -42,16 +42,47 @@ button {
 
 .workspace {
   display: grid;
+  height: 100vh;
   grid-template-columns: minmax(420px, 1fr) minmax(380px, 46%);
 }
 
 .tree-panel {
   display: flex;
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
   flex-direction: column;
   border-right: 1px solid var(--line);
   overflow: hidden;
+}
+
+.diagnostics {
+  border-bottom: 1px solid var(--line);
+  background: #121418;
+}
+
+.diagnostic {
+  display: flex;
+  min-height: 36px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  color: #aeb4bd;
+  font-size: 11px;
+}
+
+.diagnostic + .diagnostic {
+  border-top: 1px solid var(--line-soft);
+}
+
+.badge-warning {
+  color: #e9c89f;
+  background: rgb(240 163 91 / 13%);
+}
+
+.badge-error {
+  color: #f2aaa7;
+  background: rgb(224 89 84 / 14%);
 }
 
 .toolbar {
@@ -169,6 +200,20 @@ button {
 
 .topology-node {
   background: transparent;
+}
+
+.topology-empty {
+  display: grid;
+  max-width: 420px;
+  gap: 7px;
+  margin: 26px 8px;
+  color: #7f8690;
+  font: 12px/1.6 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.topology-empty strong {
+  color: #d4d7dc;
+  font: 600 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .topology-node.is-selected {
@@ -302,10 +347,50 @@ button {
 
 .inspector {
   min-width: 0;
-  min-height: 100vh;
+  height: 100vh;
   padding: 28px;
   overflow: auto;
   background: var(--surface);
+}
+
+.failure-shell {
+  display: grid;
+  min-height: 100vh;
+  align-content: start;
+  gap: 12px;
+  padding: 32px;
+  color: #d6d8dc;
+  background: #0b0c0e;
+}
+
+.failure-kind {
+  color: #f2aaa7;
+  font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.failure-shell h1 {
+  margin: 0;
+  font: 600 18px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.failure-shell pre {
+  max-width: 900px;
+  margin: 4px 0 0;
+  padding: 14px 16px;
+  border-left: 2px solid #a54743;
+  color: #e4b4b1;
+  background: #151112;
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.failure-shell p {
+  margin: 0;
+  color: #7f8690;
+  font-size: 12px;
 }
 
 .inspector-empty {
@@ -516,17 +601,45 @@ button {
 
 @media (max-width: 900px) {
   .workspace {
+    height: auto;
     grid-template-columns: 1fr;
   }
 
   .tree-panel {
+    height: 58vh;
     min-height: 58vh;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
   .inspector {
+    height: auto;
     min-height: 42vh;
+  }
+}
+
+@media (max-width: 600px) {
+  .toolbar {
+    align-items: flex-start;
+    padding-inline: 10px;
+  }
+
+  .toolbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .runtime-summary {
+    padding-top: 8px;
+  }
+
+  .topology-tree,
+  .inspector {
+    padding-inline: 14px;
+  }
+
+  .state-markers .badge-count {
+    display: none;
   }
 }
 

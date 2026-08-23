@@ -13,6 +13,12 @@ import {
   triggerLabel
 } from "./visualizer-model.js"
 
+export interface VisualizerDiagnostic {
+  readonly severity: "warning" | "error"
+  readonly message: string
+  readonly path?: string
+}
+
 const createElement = <Tag extends keyof HTMLElementTagNameMap>(
   tag: Tag,
   className?: string,
@@ -157,7 +163,11 @@ const inspectionSection = (title: string, count: number): HTMLElement => {
   return header
 }
 
-export const renderVisualizer = (root: HTMLElement, visualization: VisualizationDocument): void => {
+export const renderVisualizer = (
+  root: HTMLElement,
+  visualization: VisualizationDocument,
+  diagnostics: ReadonlyArray<VisualizerDiagnostic> = []
+): void => {
   const model = makeVisualizerModel(visualization)
   const rows = new Map<string, HTMLElement>()
   const nodes = new Map<string, HTMLElement>()
@@ -438,9 +448,14 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
 
   const toolbar = createElement("div", "toolbar")
   const runtime = createElement("div", "runtime-summary")
+  const runtimeLabel = diagnostics.length > 0
+    ? "Partial"
+    : model.hasSnapshot
+    ? `${model.activePaths.length} active`
+    : "Structure only"
   runtime.append(
     createElement("span", `runtime-dot${model.hasSnapshot ? " has-snapshot" : ""}`),
-    createElement("span", undefined, model.hasSnapshot ? `${model.activePaths.length} active` : "Structure only")
+    createElement("span", undefined, runtimeLabel)
   )
   const toolbarActions = createElement("div", "toolbar-actions")
   toolbarActions.append(clearButton, revealActiveButton, expandButton, collapseButton)
@@ -465,7 +480,16 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
     }
     tree.append(events)
   }
-  model.roots.forEach((node) => tree.append(renderNode(node, 0)))
+  if (model.roots.length === 0) {
+    const empty = createElement("div", "topology-empty")
+    empty.append(
+      createElement("strong", undefined, "No states yet"),
+      createElement("span", undefined, "The topology will appear as the machine definition becomes available.")
+    )
+    tree.append(empty)
+  } else {
+    model.roots.forEach((node) => tree.append(renderNode(node, 0)))
+  }
   rows.values().next().value?.setAttribute("tabindex", "0")
   tree.addEventListener("keydown", (event) => {
     const current = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(".state-row") : null
@@ -524,7 +548,21 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
         break
     }
   })
-  treePanel.append(toolbar, tree)
+  treePanel.append(toolbar)
+  if (diagnostics.length > 0) {
+    const diagnosticList = createElement("div", "diagnostics")
+    diagnosticList.setAttribute("role", "status")
+    diagnostics.forEach((diagnostic) => {
+      const item = createElement("div", `diagnostic diagnostic-${diagnostic.severity}`)
+      item.append(badge(diagnostic.severity, diagnostic.severity), createElement("span", undefined, diagnostic.message))
+      if (diagnostic.path !== undefined && model.inspectState(diagnostic.path) !== undefined) {
+        item.append(stateLink(diagnostic.path, diagnostic.path, navigateToState))
+      }
+      diagnosticList.append(item)
+    })
+    treePanel.append(diagnosticList)
+  }
+  treePanel.append(tree)
 
   renderEmptyInspector()
   workspace.append(treePanel, inspector)

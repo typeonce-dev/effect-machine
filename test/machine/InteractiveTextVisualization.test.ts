@@ -93,4 +93,20 @@ describe("Interactive text visualization", () => {
       ["application", "application.workflow", "application.workflow.idle"]
     )
   })
+
+  it("accepts an empty partial topology", () => {
+    const document = buildDocument(machine, snapshot)
+    const model = makeVisualizerModel({
+      ...document,
+      roots: [],
+      states: [],
+      transitions: [],
+      activities: [],
+      snapshot: null
+    })
+
+    assert.deepStrictEqual(model.roots, [])
+    assert.strictEqual(model.hasSnapshot, false)
+    assert.strictEqual(model.inspectState("application"), undefined)
+  })
 })
