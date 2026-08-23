@@ -84,6 +84,11 @@ describe("Interactive text visualization", () => {
     assert.strictEqual(inspection?.outgoing.length, 2)
     assert.strictEqual(model.inspectState("application.workflow.running")?.incoming[0]?.transition.source, idle?.path)
     assert.deepStrictEqual(
+      model.inspectEvent("Start").transitions.map((transition) => transition.source),
+      ["application.workflow.idle"]
+    )
+    assert.strictEqual(model.inspectEvent("Start").candidate, true)
+    assert.deepStrictEqual(
       inspection?.breadcrumbs.map((item) => item.path),
       ["application", "application.workflow", "application.workflow.idle"]
     )

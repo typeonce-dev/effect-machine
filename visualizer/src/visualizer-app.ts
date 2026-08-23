@@ -5,6 +5,7 @@ import type {
   VisualizationTransition
 } from "./visualization-document.js"
 import {
+  type EventInspection,
   type IncomingTransition,
   makeVisualizerModel,
   type StateInspection,
@@ -68,7 +69,11 @@ const renderBranch = (branch: VisualizationBranch, navigate: StateNavigator): HT
   return row
 }
 
-const renderTransition = (transition: VisualizationTransition, navigate: StateNavigator): HTMLElement => {
+const renderTransition = (
+  transition: VisualizationTransition,
+  navigate: StateNavigator,
+  showSource = false
+): HTMLElement => {
   const card = createElement("article", "inspection-card transition-card")
   const header = createElement("div", "card-header")
   const title = createElement("div", "card-title")
@@ -78,6 +83,11 @@ const renderTransition = (transition: VisualizationTransition, navigate: StateNa
   if (transition.acceptance === "declinable") flags.append(badge("declinable"))
   header.append(title, flags)
   card.append(header)
+  if (showSource) {
+    const source = createElement("div", "transition-source")
+    source.append(createElement("span", undefined, "From"), stateLink(transition.source, transition.source, navigate))
+    card.append(source)
+  }
 
   const branches = createElement("div", "branch-list")
   if (transition.branches.length === 0) {
@@ -151,8 +161,10 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
   const model = makeVisualizerModel(visualization)
   const rows = new Map<string, HTMLElement>()
   const nodes = new Map<string, HTMLElement>()
+  const eventButtons = new Map<string, HTMLElement>()
   const relatedPaths = new Set<string>()
   let selectedPath: string | undefined
+  let selectedEvent: string | undefined
 
   const shell = createElement("main", "app-shell")
   const workspace = createElement("section", "workspace")
@@ -168,6 +180,9 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
   expandButton.type = "button"
   const collapseButton = createElement("button", "toolbar-button", "Collapse all")
   collapseButton.type = "button"
+  const revealActiveButton = createElement("button", "toolbar-button", "Reveal active")
+  revealActiveButton.type = "button"
+  revealActiveButton.disabled = model.activePaths.length === 0
 
   const renderEmptyInspector = (): void => {
     inspector.replaceChildren()
@@ -229,27 +244,51 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
     }
   }
 
-  const clearSelection = (): void => {
-    if (selectedPath !== undefined) nodes.get(selectedPath)?.classList.remove("is-selected")
+  const renderEventInspection = (inspection: EventInspection): void => {
+    inspector.replaceChildren()
+    const header = createElement("header", "inspector-header")
+    const eyebrow = createElement("div", "inspector-eyebrow")
+    eyebrow.append(badge("event", "trigger"))
+    if (inspection.candidate) eyebrow.append(badge("enabled", "active"))
+    header.append(eyebrow, createElement("h2", undefined, inspection.event))
+    header.append(metadata([
+      ["Status", inspection.candidate ? "enabled" : "not enabled"],
+      ["Registrations", String(inspection.transitions.length)]
+    ]))
+    inspector.append(header)
+
+    const transitions = createElement("section", "inspector-section")
+    transitions.append(inspectionSection("Transitions", inspection.transitions.length))
+    inspection.transitions.forEach((transition) =>
+      transitions.append(renderTransition(transition, navigateToState, true))
+    )
+    inspector.append(transitions)
+  }
+
+  const clearRelations = (): void => {
     for (const path of relatedPaths) {
       nodes.get(path)?.classList.remove("is-related-source", "is-related-target", "is-related-update")
     }
     relatedPaths.clear()
+  }
+
+  const clearSelection = (): void => {
+    if (selectedPath !== undefined) {
+      nodes.get(selectedPath)?.classList.remove("is-selected")
+      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
+    }
+    if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+    clearRelations()
     selectedPath = undefined
+    selectedEvent = undefined
     clearButton.disabled = true
     renderEmptyInspector()
   }
 
-  const markRelatedStates = (inspection: StateInspection): void => {
-    for (const previous of relatedPaths) {
-      nodes.get(previous)?.classList.remove("is-related-source", "is-related-target", "is-related-update")
-    }
-    relatedPaths.clear()
-    for (const incoming of inspection.incoming) {
-      relatedPaths.add(incoming.transition.source)
-      nodes.get(incoming.transition.source)?.classList.add("is-related-source")
-    }
-    for (const transition of inspection.outgoing) {
+  const markTransitions = (transitions: ReadonlyArray<VisualizationTransition>): void => {
+    for (const transition of transitions) {
+      relatedPaths.add(transition.source)
+      nodes.get(transition.source)?.classList.add("is-related-source")
       for (const branch of transition.branches) {
         if (branch.target !== null) {
           relatedPaths.add(branch.target)
@@ -261,6 +300,15 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
         }
       }
     }
+  }
+
+  const markRelatedStates = (inspection: StateInspection): void => {
+    clearRelations()
+    for (const incoming of inspection.incoming) {
+      relatedPaths.add(incoming.transition.source)
+      nodes.get(incoming.transition.source)?.classList.add("is-related-source")
+    }
+    markTransitions(inspection.outgoing)
   }
 
   const expandAncestors = (inspection: StateInspection): void => {
@@ -279,9 +327,15 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
     const inspection = model.inspectState(path)
     if (inspection === undefined) return
     expandAncestors(inspection)
-    if (selectedPath !== undefined) nodes.get(selectedPath)?.classList.remove("is-selected")
+    if (selectedPath !== undefined) {
+      nodes.get(selectedPath)?.classList.remove("is-selected")
+      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
+    }
+    if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     selectedPath = path
+    selectedEvent = undefined
     nodes.get(path)?.classList.add("is-selected")
+    rows.get(path)?.setAttribute("aria-selected", "true")
     markRelatedStates(inspection)
     clearButton.disabled = false
     renderInspection(inspection)
@@ -295,6 +349,32 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
     selectState(path, true)
   }
 
+  const selectEvent = (event: string): void => {
+    const inspection = model.inspectEvent(event)
+    if (selectedPath !== undefined) {
+      nodes.get(selectedPath)?.classList.remove("is-selected")
+      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
+    }
+    if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+    selectedPath = undefined
+    selectedEvent = event
+    eventButtons.get(event)?.classList.add("is-selected")
+    clearRelations()
+    markTransitions(inspection.transitions)
+    clearButton.disabled = false
+    renderEventInspection(inspection)
+  }
+
+  const setExpanded = (row: HTMLElement, expanded: boolean): void => {
+    const node = row.closest<HTMLElement>(".topology-node")
+    const children = node?.querySelector<HTMLElement>(":scope > .topology-children")
+    if (children === null || children === undefined) return
+    row.setAttribute("aria-expanded", String(expanded))
+    children.hidden = !expanded
+    const disclosure = row.querySelector<HTMLElement>(".state-disclosure")
+    if (disclosure !== null) disclosure.textContent = expanded ? "▾" : "▸"
+  }
+
   const renderNode = (node: TopologyNode, depth: number): HTMLElement => {
     const container = createElement("div", "topology-node")
     container.dataset.statePath = node.path
@@ -302,6 +382,10 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
 
     const row = createElement("button", "state-row")
     row.type = "button"
+    row.tabIndex = -1
+    row.setAttribute("role", "treeitem")
+    row.setAttribute("aria-level", String(depth + 1))
+    row.setAttribute("aria-selected", "false")
     row.style.setProperty("--depth", String(depth))
     row.dataset.statePath = node.path
     rows.set(node.path, row)
@@ -317,6 +401,9 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
     if (node.activityCount > 0) markers.append(badge(`${node.activityCount}a`, "count"))
     row.append(disclosure, status, label, markers)
     container.append(row)
+    row.addEventListener("focus", () => {
+      rows.forEach((candidate) => candidate.tabIndex = candidate === row ? 0 : -1)
+    })
 
     if (node.children.length > 0) {
       const children = createElement("div", "topology-children")
@@ -326,9 +413,7 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
       row.setAttribute("aria-expanded", "true")
       row.addEventListener("click", () => {
         const expanded = row.getAttribute("aria-expanded") === "true"
-        row.setAttribute("aria-expanded", String(!expanded))
-        children.hidden = expanded
-        disclosure.textContent = expanded ? "▸" : "▾"
+        setExpanded(row, !expanded)
         selectState(node.path, false)
       })
     } else {
@@ -338,26 +423,107 @@ export const renderVisualizer = (root: HTMLElement, visualization: Visualization
   }
 
   const setAllExpanded = (expanded: boolean): void => {
-    treePanel.querySelectorAll<HTMLElement>(".topology-children").forEach((children) => {
-      children.hidden = !expanded
-    })
     treePanel.querySelectorAll<HTMLElement>(".state-row[aria-expanded]").forEach((row) => {
-      row.setAttribute("aria-expanded", String(expanded))
-      const disclosure = row.querySelector<HTMLElement>(".state-disclosure")
-      if (disclosure !== null) disclosure.textContent = expanded ? "▾" : "▸"
+      setExpanded(row, expanded)
     })
   }
 
   clearButton.addEventListener("click", clearSelection)
   expandButton.addEventListener("click", () => setAllExpanded(true))
   collapseButton.addEventListener("click", () => setAllExpanded(false))
+  revealActiveButton.addEventListener("click", () => {
+    const deepest = [...model.activePaths].sort((left, right) => right.split(".").length - left.split(".").length)[0]
+    if (deepest !== undefined) navigateToState(deepest)
+  })
 
   const toolbar = createElement("div", "toolbar")
-  toolbar.append(clearButton, expandButton, collapseButton)
+  const runtime = createElement("div", "runtime-summary")
+  runtime.append(
+    createElement("span", `runtime-dot${model.hasSnapshot ? " has-snapshot" : ""}`),
+    createElement("span", undefined, model.hasSnapshot ? `${model.activePaths.length} active` : "Structure only")
+  )
+  const toolbarActions = createElement("div", "toolbar-actions")
+  toolbarActions.append(clearButton, revealActiveButton, expandButton, collapseButton)
+  toolbar.append(runtime, toolbarActions)
   const tree = createElement("div", "topology-tree")
   tree.setAttribute("role", "tree")
+  tree.setAttribute("aria-label", `${model.machineId} states`)
   tree.append(createElement("div", "machine-id", model.machineId))
+  if (model.hasSnapshot) {
+    const events = createElement("div", "enabled-events")
+    events.append(createElement("span", "enabled-events-label", "Enabled"))
+    if (model.candidateEvents.length === 0) {
+      events.append(createElement("span", "enabled-events-empty", "none"))
+    } else {
+      model.candidateEvents.forEach((event) => {
+        const button = createElement("button", "event-button", event)
+        button.type = "button"
+        button.addEventListener("click", () => selectEvent(event))
+        eventButtons.set(event, button)
+        events.append(button)
+      })
+    }
+    tree.append(events)
+  }
   model.roots.forEach((node) => tree.append(renderNode(node, 0)))
+  rows.values().next().value?.setAttribute("tabindex", "0")
+  tree.addEventListener("keydown", (event) => {
+    const current = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(".state-row") : null
+    if (current === null) return
+    const visible = [...rows.values()].filter((row) => row.getClientRects().length > 0)
+    const index = visible.indexOf(current)
+    const focus = (row: HTMLElement | undefined): void => {
+      if (row === undefined) return
+      event.preventDefault()
+      row.focus()
+    }
+    switch (event.key) {
+      case "ArrowDown":
+        focus(visible[index + 1])
+        break
+      case "ArrowUp":
+        focus(visible[index - 1])
+        break
+      case "Home":
+        focus(visible[0])
+        break
+      case "End":
+        focus(visible.at(-1))
+        break
+      case "ArrowRight": {
+        if (current.getAttribute("aria-expanded") === "false") {
+          event.preventDefault()
+          setExpanded(current, true)
+        } else {
+          const child = current.closest<HTMLElement>(".topology-node")
+            ?.querySelector<HTMLElement>(":scope > .topology-children > .topology-node > .state-row")
+          focus(child ?? undefined)
+        }
+        break
+      }
+      case "ArrowLeft": {
+        if (current.getAttribute("aria-expanded") === "true") {
+          event.preventDefault()
+          setExpanded(current, false)
+        } else {
+          const parent = current.closest<HTMLElement>(".topology-children")
+            ?.closest<HTMLElement>(".topology-node")
+            ?.querySelector<HTMLElement>(":scope > .state-row")
+          focus(parent ?? undefined)
+        }
+        break
+      }
+      case "Enter":
+      case " ":
+        event.preventDefault()
+        current.click()
+        break
+      case "Escape":
+        event.preventDefault()
+        clearSelection()
+        break
+    }
+  })
   treePanel.append(toolbar, tree)
 
   renderEmptyInspector()
