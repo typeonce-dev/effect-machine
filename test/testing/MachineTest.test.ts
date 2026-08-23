@@ -30,14 +30,16 @@ const makeTraceMachine = (onAction: () => void) =>
     events: Machine.events(Start, Add),
     input: TestInput,
     initial: (to) =>
-      to.Ready().resolve(({ input, target }) => target(new Ready({ count: input.userId.length - input.userId.length })))
+      to.Ready().resolve(({ input, target }) =>
+        target.decoded(new Ready({ count: input.userId.length - input.userId.length }))
+      )
   }).handle({
     Idle: {
       on: {
         Start: (to) =>
           to.full.Ready().resolve(({ target }) => {
             onAction()
-            return target(new Ready({ count: 0 }))
+            return target.decoded(new Ready({ count: 0 }))
           })
       }
     },
@@ -46,7 +48,7 @@ const makeTraceMachine = (onAction: () => void) =>
         Add: (to) =>
           to.full.Ready().resolve(({ event, state, target }) => {
             onAction()
-            return target(new Ready({ count: state.count + event.amount }))
+            return target.decoded(new Ready({ count: state.count + event.amount }))
           })
       }
     }
@@ -101,7 +103,7 @@ describe("MachineTest", () => {
       states: States.states,
       events: Machine.events(),
       input: PositiveInput,
-      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({ userId: "user-1" })))
     })
 
     const generated = MachineTest.scenarios(machine)
@@ -119,7 +121,7 @@ describe("MachineTest", () => {
     const machine = Machine.make({
       states: States.states,
       events: Machine.events(),
-      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({ userId: "user-1" })))
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({ userId: "user-1" })))
     })
 
     assert.throws(
@@ -193,12 +195,12 @@ describe("MachineTest", () => {
         events: Machine.events(Stop),
         initial: (to) =>
           to.app.initial.resolve(({ target }) =>
-            target(
+            target.decoded(
               new App({}),
               (app) =>
                 app
-                  .left(new Left({}), (left) => left.idle(new LeftIdle({})))
-                  .right(new Right({}), (right) => right.idle(new RightIdle({})))
+                  .left.decoded(new Left({}), (left) => left.idle.decoded(new LeftIdle({})))
+                  .right.decoded(new Right({}), (right) => right.idle.decoded(new RightIdle({})))
             )
           )
       }).handle({
@@ -208,7 +210,7 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: (to) => to.full.disabled().resolve(({ target }) => target(new Disabled({})))
+                    Stop: (to) => to.full.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
                   }
                 }
               }
@@ -217,7 +219,7 @@ describe("MachineTest", () => {
               states: {
                 idle: {
                   on: {
-                    Stop: (to) => to.full.disabled().resolve(({ target }) => target(new Disabled({})))
+                    Stop: (to) => to.full.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
                   }
                 }
               }
@@ -243,7 +245,8 @@ describe("MachineTest", () => {
         branchIndex: 0,
         branchKey: undefined,
         target: "disabled",
-        resolvedTarget: "disabled"
+        resolvedTarget: "disabled",
+        updates: []
       }])
     }))
 

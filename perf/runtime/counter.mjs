@@ -52,7 +52,7 @@ export const counterMachine = Machine.make({
   events: benchmarkApi.events(CounterEvent.cases.Increment, CounterEvent.cases.Finish),
   initial: benchmarkApi.initial({
     target: (to) => to.Count(),
-    resolve: ({ target }) => target(CounterState.cases.Count.make({ value: 0 }))
+    resolve: ({ target }) => target.from(CounterState.cases.Count.make({ value: 0 }))
   }, () => CounterStates.initial.Count.from({ value: 0 }))
 }).handle({
   Count: {

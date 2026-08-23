@@ -31,13 +31,13 @@ const handled = machine.handle({
         history: {
           recent: {
             default: ({ target }) =>
-              target.App(App.make({}), (app) =>
-                app.Workspace(
+              target.App.from(App.make({}), (app) =>
+                app.Workspace.from(
                   Workspace.make({}),
                   (workspace) =>
                     workspace
-                      .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
-                      .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
+                      .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
+                      .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
                 ))
           }
         },
@@ -69,13 +69,13 @@ const handled = machine.handle({
       Route: {
         choice: (to) =>
           to.full.App().resolve(({ target }) =>
-            target(App.make({}), (app) =>
-              app.Workspace(
+            target.from(App.make({}), (app) =>
+              app.Workspace.from(
                 Workspace.make({}),
                 (workspace) =>
                   workspace
-                    .Editor(Editor.make({}), (editor) => editor.Editing(Editing.make({})))
-                    .Sync(Sync.make({}), (sync) => sync.Idle(SyncIdle.make({})))
+                    .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
+                    .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
               ))
           )
       }

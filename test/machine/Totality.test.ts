@@ -257,11 +257,11 @@ describe("machine operation totality", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Finish),
-        initial: (to) => to.Value().resolve(({ target }) => target({ _tag: "Value", amount: 42 }))
+        initial: (to) => to.Value().resolve(({ target }) => target.decoded({ _tag: "Value", amount: 42 }))
       }).handle({
         Value: {
           on: {
-            Finish: (to) => to.full.Done().resolve(({ target }) => target({ _tag: "Done" }))
+            Finish: (to) => to.full.Done().resolve(({ target }) => target.decoded({ _tag: "Done" }))
           }
         },
         Done: { output: () => 42 }

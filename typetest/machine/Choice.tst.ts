@@ -35,7 +35,7 @@ describe("Machine choice pseudo-states", () => {
       states: States.states,
       events: Machine.events(),
       initial: (to) =>
-        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
+        to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
     const complete = incomplete.handle({
@@ -49,7 +49,7 @@ describe("Machine choice pseudo-states", () => {
                 expect(context.containingState).type.toBe<Flow>()
                 expect(context.ancestors.Flow).type.toBe<Flow>()
                 expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
-                return context.target(new Approved({}))
+                return context.target.decoded(new Approved({}))
               })
           }
         }
@@ -63,7 +63,7 @@ describe("Machine choice pseudo-states", () => {
       states: States.states,
       events: Machine.events(),
       initial: (to) =>
-        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
+        to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     machine.handle({
       Flow: {
@@ -72,7 +72,7 @@ describe("Machine choice pseudo-states", () => {
             choice: (to) =>
               to.local.Approved().resolve(({ target }) =>
                 // @ts-expect-error!
-                Effect.succeed(target(new Approved({})))
+                Effect.succeed(target.decoded(new Approved({})))
               )
           }
         }
@@ -102,7 +102,7 @@ describe("Machine choice pseudo-states", () => {
       states: States.states,
       events: Machine.events(),
       initial: (to) =>
-        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
+        to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     const invalidHandlers = [
       { entry: () => undefined },
@@ -126,7 +126,7 @@ describe("Machine choice pseudo-states", () => {
       states: States.states,
       events: Machine.events(),
       initial: (to) =>
-        to.Flow.initial.resolve(({ target }) => (target(new Flow({ score: 80 }), (flow) => flow.Routing())))
+        to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing())))
     })
     base.handle({
       Flow: {
@@ -134,8 +134,8 @@ describe("Machine choice pseudo-states", () => {
           Routing: {
             choice: (to) =>
               to.local.Rejected().resolve(({ target: selectedTarget }) => {
-                expect(selectedTarget).type.not.toBeCallableWith(new Approved({}))
-                return selectedTarget(new Rejected({}))
+                expect(selectedTarget.decoded).type.not.toBeCallableWith(new Approved({}))
+                return selectedTarget.decoded(new Rejected({}))
               })
           }
         }

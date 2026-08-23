@@ -11,21 +11,21 @@ const complete = machine.handle({
   Flow: {
     history: {
       recent: {
-        default: ({ target }) => target.Flow(Flow.make({}), (flow) => flow.Idle(Idle.make({})))
+        default: ({ target }) => target.Flow.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({})))
       }
     },
     states: {
       Route: {
-        choice: (to) => to.local.Idle().resolve(({ target }) => target(Idle.make({})))
+        choice: (to) => to.local.Idle().resolve(({ target }) => target.from(Idle.make({})))
       },
       Idle: {
         on: {
-          Start: (to) => to.local.Running().resolve(({ target }) => target(Running.make({})))
+          Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
         }
       },
       Running: {
         on: {
-          Finish: (to) => to.local.Done().resolve(({ event, target }) => target(Done.make({ value: event.value })))
+          Finish: (to) => to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
         }
       },
       Done: {
@@ -40,7 +40,7 @@ const idleOnly = machine.handle({
     states: {
       Idle: {
         on: {
-          Start: (to) => to.local.Running().resolve(({ target }) => target(Running.make({})))
+          Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
         }
       }
     }
@@ -52,7 +52,7 @@ const runningOnly = machine.handle({
     states: {
       Running: {
         on: {
-          Finish: (to) => to.local.Done().resolve(({ event, target }) => target(Done.make({ value: event.value })))
+          Finish: (to) => to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
         }
       }
     }

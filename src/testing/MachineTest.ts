@@ -1109,7 +1109,7 @@ export const Invariant: {
  *   events: Machine.events(),
  *   initial: {
  *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target(new Count({ value: 0 }))
+ *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
  *   }
  * }).handle({ Count: {} })
  *
@@ -1444,14 +1444,14 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *   events: Machine.events(Increment),
  *   initial: {
  *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target(new Count({ value: 0 }))
+ *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
  *   }
  * }).handle({
  *   Count: {
  *     on: {
  *       Increment: (to) =>
  *         to.full.Count().resolve(({ state, target }) =>
- *           target(new Count({ value: state.value + 1 })))
+ *           target.decoded(new Count({ value: state.value + 1 })))
  *     }
  *   }
  * })

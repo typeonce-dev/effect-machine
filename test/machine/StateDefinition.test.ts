@@ -128,7 +128,7 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Idle")
@@ -143,7 +143,7 @@ describe("exact state-definition runtime validation", () => {
     const machine = Machine.make({
       states: states.states,
       events: Machine.events(),
-      initial: (to) => to.Opaque().resolve(({ target }) => target({ _tag: "OpaqueState", value: 1 }))
+      initial: (to) => to.Opaque().resolve(({ target }) => target.decoded({ _tag: "OpaqueState", value: 1 }))
     })
 
     assert.strictEqual(Machine.stateNodes(machine)[0]?.path, "Opaque")

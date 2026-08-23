@@ -80,7 +80,7 @@ describe("inline invoke", () => {
       const definition = Machine.make({
         states: states.states,
         events: Machine.events(Add),
-        initial: (to) => to.Collecting().resolve(({ target }) => target(new Collecting({ values: [] })))
+        initial: (to) => to.Collecting().resolve(({ target }) => target.decoded(new Collecting({ values: [] })))
       })
       const machine = definition.handle({
         Collecting: {
@@ -90,12 +90,14 @@ describe("inline invoke", () => {
                 enqueue.raise(new Add({ value: element }))
               })
             ).onDone((to) =>
-              to.full.Complete().resolve(({ state, target }) => target(new Complete({ value: state.values.join(",") })))
+              to.full.Complete().resolve(({ state, target }) =>
+                target.decoded(new Complete({ value: state.values.join(",") }))
+              )
             ),
           on: {
             Add: (to) =>
               to.full.Collecting().resolve(({ event, state, target }) =>
-                target(new Collecting({ values: [...state.values, event.value] }))
+                target.decoded(new Collecting({ values: [...state.values, event.value] }))
               )
           }
         },
@@ -111,7 +113,8 @@ describe("inline invoke", () => {
           branches: [{
             type: "direct",
             target: "Collecting",
-            selection: { path: "Collecting", kind: "state", scope: "full" }
+            selection: { path: "Collecting", kind: "state", scope: "full" },
+            updates: []
           }]
         },
         {
@@ -122,7 +125,8 @@ describe("inline invoke", () => {
           branches: [{
             type: "direct",
             target: undefined,
-            selection: { path: undefined, kind: "none", scope: "local" }
+            selection: { path: undefined, kind: "none", scope: "local" },
+            updates: []
           }]
         },
         {
@@ -133,7 +137,8 @@ describe("inline invoke", () => {
           branches: [{
             type: "direct",
             target: "Complete",
-            selection: { path: "Complete", kind: "state", scope: "full" }
+            selection: { path: "Complete", kind: "state", scope: "full" },
+            updates: []
           }]
         }
       ])
@@ -161,7 +166,7 @@ describe("inline invoke", () => {
         Loading: {
           invoke: (from) =>
             from.stream("updates", () => Stream.fail("offline")).onDone((to) => to.none).onFailure((to) =>
-              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
+              to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
             )
         },
         Complete: {},
@@ -229,7 +234,9 @@ describe("inline invoke", () => {
             ).onDone((to) => to.none),
           on: {
             FinishStream: (to) =>
-              to.full.Complete().resolve(({ event, target }) => target(new Complete({ value: String(event.value) })))
+              to.full.Complete().resolve(({ event, target }) =>
+                target.decoded(new Complete({ value: String(event.value) }))
+              )
           }
         },
         Complete: {},
@@ -258,7 +265,7 @@ describe("inline invoke", () => {
         Loading: {
           invoke: (from) =>
             from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
-              to.full.Complete().resolve(({ output, target }) => target(new Complete({ value: output })))
+              to.full.Complete().resolve(({ output, target }) => target.decoded(new Complete({ value: output })))
             )
         },
         Complete: {},
@@ -273,7 +280,8 @@ describe("inline invoke", () => {
         branches: [{
           type: "direct",
           target: "Complete",
-          selection: { path: "Complete", kind: "state", scope: "full" }
+          selection: { path: "Complete", kind: "state", scope: "full" },
+          updates: []
         }]
       }])
 
@@ -292,7 +300,7 @@ describe("inline invoke", () => {
         Loading: {
           invoke: (from) =>
             from.effect("load", () => Effect.fail("offline")).onFailure((to) =>
-              to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error })))
+              to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
             )
         },
         Complete: {},

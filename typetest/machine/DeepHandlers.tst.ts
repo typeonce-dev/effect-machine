@@ -140,21 +140,21 @@ const deepHistoryFallback = (
     "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub"
   >
 ) =>
-  target.Root(
+  target.Root.decoded(
     new Root({}),
     (root) =>
-      root.L1(new Branch({}), (l1) =>
-        l1.L2(new Branch({}), (l2) =>
-          l2.L3(new Branch({}), (l3) =>
-            l3.L4(new Branch({}), (l4) =>
-              l4.L5(new Branch({}), (l5) =>
-                l5.L6(new Branch({}), (l6) =>
-                  l6.L7(new Branch({}), (l7) =>
-                    l7.L8(new Branch({}), (l8) =>
-                      l8.L9(new Branch({}), (l9) =>
-                        l9.L10(new Branch({}), (l10) =>
-                          l10.Hub(new Hub({}), (hub) =>
-                            hub.Idle(new Idle({})))))))))))))
+      root.L1.decoded(new Branch({}), (l1) =>
+        l1.L2.decoded(new Branch({}), (l2) =>
+          l2.L3.decoded(new Branch({}), (l3) =>
+            l3.L4.decoded(new Branch({}), (l4) =>
+              l4.L5.decoded(new Branch({}), (l5) =>
+                l5.L6.decoded(new Branch({}), (l6) =>
+                  l6.L7.decoded(new Branch({}), (l7) =>
+                    l7.L8.decoded(new Branch({}), (l8) =>
+                      l8.L9.decoded(new Branch({}), (l9) =>
+                        l9.L10.decoded(new Branch({}), (l10) =>
+                          l10.Hub.decoded(new Hub({}), (hub) =>
+                            hub.Idle.decoded(new Idle({})))))))))))))
   )
 
 const makeDeepMachine = () =>

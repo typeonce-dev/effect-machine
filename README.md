@@ -149,16 +149,26 @@ parallel root.
 
 ### Construct state through builders
 
-Use `.from(...)` when constructing a new state from fields:
+Use `.from(...)` when constructing a new state from schema make input:
 
 ```ts
 target.from({ draft: event.draft })
 ```
 
 The machine runs these inputs through the state schema while planning. Schema
-defaults, refinements, and tagged-class identity are therefore preserved, and
-decode failures remain typed machine failures. Pass a value directly only when
-it is already decoded.
+defaults, transformations, refinements, and tagged-class identity are
+therefore preserved, and decode failures remain typed machine failures. This
+is the default construction path.
+
+Use `.decoded(...)` when the value is already a `Schema.Type`:
+
+```ts
+target.decoded(new Ready({ notice: null }))
+```
+
+The machine still validates the value against the schema's type side. It does
+not run encoded-input transformations again. State builders are not callable;
+the method name always makes the construction mode visible.
 
 When sibling states share fields, remove the source discriminator and pass the
 remaining fields through the target schema:
@@ -190,7 +200,7 @@ const States = Machine.states({
 const definition = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: (to) => to.Form.initial.resolve(({ target }) => target((form) => form.Editing.from()))
+  initial: (to) => to.Form.initial.resolve(({ target }) => target.from((form) => form.Editing.from()))
 })
 ```
 
@@ -428,9 +438,9 @@ compound scope without rebuilding its active child. Use
 handler source:
 
 ```ts
-Increment: ;
-;((to) =>
-  to.branch.root.session.update(({ ancestors, target }) => target.from({ count: ancestors["root.session"].count + 1 })))
+const handlers = {
+  Increment: (to) => to.branch.root.session.update(({ current, owner }) => owner.from({ count: current.count + 1 }))
+}
 ```
 
 The update keeps the exact active descendants, their values, history records,
@@ -438,8 +448,8 @@ completion outputs, and unrelated parallel regions. It runs no exit or entry
 actions and does not restart state-owned work. Eventless stabilization still
 runs, so an `always` transition can react to the new value.
 
-`update` is callable when used directly and is also a static selection for a
-named branch:
+The plain update method remains useful when topology does not change. It is
+also a static selection for a named branch:
 
 ```ts
 to.branches({
@@ -452,10 +462,69 @@ to.branches({
 )
 ```
 
-The resolver must return `target(value)` or `target.from(input)`. It may return
-`decline()` only with `{ declinable: true }`. Pass `{ reenter: true }` on event
-or invocation transitions when the handler source should exit and enter again.
-Reentry applies to that source, not to the ancestor whose value changed.
+### Change topology and a retained owner together
+
+When a transition enters another child and also replaces a valued ancestor
+that stays active, declare both operations on the same target:
+
+```ts
+const handlers = {
+  CreatePlan: (to) =>
+    to.local.SavingPlan()
+      .updating(to.branch.Ready)
+      .resolve(({ current, event, owner, target }) =>
+        target.from({
+          request: { _tag: "Create", input: event.input }
+        }).update(
+          owner.decoded(new Ready({ ...current, notice: null }))
+        )
+      )
+}
+```
+
+`to.local.SavingPlan()` selects topology. `.updating(to.branch.Ready)` names
+the retained valued owner and makes its replacement mandatory: the resolver
+does not type-check unless destination construction finishes with
+`.update(...)`. `current` is that owner's decoded value from the
+pre-transition snapshot. `target` constructs the destination; `owner`
+constructs the complete replacement owner value.
+
+The topology change and owner replacement apply atomically in one microstep.
+The owner does not exit or reenter, its work is not restarted, and destination
+entry actions observe the new owner value. Eventless stabilization follows.
+Only one retained owner may be replaced by a combined target. A `full` target,
+or any target that exits the selected owner, does not expose `.updating`.
+Combined updates use a direct resolver in this release; named branches continue
+to support value-only updates.
+
+For a schema-less destination, construction remains explicit:
+
+```ts
+to.local.Idle()
+  .updating(to.branch.Ready)
+  .resolve(({ current, output, owner, target }) =>
+    target.from().update(
+      owner.decoded(
+        new Ready({
+          ...current,
+          day: output,
+          notice: "Plan changed."
+        })
+      )
+    )
+  )
+```
+
+Both values derive from the same pre-transition snapshot and are validated
+before lifecycle actions run. Competing transitions that write the same owner
+conflict; document order and hierarchy select one writer rather than applying
+last-write-wins behavior.
+
+The resolver must return `target.decoded(value)` or `target.from(input)`. It
+may return `decline()` only with `{ declinable: true }`. Pass `{ reenter: true }`
+on event or invocation transitions when the handler source should exit and
+enter again. Reentry applies to that source, not to the ancestor whose value
+changed.
 
 The selector omits `update` for schema-less scopes, atomic and final states,
 inactive branches, parallel sibling regions, and choice resolvers. Updating a

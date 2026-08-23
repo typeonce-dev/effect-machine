@@ -60,7 +60,7 @@ const makeCounter = (state: {
     states: CounterStates.states,
     events: Machine.events(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
     emittedEvents: Machine.emittedEvents(Changed),
-    initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+    initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
   }).handle({
     Count: {
       entry: () => {
@@ -75,24 +75,24 @@ const makeCounter = (state: {
             state.inFlight -= 1
             const value = current.value + event.by
             enqueue.emit(new Changed({ value }))
-            return target(new Count({ value }))
+            return target.decoded(new Count({ value }))
           }),
         Fail: (to) =>
           to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.emit(new Changed({ value: 999 }))
-            return target(current)
+            return target.decoded(current)
           }),
         Finish: (to) =>
-          to.full.Done().resolve(({ state: current, target }) => target(new Done({ value: current.value }))),
+          to.full.Done().resolve(({ state: current, target }) => target.decoded(new Done({ value: current.value }))),
         RaiseFromAction: (to) =>
           to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.raise(new Increment({ by: 1, block: false }))
-            return target(current)
+            return target.decoded(current)
           }),
         SpawnFromAction: (to) =>
           to.full.Count().resolve(({ state: current, target }, enqueue) => {
             enqueue.stop(UnsupportedChild)
-            return target(current)
+            return target.decoded(current)
           })
       }
     },
@@ -364,11 +364,11 @@ describe("ClusterMachine", () => {
       const opaqueMachine = Machine.make({
         states: opaqueStates.states,
         events: Machine.events(Fail),
-        initial: (to) => to.OpaqueState().resolve(({ target }) => target({ _tag: "OpaqueState", resource }))
+        initial: (to) => to.OpaqueState().resolve(({ target }) => target.decoded({ _tag: "OpaqueState", resource }))
       }).handle({
         OpaqueState: {
           on: {
-            Fail: (to) => to.full.OpaqueState().resolve(({ state: current, target }) => target(current))
+            Fail: (to) => to.full.OpaqueState().resolve(({ state: current, target }) => target.decoded(current))
           }
         }
       })
@@ -619,7 +619,7 @@ describe("ClusterMachine", () => {
         id: "Invoked",
         states: states.states,
         events: Machine.events(Increment),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
       }).handle({
         Count: {
           invoke: (from) => from.effect("child", () => Effect.void).onDone((to) => to.none)

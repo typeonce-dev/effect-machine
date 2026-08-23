@@ -21,25 +21,25 @@ const handled = machine.handle({
           const value = event.value
           switch (value.length) {
             case 1:
-              return select.length1(State.cases.Text.make({ value }))
+              return select.length1.from(State.cases.Text.make({ value }))
             case 2:
-              return select.length2(State.cases.Count.make({ value: value.length }))
+              return select.length2.from(State.cases.Count.make({ value: value.length }))
             case 3:
-              return select.length3(State.cases.Text.make({ value }))
+              return select.length3.from(State.cases.Text.make({ value }))
             case 4:
-              return select.length4(State.cases.Count.make({ value: value.length }))
+              return select.length4.from(State.cases.Count.make({ value: value.length }))
             case 5:
-              return select.length5(State.cases.Text.make({ value }))
+              return select.length5.from(State.cases.Text.make({ value }))
             case 6:
               return select.length6()
             case 7:
-              return select.length7(State.cases.Count.make({ value: value.length }))
+              return select.length7.from(State.cases.Count.make({ value: value.length }))
             case 8:
-              return select.length8(State.cases.Text.make({ value: value.toUpperCase() }))
+              return select.length8.from(State.cases.Text.make({ value: value.toUpperCase() }))
             case 9:
-              return select.length9(State.cases.Count.make({ value: value.length }))
+              return select.length9.from(State.cases.Count.make({ value: value.length }))
             case 10:
-              return select.length10(State.cases.Idle.make({}))
+              return select.length10.from(State.cases.Idle.make({}))
             default:
               return select.unchanged()
           }

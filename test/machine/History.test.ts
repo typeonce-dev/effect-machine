@@ -127,9 +127,9 @@ const makeCheckoutMachine = (
     initial: ((to: any) =>
       initial.path === "checkout"
         ? to.checkout.initial.resolve(({ target }: any) =>
-          target(
+          target.decoded(
             new Checkout({ orderId: "initial" }),
-            (checkout: any) => checkout.shipping(new Shipping({ address: "initial" }))
+            (checkout: any) => checkout.shipping.decoded(new Shipping({ address: "initial" }))
           )
         )
         : to.support().resolve(() => initial)) as any
@@ -156,9 +156,9 @@ const makeCheckoutMachine = (
         }
       },
       on: {
-        Leave: (to) => to.full.support().resolve(({ target }) => target(new Support({ ticket: "ticket-1" }))),
+        Leave: (to) => to.full.support().resolve(({ target }) => target.decoded(new Support({ ticket: "ticket-1" }))),
         GoShipping: (to) =>
-          to.local.shipping().resolve(({ event, target }) => target(new Shipping({ address: event.address }))),
+          to.local.shipping().resolve(({ event, target }) => target.decoded(new Shipping({ address: event.address }))),
         ReenterHistory: (to) => to.history.checkout.exact.resolve(({ target }) => target(), { reenter: true })
       },
       states: {
@@ -166,9 +166,9 @@ const makeCheckoutMachine = (
           on: {
             EnterVerifying: (to) =>
               to.local.payment().resolve(({ target }) =>
-                target(
+                target.decoded(
                   new Payment({ attempt: 2 }),
-                  (payment) => payment.verifying(new Verifying({ challengeId: "challenge-7" }))
+                  (payment) => payment.verifying.decoded(new Verifying({ challengeId: "challenge-7" }))
                 )
               )
           }
@@ -182,7 +182,7 @@ const makeCheckoutMachine = (
           },
           initialize: ({ state, builder }) => {
             onInitialize?.()
-            return builder(new CardEntry({ cardNumber: `fresh-${state.attempt}` }))
+            return builder.decoded(new CardEntry({ cardNumber: `fresh-${state.attempt}` }))
           },
           states: {
             verifying: {
@@ -303,61 +303,67 @@ const makeWorkspaceMachine = (initialized: Array<string>) =>
     events: Machine.events(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
     initial: (to) =>
       to.workspace.initial.resolve(({ target }) =>
-        target(new Workspace({ id: "initial" }), (workspace) =>
+        target.decoded(new Workspace({ id: "initial" }), (workspace) =>
           workspace
-            .editor(new Editor({ documentId: "initial" }), (editor) => editor.writing(new Writing({ draft: "" })))
-            .sidebar(new Sidebar({ width: 0 }), (sidebar) => sidebar.files(new Files({ directory: "/" }))))
+            .editor.decoded(
+              new Editor({ documentId: "initial" }),
+              (editor) => editor.writing.decoded(new Writing({ draft: "" }))
+            )
+            .sidebar.decoded(
+              new Sidebar({ width: 0 }),
+              (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
+            ))
       )
   }).handle({
     workspace: {
       history: {
         recent: {
           default: ({ target }) =>
-            target.workspace(
+            target.workspace.decoded(
               new Workspace({ id: "fallback" }),
               (workspace) =>
                 workspace
-                  .editor(
+                  .editor.decoded(
                     new Editor({ documentId: "fallback" }),
-                    (editor) => editor.writing(new Writing({ draft: "" }))
+                    (editor) => editor.writing.decoded(new Writing({ draft: "" }))
                   )
-                  .sidebar(
+                  .sidebar.decoded(
                     new Sidebar({ width: 200 }),
-                    (sidebar) => sidebar.files(new Files({ directory: "/" }))
+                    (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
                   )
             )
         },
         exact: {
           default: ({ target }) =>
-            target.workspace(
+            target.workspace.decoded(
               new Workspace({ id: "fallback" }),
               (workspace) =>
                 workspace
-                  .editor(
+                  .editor.decoded(
                     new Editor({ documentId: "fallback" }),
-                    (editor) => editor.writing(new Writing({ draft: "" }))
+                    (editor) => editor.writing.decoded(new Writing({ draft: "" }))
                   )
-                  .sidebar(
+                  .sidebar.decoded(
                     new Sidebar({ width: 200 }),
-                    (sidebar) => sidebar.files(new Files({ directory: "/" }))
+                    (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
                   )
             )
         }
       },
       on: {
-        LeaveWorkspace: (to) => to.full.away().resolve(({ target }) => target(new Away({})))
+        LeaveWorkspace: (to) => to.full.away().resolve(({ target }) => target.decoded(new Away({})))
       },
       states: {
         editor: {
           initialize: ({ state, builder }) => {
             initialized.push("editor")
-            return builder(new Writing({ draft: `fresh:${state.documentId}` }))
+            return builder.decoded(new Writing({ draft: `fresh:${state.documentId}` }))
           }
         },
         sidebar: {
           initialize: ({ state, builder }) => {
             initialized.push("sidebar")
-            return builder(new Files({ directory: `/fresh/${state.width}` }))
+            return builder.decoded(new Files({ directory: `/fresh/${state.width}` }))
           }
         }
       }
@@ -416,15 +422,15 @@ const nestedHistoryMachine = Machine.make({
   events: Machine.events(RestoreEditor, DefaultEditor),
   initial: (to) =>
     to.workspace.initial.resolve(({ target }) =>
-      target(
+      target.decoded(
         new Workspace({ id: "workspace-1" }),
         (workspace) =>
           workspace
-            .editor(
+            .editor.decoded(
               new Editor({ documentId: "document-1" }),
-              (editor) => editor.writing(new Writing({ draft: "" }))
+              (editor) => editor.writing.decoded(new Writing({ draft: "" }))
             )
-            .sidebar(new Search({ query: "untouched" }))
+            .sidebar.decoded(new Search({ query: "untouched" }))
       )
     )
 }).handle({
@@ -434,15 +440,15 @@ const nestedHistoryMachine = Machine.make({
         history: {
           exact: {
             default: ({ target }) =>
-              target.workspace(
+              target.workspace.decoded(
                 new Workspace({ id: "fallback-workspace" }),
                 (workspace) =>
                   workspace
-                    .editor(
+                    .editor.decoded(
                       new Editor({ documentId: "fallback" }),
-                      (editor) => editor.writing(new Writing({ draft: "" }))
+                      (editor) => editor.writing.decoded(new Writing({ draft: "" }))
                     )
-                    .sidebar(new Search({ query: "fallback" }))
+                    .sidebar.decoded(new Search({ query: "fallback" }))
               )
           }
         },

@@ -26,7 +26,8 @@ describe("Machine inspection", () => {
   const machine = Machine.make({
     states: States.states,
     events: Machine.events(Reset),
-    initial: (to) => to.root.initial.resolve(({ target }) => target(new Root({}), (root) => root.idle(new Idle({}))))
+    initial: (to) =>
+      to.root.initial.resolve(({ target }) => target.decoded(new Root({}), (root) => root.idle.decoded(new Idle({}))))
   }).handle({
     root: {
       on: {
@@ -40,7 +41,7 @@ describe("Machine inspection", () => {
     const executable = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         on: {
@@ -147,7 +148,7 @@ describe("Machine inspection", () => {
     const choiceMachine = Machine.make({
       states: ChoiceStates.states,
       events: Machine.events(),
-      initial: (to) => to.Flow.initial.resolve(({ target }) => (target(new Root({}), (flow) => flow.Routing())))
+      initial: (to) => to.Flow.initial.resolve(({ target }) => (target.decoded(new Root({}), (flow) => flow.Routing())))
     })
     const flow = Machine.stateNodes(choiceMachine).find((node) => node.type === "compound")!
     const routing = Machine.stateNodes(choiceMachine).find((node) => node.type === "choice")!
@@ -193,12 +194,12 @@ describe("Machine inspection", () => {
     const flat = Machine.make({
       states: FlatStates.states,
       events: Machine.events(Reset),
-      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     })
     flat.handle({
       idle: {
         on: {
-          Reset: (to) => to.full.running().resolve(({ target }) => target(new Running({})))
+          Reset: (to) => to.full.running().resolve(({ target }) => target.decoded(new Running({})))
         }
       }
     })

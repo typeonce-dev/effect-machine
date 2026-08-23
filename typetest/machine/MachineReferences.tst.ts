@@ -34,7 +34,7 @@ describe("machine reference event channels", () => {
     internalEvents: InternalEvents,
     parent: Machine.optionalParent(ParentEvents),
     emittedEvents: Emissions,
-    initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+    initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
   }).handle({
     Idle: {
       on: {
@@ -59,7 +59,7 @@ describe("machine reference event channels", () => {
     const independentMachine = Machine.make({
       states: states.states,
       events: Events,
-      initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
     }).handle({
       Idle: {
         on: {
@@ -79,7 +79,7 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parent: Machine.optionalParent(ParentEvents),
       emittedEvents: Emissions,
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         on: {
@@ -110,7 +110,7 @@ describe("machine reference event channels", () => {
     const compatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, ParentEvents),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     })
     compatible.handle({
       Idle: { invoke: (from) => from.child(Child) }
@@ -119,7 +119,7 @@ describe("machine reference event channels", () => {
     const incompatible = Machine.make({
       states: states.states,
       events: Machine.events(Ping, OtherParentEvent),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     })
     expect(incompatible.handle).type.not.toBeCallableWith({
       Idle: {
@@ -169,7 +169,7 @@ describe("machine reference event channels", () => {
       internalEvents: InternalEvents,
       parent: Machine.parent(ParentEvents),
       emittedEvents: Emissions,
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         invoke: (from) =>

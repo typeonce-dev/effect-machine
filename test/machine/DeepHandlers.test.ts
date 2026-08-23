@@ -135,7 +135,7 @@ const machine = Machine.make({
                                                     on: {
                                                       Advance: (to) =>
                                                         to.local.done().resolve(({ event, target }) =>
-                                                          target(new DeepDone({ value: event.value }))
+                                                          target.decoded(new DeepDone({ value: event.value }))
                                                         )
                                                     }
                                                   },

@@ -67,9 +67,12 @@ Each step has one job:
 Chain `.handle` from `Machine.make`. Do not store the intermediate definition
 when the module exports one machine implementation.
 
-State builders construct the next snapshot. Use `.from(...)` when a state owns
-data. The machine validates that input through the state schema while it plans
-the transition.
+State builders construct the next snapshot. Use `.from(...)` for schema make
+input; defaults, transformations, and refinements run while the machine plans
+the transition. Use `.decoded(...)` only for an existing `Schema.Type`. It is
+validated against the type side without rerunning encoded transformations.
+Valued state builders are not callable, so the construction mode is always
+visible. Schema-less state construction uses `.from()`.
 
 The examples below show one modeling decision at a time. They omit unchanged
 state and event declarations already shown above.
@@ -393,8 +396,8 @@ update selection instead of reconstructing its active descendants:
 
 ```ts
 Changed: (to) =>
-  to.local.update(({ ancestors, target }) =>
-    target.from({ revision: ancestors.document.revision + 1 })
+  to.local.update(({ current, owner }) =>
+    owner.from({ revision: current.revision + 1 })
   )
 ```
 
@@ -404,6 +407,34 @@ the handler source. Both preserve the complete active descendant
 configuration. Neither runs lifecycle actions or restarts state-owned work by
 default. Use an event handled inside a parallel sibling when that sibling owns
 the value that must change.
+
+When topology changes and one valued ancestor remains active but needs a new
+value, declare the owner on the destination:
+
+```ts
+CreatePlan: (to) =>
+  to.local.SavingPlan()
+    .updating(to.branch.Ready)
+    .resolve(({ current, event, owner, target }) =>
+      target.from({ request: event.input }).update(
+        owner.decoded(new Ready({ ...current, notice: null }))
+      )
+    )
+```
+
+`.updating(...)` accepts the retained state selector itself. It makes the
+owner replacement mandatory at compile time: the resolver must finish a
+destination construction with `.update(...)`. `current` is the owner's
+decoded pre-transition value. `target` constructs the destination and `owner`
+constructs the complete replacement value.
+
+Both instructions are validated and applied atomically. The retained owner is
+not reentered, destination entry sees its new value, and eventless
+stabilization runs afterward. Only local and branch targets that retain the
+owner expose `.updating`; full targets do not. Combined targets support one
+owner. Keep separate domain changes explicit by constructing the complete
+owner value instead of relying on a partial merge helper. Combined updates use
+a direct resolver; named branches support value-only updates.
 
 ## Test paths and invariants
 

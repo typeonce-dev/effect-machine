@@ -57,7 +57,8 @@ describe("local compound target selection", () => {
         branches: [{
           type: "direct",
           target: "search",
-          selection: { path: "search", kind: "state", scope: "local" }
+          selection: { path: "search", kind: "state", scope: "local" },
+          updates: []
         }]
       }, {
         source: "search.Updated",
@@ -67,7 +68,8 @@ describe("local compound target selection", () => {
         branches: [{
           type: "direct",
           target: "search.Idle",
-          selection: { path: "search.Idle", kind: "state", scope: "local" }
+          selection: { path: "search.Idle", kind: "state", scope: "local" },
+          updates: []
         }]
       }])
 
@@ -142,7 +144,8 @@ describe("local compound target selection", () => {
         branches: [{
           type: "direct",
           target: "search",
-          selection: { path: "search", kind: "state", scope: "local" }
+          selection: { path: "search", kind: "state", scope: "local" },
+          updates: []
         }]
       }])
 

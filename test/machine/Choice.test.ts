@@ -25,7 +25,8 @@ let branchFactoryCalls = 0
 const machine = Machine.make({
   states: States.states,
   events: Machine.events(Recheck),
-  initial: (to) => to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 80 }), (flow) => flow.Routing()))
+  initial: (to) =>
+    to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing()))
 }).handle({
   Flow: {
     states: {
@@ -41,21 +42,21 @@ const machine = Machine.make({
           }).resolve(({ containingState, select }) => {
             const score = containingState.score
             return score === 100
-              ? select.perfect(new Approved({}))
+              ? select.perfect.decoded(new Approved({}))
               : score < 0
-              ? select.negative(new Rejected({}))
+              ? select.negative.decoded(new Rejected({}))
               : score === 0
-              ? select.zero(new Rejected({}))
+              ? select.zero.decoded(new Rejected({}))
               : score >= 70
-              ? select.passing(new Approved({}))
-              : select.failing(new Rejected({}))
+              ? select.passing.decoded(new Approved({}))
+              : select.failing.decoded(new Rejected({}))
           })
         }
       },
       Approved: {
         on: {
           Recheck: (to) =>
-            to.branch.Flow.initial.resolve(({ event, target }) => target(new Flow({ score: event.score })))
+            to.branch.Flow.initial.resolve(({ event, target }) => target.decoded(new Flow({ score: event.score })))
         }
       }
     }
@@ -84,35 +85,40 @@ describe("Machine choice pseudo-states", () => {
           key: "perfect",
           title: "Score is perfect",
           target: "Flow.Approved",
-          selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+          selection: { path: "Flow.Approved", kind: "state", scope: "local" },
+          updates: []
         },
         {
           type: "branch",
           key: "negative",
           title: "Score is negative",
           target: "Flow.Rejected",
-          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+          updates: []
         },
         {
           type: "branch",
           key: "zero",
           title: "Score is zero",
           target: "Flow.Rejected",
-          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+          updates: []
         },
         {
           type: "branch",
           key: "passing",
           title: "Score is at least 70",
           target: "Flow.Approved",
-          selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+          selection: { path: "Flow.Approved", kind: "state", scope: "local" },
+          updates: []
         },
         {
           type: "branch",
           key: "failing",
           title: "failing",
           target: "Flow.Rejected",
-          selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+          selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+          updates: []
         }
       ])
       assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
@@ -152,7 +158,7 @@ describe("Machine choice pseudo-states", () => {
         states: states.states,
         events: Machine.events(),
         initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 80 }), (flow) => flow.First()))
+          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
       }).handle({
         Flow: {
           states: {
@@ -160,7 +166,7 @@ describe("Machine choice pseudo-states", () => {
               choice: (to) => to.local.Second().resolve(({ target }) => target())
             },
             Second: {
-              choice: (to) => to.local.Approved().resolve(({ target }) => target(new Approved({})))
+              choice: (to) => to.local.Approved().resolve(({ target }) => target.decoded(new Approved({})))
             }
           }
         }
@@ -200,7 +206,7 @@ describe("Machine choice pseudo-states", () => {
         states: states.states,
         events: Machine.events(),
         initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 80 }), (flow) => flow.First()))
+          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
       }).handle({
         Flow: {
           states: {
@@ -238,9 +244,9 @@ describe("Machine choice pseudo-states", () => {
         events: Machine.events(),
         initial: (to) =>
           to.Flow.initial.resolve(({ target }) =>
-            target(
+            target.decoded(
               new Flow({ score: 10 }),
-              (flow) => flow.Approved(new Approved({}))
+              (flow) => flow.Approved.decoded(new Approved({}))
             )
           )
       }).handle({
@@ -250,7 +256,7 @@ describe("Machine choice pseudo-states", () => {
               always: (to) => to.local.Routing().resolve(({ target }) => target())
             },
             Routing: {
-              choice: (to) => to.local.Rejected().resolve(({ target }) => target(new Rejected({})))
+              choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
             }
           }
         }
@@ -294,13 +300,16 @@ describe("Machine choice pseudo-states", () => {
         states: states.states,
         events: Machine.events(),
         initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 0 }), (flow) => flow.Done(new Done({}))))
+          to.Flow.initial.resolve(({ target }) =>
+            target.decoded(new Flow({ score: 0 }), (flow) => flow.Done.decoded(new Done({})))
+          )
       }).handle({
         Flow: {
-          onDone: (to) => to.full.Flow().resolve(({ state, target }) => target(state, (flow) => flow.Routing())),
+          onDone: (to) =>
+            to.full.Flow().resolve(({ state, target }) => target.decoded(state, (flow) => flow.Routing())),
           states: {
             Routing: {
-              choice: (to) => to.local.Rejected().resolve(({ target }) => target(new Rejected({})))
+              choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
             }
           }
         }
@@ -353,12 +362,12 @@ describe("Machine choice pseudo-states", () => {
         events: Machine.events(),
         initial: (to) =>
           to.Board.initial.resolve(({ target }) =>
-            target(
+            target.decoded(
               new Board({}),
               (board) =>
                 board
-                  .Left(new Left({}), (left) => left.Routing())
-                  .Right(new Right({}), (right) => right.Routing())
+                  .Left.decoded(new Left({}), (left) => left.Routing())
+                  .Right.decoded(new Right({}), (right) => right.Routing())
             )
           )
       }).handle({
@@ -367,14 +376,14 @@ describe("Machine choice pseudo-states", () => {
             Left: {
               states: {
                 Routing: {
-                  choice: (to) => to.local.Ready().resolve(({ target }) => target(new Ready({})))
+                  choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new Ready({})))
                 }
               }
             },
             Right: {
               states: {
                 Routing: {
-                  choice: (to) => to.local.Ready().resolve(({ target }) => target(new RightReady({})))
+                  choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new RightReady({})))
                 }
               }
             }
@@ -414,18 +423,21 @@ describe("Machine choice pseudo-states", () => {
         states: states.states,
         events: Machine.events(Leave, Resume),
         initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 1 }), (flow) => flow.Active(new Active({}))))
+          to.Flow.initial.resolve(({ target }) =>
+            target.decoded(new Flow({ score: 1 }), (flow) => flow.Active.decoded(new Active({})))
+          )
       }).handle({
         Flow: {
           history: {
             Recent: {
-              default: ({ target }) => target.Flow(new Flow({ score: 0 }), (flow) => flow.Active(new Active({})))
+              default: ({ target }) =>
+                target.Flow.decoded(new Flow({ score: 0 }), (flow) => flow.Active.decoded(new Active({})))
             }
           },
           states: {
             Active: {
               on: {
-                Leave: (to) => to.full.Outside().resolve(({ target }) => target(new Outside({})))
+                Leave: (to) => to.full.Outside().resolve(({ target }) => target.decoded(new Outside({})))
               }
             },
             Routing: {
@@ -436,7 +448,7 @@ describe("Machine choice pseudo-states", () => {
         Outside: {
           on: {
             Resume: (to) =>
-              to.full.Flow().resolve(({ target }) => target(new Flow({ score: 2 }), (flow) => flow.Routing()))
+              to.full.Flow().resolve(({ target }) => target.decoded(new Flow({ score: 2 }), (flow) => flow.Routing()))
           }
         }
       })
@@ -469,7 +481,7 @@ describe("Machine choice pseudo-states", () => {
         states: states.states,
         events: Machine.events(),
         initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target(new Flow({ score: 1 }), (flow) => flow.Routing()))
+          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 1 }), (flow) => flow.Routing()))
       }).handle({
         Flow: {
           history: {
@@ -515,17 +527,17 @@ describe("Machine choice pseudo-states", () => {
       const historyChoice = Machine.make({
         states: states.states,
         events: Machine.events(Resume),
-        initial: (to) => to.Outside().resolve(({ target }) => target(new Outside({})))
+        initial: (to) => to.Outside().resolve(({ target }) => target.decoded(new Outside({})))
       }).handle({
         Flow: {
           history: {
             Recent: {
-              default: ({ target }) => target.Flow(new Flow({ score: 1 }), (flow) => flow.Routing())
+              default: ({ target }) => target.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Routing())
             }
           },
           states: {
             Routing: {
-              choice: (to) => to.local.Active().resolve(({ target }) => target(new Active({})))
+              choice: (to) => to.local.Active().resolve(({ target }) => target.decoded(new Active({})))
             }
           }
         },
@@ -572,35 +584,40 @@ describe("Machine choice pseudo-states", () => {
             key: "perfect",
             title: "Score is perfect",
             target: "Flow.Approved",
-            selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+            selection: { path: "Flow.Approved", kind: "state", scope: "local" },
+            updates: []
           },
           {
             type: "branch",
             key: "negative",
             title: "Score is negative",
             target: "Flow.Rejected",
-            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+            updates: []
           },
           {
             type: "branch",
             key: "zero",
             title: "Score is zero",
             target: "Flow.Rejected",
-            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+            updates: []
           },
           {
             type: "branch",
             key: "passing",
             title: "Score is at least 70",
             target: "Flow.Approved",
-            selection: { path: "Flow.Approved", kind: "state", scope: "local" }
+            selection: { path: "Flow.Approved", kind: "state", scope: "local" },
+            updates: []
           },
           {
             type: "branch",
             key: "failing",
             title: "failing",
             target: "Flow.Rejected",
-            selection: { path: "Flow.Rejected", kind: "state", scope: "local" }
+            selection: { path: "Flow.Rejected", kind: "state", scope: "local" },
+            updates: []
           }
         ]
       }

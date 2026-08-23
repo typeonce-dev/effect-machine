@@ -20,7 +20,7 @@ const States = Machine.states({
 const base = Machine.make({
   states: States.states,
   events: Machine.events(Open),
-  initial: (to) => to.closed().resolve(({ target }) => (target(new Closed({}))))
+  initial: (to) => to.closed().resolve(({ target }) => (target.decoded(new Closed({}))))
 })
 
 describe("declared initial entry types", () => {
@@ -28,7 +28,7 @@ describe("declared initial entry types", () => {
     base.handle({
       closed: {
         on: {
-          Open: (to) => to.full.opened.initial.resolve(({ target }) => target(new Opened({ id: "team-1" })))
+          Open: (to) => to.full.opened.initial.resolve(({ target }) => target.decoded(new Opened({ id: "team-1" })))
         }
       },
       // @ts-expect-error!
@@ -51,9 +51,9 @@ describe("declared initial entry types", () => {
         on: {
           Open: (to) =>
             to.full.opened().resolve(({ target }) =>
-              target(
+              target.decoded(
                 new Opened({ id: "team-1" }),
-                (opened) => opened.loading(new Loading({}))
+                (opened) => opened.loading.decoded(new Loading({}))
               )
             )
         }
@@ -70,12 +70,12 @@ describe("declared initial entry types", () => {
             to.full.opened().resolve(({ target }) => {
               expect(to.full.opened.initial).type.not.toBeAssignableTo<() => unknown>()
               expect(target).type.toHaveProperty("initial")
-              expect(target.initial).type.not.toBeCallableWith()
-              expect(target.initial).type.toBeCallableWith(new Opened({ id: "team-1" }))
+              expect(target.initial.decoded).type.not.toBeCallableWith()
+              expect(target.initial.decoded).type.toBeCallableWith(new Opened({ id: "team-1" }))
               expect(target.initial.from).type.toBeCallableWith({ id: "team-1" })
-              return target(
+              return target.decoded(
                 new Opened({ id: "team-1" }),
-                (opened) => opened.loading(new Loading({}))
+                (opened) => opened.loading.decoded(new Loading({}))
               )
             })
         }

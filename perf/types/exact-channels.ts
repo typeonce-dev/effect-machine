@@ -15,9 +15,9 @@ const complete = machine.handle({
       Start: (to) =>
         to.full.Done().resolve(({ event, target }, enqueue) => {
           enqueue.emit(Notice.make({ value: event.value }))
-          return target(Done.make({ value: event.value }))
+          return target.from(Done.make({ value: event.value }))
         }),
-      Loaded: (to) => to.full.Done().resolve(({ event, target }) => target(Done.make({ value: event.value })))
+      Loaded: (to) => to.full.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
     }
   },
   Done: {

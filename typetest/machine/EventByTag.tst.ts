@@ -35,7 +35,7 @@ describe("Machine.EventByTag", () => {
     Machine.make({
       states: states.states,
       events: Machine.events(FiniteUnion),
-      initial: (to) => to.Idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       Idle: {
         on: {

@@ -374,7 +374,7 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
  *   events: Machine.events(),
  *   initial: {
  *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target(new Count({ value: 0 }))
+ *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
  *   }
  * }).handle({ Count: {} })
  * const machineAtom = AtomMachine.make(machine)

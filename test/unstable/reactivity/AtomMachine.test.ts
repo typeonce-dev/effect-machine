@@ -68,12 +68,14 @@ const makeCounterMachine = () =>
   Machine.make({
     states: CounterStates.states,
     events: Machine.events(Finish),
-    initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+    initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
   }).handle({
     Count: {
       on: {
         Finish: (to) =>
-          to.full.Count().resolve(({ state, event, target }) => target(new Count({ value: state.value + event.by })))
+          to.full.Count().resolve(({ state, event, target }) =>
+            target.decoded(new Count({ value: state.value + event.by }))
+          )
       }
     },
     Done: {}
@@ -106,7 +108,7 @@ describe("AtomMachine", () => {
         states: states.states,
         events: Machine.events(),
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target(new Idle({})))
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
       }).handle({
         Idle: {
           entry: (_, enqueue) => {
@@ -148,7 +150,7 @@ describe("AtomMachine", () => {
         initial: (to) =>
           to.Count().resolve(({ target }) => {
             initialCalls += 1
-            return target(new Count({ value: 0 }))
+            return target.decoded(new Count({ value: 0 }))
           })
       }).handle({
         Count: {
@@ -163,7 +165,7 @@ describe("AtomMachine", () => {
           on: {
             Finish: (to) =>
               to.full.Count().resolve(({ event, state, target }) =>
-                target(new Count({ value: state.value + event.by }))
+                target.decoded(new Count({ value: state.value + event.by }))
               )
           }
         },
@@ -207,17 +209,18 @@ describe("AtomMachine", () => {
       const parent = Machine.make({
         states: { Count, ValueRead },
         events: Machine.events(Finish, ReadValue),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
-            Finish: (to) => to.full.ValueRead().resolve(({ target }) => target(new ValueRead({ value: "active" })))
+            Finish: (to) =>
+              to.full.ValueRead().resolve(({ target }) => target.decoded(new ValueRead({ value: "active" })))
           }
         },
         ValueRead: {
           invoke: (from) => from.child(Child).onDone((to) => to.none),
           on: {
-            ReadValue: (to) => to.full.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+            ReadValue: (to) => to.full.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
           }
         }
       })
@@ -310,7 +313,7 @@ describe("AtomMachine", () => {
       const parent = Machine.make({
         states: { Count },
         events: Machine.events(),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
       }).handle({
         Count: {
           invoke: (from) =>
@@ -426,10 +429,10 @@ describe("AtomMachine", () => {
         events: Machine.events(),
         initial: (to) =>
           to.Ready.initial.resolve(({ target }) =>
-            target(new Ready({}), (ready) =>
+            target.decoded(new Ready({}), (ready) =>
               ready
-                .editor(new Editor({}), (editor) => editor.Editing(new Editing({})))
-                .network(new Network({}), (network) => network.Online(new Online({}))))
+                .editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
+                .network.decoded(new Network({}), (network) => network.Online.decoded(new Online({}))))
           )
       }).handle({
         Ready: {
@@ -559,12 +562,14 @@ describe("AtomMachine", () => {
           }
         },
         events: Machine.events(Finish),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 1 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 1 })))
       }).handle({
         Count: {
           on: {
             Finish: (to) =>
-              to.full.Done().resolve(({ state, event, target }) => target(new Done({ value: state.value + event.by })))
+              to.full.Done().resolve(({ state, event, target }) =>
+                target.decoded(new Done({ value: state.value + event.by }))
+              )
           }
         },
         Done: {

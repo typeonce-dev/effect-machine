@@ -47,7 +47,15 @@ import {
   validateDeclaredTransitionTarget
 } from "./planner.js"
 import { decodeEmitSync, decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
-import { isInitialTarget, isNoTarget, isSnapshot, isStateUpdate, isTarget, TargetSnapshotTypeId } from "./topology.js"
+import {
+  isCombinedTarget,
+  isInitialTarget,
+  isNoTarget,
+  isSnapshot,
+  isStateUpdate,
+  isTarget,
+  TargetSnapshotTypeId
+} from "./topology.js"
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
@@ -548,25 +556,28 @@ const collectIndexedEvaluatedTransition = (
     selection.context,
     selection.transition.evaluate
   )
-  const update = isStateUpdate(transitionResult.state)
+  const combined = isCombinedTarget(transitionResult.state) ? transitionResult.state : undefined
+  const transitionState = combined?.target ?? transitionResult.state
+  const stateUpdate = combined?.update ?? (isStateUpdate(transitionState) ? transitionState : undefined)
+  const update = stateUpdate !== undefined
     ? (() => {
-      const index = descriptor.indexByPath.get(transitionResult.state.path)
+      const index = descriptor.indexByPath.get(stateUpdate.path)
       const node = index === undefined ? undefined : descriptor.nodes[index]
       if (
         index === undefined || node === undefined || state.active[index] !== 1 || node.schema === undefined ||
         (node.type !== "compound" && node.type !== "parallel")
       ) {
         throw new Error(
-          `Machine state update owner "${transitionResult.state.path}" must be an active valued compound or parallel state`
+          `Machine state update owner "${stateUpdate.path}" must be an active valued compound or parallel state`
         )
       }
       return {
         path: node.path,
-        value: decodeStateValueSync(machine, node, transitionResult.state.value)
+        value: decodeStateValueSync(machine, node, stateUpdate.value)
       }
     })()
     : undefined
-  const unresolvedTarget = update === undefined ? transitionResult.state : undefined
+  const unresolvedTarget = transitionState === undefined || isStateUpdate(transitionState) ? undefined : transitionState
   validateDeclaredTransitionTarget(
     selection.sourcePath,
     selection.trigger,
@@ -585,13 +596,22 @@ const collectIndexedEvaluatedTransition = (
   if (target !== undefined && !isTarget(target) && !isSnapshot(target)) {
     throw new Error("Machine expected indexed transition target to be a snapshot or target builder result")
   }
-  const next = target === undefined
+  let next = target === undefined
     ? update === undefined ? state : (() => {
       const next = copyOwnedIndexedState(state)
       next.values[descriptor.indexByPath.get(update.path)!] = update.value
       return next
     })()
     : normalizeIndexedTargetStateSync(machine, descriptor, state, target as any, selection.leafIndex)
+  if (combined !== undefined && update !== undefined) {
+    const ownerIndex = descriptor.indexByPath.get(update.path)!
+    if (next.active[ownerIndex] !== 1) {
+      throw new Error(`Machine combined target exited its updating owner "${update.path}"`)
+    }
+    const values = next.values.slice()
+    values[ownerIndex] = update.value
+    next = { ...next, values }
+  }
   const changed = selection.transition.reenter || !hasSameIndexedActive(state, next)
   const stabilize = changed || update !== undefined
   if (!changed) {
@@ -656,7 +676,8 @@ const indexedMicrostep = (
     branchIndex: transition.branchIndex,
     branchKey: transition.branchKey,
     target: transition.unresolvedTarget === undefined ? undefined : getTargetNodePath(transition.unresolvedTarget),
-    resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target)
+    resolvedTarget: transition.target === undefined ? undefined : getTargetNodePath(transition.target),
+    updates: transition.update === undefined ? [] : [transition.update.path]
   })
   if (selections.length === 1) {
     const transition = collectIndexedEvaluatedTransition(machine, descriptor, state, selections[0]!)
@@ -849,7 +870,8 @@ const planIndexedFlatState = (
               branchIndex: transitionResult.branchIndex,
               branchKey: transitionResult.branchKey,
               target: target === undefined ? undefined : getTargetNodePath(target as any),
-              resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any)
+              resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any),
+              updates: []
             }]
           }
           : undefined),

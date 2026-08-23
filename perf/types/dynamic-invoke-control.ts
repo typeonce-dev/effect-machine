@@ -14,5 +14,5 @@ export const loadUser = (userId: string) => Effect.fail(new LoadError()).pipe(Ef
 export const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
-  initial: (to) => to.Loading().resolve(({ target }) => target(Loading.make({ userId: "user-1" })))
+  initial: (to) => to.Loading().resolve(({ target }) => target.from(Loading.make({ userId: "user-1" })))
 })

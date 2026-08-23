@@ -27,17 +27,17 @@ const makeCounterMachine = () =>
     states: CounterStates.states,
     events: Machine.events(Add),
     internalEvents: Machine.internalEvents(InternalAdd),
-    initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+    initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
   }).handle({
     Counter: {
       on: {
         Add: (to) =>
           to.full.Counter().resolve(({ event, state, target }) =>
-            target(new Counter({ count: state.count + event.amount }))
+            target.decoded(new Counter({ count: state.count + event.amount }))
           ),
         InternalAdd: (to) =>
           to.full.Counter().resolve(({ event, state, target }) =>
-            target(new Counter({ count: state.count + event.amount }))
+            target.decoded(new Counter({ count: state.count + event.amount }))
           )
       }
     }
@@ -47,23 +47,23 @@ const causalMachine = Machine.make({
   states: CounterStates.states,
   events: Machine.events(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEvents(InternalAdd),
-  initial: (to) => to.Counter().resolve(({ target }) => target(new Counter({ count: 0 })))
+  initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
 }).handle({
   Counter: {
     on: {
       Add: (to) =>
         to.full.Counter().resolve(({ event, state, target }) =>
-          target(new Counter({ count: state.count + event.amount }))
+          target.decoded(new Counter({ count: state.count + event.amount }))
         ),
       Noop: (to) => to.none,
       Burst: (to) =>
         to.full.Counter().resolve(({ state, target }, enqueue) => {
           enqueue.raise(new InternalAdd({ amount: 10 }))
-          return target(new Counter({ count: state.count + 1 }))
+          return target.decoded(new Counter({ count: state.count + 1 }))
         }),
       InternalAdd: (to) =>
         to.full.Counter().resolve(({ event, state, target }) =>
-          target(new Counter({ count: state.count + event.amount }))
+          target.decoded(new Counter({ count: state.count + event.amount }))
         )
     }
   }
@@ -247,12 +247,12 @@ describe("MachineTest runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
+        initial: (to) => to.Waiting().resolve(({ target }) => target.decoded(new Waiting({})))
       }).handle({
         Waiting: {
           invoke: (from) =>
             from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
             )
         },
         TimedOut: {}
@@ -727,12 +727,12 @@ describe("MachineTest causal runtime commands", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Waiting().resolve(({ target }) => target(new Waiting({})))
+        initial: (to) => to.Waiting().resolve(({ target }) => target.decoded(new Waiting({})))
       }).handle({
         Waiting: {
           invoke: (from) =>
             from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
             )
         },
         TimedOut: {}

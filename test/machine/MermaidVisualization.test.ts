@@ -54,14 +54,16 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
           key: "approved",
           title: "approved %%\nnow",
           target: "Root.Done",
-          selection: { kind: "state", scope: "local", path: "Root.Done" }
+          selection: { kind: "state", scope: "local", path: "Root.Done" },
+          updates: []
         },
         {
           type: "branch",
           key: "unchanged",
           title: "unchanged",
           target: undefined,
-          selection: { kind: "none", scope: "local", path: undefined }
+          selection: { kind: "none", scope: "local", path: undefined },
+          updates: []
         }
       ]
     },
@@ -72,8 +74,9 @@ const inspection: InspectionApi<TestMachine, { readonly active: boolean }> = {
       acceptance: "declinable",
       branches: [{
         type: "direct",
-        target: "Root.Route",
-        selection: { kind: "choice", scope: "local", path: "Root.Route" }
+        target: "Root.Done",
+        selection: { kind: "state", scope: "local", path: "Root.Done" },
+        updates: ["Root"]
       }]
     }
   ],
@@ -106,7 +109,7 @@ describe("Mermaid visualization", () => {
     assert.include(rendered, "state \"● Choose route (Route)\" as state_1")
     assert.include(rendered, "state state_1 <<choice>>")
     assert.include(rendered, "state_1 --> state_2: choice [approved #37;#37; now]")
-    assert.include(rendered, "state_2 --> state_1: Retry [declinable]")
+    assert.include(rendered, "state_2 --> state_2: Retry [declinable] / update Root")
     assert.notMatch(rendered, /state_1 --> .*otherwise/)
     assert.include(rendered, "state_1: process / worker #37;#37; end note")
     assert.notInclude(rendered, "Candidate events")

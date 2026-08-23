@@ -70,7 +70,7 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(),
-        initial: (to) => to.Inactive().resolve(({ target }) => target(new Inactive({})))
+        initial: (to) => to.Inactive().resolve(({ target }) => target.decoded(new Inactive({})))
       }).handle({
         Root: {
           invoke: (from) => from.logic("root", { address: Machine.childAddress("root"), logic: restoredLogic("root") }),
@@ -180,7 +180,7 @@ describe("Machine.resume", () => {
                 states: {
                   A: {
                     on: {
-                      Advance: (to) => to.local.B().resolve(({ target }) => target(new LeftB({})))
+                      Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new LeftB({})))
                     }
                   }
                 }
@@ -189,7 +189,7 @@ describe("Machine.resume", () => {
                 states: {
                   A: {
                     on: {
-                      Advance: (to) => to.local.B().resolve(({ target }) => target(new RightB({})))
+                      Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new RightB({})))
                     }
                   }
                 }
@@ -234,11 +234,11 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Finish),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
-            Finish: (to) => to.full.Done().resolve(({ target }) => target(new Done({ value: 9 })))
+            Finish: (to) => to.full.Done().resolve(({ target }) => target.decoded(new Done({ value: 9 })))
           }
         },
         Done: { output: ({ state }) => state.value }
@@ -281,7 +281,7 @@ describe("Machine.resume", () => {
       })
         .handle({
           Flow: {
-            onDone: (to) => to.full.Next().resolve(({ target }) => target(new Next({})))
+            onDone: (to) => to.full.Next().resolve(({ target }) => target.decoded(new Next({})))
           },
           Next: {}
         })
@@ -303,10 +303,10 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Ping),
-        initial: (to) => to.A().resolve(({ target }) => target(new A({})))
+        initial: (to) => to.A().resolve(({ target }) => target.decoded(new A({})))
       }).handle({
         A: {
-          always: (to) => to.full.B().resolve(({ target }) => target(new B({})))
+          always: (to) => to.full.B().resolve(({ target }) => target.decoded(new B({})))
         },
         B: {}
       })
@@ -329,15 +329,15 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(Cancel),
         internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Cancelled().resolve(({ target }) => target(new Cancelled({})))
+        initial: (to) => to.Cancelled().resolve(({ target }) => target.decoded(new Cancelled({})))
       }).handle({
         Waiting: {
           invoke: (from) =>
             from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target(new TimedOut({})))
+              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
             ),
           on: {
-            Cancel: (to) => to.full.Cancelled().resolve(({ target }) => target(new Cancelled({})))
+            Cancel: (to) => to.full.Cancelled().resolve(({ target }) => target.decoded(new Cancelled({})))
           }
         },
         Cancelled: {},
@@ -371,12 +371,12 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(LoadedEvent),
-        initial: (to) => to.Loaded().resolve(({ target }) => target(new Loaded({ value: "initial" })))
+        initial: (to) => to.Loaded().resolve(({ target }) => target.decoded(new Loaded({ value: "initial" })))
       }).handle({
         Loading: {
           invoke: (from) =>
             from.effect("load", () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh"))).onDone((to) =>
-              to.full.Loaded().resolve(({ output, target }) => target(new Loaded({ value: output })))
+              to.full.Loaded().resolve(({ output, target }) => target.decoded(new Loaded({ value: output })))
             )
         },
         Loaded: {}
@@ -405,7 +405,7 @@ describe("Machine.resume", () => {
         states: states.states,
         events: Machine.events(),
         internalEvents: Machine.internalEvents(FailedEvent),
-        initial: (to) => to.Failed().resolve(({ target }) => target(new Failed({ message: "initial" })))
+        initial: (to) => to.Failed().resolve(({ target }) => target.decoded(new Failed({ message: "initial" })))
       }).handle({
         Loading: {
           invoke: (from) =>
@@ -413,7 +413,7 @@ describe("Machine.resume", () => {
               Ref.update(runs, (n) => n + 1).pipe(
                 Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
               )).onFailure((to) =>
-                to.full.Failed().resolve(({ error, target }) => target(new Failed({ message: error.message })))
+                to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error.message })))
               )
         },
         Failed: {}
@@ -442,12 +442,14 @@ describe("Machine.resume", () => {
       const child = Machine.make({
         states: childStates.states,
         events: Machine.events(ChildFinish),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target(new ChildIdle({ value: 1 })))
+        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({ value: 1 })))
       }).handle({
         ChildIdle: {
           on: {
             ChildFinish: (to) =>
-              to.full.ChildDone().resolve(({ state, target }) => target(new ChildDone({ value: state.value + 1 })))
+              to.full.ChildDone().resolve(({ state, target }) =>
+                target.decoded(new ChildDone({ value: state.value + 1 }))
+              )
           }
         },
         ChildDone: { output: ({ state }) => state.value }
@@ -457,12 +459,12 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(ChildOutput),
-        initial: (to) => to.ChildOutput().resolve(({ target }) => target(new ChildOutput({ value: 0 })))
+        initial: (to) => to.ChildOutput().resolve(({ target }) => target.decoded(new ChildOutput({ value: 0 })))
       }).handle({
         Parent: {
           invoke: (from) =>
             from.child(Child).onDone((to) =>
-              to.full.ChildOutput().resolve(({ output, target }) => target(new ChildOutput({ value: output })))
+              to.full.ChildOutput().resolve(({ output, target }) => target.decoded(new ChildOutput({ value: output })))
             )
         },
         ChildOutput: {}
@@ -556,13 +558,13 @@ describe("Machine.resume", () => {
       const machine = Machine.make({
         states: states.states,
         events: Machine.events(Add),
-        initial: (to) => to.Count().resolve(({ target }) => target(new Count({ value: 0 })))
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
       }).handle({
         Count: {
           on: {
             Add: (to) =>
               to.full.Count().resolve(({ event, state, target }) =>
-                target(new Count({ value: state.value + event.value }))
+                target.decoded(new Count({ value: state.value + event.value }))
               )
           }
         }

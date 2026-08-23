@@ -18,7 +18,7 @@ describe("MachineTest", () => {
     events: Machine.events(PublicEvent),
     internalEvents: Machine.internalEvents(InternalEvent),
     input: Input,
-    initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
+    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
   }).handle({
     idle: {
       on: {
@@ -51,7 +51,7 @@ describe("MachineTest", () => {
     const noInput = Machine.make({
       states: States.states,
       events: Machine.events(PublicEvent),
-      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({ idle: {} })
     type Scenario = MachineTest.Scenario<typeof noInput>
     type Options = MachineTest.ScenarioOptions<typeof noInput>
@@ -97,7 +97,7 @@ describe("MachineTest", () => {
     const invokedMachine = Machine.make({
       states: States.states,
       events: Machine.events(PublicEvent),
-      initial: (to) => to.idle().resolve(({ target }) => (target(new Idle({}))))
+      initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
     }).handle({
       idle: {
         invoke: (from) =>

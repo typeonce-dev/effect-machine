@@ -35,7 +35,9 @@ const machine = Machine.make({
   states: States.states,
   events: Machine.events(),
   initial: (to) =>
-    to.Workflow.initial.resolve(({ target }) => target(new Workflow({}), (workflow) => workflow.Idle(new Idle({}))))
+    to.Workflow.initial.resolve(({ target }) =>
+      target.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))
+    )
 })
 
 const renderMachine = makeTextRenderer<

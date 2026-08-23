@@ -49,7 +49,8 @@ const childMachine = Machine.make({
   events: Machine.events(),
   parent: Machine.parent(ChildParentEvents),
   input: Schema.Struct({ value: Schema.String }),
-  initial: (to) => to.Done().resolve(({ input, target }) => target(ChildState.cases.Done.make({ value: input.value })))
+  initial: (to) =>
+    to.Done().resolve(({ input, target }) => target.decoded(ChildState.cases.Done.make({ value: input.value })))
 }).handle({
   Done: {
     entry: ({ parent, state }, enqueue) => {
@@ -90,7 +91,7 @@ const definition = Machine.make({
   internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
   emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
-  initial: (to) => to.Idle().resolve(({ input: { seed: _seed }, target }) => target(State.cases.Idle.make({})))
+  initial: (to) => to.Idle().resolve(({ input: { seed: _seed }, target }) => target.decoded(State.cases.Idle.make({})))
 })
 const machine = definition.handle({
   Idle: {
@@ -98,12 +99,12 @@ const machine = definition.handle({
     on: {
       Begin: (to) =>
         to.full.Ready().resolve(({ target }) =>
-          target(
+          target.decoded(
             State.cases.Ready.make({}),
             (ready) =>
-              ready.Editor(
+              ready.Editor.decoded(
                 State.cases.Editor.make({}),
-                (editor) => editor.Editing(State.cases.Editing.make({ value: "ready" }))
+                (editor) => editor.Editing.decoded(State.cases.Editing.make({ value: "ready" }))
               )
           )
         )
@@ -117,7 +118,7 @@ const machine = definition.handle({
             on: {
               Save: (to) =>
                 to.local.Saving().resolve(({ event, target }) =>
-                  target(State.cases.Saving.make({ value: event.value }))
+                  target.decoded(State.cases.Saving.make({ value: event.value }))
                 ),
               Loaded: (to) => to.none
             }
@@ -129,10 +130,12 @@ const machine = definition.handle({
               ChildNotice: (to) =>
                 to.local.Saving().resolve(({ event, target }, enqueue) => {
                   enqueue.emit(Emissions.Notice({ value: event.value }))
-                  return target(State.cases.Saving.make({ value: event.value }))
+                  return target.decoded(State.cases.Saving.make({ value: event.value }))
                 }),
               ChildCompleted: (to) =>
-                to.full.Done().resolve(({ event, target }) => target(State.cases.Done.make({ value: event.value })))
+                to.full.Done().resolve(({ event, target }) =>
+                  target.decoded(State.cases.Done.make({ value: event.value }))
+                )
             }
           }
         }
