@@ -11,6 +11,7 @@ import type {
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
+import { renderInputForm } from "./input-form.js"
 import { requestSimulation } from "./simulation-client.js"
 import {
   type EventInspection,
@@ -165,6 +166,12 @@ const inspectionSection = (title: string, count: number): HTMLElement => {
   return header
 }
 
+const formSection = (title: string): HTMLElement => {
+  const header = createElement("div", "section-heading")
+  header.append(createElement("h3", undefined, title))
+  return header
+}
+
 const prettyJson = (value: unknown): string => JSON.stringify(value, null, 2)
 
 const jsonBlock = (value: unknown): HTMLElement => createElement("pre", "json-value", prettyJson(value))
@@ -172,15 +179,9 @@ const jsonBlock = (value: unknown): HTMLElement => createElement("pre", "json-va
 const eventName = (value: unknown): string =>
   typeof value === "object" && value !== null && "_tag" in value ? String(value._tag) : "event"
 
-const parseJson = (value: string): { readonly ok: true; readonly value: unknown } | {
-  readonly ok: false
-  readonly message: string
-} => {
-  try {
-    return { ok: true, value: JSON.parse(value) }
-  } catch (cause) {
-    return { ok: false, message: cause instanceof Error ? cause.message : String(cause) }
-  }
+const activeTopology = (paths: ReadonlyArray<string>): string => {
+  const leaves = paths.filter((path) => !paths.some((candidate) => candidate.startsWith(`${path}.`)))
+  return leaves.map((path) => path.split(".").at(-1) ?? path).join(" + ") || "none"
 }
 
 export const renderVisualizer = (
@@ -194,6 +195,7 @@ export const renderVisualizer = (
   const nodes = new Map<string, HTMLElement>()
   const statuses = new Map<string, HTMLElement>()
   const eventButtons = new Map<string, HTMLElement>()
+  const eventSchemas = new Map(visualization.inputs.events.map(({ event, schema }) => [event, schema]))
   const relatedPaths = new Set<string>()
   let selectedPath: string | undefined
   let selectedEvent: string | undefined
@@ -316,54 +318,60 @@ export const renderVisualizer = (
     ]))
     inspector.append(header)
 
+    if (simulation !== undefined && candidate) {
+      const schema = eventSchemas.get(inspection.event)
+      const composer = createElement("section", "inspector-section simulation-composer")
+      composer.append(formSection("Event input"))
+      if (schema === undefined) {
+        composer.append(createElement(
+          "p",
+          "input-unsupported",
+          "No public input schema is available for this event."
+        ))
+      } else {
+        const input = renderInputForm(schema, {
+          name: inspection.event,
+          fixed: { _tag: inspection.event },
+          omit: ["_tag"]
+        })
+        const send = createElement("button", "simulation-action", `Send ${inspection.event}`)
+        send.type = "submit"
+        send.disabled = simulationPending || !input.supported
+        input.element.addEventListener("submit", (event) => {
+          event.preventDefault()
+          const result = input.read()
+          const source = visualization.source
+          if (!result.ok || source === null || simulation === undefined) return
+          void runSimulation({
+            _tag: "SendSimulationEvent",
+            protocolVersion,
+            key: machineKey,
+            revision: visualization.revision,
+            source,
+            step: simulation.step,
+            snapshot: simulation.snapshot,
+            event: result.value as never
+          })
+        })
+        input.element.append(send)
+        composer.append(
+          input.element,
+          createElement(
+            "p",
+            "simulation-note",
+            "The real planner validates this event and shows every synchronous transition it selects."
+          )
+        )
+      }
+      inspector.append(composer)
+    }
+
     const transitions = createElement("section", "inspector-section")
     transitions.append(inspectionSection("Transitions", inspection.transitions.length))
     inspection.transitions.forEach((transition) =>
       transitions.append(renderTransition(transition, navigateToState, true))
     )
     inspector.append(transitions)
-
-    if (simulation !== undefined) {
-      const composer = createElement("section", "inspector-section simulation-composer")
-      composer.append(inspectionSection("Event payload", 1))
-      const editor = createElement("textarea", "json-editor")
-      editor.value = prettyJson({ _tag: inspection.event })
-      editor.spellcheck = false
-      editor.setAttribute("aria-label", `${inspection.event} JSON payload`)
-      const error = createElement("div", "editor-error")
-      error.hidden = true
-      const send = createElement("button", "simulation-action", "Plan event")
-      send.type = "button"
-      send.disabled = simulationPending
-      send.addEventListener("click", () => {
-        const parsed = parseJson(editor.value)
-        if (!parsed.ok) {
-          error.textContent = parsed.message
-          error.hidden = false
-          return
-        }
-        error.hidden = true
-        const source = visualization.source
-        if (source === null || simulation === undefined) return
-        void runSimulation({
-          _tag: "SendSimulationEvent",
-          protocolVersion,
-          key: machineKey,
-          revision: visualization.revision,
-          source,
-          step: simulation.step,
-          snapshot: simulation.snapshot,
-          event: parsed.value as never
-        })
-      })
-      const note = createElement(
-        "p",
-        "simulation-note",
-        "Schema decoding and synchronous transition resolvers run in an isolated worker. Planned commands are not committed."
-      )
-      composer.append(editor, error, send, note)
-      inspector.append(composer)
-    }
   }
 
   const renderSimulationFailure = (failureDiagnostics: ReadonlyArray<Diagnostic>): void => {
@@ -496,49 +504,40 @@ export const renderVisualizer = (
     header.append(eyebrow, createElement("h2", undefined, "Start simulation"))
     inspector.append(header)
     const composer = createElement("section", "inspector-section simulation-composer")
-    composer.append(inspectionSection("Machine input", 1))
-    const editor = createElement("textarea", "json-editor")
-    editor.placeholder = "Optional JSON input"
-    editor.spellcheck = false
-    editor.setAttribute("aria-label", "Machine input JSON")
-    const error = createElement("div", "editor-error")
-    error.hidden = true
-    const start = createElement("button", "simulation-action", "Plan initial state")
-    start.type = "button"
-    start.disabled = simulationPending || visualization.source === null
-    start.addEventListener("click", () => {
+    composer.append(formSection("Machine input"))
+    const input = visualization.inputs.machine
+    if (input === null) {
+      composer.append(createElement("p", "section-empty", "This machine does not declare startup input."))
+      inspector.append(composer)
+      return
+    }
+    const form = renderInputForm(input, { name: "Machine input" })
+    const start = createElement("button", "simulation-action", "Start simulation")
+    start.type = "submit"
+    start.disabled = simulationPending || visualization.source === null || !form.supported
+    form.element.addEventListener("submit", (event) => {
+      event.preventDefault()
       const source = visualization.source
       if (source === null) return
-      const input = editor.value.trim()
-      let value: unknown
-      if (input.length > 0) {
-        const parsed = parseJson(input)
-        if (!parsed.ok) {
-          error.textContent = parsed.message
-          error.hidden = false
-          return
-        }
-        value = parsed.value
-      }
-      error.hidden = true
+      const result = form.read()
+      if (!result.ok) return
       const request: SimulationRequest = {
         _tag: "StartSimulation",
         protocolVersion,
         key: machineKey,
         revision: visualization.revision,
         source,
-        ...(input.length > 0 ? { input: value as never } : {})
+        input: result.value as never
       }
       void runSimulation(request)
     })
+    form.element.append(start)
     composer.append(
-      editor,
-      error,
-      start,
+      form.element,
       createElement(
         "p",
         "simulation-note",
-        "Leave input empty for machines without input. Initialization and synchronous callbacks run; runtime activities and commands do not."
+        "Initialization and synchronous callbacks run in isolation. Runtime activities and planned commands are not started."
       )
     )
     inspector.append(composer)
@@ -586,11 +585,17 @@ export const renderVisualizer = (
         })
       })
       clearButton.disabled = false
+      const before = activeTopology(result.frame.before.activePaths)
+      const after = activeTopology(result.frame.after.activePaths)
       simulationFeedback.textContent = result.frame.trigger._tag === "Initial"
-        ? "Initial state planned"
+        ? `Started in ${after}`
         : result.frame.microsteps.length === 0
-        ? "No transition accepted the value"
-        : `${result.frame.microsteps.length} microstep${result.frame.microsteps.length === 1 ? "" : "s"} planned`
+        ? `${eventName(result.frame.trigger.event)} was not accepted · remained in ${after}`
+        : before === after
+        ? `${eventName(result.frame.trigger.event)} handled · remained in ${after}`
+        : `${before} → ${after} · ${result.frame.microsteps.length} microstep${
+          result.frame.microsteps.length === 1 ? "" : "s"
+        }`
       simulationFeedback.dataset.status = "applied"
     } catch (cause) {
       selectedFrame = undefined
@@ -714,6 +719,27 @@ export const renderVisualizer = (
     clearRelations()
     markTransitions(inspection.transitions)
     clearButton.disabled = false
+    const schema = eventSchemas.get(event)
+    if (simulation !== undefined && candidateEvents().includes(event) && schema !== undefined) {
+      const input = renderInputForm(schema, { name: event, fixed: { _tag: event }, omit: ["_tag"] })
+      if (!input.hasFields && input.supported) {
+        const result = input.read()
+        const source = visualization.source
+        if (result.ok && source !== null) {
+          void runSimulation({
+            _tag: "SendSimulationEvent",
+            protocolVersion,
+            key: machineKey,
+            revision: visualization.revision,
+            source,
+            step: simulation.step,
+            snapshot: simulation.snapshot,
+            event: result.value as never
+          })
+          return
+        }
+      }
+    }
     renderEventInspection(inspection)
   }
 
@@ -863,7 +889,17 @@ export const renderVisualizer = (
       selectedFrame = undefined
       clearRelations()
       clearButton.disabled = false
-      renderStartSimulation()
+      if (visualization.inputs.machine === null && visualization.source !== null) {
+        void runSimulation({
+          _tag: "StartSimulation",
+          protocolVersion,
+          key: machineKey,
+          revision: visualization.revision,
+          source: visualization.source
+        })
+      } else {
+        renderStartSimulation()
+      }
     } else {
       simulation = undefined
       selectedFrame = undefined

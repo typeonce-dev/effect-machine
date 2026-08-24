@@ -13,7 +13,7 @@ import * as internal from "./internal/machineDocument.js"
  * @category models
  * @since 0.23.0
  */
-export const schemaVersion = 1 as const
+export const schemaVersion = 2 as const
 
 /**
  * Source module and export that produced a machine.
@@ -217,6 +217,58 @@ export const Snapshot = Schema.Struct({
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
 
 /**
+ * Canonical JSON Schema used to render one machine input form.
+ *
+ * @category schemas
+ * @since 0.24.0
+ */
+export const InputSchema = Schema.Struct({
+  dialect: Schema.Literal("draft-2020-12"),
+  schema: Schema.Json,
+  definitions: Schema.Record(Schema.String, Schema.Json)
+})
+
+/**
+ * @category models
+ * @since 0.24.0
+ */
+export type InputSchema = Schema.Schema.Type<typeof InputSchema>
+
+/**
+ * Public event input paired with the schema for its payload.
+ *
+ * @category schemas
+ * @since 0.24.0
+ */
+export const EventInput = Schema.Struct({
+  event: Schema.String,
+  schema: InputSchema
+})
+
+/**
+ * @category models
+ * @since 0.24.0
+ */
+export type EventInput = Schema.Schema.Type<typeof EventInput>
+
+/**
+ * Machine and public event inputs available to devtools forms.
+ *
+ * @category schemas
+ * @since 0.24.0
+ */
+export const Inputs = Schema.Struct({
+  machine: Schema.NullOr(InputSchema),
+  events: Schema.Array(EventInput)
+})
+
+/**
+ * @category models
+ * @since 0.24.0
+ */
+export type Inputs = Schema.Schema.Type<typeof Inputs>
+
+/**
  * Complete, versioned, JSON-safe machine inspection document.
  *
  * @category schemas
@@ -232,6 +284,7 @@ export const MachineDocument = Schema.Struct({
   states: Schema.Array(State),
   transitions: Schema.Array(Transition),
   activities: Schema.Array(Activity),
+  inputs: Inputs,
   snapshot: Schema.NullOr(Snapshot)
 })
 

@@ -66,7 +66,7 @@ Run the devtools only against code you trust. The server has no authentication a
 
 The visualizer shows topology, active initial paths, state annotations, events, transitions, branches, state updates, activities, source metadata, and diagnostics. The tree supports pointer and keyboard navigation, subtree expansion, related-state highlighting, and structured detail inspection.
 
-Simulation uses the same `Machine.planInitial` and `Machine.plan` semantics as the core package. Start a session with optional JSON machine input, select an enabled event, edit its JSON payload, and inspect the resulting macrostep as structured microsteps. The trace includes selected branches, before/after topology, exits, entries, state updates, raised events, emitted events, planned commands, completion, and output.
+Simulation uses the same `Machine.planInitial` and `Machine.plan` semantics as the core package. Machine input and event payload controls are derived from their Effect schemas. Start a session, send an enabled event, and inspect the resulting macrostep as structured microsteps. Events without payload fields run when clicked; events with input open a form first. The trace includes selected branches, before/after topology, exits, entries, state updates, raised events, emitted events, planned commands, completion, and output.
 
 Each plan loads the exported machine in a fresh worker, decodes the portable session snapshot, and evaluates synchronous statechart callbacks. This supports conditional branches, parallel transitions, history, choices, state updates, reentry, and automatic stabilization. It also means synchronous code inside initial, transition, entry, exit, choice, history, and output callbacks runs during planning.
 

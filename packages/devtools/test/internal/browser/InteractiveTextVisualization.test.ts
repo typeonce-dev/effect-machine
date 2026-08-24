@@ -3,6 +3,8 @@ import { Machine } from "@typeonce/effect-machine"
 import * as Schema from "effect/Schema"
 import { makeTextRenderer } from "../../../../effect-machine/test/machine/visualization/text.js"
 import { machine, snapshot } from "../../../src/internal/browser/example-machine.js"
+import { projectInputSchema } from "../../../src/internal/browser/input-form.js"
+import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
 import { textTreeToString } from "../../../src/internal/browser/text-tree.js"
 import { makeVisualizerModel } from "../../../src/internal/browser/visualizer-model.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
@@ -110,5 +112,36 @@ describe("Interactive text visualization", () => {
     assert.deepStrictEqual(model.roots, [])
     assert.strictEqual(model.hasSnapshot, false)
     assert.strictEqual(model.inspectState("application"), undefined)
+  })
+
+  it("projects machine and event schemas into concrete form fields", () => {
+    const document = MachineDocument.make(plannerMachine)
+    const input = document.inputs.machine === null ? undefined : projectInputSchema(document.inputs.machine)
+    const beginSchema = document.inputs.events.find(({ event }) => event === "Begin")?.schema
+    const begin = beginSchema === undefined ? undefined : projectInputSchema(beginSchema)
+
+    assert.deepStrictEqual(input, {
+      _tag: "Object",
+      title: undefined,
+      description: undefined,
+      fields: [{
+        key: "owner",
+        required: true,
+        field: {
+          _tag: "String",
+          title: undefined,
+          description: undefined,
+          defaultValue: undefined,
+          format: undefined,
+          minLength: undefined,
+          maxLength: undefined,
+          pattern: undefined
+        }
+      }]
+    })
+    assert.strictEqual(begin?._tag, "Object")
+    if (begin?._tag !== "Object") return
+    assert.deepStrictEqual(begin.fields.map(({ key }) => key), ["_tag", "job", "priority"])
+    assert.strictEqual(begin.fields[2]?.field._tag, "Enum")
   })
 })

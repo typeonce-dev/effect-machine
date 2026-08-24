@@ -12,7 +12,7 @@ import * as MachineDocument from "./MachineDocument.js"
  * @category models
  * @since 0.23.0
  */
-export const protocolVersion = 1 as const
+export const protocolVersion = 2 as const
 
 /**
  * @category schemas

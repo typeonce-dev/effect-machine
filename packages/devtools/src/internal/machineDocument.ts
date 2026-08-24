@@ -1,10 +1,77 @@
 import { Machine } from "@typeonce/effect-machine"
+import * as Schema from "effect/Schema"
 import type * as Public from "../MachineDocument.js"
 
 const enabled = Machine.enabled as (
   machine: Machine.Machine.Any,
   snapshot: unknown
 ) => ReadonlyArray<PropertyKey>
+
+const inputEventSchemas = Machine.inputEventSchemas as (
+  machine: Machine.Machine.Any
+) => ReadonlyArray<Machine.Machine.TaggedSchema>
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const resolveReference = (
+  value: unknown,
+  definitions: Readonly<Record<string, unknown>>
+): Record<string, unknown> | undefined => {
+  if (!isRecord(value)) return undefined
+  if (typeof value.$ref !== "string" || !value.$ref.startsWith("#/$defs/")) return value
+  const name = decodeURIComponent(value.$ref.slice("#/$defs/".length))
+  const target = definitions[name]
+  return isRecord(target) ? target : undefined
+}
+
+const tagsOf = (
+  value: unknown,
+  definitions: Readonly<Record<string, unknown>>
+): ReadonlyArray<string> => {
+  const schema = resolveReference(value, definitions)
+  if (schema === undefined || !isRecord(schema.properties)) return []
+  const tag = resolveReference(schema.properties._tag, definitions)
+  if (tag === undefined) return []
+  if (typeof tag.const === "string" || typeof tag.const === "number") return [String(tag.const)]
+  return Array.isArray(tag.enum)
+    ? tag.enum.filter((item): item is string | number => typeof item === "string" || typeof item === "number").map(
+      String
+    )
+    : []
+}
+
+const inputSchema = (schema: Schema.Top): Public.InputSchema => {
+  const document = Schema.toJsonSchemaDocument(schema)
+  return {
+    dialect: document.dialect,
+    schema: document.schema as Schema.Json,
+    definitions: document.definitions as Record<string, Schema.Json>
+  }
+}
+
+const eventInputs = (machine: Machine.Machine.Any): ReadonlyArray<Public.EventInput> => {
+  const inputs: Array<Public.EventInput> = []
+  for (const eventSchema of inputEventSchemas(machine)) {
+    const document = inputSchema(eventSchema)
+    const root = document.schema
+    const record = isRecord(root) ? root : undefined
+    const variants = record !== undefined && Array.isArray(record.anyOf)
+      ? record.anyOf
+      : record !== undefined && Array.isArray(record.oneOf)
+      ? record.oneOf
+      : [root]
+    for (const variant of variants) {
+      for (const event of tagsOf(variant, document.definitions)) {
+        inputs.push({
+          event,
+          schema: { ...document, schema: variant as Schema.Json }
+        })
+      }
+    }
+  }
+  return inputs
+}
 
 const selection = (value: Machine.Machine.TransitionTargetSelection): Public.Selection => ({
   path: value.path ?? null,
@@ -102,7 +169,7 @@ export const make = <M extends Machine.Machine.Any>(
 
   const initial = Machine.initialDefinition(machine)
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: options.revision ?? 0,
     source: options.source ?? null,
     machineId: machine.id ?? "Machine",
@@ -128,11 +195,17 @@ export const make = <M extends Machine.Machine.Any>(
     })),
     transitions,
     activities,
+    inputs: {
+      machine: machine.input === undefined ? null : inputSchema(machine.input),
+      events: eventInputs(machine)
+    },
     snapshot: options.snapshot === undefined
       ? null
       : {
         activePaths: Machine.configuration(machine, options.snapshot).map((node) => node.path),
-        candidateEvents: enabled(machine, options.snapshot).map(String)
+        candidateEvents: enabled(machine, options.snapshot)
+          .map(String)
+          .filter((event) => Object.hasOwn(machine.events, event))
       }
   }
 }

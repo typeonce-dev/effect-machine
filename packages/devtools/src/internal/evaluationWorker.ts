@@ -224,6 +224,7 @@ const simulationEvent = (machine: Machine.Machine.Any, value: Schema.Json): unkn
   if (typeof value !== "object" || value === null || Array.isArray(value) || !("_tag" in value)) return value
   const tag = value._tag
   if (typeof tag !== "string" && typeof tag !== "number") return value
+  if (!Object.hasOwn(machine.events, tag)) return value
   const constructor = Reflect.get(machine.events, tag)
   if (typeof constructor !== "function") return value
   const { _tag: _, ...payload } = value
@@ -233,10 +234,13 @@ const simulationEvent = (machine: Machine.Machine.Any, value: Schema.Json): unkn
 const simulationSnapshot = (
   machine: Machine.Machine.Any,
   snapshot: unknown
-): DevToolsProtocol.SimulationSnapshot => ({
-  activePaths: configuration(machine, snapshot).map((node) => node.path),
-  candidateEvents: enabled(machine, snapshot).map(String)
-})
+): DevToolsProtocol.SimulationSnapshot => {
+  const publicEvents = new Set(Reflect.ownKeys(machine.events).map(String))
+  return {
+    activePaths: configuration(machine, snapshot).map((node) => node.path),
+    candidateEvents: enabled(machine, snapshot).map(String).filter((event) => publicEvents.has(event))
+  }
+}
 
 const trigger = (value: Machine.Machine.TransitionTrigger): MachineDocument.Trigger => {
   switch (value.type) {

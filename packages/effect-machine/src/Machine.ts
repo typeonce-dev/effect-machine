@@ -9178,6 +9178,22 @@ export const initialDefinition: <M extends Machine.Any>(machine: M) => Machine.I
 > = internal.initialDefinition
 
 /**
+ * Returns the schemas accepted by the machine's public event protocol.
+ *
+ * **Details**
+ *
+ * The returned tuple retains the schemas supplied to {@link events}, including
+ * grouped tagged unions. Internal and emitted event schemas are excluded. This
+ * getter is intended for tooling that needs to describe or construct valid
+ * external inputs without reaching into the opaque event protocol.
+ *
+ * @category getters
+ * @since 0.24.0
+ */
+export const inputEventSchemas: <M extends Machine.Any>(machine: M) => Machine.InputEvents<M> =
+  internal.inputEventSchemas
+
+/**
  * Returns every registered transition handler in state definition order.
  *
  * **Details**

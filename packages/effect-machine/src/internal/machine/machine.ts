@@ -2097,6 +2097,10 @@ export const initialDefinition = <M extends Machine.Any>(
     Machine.RootStateIdentifier<Machine.StateIdentifier<Machine.States<M>>>
   >
 
+export const inputEventSchemas = <M extends Machine.Any>(
+  machine: M
+): Machine.InputEvents<M> => Protocol.inputEventSchemas(machine) as Machine.InputEvents<M>
+
 export const transitionDefinitions = <M extends Machine.Any>(
   machine: M
 ): ReadonlyArray<
