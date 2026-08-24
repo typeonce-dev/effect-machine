@@ -5,6 +5,7 @@ import type {
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
+import * as MachineSimulator from "../../MachineSimulator.js"
 import {
   type EventInspection,
   type IncomingTransition,
@@ -158,6 +159,20 @@ const inspectionSection = (title: string, count: number): HTMLElement => {
   return header
 }
 
+const simulationResultMessage = (result: MachineSimulator.StepResult): string => {
+  if (result._tag === "Applied") return `${result.event} applied · runtime code was skipped`
+  if (result._tag === "Blocked") return `${result.event} is not enabled in the current topology`
+  const reasons: Record<MachineSimulator.Indeterminate["reason"], string> = {
+    "multiple-transitions": "multiple active transitions",
+    "declinable-transition": "acceptance depends on runtime code",
+    "conditional-branches": "the selected branch depends on runtime code",
+    "history-target": "history resolution needs runtime state",
+    "choice-target": "choice resolution needs runtime code",
+    "missing-target": "the target is not present in the document"
+  }
+  return `${result.event} was not applied · ${reasons[result.reason]}`
+}
+
 export const renderVisualizer = (
   root: HTMLElement,
   visualization: VisualizationDocument,
@@ -166,10 +181,15 @@ export const renderVisualizer = (
   const model = makeVisualizerModel(visualization)
   const rows = new Map<string, HTMLElement>()
   const nodes = new Map<string, HTMLElement>()
+  const statuses = new Map<string, HTMLElement>()
   const eventButtons = new Map<string, HTMLElement>()
   const relatedPaths = new Set<string>()
   let selectedPath: string | undefined
   let selectedEvent: string | undefined
+  let simulation: MachineSimulator.Session | undefined
+
+  const activePaths = (): ReadonlyArray<string> => simulation?.snapshot.activePaths ?? model.activePaths
+  const candidateEvents = (): ReadonlyArray<string> => simulation?.snapshot.candidateEvents ?? model.candidateEvents
 
   const shell = createElement("main", "app-shell")
   const workspace = createElement("section", "workspace")
@@ -188,16 +208,24 @@ export const renderVisualizer = (
   const revealActiveButton = createElement("button", "toolbar-button", "Reveal active")
   revealActiveButton.type = "button"
   revealActiveButton.disabled = model.activePaths.length === 0
+  const simulationButton = createElement("button", "toolbar-button", "Start simulation")
+  simulationButton.type = "button"
+  simulationButton.disabled = model.roots.length === 0
 
   const renderEmptyInspector = (): void => {
     inspector.replaceChildren()
-    const empty = createElement("div", "inspector-empty")
-    empty.append(
-      createElement("span", "inspector-empty-kind", "Inspector"),
-      createElement("h2", undefined, "Select a state"),
-      createElement("p", undefined, "Choose a state to inspect its topology, transitions, and activities.")
-    )
-    inspector.append(empty)
+    const summary = createElement("div", "inspector-empty")
+    summary.append(createElement("span", "inspector-empty-kind", "Machine"))
+    summary.append(createElement("h2", undefined, visualization.machineId))
+    summary.append(metadata([
+      ["Source", visualization.source?.file ?? "in memory"],
+      ["Export", visualization.source?.exportName ?? "none"],
+      ["Initial", visualization.initial.target],
+      ["Selection", visualization.initial.selection.kind],
+      ["Revision", String(visualization.revision)]
+    ]))
+    summary.append(createElement("p", undefined, "Select a state to inspect its transitions and activities."))
+    inspector.append(summary)
   }
 
   const renderInspection = (inspection: StateInspection): void => {
@@ -211,14 +239,26 @@ export const renderVisualizer = (
     })
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge(inspection.state.type, "state"))
-    if (inspection.active) eyebrow.append(badge("active", "active"))
+    if (activePaths().includes(inspection.state.path)) eyebrow.append(badge("active", "active"))
     if (inspection.initial) eyebrow.append(badge("initial", "initial"))
     header.append(breadcrumbs, eyebrow, createElement("h2", undefined, inspection.label))
     header.append(metadata([
       ["Path", inspection.state.path],
       ["Parent", inspection.state.parent ?? "root"],
-      ["Children", String(inspection.state.children.length)]
+      ["Children", String(inspection.state.children.length)],
+      ["Initial child", inspection.state.initial ?? "none"],
+      ["History", inspection.state.history ?? "none"]
     ]))
+    if (inspection.state.description !== null || inspection.state.documentation !== null) {
+      const annotations = createElement("div", "state-annotations")
+      if (inspection.state.description !== null) {
+        annotations.append(createElement("p", "state-description", inspection.state.description))
+      }
+      if (inspection.state.documentation !== null) {
+        annotations.append(createElement("p", "state-documentation", inspection.state.documentation))
+      }
+      header.append(annotations)
+    }
     inspector.append(header)
 
     const transitions = createElement("section", "inspector-section")
@@ -254,10 +294,11 @@ export const renderVisualizer = (
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("event", "trigger"))
-    if (inspection.candidate) eyebrow.append(badge("enabled", "active"))
+    const candidate = candidateEvents().includes(inspection.event)
+    if (candidate) eyebrow.append(badge("enabled", "active"))
     header.append(eyebrow, createElement("h2", undefined, inspection.event))
     header.append(metadata([
-      ["Status", inspection.candidate ? "enabled" : "not enabled"],
+      ["Status", candidate ? "enabled" : "not enabled"],
       ["Registrations", String(inspection.transitions.length)]
     ]))
     inspector.append(header)
@@ -398,6 +439,7 @@ export const renderVisualizer = (
     const disclosure = createElement("span", "state-disclosure", node.children.length === 0 ? "" : "▾")
     const status = createElement("span", `state-status${node.active ? " is-active" : ""}`)
     status.setAttribute("aria-label", node.active ? "active" : "inactive")
+    statuses.set(node.path, status)
     const label = createElement("span", "state-label", node.label)
     const markers = createElement("span", "state-markers")
     if (node.initial) markers.append(badge("initial", "initial"))
@@ -437,44 +479,94 @@ export const renderVisualizer = (
   expandButton.addEventListener("click", () => setAllExpanded(true))
   collapseButton.addEventListener("click", () => setAllExpanded(false))
   revealActiveButton.addEventListener("click", () => {
-    const deepest = [...model.activePaths].sort((left, right) => right.split(".").length - left.split(".").length)[0]
+    const deepest = [...activePaths()].sort((left, right) => right.split(".").length - left.split(".").length)[0]
     if (deepest !== undefined) navigateToState(deepest)
   })
 
   const toolbar = createElement("div", "toolbar")
   const runtime = createElement("div", "runtime-summary")
-  const runtimeLabel = diagnostics.length > 0
-    ? "Partial"
-    : model.hasSnapshot
-    ? `${model.activePaths.length} active`
-    : "Structure only"
-  runtime.append(
-    createElement("span", `runtime-dot${model.hasSnapshot ? " has-snapshot" : ""}`),
-    createElement("span", undefined, runtimeLabel)
-  )
+  const runtimeDot = createElement("span", "runtime-dot")
+  const runtimeText = createElement("span")
+  runtime.append(runtimeDot, runtimeText)
   const toolbarActions = createElement("div", "toolbar-actions")
-  toolbarActions.append(clearButton, revealActiveButton, expandButton, collapseButton)
+  toolbarActions.append(clearButton, simulationButton, revealActiveButton, expandButton, collapseButton)
   toolbar.append(runtime, toolbarActions)
   const tree = createElement("div", "topology-tree")
   tree.setAttribute("role", "tree")
   tree.setAttribute("aria-label", `${model.machineId} states`)
   tree.append(createElement("div", "machine-id", model.machineId))
-  if (model.hasSnapshot) {
-    const events = createElement("div", "enabled-events")
-    events.append(createElement("span", "enabled-events-label", "Enabled"))
-    if (model.candidateEvents.length === 0) {
+  const events = createElement("div", "enabled-events")
+  const simulationFeedback = createElement("div", "simulation-feedback")
+  simulationFeedback.setAttribute("role", "status")
+  tree.append(events, simulationFeedback)
+
+  const renderEventButtons = (): void => {
+    events.replaceChildren(createElement("span", "enabled-events-label", "Enabled"))
+    eventButtons.clear()
+    const candidates = candidateEvents()
+    if (candidates.length === 0) {
       events.append(createElement("span", "enabled-events-empty", "none"))
-    } else {
-      model.candidateEvents.forEach((event) => {
-        const button = createElement("button", "event-button", event)
-        button.type = "button"
-        button.addEventListener("click", () => selectEvent(event))
-        eventButtons.set(event, button)
-        events.append(button)
-      })
+      return
     }
-    tree.append(events)
+    candidates.forEach((event) => {
+      const button = createElement("button", `event-button${event === selectedEvent ? " is-selected" : ""}`, event)
+      button.type = "button"
+      button.addEventListener("click", () => {
+        if (simulation !== undefined) {
+          const result = MachineSimulator.send(simulation, event)
+          if (result._tag === "Applied") simulation = { document: visualization, snapshot: result.session }
+          simulationFeedback.textContent = simulationResultMessage(result)
+          simulationFeedback.dataset.status = result._tag.toLowerCase()
+          updateSimulationUi()
+        }
+        selectEvent(event)
+      })
+      eventButtons.set(event, button)
+      events.append(button)
+    })
   }
+
+  const updateSimulationUi = (): void => {
+    const active = new Set(activePaths())
+    statuses.forEach((status, path) => {
+      const isActive = active.has(path)
+      status.classList.toggle("is-active", isActive)
+      status.setAttribute("aria-label", isActive ? "active" : "inactive")
+    })
+    const hasRuntimeState = simulation !== undefined || model.hasSnapshot
+    runtimeDot.classList.toggle("has-snapshot", hasRuntimeState)
+    runtimeText.textContent = simulation !== undefined
+      ? `${active.size} active · step ${simulation.snapshot.step}`
+      : diagnostics.length > 0
+      ? "Partial"
+      : model.hasSnapshot
+      ? `${active.size} active`
+      : "Structure only"
+    simulationButton.textContent = simulation === undefined ? "Start simulation" : "Reset simulation"
+    revealActiveButton.disabled = active.size === 0
+    events.hidden = !hasRuntimeState
+    simulationFeedback.hidden = simulation === undefined
+    renderEventButtons()
+    if (selectedPath !== undefined) {
+      const inspection = model.inspectState(selectedPath)
+      if (inspection !== undefined) renderInspection(inspection)
+    } else if (selectedEvent !== undefined) {
+      renderEventInspection(model.inspectEvent(selectedEvent))
+    }
+  }
+
+  simulationButton.addEventListener("click", () => {
+    if (simulation === undefined) {
+      simulation = MachineSimulator.start(visualization)
+      simulationFeedback.textContent = "Best-effort simulation started · user code will not run"
+      simulationFeedback.dataset.status = "applied"
+    } else {
+      simulation = undefined
+      simulationFeedback.textContent = ""
+      delete simulationFeedback.dataset.status
+    }
+    updateSimulationUi()
+  })
   if (model.roots.length === 0) {
     const empty = createElement("div", "topology-empty")
     empty.append(
@@ -485,6 +577,7 @@ export const renderVisualizer = (
   } else {
     model.roots.forEach((node) => tree.append(renderNode(node, 0)))
   }
+  updateSimulationUi()
   rows.values().next().value?.setAttribute("tabindex", "0")
   tree.addEventListener("keydown", (event) => {
     const current = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(".state-row") : null

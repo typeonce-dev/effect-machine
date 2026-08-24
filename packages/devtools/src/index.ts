@@ -27,4 +27,9 @@ export * as MachineRegistry from "./MachineRegistry.js"
 /**
  * @since 0.1.0
  */
+export * as MachineSimulator from "./MachineSimulator.js"
+
+/**
+ * @since 0.1.0
+ */
 export * as ProjectInspector from "./ProjectInspector.js"

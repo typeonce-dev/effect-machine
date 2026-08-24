@@ -20,4 +20,10 @@ The page updates after matching source files change. A failed reload keeps the l
 
 Discovery is static: it parses source files without executing them. Evaluation loads only candidate modules in a fresh worker and never invokes transition resolvers or activity sources. Module-level code still runs when an exported machine is loaded, so project modules used with the devtools should keep construction free of application side effects.
 
-The visualizer currently supports topology navigation, state and event inspection, transition branches and updates, activities, keyboard navigation, and live reload. Runtime-safe simulation is intentionally a separate document-level capability.
+The visualizer supports topology navigation, state annotations, event inspection, transition branches and updates, activities, keyboard navigation, live reload, and best-effort simulation.
+
+## Simulation boundary
+
+Start a simulation from the topology toolbar, then choose an enabled event. The simulator advances only when the document identifies one required direct transition. It updates the active topology without running project code.
+
+Declinable transitions, conditional branches, history, and choices return an indeterminate result instead of guessing. Deterministic steps explicitly note that runtime effects, state updates, reentry lifecycles, and automatic stabilization were skipped when relevant.

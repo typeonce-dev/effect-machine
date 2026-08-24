@@ -291,6 +291,25 @@ button {
   text-transform: uppercase;
 }
 
+.simulation-feedback {
+  margin: -5px 8px 14px;
+  color: #7f99c4;
+  font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.simulation-feedback[data-status="indeterminate"] {
+  color: #d9ae7e;
+}
+
+.simulation-feedback[data-status="blocked"] {
+  color: #d58d89;
+}
+
+.enabled-events[hidden],
+.simulation-feedback[hidden] {
+  display: none;
+}
+
 .event-button {
   padding: 4px 7px;
   border: 0;
@@ -535,6 +554,23 @@ button {
 .inspector-header {
   padding-bottom: 24px;
   border-bottom: 1px solid var(--line);
+}
+
+.state-annotations {
+  margin-top: 18px;
+}
+
+.state-annotations p {
+  margin: 7px 0 0;
+  color: #aeb4bd;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.state-annotations .state-documentation {
+  color: #7f8690;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .breadcrumbs {
