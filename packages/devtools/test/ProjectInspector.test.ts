@@ -1,5 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { parseCandidate } from "../src/internal/projectInspector.js"
 import * as ProjectInspector from "../src/ProjectInspector.js"
 
@@ -58,4 +61,27 @@ describe("ProjectInspector", () => {
         assert.strictEqual(results[0].diagnostics[0]?.code, "module-load-failed")
       }
     }).pipe(Effect.provide(ProjectInspector.layer)))
+
+  it.effect("retains a known candidate only while its source is syntactically incomplete", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => mkdtemp(join(tmpdir(), "effect-machine-inspector-"))),
+      (root) =>
+        Effect.gen(function*() {
+          const inspector = yield* ProjectInspector.ProjectInspector
+          const sourceDirectory = join(root, "src")
+          const sourceFile = join(sourceDirectory, "workflow.ts")
+          yield* Effect.promise(() => mkdir(sourceDirectory))
+          yield* Effect.promise(() => writeFile(sourceFile, "export const building = {", "utf8"))
+
+          const options = {
+            root,
+            retainedCandidates: [{ file: "src/workflow.ts", exportNames: ["workflow"] }]
+          }
+          assert.deepStrictEqual(yield* inspector.discover(options), options.retainedCandidates)
+
+          yield* Effect.promise(() => writeFile(sourceFile, "export const value = 1\n", "utf8"))
+          assert.deepStrictEqual(yield* inspector.discover(options), [])
+        }).pipe(Effect.provide(ProjectInspector.layer)),
+      (root) => Effect.promise(() => rm(root, { recursive: true, force: true }))
+    ))
 })

@@ -24,19 +24,60 @@ export const reconcile = (
   previous: ReadonlyArray<DevToolsProtocol.MachineResult>,
   next: ReadonlyArray<DevToolsProtocol.MachineResult>
 ): ReadonlyArray<DevToolsProtocol.MachineResult> => {
-  const previousByKey = new Map(previous.map((result) => [result.key, result]))
-  return next.map((result): DevToolsProtocol.MachineResult => {
-    if (result._tag !== "Failed") return result
-    const prior = previousByKey.get(result.key)
-    if (prior?._tag !== "Ready" && prior?._tag !== "Partial") return result
-    return {
+  const validPrevious = previous.filter((result): result is DevToolsProtocol.Ready | DevToolsProtocol.Partial =>
+    result._tag === "Ready" || result._tag === "Partial"
+  )
+  const previousByKey = new Map(validPrevious.map((result) => [result.key, result]))
+  const previousByFile = new Map<string, Array<DevToolsProtocol.Ready | DevToolsProtocol.Partial>>()
+  for (const result of validPrevious) {
+    const file = result.document.source?.file
+    if (file === undefined) continue
+    const matches = previousByFile.get(file)
+    if (matches === undefined) previousByFile.set(file, [result])
+    else matches.push(result)
+  }
+
+  const emitted = new Set(next.filter((result) => result._tag !== "Failed").map((result) => result.key))
+  return next.flatMap((result): ReadonlyArray<DevToolsProtocol.MachineResult> => {
+    if (result._tag !== "Failed") return [result]
+
+    const moduleFailure = result.diagnostics.some((diagnostic) =>
+      diagnostic.code === "module-load-failed" || diagnostic.code === "machine-export-not-found"
+    )
+    const exact = previousByKey.get(result.key)
+    const candidates = moduleFailure || exact === undefined
+      ? previousByFile.get(result.source.file) ?? []
+      : [exact]
+    const retained = candidates.filter((candidate) => !emitted.has(candidate.key))
+    if (retained.length === 0) return [result]
+
+    for (const candidate of retained) emitted.add(candidate.key)
+    return retained.map((candidate): DevToolsProtocol.Partial => ({
       _tag: "Partial",
       protocolVersion: DevToolsProtocol.protocolVersion,
-      key: result.key,
-      document: prior.document,
+      key: candidate.key,
+      document: candidate.document,
       diagnostics: [staleDiagnostic(result), ...result.diagnostics]
-    }
+    }))
   })
+}
+
+const retainedCandidates = (
+  results: ReadonlyArray<DevToolsProtocol.MachineResult>
+): ReadonlyArray<ProjectInspector.Candidate> => {
+  const exportsByFile = new Map<string, Set<string>>()
+  for (const result of results) {
+    if (result._tag !== "Ready" && result._tag !== "Partial") continue
+    const source = result.document.source
+    if (source === null) continue
+    const exportNames = exportsByFile.get(source.file) ?? new Set<string>()
+    if (source.exportName !== null) exportNames.add(source.exportName)
+    exportsByFile.set(source.file, exportNames)
+  }
+  return [...exportsByFile].map(([file, exportNames]) => ({
+    file,
+    exportNames: [...exportNames].sort()
+  }))
 }
 
 const make = (api: PublicApi, options: MachineRegistry.Options) =>
@@ -50,7 +91,11 @@ const make = (api: PublicApi, options: MachineRegistry.Options) =>
 
     const refresh = SubscriptionRef.get(state).pipe(
       Effect.flatMap((current) =>
-        inspector.inspect({ ...options, revision: current.revision + 1 }).pipe(
+        inspector.inspect({
+          ...options,
+          revision: current.revision + 1,
+          retainedCandidates: retainedCandidates(current.results)
+        }).pipe(
           Effect.map((results): MachineRegistry.Snapshot => ({
             protocolVersion: DevToolsProtocol.protocolVersion,
             revision: current.revision + 1,

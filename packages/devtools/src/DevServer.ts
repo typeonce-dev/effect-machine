@@ -18,6 +18,7 @@ export interface Options {
   readonly port: number
   readonly open?: boolean | undefined
   readonly debounce?: number | undefined
+  readonly watchPolling?: boolean | undefined
 }
 
 /**

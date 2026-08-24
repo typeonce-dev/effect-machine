@@ -95,6 +95,17 @@ export const parseCandidate = (file: string, source: string): ProjectInspector.C
   }
 }
 
+const hasSyntacticErrors = (file: string, source: string): boolean =>
+  ts.transpileModule(source, {
+    fileName: file,
+    reportDiagnostics: true,
+    compilerOptions: {
+      allowJs: true,
+      jsx: ts.JsxEmit.Preserve,
+      target: ts.ScriptTarget.Latest
+    }
+  }).diagnostics?.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) === true
+
 interface PublicApi {
   readonly ProjectInspector: typeof ProjectInspector.ProjectInspector
   readonly DiscoveryError: typeof ProjectInspector.DiscoveryError
@@ -112,6 +123,9 @@ const makeDiscovery = (api: PublicApi) =>
     > =>
       Effect.gen(function*() {
         const root = path.resolve(options.root)
+        const retainedByFile = new Map(
+          (options.retainedCandidates ?? []).map((candidate) => [candidate.file, candidate])
+        )
         const files = yield* fs.glob(options.include ?? defaultInclude, {
           root,
           exclude: [...defaultExclude, ...(options.exclude ?? [])]
@@ -120,7 +134,12 @@ const makeDiscovery = (api: PublicApi) =>
           files.sort(),
           (file) =>
             fs.readFileString(path.join(root, file)).pipe(
-              Effect.map((source) => parseCandidate(file, source))
+              Effect.map((source) => {
+                const candidate = parseCandidate(file, source)
+                if (candidate !== undefined) return candidate
+                const retained = retainedByFile.get(file)
+                return retained !== undefined && hasSyntacticErrors(file, source) ? retained : undefined
+              })
             ),
           { concurrency: "unbounded" }
         )

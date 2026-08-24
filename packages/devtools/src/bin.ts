@@ -35,13 +35,18 @@ const open = Flag.boolean("open").pipe(
   Flag.withDefault(false)
 )
 
-const cli = Command.make("effect-machine", { root, include, host, port, open }).pipe(
+const watchPolling = Flag.boolean("watch-polling").pipe(
+  Flag.withDescription("Use polling instead of native file-system events"),
+  Flag.withDefault(false)
+)
+
+const cli = Command.make("effect-machine", { root, include, host, port, open, watchPolling }).pipe(
   Command.withDescription("Inspect Effect Machine definitions in a live local visualizer"),
-  Command.withHandler(({ host, include, open, port, root }) => {
+  Command.withHandler(({ host, include, open, port, root, watchPolling }) => {
     const RegistryLayer = MachineRegistry.layer({ root, include }).pipe(
       Layer.provideMerge(ProjectInspector.layer)
     )
-    return DevServer.run({ root, host, port, open }).pipe(Effect.provide(RegistryLayer))
+    return DevServer.run({ root, host, port, open, watchPolling }).pipe(Effect.provide(RegistryLayer))
   })
 )
 

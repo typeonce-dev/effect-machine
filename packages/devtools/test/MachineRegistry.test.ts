@@ -41,4 +41,35 @@ describe("MachineRegistry", () => {
       ])
     }
   })
+
+  it("matches a failed reload by source file when its export identity changes", () => {
+    const document = MachineDocument.make(machine, {
+      source: { file: "src/workflow.ts", exportName: "workflow" }
+    })
+    const ready: DevToolsProtocol.Ready = {
+      _tag: "Ready",
+      protocolVersion: 1,
+      key: "src/workflow.ts#workflow",
+      document,
+      diagnostics: []
+    }
+    const failed: DevToolsProtocol.Failed = {
+      _tag: "Failed",
+      protocolVersion: 1,
+      key: "src/workflow.ts#renamed",
+      source: { file: "src/workflow.ts", exportName: "renamed" },
+      machineId: null,
+      diagnostics: [{
+        severity: "error",
+        code: "module-load-failed",
+        message: "Unexpected end of input",
+        location: { file: "src/workflow.ts", line: null, column: null },
+        statePath: null
+      }]
+    }
+
+    const result = reconcile([ready], [failed])[0]
+    assert.strictEqual(result?._tag, "Partial")
+    assert.strictEqual(result?.key, ready.key)
+  })
 })

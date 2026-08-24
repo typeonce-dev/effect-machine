@@ -1,4 +1,4 @@
-import { type FSWatcher, watch } from "chokidar"
+import { type ChokidarOptions, type FSWatcher, watch } from "chokidar"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import type { IncomingMessage, ServerResponse } from "node:http"
@@ -122,12 +122,7 @@ const acquireWatcher = (
 ): Effect.Effect<FSWatcher> =>
   Effect.sync(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
-    const watcher = watch(options.root, {
-      ignoreInitial: true,
-      interval: 200,
-      usePolling: true,
-      ignored: (file, stats) => isIgnored(file) || stats?.isFile() === true && !sourceExtension.test(file)
-    })
+    const watcher = watch(options.root, watcherOptions(options))
     watcher.on("all", (_event, file) => {
       if (!isProjectSource(options.root, file)) return
       if (refreshTimer !== undefined) clearTimeout(refreshTimer)
@@ -147,6 +142,14 @@ const acquireWatcher = (
     })
     return watcher
   })
+
+export const watcherOptions = (options: DevServer.Options): ChokidarOptions =>
+  ({
+    ignoreInitial: true,
+    interval: 200,
+    usePolling: options.watchPolling ?? false,
+    ignored: (file, stats) => isIgnored(file) || stats?.isFile() === true && !sourceExtension.test(file)
+  }) satisfies ChokidarOptions
 
 export const run = (
   ErrorType: DevServerErrorConstructor,

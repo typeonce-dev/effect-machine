@@ -39,6 +39,13 @@ export interface InspectOptions {
   readonly include?: string | undefined
   readonly exclude?: ReadonlyArray<string> | undefined
   readonly revision?: number | undefined
+  /**
+   * Last-known machine candidates. A syntactically incomplete source file is
+   * evaluated with this identity so the registry can retain its document.
+   *
+   * @internal
+   */
+  readonly retainedCandidates?: ReadonlyArray<Candidate> | undefined
 }
 
 /**
