@@ -1,5 +1,5 @@
 import "./styles.css"
-import { Machine } from "../../packages/effect-machine/src/index.js"
+import { Machine } from "@typeonce/effect-machine"
 import { machine, snapshot } from "./example-machine.js"
 import { makeVisualizationDocument } from "./visualization-document.js"
 import { mountVisualizer, type VisualizerSource } from "./visualizer.js"

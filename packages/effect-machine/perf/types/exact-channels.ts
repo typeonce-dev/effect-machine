@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
+import { Machine } from "../../dist/index.js"
 import { Done, Loaded, machine, Notice, Start, States } from "./exact-channels-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?

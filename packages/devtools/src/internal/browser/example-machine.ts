@@ -1,5 +1,5 @@
+import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
-import { Machine } from "../../packages/effect-machine/src/index.js"
 
 class Application extends Schema.TaggedClass<Application>("Application")("Application", {}) {}
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}

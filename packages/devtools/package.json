@@ -1,0 +1,33 @@
+{
+  "name": "@typeonce/effect-machine-devtools",
+  "version": "0.0.0",
+  "description": "Local development tools for Effect Machine",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./internal/*": null
+  },
+  "scripts": {
+    "build": "vite build --config vite.config.ts",
+    "check": "tsc -p tsconfig.json",
+    "dev": "vite --config vite.config.ts"
+  },
+  "dependencies": {
+    "@typeonce/effect-machine": "workspace:^"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.111"
+  },
+  "devDependencies": {
+    "@types/node": "25.7.0",
+    "effect": "4.0.0-rc.111",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

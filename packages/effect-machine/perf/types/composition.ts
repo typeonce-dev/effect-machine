@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Context, Data, Effect } from "effect"
+import { Machine } from "../../dist/index.js"
 import {
   App,
   Editing,

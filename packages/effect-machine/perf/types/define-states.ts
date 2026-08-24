@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
+import { Machine } from "../../dist/index.js"
 
 const State = Schema.TaggedUnion({
   Idle: {},

@@ -1,4 +1,4 @@
-import { Machine } from "@typeonce/effect-machine"
+import { Machine } from "../../dist/index.js"
 import { LoadError, loadUser, machine } from "./dynamic-invoke-control.js"
 
 interface User {

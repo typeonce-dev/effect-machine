@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
+import { Machine } from "../../dist/index.js"
 
 export class LoadError {
   readonly _tag = "LoadError"

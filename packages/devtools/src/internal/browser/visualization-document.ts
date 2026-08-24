@@ -1,4 +1,4 @@
-import { Machine } from "../../packages/effect-machine/src/index.js"
+import { Machine } from "@typeonce/effect-machine"
 
 export type VisualizationStateType = "atomic" | "compound" | "parallel" | "final" | "history" | "choice"
 

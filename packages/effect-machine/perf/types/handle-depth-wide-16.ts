@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Context, Data, Effect } from "effect"
+import { Machine } from "../../dist/index.js"
 import { machine } from "./handle-depth-wide-16-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?

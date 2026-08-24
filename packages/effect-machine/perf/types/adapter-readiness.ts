@@ -1,7 +1,7 @@
-import { Machine } from "@typeonce/effect-machine"
-import { ClusterMachine } from "@typeonce/effect-machine/cluster"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { Atom } from "effect/unstable/reactivity"
+import { Machine } from "../../dist/index.js"
+import { ClusterMachine } from "../../dist/unstable/cluster/index.js"
+import { AtomMachine } from "../../dist/unstable/reactivity/index.js"
 import { machine, snapshot } from "./adapter-readiness-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?

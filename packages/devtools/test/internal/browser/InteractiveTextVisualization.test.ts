@@ -1,10 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { machine, snapshot } from "../../../../visualizer/src/example-machine.js"
-import { textTreeToString } from "../../../../visualizer/src/text-tree.js"
-import { makeVisualizationDocument } from "../../../../visualizer/src/visualization-document.js"
-import { makeVisualizerModel } from "../../../../visualizer/src/visualizer-model.js"
-import { Machine } from "../../src/index.js"
-import { makeTextRenderer } from "./visualization/text.js"
+import { Machine } from "@typeonce/effect-machine"
+import { makeTextRenderer } from "../../../../effect-machine/test/machine/visualization/text.js"
+import { machine, snapshot } from "../../../src/internal/browser/example-machine.js"
+import { textTreeToString } from "../../../src/internal/browser/text-tree.js"
+import { makeVisualizationDocument } from "../../../src/internal/browser/visualization-document.js"
+import { makeVisualizerModel } from "../../../src/internal/browser/visualizer-model.js"
 
 const renderText = makeTextRenderer<typeof machine, typeof snapshot>(Machine)
 const buildDocument = makeVisualizationDocument<typeof machine, typeof snapshot>(Machine)

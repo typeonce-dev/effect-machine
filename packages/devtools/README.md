@@ -6,8 +6,8 @@ Run the local prototype from the repository root:
 pnpm visualizer
 ```
 
-Replace the exports in `src/example-machine.ts` with another completed `.handle(...)` result. The browser reloads when the
-imported machine changes.
+Replace the exports in `src/internal/browser/example-machine.ts` with another completed `.handle(...)` result. The browser
+reloads when the imported machine changes.
 
 The current entry point has three steps:
 

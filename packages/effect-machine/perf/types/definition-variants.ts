@@ -1,4 +1,4 @@
-import { Machine } from "@typeonce/effect-machine"
+import { Machine } from "../../dist/index.js"
 import { Done, Flow, Idle, machine, Running } from "./definition-variants-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?

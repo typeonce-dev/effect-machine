@@ -1,4 +1,4 @@
-import { Machine } from "@typeonce/effect-machine"
+import { Machine } from "../../dist/index.js"
 import { machine, State } from "./named-branches-control.js"
 
 const handled = machine.handle({

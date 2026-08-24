@@ -1,5 +1,5 @@
-import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
+import { Machine } from "../../dist/index.js"
 
 export const Idle = Schema.TaggedStruct("Idle", { value: Schema.Number })
 export const Done = Schema.TaggedStruct("Done", { value: Schema.String })
