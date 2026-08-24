@@ -28,14 +28,25 @@ const defaultExclude = [
 ] as const
 
 interface EvaluationRequest {
+  readonly _tag: "InspectMachines"
   readonly root: string
   readonly revision: number
   readonly candidates: ReadonlyArray<ProjectInspector.Candidate>
 }
 
 interface EvaluationResponse {
+  readonly _tag: "InspectedMachines"
   readonly results: ReadonlyArray<unknown>
 }
+
+interface SimulationWorkerRequest {
+  readonly _tag: "Simulate"
+  readonly root: string
+  readonly request: DevToolsProtocol.SimulationRequest
+}
+
+type WorkerRequest = EvaluationRequest | SimulationWorkerRequest
+type WorkerResponse = EvaluationResponse | DevToolsProtocol.SimulationResult
 
 const scriptKind = (file: string): ts.ScriptKind => {
   if (file.endsWith(".tsx")) return ts.ScriptKind.TSX
@@ -169,6 +180,22 @@ const WorkerLayer = NodeWorker.layer(() =>
   })
 )
 
+const runWorker = (
+  request: WorkerRequest
+): Effect.Effect<WorkerResponse, unknown> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const platform = yield* Worker.WorkerPlatform
+      const worker = yield* platform.spawn<WorkerResponse, WorkerRequest>(0)
+      const response = yield* Deferred.make<WorkerResponse>()
+      const runner = yield* Effect.forkScoped(
+        worker.run((message) => Deferred.succeed(response, message))
+      )
+      yield* worker.send(request)
+      return yield* Effect.raceFirst(Deferred.await(response), Fiber.join(runner))
+    })
+  ).pipe(Effect.provide(WorkerLayer))
+
 const evaluate = (
   api: PublicApi,
   candidates: ReadonlyArray<ProjectInspector.Candidate>,
@@ -177,28 +204,22 @@ const evaluate = (
   if (candidates.length === 0) return Effect.succeed([])
 
   const request: EvaluationRequest = {
+    _tag: "InspectMachines",
     root: options.root,
     revision: options.revision ?? 0,
     candidates
   }
 
-  return Effect.scoped(
-    Effect.gen(function*() {
-      const platform = yield* Worker.WorkerPlatform
-      const worker = yield* platform.spawn<EvaluationResponse, EvaluationRequest>(0)
-      const response = yield* Deferred.make<EvaluationResponse>()
-      const runner = yield* Effect.forkScoped(
-        worker.run((message) => Deferred.succeed(response, message))
-      )
-      yield* worker.send(request)
-      const message = yield* Effect.raceFirst(Deferred.await(response), Fiber.join(runner))
-      return yield* Effect.forEach(
+  return runWorker(request).pipe(
+    Effect.flatMap((message) => {
+      if (message._tag !== "InspectedMachines") {
+        return Effect.fail(new Error(`Unexpected worker response: ${message._tag}`))
+      }
+      return Effect.forEach(
         message.results,
         (result) => Schema.decodeUnknownEffect(DevToolsProtocol.MachineResult)(result)
       )
-    })
-  ).pipe(
-    Effect.provide(WorkerLayer),
+    }),
     Effect.mapError((cause) =>
       new api.EvaluationError({
         message: "The isolated machine evaluator failed",
@@ -208,6 +229,27 @@ const evaluate = (
   )
 }
 
+const simulate = (
+  api: PublicApi,
+  request: DevToolsProtocol.SimulationRequest,
+  options: Pick<ProjectInspector.InspectOptions, "root">
+): Effect.Effect<DevToolsProtocol.SimulationResult, ProjectInspector.EvaluationError> =>
+  runWorker({ _tag: "Simulate", root: options.root, request }).pipe(
+    Effect.timeout("10 seconds"),
+    Effect.flatMap((response) => {
+      if (response._tag === "InspectedMachines") {
+        return Effect.fail(new Error("The isolated planner returned an inspection response"))
+      }
+      return Schema.decodeUnknownEffect(DevToolsProtocol.SimulationResult)(response)
+    }),
+    Effect.mapError((cause) =>
+      new api.EvaluationError({
+        message: "The isolated machine planner failed",
+        cause
+      })
+    )
+  )
+
 const make = (api: PublicApi) =>
   Effect.gen(function*() {
     const discover = yield* makeDiscovery(api)
@@ -216,7 +258,8 @@ const make = (api: PublicApi) =>
     return api.ProjectInspector.of({
       discover,
       evaluate: (candidates, options) => evaluate(api, candidates, options),
-      inspect
+      inspect,
+      simulate: (request, options) => simulate(api, request, options)
     })
   })
 

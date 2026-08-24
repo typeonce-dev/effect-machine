@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as internal from "./internal/devServer.js"
 import type * as MachineRegistry from "./MachineRegistry.js"
+import type * as ProjectInspector from "./ProjectInspector.js"
 
 /**
  * @category models
@@ -41,5 +42,8 @@ export class DevServerError extends Schema.Error<DevServerError>(
  * @category constructors
  * @since 0.23.0
  */
-export const run = (options: Options): Effect.Effect<never, DevServerError, MachineRegistry.MachineRegistry> =>
-  internal.run(DevServerError, options)
+export const run = (options: Options): Effect.Effect<
+  never,
+  DevServerError,
+  MachineRegistry.MachineRegistry | ProjectInspector.ProjectInspector
+> => internal.run(DevServerError, options)

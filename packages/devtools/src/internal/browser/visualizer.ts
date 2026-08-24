@@ -22,7 +22,7 @@ export const mountVisualizer = (root: HTMLElement, source: MachineResult): void 
   switch (source._tag) {
     case "Ready":
     case "Partial":
-      renderVisualizer(root, source.document, source.diagnostics)
+      renderVisualizer(root, source.key, source.document, source.diagnostics)
       break
     case "Failed":
       renderError(root, source)
