@@ -1,5 +1,12 @@
 # @typeonce/effect-machine
 
+## 0.23.0
+
+### Patch Changes
+
+- f90b37d: Move the published package into an Effect-style workspace without changing its public exports.
+- f90b37d: Release `@typeonce/effect-machine` and `@typeonce/effect-machine-devtools` at the same version. Install matching versions so the devtools inspection protocol and machine model remain compatible.
+
 ## 0.22.0
 
 ### Minor Changes
@@ -18,7 +25,7 @@
       target
         .from({ request })
         .update(owner.decoded(new Ready({ ...current, notice: null })))
-    )
+    );
   ```
 
   Transition inspection and retained microsteps now include an `updates` array naming replaced owners.
@@ -101,9 +108,9 @@
         from
           .effect("load", () => loadUser())
           .onDone((to) => to.full.Ready())
-          .onFailure((to) => to.full.Failed())
-    }
-  })
+          .onFailure((to) => to.full.Failed()),
+    },
+  });
   ```
 
   Return an array of completed chains for multiple activities. Sources and child descriptors remain reusable, while keeping the invocation declaration local preserves exact owner-state, event, parent, output, failure, element, snapshot, and service inference.
@@ -136,10 +143,12 @@
         .branches({
           running: { target: to.full.Running() },
           done: { target: to.full.Done() },
-          unchanged: { target: to.none }
+          unchanged: { target: to.none },
         })
-        .resolve(({ event, select }) => event.cached ? select.done.from() : select.running.from())
-  }
+        .resolve(({ event, select }) =>
+          event.cached ? select.done.from() : select.running.from()
+        ),
+  };
   ```
 
   Use `.reenter()` for resolver-free reentry, or pass literal `declinable: true` to `.resolve(...)` when the resolver must receive `decline()`. Bare targets are accepted only when their schemas support default construction.
@@ -168,13 +177,13 @@
   Machine.transition({
     branches: (to) => ({
       moving: { target: to.local.Running() },
-      unchanged: { target: to.none() }
+      unchanged: { target: to.none() },
     }),
     resolve: ({ event, select }) =>
       event.axis === 0
         ? select.unchanged()
-        : select.moving.from({ startedAt: event.at })
-  })
+        : select.moving.from({ startedAt: event.at }),
+  });
   ```
 
   Branch keys are stable inspection, visualization, trace-verification, and coverage identities. Optional branch titles remain presentation metadata.
@@ -235,14 +244,14 @@
         title: "cached",
         when: ({ event }) => event.cached,
         target: (to) => to.full.Ready(),
-        resolve: ({ match, target }) => target.from({ data: match })
-      })
+        resolve: ({ match, target }) => target.from({ data: match }),
+      }),
     ],
     otherwise: {
       target: (to) => to.full.Loading(),
-      resolve: ({ target }) => target.from()
-    }
-  })
+      resolve: ({ target }) => target.from(),
+    },
+  });
   ```
 
   Replace each object previously written directly in the `cases` array with `branch({ ... })` inside the `cases: (branch) => [...]` factory. Direct transitions and `otherwise` keep their existing shape.
@@ -262,8 +271,8 @@
   Machine.invoke({
     id: "load",
     effect: () => load,
-    onDone: ({ output, target }) => target.none()
-  })
+    onDone: ({ output, target }) => target.none(),
+  });
   ```
 
 - 34a9a26: Add typed declared-initial entry to compound and parallel transition targets.
@@ -277,15 +286,17 @@
   The hot Effect `Stream` observes ordered creation, initialization, mailbox delivery and processing, state changes, emissions, Effect and timer activities, and termination for a prepared root and all locally owned descendants:
 
   ```ts
-  const prepared = yield * Machine.prepare(machine)
+  const prepared = yield * Machine.prepare(machine);
 
   yield *
     prepared.inspection.pipe(
-      Stream.runForEach((event) => Console.log(event.sequence, event.subject.id, event._tag)),
+      Stream.runForEach((event) =>
+        Console.log(event.sequence, event.subject.id, event._tag)
+      ),
       Effect.forkScoped({ startImmediately: true })
-    )
+    );
 
-  const ref = yield * prepared.start
+  const ref = yield * prepared.start;
   ```
 
   Inspection is non-replayed, never fails, and completes with the root. Its session ids and ordering are local to one prepared ownership tree; distributed identity and delivery remain an Effect Cluster concern.
@@ -297,11 +308,11 @@
 - 9798994: Rename the minimal inter-machine reference types so they use machine terminology and remain distinct from Effect Cluster concepts.
 
   ```ts
-  Machine.ActorRef<Event> // before
-  Machine.MachineTarget<Event> // after
+  Machine.ActorRef<Event>; // before
+  Machine.MachineTarget<Event>; // after
 
-  Machine.ActorContext<InputEvents, ParentEvents> // before
-  Machine.MachineReferences<InputEvents, ParentEvents> // after
+  Machine.ActorContext<InputEvents, ParentEvents>; // before
+  Machine.MachineReferences<InputEvents, ParentEvents>; // after
   ```
 
   The inferred `self` and `parent` fields and all runtime behavior are unchanged.
@@ -313,13 +324,13 @@
 - 2a84cd2: Add `Machine.prepare` for composing snapshot and emission streams before a machine initializes, while keeping `Machine.start` as the one-step convenience.
 
   ```ts
-  const prepared = yield * Machine.prepare(machine)
+  const prepared = yield * Machine.prepare(machine);
   yield *
     prepared.emissions.pipe(
       Stream.runForEach(handleEmission),
       Effect.forkScoped({ startImmediately: true })
-    )
-  const ref = yield * prepared.start
+    );
+  const ref = yield * prepared.start;
   ```
 
   AtomMachine emission streams use the same preparation boundary, and machine definitions now expose `definition.invoke(...)` so invocation `self` and `parent` references use the exact public input and `parentEvents` protocols.
@@ -331,15 +342,15 @@
 - b7004c2: Make `Machine.events` and `Machine.internalEvents` definition-time protocol descriptors that are passed directly to `Machine.make`. The descriptors expose type-safe deferred constructors while retaining their schemas privately, so applications can export the event API without exporting schemas or reaching for throwing schema `.make` methods.
 
   ```ts
-  const Events = Machine.events(PublicEvent)
-  const InternalEvents = Machine.internalEvents(InternalEvent)
+  const Events = Machine.events(PublicEvent);
+  const InternalEvents = Machine.internalEvents(InternalEvent);
 
   const machine = Machine.make({
     states: States.states,
     events: Events,
     internalEvents: InternalEvents,
-    initial: () => States.initial.Idle.from()
-  })
+    initial: () => States.initial.Idle.from(),
+  });
   ```
 
   Remove the eager schema-based `Machine.event` constructor. Pass complete decoded event objects directly to APIs that intentionally retain values, such as manual model-testing scenarios or transport messages.
@@ -349,30 +360,30 @@
   Remove `Machine.retag`. To reuse compatible fields across sibling states, destructure away the source discriminator and construct the destination through its target builder:
 
   ```ts
-  const { _tag: _, ...fields } = state
-  return target.local.Saving.from({ ...fields, attempt: 1 })
+  const { _tag: _, ...fields } = state;
+  return target.local.Saving.from({ ...fields, attempt: 1 });
   ```
 
 - 62e2281: Separate actor inputs from outward notifications. Declare emissions with `Machine.emittedEvents`, publish them with `emit`, and observe the hot, non-replaying `MachineRef.emissions` stream. Children declare the public inputs they expect from their owner through `parentEvents`, then communicate explicitly with the typed, optional `parent` actor reference:
 
   ```ts
-  const Emissions = Machine.emittedEvents(Progress)
-  const ParentEvents = Machine.events(Completed)
+  const Emissions = Machine.emittedEvents(Progress);
+  const ParentEvents = Machine.events(Completed);
 
   const worker = Machine.make({
     // ...
     emittedEvents: Emissions,
-    parentEvents: ParentEvents
+    parentEvents: ParentEvents,
   }).handle({
     Working: {
       entry: ({ parent }, enqueue) => {
-        enqueue.emit(Emissions.Progress({ value: 0.5 }))
+        enqueue.emit(Emissions.Progress({ value: 0.5 }));
         if (parent !== undefined) {
-          enqueue.sendTo(parent, ParentEvents.Completed({ value: 42 }))
+          enqueue.sendTo(parent, ParentEvents.Completed({ value: 42 }));
         }
-      }
-    }
-  })
+      },
+    },
+  });
   ```
 
   Handler contexts also expose typed `self`; invoked-child composition checks that every `parentEvents` case is accepted by the parent. This release renames structural handler ancestry to `containingState` and `ancestors`, supports zero-payload event and emission constructors with `()`, and exposes root and child emission streams through AtomMachine.
@@ -401,11 +412,11 @@
   const States = Machine.defineStates({
     Form: {
       initial: "Editing",
-      states: { Editing: {}, Saving }
-    }
-  })
+      states: { Editing: {}, Saving },
+    },
+  });
 
-  States.initial.Form.from((form) => form.Editing.from())
+  States.initial.Form.from((form) => form.Editing.from());
   ```
 
 ## 0.7.0
@@ -418,17 +429,17 @@
   earlier instead of requiring the complete root snapshot.
 
   ```ts
-  const readySnapshot = States.getSnapshot(snapshot, "Ready")
+  const readySnapshot = States.getSnapshot(snapshot, "Ready");
 
   if (Option.isSome(readySnapshot)) {
-    States.get(readySnapshot.value, "Ready.editor")
-    States.matches(readySnapshot.value, "Ready.editor.Editing")
+    States.get(readySnapshot.value, "Ready.editor");
+    States.matches(readySnapshot.value, "Ready.editor.Editing");
   }
 
   const editorSnapshotAtom = AtomMachine.selectSnapshot(
     machineAtom,
     "Ready.editor"
-  )
+  );
   ```
 
   Add equality-aware `AtomMachine.selectSnapshot` and
