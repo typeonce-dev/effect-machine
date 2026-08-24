@@ -11,6 +11,10 @@ Effect Machine is experimental and pre-1.0. Use only:
 
 Do not create a major changeset before 1.0. Backward compatibility is not a design goal during this phase: prefer the clearest long-term API and provide a direct migration instead of adding deprecated aliases or compatibility wrappers.
 
+## Synchronized package versions
+
+`@typeonce/effect-machine` and `@typeonce/effect-machine-devtools` belong to the same Changesets fixed group. Keep their package versions equal and use `workspace:^` for the devtools dependency on core. A release affecting either package publishes both at the same version, so users can select compatible packages by matching their versions.
+
 ## Writing changelog entries
 
 Changeset descriptions are published directly on the documentation website. Write them for library users rather than repository maintainers.

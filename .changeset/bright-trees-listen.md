@@ -1,7 +1,7 @@
 ---
-"@typeonce/effect-machine": patch
+"@typeonce/effect-machine-devtools": minor
 ---
 
 Add a local interactive text visualizer prototype that renders the public machine inspection data as a collapsible tree.
 
-Use `pnpm visualizer` to inspect the example machine and replace its imported `.handle(...)` result with another machine.
+Use the text tree to navigate topology, expand nested states, select subtrees, and inspect structured machine details without converting the model into a chart.
