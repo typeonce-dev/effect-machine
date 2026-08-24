@@ -30,6 +30,25 @@ if (manifest.exports?.["./internal/*"] !== null) {
   errors.push('package.json must block the "./internal/*" export')
 }
 
+const publicExports = [
+  ".",
+  "./DevToolsProtocol",
+  "./MachineDocument",
+  "./MachineSimulator",
+  "./package.json",
+  "./internal/*"
+]
+const unexpectedExports = Object.keys(manifest.exports ?? {}).filter((path) => !publicExports.includes(path))
+if (unexpectedExports.length > 0) {
+  errors.push(`Unexpected public devtools exports: ${unexpectedExports.join(", ")}`)
+}
+
+const unexpectedPublishedExports = Object.keys(manifest.publishConfig?.exports ?? {})
+  .filter((path) => !publicExports.includes(path))
+if (unexpectedPublishedExports.length > 0) {
+  errors.push(`Unexpected published devtools exports: ${unexpectedPublishedExports.join(", ")}`)
+}
+
 if (errors.length > 0) {
   console.error(errors.join("\n"))
   process.exitCode = 1

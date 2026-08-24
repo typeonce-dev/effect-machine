@@ -10,6 +10,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "types": ["node", "vite/client"]
   },
   "include": ["src/**/*.ts", "vite.config.ts"]

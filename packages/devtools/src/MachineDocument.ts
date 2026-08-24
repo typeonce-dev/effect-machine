@@ -1,7 +1,7 @@
 /**
  * Serializable inspection documents for Effect Machine devtools.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import type { Machine } from "@typeonce/effect-machine"
 import * as Schema from "effect/Schema"
@@ -11,7 +11,7 @@ import * as internal from "./internal/machineDocument.js"
  * Current machine document schema version.
  *
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const schemaVersion = 1 as const
 
@@ -19,7 +19,7 @@ export const schemaVersion = 1 as const
  * Source module and export that produced a machine.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Source = Schema.Struct({
   file: Schema.String,
@@ -28,7 +28,7 @@ export const Source = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Source = Schema.Schema.Type<typeof Source>
 
@@ -36,7 +36,7 @@ export type Source = Schema.Schema.Type<typeof Source>
  * Static target selection retained from a transition definition.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Selection = Schema.Struct({
   path: Schema.NullOr(Schema.String),
@@ -46,13 +46,13 @@ export const Selection = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Selection = Schema.Schema.Type<typeof Selection>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Initial = Schema.Struct({
   target: Schema.String,
@@ -61,13 +61,13 @@ export const Initial = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Initial = Schema.Schema.Type<typeof Initial>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const State = Schema.Struct({
   path: Schema.String,
@@ -87,13 +87,13 @@ export const State = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type State = Schema.Schema.Type<typeof State>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Trigger = Schema.Union([
   Schema.Struct({ type: Schema.tag("event"), event: Schema.String }),
@@ -109,7 +109,7 @@ export const Trigger = Schema.Union([
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Trigger = Schema.Schema.Type<typeof Trigger>
 
@@ -122,7 +122,7 @@ const BranchFields = {
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Branch = Schema.Union([
   Schema.Struct({ ...BranchFields, type: Schema.tag("direct") }),
@@ -136,13 +136,13 @@ export const Branch = Schema.Union([
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Branch = Schema.Schema.Type<typeof Branch>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Transition = Schema.Struct({
   id: Schema.String,
@@ -155,7 +155,7 @@ export const Transition = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Transition = Schema.Schema.Type<typeof Transition>
 
@@ -167,7 +167,7 @@ const ActivityFields = {
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Activity = Schema.Union([
   Schema.Struct({ ...ActivityFields, type: Schema.tag("process") }),
@@ -197,13 +197,13 @@ export const Activity = Schema.Union([
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Activity = Schema.Schema.Type<typeof Activity>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Snapshot = Schema.Struct({
   activePaths: Schema.Array(Schema.String),
@@ -212,7 +212,7 @@ export const Snapshot = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
 
@@ -220,7 +220,7 @@ export type Snapshot = Schema.Schema.Type<typeof Snapshot>
  * Complete, versioned, JSON-safe machine inspection document.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const MachineDocument = Schema.Struct({
   schemaVersion: Schema.Literal(schemaVersion),
@@ -237,7 +237,7 @@ export const MachineDocument = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type MachineDocument = Schema.Schema.Type<typeof MachineDocument>
 
@@ -245,7 +245,7 @@ export type MachineDocument = Schema.Schema.Type<typeof MachineDocument>
  * Options for capturing a machine document.
  *
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export interface MakeOptions<M extends Machine.Machine.Any> {
   readonly revision?: number | undefined
@@ -258,7 +258,7 @@ export interface MakeOptions<M extends Machine.Machine.Any> {
  * It never evaluates transition resolvers or activity sources.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const make: <M extends Machine.Machine.Any>(machine: M, options?: MakeOptions<M>) => MachineDocument =
   internal.make

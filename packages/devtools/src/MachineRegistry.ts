@@ -1,7 +1,7 @@
 /**
  * Live registry of machine inspection results for one project.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
@@ -15,19 +15,19 @@ import type * as ProjectInspector from "./ProjectInspector.js"
  * Current registry state sent to browser clients.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Snapshot = DevToolsProtocol.RegistrySnapshot
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export interface Options extends ProjectInspector.InspectOptions {
 }
@@ -36,7 +36,7 @@ export interface Options extends ProjectInspector.InspectOptions {
  * Failure while starting the initial project inspection.
  *
  * @category errors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class RegistryError extends Schema.Error<RegistryError>(
   "@typeonce/effect-machine-devtools/MachineRegistry/RegistryError"
@@ -51,7 +51,7 @@ export class RegistryError extends Schema.Error<RegistryError>(
  * document as a partial result while exposing the new diagnostics.
  *
  * @category services
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class MachineRegistry extends Context.Service<MachineRegistry, {
   readonly get: Effect.Effect<Snapshot>
@@ -64,6 +64,6 @@ export class MachineRegistry extends Context.Service<MachineRegistry, {
  * source file changes.
  *
  * @category layers
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const layer = (options: Options) => internal.layer({ MachineRegistry, RegistryError }, options)

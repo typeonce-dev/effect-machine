@@ -1,7 +1,7 @@
 /**
  * Local HTTP server for the Effect Machine visualizer.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -10,7 +10,7 @@ import type * as MachineRegistry from "./MachineRegistry.js"
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export interface Options {
   readonly root: string
@@ -24,7 +24,7 @@ export interface Options {
  * Failure while starting or serving the local visualizer.
  *
  * @category errors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class DevServerError extends Schema.Error<DevServerError>(
   "@typeonce/effect-machine-devtools/DevServer/DevServerError"
@@ -38,7 +38,7 @@ export class DevServerError extends Schema.Error<DevServerError>(
  * Starts the local visualizer and runs until interrupted.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const run = (options: Options): Effect.Effect<never, DevServerError, MachineRegistry.MachineRegistry> =>
   internal.run(DevServerError, options)

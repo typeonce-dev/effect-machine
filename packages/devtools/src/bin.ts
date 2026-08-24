@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
+import PackageJson from "../package.json" with { type: "json" }
 import * as DevServer from "./DevServer.js"
 import * as MachineRegistry from "./MachineRegistry.js"
 import * as ProjectInspector from "./ProjectInspector.js"
@@ -44,7 +45,7 @@ const cli = Command.make("effect-machine", { root, include, host, port, open }).
   })
 )
 
-Command.run(cli, { version: "0.1.0" }).pipe(
+Command.run(cli, { version: PackageJson.version }).pipe(
   Effect.provide(NodeServices.layer),
   NodeRuntime.runMain
 )

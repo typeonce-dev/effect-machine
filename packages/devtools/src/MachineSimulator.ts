@@ -1,7 +1,7 @@
 /**
  * Side-effect-free, best-effort simulation over a machine document.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import * as Schema from "effect/Schema"
 import * as internal from "./internal/machineSimulator.js"
@@ -11,7 +11,7 @@ import type * as MachineDocument from "./MachineDocument.js"
  * Serializable state of a simulation session.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Snapshot = Schema.Struct({
   step: Schema.Natural,
@@ -21,7 +21,7 @@ export const Snapshot = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
 
@@ -29,7 +29,7 @@ export type Snapshot = Schema.Schema.Type<typeof Snapshot>
  * Opaque simulation state paired with its source document.
  *
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export interface Session {
   readonly document: MachineDocument.MachineDocument
@@ -40,7 +40,7 @@ export interface Session {
  * Runtime behavior deliberately skipped by a best-effort step.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Note = Schema.Literals([
   "runtime-effects-skipped",
@@ -51,7 +51,7 @@ export const Note = Schema.Literals([
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Note = Schema.Schema.Type<typeof Note>
 
@@ -65,7 +65,7 @@ const ResultFields = {
  * A topologically deterministic step.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Applied = Schema.Struct({
   ...ResultFields,
@@ -75,7 +75,7 @@ export const Applied = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Applied = Schema.Schema.Type<typeof Applied>
 
@@ -83,7 +83,7 @@ export type Applied = Schema.Schema.Type<typeof Applied>
  * An event with no registration in the current active configuration.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Blocked = Schema.Struct({
   ...ResultFields,
@@ -93,7 +93,7 @@ export const Blocked = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Blocked = Schema.Schema.Type<typeof Blocked>
 
@@ -102,7 +102,7 @@ export type Blocked = Schema.Schema.Type<typeof Blocked>
  * evaluate.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Indeterminate = Schema.Struct({
   ...ResultFields,
@@ -119,19 +119,19 @@ export const Indeterminate = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Indeterminate = Schema.Schema.Type<typeof Indeterminate>
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const StepResult = Schema.Union([Applied, Blocked, Indeterminate])
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type StepResult = Schema.Schema.Type<typeof StepResult>
 
@@ -140,7 +140,7 @@ export type StepResult = Schema.Schema.Type<typeof StepResult>
  * initial topology.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const start: (document: MachineDocument.MachineDocument) => Session = internal.start
 
@@ -149,6 +149,6 @@ export const start: (document: MachineDocument.MachineDocument) => Session = int
  * is statically known; its notes list runtime behavior that was skipped.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const send: (session: Session, event: string) => StepResult = internal.send

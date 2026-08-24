@@ -1,7 +1,7 @@
 /**
  * Discovery and isolated evaluation of Effect Machine definitions in a project.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -13,7 +13,7 @@ import * as internal from "./internal/projectInspector.js"
  * A source module containing at least one `.handle(...)` machine definition.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Candidate = Schema.Struct({
   file: Schema.String,
@@ -22,7 +22,7 @@ export const Candidate = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Candidate = Schema.Schema.Type<typeof Candidate>
 
@@ -32,7 +32,7 @@ export type Candidate = Schema.Schema.Type<typeof Candidate>
  * Include and exclude entries are glob patterns relative to `root`.
  *
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export interface InspectOptions {
   readonly root: string
@@ -45,7 +45,7 @@ export interface InspectOptions {
  * A typed failure while reading or parsing the project source tree.
  *
  * @category errors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class DiscoveryError extends Schema.Error<DiscoveryError>(
   "@typeonce/effect-machine-devtools/ProjectInspector/DiscoveryError"
@@ -60,7 +60,7 @@ export class DiscoveryError extends Schema.Error<DiscoveryError>(
  * project modules are returned as `DevToolsProtocol.Failed` values instead.
  *
  * @category errors
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class EvaluationError extends Schema.Error<EvaluationError>(
   "@typeonce/effect-machine-devtools/ProjectInspector/EvaluationError"
@@ -74,7 +74,7 @@ export class EvaluationError extends Schema.Error<EvaluationError>(
  * Service for locating and evaluating machine modules.
  *
  * @category services
- * @since 0.1.0
+ * @since 0.23.0
  */
 export class ProjectInspector extends Context.Service<ProjectInspector, {
   readonly discover: (options: InspectOptions) => Effect.Effect<ReadonlyArray<Candidate>, DiscoveryError>
@@ -91,7 +91,7 @@ export class ProjectInspector extends Context.Service<ProjectInspector, {
  * Discovers machine candidates with the configured inspector.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const discover = (options: InspectOptions): Effect.Effect<
   ReadonlyArray<Candidate>,
@@ -103,7 +103,7 @@ export const discover = (options: InspectOptions): Effect.Effect<
  * Evaluates machine candidates with the configured inspector.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const evaluate = (
   candidates: ReadonlyArray<Candidate>,
@@ -115,7 +115,7 @@ export const evaluate = (
  * Discovers and evaluates every machine candidate in a project.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const inspect = (options: InspectOptions): Effect.Effect<
   ReadonlyArray<DevToolsProtocol.MachineResult>,
@@ -128,6 +128,6 @@ export const inspect = (options: InspectOptions): Effect.Effect<
  * fresh worker so a broken project module cannot corrupt the long-lived host.
  *
  * @category layers
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const layer = internal.layer({ ProjectInspector, DiscoveryError, EvaluationError })

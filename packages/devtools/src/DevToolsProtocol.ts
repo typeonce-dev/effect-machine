@@ -1,7 +1,7 @@
 /**
  * Versioned messages exchanged by Effect Machine devtools processes.
  *
- * @since 0.1.0
+ * @since 0.23.0
  */
 import * as Schema from "effect/Schema"
 import * as MachineDocument from "./MachineDocument.js"
@@ -10,13 +10,13 @@ import * as MachineDocument from "./MachineDocument.js"
  * Current devtools protocol version.
  *
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const protocolVersion = 1 as const
 
 /**
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Location = Schema.Struct({
   file: Schema.String,
@@ -26,7 +26,7 @@ export const Location = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Location = Schema.Schema.Type<typeof Location>
 
@@ -34,7 +34,7 @@ export type Location = Schema.Schema.Type<typeof Location>
  * A recoverable or terminal problem associated with one machine candidate.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Diagnostic = Schema.Struct({
   severity: Schema.Literals(["warning", "error"]),
@@ -46,7 +46,7 @@ export const Diagnostic = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Diagnostic = Schema.Schema.Type<typeof Diagnostic>
 
@@ -59,7 +59,7 @@ const ResultFields = {
  * A complete machine inspection result.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Ready = Schema.Struct({
   ...ResultFields,
@@ -70,7 +70,7 @@ export const Ready = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Ready = Schema.Schema.Type<typeof Ready>
 
@@ -78,7 +78,7 @@ export type Ready = Schema.Schema.Type<typeof Ready>
  * A usable document accompanied by diagnostics from an incomplete reload.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Partial = Schema.Struct({
   ...ResultFields,
@@ -89,7 +89,7 @@ export const Partial = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Partial = Schema.Schema.Type<typeof Partial>
 
@@ -97,7 +97,7 @@ export type Partial = Schema.Schema.Type<typeof Partial>
  * A machine candidate that could not produce a document.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const Failed = Schema.Struct({
   ...ResultFields,
@@ -109,7 +109,7 @@ export const Failed = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type Failed = Schema.Schema.Type<typeof Failed>
 
@@ -117,13 +117,13 @@ export type Failed = Schema.Schema.Type<typeof Failed>
  * Schema for every result returned by discovery and evaluation.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const MachineResult = Schema.Union([Ready, Partial, Failed])
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type MachineResult = Schema.Schema.Type<typeof MachineResult>
 
@@ -131,7 +131,7 @@ export type MachineResult = Schema.Schema.Type<typeof MachineResult>
  * A complete live-registry update sent to browser clients.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 0.23.0
  */
 export const RegistrySnapshot = Schema.Struct({
   protocolVersion: Schema.Literal(protocolVersion),
@@ -141,6 +141,6 @@ export const RegistrySnapshot = Schema.Struct({
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 0.23.0
  */
 export type RegistrySnapshot = Schema.Schema.Type<typeof RegistrySnapshot>
