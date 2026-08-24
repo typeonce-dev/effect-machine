@@ -13,3 +13,8 @@ export * as DevToolsProtocol from "./DevToolsProtocol.js"
  * @since 0.1.0
  */
 export * as MachineDocument from "./MachineDocument.js"
+
+/**
+ * @since 0.1.0
+ */
+export * as ProjectInspector from "./ProjectInspector.js"

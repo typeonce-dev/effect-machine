@@ -17,18 +17,19 @@
     "dev": "vite --config vite.config.ts"
   },
   "dependencies": {
-    "@typeonce/effect-machine": "workspace:^"
+    "@effect/platform-node": "4.0.0-rc.111",
+    "@typeonce/effect-machine": "workspace:^",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
   },
   "peerDependencies": {
     "effect": "4.0.0-rc.111"
   },
   "devDependencies": {
     "@types/node": "25.7.0",
-    "effect": "4.0.0-rc.111",
-    "typescript": "6.0.3",
-    "vite": "8.1.5"
+    "effect": "4.0.0-rc.111"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19.0"
   }
 }
