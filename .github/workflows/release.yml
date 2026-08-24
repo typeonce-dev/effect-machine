@@ -6,8 +6,9 @@ on:
     paths:
       - ".changeset/**"
       - "package.json"
+      - "packages/*/package.json"
       - "pnpm-lock.yaml"
-      - "src/**"
+      - "packages/*/src/**"
 
 concurrency:
   group: release-${{ github.ref }}

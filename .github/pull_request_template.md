@@ -5,7 +5,7 @@
 ## Changeset
 
 - [ ] Added or updated for a library or package-metadata change
-- [ ] Not required because this PR does not change `src/` or `package.json`
+- [ ] Not required because this PR does not change a publishable package
 
 ## Validation
 

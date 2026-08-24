@@ -73,7 +73,10 @@ const readSiteModel = (inputDirectory, config) => {
     }
   })
   const changelog = readChangelog(packageManifest.name)
-  const agentGuide = readFileSync(join(repositoryDirectory, "docs", "agent-guide.md"), "utf8")
+  const agentGuide = readFileSync(
+    join(repositoryDirectory, "packages", "effect-machine", "docs", "agent-guide.md"),
+    "utf8"
+  )
 
   return {
     ...config,
@@ -192,7 +195,7 @@ export const renderChangelogPage = (site) => {
 
 export const renderAgentGuidePage = (site) => {
   const resolveLink = (href) => href.startsWith("./") && href.endsWith(".md")
-    ? `${site.package.repositoryUrl}/blob/main/docs/${href.slice(2)}`
+    ? `${site.package.repositoryUrl}/blob/main/packages/effect-machine/docs/${href.slice(2)}`
     : href
   const content = `
     <article class="agent-guide" data-pagefind-meta="type:agent-guide">
@@ -840,7 +843,7 @@ const parseChangeGroups = (markdown) => {
 
 const readChangelog = (packageName) => {
   const releases = parseChangelog(
-    readFileSync(join(repositoryDirectory, "CHANGELOG.md"), "utf8"),
+    readFileSync(join(repositoryDirectory, "packages", "effect-machine", "CHANGELOG.md"), "utf8"),
     readReleaseDates(packageName)
   )
   const pending = readdirSync(join(repositoryDirectory, ".changeset"), { withFileTypes: true })

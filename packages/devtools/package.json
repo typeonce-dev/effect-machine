@@ -1,0 +1,77 @@
+{
+  "name": "@typeonce/effect-machine-devtools",
+  "version": "0.22.0",
+  "description": "Local development tools for Effect Machine",
+  "author": "Sandro Maglione",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/typeonce-dev/effect-machine.git",
+    "directory": "packages/devtools"
+  },
+  "bugs": {
+    "url": "https://github.com/typeonce-dev/effect-machine/issues"
+  },
+  "homepage": "https://github.com/typeonce-dev/effect-machine/tree/main/packages/devtools#readme",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "bin": {
+    "effect-machine": "./dist/bin.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./DevToolsProtocol": "./src/DevToolsProtocol.ts",
+    "./MachineDocument": "./src/MachineDocument.ts",
+    "./MachineSimulator": "./src/MachineSimulator.ts",
+    "./package.json": "./package.json",
+    "./internal/*": null
+  },
+  "scripts": {
+    "build": "node scripts/clean.mjs && vite build --config vite.config.ts && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json",
+    "dev": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@effect/platform-browser": "4.0.0-rc.111",
+    "@effect/platform-node": "4.0.0-rc.111",
+    "@typeonce/effect-machine": "workspace:^",
+    "chokidar": "4.0.3",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.111"
+  },
+  "devDependencies": {
+    "@types/node": "25.7.0",
+    "effect": "4.0.0-rc.111",
+    "tsx": "4.21.0"
+  },
+  "files": [
+    "src/**/*",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/client/**/*",
+    "index.html",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": "./dist/index.js",
+      "./DevToolsProtocol": "./dist/DevToolsProtocol.js",
+      "./MachineDocument": "./dist/MachineDocument.js",
+      "./MachineSimulator": "./dist/MachineSimulator.js",
+      "./internal/*": null
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -29,6 +29,9 @@ for (let index = 2; index < process.argv.length; index += 1) {
 
 const root = options.root
 const tsc = resolve(root, "node_modules", "typescript", "bin", "tsc")
+const performanceDirectory = existsSync(resolve(root, "packages", "effect-machine", "perf", "types"))
+  ? resolve(root, "packages", "effect-machine", "perf", "types")
+  : resolve(root, "perf", "types")
 
 // Instantiation counts are deterministic for the pinned compiler. Budgets keep
 // roughly thirty percent headroom; wall-clock check time is never gated.
@@ -242,7 +245,7 @@ const version = run(["--version"])
 const results = new Map()
 
 for (const scenario of scenarios) {
-  const file = resolve(root, "perf", "types", scenario.file)
+  const file = resolve(performanceDirectory, scenario.file)
   if (!existsSync(file)) {
     if (options.allowMissing) {
       continue

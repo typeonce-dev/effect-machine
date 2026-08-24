@@ -23,7 +23,9 @@ export const classifyChanges = ({
   beforePackageJson,
   changedFiles
 }) => {
-  const sourceChanged = changedFiles.some((path) => path.startsWith("src/"))
+  const sourceChanged = changedFiles.some((path) =>
+    path.startsWith("src/") || path.startsWith("packages/effect-machine/src/")
+  )
   const dependencyChanged = relevantDependenciesChanged(beforePackageJson, afterPackageJson)
   const classifierChanged = changedFiles.includes("scripts/ci-changes.mjs")
   const typePerformance = sourceChanged ||
@@ -31,21 +33,27 @@ export const classifyChanges = ({
     classifierChanged ||
     changedFiles.some((path) =>
       path.startsWith("perf/types/") ||
+      path.startsWith("packages/effect-machine/perf/types/") ||
       path === "scripts/type-performance.mjs" ||
       path === "scripts/compare-type-performance.mjs" ||
       path === "tsconfig.json" ||
       path === "tsconfig.build.json" ||
+      path === "packages/effect-machine/tsconfig.build.json" ||
       path === ".github/workflows/type-performance.yml"
     )
   const runtimePerformance = dependencyChanged ||
     classifierChanged ||
     changedFiles.some((path) =>
       path.startsWith("src/internal/machine/") ||
+      path.startsWith("packages/effect-machine/src/internal/machine/") ||
       path === "src/Machine.ts" ||
+      path === "packages/effect-machine/src/Machine.ts" ||
       path.startsWith("perf/runtime/") ||
+      path.startsWith("packages/effect-machine/perf/runtime/") ||
       path === "scripts/runtime-performance.mjs" ||
       path === "scripts/compare-runtime-performance.mjs" ||
       path === "tsconfig.build.json" ||
+      path === "packages/effect-machine/tsconfig.build.json" ||
       path === ".github/workflows/runtime-performance.yml"
     )
   return {
@@ -56,7 +64,17 @@ export const classifyChanges = ({
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" })
 
-const readPackageJsonAt = (revision) => JSON.parse(git("show", `${revision}:package.json`))
+const readPackageJsonAt = (revision) => {
+  for (const path of ["packages/effect-machine/package.json", "package.json"]) {
+    try {
+      const manifest = JSON.parse(git("show", `${revision}:${path}`))
+      if (manifest.name === "@typeonce/effect-machine") return manifest
+    } catch {
+      // Try the layout used by the other revision.
+    }
+  }
+  throw new Error(`Unable to locate @typeonce/effect-machine package.json at ${revision}`)
+}
 
 const main = () => {
   const options = {

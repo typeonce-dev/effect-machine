@@ -16,6 +16,7 @@ When compatibility, convenience, concision, and semantic clarity conflict, prefe
 ## Experimental versioning
 
 - The library is experimental and pre-1.0. Public additions and breaking API changes use a minor changeset; compatible fixes and implementation improvements use a patch changeset. Do not create major changesets before 1.0.
+- `@typeonce/effect-machine` and `@typeonce/effect-machine-devtools` release from one Changesets fixed group and must always have the same version. Keep their package versions, workspace dependency, and release configuration synchronized so users can install matching versions for compatibility.
 - Backward compatibility is not currently a design goal. Change or remove an existing API whenever a clearer, safer, smaller long-term design replaces it.
 - Do not add deprecated aliases, compatibility wrappers, or parallel APIs solely to preserve an inferior existing design unless the user explicitly requests them.
 - Explain the resulting API and direct migration in changesets. Do not use changelog entries to credit an external library or narrate implementation history.
@@ -31,12 +32,12 @@ When compatibility, convenience, concision, and semantic clarity conflict, prefe
 ## Effect internal standards
 
 - Before introducing an internal abstraction or protocol, inspect the analogous implementation under `references/effect` and follow its naming, module-boundary, and ownership conventions where they apply.
-- Keep public modules declarative and route implementation through `src/internal`. Preserve directed dependencies and avoid internal barrel modules.
+- Keep public modules declarative and route implementation through `packages/effect-machine/src/internal`. Preserve directed dependencies and avoid internal barrel modules.
 - Give optimized planners and runtimes explicit contracts and ownership boundaries. Do not hide mutable state behind readonly types or retain caller-owned mutable containers in cached structures.
 - Treat the generic planner/runtime as the semantic reference. Optimized strategies must fail closed: a new capability uses the generic path until its optimized semantics are implemented deliberately.
 - Keep casts at genuine erased boundaries only. Prefer narrower internal representations, explicit invariants, and exhaustive capability checks over broad `any`-based protocols.
 - For every optimized semantic change, add forced generic-versus-optimized differential coverage and a focused regression test. Include relevant edge cases such as targetless and reentering transitions, simultaneous transitions, raised events, completion, invocation, and retained snapshots.
-- Put public behavioral tests under `test/` and implementation-strategy tests under `test/internal/`. Tests should establish observable semantics, not mirror implementation details.
+- Put public behavioral tests under `packages/effect-machine/test/` and implementation-strategy tests under `packages/effect-machine/test/internal/`. Tests should establish observable semantics, not mirror implementation details.
 - Treat correctness, type safety, and benchmark regressions as blockers. Do not recover performance by weakening semantics or public inference.
 
 ## Verification
@@ -63,5 +64,5 @@ Use the pull request performance workflows to compare against the base branch; d
 
 ## Pull request conventions
 
-- Add or update a changeset for changes under `src/` or changes to `package.json`, following the changelog-writing guide in `.changeset/README.md`.
+- Add or update a changeset for changes under `packages/effect-machine/src/` or changes to a publishable package manifest, following the changelog-writing guide in `.changeset/README.md`.
 - Fill in the pull request template, including the validation performed and the changeset decision.

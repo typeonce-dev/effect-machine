@@ -1,57 +1,17 @@
 {
-  "name": "@typeonce/effect-machine",
-  "version": "0.22.0",
-  "description": "Schema-first state machines and statecharts for Effect",
-  "author": "Sandro Maglione",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/typeonce-dev/effect-machine.git"
-  },
-  "bugs": {
-    "url": "https://github.com/typeonce-dev/effect-machine/issues"
-  },
-  "homepage": "https://github.com/typeonce-dev/effect-machine#readme",
+  "private": true,
   "type": "module",
-  "license": "MIT",
-  "sideEffects": false,
-  "files": [
-    "src/**/*.ts",
-    "dist",
-    "docs",
-    "README.md",
-    "LICENSE",
-    "NOTICE"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./reactivity": {
-      "types": "./dist/unstable/reactivity/index.d.ts",
-      "import": "./dist/unstable/reactivity/index.js"
-    },
-    "./cluster": {
-      "types": "./dist/unstable/cluster/index.d.ts",
-      "import": "./dist/unstable/cluster/index.js"
-    },
-    "./testing": {
-      "types": "./dist/testing/index.d.ts",
-      "import": "./dist/testing/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
+  "packageManager": "pnpm@10.17.1",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm --recursive --filter \"./packages/**\" run build",
     "test": "vitest run",
-    "test:types": "tstyche",
-    "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs",
-    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/invoke-autocomplete.test.mjs scripts/runtime-performance-compatibility.test.mjs scripts/runtime-performance-regression.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:types": "pnpm --dir packages/effect-machine test:types",
+    "devtools": "pnpm --dir packages/devtools dev",
+    "visualizer": "pnpm devtools",
+    "visualizer:build": "pnpm --dir packages/devtools build",
+    "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs packages/effect-machine && node scripts/check-devtools-architecture.mjs packages/devtools",
+    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/invoke-autocomplete.test.mjs scripts/release-contract.test.mjs scripts/runtime-performance-compatibility.test.mjs scripts/runtime-performance-regression.test.mjs",
+    "typecheck": "pnpm --recursive --filter \"./packages/**\" run check && tsc -p tsconfig.tests.json",
     "perf:types": "pnpm build && node scripts/type-performance.mjs",
     "perf:runtime": "pnpm build && node --expose-gc scripts/runtime-performance.mjs",
     "format": "dprint fmt",
@@ -65,13 +25,11 @@
     "docs:site:serve": "node scripts/api-reference-site/serve.mjs",
     "test:consumer": "node scripts/test-consumer.mjs",
     "pack:check": "node scripts/pack-check.mjs",
-    "check": "pnpm format:check && pnpm check:architecture && pnpm check:ci && pnpm docs:api:check && pnpm docs:site:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check",
+    "devtools:pack-check": "node scripts/devtools-pack-check.mjs",
+    "check": "pnpm format:check && pnpm check:architecture && pnpm check:ci && pnpm docs:api:check && pnpm docs:site:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check && pnpm devtools:pack-check",
     "changeset": "changeset",
     "version-packages": "changeset version && dprint fmt",
     "release": "pnpm build && changeset publish"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.111"
   },
   "devDependencies": {
     "@changesets/cli": "2.31.0",
@@ -84,10 +42,7 @@
     "tstyche": "7.2.1",
     "typedoc": "0.28.20",
     "typescript": "6.0.3",
+    "vite": "8.1.5",
     "vitest": "4.1.10"
-  },
-  "packageManager": "pnpm@10.17.1",
-  "engines": {
-    "node": ">=20"
   }
 }

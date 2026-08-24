@@ -491,7 +491,7 @@ export const formatArchitectureDiagnostics = (diagnostics) =>
 const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 
 if (isMain) {
-  const diagnostics = checkArchitecture()
+  const diagnostics = checkArchitecture({ rootDirectory: process.argv[2] ?? process.cwd() })
   if (diagnostics.length > 0) {
     console.error(formatArchitectureDiagnostics(diagnostics))
     process.exitCode = 1
