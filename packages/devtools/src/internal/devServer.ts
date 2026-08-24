@@ -82,6 +82,7 @@ const staleSimulation = (
   protocolVersion: DevToolsProtocol.protocolVersion,
   key: request.key,
   revision: request.revision,
+  inputIssues: [],
   diagnostics: [{
     severity: "error",
     code: "simulation-stale",

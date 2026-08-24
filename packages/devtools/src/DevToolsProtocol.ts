@@ -378,6 +378,24 @@ export const SimulationReady = Schema.Struct({
 export type SimulationReady = Schema.Schema.Type<typeof SimulationReady>
 
 /**
+ * One authoritative Effect Schema issue associated with a machine or event
+ * input path.
+ *
+ * @category schemas
+ * @since 0.24.0
+ */
+export const InputIssue = Schema.Struct({
+  path: Schema.Array(Schema.Union([Schema.String, Schema.Number])),
+  message: Schema.String
+})
+
+/**
+ * @category models
+ * @since 0.24.0
+ */
+export type InputIssue = Schema.Schema.Type<typeof InputIssue>
+
+/**
  * Recoverable failure produced while loading, decoding, or planning a session.
  *
  * @category schemas
@@ -388,7 +406,8 @@ export const SimulationFailed = Schema.Struct({
   _tag: Schema.tag("SimulationFailed"),
   key: Schema.String,
   revision: Schema.Natural,
-  diagnostics: Schema.Array(Diagnostic)
+  diagnostics: Schema.Array(Diagnostic),
+  inputIssues: Schema.Array(InputIssue)
 })
 
 /**

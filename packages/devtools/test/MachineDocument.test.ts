@@ -25,13 +25,21 @@ describe("MachineDocument", () => {
   it("captures form schemas for machine and public event inputs", () => {
     const document = MachineDocument.make(plannerMachine)
     const begin = document.inputs.events.find(({ event }) => event === "Begin")
+    const machineSchema = document.inputs.machine?.schema as {
+      readonly properties?: Readonly<Record<string, unknown>>
+      readonly required?: ReadonlyArray<string>
+    } | undefined
 
-    assert.deepStrictEqual(document.inputs.machine?.schema, {
-      type: "object",
-      properties: { owner: { type: "string" } },
-      required: ["owner"],
-      additionalProperties: false
-    })
+    assert.deepStrictEqual(Object.keys(machineSchema?.properties ?? {}), [
+      "owner",
+      "attempts",
+      "notifications",
+      "mode",
+      "note",
+      "labels",
+      "preferences"
+    ])
+    assert.deepStrictEqual(machineSchema?.required, ["owner", "attempts", "notifications", "mode"])
     assert.deepStrictEqual(begin?.schema.schema, { $ref: "#/$defs/PlannerBeginEncoded" })
     assert.deepStrictEqual(document.inputs.events.map(({ event }) => event), ["Begin", "Cancel"])
   })

@@ -120,28 +120,54 @@ describe("Interactive text visualization", () => {
     const beginSchema = document.inputs.events.find(({ event }) => event === "Begin")?.schema
     const begin = beginSchema === undefined ? undefined : projectInputSchema(beginSchema)
 
-    assert.deepStrictEqual(input, {
-      _tag: "Object",
-      title: undefined,
-      description: undefined,
-      fields: [{
-        key: "owner",
-        required: true,
-        field: {
-          _tag: "String",
-          title: undefined,
-          description: undefined,
-          defaultValue: undefined,
-          format: undefined,
-          minLength: undefined,
-          maxLength: undefined,
-          pattern: undefined
-        }
-      }]
-    })
+    assert.strictEqual(input?._tag, "Object")
+    if (input?._tag !== "Object") return
+    const inputFields = new Map(input.fields.map(({ field, key }) => [key, field]))
+    assert.deepStrictEqual(input.fields.map(({ key }) => key), [
+      "owner",
+      "attempts",
+      "notifications",
+      "mode",
+      "note",
+      "labels",
+      "preferences"
+    ])
+    assert.deepInclude(inputFields.get("owner"), { _tag: "String", title: "Owner", minLength: 1 })
+    assert.deepInclude(inputFields.get("attempts"), { _tag: "Number", integer: true, minimum: 1, maximum: 5 })
+    assert.strictEqual(inputFields.get("notifications")?._tag, "Boolean")
+    assert.deepInclude(inputFields.get("mode"), { _tag: "Enum", values: ["guided", "automatic"] })
+    assert.deepInclude(inputFields.get("labels"), { _tag: "Array", minItems: 1, maxItems: 3 })
+    assert.strictEqual(inputFields.get("preferences")?._tag, "Object")
     assert.strictEqual(begin?._tag, "Object")
     if (begin?._tag !== "Object") return
-    assert.deepStrictEqual(begin.fields.map(({ key }) => key), ["_tag", "job", "priority"])
+    assert.deepStrictEqual(begin.fields.map(({ key }) => key), [
+      "_tag",
+      "job",
+      "priority",
+      "estimate",
+      "approved",
+      "notes",
+      "labels",
+      "route"
+    ])
     assert.strictEqual(begin.fields[2]?.field._tag, "Enum")
+    assert.deepInclude(begin.fields[3]?.field, { _tag: "Number", minimum: 0, maximum: 100 })
+  })
+
+  it("treats Effect's non-finite number encoding as one numeric field", () => {
+    assert.deepInclude(
+      projectInputSchema({
+        dialect: "draft-2020-12",
+        schema: {
+          anyOf: [
+            { type: "number" },
+            { type: "string", enum: ["Infinity", "-Infinity", "NaN"] }
+          ],
+          title: "Value"
+        },
+        definitions: {}
+      }),
+      { _tag: "Number", title: "Value", integer: false }
+    )
   })
 })

@@ -8,9 +8,56 @@ class Working extends Schema.TaggedClass<Working>("PlannerWorking")("Working", {
 }) {}
 class Finished extends Schema.TaggedClass<Finished>("PlannerFinished")("Finished", { job: Schema.String }) {}
 
+const Owner = Schema.NonEmptyString.annotate({
+  title: "Owner",
+  description: "A non-empty name carried into the initial Idle state."
+})
+const Attempts = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })).annotate({
+  title: "Attempts",
+  description: "An integer between one and five."
+})
+const Labels = Schema.Array(Schema.NonEmptyString).check(Schema.isLengthBetween(1, 3)).annotate({
+  title: "Labels",
+  description: "One to three non-empty labels."
+})
+const Route = Schema.Union([
+  Schema.Literal("direct").annotate({ title: "Direct" }),
+  Schema.Struct({
+    queue: Schema.NonEmptyString.annotate({
+      title: "Queue",
+      description: "The queue used by the queued route."
+    })
+  }).annotate({ title: "Queued" })
+]).annotate({
+  title: "Route",
+  description: "Choose a literal direct route or provide a queue."
+})
+
 class Begin extends Schema.TaggedClass<Begin>("PlannerBegin")("Begin", {
-  job: Schema.String,
-  priority: Schema.Literals(["normal", "urgent"])
+  job: Schema.NonEmptyString.annotate({
+    title: "Job",
+    description: "A non-empty job name used as the final output."
+  }),
+  priority: Schema.Literals(["normal", "urgent"]).annotate({
+    title: "Priority",
+    description: "Urgent jobs raise AutoFinish during the same macrostep."
+  }),
+  estimate: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 100 })).annotate({
+    title: "Estimate",
+    description: "A numeric estimate between zero and one hundred."
+  }),
+  approved: Schema.Boolean.annotate({
+    title: "Approved",
+    description: "A boolean checkbox included in the event payload."
+  }),
+  notes: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(80)).annotate({
+      title: "Notes",
+      description: "Optional text limited to eighty characters."
+    })
+  ),
+  labels: Schema.optionalKey(Labels),
+  route: Schema.optionalKey(Route)
 }) {}
 class Cancel extends Schema.TaggedClass<Cancel>("PlannerCancel")("Cancel", { reason: Schema.String }) {}
 class AutoFinish extends Schema.TaggedClass<AutoFinish>("PlannerAutoFinish")("AutoFinish", {}) {}
@@ -31,7 +78,36 @@ export const plannerMachine = Machine.make({
   events: Events,
   internalEvents: InternalEvents,
   emittedEvents: Emissions,
-  input: Schema.Struct({ owner: Schema.String }),
+  input: Schema.Struct({
+    owner: Owner,
+    attempts: Attempts,
+    notifications: Schema.Boolean.annotate({
+      title: "Notifications",
+      description: "A required boolean with false as a valid value."
+    }),
+    mode: Schema.Literals(["guided", "automatic"]).annotate({
+      title: "Mode",
+      description: "A fixed set of startup modes."
+    }),
+    note: Schema.optionalKey(
+      Schema.String.check(Schema.isMaxLength(40)).annotate({
+        title: "Note",
+        description: "Optional startup text limited to forty characters."
+      })
+    ),
+    labels: Schema.optionalKey(Labels),
+    preferences: Schema.optionalKey(
+      Schema.Struct({
+        retries: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3 })).annotate({
+          title: "Retries"
+        }),
+        dryRun: Schema.Boolean.annotate({ title: "Dry run" })
+      }).annotate({
+        title: "Preferences",
+        description: "An optional nested object."
+      })
+    )
+  }),
   initial: (to) => to.Idle().resolve(({ input, target }) => target.decoded(new Idle({ owner: input.owner })))
 }).handle({
   Idle: {

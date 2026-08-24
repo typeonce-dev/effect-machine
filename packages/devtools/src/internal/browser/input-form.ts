@@ -1,3 +1,4 @@
+import type { InputIssue } from "../../DevToolsProtocol.js"
 import type { InputSchema } from "../../MachineDocument.js"
 
 type JsonPrimitive = string | number | boolean | null
@@ -102,12 +103,43 @@ const annotations = (schema: Record<string, unknown>) => ({
   description: stringValue(schema.description)
 })
 
+const mergeAllOf = (
+  schema: Record<string, unknown>,
+  definitions: Readonly<Record<string, unknown>>
+): Record<string, unknown> => {
+  if (!Array.isArray(schema.allOf)) return schema
+  const { allOf, ...base } = schema
+  return Object.assign(
+    base,
+    ...allOf
+      .map((part) => resolveReference(part, definitions))
+      .filter(isRecord)
+      .map((part) => mergeAllOf(part, definitions))
+  )
+}
+
+const effectNumberAlternative = (
+  alternatives: ReadonlyArray<unknown>,
+  definitions: Readonly<Record<string, unknown>>
+): Record<string, unknown> | undefined => {
+  if (alternatives.length !== 2) return undefined
+  const resolved = alternatives.map((alternative) => resolveReference(alternative, definitions))
+  const number = resolved.find((alternative) => isRecord(alternative) && alternative.type === "number")
+  const encodedNonFinite = resolved.find((alternative) => {
+    if (!isRecord(alternative) || alternative.type !== "string" || !Array.isArray(alternative.enum)) return false
+    const enumValues: ReadonlyArray<unknown> = alternative.enum
+    return enumValues.length === 3 &&
+      ["Infinity", "-Infinity", "NaN"].every((value) => enumValues.includes(value))
+  })
+  return isRecord(number) && encodedNonFinite !== undefined ? number : undefined
+}
+
 const project = (
   value: unknown,
   definitions: Readonly<Record<string, unknown>>
 ): InputField => {
-  const resolved = resolveReference(value, definitions)
-  if (!isRecord(resolved)) {
+  const referenced = resolveReference(value, definitions)
+  if (!isRecord(referenced)) {
     return {
       _tag: "Unsupported",
       title: undefined,
@@ -115,6 +147,7 @@ const project = (
       reason: "This input schema cannot be represented as fields."
     }
   }
+  const resolved = mergeAllOf(referenced, definitions)
   const common = annotations(resolved)
   const alternatives = Array.isArray(resolved.oneOf)
     ? resolved.oneOf
@@ -122,6 +155,17 @@ const project = (
     ? resolved.anyOf
     : undefined
   if (alternatives !== undefined) {
+    const effectNumber = effectNumberAlternative(alternatives, definitions)
+    if (effectNumber !== undefined) {
+      return {
+        _tag: "Number",
+        ...common,
+        defaultValue: numberValue(resolved.default ?? effectNumber.default),
+        integer: false,
+        minimum: numberValue(resolved.minimum ?? effectNumber.minimum),
+        maximum: numberValue(resolved.maximum ?? effectNumber.maximum)
+      }
+    }
     return {
       _tag: "Union",
       ...common,
@@ -220,6 +264,9 @@ export interface InputForm {
   readonly hasFields: boolean
   readonly supported: boolean
   readonly read: () => InputFormResult
+  readonly clearIssues: () => void
+  readonly setIssues: (issues: ReadonlyArray<InputIssue>) => void
+  readonly setPending: (pending: boolean) => void
 }
 
 interface Control {
@@ -227,6 +274,10 @@ interface Control {
   readonly interactive: boolean
   readonly supported: boolean
   readonly read: () => unknown
+}
+
+interface RenderContext {
+  readonly issueTargets: Map<string, HTMLElement>
 }
 
 let nextControlId = 0
@@ -249,7 +300,72 @@ const labelText = (field: InputField, fallback: string): string => field.title ?
 const description = (field: InputField): HTMLElement | undefined =>
   field.description === undefined ? undefined : element("p", "input-description", field.description)
 
-const renderControl = (field: InputField, name: string): Control => {
+const fieldType = (field: InputField): string => {
+  switch (field._tag) {
+    case "String":
+      return field.format ?? "string"
+    case "Number":
+      return field.integer ? "integer" : "number"
+    case "Boolean":
+      return "boolean"
+    case "Enum":
+      return "enum"
+    case "Literal":
+      return "literal"
+    case "Object":
+      return "object"
+    case "Array":
+      return `${fieldType(field.item)}[]`
+    case "Union":
+      return "union"
+    case "Unsupported":
+      return "unsupported"
+  }
+}
+
+const fieldConstraints = (field: InputField): ReadonlyArray<string> => {
+  switch (field._tag) {
+    case "String":
+      return [
+        field.minLength === undefined ? undefined : `min ${field.minLength} characters`,
+        field.maxLength === undefined ? undefined : `max ${field.maxLength} characters`,
+        field.pattern === undefined ? undefined : `pattern ${field.pattern}`,
+        field.defaultValue === undefined ? undefined : `default ${field.defaultValue}`
+      ].filter((value): value is string => value !== undefined)
+    case "Number":
+      return [
+        field.minimum === undefined ? undefined : `min ${field.minimum}`,
+        field.maximum === undefined ? undefined : `max ${field.maximum}`,
+        field.defaultValue === undefined ? undefined : `default ${field.defaultValue}`
+      ].filter((value): value is string => value !== undefined)
+    case "Enum":
+      return [
+        `${field.values.length} options`,
+        field.defaultValue === undefined ? undefined : `default ${String(field.defaultValue)}`
+      ].filter((value): value is string => value !== undefined)
+    case "Literal":
+      return [`fixed ${String(field.value)}`]
+    case "Object":
+      return [`${field.fields.length} fields`]
+    case "Array":
+      return [
+        field.minItems === 0 ? undefined : `min ${field.minItems} items`,
+        field.maxItems === undefined ? undefined : `max ${field.maxItems} items`
+      ].filter((value): value is string => value !== undefined)
+    case "Union":
+      return [`${field.alternatives.length} variants`]
+    case "Boolean":
+    case "Unsupported":
+      return []
+  }
+}
+
+const renderControl = (
+  field: InputField,
+  name: string,
+  context: RenderContext,
+  path: ReadonlyArray<string | number>
+): Control => {
   switch (field._tag) {
     case "String": {
       const input = element("input", "input-control")
@@ -326,9 +442,12 @@ const renderControl = (field: InputField, name: string): Control => {
         const row = element("div", "input-field")
         const heading = element("div", "input-field-heading")
         const label = element("label", "input-label", labelText(property.field, property.key))
+        const identity = element("div", "input-field-identity")
+        identity.append(label, element("span", "input-field-type", fieldType(property.field)))
         const required = property.required ? element("span", "input-required", "required") : undefined
         let included: HTMLInputElement | undefined
-        const control = renderControl(property.field, `${name}.${property.key}`)
+        const propertyPath = [...path, property.key]
+        const control = renderControl(property.field, `${name}.${property.key}`, context, propertyPath)
         const labelled = control.element instanceof HTMLInputElement || control.element instanceof HTMLSelectElement
           ? control.element
           : control.element.querySelector<HTMLInputElement | HTMLSelectElement>(":scope > input, :scope > select")
@@ -338,19 +457,20 @@ const renderControl = (field: InputField, name: string): Control => {
           label.htmlFor = id
         }
         if (property.required) {
-          if (
-            control.element instanceof HTMLSelectElement ||
-            (control.element instanceof HTMLInputElement && control.element.type !== "checkbox")
-          ) {
+          if (control.element instanceof HTMLSelectElement) {
             control.element.required = true
+          } else if (control.element instanceof HTMLInputElement) {
+            control.element.required = property.field._tag === "Number" ||
+              (property.field._tag === "String" &&
+                (property.field.format !== undefined || (property.field.minLength ?? 0) > 0))
           }
-          heading.append(label, required!)
+          heading.append(identity, required!)
         } else {
           const optional = element("label", "input-optional")
           included = element("input")
           included.type = "checkbox"
           optional.append(included, element("span", undefined, "include"))
-          heading.append(label, optional)
+          heading.append(identity, optional)
           control.element.toggleAttribute("inert", true)
           control.element.classList.add("is-disabled")
           control.element.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
@@ -374,9 +494,19 @@ const renderControl = (field: InputField, name: string): Control => {
             ) control.element.disabled = !included!.checked
           })
         }
+        const issues = element("div", "input-errors")
+        issues.hidden = true
+        context.issueTargets.set(JSON.stringify(propertyPath), issues)
         row.append(heading, control.element)
+        const constraints = fieldConstraints(property.field)
+        if (constraints.length > 0) {
+          const metadata = element("div", "input-constraints")
+          constraints.forEach((constraint) => metadata.append(element("span", undefined, constraint)))
+          row.append(metadata)
+        }
         const details = description(property.field)
         if (details !== undefined) row.append(details)
+        row.append(issues)
         group.append(row)
         controls.push({ key: property.key, included, control })
       }
@@ -397,25 +527,33 @@ const renderControl = (field: InputField, name: string): Control => {
       const group = element("fieldset", "input-array")
       group.append(element("legend", undefined, labelText(field, name)))
       const items = element("div", "input-array-items")
-      const controls: Array<{ readonly row: HTMLElement; readonly control: Control }> = []
+      const controls: Array<{
+        readonly row: HTMLElement
+        readonly control: Control
+        readonly remove: HTMLButtonElement
+      }> = []
       const add = element("button", "input-array-add", "Add item")
       add.type = "button"
+      const refreshActions = (): void => {
+        add.disabled = field.maxItems !== undefined && controls.length >= field.maxItems
+        controls.forEach(({ remove }) => remove.disabled = controls.length <= field.minItems)
+      }
       const addItem = (): void => {
         if (field.maxItems !== undefined && controls.length >= field.maxItems) return
         const row = element("div", "input-array-item")
-        const control = renderControl(field.item, `${name}.${controls.length}`)
+        const control = renderControl(field.item, `${name}.${controls.length}`, context, [...path, controls.length])
         const remove = element("button", "input-array-remove", "Remove")
         remove.type = "button"
         remove.addEventListener("click", () => {
           row.remove()
           const index = controls.findIndex((item) => item.row === row)
           if (index >= 0) controls.splice(index, 1)
-          add.disabled = false
+          refreshActions()
         })
         row.append(control.element, remove)
         items.append(row)
-        controls.push({ row, control })
-        add.disabled = field.maxItems !== undefined && controls.length >= field.maxItems
+        controls.push({ row, control, remove })
+        refreshActions()
       }
       for (let index = 0; index < field.minItems; index++) addItem()
       add.addEventListener("click", addItem)
@@ -434,7 +572,7 @@ const renderControl = (field: InputField, name: string): Control => {
       const body = element("div", "input-union-body")
       let selected = 0
       const controls = field.alternatives.map((alternative, index) => {
-        const control = renderControl(alternative, `${name}.${index}`)
+        const control = renderControl(alternative, `${name}.${index}`, context, path)
         const option = element("option", undefined, labelText(alternative, `Option ${index + 1}`))
         option.value = String(index)
         select.append(option)
@@ -470,23 +608,62 @@ export const renderInputForm = (
   }
 ): InputForm => {
   const form = element("form", "schema-form")
+  const formIssues = element("div", "input-errors input-errors-form")
+  formIssues.hidden = true
+  const context: RenderContext = { issueTargets: new Map() }
   const projected = projectInputSchema(schema)
   const visible = projected._tag === "Object" && options.omit !== undefined
     ? { ...projected, fields: projected.fields.filter(({ key }) => !options.omit!.includes(key)) }
     : projected
-  const control = renderControl(visible, options.name)
-  form.append(control.element)
+  const control = renderControl(visible, options.name, context, [])
+  form.append(formIssues, control.element)
+  const clearIssues = (): void => {
+    formIssues.replaceChildren()
+    formIssues.hidden = true
+    context.issueTargets.forEach((target) => {
+      target.replaceChildren()
+      target.hidden = true
+    })
+  }
+  const setIssues = (issues: ReadonlyArray<InputIssue>): void => {
+    clearIssues()
+    const grouped = new Map<HTMLElement, Array<string>>()
+    for (const issue of issues) {
+      let target: HTMLElement = formIssues
+      for (let length = issue.path.length; length > 0; length--) {
+        const candidate = context.issueTargets.get(JSON.stringify(issue.path.slice(0, length)))
+        if (candidate !== undefined) {
+          target = candidate
+          break
+        }
+      }
+      const messages = grouped.get(target) ?? []
+      if (!messages.includes(issue.message)) messages.push(issue.message)
+      grouped.set(target, messages)
+    }
+    grouped.forEach((messages, target) => {
+      messages.forEach((message) => target.append(element("div", undefined, message)))
+      target.hidden = false
+    })
+  }
   return {
     element: form,
     hasFields: control.interactive,
     supported: control.supported,
     read: () => {
+      clearIssues()
       if (!form.reportValidity() || !control.supported) return { ok: false }
       const value = control.read()
       return {
         ok: true,
         value: isRecord(value) && options.fixed !== undefined ? { ...value, ...options.fixed } : value
       }
+    },
+    clearIssues,
+    setIssues,
+    setPending: (pending) => {
+      form.toggleAttribute("inert", pending)
+      form.setAttribute("aria-busy", String(pending))
     }
   }
 }

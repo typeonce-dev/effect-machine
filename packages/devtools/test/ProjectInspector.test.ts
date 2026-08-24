@@ -145,7 +145,55 @@ describe("ProjectInspector", () => {
       assert.strictEqual(failed._tag, "SimulationFailed")
       if (failed._tag === "SimulationFailed") {
         assert.strictEqual(failed.diagnostics[0]?.code, "simulation-planning-failed")
+        assert.deepStrictEqual(failed.inputIssues, [])
       }
+    }).pipe(Effect.provide(ProjectInspector.layer)))
+
+  it.effect("returns authoritative input issues with field paths", () =>
+    Effect.gen(function*() {
+      const inspector = yield* ProjectInspector.ProjectInspector
+      const source = {
+        file: "packages/devtools/src/internal/browser/planner-example.ts",
+        exportName: "plannerMachine"
+      }
+      const started = yield* inspector.simulate({
+        _tag: "StartSimulation",
+        protocolVersion: DevToolsProtocol.protocolVersion,
+        key: "planner-input-validation",
+        revision: 0,
+        source,
+        input: {
+          owner: "Agent",
+          attempts: 2,
+          notifications: false,
+          mode: "guided"
+        }
+      }, { root: process.cwd() })
+      if (started._tag !== "SimulationReady") return
+
+      const failed = yield* inspector.simulate({
+        _tag: "SendSimulationEvent",
+        protocolVersion: DevToolsProtocol.protocolVersion,
+        key: started.key,
+        revision: started.revision,
+        source,
+        step: started.step,
+        snapshot: started.snapshot,
+        event: {
+          _tag: "Begin",
+          job: "",
+          priority: "unsupported",
+          estimate: 101,
+          approved: true
+        }
+      }, { root: process.cwd() })
+
+      assert.strictEqual(failed._tag, "SimulationFailed")
+      if (failed._tag !== "SimulationFailed") return
+      assert.deepStrictEqual(
+        failed.inputIssues.map(({ path }) => path),
+        [["job"], ["priority"], ["estimate"]]
+      )
     }).pipe(Effect.provide(ProjectInspector.layer)))
 
   it.effect("reports payload branches, raised events, emissions, commands, and output", () =>
@@ -161,7 +209,12 @@ describe("ProjectInspector", () => {
         key: "planner-example",
         revision: 3,
         source,
-        input: { owner: "Agent" }
+        input: {
+          owner: "Agent",
+          attempts: 2,
+          notifications: false,
+          mode: "guided"
+        }
       }, { root: process.cwd() })
       assert.strictEqual(started._tag, "SimulationReady")
       if (started._tag !== "SimulationReady") return
@@ -174,7 +227,13 @@ describe("ProjectInspector", () => {
         source,
         step: started.step,
         snapshot: started.snapshot,
-        event: { _tag: "Begin", job: "release", priority: "urgent" }
+        event: {
+          _tag: "Begin",
+          job: "release",
+          priority: "urgent",
+          estimate: 13,
+          approved: true
+        }
       }, { root: process.cwd() })
 
       assert.strictEqual(planned._tag, "SimulationReady")

@@ -2,6 +2,7 @@ import * as NodeWorkerRunner from "@effect/platform-node/NodeWorkerRunner"
 import { Machine } from "@typeonce/effect-machine"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as WorkerRunner from "effect/unstable/workers/WorkerRunner"
 import { isAbsolute, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -54,6 +55,7 @@ const diagnostic = (
 })
 
 const messageOf = (cause: unknown): string => {
+  if (Schema.isSchemaError(cause)) return `Invalid machine value: ${cause.message}`
   if (cause instanceof Error && cause.message.length > 0) return cause.message
   if (typeof cause === "object" && cause !== null && "cause" in cause && Schema.isSchemaError(cause.cause)) {
     const boundary = "boundary" in cause ? String(cause.boundary) : "value"
@@ -210,6 +212,83 @@ const decodeSnapshot = Machine.decodeSnapshot as (
   snapshot: unknown
 ) => Effect.Effect<unknown, unknown>
 
+const validateSchemaInput = (
+  schema: Schema.Top,
+  input: unknown
+): Effect.Effect<void, Schema.SchemaError> =>
+  schema.makeEffect(input as never, { parseOptions: { errors: "all" } }).pipe(
+    Effect.asVoid,
+    Effect.mapError((issue) => new Schema.SchemaError(issue))
+  )
+
+const isJsonSchemaRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const resolveJsonSchemaReference = (
+  value: unknown,
+  definitions: Readonly<Record<string, unknown>>
+): Record<string, unknown> | undefined => {
+  if (!isJsonSchemaRecord(value)) return undefined
+  if (typeof value.$ref !== "string" || !value.$ref.startsWith("#/$defs/")) return value
+  const target = definitions[decodeURIComponent(value.$ref.slice("#/$defs/".length))]
+  return isJsonSchemaRecord(target) ? target : undefined
+}
+
+const inputEventTags = (schema: Machine.Machine.TaggedSchema): ReadonlySet<string> => {
+  const document = Schema.toJsonSchemaDocument(schema)
+  const root = resolveJsonSchemaReference(document.schema, document.definitions) ?? document.schema
+  const variants = isJsonSchemaRecord(root) && Array.isArray(root.anyOf)
+    ? root.anyOf
+    : isJsonSchemaRecord(root) && Array.isArray(root.oneOf)
+    ? root.oneOf
+    : [root]
+  const tags = new Set<string>()
+  for (const variant of variants) {
+    const resolved = resolveJsonSchemaReference(variant, document.definitions)
+    if (resolved === undefined || !isJsonSchemaRecord(resolved.properties)) continue
+    const tag = resolveJsonSchemaReference(resolved.properties._tag, document.definitions)
+    if (tag === undefined) continue
+    if (typeof tag.const === "string" || typeof tag.const === "number") tags.add(String(tag.const))
+    if (Array.isArray(tag.enum)) {
+      tag.enum.forEach((value) => {
+        if (typeof value === "string" || typeof value === "number") tags.add(String(value))
+      })
+    }
+  }
+  return tags
+}
+
+const inputEventSchemas = Machine.inputEventSchemas as (
+  machine: Machine.Machine.Any
+) => ReadonlyArray<Machine.Machine.TaggedSchema>
+
+const validateInitialInput = (
+  machine: Machine.Machine.Any,
+  request: DevToolsProtocol.StartSimulation
+): Effect.Effect<void, Schema.SchemaError | Error> => {
+  if (machine.input === undefined) {
+    return Object.hasOwn(request, "input")
+      ? Effect.fail(new Error("This machine does not accept startup input"))
+      : Effect.void
+  }
+  return validateSchemaInput(machine.input, request.input)
+}
+
+const validateEventInput = (
+  machine: Machine.Machine.Any,
+  event: unknown
+): Effect.Effect<void, Schema.SchemaError | Error> => {
+  if (typeof event !== "object" || event === null || !("_tag" in event)) {
+    return Effect.fail(new Error("A public event requires a _tag discriminator"))
+  }
+  const tag = String(event._tag)
+  const schemas = inputEventSchemas(machine)
+  const schema = schemas.find((schema) => inputEventTags(schema).has(tag))
+  return schema === undefined
+    ? Effect.fail(new Error(`This machine does not accept the public event ${tag}`))
+    : validateSchemaInput(schema, event)
+}
+
 const configuration = Machine.configuration as (
   machine: Machine.Machine.Any,
   snapshot: unknown
@@ -303,8 +382,22 @@ const simulationDiagnostic = (
   protocolVersion: DevToolsProtocol.protocolVersion,
   key: request.key,
   revision: request.revision,
+  inputIssues: inputIssuesOf(cause),
   diagnostics: [diagnostic(request.source.file, code, messageOf(cause))]
 })
+
+const inputIssuesOf = (cause: unknown): ReadonlyArray<DevToolsProtocol.InputIssue> => {
+  const schemaError = Schema.isSchemaError(cause)
+    ? cause
+    : typeof cause === "object" && cause !== null && "cause" in cause && Schema.isSchemaError(cause.cause)
+    ? cause.cause
+    : undefined
+  if (schemaError === undefined) return []
+  return SchemaIssue.makeFormatterStandardSchemaV1()(schemaError.issue).issues.map((issue) => ({
+    path: issue.path?.map((part) => typeof part === "number" ? part : String(part)) ?? [],
+    message: issue.message
+  }))
+}
 
 const isProjectFile = (root: string, file: string): boolean => {
   const absoluteRoot = resolve(root)
@@ -382,26 +475,29 @@ const simulate = (
   return loadSimulationMachine(server, workerRequest).pipe(
     Effect.flatMap((machine) => {
       if (request._tag === "StartSimulation") {
-        const planned = Object.hasOwn(request, "input")
-          ? planInitial(machine, request.input)
-          : planInitial(machine)
-        return Effect.flatMap(planned, (result) => {
-          const before = result.startingState ?? result.state
-          const after = result.state
-          if (before === undefined || after === undefined) {
-            return Effect.fail(new Error("The initial planner did not return a state snapshot"))
-          }
-          return makeSimulationReady(request, machine, before, after, result)
+        return Effect.flatMap(validateInitialInput(machine, request), () => {
+          const planned = Object.hasOwn(request, "input")
+            ? planInitial(machine, request.input)
+            : planInitial(machine)
+          return Effect.flatMap(planned, (result) => {
+            const before = result.startingState ?? result.state
+            const after = result.state
+            if (before === undefined || after === undefined) {
+              return Effect.fail(new Error("The initial planner did not return a state snapshot"))
+            }
+            return makeSimulationReady(request, machine, before, after, result)
+          })
         })
       }
-      return Effect.flatMap(
-        decodeSnapshot(machine, request.snapshot),
-        (before) =>
-          Effect.flatMap(plan(machine, before, simulationEvent(machine, request.event)), (result) => {
-            if (result.next === undefined) return Effect.fail(new Error("The planner did not return a next snapshot"))
-            return makeSimulationReady(request, machine, before, result.next, result)
-          })
-      )
+      return Effect.flatMap(validateEventInput(machine, request.event), () =>
+        Effect.flatMap(
+          decodeSnapshot(machine, request.snapshot),
+          (before) =>
+            Effect.flatMap(plan(machine, before, simulationEvent(machine, request.event)), (result) => {
+              if (result.next === undefined) return Effect.fail(new Error("The planner did not return a next snapshot"))
+              return makeSimulationReady(request, machine, before, result.next, result)
+            })
+        ))
     }),
     Effect.catch((cause) => Effect.succeed(simulationDiagnostic(request, "simulation-planning-failed", cause)))
   )

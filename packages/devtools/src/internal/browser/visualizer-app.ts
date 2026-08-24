@@ -11,7 +11,7 @@ import type {
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
-import { renderInputForm } from "./input-form.js"
+import { type InputForm, renderInputForm } from "./input-form.js"
 import { requestSimulation } from "./simulation-client.js"
 import {
   type EventInspection,
@@ -202,6 +202,7 @@ export const renderVisualizer = (
   let selectedFrame: SimulationFrame | undefined
   let simulation: SimulationReady | undefined
   let simulationPending = false
+  let activeInputForm: InputForm | undefined
 
   const activePaths = (): ReadonlyArray<string> => simulation?.current.activePaths ?? model.activePaths
   const candidateEvents = (): ReadonlyArray<string> => simulation?.current.candidateEvents ?? model.candidateEvents
@@ -228,6 +229,7 @@ export const renderVisualizer = (
   simulationButton.disabled = model.roots.length === 0
 
   const renderEmptyInspector = (): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const summary = createElement("div", "inspector-empty")
     summary.append(createElement("span", "inspector-empty-kind", "Machine"))
@@ -244,6 +246,7 @@ export const renderVisualizer = (
   }
 
   const renderInspection = (inspection: StateInspection): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const breadcrumbs = createElement("nav", "breadcrumbs")
@@ -305,6 +308,7 @@ export const renderVisualizer = (
   }
 
   const renderEventInspection = (inspection: EventInspection): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
@@ -334,6 +338,7 @@ export const renderVisualizer = (
           fixed: { _tag: inspection.event },
           omit: ["_tag"]
         })
+        activeInputForm = input
         const send = createElement("button", "simulation-action", `Send ${inspection.event}`)
         send.type = "submit"
         send.disabled = simulationPending || !input.supported
@@ -375,6 +380,7 @@ export const renderVisualizer = (
   }
 
   const renderSimulationFailure = (failureDiagnostics: ReadonlyArray<Diagnostic>): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
@@ -412,6 +418,7 @@ export const renderVisualizer = (
   }
 
   const renderSimulationTrace = (frame: SimulationFrame): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header trace-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
@@ -497,6 +504,7 @@ export const renderVisualizer = (
   }
 
   const renderStartSimulation = (): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
@@ -512,6 +520,7 @@ export const renderVisualizer = (
       return
     }
     const form = renderInputForm(input, { name: "Machine input" })
+    activeInputForm = form
     const start = createElement("button", "simulation-action", "Start simulation")
     start.type = "submit"
     start.disabled = simulationPending || visualization.source === null || !form.supported
@@ -546,12 +555,20 @@ export const renderVisualizer = (
   async function runSimulation(request: SimulationRequest): Promise<void> {
     if (simulationPending) return
     simulationPending = true
+    activeInputForm?.clearIssues()
+    activeInputForm?.setPending(true)
     simulationFeedback.textContent = "Planning in an isolated worker…"
     simulationFeedback.dataset.status = "pending"
     updateSimulationUi()
     try {
       const result = await requestSimulation(request)
       if (result._tag === "SimulationFailed") {
+        if (result.inputIssues.length > 0 && activeInputForm !== undefined) {
+          simulationFeedback.textContent = "Some input fields are invalid"
+          simulationFeedback.dataset.status = "error"
+          activeInputForm.setIssues(result.inputIssues)
+          return
+        }
         selectedFrame = undefined
         if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
         selectedEvent = undefined
@@ -561,6 +578,7 @@ export const renderVisualizer = (
         return
       }
       simulation = result
+      activeInputForm = undefined
       if (selectedPath !== undefined) {
         nodes.get(selectedPath)?.classList.remove("is-selected")
         rows.get(selectedPath)?.setAttribute("aria-selected", "false")
@@ -615,6 +633,7 @@ export const renderVisualizer = (
       renderSimulationFailure([failure])
     } finally {
       simulationPending = false
+      activeInputForm?.setPending(false)
       updateSimulationUi()
     }
   }
@@ -877,7 +896,7 @@ export const renderVisualizer = (
     } else if (selectedPath !== undefined) {
       const inspection = model.inspectState(selectedPath)
       if (inspection !== undefined) renderInspection(inspection)
-    } else if (selectedEvent !== undefined) {
+    } else if (selectedEvent !== undefined && activeInputForm === undefined) {
       renderEventInspection(model.inspectEvent(selectedEvent))
     }
   }

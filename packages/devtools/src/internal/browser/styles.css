@@ -816,6 +816,15 @@ button {
   gap: 12px;
 }
 
+.input-field-identity,
+.input-constraints {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .input-label,
 .input-required,
 .input-optional,
@@ -826,6 +835,28 @@ button {
 .input-label {
   color: #cfd3d9;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.input-field-type,
+.input-constraints span {
+  color: #8294ad;
+  font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.input-field-type {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: rgb(75 125 255 / 12%);
+}
+
+.input-constraints {
+  margin-top: -1px;
+}
+
+.input-constraints span + span::before {
+  margin-right: 6px;
+  color: #4f5762;
+  content: "·";
 }
 
 .input-required {
@@ -857,7 +888,8 @@ button {
 }
 
 .input-description,
-.input-unsupported {
+.input-unsupported,
+.input-errors {
   margin: 0;
   font-size: 11px;
   line-height: 1.55;
@@ -869,6 +901,16 @@ button {
 
 .input-unsupported {
   color: #d7a5a2;
+}
+
+.input-errors {
+  color: #efaaa6;
+}
+
+.input-errors-form {
+  padding: 8px 10px;
+  border: 1px solid rgb(224 89 84 / 30%);
+  background: rgb(224 89 84 / 8%);
 }
 
 .literal-control {
