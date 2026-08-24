@@ -1,17 +1,18 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Machine } from "@typeonce/effect-machine"
+import * as Schema from "effect/Schema"
 import { makeTextRenderer } from "../../../../effect-machine/test/machine/visualization/text.js"
 import { machine, snapshot } from "../../../src/internal/browser/example-machine.js"
 import { textTreeToString } from "../../../src/internal/browser/text-tree.js"
-import { makeVisualizationDocument } from "../../../src/internal/browser/visualization-document.js"
 import { makeVisualizerModel } from "../../../src/internal/browser/visualizer-model.js"
+import * as MachineDocument from "../../../src/MachineDocument.js"
 
 const renderText = makeTextRenderer<typeof machine, typeof snapshot>(Machine)
-const buildDocument = makeVisualizationDocument<typeof machine, typeof snapshot>(Machine)
+const buildDocument = () => MachineDocument.make(machine, { snapshot })
 
 describe("Interactive text visualization", () => {
   it("captures ordered serializable machine information", () => {
-    const document = buildDocument(machine, snapshot)
+    const document = buildDocument()
     const idle = document.states.find((state) => state.path === "application.workflow.idle")
 
     assert.deepStrictEqual(document.initial, {
@@ -56,15 +57,16 @@ describe("Interactive text visualization", () => {
       candidateEvents: ["Start", "Refresh", "Disconnect"]
     })
     assert.deepStrictEqual(JSON.parse(JSON.stringify(document)), document)
-    assert.strictEqual(buildDocument(machine).snapshot, null)
+    assert.deepStrictEqual(Schema.decodeUnknownSync(MachineDocument.MachineDocument)(document), document)
+    assert.strictEqual(MachineDocument.make(machine).snapshot, null)
   })
 
   it("preserves the static text renderer output", () => {
-    assert.strictEqual(textTreeToString(buildDocument(machine, snapshot)), renderText(machine, snapshot))
+    assert.strictEqual(textTreeToString(buildDocument()), renderText(machine, snapshot))
   })
 
   it("projects a state-only topology and structured state inspection", () => {
-    const model = makeVisualizerModel(buildDocument(machine, snapshot))
+    const model = makeVisualizerModel(buildDocument())
     const application = model.roots[0]
     const workflow = application?.children[0]
     const idle = workflow?.children[0]
@@ -95,7 +97,7 @@ describe("Interactive text visualization", () => {
   })
 
   it("accepts an empty partial topology", () => {
-    const document = buildDocument(machine, snapshot)
+    const document = buildDocument()
     const model = makeVisualizerModel({
       ...document,
       roots: [],

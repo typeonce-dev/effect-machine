@@ -1,9 +1,10 @@
+import type { Diagnostic } from "../../DevToolsProtocol.js"
 import type {
-  VisualizationActivity,
-  VisualizationBranch,
-  VisualizationDocument,
-  VisualizationTransition
-} from "./visualization-document.js"
+  Activity as VisualizationActivity,
+  Branch as VisualizationBranch,
+  MachineDocument as VisualizationDocument,
+  Transition as VisualizationTransition
+} from "../../MachineDocument.js"
 import {
   type EventInspection,
   type IncomingTransition,
@@ -12,12 +13,6 @@ import {
   type TopologyNode,
   triggerLabel
 } from "./visualizer-model.js"
-
-export interface VisualizerDiagnostic {
-  readonly severity: "warning" | "error"
-  readonly message: string
-  readonly path?: string
-}
 
 const createElement = <Tag extends keyof HTMLElementTagNameMap>(
   tag: Tag,
@@ -166,7 +161,7 @@ const inspectionSection = (title: string, count: number): HTMLElement => {
 export const renderVisualizer = (
   root: HTMLElement,
   visualization: VisualizationDocument,
-  diagnostics: ReadonlyArray<VisualizerDiagnostic> = []
+  diagnostics: ReadonlyArray<Diagnostic> = []
 ): void => {
   const model = makeVisualizerModel(visualization)
   const rows = new Map<string, HTMLElement>()
@@ -555,8 +550,8 @@ export const renderVisualizer = (
     diagnostics.forEach((diagnostic) => {
       const item = createElement("div", `diagnostic diagnostic-${diagnostic.severity}`)
       item.append(badge(diagnostic.severity, diagnostic.severity), createElement("span", undefined, diagnostic.message))
-      if (diagnostic.path !== undefined && model.inspectState(diagnostic.path) !== undefined) {
-        item.append(stateLink(diagnostic.path, diagnostic.path, navigateToState))
+      if (diagnostic.statePath !== null && model.inspectState(diagnostic.statePath) !== undefined) {
+        item.append(stateLink(diagnostic.statePath, diagnostic.statePath, navigateToState))
       }
       diagnosticList.append(item)
     })

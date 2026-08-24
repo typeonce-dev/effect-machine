@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json",
+    "./*": "./src/*.ts",
     "./internal/*": null
   },
   "scripts": {

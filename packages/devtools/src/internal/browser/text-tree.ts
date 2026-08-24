@@ -1,10 +1,10 @@
 import type {
-  VisualizationActivity,
-  VisualizationBranch,
-  VisualizationDocument,
-  VisualizationState,
-  VisualizationTransition
-} from "./visualization-document.js"
+  Activity as VisualizationActivity,
+  Branch as VisualizationBranch,
+  MachineDocument as VisualizationDocument,
+  State as VisualizationState,
+  Transition as VisualizationTransition
+} from "../../MachineDocument.js"
 
 export type TreeItemKind = "state" | "transition" | "branch" | "activity"
 
