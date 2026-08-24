@@ -1,12 +1,15 @@
-import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { effectMachineAdapter } from "./counter.mjs"
 
 const readPackageVersion = (path) => JSON.parse(readFileSync(path, "utf8")).version
-const implementationRoot = resolve(
+const configuredRoot = resolve(
   process.env.EFFECT_MACHINE_BENCHMARK_ROOT ?? fileURLToPath(new URL("../..", import.meta.url))
 )
+const implementationRoot = existsSync(join(configuredRoot, "packages", "effect-machine", "package.json"))
+  ? join(configuredRoot, "packages", "effect-machine")
+  : configuredRoot
 
 export const packageVersions = {
   effectMachine: readPackageVersion(resolve(implementationRoot, "package.json")),

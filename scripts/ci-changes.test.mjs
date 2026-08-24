@@ -30,10 +30,18 @@ test("runs type performance for public source changes", () => {
     runtimePerformance: false,
     typePerformance: true
   })
+  assert.deepEqual(classify(["packages/effect-machine/src/index.ts"]), {
+    runtimePerformance: false,
+    typePerformance: true
+  })
 })
 
 test("adds runtime performance for machine implementation changes", () => {
   assert.deepEqual(classify(["src/internal/machine/runtime.ts"]), {
+    runtimePerformance: true,
+    typePerformance: true
+  })
+  assert.deepEqual(classify(["packages/effect-machine/src/internal/machine/runtime.ts"]), {
     runtimePerformance: true,
     typePerformance: true
   })

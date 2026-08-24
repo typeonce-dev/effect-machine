@@ -4,9 +4,12 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { makeEffectMachineBenchmarkApi } from "./effect-machine-compatibility.mjs"
 
-const implementationRoot = resolve(
+const configuredRoot = resolve(
   process.env.EFFECT_MACHINE_BENCHMARK_ROOT ?? fileURLToPath(new URL("../..", import.meta.url))
 )
+const implementationRoot = existsSync(join(configuredRoot, "packages", "effect-machine", "package.json"))
+  ? join(configuredRoot, "packages", "effect-machine")
+  : configuredRoot
 const implementationRequire = createRequire(pathToFileURL(join(implementationRoot, "package.json")))
 const effectPackagePath = implementationRequire.resolve("effect/package.json")
 const effectPackage = JSON.parse(readFileSync(effectPackagePath, "utf8"))

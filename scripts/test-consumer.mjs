@@ -3,7 +3,8 @@ import { cp, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
-const root = resolve(import.meta.dirname, "..")
+const repositoryRoot = resolve(import.meta.dirname, "..")
+const root = join(repositoryRoot, "packages", "effect-machine")
 const destination = await mkdtemp(join(tmpdir(), "effect-machine-consumer-"))
 
 const run = (command, args, options = {}) => {
@@ -30,20 +31,24 @@ try {
   const consumer = join(destination, "consumer")
   const packageDirectory = join(consumer, "node_modules", "@typeonce", "effect-machine")
 
-  await cp(join(root, "scripts", "fixtures", "consumer"), consumer, {
+  await cp(join(repositoryRoot, "scripts", "fixtures", "consumer"), consumer, {
     recursive: true
   })
   await mkdir(packageDirectory, { recursive: true })
 
   run("tar", ["-xzf", join(destination, archives[0]), "-C", packageDirectory, "--strip-components=1"], { cwd: root })
 
-  await symlink(join(root, "node_modules", "effect"), join(consumer, "node_modules", "effect"), "dir")
+  await symlink(join(repositoryRoot, "node_modules", "effect"), join(consumer, "node_modules", "effect"), "dir")
   await mkdir(join(consumer, "node_modules", "@types"), { recursive: true })
-  await symlink(join(root, "node_modules", "@types", "node"), join(consumer, "node_modules", "@types", "node"), "dir")
+  await symlink(
+    join(repositoryRoot, "node_modules", "@types", "node"),
+    join(consumer, "node_modules", "@types", "node"),
+    "dir"
+  )
 
   run(
     process.execPath,
-    [join(root, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
+    [join(repositoryRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumer, "tsconfig.json")],
     { cwd: consumer }
   )
   if (process.env.TSGO_BIN !== undefined) {

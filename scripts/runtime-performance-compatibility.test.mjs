@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert"
 import { test } from "node:test"
-import { makeEffectMachineBenchmarkApi } from "../perf/runtime/effect-machine-compatibility.mjs"
+import { makeEffectMachineBenchmarkApi } from "../packages/effect-machine/perf/runtime/effect-machine-compatibility.mjs"
 
 test("adapts the state-definition constructor across the public rename", () => {
   const definitions = { Idle: "schema" }

@@ -1,9 +1,9 @@
 import { assert, describe, it } from "@effect/vitest"
+import { machine, snapshot } from "../../../../visualizer/src/example-machine.js"
+import { textTreeToString } from "../../../../visualizer/src/text-tree.js"
+import { makeVisualizationDocument } from "../../../../visualizer/src/visualization-document.js"
+import { makeVisualizerModel } from "../../../../visualizer/src/visualizer-model.js"
 import { Machine } from "../../src/index.js"
-import { machine, snapshot } from "../../visualizer/src/example-machine.js"
-import { textTreeToString } from "../../visualizer/src/text-tree.js"
-import { makeVisualizationDocument } from "../../visualizer/src/visualization-document.js"
-import { makeVisualizerModel } from "../../visualizer/src/visualizer-model.js"
 import { makeTextRenderer } from "./visualization/text.js"
 
 const renderText = makeTextRenderer<typeof machine, typeof snapshot>(Machine)

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
 
-const root = resolve(import.meta.dirname, "..")
+const root = resolve(import.meta.dirname, "../packages/effect-machine")
 const destination = await mkdtemp(join(tmpdir(), "effect-machine-pack-"))
 
 try {

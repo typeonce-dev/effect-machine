@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/*/test/**/*.ts",
+    "visualizer/src/example-machine.ts",
+    "visualizer/src/text-tree.ts",
+    "visualizer/src/visualization-document.ts",
+    "visualizer/src/visualizer-model.ts"
+  ],
+  "exclude": ["**/dist/**", "**/node_modules/**", "references/**"],
+  "references": [
+    { "path": "packages/effect-machine" }
+  ],
+  "compilerOptions": {
+    "composite": false,
+    "rootDir": ".",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@typeonce/effect-machine": ["./packages/effect-machine/src/index.ts"],
+      "@typeonce/effect-machine/*": ["./packages/effect-machine/src/*.ts"]
+    }
+  }
+}

@@ -80,7 +80,7 @@ const machine = Machine.make({}).handle({})
   assert.match(html, /href="#create-a-machine">Create a machine<\/a>/)
   assert.match(
     html,
-    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine\/blob\/main\/docs\/effect-atom-react\.md"/
+    /href="https:\/\/github\.com\/typeonce-dev\/effect-machine\/blob\/main\/packages\/effect-machine\/docs\/effect-atom-react\.md"/
   )
   assert.match(html, /class="code-block code-block--markdown"/)
 })

@@ -1,7 +1,8 @@
 {
   "channel": "v4",
   "output": ".data/api-reference/v4",
-  "tsconfig": "tsconfig.json",
+  "packageDirectory": "packages/effect-machine",
+  "tsconfig": "packages/effect-machine/tsconfig.json",
   "barrels": [
     {
       "export": ".",

@@ -33,7 +33,11 @@ const diff = (filters) => {
 
 const changedFiles = diff("ACDMRTUXB")
 const releaseFiles = changedFiles.filter(
-  (path) => path.startsWith("src/") || path === "package.json"
+  (path) =>
+    path.startsWith("src/") ||
+    path.startsWith("packages/effect-machine/src/") ||
+    path === "package.json" ||
+    path === "packages/effect-machine/package.json"
 )
 
 if (releaseFiles.length === 0) {

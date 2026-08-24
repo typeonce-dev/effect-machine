@@ -4,7 +4,7 @@ import path from "node:path"
 import { test } from "node:test"
 import ts from "typescript"
 
-const projectRoot = path.resolve(import.meta.dirname, "..")
+const projectRoot = path.resolve(import.meta.dirname, "../packages/effect-machine")
 const virtualFile = path.join(projectRoot, "invoke-autocomplete.fixture.ts")
 const source = `
 import { Effect, Stream } from "effect"

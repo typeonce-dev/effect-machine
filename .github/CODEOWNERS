@@ -1,7 +1,7 @@
-/src/ @SandroMaglione
+/packages/ @SandroMaglione
 /scripts/ @SandroMaglione
 /.github/ @SandroMaglione
 /package.json @SandroMaglione
 /pnpm-lock.yaml @SandroMaglione
-/tsconfig.build.json @SandroMaglione
+/tsconfig*.json @SandroMaglione
 /.changeset/config.json @SandroMaglione

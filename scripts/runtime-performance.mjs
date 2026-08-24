@@ -10,7 +10,7 @@ import {
   memoryImplementations,
   packageVersions,
   runtimeReferenceImplementations
-} from "../perf/runtime/implementations.mjs"
+} from "../packages/effect-machine/perf/runtime/implementations.mjs"
 const sourceRevision = (() => {
   try {
     return {
@@ -391,7 +391,9 @@ const benchmarks = bench.tasks.map((task) => {
   }
 })
 
-const memoryWorker = fileURLToPath(new URL("../perf/runtime/memory-worker.mjs", import.meta.url))
+const memoryWorker = fileURLToPath(
+  new URL("../packages/effect-machine/perf/runtime/memory-worker.mjs", import.meta.url)
+)
 const memory = memoryImplementations.map((implementation) => {
   const profiles = Object.keys(implementation.memoryProfiles).map((profileId) =>
     JSON.parse(

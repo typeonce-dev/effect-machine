@@ -9,7 +9,7 @@ Wait for the proposal to be discussed and accepted before starting an implementa
 The source tree follows Effect's public-module/internal-implementation split:
 
 ```text
-src/
+packages/effect-machine/src/
 ├── Machine.ts
 ├── index.ts
 ├── testing/
@@ -23,7 +23,7 @@ Public entrypoints and public modules use Effect-style names. Private files sit
 under the domain they implement and use responsibility names such as
 `planner.ts`, `process.ts`, and `runtime.ts`; they do not repeat `machine` in
 every filename. Runtime tests mirror the same domains. Tests below
-`test/internal/` are the only white-box suites allowed to import `src/internal`.
+`packages/effect-machine/test/internal/` are the only white-box suites allowed to import `packages/effect-machine/src/internal`.
 
 The core dependency direction is:
 
@@ -39,7 +39,7 @@ public entrypoint -> public module -> process -> planner
 Internal machine modules may refer back to the public `Machine` types through
 type-only imports. The runtime is intentionally unaware of the model, planner,
 and process layers. Testing implementations are isolated under
-`src/internal/testing` and may only be consumed by the public testing module or
+`packages/effect-machine/src/internal/testing` and may only be consumed by the public testing module or
 other testing internals.
 
 `pnpm check:architecture` builds a TypeScript dependency graph using the
