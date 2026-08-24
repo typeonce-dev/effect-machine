@@ -1,6 +1,6 @@
 {
   "name": "@typeonce/effect-machine-devtools",
-  "version": "0.0.0",
+  "version": "0.22.0",
   "description": "Local development tools for Effect Machine",
   "license": "MIT",
   "type": "module",

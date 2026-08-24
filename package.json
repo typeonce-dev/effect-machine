@@ -10,7 +10,7 @@
     "visualizer": "pnpm devtools",
     "visualizer:build": "pnpm --dir packages/devtools build",
     "check:architecture": "node --test scripts/check-architecture.test.mjs && node scripts/check-architecture.mjs packages/effect-machine && node scripts/check-devtools-architecture.mjs packages/devtools",
-    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/invoke-autocomplete.test.mjs scripts/runtime-performance-compatibility.test.mjs scripts/runtime-performance-regression.test.mjs",
+    "check:ci": "node --test scripts/ci-changes.test.mjs scripts/invoke-autocomplete.test.mjs scripts/release-contract.test.mjs scripts/runtime-performance-compatibility.test.mjs scripts/runtime-performance-regression.test.mjs",
     "typecheck": "pnpm --recursive --filter \"./packages/**\" run check && tsc -p tsconfig.tests.json",
     "perf:types": "pnpm build && node scripts/type-performance.mjs",
     "perf:runtime": "pnpm build && node --expose-gc scripts/runtime-performance.mjs",
