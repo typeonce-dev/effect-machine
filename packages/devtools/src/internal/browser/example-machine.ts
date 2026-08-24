@@ -1,6 +1,8 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
+// Shared by the live browser UI and its project-inspection fixture.
+
 class Application extends Schema.TaggedClass<Application>("Application")("Application", {}) {}
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}

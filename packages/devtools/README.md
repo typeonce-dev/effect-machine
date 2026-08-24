@@ -1,41 +1,23 @@
-# Interactive text visualizer
+# Effect Machine devtools
 
-Run the local prototype from the repository root:
+Run the local visualizer from a project that uses Effect Machine:
 
 ```sh
-pnpm visualizer
+effect-machine
 ```
 
-Replace the exports in `src/internal/browser/example-machine.ts` with another completed `.handle(...)` result. The browser
-reloads when the imported machine changes.
+The command scans `**/src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}` for `.handle(...)` calls, evaluates candidate modules in an isolated worker, and serves the machine index at `http://127.0.0.1:5173`.
 
-The current entry point has three steps:
+Use flags when the project layout or local address differs:
 
-```ts
-const buildDocument = makeVisualizationDocument<typeof machine, typeof snapshot>(Machine)
-const visualization = buildDocument(machine, snapshot)
-mountVisualizer(root, { status: "ready", document: visualization })
+```sh
+effect-machine --root ./packages/app --include "src/**/*.ts" --port 4173 --open
 ```
 
-The snapshot is optional. Without one, the tree renders the complete topology without active-state or enabled-event markers.
+The page updates after matching source files change. A failed reload keeps the last valid machine document visible as a partial result, with the current diagnostic beside it. Removing a machine export removes it from the index on the next successful scan.
 
-## Interaction model
+## Evaluation boundary
 
-- The main tree contains states only. Initial, parallel, history, final, transition-count, and activity-count markers keep the
-  topology readable without mixing behavior into the hierarchy.
-- Selecting a state opens its outgoing transitions, incoming transitions, branches, updates, and activities in the inspector.
-- State paths in breadcrumbs, transition targets, update owners, and incoming sources navigate back into the tree.
-- Enabled events open an event-centric transition inspection. `Reveal active` selects the deepest active state.
-- Arrow keys move through visible states. Left and right collapse or expand a branch. Enter or Space selects it. Escape clears
-  the current inspection.
+Discovery is static: it parses source files without executing them. Evaluation loads only candidate modules in a fresh worker and never invokes transition resolvers or activity sources. Module-level code still runs when an exported machine is loaded, so project modules used with the devtools should keep construction free of application side effects.
 
-## Input states
-
-`mountVisualizer` accepts ready, partial, and error sources. A partial source keeps the available topology visible and shows its
-diagnostics. An error source renders the failure in place. This interface is intended for the later codebase scanner and live
-reload process.
-
-The direct prototype imports a completed machine, so a failure thrown while importing that module still belongs to Vite. The
-future scanner must catch module-loading failures before it calls `mountVisualizer`.
-
-The original text renderer remains covered by an exact-output parity test through the same serializable visualization document.
+The visualizer currently supports topology navigation, state and event inspection, transition branches and updates, activities, keyboard navigation, and live reload. Runtime-safe simulation is intentionally a separate document-level capability.

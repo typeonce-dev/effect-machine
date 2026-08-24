@@ -126,3 +126,21 @@ export const MachineResult = Schema.Union([Ready, Partial, Failed])
  * @since 0.1.0
  */
 export type MachineResult = Schema.Schema.Type<typeof MachineResult>
+
+/**
+ * A complete live-registry update sent to browser clients.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const RegistrySnapshot = Schema.Struct({
+  protocolVersion: Schema.Literal(protocolVersion),
+  revision: Schema.Natural,
+  results: Schema.Array(MachineResult)
+})
+
+/**
+ * @category models
+ * @since 0.1.0
+ */
+export type RegistrySnapshot = Schema.Schema.Type<typeof RegistrySnapshot>

@@ -2,9 +2,12 @@
   "name": "@typeonce/effect-machine-devtools",
   "version": "0.0.0",
   "description": "Local development tools for Effect Machine",
-  "private": true,
+  "license": "MIT",
   "type": "module",
   "sideEffects": false,
+  "bin": {
+    "effect-machine": "./dist/bin.js"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./package.json": "./package.json",
@@ -12,13 +15,15 @@
     "./internal/*": null
   },
   "scripts": {
-    "build": "vite build --config vite.config.ts",
+    "build": "node scripts/clean.mjs && vite build --config vite.config.ts && tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json",
-    "dev": "vite --config vite.config.ts"
+    "dev": "tsx src/bin.ts"
   },
   "dependencies": {
+    "@effect/platform-browser": "4.0.0-rc.111",
     "@effect/platform-node": "4.0.0-rc.111",
     "@typeonce/effect-machine": "workspace:^",
+    "chokidar": "4.0.3",
     "typescript": "6.0.3",
     "vite": "8.1.5"
   },
@@ -27,7 +32,28 @@
   },
   "devDependencies": {
     "@types/node": "25.7.0",
-    "effect": "4.0.0-rc.111"
+    "effect": "4.0.0-rc.111",
+    "tsx": "4.21.0"
+  },
+  "files": [
+    "src/**/*",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/client/**/*",
+    "index.html",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      "./package.json": "./package.json",
+      ".": "./dist/index.js",
+      "./*": "./dist/*.js",
+      "./internal/*": null
+    }
   },
   "engines": {
     "node": ">=22.19.0"

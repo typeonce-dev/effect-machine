@@ -14,7 +14,7 @@ import ts from "typescript"
 import * as DevToolsProtocol from "../DevToolsProtocol.js"
 import type * as ProjectInspector from "../ProjectInspector.js"
 
-const defaultInclude = "**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+const defaultInclude = "**/src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
 
 const defaultExclude = [
   "**/node_modules/**",
@@ -135,8 +135,11 @@ const makeDiscovery = (api: PublicApi) =>
       )
   })
 
-const workerBootstrap = new URL("./evaluationWorkerBootstrap.mjs", import.meta.url)
-const workerRuntime = new URL("./evaluationWorker.ts", import.meta.url)
+const workerBootstrap = new URL("./evaluationWorkerBootstrap.js", import.meta.url)
+const workerRuntime = new URL(
+  import.meta.url.endsWith(".ts") ? "./evaluationWorker.ts" : "./evaluationWorker.js",
+  import.meta.url
+)
 
 const WorkerLayer = NodeWorker.layer(() =>
   new NodeWorkerThread(workerBootstrap, {
