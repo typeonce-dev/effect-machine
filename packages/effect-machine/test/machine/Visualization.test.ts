@@ -17,6 +17,7 @@ class Disabled extends Schema.TaggedClass<Disabled>("Disabled")("Disabled", {}) 
 class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 class Disconnect extends Schema.TaggedClass<Disconnect>("Disconnect")("Disconnect", {}) {}
 class Refresh extends Schema.TaggedClass<Refresh>("Refresh")("Refresh", {}) {}
+class InternalRefresh extends Schema.TaggedClass<InternalRefresh>("InternalRefresh")("InternalRefresh", {}) {}
 
 const States = Machine.states({
   application: {
@@ -83,6 +84,7 @@ const machineDefinition = Machine.make({
   id: "inspection-example",
   states: States.states,
   events: Machine.events(Start, Disconnect, Refresh),
+  internalEvents: Machine.internalEvents(InternalRefresh),
   initial: (to) => to.application.initial.resolve(() => initial)
 })
 
@@ -187,6 +189,10 @@ const renderLifecycleMachine = makeTextRenderer<
 >(Machine)
 
 describe("Machine structural visualization", () => {
+  it("exposes only the public input event schemas", () => {
+    assert.deepStrictEqual(Machine.inputEventSchemas(machine), [Start, Disconnect, Refresh])
+  })
+
   it("exposes the static root initial selection without executing the resolver", () => {
     const inspectOnly = Machine.make({
       states: States.states,

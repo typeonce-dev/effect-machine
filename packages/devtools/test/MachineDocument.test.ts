@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 import * as DevToolsProtocol from "../src/DevToolsProtocol.js"
 import { machine, snapshot } from "../src/internal/browser/example-machine.js"
+import { plannerMachine } from "../src/internal/browser/planner-example.js"
 import * as MachineDocument from "../src/MachineDocument.js"
 
 describe("MachineDocument", () => {
@@ -12,13 +13,35 @@ describe("MachineDocument", () => {
       snapshot
     })
 
-    assert.strictEqual(document.schemaVersion, 1)
+    assert.strictEqual(document.schemaVersion, 2)
     assert.strictEqual(document.revision, 3)
     assert.deepStrictEqual(document.source, {
       file: "/project/src/workflow.ts",
       exportName: "workflow"
     })
     assert.deepStrictEqual(Schema.decodeUnknownSync(MachineDocument.MachineDocument)(document), document)
+  })
+
+  it("captures form schemas for machine and public event inputs", () => {
+    const document = MachineDocument.make(plannerMachine)
+    const begin = document.inputs.events.find(({ event }) => event === "Begin")
+    const machineSchema = document.inputs.machine?.schema as {
+      readonly properties?: Readonly<Record<string, unknown>>
+      readonly required?: ReadonlyArray<string>
+    } | undefined
+
+    assert.deepStrictEqual(Object.keys(machineSchema?.properties ?? {}), [
+      "owner",
+      "attempts",
+      "notifications",
+      "mode",
+      "note",
+      "labels",
+      "preferences"
+    ])
+    assert.deepStrictEqual(machineSchema?.required, ["owner", "attempts", "notifications", "mode"])
+    assert.deepStrictEqual(begin?.schema.schema, { $ref: "#/$defs/PlannerBeginEncoded" })
+    assert.deepStrictEqual(document.inputs.events.map(({ event }) => event), ["Begin", "Cancel"])
   })
 
   it("validates ready, partial, and failed evaluation results", () => {
@@ -33,21 +56,21 @@ describe("MachineDocument", () => {
     const results: ReadonlyArray<DevToolsProtocol.MachineResult> = [
       {
         _tag: "Ready",
-        protocolVersion: 1,
+        protocolVersion: 2,
         key: "workflow.ts#workflow",
         document,
         diagnostics: []
       },
       {
         _tag: "Partial",
-        protocolVersion: 1,
+        protocolVersion: 2,
         key: "workflow.ts#workflow",
         document,
         diagnostics: [diagnostic]
       },
       {
         _tag: "Failed",
-        protocolVersion: 1,
+        protocolVersion: 2,
         key: "broken.ts#machine",
         source: { file: "broken.ts", exportName: "machine" },
         machineId: null,

@@ -11,14 +11,14 @@ describe("MachineRegistry", () => {
     })
     const ready: DevToolsProtocol.Ready = {
       _tag: "Ready",
-      protocolVersion: 1,
+      protocolVersion: 2,
       key: "src/workflow.ts#workflow",
       document,
       diagnostics: []
     }
     const failed: DevToolsProtocol.Failed = {
       _tag: "Failed",
-      protocolVersion: 1,
+      protocolVersion: 2,
       key: ready.key,
       source: { file: "src/workflow.ts", exportName: "workflow" },
       machineId: null,
@@ -48,14 +48,14 @@ describe("MachineRegistry", () => {
     })
     const ready: DevToolsProtocol.Ready = {
       _tag: "Ready",
-      protocolVersion: 1,
+      protocolVersion: 2,
       key: "src/workflow.ts#workflow",
       document,
       diagnostics: []
     }
     const failed: DevToolsProtocol.Failed = {
       _tag: "Failed",
-      protocolVersion: 1,
+      protocolVersion: 2,
       key: "src/workflow.ts#renamed",
       source: { file: "src/workflow.ts", exportName: "renamed" },
       machineId: null,

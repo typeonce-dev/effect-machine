@@ -67,6 +67,7 @@ describe("Machine inspection", () => {
   })
 
   it("preserves state paths for structural inspection", () => {
+    expect(Machine.inputEventSchemas(machine)).type.toBe<readonly [typeof Reset]>()
     const nodes = Machine.stateNodes(machine)
     expect(nodes[0]!.path).type.toBe<"root" | "root.idle" | "root.recent">()
     expect(nodes.find((node) => node.type === "history")!.path).type.toBe<"root.recent">()

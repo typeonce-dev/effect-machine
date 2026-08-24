@@ -1,11 +1,18 @@
-import type { Diagnostic } from "../../DevToolsProtocol.js"
+import {
+  type Diagnostic,
+  protocolVersion,
+  type SimulationFrame,
+  type SimulationReady,
+  type SimulationRequest
+} from "../../DevToolsProtocol.js"
 import type {
   Activity as VisualizationActivity,
   Branch as VisualizationBranch,
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
-import * as MachineSimulator from "../../MachineSimulator.js"
+import { type InputForm, renderInputForm } from "./input-form.js"
+import { requestSimulation } from "./simulation-client.js"
 import {
   type EventInspection,
   type IncomingTransition,
@@ -159,22 +166,27 @@ const inspectionSection = (title: string, count: number): HTMLElement => {
   return header
 }
 
-const simulationResultMessage = (result: MachineSimulator.StepResult): string => {
-  if (result._tag === "Applied") return `${result.event} applied · runtime code was skipped`
-  if (result._tag === "Blocked") return `${result.event} is not enabled in the current topology`
-  const reasons: Record<MachineSimulator.Indeterminate["reason"], string> = {
-    "multiple-transitions": "multiple active transitions",
-    "declinable-transition": "acceptance depends on runtime code",
-    "conditional-branches": "the selected branch depends on runtime code",
-    "history-target": "history resolution needs runtime state",
-    "choice-target": "choice resolution needs runtime code",
-    "missing-target": "the target is not present in the document"
-  }
-  return `${result.event} was not applied · ${reasons[result.reason]}`
+const formSection = (title: string): HTMLElement => {
+  const header = createElement("div", "section-heading")
+  header.append(createElement("h3", undefined, title))
+  return header
+}
+
+const prettyJson = (value: unknown): string => JSON.stringify(value, null, 2)
+
+const jsonBlock = (value: unknown): HTMLElement => createElement("pre", "json-value", prettyJson(value))
+
+const eventName = (value: unknown): string =>
+  typeof value === "object" && value !== null && "_tag" in value ? String(value._tag) : "event"
+
+const activeTopology = (paths: ReadonlyArray<string>): string => {
+  const leaves = paths.filter((path) => !paths.some((candidate) => candidate.startsWith(`${path}.`)))
+  return leaves.map((path) => path.split(".").at(-1) ?? path).join(" + ") || "none"
 }
 
 export const renderVisualizer = (
   root: HTMLElement,
+  machineKey: string,
   visualization: VisualizationDocument,
   diagnostics: ReadonlyArray<Diagnostic> = []
 ): void => {
@@ -183,13 +195,17 @@ export const renderVisualizer = (
   const nodes = new Map<string, HTMLElement>()
   const statuses = new Map<string, HTMLElement>()
   const eventButtons = new Map<string, HTMLElement>()
+  const eventSchemas = new Map(visualization.inputs.events.map(({ event, schema }) => [event, schema]))
   const relatedPaths = new Set<string>()
   let selectedPath: string | undefined
   let selectedEvent: string | undefined
-  let simulation: MachineSimulator.Session | undefined
+  let selectedFrame: SimulationFrame | undefined
+  let simulation: SimulationReady | undefined
+  let simulationPending = false
+  let activeInputForm: InputForm | undefined
 
-  const activePaths = (): ReadonlyArray<string> => simulation?.snapshot.activePaths ?? model.activePaths
-  const candidateEvents = (): ReadonlyArray<string> => simulation?.snapshot.candidateEvents ?? model.candidateEvents
+  const activePaths = (): ReadonlyArray<string> => simulation?.current.activePaths ?? model.activePaths
+  const candidateEvents = (): ReadonlyArray<string> => simulation?.current.candidateEvents ?? model.candidateEvents
 
   const shell = createElement("main", "app-shell")
   const workspace = createElement("section", "workspace")
@@ -213,6 +229,7 @@ export const renderVisualizer = (
   simulationButton.disabled = model.roots.length === 0
 
   const renderEmptyInspector = (): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const summary = createElement("div", "inspector-empty")
     summary.append(createElement("span", "inspector-empty-kind", "Machine"))
@@ -229,6 +246,7 @@ export const renderVisualizer = (
   }
 
   const renderInspection = (inspection: StateInspection): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const breadcrumbs = createElement("nav", "breadcrumbs")
@@ -290,6 +308,7 @@ export const renderVisualizer = (
   }
 
   const renderEventInspection = (inspection: EventInspection): void => {
+    activeInputForm = undefined
     inspector.replaceChildren()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
@@ -303,12 +322,320 @@ export const renderVisualizer = (
     ]))
     inspector.append(header)
 
+    if (simulation !== undefined && candidate) {
+      const schema = eventSchemas.get(inspection.event)
+      const composer = createElement("section", "inspector-section simulation-composer")
+      composer.append(formSection("Event input"))
+      if (schema === undefined) {
+        composer.append(createElement(
+          "p",
+          "input-unsupported",
+          "No public input schema is available for this event."
+        ))
+      } else {
+        const input = renderInputForm(schema, {
+          name: inspection.event,
+          fixed: { _tag: inspection.event },
+          omit: ["_tag"]
+        })
+        activeInputForm = input
+        const send = createElement("button", "simulation-action", `Send ${inspection.event}`)
+        send.type = "submit"
+        send.disabled = simulationPending || !input.supported
+        input.element.addEventListener("submit", (event) => {
+          event.preventDefault()
+          const result = input.read()
+          const source = visualization.source
+          if (!result.ok || source === null || simulation === undefined) return
+          void runSimulation({
+            _tag: "SendSimulationEvent",
+            protocolVersion,
+            key: machineKey,
+            revision: visualization.revision,
+            source,
+            step: simulation.step,
+            snapshot: simulation.snapshot,
+            event: result.value as never
+          })
+        })
+        input.element.append(send)
+        composer.append(
+          input.element,
+          createElement(
+            "p",
+            "simulation-note",
+            "The real planner validates this event and shows every synchronous transition it selects."
+          )
+        )
+      }
+      inspector.append(composer)
+    }
+
     const transitions = createElement("section", "inspector-section")
     transitions.append(inspectionSection("Transitions", inspection.transitions.length))
     inspection.transitions.forEach((transition) =>
       transitions.append(renderTransition(transition, navigateToState, true))
     )
     inspector.append(transitions)
+  }
+
+  const renderSimulationFailure = (failureDiagnostics: ReadonlyArray<Diagnostic>): void => {
+    activeInputForm = undefined
+    inspector.replaceChildren()
+    const header = createElement("header", "inspector-header")
+    const eyebrow = createElement("div", "inspector-eyebrow")
+    eyebrow.append(badge("planner error", "error"))
+    header.append(eyebrow, createElement("h2", undefined, "Simulation could not continue"))
+    inspector.append(header)
+    const list = createElement("section", "inspector-section trace-list")
+    failureDiagnostics.forEach((item) => {
+      const card = createElement("article", "inspection-card trace-card")
+      card.append(createElement("strong", undefined, item.code), createElement("pre", "trace-error", item.message))
+      list.append(card)
+    })
+    inspector.append(list)
+  }
+
+  const renderPathGroup = (label: string, paths: ReadonlyArray<string>): HTMLElement => {
+    const group = createElement("div", "trace-path-group")
+    group.append(createElement("span", "trace-label", label))
+    const values = createElement("div", "trace-paths")
+    if (paths.length === 0) values.append(createElement("span", "section-empty", "none"))
+    paths.forEach((path) => values.append(stateLink(path, path, navigateToState)))
+    group.append(values)
+    return group
+  }
+
+  const renderTraceValues = (label: string, values: ReadonlyArray<unknown>): HTMLElement => {
+    const section = createElement("div", "trace-values")
+    section.append(createElement("span", "trace-label", label))
+    if (values.length === 0) {
+      section.append(createElement("span", "section-empty", "none"))
+    } else {
+      values.forEach((value) => section.append(jsonBlock(value)))
+    }
+    return section
+  }
+
+  const renderSimulationTrace = (frame: SimulationFrame): void => {
+    activeInputForm = undefined
+    inspector.replaceChildren()
+    const header = createElement("header", "inspector-header trace-header")
+    const eyebrow = createElement("div", "inspector-eyebrow")
+    eyebrow.append(badge("planned", "active"))
+    if (frame.done) eyebrow.append(badge("done", "state"))
+    const title = frame.trigger._tag === "Initial"
+      ? "Initial plan"
+      : `Event · ${eventName(frame.trigger.event)}`
+    header.append(eyebrow, createElement("h2", undefined, title))
+    header.append(metadata([
+      ["Step", String(frame.step)],
+      ["Microsteps", String(frame.microsteps.length)],
+      ["Active before", String(frame.before.activePaths.length)],
+      ["Active after", String(frame.after.activePaths.length)]
+    ]))
+    const received = frame.trigger._tag === "Initial" ? frame.trigger.input : frame.trigger.event
+    if (received !== undefined) header.append(jsonBlock(received))
+    inspector.append(header)
+
+    const topology = createElement("section", "inspector-section trace-topology")
+    topology.append(inspectionSection("Topology change", frame.microsteps.length))
+    topology.append(
+      renderPathGroup("Before", frame.before.activePaths),
+      renderPathGroup("After", frame.after.activePaths)
+    )
+    inspector.append(topology)
+
+    const steps = createElement("section", "inspector-section trace-list")
+    steps.append(inspectionSection("Microsteps", frame.microsteps.length))
+    if (frame.microsteps.length === 0) {
+      steps.append(createElement(
+        "p",
+        "section-empty",
+        frame.trigger._tag === "Initial"
+          ? "No automatic microsteps were needed."
+          : "No transition accepted this event."
+      ))
+    }
+    frame.microsteps.forEach((step) => {
+      const card = createElement("article", "inspection-card trace-card")
+      const cardHeader = createElement("div", "card-header")
+      const cardTitle = createElement("div", "card-title")
+      cardTitle.append(
+        badge(`#${step.index + 1}`, "count"),
+        createElement("strong", undefined, eventName(step.event))
+      )
+      cardHeader.append(cardTitle, badge(step.changed ? "changed" : "unchanged", step.changed ? "active" : "neutral"))
+      card.append(cardHeader)
+      if (step.transitions.length > 0) {
+        const selected = createElement("div", "trace-transitions")
+        selected.append(createElement("span", "trace-label", "Selected transitions"))
+        step.transitions.forEach((transition) => {
+          const row = createElement("div", "trace-transition")
+          row.append(stateLink(transition.source, transition.source, navigateToState))
+          row.append(createElement("span", "branch-arrow", "→"))
+          const target = transition.resolvedTarget ?? transition.target
+          if (target === null) row.append(createElement("span", "branch-target", "No target"))
+          else row.append(stateLink(target, target, navigateToState))
+          if (transition.branchKey !== null) row.append(badge(transition.branchKey, "condition"))
+          if (transition.reenter) row.append(badge("reenter"))
+          selected.append(row)
+          if (transition.updates.length > 0) selected.append(renderPathGroup("Updates", transition.updates))
+        })
+        card.append(selected)
+      }
+      card.append(renderPathGroup("Exit", step.exitPaths), renderPathGroup("Entry", step.entryPaths))
+      if (step.raisedEvents.length > 0) card.append(renderTraceValues("Raised", step.raisedEvents))
+      if (step.emittedEvents.length > 0) card.append(renderTraceValues("Emitted", step.emittedEvents))
+      if (step.commands.length > 0) card.append(renderTraceValues("Commands", step.commands))
+      card.append(renderPathGroup("Active after", step.activePaths))
+      steps.append(card)
+    })
+    inspector.append(steps)
+
+    if (frame.commands.length > 0 || frame.emittedEvents.length > 0 || frame.output !== undefined) {
+      const results = createElement("section", "inspector-section trace-results")
+      results.append(inspectionSection("Plan result", frame.commands.length + frame.emittedEvents.length))
+      if (frame.commands.length > 0) results.append(renderTraceValues("Planned commands", frame.commands))
+      if (frame.emittedEvents.length > 0) results.append(renderTraceValues("Emitted events", frame.emittedEvents))
+      if (frame.output !== undefined) results.append(renderTraceValues("Output", [frame.output]))
+      inspector.append(results)
+    }
+  }
+
+  const renderStartSimulation = (): void => {
+    activeInputForm = undefined
+    inspector.replaceChildren()
+    const header = createElement("header", "inspector-header")
+    const eyebrow = createElement("div", "inspector-eyebrow")
+    eyebrow.append(badge("planner", "active"))
+    header.append(eyebrow, createElement("h2", undefined, "Start simulation"))
+    inspector.append(header)
+    const composer = createElement("section", "inspector-section simulation-composer")
+    composer.append(formSection("Machine input"))
+    const input = visualization.inputs.machine
+    if (input === null) {
+      composer.append(createElement("p", "section-empty", "This machine does not declare startup input."))
+      inspector.append(composer)
+      return
+    }
+    const form = renderInputForm(input, { name: "Machine input" })
+    activeInputForm = form
+    const start = createElement("button", "simulation-action", "Start simulation")
+    start.type = "submit"
+    start.disabled = simulationPending || visualization.source === null || !form.supported
+    form.element.addEventListener("submit", (event) => {
+      event.preventDefault()
+      const source = visualization.source
+      if (source === null) return
+      const result = form.read()
+      if (!result.ok) return
+      const request: SimulationRequest = {
+        _tag: "StartSimulation",
+        protocolVersion,
+        key: machineKey,
+        revision: visualization.revision,
+        source,
+        input: result.value as never
+      }
+      void runSimulation(request)
+    })
+    form.element.append(start)
+    composer.append(
+      form.element,
+      createElement(
+        "p",
+        "simulation-note",
+        "Initialization and synchronous callbacks run in isolation. Runtime activities and planned commands are not started."
+      )
+    )
+    inspector.append(composer)
+  }
+
+  async function runSimulation(request: SimulationRequest): Promise<void> {
+    if (simulationPending) return
+    simulationPending = true
+    activeInputForm?.clearIssues()
+    activeInputForm?.setPending(true)
+    simulationFeedback.textContent = "Planning in an isolated worker…"
+    simulationFeedback.dataset.status = "pending"
+    updateSimulationUi()
+    try {
+      const result = await requestSimulation(request)
+      if (result._tag === "SimulationFailed") {
+        if (result.inputIssues.length > 0 && activeInputForm !== undefined) {
+          simulationFeedback.textContent = "Some input fields are invalid"
+          simulationFeedback.dataset.status = "error"
+          activeInputForm.setIssues(result.inputIssues)
+          return
+        }
+        selectedFrame = undefined
+        if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+        selectedEvent = undefined
+        simulationFeedback.textContent = result.diagnostics[0]?.message ?? "Simulation failed"
+        simulationFeedback.dataset.status = "error"
+        renderSimulationFailure(result.diagnostics)
+        return
+      }
+      simulation = result
+      activeInputForm = undefined
+      if (selectedPath !== undefined) {
+        nodes.get(selectedPath)?.classList.remove("is-selected")
+        rows.get(selectedPath)?.setAttribute("aria-selected", "false")
+      }
+      if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+      selectedPath = undefined
+      selectedEvent = undefined
+      selectedFrame = result.frame
+      clearRelations()
+      result.frame.microsteps.forEach((step) => {
+        step.transitions.forEach((transition) => {
+          relatedPaths.add(transition.source)
+          nodes.get(transition.source)?.classList.add("is-related-source")
+        })
+        step.entryPaths.forEach((path) => {
+          relatedPaths.add(path)
+          nodes.get(path)?.classList.add("is-related-target")
+        })
+        step.transitions.flatMap((transition) => transition.updates).forEach((path) => {
+          relatedPaths.add(path)
+          nodes.get(path)?.classList.add("is-related-update")
+        })
+      })
+      clearButton.disabled = false
+      const before = activeTopology(result.frame.before.activePaths)
+      const after = activeTopology(result.frame.after.activePaths)
+      simulationFeedback.textContent = result.frame.trigger._tag === "Initial"
+        ? `Started in ${after}`
+        : result.frame.microsteps.length === 0
+        ? `${eventName(result.frame.trigger.event)} was not accepted · remained in ${after}`
+        : before === after
+        ? `${eventName(result.frame.trigger.event)} handled · remained in ${after}`
+        : `${before} → ${after} · ${result.frame.microsteps.length} microstep${
+          result.frame.microsteps.length === 1 ? "" : "s"
+        }`
+      simulationFeedback.dataset.status = "applied"
+    } catch (cause) {
+      selectedFrame = undefined
+      if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+      selectedEvent = undefined
+      const failure: Diagnostic = {
+        severity: "error",
+        code: "simulation-request-failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+        location: visualization.source === null
+          ? null
+          : { file: visualization.source.file, line: null, column: null },
+        statePath: null
+      }
+      simulationFeedback.textContent = failure.message
+      simulationFeedback.dataset.status = "error"
+      renderSimulationFailure([failure])
+    } finally {
+      simulationPending = false
+      activeInputForm?.setPending(false)
+      updateSimulationUi()
+    }
   }
 
   const clearRelations = (): void => {
@@ -327,6 +654,7 @@ export const renderVisualizer = (
     clearRelations()
     selectedPath = undefined
     selectedEvent = undefined
+    selectedFrame = undefined
     clearButton.disabled = true
     renderEmptyInspector()
   }
@@ -380,6 +708,7 @@ export const renderVisualizer = (
     if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     selectedPath = path
     selectedEvent = undefined
+    selectedFrame = undefined
     nodes.get(path)?.classList.add("is-selected")
     rows.get(path)?.setAttribute("aria-selected", "true")
     markRelatedStates(inspection)
@@ -404,10 +733,32 @@ export const renderVisualizer = (
     if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     selectedPath = undefined
     selectedEvent = event
+    selectedFrame = undefined
     eventButtons.get(event)?.classList.add("is-selected")
     clearRelations()
     markTransitions(inspection.transitions)
     clearButton.disabled = false
+    const schema = eventSchemas.get(event)
+    if (simulation !== undefined && candidateEvents().includes(event) && schema !== undefined) {
+      const input = renderInputForm(schema, { name: event, fixed: { _tag: event }, omit: ["_tag"] })
+      if (!input.hasFields && input.supported) {
+        const result = input.read()
+        const source = visualization.source
+        if (result.ok && source !== null) {
+          void runSimulation({
+            _tag: "SendSimulationEvent",
+            protocolVersion,
+            key: machineKey,
+            revision: visualization.revision,
+            source,
+            step: simulation.step,
+            snapshot: simulation.snapshot,
+            event: result.value as never
+          })
+          return
+        }
+      }
+    }
     renderEventInspection(inspection)
   }
 
@@ -511,16 +862,8 @@ export const renderVisualizer = (
     candidates.forEach((event) => {
       const button = createElement("button", `event-button${event === selectedEvent ? " is-selected" : ""}`, event)
       button.type = "button"
-      button.addEventListener("click", () => {
-        if (simulation !== undefined) {
-          const result = MachineSimulator.send(simulation, event)
-          if (result._tag === "Applied") simulation = { document: visualization, snapshot: result.session }
-          simulationFeedback.textContent = simulationResultMessage(result)
-          simulationFeedback.dataset.status = result._tag.toLowerCase()
-          updateSimulationUi()
-        }
-        selectEvent(event)
-      })
+      button.disabled = simulationPending
+      button.addEventListener("click", () => selectEvent(event))
       eventButtons.set(event, button)
       events.append(button)
     })
@@ -536,34 +879,52 @@ export const renderVisualizer = (
     const hasRuntimeState = simulation !== undefined || model.hasSnapshot
     runtimeDot.classList.toggle("has-snapshot", hasRuntimeState)
     runtimeText.textContent = simulation !== undefined
-      ? `${active.size} active · step ${simulation.snapshot.step}`
+      ? `${active.size} active · step ${simulation.step}`
       : diagnostics.length > 0
       ? "Partial"
       : model.hasSnapshot
       ? `${active.size} active`
       : "Structure only"
     simulationButton.textContent = simulation === undefined ? "Start simulation" : "Reset simulation"
+    simulationButton.disabled = simulationPending || model.roots.length === 0 || visualization.source === null
     revealActiveButton.disabled = active.size === 0
     events.hidden = !hasRuntimeState
-    simulationFeedback.hidden = simulation === undefined
+    simulationFeedback.hidden = simulation === undefined && !simulationPending && simulationFeedback.textContent === ""
     renderEventButtons()
-    if (selectedPath !== undefined) {
+    if (selectedFrame !== undefined) {
+      renderSimulationTrace(selectedFrame)
+    } else if (selectedPath !== undefined) {
       const inspection = model.inspectState(selectedPath)
       if (inspection !== undefined) renderInspection(inspection)
-    } else if (selectedEvent !== undefined) {
+    } else if (selectedEvent !== undefined && activeInputForm === undefined) {
       renderEventInspection(model.inspectEvent(selectedEvent))
     }
   }
 
   simulationButton.addEventListener("click", () => {
     if (simulation === undefined) {
-      simulation = MachineSimulator.start(visualization)
-      simulationFeedback.textContent = "Best-effort simulation started · user code will not run"
-      simulationFeedback.dataset.status = "applied"
+      selectedPath = undefined
+      selectedEvent = undefined
+      selectedFrame = undefined
+      clearRelations()
+      clearButton.disabled = false
+      if (visualization.inputs.machine === null && visualization.source !== null) {
+        void runSimulation({
+          _tag: "StartSimulation",
+          protocolVersion,
+          key: machineKey,
+          revision: visualization.revision,
+          source: visualization.source
+        })
+      } else {
+        renderStartSimulation()
+      }
     } else {
       simulation = undefined
+      selectedFrame = undefined
       simulationFeedback.textContent = ""
       delete simulationFeedback.dataset.status
+      clearSelection()
     }
     updateSimulationUi()
   })

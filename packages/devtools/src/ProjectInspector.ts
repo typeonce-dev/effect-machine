@@ -92,6 +92,11 @@ export class ProjectInspector extends Context.Service<ProjectInspector, {
   readonly inspect: (
     options: InspectOptions
   ) => Effect.Effect<ReadonlyArray<DevToolsProtocol.MachineResult>, DiscoveryError | EvaluationError>
+  /** @internal */
+  readonly simulate: (
+    request: DevToolsProtocol.SimulationRequest,
+    options: Pick<InspectOptions, "root">
+  ) => Effect.Effect<DevToolsProtocol.SimulationResult, EvaluationError>
 }>()("@typeonce/effect-machine-devtools/ProjectInspector") {}
 
 /**
