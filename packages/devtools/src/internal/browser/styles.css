@@ -793,11 +793,6 @@ button {
   background: rgb(75 125 255 / 22%);
 }
 
-.badge-initial {
-  color: #e9c89f;
-  background: rgb(240 163 91 / 13%);
-}
-
 .badge-trigger {
   color: #b9d2ff;
   background: rgb(75 125 255 / 16%);
@@ -926,9 +921,29 @@ button {
   overflow-wrap: anywhere;
 }
 
+.inspector-title-row,
+.inspector-state-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.inspector-title-row {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.inspector-state-title {
+  gap: 9px;
+}
+
+.inspector-title-row h2 {
+  min-width: 0;
+  margin: 0;
+}
+
 .inspector-empty p,
-.section-empty,
-.empty-inline {
+.section-empty {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
@@ -1046,15 +1061,6 @@ button {
   padding: 10px 12px;
 }
 
-.transition-source {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 0 12px 10px;
-  color: #727983;
-  font-size: 11px;
-}
-
 .card-title {
   min-width: 0;
 }
@@ -1092,6 +1098,7 @@ button {
 }
 
 .branch-row .metadata,
+.transition-card .card-metadata,
 .activity-card .metadata,
 .incoming-card .metadata {
   margin-top: 10px;
@@ -1103,6 +1110,10 @@ button {
 
 .incoming-card .metadata {
   padding: 0 12px;
+}
+
+.transition-card .card-metadata {
+  padding: 0 12px 10px;
 }
 
 .branch-updates {

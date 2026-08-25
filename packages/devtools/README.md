@@ -64,7 +64,7 @@ Run the devtools only against code you trust. The server has no authentication a
 
 ## Inspection and simulation
 
-The visualizer shows topology as a read-only statechart with native horizontal and vertical scrolling, incremental zoom, and a fit-to-viewport overview. Machine tabs run across the top so the chart uses the rest of the viewport. States remain grouped inside their compound parents, while orthogonal routes connect each enabled transition without requiring a draggable canvas. State cards show projected value fields and invocations at a glance. Selecting a state distinguishes incoming from outgoing relationships, and conditional branches with the same source and target share one topology edge while retaining their full details in the dismissible inspector.
+The visualizer shows topology as a read-only statechart with native horizontal and vertical scrolling, incremental zoom, and a fit-to-viewport overview. Machine tabs run across the top so the chart uses the rest of the viewport. States remain grouped inside their compound parents, while orthogonal routes connect each enabled transition without requiring a draggable canvas. State cards show projected value fields and invocations at a glance. A single click selects a state or transition, while a double click opens its dismissible inspector. State selection distinguishes incoming from outgoing relationships, and conditional branches with the same source and target share one topology edge while retaining their full details in the inspector.
 
 The machine document includes the projected value and output schemas for every state. The browser uses those schemas only for inspection; authoritative decoding and planning still happen in the isolated worker.
 

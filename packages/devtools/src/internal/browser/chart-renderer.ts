@@ -13,7 +13,9 @@ import { makeChartModel } from "./chart-model.js"
 
 export interface ChartHandlers {
   readonly selectState: (path: string) => void
+  readonly openStateDetails: (path: string) => void
   readonly selectTransition: (transitionId: string) => void
+  readonly openTransitionDetails: (transitionId: string) => void
   readonly clearSelection: () => void
 }
 
@@ -226,6 +228,7 @@ const render = (
     const stateStatus = status(laidOut.node.active, laidOut.node.initial)
     card.append(stateContent(laidOut, stateStatus))
     card.addEventListener("click", () => handlers.selectState(laidOut.node.path))
+    card.addEventListener("dblclick", () => handlers.openStateDetails(laidOut.node.path))
     nodesLayer.append(card)
     registerStateElement(laidOut.node.path, card)
     stateControls.set(laidOut.node.path, card)
@@ -277,6 +280,7 @@ const render = (
       height: laidOut.labelHeight
     })
     label.addEventListener("click", () => handlers.selectTransition(laidOut.edge.transitionId))
+    label.addEventListener("dblclick", () => handlers.openTransitionDetails(laidOut.edge.transitionId))
     label.addEventListener(
       "mouseenter",
       () => hoverTransition(laidOut.edge.transitionId, laidOut.edge.source, laidOut.edge.target, true)
@@ -286,6 +290,7 @@ const render = (
       () => hoverTransition(laidOut.edge.transitionId, laidOut.edge.source, laidOut.edge.target, false)
     )
     hit.addEventListener("click", () => handlers.selectTransition(laidOut.edge.transitionId))
+    hit.addEventListener("dblclick", () => handlers.openTransitionDetails(laidOut.edge.transitionId))
     hit.addEventListener(
       "mouseenter",
       () => hoverTransition(laidOut.edge.transitionId, laidOut.edge.source, laidOut.edge.target, true)

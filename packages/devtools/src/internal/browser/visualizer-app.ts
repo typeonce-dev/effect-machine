@@ -40,15 +40,32 @@ const createElement = <Tag extends keyof HTMLElementTagNameMap>(
   return element
 }
 
-const metadata = (items: ReadonlyArray<readonly [string, string]>): HTMLDListElement => {
+type MetadataValue = string | Node | null | undefined
+
+const metadata = (items: ReadonlyArray<readonly [string, MetadataValue]>): HTMLDListElement => {
   const list = createElement("dl", "metadata")
   for (const [label, value] of items) {
-    list.append(createElement("dt", undefined, label), createElement("dd", undefined, value))
+    if (value === null || value === undefined || value === "" || value === "none") continue
+    const description = createElement("dd")
+    description.append(value)
+    list.append(createElement("dt", undefined, label), description)
   }
   return list
 }
 
 const badge = (text: string, kind = "neutral"): HTMLSpanElement => createElement("span", `badge badge-${kind}`, text)
+
+const stateStatus = (active: boolean, initial: boolean): HTMLSpanElement => {
+  const status = createElement(
+    "span",
+    `chart-state-status${active ? " is-active" : ""}${initial ? " is-initial" : ""}`
+  )
+  status.setAttribute(
+    "aria-label",
+    active && initial ? "active, initial state" : active ? "active" : initial ? "initial state" : "inactive"
+  )
+  return status
+}
 
 type StateNavigator = (path: string) => void
 
@@ -75,14 +92,14 @@ const renderBranch = (branch: VisualizationBranch, navigate: StateNavigator): HT
   }
   row.append(main)
 
-  const details: Array<readonly [string, string]> = [
+  const details: Array<readonly [string, MetadataValue]> = [
     [
       "Selection",
       branch.selection.kind === "update" && branch.selection.scope === "local"
         ? "to.local.update"
         : branch.selection.kind
     ],
-    ["Scope", branch.selection.scope ?? "none"]
+    ["Scope", branch.selection.scope]
   ]
   row.append(metadata(details))
   if (branch.updates.length > 0) {
@@ -102,25 +119,24 @@ const renderTransition = (
   const card = createElement("article", "inspection-card transition-card")
   const header = createElement("div", "card-header")
   const title = createElement("div", "card-title")
-  title.append(badge(transition.trigger.type, "trigger"), createElement("strong", undefined, triggerLabel(transition)))
+  title.append(createElement("strong", undefined, triggerLabel(transition)))
   const flags = createElement("div", "card-flags")
+  flags.append(badge(transition.trigger.type, "trigger"))
   if (transition.reenter) flags.append(badge("reenter"))
   if (transition.acceptance === "declinable") flags.append(badge("declinable"))
   header.append(title, flags)
   card.append(header)
   if (showSource) {
-    const source = createElement("div", "transition-source")
-    source.append(createElement("span", undefined, "From"), stateLink(transition.source, transition.source, navigate))
+    const source = metadata([["Source", stateLink(transition.source, transition.source, navigate)]])
+    source.classList.add("card-metadata")
     card.append(source)
   }
 
-  const branches = createElement("div", "branch-list")
-  if (transition.branches.length === 0) {
-    branches.append(createElement("div", "empty-inline", "No transition branches"))
-  } else {
+  if (transition.branches.length > 0) {
+    const branches = createElement("div", "branch-list")
     transition.branches.forEach((branch) => branches.append(renderBranch(branch, navigate)))
+    card.append(branches)
   }
-  card.append(branches)
   return card
 }
 
@@ -128,16 +144,16 @@ const renderIncomingTransition = (incoming: IncomingTransition, navigate: StateN
   const card = createElement("article", "inspection-card incoming-card")
   const header = createElement("div", "card-header")
   const title = createElement("div", "card-title")
-  title.append(
-    badge(incoming.transition.trigger.type, "trigger"),
-    createElement("strong", undefined, triggerLabel(incoming.transition))
-  )
-  header.append(title, stateLink(incoming.transition.source, incoming.transition.source, navigate))
+  title.append(createElement("strong", undefined, triggerLabel(incoming.transition)))
+  const flags = createElement("div", "card-flags")
+  flags.append(badge(incoming.transition.trigger.type, "trigger"))
+  header.append(title, flags)
   card.append(header)
 
-  const details: Array<readonly [string, string]> = [
+  const details: Array<readonly [string, MetadataValue]> = [
+    ["Source", stateLink(incoming.transition.source, incoming.transition.source, navigate)],
     ["Selection", incoming.branch.selection.kind],
-    ["Scope", incoming.branch.selection.scope ?? "none"]
+    ["Scope", incoming.branch.selection.scope]
   ]
   if (incoming.branch.type === "branch") details.unshift(["Branch", incoming.branch.title])
   card.append(metadata(details))
@@ -156,15 +172,19 @@ const activityTitle = (activity: VisualizationActivity): string => {
   }
 }
 
-const renderActivity = (activity: VisualizationActivity): HTMLElement => {
+const renderActivity = (activity: VisualizationActivity, navigate: StateNavigator): HTMLElement => {
   const card = createElement("article", "inspection-card activity-card")
   const header = createElement("div", "card-header")
   const title = createElement("div", "card-title")
-  title.append(badge(activity.type, "activity"), createElement("strong", undefined, activityTitle(activity)))
-  header.append(title)
+  title.append(createElement("strong", undefined, activityTitle(activity)))
+  const flags = createElement("div", "card-flags")
+  flags.append(badge(activity.type, "activity"))
+  header.append(title, flags)
   card.append(header)
 
-  const details: Array<readonly [string, string]> = [["Owner", activity.source]]
+  const details: Array<readonly [string, MetadataValue]> = [
+    ["Owner", stateLink(activity.source, activity.source, navigate)]
+  ]
   if (activity.type === "timer") details.push(["Duration", activity.duration])
   if (activity.type === "effect") {
     details.push(["Success", activity.outcomes.success], ["Failure", activity.outcomes.failure])
@@ -276,17 +296,20 @@ export const renderVisualizer = (
       if (index > 0) breadcrumbs.append(createElement("span", "breadcrumb-separator", "/"))
       breadcrumbs.append(stateLink(item.path, item.label, navigateToState))
     })
-    const eyebrow = createElement("div", "inspector-eyebrow")
-    eyebrow.append(badge(inspection.state.type, "state"))
-    if (activePaths().includes(inspection.state.path)) eyebrow.append(badge("active", "active"))
-    if (inspection.initial) eyebrow.append(badge("initial", "initial"))
-    header.append(breadcrumbs, eyebrow, createElement("h2", undefined, inspection.label))
+    const titleRow = createElement("div", "inspector-title-row")
+    const title = createElement("div", "inspector-state-title")
+    title.append(
+      stateStatus(activePaths().includes(inspection.state.path), inspection.initial),
+      createElement("h2", undefined, inspection.label)
+    )
+    titleRow.append(title, badge(inspection.state.type, "state"))
+    header.append(breadcrumbs, titleRow)
     header.append(metadata([
       ["Path", inspection.state.path],
-      ["Parent", inspection.state.parent ?? "root"],
-      ["Children", String(inspection.state.children.length)],
-      ["Initial child", inspection.state.initial ?? "none"],
-      ["History", inspection.state.history ?? "none"]
+      ["Parent", inspection.state.parent],
+      ["Children", inspection.state.children.length > 0 ? String(inspection.state.children.length) : null],
+      ["Initial child", inspection.state.initial],
+      ["History", inspection.state.history]
     ]))
     if (inspection.state.description !== null || inspection.state.documentation !== null) {
       const annotations = createElement("div", "state-annotations")
@@ -300,30 +323,26 @@ export const renderVisualizer = (
     }
     inspectorContent.append(header)
 
-    const transitions = createElement("section", "inspector-section")
-    transitions.append(inspectionSection("Transitions", inspection.outgoing.length))
-    if (inspection.outgoing.length === 0) {
-      transitions.append(createElement("p", "section-empty", "No transitions leave this state."))
-    } else {
+    if (inspection.outgoing.length > 0) {
+      const transitions = createElement("section", "inspector-section")
+      transitions.append(inspectionSection("Transitions", inspection.outgoing.length))
       inspection.outgoing.forEach((transition) => transitions.append(renderTransition(transition, navigateToState)))
+      inspectorContent.append(transitions)
     }
-    inspectorContent.append(transitions)
 
-    const incoming = createElement("section", "inspector-section")
-    incoming.append(inspectionSection("Entered by", inspection.incoming.length))
-    if (inspection.incoming.length === 0) {
-      incoming.append(createElement("p", "section-empty", "No transitions target this state."))
-    } else {
+    if (inspection.incoming.length > 0) {
+      const incoming = createElement("section", "inspector-section")
+      incoming.append(inspectionSection("Entered by", inspection.incoming.length))
       inspection.incoming.forEach((transition) =>
         incoming.append(renderIncomingTransition(transition, navigateToState))
       )
+      inspectorContent.append(incoming)
     }
-    inspectorContent.append(incoming)
 
     if (inspection.activities.length > 0) {
       const activities = createElement("section", "inspector-section")
-      activities.append(inspectionSection("Activities", inspection.activities.length))
-      inspection.activities.forEach((activity) => activities.append(renderActivity(activity)))
+      activities.append(inspectionSection("Invoked", inspection.activities.length))
+      inspection.activities.forEach((activity) => activities.append(renderActivity(activity, navigateToState)))
       inspectorContent.append(activities)
     }
   }
@@ -393,12 +412,14 @@ export const renderVisualizer = (
       inspectorContent.append(composer)
     }
 
-    const transitions = createElement("section", "inspector-section")
-    transitions.append(inspectionSection("Transitions", inspection.transitions.length))
-    inspection.transitions.forEach((transition) =>
-      transitions.append(renderTransition(transition, navigateToState, true))
-    )
-    inspectorContent.append(transitions)
+    if (inspection.transitions.length > 0) {
+      const transitions = createElement("section", "inspector-section")
+      transitions.append(inspectionSection("Transitions", inspection.transitions.length))
+      inspection.transitions.forEach((transition) =>
+        transitions.append(renderTransition(transition, navigateToState, true))
+      )
+      inspectorContent.append(transitions)
+    }
   }
 
   const renderTransitionInspection = (transition: VisualizationTransition): void => {
@@ -406,22 +427,28 @@ export const renderVisualizer = (
     inspectorContent.replaceChildren()
     showInspector()
     const header = createElement("header", "inspector-header")
-    const eyebrow = createElement("div", "inspector-eyebrow")
-    eyebrow.append(badge(transition.trigger.type, "trigger"))
-    if (transition.reenter) eyebrow.append(badge("reenter"))
-    if (transition.acceptance === "declinable") eyebrow.append(badge("declinable"))
-    header.append(eyebrow, createElement("h2", undefined, triggerLabel(transition)))
+    const titleRow = createElement("div", "inspector-title-row")
+    const flags = createElement("div", "card-flags")
+    flags.append(badge(transition.trigger.type, "trigger"))
+    if (transition.reenter) flags.append(badge("reenter"))
+    if (transition.acceptance === "declinable") flags.append(badge("declinable"))
+    titleRow.append(createElement("h2", undefined, triggerLabel(transition)), flags)
+    header.append(titleRow)
     header.append(metadata([
       ["Source", transition.source],
-      ["Branches", String(transition.branches.length)],
-      ["Acceptance", transition.acceptance],
-      ["Reenter", transition.reenter ? "yes" : "no"]
+      ["Branches", transition.branches.length > 1 ? String(transition.branches.length) : null],
+      ["Acceptance", transition.acceptance === "declinable" ? transition.acceptance : null],
+      ["Reenter", transition.reenter ? "yes" : null]
     ]))
     inspectorContent.append(header)
-    const details = createElement("section", "inspector-section")
-    details.append(inspectionSection("Transition", transition.branches.length))
-    details.append(renderTransition(transition, navigateToState))
-    inspectorContent.append(details)
+    if (transition.branches.length > 0) {
+      const details = createElement("section", "inspector-section")
+      details.append(inspectionSection("Branches", transition.branches.length))
+      const branches = createElement("div", "inspection-card branch-list")
+      transition.branches.forEach((branch) => branches.append(renderBranch(branch, navigateToState)))
+      details.append(branches)
+      inspectorContent.append(details)
+    }
   }
 
   const renderSimulationFailure = (failureDiagnostics: ReadonlyArray<Diagnostic>): void => {
@@ -809,6 +836,18 @@ export const renderVisualizer = (
     updateChartPresentation()
   }
 
+  const openStateDetails = (path: string): void => {
+    selectState(path, false)
+    const inspection = model.inspectState(path)
+    if (inspection !== undefined) renderInspection(inspection)
+  }
+
+  const openTransitionDetails = (transitionId: string): void => {
+    selectTransition(transitionId)
+    const transition = transitionsById.get(transitionId)
+    if (transition !== undefined) renderTransitionInspection(transition)
+  }
+
   clearButton.addEventListener("click", clearSelection)
   inspectorClose.addEventListener("click", hideInspector)
   detailsButton.addEventListener("click", () => {
@@ -998,7 +1037,9 @@ export const renderVisualizer = (
   } else {
     void Effect.runPromise(renderChart(chartHost, visualization, {
       selectState: (path) => selectState(path, false),
+      openStateDetails,
       selectTransition,
+      openTransitionDetails,
       clearSelection
     })).then(
       (view) => {
