@@ -1055,7 +1055,8 @@ export const renderVisualizer = (
       openStateDetails,
       selectTransition,
       openTransitionDetails,
-      clearSelection
+      clearSelection,
+      zoomChanged: updateZoomControls
     })).then(
       (view) => {
         chartView = view

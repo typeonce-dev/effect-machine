@@ -17,6 +17,7 @@ export interface ChartHandlers {
   readonly selectTransition: (transitionId: string) => void
   readonly openTransitionDetails: (transitionId: string) => void
   readonly clearSelection: () => void
+  readonly zoomChanged: (zoom: number) => void
 }
 
 export interface ChartPresentation {
@@ -34,12 +35,47 @@ export interface ChartView {
   readonly focusState: (path: string) => void
   readonly revealState: (path: string) => void
   readonly getZoom: () => number
-  readonly setZoom: (zoom: number) => number
+  readonly setZoom: (zoom: number, anchor?: ChartZoomAnchor) => number
   readonly fit: () => number
+}
+
+export interface ChartZoomAnchor {
+  readonly x: number
+  readonly y: number
 }
 
 export const minimumChartZoom = 0.2
 export const maximumChartZoom = 1.6
+export const chartPanThreshold = 5
+
+const clampZoom = (zoom: number): number => Math.min(maximumChartZoom, Math.max(minimumChartZoom, zoom))
+
+export const chartZoomScrollPosition = (
+  currentZoom: number,
+  nextZoom: number,
+  scrollLeft: number,
+  scrollTop: number,
+  anchor: ChartZoomAnchor
+): ChartZoomAnchor => ({
+  x: Math.max(0, (scrollLeft + anchor.x) / currentZoom * nextZoom - anchor.x),
+  y: Math.max(0, (scrollTop + anchor.y) / currentZoom * nextZoom - anchor.y)
+})
+
+export const chartWheelZoom = (
+  currentZoom: number,
+  deltaY: number,
+  deltaMode: number,
+  viewportHeight: number
+): number => {
+  const normalizedDelta = deltaY * (deltaMode === 1 ? 16 : deltaMode === 2 ? viewportHeight : 1)
+  return clampZoom(currentZoom * Math.exp(-normalizedDelta * 0.0025))
+}
+
+export const isChartPan = (
+  start: ChartZoomAnchor,
+  current: ChartZoomAnchor,
+  threshold = chartPanThreshold
+): boolean => Math.hypot(current.x - start.x, current.y - start.y) >= threshold
 
 const element = <Tag extends keyof HTMLElementTagNameMap>(
   tag: Tag,
@@ -189,6 +225,15 @@ const render = (
   host.replaceChildren(viewport)
 
   let zoom = 1
+  let pan: {
+    readonly pointerId: number
+    readonly start: ChartZoomAnchor
+    readonly scrollLeft: number
+    readonly scrollTop: number
+    dragging: boolean
+  } | undefined
+  let suppressClick = false
+  let suppressDoubleClickUntil = 0
 
   const stateElements = new Map<string, Array<HTMLElement>>()
   const stateControls = new Map<string, HTMLButtonElement>()
@@ -309,6 +354,64 @@ const render = (
     handlers.clearSelection()
   })
 
+  viewport.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || event.button !== 0 || pan !== undefined) return
+    pan = {
+      pointerId: event.pointerId,
+      start: { x: event.clientX, y: event.clientY },
+      scrollLeft: viewport.scrollLeft,
+      scrollTop: viewport.scrollTop,
+      dragging: false
+    }
+  })
+
+  viewport.addEventListener("pointermove", (event) => {
+    if (pan === undefined || event.pointerId !== pan.pointerId) return
+    const current = { x: event.clientX, y: event.clientY }
+    if (!pan.dragging) {
+      if (!isChartPan(pan.start, current)) return
+      pan.dragging = true
+      viewport.setPointerCapture(event.pointerId)
+      viewport.classList.add("is-panning")
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && viewport.contains(focused)) focused.blur()
+    }
+    event.preventDefault()
+    viewport.scrollTo({
+      left: pan.scrollLeft - (current.x - pan.start.x),
+      top: pan.scrollTop - (current.y - pan.start.y)
+    })
+  })
+
+  const finishPan = (event: PointerEvent, cancelled: boolean): void => {
+    if (pan === undefined || event.pointerId !== pan.pointerId) return
+    const dragged = pan.dragging
+    if (viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId)
+    viewport.classList.remove("is-panning")
+    pan = undefined
+    if (!dragged || cancelled) return
+    event.preventDefault()
+    suppressClick = true
+    suppressDoubleClickUntil = performance.now() + 400
+    setTimeout(() => {
+      suppressClick = false
+    }, 0)
+  }
+
+  viewport.addEventListener("pointerup", (event) => finishPan(event, false))
+  viewport.addEventListener("pointercancel", (event) => finishPan(event, true))
+  viewport.addEventListener("click", (event) => {
+    if (!suppressClick) return
+    suppressClick = false
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }, true)
+  viewport.addEventListener("dblclick", (event) => {
+    if (performance.now() > suppressDoubleClickUntil) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }, true)
+
   const revealState = (path: string): void => {
     const control = stateControls.get(path)
     if (control === undefined) return
@@ -322,23 +425,38 @@ const render = (
     })
   }
 
-  const setZoom = (requested: number): number => {
-    const next = Math.min(maximumChartZoom, Math.max(minimumChartZoom, requested))
+  const setZoom = (requested: number, anchor?: ChartZoomAnchor): number => {
+    const next = clampZoom(requested)
     if (next === zoom) return zoom
-    const center = {
-      x: (viewport.scrollLeft + viewport.clientWidth / 2) / zoom,
-      y: (viewport.scrollTop + viewport.clientHeight / 2) / zoom
-    }
+    const zoomAnchor = anchor ?? { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }
+    const scroll = chartZoomScrollPosition(
+      zoom,
+      next,
+      viewport.scrollLeft,
+      viewport.scrollTop,
+      zoomAnchor
+    )
     zoom = next
     canvas.style.transform = `scale(${zoom})`
     stage.style.width = `${layout.width * zoom}px`
     stage.style.height = `${layout.height * zoom}px`
     viewport.scrollTo({
-      left: Math.max(0, center.x * zoom - viewport.clientWidth / 2),
-      top: Math.max(0, center.y * zoom - viewport.clientHeight / 2)
+      left: scroll.x,
+      top: scroll.y
     })
+    handlers.zoomChanged(zoom)
     return zoom
   }
+
+  viewport.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return
+    event.preventDefault()
+    const bounds = viewport.getBoundingClientRect()
+    setZoom(
+      chartWheelZoom(zoom, event.deltaY, event.deltaMode, viewport.clientHeight),
+      { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
+    )
+  }, { passive: false })
 
   const fit = (): number => {
     const availableWidth = Math.max(1, viewport.clientWidth - 48)

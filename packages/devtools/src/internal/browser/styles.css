@@ -407,6 +407,16 @@ button {
 .chart-viewport {
   overflow: auto;
   overscroll-behavior: contain;
+  cursor: grab;
+  touch-action: pan-x pan-y;
+}
+
+.chart-viewport.is-panning,
+.chart-viewport.is-panning .chart-state,
+.chart-viewport.is-panning .chart-edge-hit,
+.chart-viewport.is-panning .chart-edge-label {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .chart-stage {
@@ -590,6 +600,10 @@ button {
   gap: 10px;
 }
 
+.chart-activity-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
 .chart-field-name,
 .chart-activity-name {
   color: #c4c9d0;
@@ -605,7 +619,10 @@ button {
 }
 
 .chart-activity-kind {
+  min-width: max-content;
   color: #77a990;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .chart-more {
