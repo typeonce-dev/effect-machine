@@ -1005,7 +1005,7 @@ button {
 
 .metadata {
   display: grid;
-  grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
   gap: 8px 16px;
   margin: 20px 0 0;
   font-size: 11px;
@@ -1118,7 +1118,7 @@ button {
 
 .branch-updates {
   display: grid;
-  grid-template-columns: minmax(74px, auto) minmax(0, 1fr);
+  grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
   gap: 8px 16px;
   margin-top: 9px;
   font-size: 11px;

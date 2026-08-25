@@ -6,7 +6,7 @@ import { machine, snapshot } from "../../../src/internal/browser/example-machine
 import { projectInputSchema } from "../../../src/internal/browser/input-form.js"
 import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
 import { textTreeToString } from "../../../src/internal/browser/text-tree.js"
-import { makeVisualizerModel } from "../../../src/internal/browser/visualizer-model.js"
+import { branchTargetApi, makeVisualizerModel } from "../../../src/internal/browser/visualizer-model.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
 
 const renderText = makeTextRenderer<typeof machine, typeof snapshot>(Machine)
@@ -96,6 +96,87 @@ describe("Interactive text visualization", () => {
       inspection?.breadcrumbs.map((item) => item.path),
       ["application", "application.workflow", "application.workflow.idle"]
     )
+  })
+
+  it("renders retained transition selections as canonical Effect Machine APIs", () => {
+    const document = buildDocument()
+    const plannerDocument = MachineDocument.make(plannerMachine)
+    const api = (
+      source: string,
+      selection: MachineDocument.Selection,
+      updates: ReadonlyArray<string> = []
+    ): string | undefined =>
+      branchTargetApi(document, source, {
+        id: "test-branch",
+        type: "direct",
+        target: selection.path,
+        selection,
+        updates
+      })
+    const start = document.transitions.find((transition) =>
+      transition.trigger.type === "event" && transition.trigger.event === "Start"
+    )
+    const refresh = document.transitions.find((transition) =>
+      transition.trigger.type === "event" && transition.trigger.event === "Refresh"
+    )
+    const begin = plannerDocument.transitions.find((transition) =>
+      transition.trigger.type === "event" && transition.trigger.event === "Begin"
+    )
+
+    assert.deepStrictEqual(
+      begin?.branches.map((branch) => branchTargetApi(plannerDocument, begin.source, branch)),
+      ["to.full.Working()", "to.full.Working()"]
+    )
+
+    assert.strictEqual(
+      start === undefined ? undefined : branchTargetApi(document, start.source, start.branches[0]!),
+      "to.local.running().updating(to.branch.application.workflow)"
+    )
+    assert.strictEqual(
+      refresh === undefined ? undefined : branchTargetApi(document, refresh.source, refresh.branches[0]!),
+      "to.local.update"
+    )
+    assert.strictEqual(
+      api("application.workflow.running.editing", {
+        path: "application.workflow.running",
+        kind: "state",
+        scope: "local"
+      }),
+      "to.local.with"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", {
+        path: "application.workflow.running",
+        kind: "initial",
+        scope: "local"
+      }),
+      "to.local.running.initial"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", {
+        path: "application.workflow",
+        kind: "update",
+        scope: "branch"
+      }),
+      "to.branch.application.workflow.update"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", {
+        path: "application.workflow.recent",
+        kind: "history",
+        scope: "full"
+      }),
+      "to.history.application.workflow.recent"
+    )
+    assert.strictEqual(
+      api("application.workflow.idle", {
+        path: null,
+        kind: "none",
+        scope: "local"
+      }),
+      "to.none"
+    )
+    assert.strictEqual(api("application", document.initial.selection), "to.application.initial")
   })
 
   it("accepts an empty partial topology", () => {
