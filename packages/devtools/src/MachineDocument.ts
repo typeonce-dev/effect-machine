@@ -13,7 +13,7 @@ import * as internal from "./internal/machineDocument.js"
  * @category models
  * @since 0.23.0
  */
-export const schemaVersion = 2 as const
+export const schemaVersion = 3 as const
 
 /**
  * Source module and export that produced a machine.
@@ -66,6 +66,24 @@ export const Initial = Schema.Struct({
 export type Initial = Schema.Schema.Type<typeof Initial>
 
 /**
+ * Canonical JSON Schema retained for machine contracts.
+ *
+ * @category schemas
+ * @since 0.24.0
+ */
+export const InputSchema = Schema.Struct({
+  dialect: Schema.Literal("draft-2020-12"),
+  schema: Schema.Json,
+  definitions: Schema.Record(Schema.String, Schema.Json)
+})
+
+/**
+ * @category models
+ * @since 0.24.0
+ */
+export type InputSchema = Schema.Schema.Type<typeof InputSchema>
+
+/**
  * @category schemas
  * @since 0.23.0
  */
@@ -81,6 +99,8 @@ export const State = Schema.Struct({
   parent: Schema.NullOr(Schema.String),
   children: Schema.Array(Schema.String),
   initial: Schema.NullOr(Schema.String),
+  valueSchema: Schema.NullOr(InputSchema),
+  outputSchema: Schema.NullOr(InputSchema),
   transitionIds: Schema.Array(Schema.String),
   activityIds: Schema.Array(Schema.String)
 })
@@ -215,24 +235,6 @@ export const Snapshot = Schema.Struct({
  * @since 0.23.0
  */
 export type Snapshot = Schema.Schema.Type<typeof Snapshot>
-
-/**
- * Canonical JSON Schema used to render one machine input form.
- *
- * @category schemas
- * @since 0.24.0
- */
-export const InputSchema = Schema.Struct({
-  dialect: Schema.Literal("draft-2020-12"),
-  schema: Schema.Json,
-  definitions: Schema.Record(Schema.String, Schema.Json)
-})
-
-/**
- * @category models
- * @since 0.24.0
- */
-export type InputSchema = Schema.Schema.Type<typeof InputSchema>
 
 /**
  * Public event input paired with the schema for its payload.

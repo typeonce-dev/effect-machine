@@ -1,0 +1,11 @@
+---
+"@typeonce/effect-machine-devtools": minor
+---
+
+Replace the text-tree topology pane with a statically laid-out statechart. State cards expose value fields and invocations, while routed transition edges and compound regions make the machine topology readable without a draggable canvas. Directional colors distinguish incoming from outgoing relationships, and conditional branches with the same source and target share one topology edge while retaining their full details in the inspector. Machine tabs sit above the full-viewport chart, selection remains visible independently from the on-demand floating inspector, and corner zoom and fit controls provide a whole-machine overview.
+
+`MachineDocument.State` now retains each state's projected value and output schemas. Consumers of serialized documents must accept `schemaVersion: 3` and the new `valueSchema` and `outputSchema` fields.
+
+Replace planner-backed browser simulation and `MachineSimulator` with the side-effect-free `MachineWalkthrough` module. A walkthrough derives its initial and active configurations entirely from `MachineDocument`, exposes each documented transition branch as an explicit choice, preserves parallel regions, records shallow and deep history, and retains an immutable timeline with cursor-based time travel. Runtime-resolved targets and first-use history remain visible but unavailable instead of executing callbacks or inventing results.
+
+The browser now presents public machine and event schemas as read-only contracts and uses transition edges for simulation. Targetless transitions render as clickable self-loops, runtime-resolved targets terminate at disabled dashed placeholders, and state nodes remain read-only. Direct choices advance immediately while ambiguous or unavailable branches appear in a compact anchored picker. The bottom dock is reserved for the time-travel timeline. The browser no longer asks for payload values or evaluates initializers, resolvers, guards, updates, automatic callbacks, or invoke outcomes. Migrate programmatic document exploration from `MachineSimulator.start` and `MachineSimulator.send` to `MachineWalkthrough.start`, `MachineWalkthrough.choices`, and `MachineWalkthrough.take`.

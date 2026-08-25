@@ -3,8 +3,14 @@ import { Schema } from "effect"
 
 // Shared by the live browser UI and its project-inspection fixture.
 
-class Application extends Schema.TaggedClass<Application>("Application")("Application", {}) {}
-class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
+class Application extends Schema.TaggedClass<Application>("Application")("Application", {
+  workspace: Schema.String,
+  revision: Schema.Number
+}) {}
+class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {
+  document: Schema.String,
+  unsavedChanges: Schema.Number
+}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Running extends Schema.TaggedClass<Running>("Running")("Running", {}) {}
 class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {}) {}
@@ -59,11 +65,11 @@ const States = Machine.states({
 
 export const snapshot = {
   path: "application" as const,
-  value: new Application({}),
+  value: new Application({ workspace: "effect-machine", revision: 7 }),
   states: {
     workflow: {
       path: "application.workflow" as const,
-      value: new Workflow({}),
+      value: new Workflow({ document: "Machine.ts", unsavedChanges: 2 }),
       state: { path: "application.workflow.idle" as const, value: new Idle({}) }
     },
     connection: {
@@ -103,9 +109,12 @@ export const machine = Machine.make({
                     target.decoded(
                       new Running({}),
                       (running) => running.editing.decoded(new Editing({}))
-                    ).update(owner.decoded(new Workflow({})))
+                    ).update(owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 })))
                   ),
-              Refresh: (to) => to.local.update(({ owner }) => owner.decoded(new Workflow({})))
+              Refresh: (to) =>
+                to.local.update(({ owner }) =>
+                  owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
+                )
             }
           },
           running: {

@@ -63,6 +63,9 @@ importers:
       chokidar:
         specifier: 4.0.3
         version: 4.0.3
+      elkjs:
+        specifier: 0.11.1
+        version: 0.11.1
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -831,6 +834,9 @@ packages:
 
   effect@4.0.0-rc.111:
     resolution: {integrity: sha512-ASd5L58EIR0CUNueZNKKjSsyOCd+2alxOAIaTcHaqkJkPsaYSsw5Cg/cfANk5K4Jr2YsX756xvX11shzqsreWA==}
+
+  elkjs@0.11.1:
+    resolution: {integrity: sha512-zxxR9k+rx5ktMwT/FwyLdPCrq7xN6e4VGGHH8hA01vVYKjTFik7nHOxBnAYtrgYUB1RpAiLvA1/U2YraWxyKKg==}
 
   enquirer@2.4.1:
     resolution: {integrity: sha512-rRqJg/6gd538VHvR3PSrdRBb/1Vy2YfzHqzvbhGIQpDRKIa4FgV/54b5Q1xYSxOOwKvjXweS26E0Q+nAMwp2pQ==}
@@ -2093,6 +2099,8 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.9.0
       msgpackr: 2.0.5
+
+  elkjs@0.11.1: {}
 
   enquirer@2.4.1:
     dependencies:

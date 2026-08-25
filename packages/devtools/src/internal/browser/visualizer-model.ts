@@ -72,6 +72,110 @@ export const triggerLabel = (transition: VisualizationTransition): string => {
   }
 }
 
+const propertyAccess = (key: string): string => /^[$A-Z_a-z][$\w]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`
+
+const pathAccess = (path: string): string => path.split(".").map(propertyAccess).join("")
+
+const nearestCompoundScope = (
+  document: VisualizationDocument,
+  source: string
+): string | undefined => {
+  const states = new Map(document.states.map((state) => [state.path, state]))
+  let current = states.get(source)
+  while (current !== undefined) {
+    if (current.type === "compound") return current.path
+    current = current.parent === null ? undefined : states.get(current.parent)
+  }
+  return undefined
+}
+
+const localPathAccess = (
+  document: VisualizationDocument,
+  source: string,
+  path: string
+): string | undefined => {
+  const scope = nearestCompoundScope(document, source)
+  if (scope === undefined) return undefined
+  if (path === scope) return ""
+  const prefix = `${scope}.`
+  return path.startsWith(prefix) ? pathAccess(path.slice(prefix.length)) : undefined
+}
+
+/** Canonical Effect Machine selector represented by one retained transition branch. */
+export const branchTargetApi = (
+  document: VisualizationDocument,
+  source: string,
+  branch: VisualizationBranch
+): string | undefined => {
+  const { selection } = branch
+  if (selection.kind === "none") return "to.none"
+  const path = selection.path
+  if (path === null || selection.scope === null) return undefined
+
+  let api: string | undefined
+  if (selection.kind === "history" && selection.scope === "full") {
+    api = `to.history${pathAccess(path)}`
+  } else if (selection.scope === "local") {
+    const local = localPathAccess(document, source, path)
+    if (local === undefined) return undefined
+    switch (selection.kind) {
+      case "state":
+        api = local === "" ? "to.local.with" : `to.local${local}()`
+        break
+      case "choice":
+        api = local === "" ? undefined : `to.local${local}()`
+        break
+      case "initial":
+        api = local === "" ? undefined : `to.local${local}.initial`
+        break
+      case "update":
+        api = local === "" ? "to.local.update" : undefined
+        break
+      case "history":
+        break
+    }
+  } else if (selection.scope === "branch") {
+    switch (selection.kind) {
+      case "state":
+      case "choice":
+        api = `to.branch${pathAccess(path)}()`
+        break
+      case "initial":
+        api = `to.branch${pathAccess(path)}.initial`
+        break
+      case "update":
+        api = `to.branch${pathAccess(path)}.update`
+        break
+      case "history":
+        break
+    }
+  } else if (selection.scope === "full") {
+    switch (selection.kind) {
+      case "state":
+      case "choice":
+        api = `to.full${pathAccess(path)}()`
+        break
+      case "initial":
+        api = `to.full${pathAccess(path)}.initial`
+        break
+      case "history":
+        api = `to.history${pathAccess(path)}`
+        break
+      case "update":
+        break
+    }
+  } else if (selection.scope === "initial") {
+    if (selection.kind === "state") api = `to${pathAccess(path)}()`
+    if (selection.kind === "initial") api = `to${pathAccess(path)}.initial`
+  }
+
+  if (api === undefined || selection.kind === "update") return api
+  return branch.updates.reduce(
+    (expression, owner) => `${expression}.updating(to.branch${pathAccess(owner)})`,
+    api
+  )
+}
+
 const buildInitialPaths = (document: VisualizationDocument): ReadonlySet<string> => {
   const initial = new Set<string>([document.initial.target])
   for (const state of document.states) {

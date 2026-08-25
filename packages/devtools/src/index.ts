@@ -15,6 +15,6 @@ export * as DevToolsProtocol from "./DevToolsProtocol.js"
 export * as MachineDocument from "./MachineDocument.js"
 
 /**
- * @since 0.23.0
+ * @since 0.25.0
  */
-export * as MachineSimulator from "./MachineSimulator.js"
+export * as MachineWalkthrough from "./MachineWalkthrough.js"

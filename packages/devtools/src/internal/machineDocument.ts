@@ -169,7 +169,7 @@ export const make = <M extends Machine.Machine.Any>(
 
   const initial = Machine.initialDefinition(machine)
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: options.revision ?? 0,
     source: options.source ?? null,
     machineId: machine.id ?? "Machine",
@@ -190,6 +190,8 @@ export const make = <M extends Machine.Machine.Any>(
       parent: node.parent ?? null,
       children: [...childPaths.get(node.path) ?? []],
       initial: node.initial ?? null,
+      valueSchema: node.schema === undefined ? null : inputSchema(node.schema),
+      outputSchema: node.output === undefined ? null : inputSchema(node.output),
       transitionIds: [...transitionIds.get(node.path) ?? []],
       activityIds: [...activityIds.get(node.path) ?? []]
     })),

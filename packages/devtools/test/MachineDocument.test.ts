@@ -13,7 +13,7 @@ describe("MachineDocument", () => {
       snapshot
     })
 
-    assert.strictEqual(document.schemaVersion, 2)
+    assert.strictEqual(document.schemaVersion, 3)
     assert.strictEqual(document.revision, 3)
     assert.deepStrictEqual(document.source, {
       file: "/project/src/workflow.ts",
@@ -42,6 +42,12 @@ describe("MachineDocument", () => {
     assert.deepStrictEqual(machineSchema?.required, ["owner", "attempts", "notifications", "mode"])
     assert.deepStrictEqual(begin?.schema.schema, { $ref: "#/$defs/PlannerBeginEncoded" })
     assert.deepStrictEqual(document.inputs.events.map(({ event }) => event), ["Begin", "Cancel"])
+    const working = document.states.find((state) => state.path === "Working")
+    const workingSchema = working?.valueSchema?.schema as { readonly $ref?: string } | undefined
+    const finished = document.states.find((state) => state.path === "Finished")
+
+    assert.strictEqual(workingSchema?.$ref, "#/$defs/PlannerWorkingEncoded")
+    assert.notStrictEqual(finished?.outputSchema, null)
   })
 
   it("validates ready, partial, and failed evaluation results", () => {

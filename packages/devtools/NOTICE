@@ -1,3 +1,7 @@
 Portions are adapted from the Effect project, which is distributed under the
 MIT License. See https://github.com/Effect-TS/effect and the source history for
 authorship and provenance.
+
+This product includes Eclipse Layout Kernel for JavaScript (elkjs), which is
+distributed under the Eclipse Public License 2.0. See
+https://github.com/kieler/elkjs for source and license information.

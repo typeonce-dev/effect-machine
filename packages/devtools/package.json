@@ -22,7 +22,7 @@
     ".": "./src/index.ts",
     "./DevToolsProtocol": "./src/DevToolsProtocol.ts",
     "./MachineDocument": "./src/MachineDocument.ts",
-    "./MachineSimulator": "./src/MachineSimulator.ts",
+    "./MachineWalkthrough": "./src/MachineWalkthrough.ts",
     "./package.json": "./package.json",
     "./internal/*": null
   },
@@ -36,6 +36,7 @@
     "@effect/platform-node": "4.0.0-rc.111",
     "@typeonce/effect-machine": "workspace:^",
     "chokidar": "4.0.3",
+    "elkjs": "0.11.1",
     "typescript": "6.0.3",
     "vite": "8.1.5"
   },
@@ -67,7 +68,7 @@
       ".": "./dist/index.js",
       "./DevToolsProtocol": "./dist/DevToolsProtocol.js",
       "./MachineDocument": "./dist/MachineDocument.js",
-      "./MachineSimulator": "./dist/MachineSimulator.js",
+      "./MachineWalkthrough": "./dist/MachineWalkthrough.js",
       "./internal/*": null
     }
   },
