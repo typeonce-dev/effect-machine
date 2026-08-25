@@ -1,5 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
+import * as Effect from "effect/Effect"
 
 class Idle extends Schema.TaggedClass<Idle>("PlannerIdle")("Idle", { owner: Schema.String }) {}
 class Working extends Schema.TaggedClass<Working>("PlannerWorking")("Working", {
@@ -128,6 +129,7 @@ export const plannerMachine = Machine.make({
     }
   },
   Working: {
+    invoke: (from) => from.effect("monitor-job", () => Effect.never),
     on: {
       AutoFinish: (to) =>
         to.full.Finished().resolve(({ state, target }) => target.decoded(new Finished({ job: state.job }))),

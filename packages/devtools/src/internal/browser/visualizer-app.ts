@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect"
 import {
   type Diagnostic,
   protocolVersion,
@@ -11,6 +12,13 @@ import type {
   MachineDocument as VisualizationDocument,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
+import {
+  type ChartPresentation,
+  type ChartView,
+  maximumChartZoom,
+  minimumChartZoom,
+  renderChart
+} from "./chart-renderer.js"
 import { type InputForm, renderInputForm } from "./input-form.js"
 import { requestSimulation } from "./simulation-client.js"
 import {
@@ -18,7 +26,6 @@ import {
   type IncomingTransition,
   makeVisualizerModel,
   type StateInspection,
-  type TopologyNode,
   triggerLabel
 } from "./visualizer-model.js"
 
@@ -56,22 +63,31 @@ const renderBranch = (branch: VisualizationBranch, navigate: StateNavigator): HT
   const row = createElement("div", "branch-row")
   const main = createElement("div", "branch-main")
   if (branch.type === "branch") main.append(badge(branch.title, "condition"))
-  main.append(createElement("span", "branch-arrow", "→"))
   if (branch.target !== null) {
-    main.append(stateLink(branch.target, branch.target, navigate))
+    main.append(createElement("span", "branch-arrow", "→"), stateLink(branch.target, branch.target, navigate))
+  } else if (branch.selection.kind === "update") {
+    main.append(
+      badge(branch.selection.scope === "local" ? "to.local.update" : "value update", "update"),
+      createElement("span", "branch-target", "Updates the owner value")
+    )
   } else {
-    main.append(createElement("span", "branch-target", branch.updates.length > 0 ? "Remain in state" : "No target"))
+    main.append(createElement("span", "branch-target", "No target state"))
   }
   row.append(main)
 
   const details: Array<readonly [string, string]> = [
-    ["Selection", branch.selection.kind],
+    [
+      "Selection",
+      branch.selection.kind === "update" && branch.selection.scope === "local"
+        ? "to.local.update"
+        : branch.selection.kind
+    ],
     ["Scope", branch.selection.scope ?? "none"]
   ]
   row.append(metadata(details))
   if (branch.updates.length > 0) {
     const updates = createElement("div", "branch-updates")
-    updates.append(createElement("span", "branch-updates-label", "Updates"))
+    updates.append(createElement("span", "branch-updates-label", "Value owner"))
     branch.updates.forEach((path) => updates.append(stateLink(path, path, navigate)))
     row.append(updates)
   }
@@ -191,36 +207,45 @@ export const renderVisualizer = (
   diagnostics: ReadonlyArray<Diagnostic> = []
 ): void => {
   const model = makeVisualizerModel(visualization)
-  const rows = new Map<string, HTMLElement>()
-  const nodes = new Map<string, HTMLElement>()
-  const statuses = new Map<string, HTMLElement>()
+  const transitionsById = new Map(visualization.transitions.map((transition) => [transition.id, transition]))
   const eventButtons = new Map<string, HTMLElement>()
   const eventSchemas = new Map(visualization.inputs.events.map(({ event, schema }) => [event, schema]))
-  const relatedPaths = new Set<string>()
+  const relatedFrom = new Set<string>()
+  const relatedTo = new Set<string>()
+  const incomingTransitions = new Set<string>()
+  const outgoingTransitions = new Set<string>()
   let selectedPath: string | undefined
   let selectedEvent: string | undefined
+  let selectedTransition: string | undefined
   let selectedFrame: SimulationFrame | undefined
   let simulation: SimulationReady | undefined
   let simulationPending = false
   let activeInputForm: InputForm | undefined
+  let chartView: ChartView | undefined
 
   const activePaths = (): ReadonlyArray<string> => simulation?.current.activePaths ?? model.activePaths
   const candidateEvents = (): ReadonlyArray<string> => simulation?.current.candidateEvents ?? model.candidateEvents
 
   const shell = createElement("main", "app-shell")
   const workspace = createElement("section", "workspace")
-  const treePanel = createElement("section", "tree-panel")
-  treePanel.setAttribute("aria-label", `${model.machineId} topology`)
+  const chartPanel = createElement("section", "chart-panel")
+  chartPanel.setAttribute("aria-label", `${model.machineId} topology`)
   const inspector = createElement("aside", "inspector")
   inspector.setAttribute("aria-live", "polite")
+  inspector.setAttribute("aria-label", "Selection details")
+  inspector.hidden = true
+  const inspectorClose = createElement("button", "inspector-close", "Close")
+  inspectorClose.type = "button"
+  inspectorClose.setAttribute("aria-label", "Close details")
+  const inspectorContent = createElement("div", "inspector-content")
+  inspector.append(inspectorClose, inspectorContent)
 
   const clearButton = createElement("button", "toolbar-button", "Clear selection")
   clearButton.type = "button"
   clearButton.disabled = true
-  const expandButton = createElement("button", "toolbar-button", "Expand all")
-  expandButton.type = "button"
-  const collapseButton = createElement("button", "toolbar-button", "Collapse all")
-  collapseButton.type = "button"
+  const detailsButton = createElement("button", "toolbar-button", "View details")
+  detailsButton.type = "button"
+  detailsButton.disabled = true
   const revealActiveButton = createElement("button", "toolbar-button", "Reveal active")
   revealActiveButton.type = "button"
   revealActiveButton.disabled = model.activePaths.length === 0
@@ -228,26 +253,22 @@ export const renderVisualizer = (
   simulationButton.type = "button"
   simulationButton.disabled = model.roots.length === 0
 
-  const renderEmptyInspector = (): void => {
+  const hideInspector = (): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
-    const summary = createElement("div", "inspector-empty")
-    summary.append(createElement("span", "inspector-empty-kind", "Machine"))
-    summary.append(createElement("h2", undefined, visualization.machineId))
-    summary.append(metadata([
-      ["Source", visualization.source?.file ?? "in memory"],
-      ["Export", visualization.source?.exportName ?? "none"],
-      ["Initial", visualization.initial.target],
-      ["Selection", visualization.initial.selection.kind],
-      ["Revision", String(visualization.revision)]
-    ]))
-    summary.append(createElement("p", undefined, "Select a state to inspect its transitions and activities."))
-    inspector.append(summary)
+    inspectorContent.replaceChildren()
+    inspector.hidden = true
+    detailsButton.textContent = "View details"
+  }
+
+  const showInspector = (): void => {
+    inspector.hidden = false
+    detailsButton.textContent = "Hide details"
   }
 
   const renderInspection = (inspection: StateInspection): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
+    inspectorContent.replaceChildren()
+    showInspector()
     const header = createElement("header", "inspector-header")
     const breadcrumbs = createElement("nav", "breadcrumbs")
     breadcrumbs.setAttribute("aria-label", "State path")
@@ -277,7 +298,7 @@ export const renderVisualizer = (
       }
       header.append(annotations)
     }
-    inspector.append(header)
+    inspectorContent.append(header)
 
     const transitions = createElement("section", "inspector-section")
     transitions.append(inspectionSection("Transitions", inspection.outgoing.length))
@@ -286,7 +307,7 @@ export const renderVisualizer = (
     } else {
       inspection.outgoing.forEach((transition) => transitions.append(renderTransition(transition, navigateToState)))
     }
-    inspector.append(transitions)
+    inspectorContent.append(transitions)
 
     const incoming = createElement("section", "inspector-section")
     incoming.append(inspectionSection("Entered by", inspection.incoming.length))
@@ -297,19 +318,20 @@ export const renderVisualizer = (
         incoming.append(renderIncomingTransition(transition, navigateToState))
       )
     }
-    inspector.append(incoming)
+    inspectorContent.append(incoming)
 
     if (inspection.activities.length > 0) {
       const activities = createElement("section", "inspector-section")
       activities.append(inspectionSection("Activities", inspection.activities.length))
       inspection.activities.forEach((activity) => activities.append(renderActivity(activity)))
-      inspector.append(activities)
+      inspectorContent.append(activities)
     }
   }
 
   const renderEventInspection = (inspection: EventInspection): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
+    inspectorContent.replaceChildren()
+    showInspector()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("event", "trigger"))
@@ -320,7 +342,7 @@ export const renderVisualizer = (
       ["Status", candidate ? "enabled" : "not enabled"],
       ["Registrations", String(inspection.transitions.length)]
     ]))
-    inspector.append(header)
+    inspectorContent.append(header)
 
     if (simulation !== undefined && candidate) {
       const schema = eventSchemas.get(inspection.event)
@@ -368,7 +390,7 @@ export const renderVisualizer = (
           )
         )
       }
-      inspector.append(composer)
+      inspectorContent.append(composer)
     }
 
     const transitions = createElement("section", "inspector-section")
@@ -376,24 +398,48 @@ export const renderVisualizer = (
     inspection.transitions.forEach((transition) =>
       transitions.append(renderTransition(transition, navigateToState, true))
     )
-    inspector.append(transitions)
+    inspectorContent.append(transitions)
+  }
+
+  const renderTransitionInspection = (transition: VisualizationTransition): void => {
+    activeInputForm = undefined
+    inspectorContent.replaceChildren()
+    showInspector()
+    const header = createElement("header", "inspector-header")
+    const eyebrow = createElement("div", "inspector-eyebrow")
+    eyebrow.append(badge(transition.trigger.type, "trigger"))
+    if (transition.reenter) eyebrow.append(badge("reenter"))
+    if (transition.acceptance === "declinable") eyebrow.append(badge("declinable"))
+    header.append(eyebrow, createElement("h2", undefined, triggerLabel(transition)))
+    header.append(metadata([
+      ["Source", transition.source],
+      ["Branches", String(transition.branches.length)],
+      ["Acceptance", transition.acceptance],
+      ["Reenter", transition.reenter ? "yes" : "no"]
+    ]))
+    inspectorContent.append(header)
+    const details = createElement("section", "inspector-section")
+    details.append(inspectionSection("Transition", transition.branches.length))
+    details.append(renderTransition(transition, navigateToState))
+    inspectorContent.append(details)
   }
 
   const renderSimulationFailure = (failureDiagnostics: ReadonlyArray<Diagnostic>): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
+    inspectorContent.replaceChildren()
+    showInspector()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("planner error", "error"))
     header.append(eyebrow, createElement("h2", undefined, "Simulation could not continue"))
-    inspector.append(header)
+    inspectorContent.append(header)
     const list = createElement("section", "inspector-section trace-list")
     failureDiagnostics.forEach((item) => {
       const card = createElement("article", "inspection-card trace-card")
       card.append(createElement("strong", undefined, item.code), createElement("pre", "trace-error", item.message))
       list.append(card)
     })
-    inspector.append(list)
+    inspectorContent.append(list)
   }
 
   const renderPathGroup = (label: string, paths: ReadonlyArray<string>): HTMLElement => {
@@ -419,7 +465,8 @@ export const renderVisualizer = (
 
   const renderSimulationTrace = (frame: SimulationFrame): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
+    inspectorContent.replaceChildren()
+    showInspector()
     const header = createElement("header", "inspector-header trace-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("planned", "active"))
@@ -436,7 +483,7 @@ export const renderVisualizer = (
     ]))
     const received = frame.trigger._tag === "Initial" ? frame.trigger.input : frame.trigger.event
     if (received !== undefined) header.append(jsonBlock(received))
-    inspector.append(header)
+    inspectorContent.append(header)
 
     const topology = createElement("section", "inspector-section trace-topology")
     topology.append(inspectionSection("Topology change", frame.microsteps.length))
@@ -444,7 +491,7 @@ export const renderVisualizer = (
       renderPathGroup("Before", frame.before.activePaths),
       renderPathGroup("After", frame.after.activePaths)
     )
-    inspector.append(topology)
+    inspectorContent.append(topology)
 
     const steps = createElement("section", "inspector-section trace-list")
     steps.append(inspectionSection("Microsteps", frame.microsteps.length))
@@ -491,7 +538,7 @@ export const renderVisualizer = (
       card.append(renderPathGroup("Active after", step.activePaths))
       steps.append(card)
     })
-    inspector.append(steps)
+    inspectorContent.append(steps)
 
     if (frame.commands.length > 0 || frame.emittedEvents.length > 0 || frame.output !== undefined) {
       const results = createElement("section", "inspector-section trace-results")
@@ -499,24 +546,25 @@ export const renderVisualizer = (
       if (frame.commands.length > 0) results.append(renderTraceValues("Planned commands", frame.commands))
       if (frame.emittedEvents.length > 0) results.append(renderTraceValues("Emitted events", frame.emittedEvents))
       if (frame.output !== undefined) results.append(renderTraceValues("Output", [frame.output]))
-      inspector.append(results)
+      inspectorContent.append(results)
     }
   }
 
   const renderStartSimulation = (): void => {
     activeInputForm = undefined
-    inspector.replaceChildren()
+    inspectorContent.replaceChildren()
+    showInspector()
     const header = createElement("header", "inspector-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("planner", "active"))
     header.append(eyebrow, createElement("h2", undefined, "Start simulation"))
-    inspector.append(header)
+    inspectorContent.append(header)
     const composer = createElement("section", "inspector-section simulation-composer")
     composer.append(formSection("Machine input"))
     const input = visualization.inputs.machine
     if (input === null) {
       composer.append(createElement("p", "section-empty", "This machine does not declare startup input."))
-      inspector.append(composer)
+      inspectorContent.append(composer)
       return
     }
     const form = renderInputForm(input, { name: "Machine input" })
@@ -549,7 +597,7 @@ export const renderVisualizer = (
         "Initialization and synchronous callbacks run in isolation. Runtime activities and planned commands are not started."
       )
     )
-    inspector.append(composer)
+    inspectorContent.append(composer)
   }
 
   async function runSimulation(request: SimulationRequest): Promise<void> {
@@ -579,30 +627,26 @@ export const renderVisualizer = (
       }
       simulation = result
       activeInputForm = undefined
-      if (selectedPath !== undefined) {
-        nodes.get(selectedPath)?.classList.remove("is-selected")
-        rows.get(selectedPath)?.setAttribute("aria-selected", "false")
-      }
       if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
       selectedPath = undefined
       selectedEvent = undefined
+      selectedTransition = undefined
       selectedFrame = result.frame
       clearRelations()
       result.frame.microsteps.forEach((step) => {
         step.transitions.forEach((transition) => {
-          relatedPaths.add(transition.source)
-          nodes.get(transition.source)?.classList.add("is-related-source")
-        })
-        step.entryPaths.forEach((path) => {
-          relatedPaths.add(path)
-          nodes.get(path)?.classList.add("is-related-target")
-        })
-        step.transitions.flatMap((transition) => transition.updates).forEach((path) => {
-          relatedPaths.add(path)
-          nodes.get(path)?.classList.add("is-related-update")
+          relatedFrom.add(transition.source)
+          const target = transition.resolvedTarget ?? transition.target
+          if (target !== null) relatedTo.add(target)
+          const definition = visualization.transitions.find((candidate) =>
+            candidate.source === transition.source &&
+            JSON.stringify(candidate.trigger) === JSON.stringify(transition.trigger)
+          )
+          if (definition !== undefined) outgoingTransitions.add(definition.id)
         })
       })
       clearButton.disabled = false
+      detailsButton.disabled = false
       const before = activeTopology(result.frame.before.activePaths)
       const after = activeTopology(result.frame.after.activePaths)
       simulationFeedback.textContent = result.frame.trigger._tag === "Initial"
@@ -638,40 +682,47 @@ export const renderVisualizer = (
     }
   }
 
+  const chartPresentation = (): ChartPresentation => ({
+    activePaths: activePaths(),
+    selectedState: selectedPath ?? null,
+    selectedTransition: selectedTransition ?? null,
+    fromPaths: [...relatedFrom],
+    toPaths: [...relatedTo],
+    incomingTransitionIds: [...incomingTransitions],
+    outgoingTransitionIds: [...outgoingTransitions]
+  })
+
+  const updateChartPresentation = (): void => chartView?.update(chartPresentation())
+
   const clearRelations = (): void => {
-    for (const path of relatedPaths) {
-      nodes.get(path)?.classList.remove("is-related-source", "is-related-target", "is-related-update")
-    }
-    relatedPaths.clear()
+    relatedFrom.clear()
+    relatedTo.clear()
+    incomingTransitions.clear()
+    outgoingTransitions.clear()
   }
 
   const clearSelection = (): void => {
-    if (selectedPath !== undefined) {
-      nodes.get(selectedPath)?.classList.remove("is-selected")
-      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
-    }
     if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     clearRelations()
     selectedPath = undefined
     selectedEvent = undefined
+    selectedTransition = undefined
     selectedFrame = undefined
     clearButton.disabled = true
-    renderEmptyInspector()
+    detailsButton.disabled = true
+    hideInspector()
+    updateChartPresentation()
   }
 
-  const markTransitions = (transitions: ReadonlyArray<VisualizationTransition>): void => {
+  const markTransitions = (
+    transitions: ReadonlyArray<VisualizationTransition>,
+    includeSource = true
+  ): void => {
     for (const transition of transitions) {
-      relatedPaths.add(transition.source)
-      nodes.get(transition.source)?.classList.add("is-related-source")
+      if (includeSource) relatedFrom.add(transition.source)
+      outgoingTransitions.add(transition.id)
       for (const branch of transition.branches) {
-        if (branch.target !== null) {
-          relatedPaths.add(branch.target)
-          nodes.get(branch.target)?.classList.add("is-related-target")
-        }
-        for (const update of branch.updates) {
-          relatedPaths.add(update)
-          nodes.get(update)?.classList.add("is-related-update")
-        }
+        if (branch.target !== null) relatedTo.add(branch.target)
       }
     }
   }
@@ -679,45 +730,26 @@ export const renderVisualizer = (
   const markRelatedStates = (inspection: StateInspection): void => {
     clearRelations()
     for (const incoming of inspection.incoming) {
-      relatedPaths.add(incoming.transition.source)
-      nodes.get(incoming.transition.source)?.classList.add("is-related-source")
+      relatedFrom.add(incoming.transition.source)
+      incomingTransitions.add(incoming.transition.id)
     }
-    markTransitions(inspection.outgoing)
-  }
-
-  const expandAncestors = (inspection: StateInspection): void => {
-    for (const ancestor of inspection.breadcrumbs.slice(0, -1)) {
-      const row = rows.get(ancestor.path)
-      const children = nodes.get(ancestor.path)?.querySelector<HTMLElement>(":scope > .topology-children")
-      if (row === undefined || children === null || children === undefined) continue
-      row.setAttribute("aria-expanded", "true")
-      children.hidden = false
-      const disclosure = row.querySelector<HTMLElement>(".state-disclosure")
-      if (disclosure !== null) disclosure.textContent = "▾"
-    }
+    markTransitions(inspection.outgoing, false)
   }
 
   const selectState = (path: string, focus: boolean): void => {
     const inspection = model.inspectState(path)
     if (inspection === undefined) return
-    expandAncestors(inspection)
-    if (selectedPath !== undefined) {
-      nodes.get(selectedPath)?.classList.remove("is-selected")
-      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
-    }
     if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     selectedPath = path
     selectedEvent = undefined
+    selectedTransition = undefined
     selectedFrame = undefined
-    nodes.get(path)?.classList.add("is-selected")
-    rows.get(path)?.setAttribute("aria-selected", "true")
     markRelatedStates(inspection)
     clearButton.disabled = false
-    renderInspection(inspection)
-    if (focus) {
-      rows.get(path)?.focus({ preventScroll: true })
-      rows.get(path)?.scrollIntoView({ block: "nearest" })
-    }
+    detailsButton.disabled = false
+    if (!inspector.hidden) renderInspection(inspection)
+    updateChartPresentation()
+    if (focus) chartView?.focusState(path)
   }
 
   function navigateToState(path: string): void {
@@ -726,18 +758,17 @@ export const renderVisualizer = (
 
   const selectEvent = (event: string): void => {
     const inspection = model.inspectEvent(event)
-    if (selectedPath !== undefined) {
-      nodes.get(selectedPath)?.classList.remove("is-selected")
-      rows.get(selectedPath)?.setAttribute("aria-selected", "false")
-    }
     if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
     selectedPath = undefined
     selectedEvent = event
+    selectedTransition = undefined
     selectedFrame = undefined
     eventButtons.get(event)?.classList.add("is-selected")
     clearRelations()
     markTransitions(inspection.transitions)
     clearButton.disabled = false
+    detailsButton.disabled = false
+    updateChartPresentation()
     const schema = eventSchemas.get(event)
     if (simulation !== undefined && candidateEvents().includes(event) && schema !== undefined) {
       const input = renderInputForm(schema, { name: event, fixed: { _tag: event }, omit: ["_tag"] })
@@ -762,77 +793,78 @@ export const renderVisualizer = (
     renderEventInspection(inspection)
   }
 
-  const setExpanded = (row: HTMLElement, expanded: boolean): void => {
-    const node = row.closest<HTMLElement>(".topology-node")
-    const children = node?.querySelector<HTMLElement>(":scope > .topology-children")
-    if (children === null || children === undefined) return
-    row.setAttribute("aria-expanded", String(expanded))
-    children.hidden = !expanded
-    const disclosure = row.querySelector<HTMLElement>(".state-disclosure")
-    if (disclosure !== null) disclosure.textContent = expanded ? "▾" : "▸"
-  }
-
-  const renderNode = (node: TopologyNode, depth: number): HTMLElement => {
-    const container = createElement("div", "topology-node")
-    container.dataset.statePath = node.path
-    nodes.set(node.path, container)
-
-    const row = createElement("button", "state-row")
-    row.type = "button"
-    row.tabIndex = -1
-    row.setAttribute("role", "treeitem")
-    row.setAttribute("aria-level", String(depth + 1))
-    row.setAttribute("aria-selected", "false")
-    row.style.setProperty("--depth", String(depth))
-    row.dataset.statePath = node.path
-    rows.set(node.path, row)
-
-    const disclosure = createElement("span", "state-disclosure", node.children.length === 0 ? "" : "▾")
-    const status = createElement("span", `state-status${node.active ? " is-active" : ""}`)
-    status.setAttribute("aria-label", node.active ? "active" : "inactive")
-    statuses.set(node.path, status)
-    const label = createElement("span", "state-label", node.label)
-    const markers = createElement("span", "state-markers")
-    if (node.initial) markers.append(badge("initial", "initial"))
-    if (node.type !== "atomic") markers.append(badge(node.type, "state"))
-    if (node.transitionCount > 0) markers.append(badge(`${node.transitionCount}t`, "count"))
-    if (node.activityCount > 0) markers.append(badge(`${node.activityCount}a`, "count"))
-    row.append(disclosure, status, label, markers)
-    container.append(row)
-    row.addEventListener("focus", () => {
-      rows.forEach((candidate) => candidate.tabIndex = candidate === row ? 0 : -1)
-    })
-
-    if (node.children.length > 0) {
-      const children = createElement("div", "topology-children")
-      children.setAttribute("role", "group")
-      node.children.forEach((child) => children.append(renderNode(child, depth + 1)))
-      container.append(children)
-      row.setAttribute("aria-expanded", "true")
-      row.addEventListener("click", () => {
-        const expanded = row.getAttribute("aria-expanded") === "true"
-        setExpanded(row, !expanded)
-        selectState(node.path, false)
-      })
-    } else {
-      row.addEventListener("click", () => selectState(node.path, false))
-    }
-    return container
-  }
-
-  const setAllExpanded = (expanded: boolean): void => {
-    treePanel.querySelectorAll<HTMLElement>(".state-row[aria-expanded]").forEach((row) => {
-      setExpanded(row, expanded)
-    })
+  const selectTransition = (transitionId: string): void => {
+    const transition = transitionsById.get(transitionId)
+    if (transition === undefined) return
+    if (selectedEvent !== undefined) eventButtons.get(selectedEvent)?.classList.remove("is-selected")
+    selectedPath = undefined
+    selectedEvent = undefined
+    selectedTransition = transitionId
+    selectedFrame = undefined
+    clearRelations()
+    markTransitions([transition])
+    clearButton.disabled = false
+    detailsButton.disabled = false
+    if (!inspector.hidden) renderTransitionInspection(transition)
+    updateChartPresentation()
   }
 
   clearButton.addEventListener("click", clearSelection)
-  expandButton.addEventListener("click", () => setAllExpanded(true))
-  collapseButton.addEventListener("click", () => setAllExpanded(false))
+  inspectorClose.addEventListener("click", hideInspector)
+  detailsButton.addEventListener("click", () => {
+    if (!inspector.hidden) {
+      hideInspector()
+    } else if (selectedFrame !== undefined) {
+      renderSimulationTrace(selectedFrame)
+    } else if (selectedPath !== undefined) {
+      const inspection = model.inspectState(selectedPath)
+      if (inspection !== undefined) renderInspection(inspection)
+    } else if (selectedEvent !== undefined) {
+      renderEventInspection(model.inspectEvent(selectedEvent))
+    } else if (selectedTransition !== undefined) {
+      const transition = transitionsById.get(selectedTransition)
+      if (transition !== undefined) renderTransitionInspection(transition)
+    }
+  })
   revealActiveButton.addEventListener("click", () => {
     const deepest = [...activePaths()].sort((left, right) => right.split(".").length - left.split(".").length)[0]
     if (deepest !== undefined) navigateToState(deepest)
   })
+
+  const zoomOutButton = createElement("button", "toolbar-button zoom-button", "−")
+  zoomOutButton.type = "button"
+  zoomOutButton.setAttribute("aria-label", "Zoom out")
+  const zoomResetButton = createElement("button", "toolbar-button zoom-value", "100%")
+  zoomResetButton.type = "button"
+  zoomResetButton.setAttribute("aria-label", "Reset zoom")
+  const zoomInButton = createElement("button", "toolbar-button zoom-button", "+")
+  zoomInButton.type = "button"
+  zoomInButton.setAttribute("aria-label", "Zoom in")
+  const zoomFitButton = createElement("button", "toolbar-button zoom-button", "Fit")
+  zoomFitButton.type = "button"
+  zoomFitButton.setAttribute("aria-label", "Fit chart")
+  const zoomButtons = [zoomOutButton, zoomResetButton, zoomInButton, zoomFitButton]
+  zoomButtons.forEach((button) => button.disabled = true)
+
+  const updateZoomControls = (): void => {
+    const zoom = chartView?.getZoom()
+    zoomResetButton.textContent = `${Math.round((zoom ?? 1) * 100)}%`
+    zoomOutButton.disabled = zoom === undefined || zoom <= minimumChartZoom
+    zoomResetButton.disabled = zoom === undefined || zoom === 1
+    zoomInButton.disabled = zoom === undefined || zoom >= maximumChartZoom
+    zoomFitButton.disabled = zoom === undefined
+  }
+
+  const changeZoom = (next: (view: ChartView) => number): void => {
+    if (chartView === undefined) return
+    next(chartView)
+    updateZoomControls()
+  }
+
+  zoomOutButton.addEventListener("click", () => changeZoom((view) => view.setZoom(view.getZoom() - 0.1)))
+  zoomResetButton.addEventListener("click", () => changeZoom((view) => view.setZoom(1)))
+  zoomInButton.addEventListener("click", () => changeZoom((view) => view.setZoom(view.getZoom() + 0.1)))
+  zoomFitButton.addEventListener("click", () => changeZoom((view) => view.fit()))
 
   const toolbar = createElement("div", "toolbar")
   const runtime = createElement("div", "runtime-summary")
@@ -840,16 +872,21 @@ export const renderVisualizer = (
   const runtimeText = createElement("span")
   runtime.append(runtimeDot, runtimeText)
   const toolbarActions = createElement("div", "toolbar-actions")
-  toolbarActions.append(clearButton, simulationButton, revealActiveButton, expandButton, collapseButton)
+  toolbarActions.append(clearButton, detailsButton, simulationButton, revealActiveButton)
+  const zoomControls = createElement("div", "zoom-controls")
+  zoomControls.setAttribute("role", "group")
+  zoomControls.setAttribute("aria-label", "Chart zoom")
+  zoomControls.append(zoomOutButton, zoomResetButton, zoomInButton, zoomFitButton)
   toolbar.append(runtime, toolbarActions)
-  const tree = createElement("div", "topology-tree")
-  tree.setAttribute("role", "tree")
-  tree.setAttribute("aria-label", `${model.machineId} states`)
-  tree.append(createElement("div", "machine-id", model.machineId))
+  const chart = createElement("div", "topology-chart")
+  chart.setAttribute("role", "region")
+  chart.setAttribute("aria-label", `${model.machineId} states`)
   const events = createElement("div", "enabled-events")
   const simulationFeedback = createElement("div", "simulation-feedback")
   simulationFeedback.setAttribute("role", "status")
-  tree.append(events, simulationFeedback)
+  const chartHost = createElement("div", "chart-host")
+  chartHost.append(createElement("div", "chart-loading", "Computing layout…"))
+  chart.append(events, simulationFeedback, chartHost)
 
   const renderEventButtons = (): void => {
     events.replaceChildren(createElement("span", "enabled-events-label", "Enabled"))
@@ -871,11 +908,7 @@ export const renderVisualizer = (
 
   const updateSimulationUi = (): void => {
     const active = new Set(activePaths())
-    statuses.forEach((status, path) => {
-      const isActive = active.has(path)
-      status.classList.toggle("is-active", isActive)
-      status.setAttribute("aria-label", isActive ? "active" : "inactive")
-    })
+    updateChartPresentation()
     const hasRuntimeState = simulation !== undefined || model.hasSnapshot
     runtimeDot.classList.toggle("has-snapshot", hasRuntimeState)
     runtimeText.textContent = simulation !== undefined
@@ -891,13 +924,18 @@ export const renderVisualizer = (
     events.hidden = !hasRuntimeState
     simulationFeedback.hidden = simulation === undefined && !simulationPending && simulationFeedback.textContent === ""
     renderEventButtons()
-    if (selectedFrame !== undefined) {
-      renderSimulationTrace(selectedFrame)
-    } else if (selectedPath !== undefined) {
-      const inspection = model.inspectState(selectedPath)
-      if (inspection !== undefined) renderInspection(inspection)
-    } else if (selectedEvent !== undefined && activeInputForm === undefined) {
-      renderEventInspection(model.inspectEvent(selectedEvent))
+    if (!inspector.hidden) {
+      if (selectedFrame !== undefined) {
+        renderSimulationTrace(selectedFrame)
+      } else if (selectedPath !== undefined) {
+        const inspection = model.inspectState(selectedPath)
+        if (inspection !== undefined) renderInspection(inspection)
+      } else if (selectedEvent !== undefined && activeInputForm === undefined) {
+        renderEventInspection(model.inspectEvent(selectedEvent))
+      } else if (selectedTransition !== undefined) {
+        const transition = transitionsById.get(selectedTransition)
+        if (transition !== undefined) renderTransitionInspection(transition)
+      }
     }
   }
 
@@ -905,6 +943,7 @@ export const renderVisualizer = (
     if (simulation === undefined) {
       selectedPath = undefined
       selectedEvent = undefined
+      selectedTransition = undefined
       selectedFrame = undefined
       clearRelations()
       clearButton.disabled = false
@@ -928,76 +967,7 @@ export const renderVisualizer = (
     }
     updateSimulationUi()
   })
-  if (model.roots.length === 0) {
-    const empty = createElement("div", "topology-empty")
-    empty.append(
-      createElement("strong", undefined, "No states yet"),
-      createElement("span", undefined, "The topology will appear as the machine definition becomes available.")
-    )
-    tree.append(empty)
-  } else {
-    model.roots.forEach((node) => tree.append(renderNode(node, 0)))
-  }
-  updateSimulationUi()
-  rows.values().next().value?.setAttribute("tabindex", "0")
-  tree.addEventListener("keydown", (event) => {
-    const current = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(".state-row") : null
-    if (current === null) return
-    const visible = [...rows.values()].filter((row) => row.getClientRects().length > 0)
-    const index = visible.indexOf(current)
-    const focus = (row: HTMLElement | undefined): void => {
-      if (row === undefined) return
-      event.preventDefault()
-      row.focus()
-    }
-    switch (event.key) {
-      case "ArrowDown":
-        focus(visible[index + 1])
-        break
-      case "ArrowUp":
-        focus(visible[index - 1])
-        break
-      case "Home":
-        focus(visible[0])
-        break
-      case "End":
-        focus(visible.at(-1))
-        break
-      case "ArrowRight": {
-        if (current.getAttribute("aria-expanded") === "false") {
-          event.preventDefault()
-          setExpanded(current, true)
-        } else {
-          const child = current.closest<HTMLElement>(".topology-node")
-            ?.querySelector<HTMLElement>(":scope > .topology-children > .topology-node > .state-row")
-          focus(child ?? undefined)
-        }
-        break
-      }
-      case "ArrowLeft": {
-        if (current.getAttribute("aria-expanded") === "true") {
-          event.preventDefault()
-          setExpanded(current, false)
-        } else {
-          const parent = current.closest<HTMLElement>(".topology-children")
-            ?.closest<HTMLElement>(".topology-node")
-            ?.querySelector<HTMLElement>(":scope > .state-row")
-          focus(parent ?? undefined)
-        }
-        break
-      }
-      case "Enter":
-      case " ":
-        event.preventDefault()
-        current.click()
-        break
-      case "Escape":
-        event.preventDefault()
-        clearSelection()
-        break
-    }
-  })
-  treePanel.append(toolbar)
+  chartPanel.append(toolbar)
   if (diagnostics.length > 0) {
     const diagnosticList = createElement("div", "diagnostics")
     diagnosticList.setAttribute("role", "status")
@@ -1009,12 +979,42 @@ export const renderVisualizer = (
       }
       diagnosticList.append(item)
     })
-    treePanel.append(diagnosticList)
+    chartPanel.append(diagnosticList)
   }
-  treePanel.append(tree)
-
-  renderEmptyInspector()
-  workspace.append(treePanel, inspector)
+  chartPanel.append(chart)
+  chartPanel.append(zoomControls)
+  hideInspector()
+  workspace.append(chartPanel, inspector)
   shell.append(workspace)
   root.replaceChildren(shell)
+
+  if (model.roots.length === 0) {
+    const empty = createElement("div", "topology-empty")
+    empty.append(
+      createElement("strong", undefined, "No states yet"),
+      createElement("span", undefined, "The topology will appear as the machine definition becomes available.")
+    )
+    chartHost.replaceChildren(empty)
+  } else {
+    void Effect.runPromise(renderChart(chartHost, visualization, {
+      selectState: (path) => selectState(path, false),
+      selectTransition,
+      clearSelection
+    })).then(
+      (view) => {
+        chartView = view
+        updateChartPresentation()
+        updateZoomControls()
+      },
+      (cause) => {
+        const failure = createElement("div", "chart-layout-error")
+        failure.append(
+          createElement("strong", undefined, "The chart could not be laid out"),
+          createElement("span", undefined, cause instanceof Error ? cause.message : String(cause))
+        )
+        chartHost.replaceChildren(failure)
+      }
+    )
+  }
+  updateSimulationUi()
 }

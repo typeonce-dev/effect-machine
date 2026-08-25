@@ -1,6 +1,6 @@
 # Effect Machine devtools
 
-`@typeonce/effect-machine-devtools` scans a local project for exported Effect Machine `.handle(...)` results and serves a live text-tree visualizer.
+`@typeonce/effect-machine-devtools` scans a local project for exported Effect Machine `.handle(...)` results and serves a live, statically laid-out statechart.
 
 The package is experimental and pre-1.0. Minor releases may change its command options, document schemas, and programmatic modules.
 
@@ -64,7 +64,9 @@ Run the devtools only against code you trust. The server has no authentication a
 
 ## Inspection and simulation
 
-The visualizer shows topology, active initial paths, state annotations, events, transitions, branches, state updates, activities, source metadata, and diagnostics. The tree supports pointer and keyboard navigation, subtree expansion, related-state highlighting, and structured detail inspection.
+The visualizer shows topology as a read-only statechart with native horizontal and vertical scrolling, incremental zoom, and a fit-to-viewport overview. Machine tabs run across the top so the chart uses the rest of the viewport. States remain grouped inside their compound parents, while orthogonal routes connect each enabled transition without requiring a draggable canvas. State cards show projected value fields and invocations at a glance. Selecting a state distinguishes incoming from outgoing relationships, and conditional branches with the same source and target share one topology edge while retaining their full details in the dismissible inspector.
+
+The machine document includes the projected value and output schemas for every state. The browser uses those schemas only for inspection; authoritative decoding and planning still happen in the isolated worker.
 
 Simulation uses the same `Machine.planInitial` and `Machine.plan` semantics as the core package. Machine input and event payload controls are derived from their Effect schemas. Fields show their projected type, description, required or optional status, and constraints such as ranges, lengths, patterns, enum choices, and defaults. Supported controls include strings, numbers, booleans, enums, literals, nested objects, arrays, and unions. Browser constraints provide immediate feedback, then Effect Schema validates the complete value in the worker and reports failures beside the corresponding fields.
 

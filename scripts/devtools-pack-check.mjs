@@ -146,7 +146,15 @@ try {
   }
 
   const port = await availablePort()
-  child = spawn(binary, ["--root", consumer, "--host", "127.0.0.1", "--port", String(port)], {
+  child = spawn(binary, [
+    "--root",
+    consumer,
+    "--host",
+    "127.0.0.1",
+    "--port",
+    String(port),
+    "--watch-polling"
+  ], {
     cwd: consumer,
     env: { ...process.env, NO_COLOR: "1" },
     stdio: ["ignore", "pipe", "pipe"]
@@ -163,7 +171,7 @@ try {
     return result?._tag === "Ready" && result.document?.machineId === "packed-fixture" ? snapshot : undefined
   })
   const page = await fetch(endpoint)
-  if (!page.ok || !(await page.text()).includes("Effect Machine · Text visualizer")) {
+  if (!page.ok || !(await page.text()).includes("Effect Machine · Statechart")) {
     throw new Error("The installed package did not serve the browser application")
   }
 
