@@ -36,12 +36,21 @@ export interface ChartNode {
 export interface ChartEdge {
   readonly id: string
   readonly transitionId: string
+  readonly branchIds: ReadonlyArray<string>
+  readonly kind: "target" | "targetless" | "runtime"
   readonly source: string
-  readonly target: string
+  readonly target: string | null
   readonly label: string
   readonly trigger: VisualizationTransition["trigger"]
   readonly reenter: boolean
   readonly acceptance: VisualizationTransition["acceptance"]
+}
+
+export interface ChartRuntimeTarget {
+  readonly id: string
+  readonly edgeId: string
+  readonly parent: string | null
+  readonly label: string
 }
 
 export interface ChartInitial {
@@ -55,6 +64,7 @@ export interface ChartModel {
   readonly roots: ReadonlyArray<string>
   readonly nodes: ReadonlyArray<ChartNode>
   readonly edges: ReadonlyArray<ChartEdge>
+  readonly runtimeTargets: ReadonlyArray<ChartRuntimeTarget>
   readonly initials: ReadonlyArray<ChartInitial>
 }
 
@@ -123,6 +133,25 @@ const transitionLabel = (transition: VisualizationTransition, branch: Visualizat
   return branch.type === "branch" ? `${trigger} · ${branch.title}` : trigger
 }
 
+interface EdgeGroup {
+  readonly kind: ChartEdge["kind"]
+  readonly target: string | null
+  readonly branches: Array<VisualizationBranch>
+}
+
+const edgeGroup = (
+  branch: VisualizationBranch,
+  states: ReadonlyMap<string, VisualizationState>
+): { readonly key: string; readonly kind: ChartEdge["kind"]; readonly target: string | null } => {
+  if (branch.target !== null && states.has(branch.target)) {
+    return { key: `target:${branch.target}`, kind: "target", target: branch.target }
+  }
+  if (branch.selection.kind === "none" || branch.selection.kind === "update") {
+    return { key: "targetless", kind: "targetless", target: null }
+  }
+  return { key: "runtime", kind: "runtime", target: null }
+}
+
 export const makeChartModel = (document: VisualizationDocument): ChartModel => {
   const active = new Set(document.snapshot?.activePaths ?? [])
   const initialPaths = new Set([document.initial.target])
@@ -150,16 +179,21 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
 
   const edges = document.transitions.flatMap((transition): ReadonlyArray<ChartEdge> => {
     if (!states.has(transition.source)) return []
-    const branchesByTarget = new Map<string, Array<VisualizationBranch>>()
+    const groups = new Map<string, EdgeGroup>()
     for (const branch of transition.branches) {
-      if (branch.target === null || !states.has(branch.target)) continue
-      const branches = branchesByTarget.get(branch.target) ?? []
-      branches.push(branch)
-      branchesByTarget.set(branch.target, branches)
+      const group = edgeGroup(branch, states)
+      const current = groups.get(group.key)
+      if (current === undefined) {
+        groups.set(group.key, { kind: group.kind, target: group.target, branches: [branch] })
+      } else {
+        current.branches.push(branch)
+      }
     }
-    return [...branchesByTarget].map(([target, branches]): ChartEdge => ({
-      id: branches.length === 1 ? branches[0]!.id : `${transition.id}:target:${target}`,
+    return [...groups].map(([key, { branches, kind, target }]): ChartEdge => ({
+      id: branches.length === 1 ? branches[0]!.id : `${transition.id}:${key}`,
       transitionId: transition.id,
+      branchIds: branches.map(({ id }) => id),
+      kind,
       source: transition.source,
       target,
       label: branches.length === 1
@@ -169,6 +203,19 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
       reenter: transition.reenter,
       acceptance: transition.acceptance
     }))
+  })
+
+  const runtimeTargets = edges.flatMap((edge): ReadonlyArray<ChartRuntimeTarget> => {
+    if (edge.kind !== "runtime") return []
+    const source = states.get(edge.source)
+    return source === undefined
+      ? []
+      : [{
+        id: `runtime:${edge.id}`,
+        edgeId: edge.id,
+        parent: source.parent,
+        label: "runtime target"
+      }]
   })
 
   const initials = [...initialPaths].flatMap((target): ReadonlyArray<ChartInitial> => {
@@ -181,6 +228,7 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
     roots: [...document.roots],
     nodes,
     edges,
+    runtimeTargets,
     initials
   }
 }

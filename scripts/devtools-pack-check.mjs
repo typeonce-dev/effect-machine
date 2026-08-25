@@ -134,7 +134,7 @@ try {
     `await import("@typeonce/effect-machine-devtools");
      await import("@typeonce/effect-machine-devtools/DevToolsProtocol");
      await import("@typeonce/effect-machine-devtools/MachineDocument");
-     await import("@typeonce/effect-machine-devtools/MachineSimulator");`
+     await import("@typeonce/effect-machine-devtools/MachineWalkthrough");`
   ], { cwd: consumer })
   const privateImport = spawnSync(process.execPath, [
     "--input-type=module",

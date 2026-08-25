@@ -9,7 +9,7 @@ import type {
   ElkPort
 } from "elkjs/lib/elk-api.js"
 import ELKBundle from "elkjs/lib/elk.bundled.js"
-import type { ChartEdge, ChartInitial, ChartModel, ChartNode } from "./chart-model.js"
+import type { ChartEdge, ChartInitial, ChartModel, ChartNode, ChartRuntimeTarget } from "./chart-model.js"
 
 export const maxVisibleFields = 4
 export const maxVisibleActivities = 3
@@ -36,6 +36,14 @@ export interface LaidOutChartInitial {
   readonly height: number
 }
 
+export interface LaidOutChartRuntimeTarget {
+  readonly target: ChartRuntimeTarget
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
 export interface LaidOutChartTransition {
   readonly kind: "transition"
   readonly edge: ChartEdge
@@ -56,6 +64,7 @@ export interface LaidOutChart {
   readonly height: number
   readonly nodes: ReadonlyArray<LaidOutChartNode>
   readonly initials: ReadonlyArray<LaidOutChartInitial>
+  readonly runtimeTargets: ReadonlyArray<LaidOutChartRuntimeTarget>
   readonly edges: ReadonlyArray<LaidOutChartTransition | LaidOutChartInitialEdge>
 }
 
@@ -97,6 +106,8 @@ const sourcePortId = (edge: ChartEdge): string => `port:${edge.id}:source`
 const targetPortId = (edge: ChartEdge): string => `port:${edge.id}:target`
 const initialNodeId = (initial: ChartInitial): string => `node:${initial.id}`
 const initialTargetPortId = (initial: ChartInitial): string => `port:${initial.id}:target`
+const runtimeNodeId = (target: ChartRuntimeTarget): string => `node:${target.id}`
+const runtimeTargetPortId = (target: ChartRuntimeTarget): string => `port:${target.edgeId}:target`
 
 const portsByState = (model: ChartModel): ReadonlyMap<string, ReadonlyArray<ElkPort>> => {
   const ports = new Map<string, Array<ElkPort>>()
@@ -116,7 +127,11 @@ const portsByState = (model: ChartModel): ReadonlyMap<string, ReadonlyArray<ElkP
 
   for (const edge of model.edges) {
     add(edge.source, sourcePortId(edge), "EAST")
-    add(edge.target, targetPortId(edge), "WEST")
+    if (edge.kind === "target" && edge.target !== null) {
+      add(edge.target, targetPortId(edge), "WEST")
+    } else if (edge.kind === "targetless") {
+      add(edge.source, targetPortId(edge), "EAST")
+    }
   }
   for (const initial of model.initials) add(initial.target, initialTargetPortId(initial), "WEST")
   return ports
@@ -139,6 +154,12 @@ const makeGraph = (model: ChartModel): ElkNode => {
     const siblings = initialsByParent.get(initial.parent) ?? []
     siblings.push(initial)
     initialsByParent.set(initial.parent, siblings)
+  }
+  const runtimeTargetsByParent = new Map<string | null, Array<ChartRuntimeTarget>>()
+  for (const target of model.runtimeTargets) {
+    const siblings = runtimeTargetsByParent.get(target.parent) ?? []
+    siblings.push(target)
+    runtimeTargetsByParent.set(target.parent, siblings)
   }
   const ports = portsByState(model)
 
@@ -181,7 +202,19 @@ const makeGraph = (model: ChartModel): ElkNode => {
           "elk.layered.spacing.nodeNodeBetweenLayers": "108"
         }
       }
-    })
+    }),
+    ...(runtimeTargetsByParent.get(parent) ?? []).map((target): ElkNode => ({
+      id: runtimeNodeId(target),
+      width: 118,
+      height: 34,
+      ports: [{
+        id: runtimeTargetPortId(target),
+        width: 6,
+        height: 6,
+        layoutOptions: { "elk.port.side": "WEST" }
+      }],
+      layoutOptions: { "elk.portConstraints": "FIXED_SIDE" }
+    }))
   ]
 
   return {
@@ -293,12 +326,27 @@ const midpoint = (points: ReadonlyArray<ChartPoint>): ChartPoint => {
   return points.at(-1)!
 }
 
+const expandTargetlessLoop = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPoint> => {
+  const start = points[0]
+  const end = points.at(-1)
+  if (start === undefined || end === undefined) return points
+  const outerX = Math.max(...points.map(({ x }) => x)) + 30
+  return compactPoints([
+    start,
+    { x: outerX, y: start.y },
+    { x: outerX, y: end.y },
+    end
+  ])
+}
+
 const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
   const chartNodes = new Map(model.nodes.map((node) => [node.path, node]))
   const chartInitials = new Map(model.initials.map((initial) => [initialNodeId(initial), initial]))
+  const chartRuntimeTargets = new Map(model.runtimeTargets.map((target) => [runtimeNodeId(target), target]))
   const offsets = new Map<string, ChartPoint>([[graph.id, { x: 0, y: 0 }]])
   const nodes: Array<LaidOutChartNode> = []
   const initials: Array<LaidOutChartInitial> = []
+  const runtimeTargets: Array<LaidOutChartRuntimeTarget> = []
 
   const visit = (node: ElkNode, parentOffset: ChartPoint): void => {
     const absolute = add(parentOffset, { x: node.x ?? 0, y: node.y ?? 0 })
@@ -325,6 +373,16 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
         height: node.height ?? 14
       })
     }
+    const runtimeTarget = chartRuntimeTargets.get(node.id)
+    if (runtimeTarget !== undefined) {
+      runtimeTargets.push({
+        target: runtimeTarget,
+        x: absolute.x,
+        y: absolute.y,
+        width: node.width ?? 118,
+        height: node.height ?? 34
+      })
+    }
     for (const child of node.children ?? []) visit(child, absolute)
   }
   for (const child of graph.children ?? []) visit(child, { x: 0, y: 0 })
@@ -339,12 +397,13 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
     if (chartEdge !== undefined) {
       const metric = labelMetric(chartEdge.label)
       const label = edge.labels?.[0]
+      const transitionPoints = chartEdge.kind === "targetless" ? expandTargetlessLoop(points) : points
       return [{
         kind: "transition",
         edge: chartEdge,
-        points,
+        points: transitionPoints,
         label: label?.x === undefined || label.y === undefined
-          ? midpoint(points)
+          ? midpoint(transitionPoints)
           : add(offset, {
             x: label.x + (label.width ?? metric.width) / 2,
             y: label.y + (label.height ?? metric.height) / 2
@@ -362,6 +421,7 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
     height: Math.max(280, graph.height ?? 0),
     nodes,
     initials,
+    runtimeTargets,
     edges
   }
 }

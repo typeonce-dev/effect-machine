@@ -12,15 +12,20 @@ import {
 import { makeChartModel } from "./chart-model.js"
 
 export interface ChartHandlers {
-  readonly selectState: (path: string) => void
+  readonly selectState: (path: string, anchor: ChartInteractionAnchor) => void
   readonly openStateDetails: (path: string) => void
-  readonly selectTransition: (transitionId: string) => void
+  readonly selectTransition: (
+    transitionId: string,
+    branchIds: ReadonlyArray<string>,
+    anchor: ChartInteractionAnchor
+  ) => void
   readonly openTransitionDetails: (transitionId: string) => void
   readonly clearSelection: () => void
   readonly zoomChanged: (zoom: number) => void
 }
 
 export interface ChartPresentation {
+  readonly simulationMode: boolean
   readonly activePaths: ReadonlyArray<string>
   readonly selectedState: string | null
   readonly selectedTransition: string | null
@@ -28,18 +33,26 @@ export interface ChartPresentation {
   readonly toPaths: ReadonlyArray<string>
   readonly incomingTransitionIds: ReadonlyArray<string>
   readonly outgoingTransitionIds: ReadonlyArray<string>
+  readonly availableBranchIds: ReadonlyArray<string>
+  readonly unavailableBranchIds: ReadonlyArray<string>
 }
 
 export interface ChartView {
   readonly update: (presentation: ChartPresentation) => void
   readonly focusState: (path: string) => void
   readonly revealState: (path: string) => void
+  readonly revealStates: (paths: ReadonlyArray<string>) => void
   readonly getZoom: () => number
   readonly setZoom: (zoom: number, anchor?: ChartZoomAnchor) => number
   readonly fit: () => number
 }
 
 export interface ChartZoomAnchor {
+  readonly x: number
+  readonly y: number
+}
+
+export interface ChartInteractionAnchor {
   readonly x: number
   readonly y: number
 }
@@ -239,6 +252,11 @@ const render = (
   const stateControls = new Map<string, HTMLButtonElement>()
   const stateStatuses = new Map<string, HTMLElement>()
   const transitionElements = new Map<string, Array<Element>>()
+  const edgeElements = new Map<string, Array<Element>>()
+  const transitionControls = new Map<string, Array<HTMLButtonElement>>()
+  const chartEdges = new Map(
+    layout.edges.flatMap((laidOut) => laidOut.kind === "transition" ? [[laidOut.edge.id, laidOut.edge] as const] : [])
+  )
 
   const registerStateElement = (path: string, node: HTMLElement): void => {
     const registered = stateElements.get(path) ?? []
@@ -249,6 +267,11 @@ const render = (
     const registered = transitionElements.get(id) ?? []
     registered.push(node)
     transitionElements.set(id, registered)
+  }
+  const registerEdgeElement = (id: string, node: Element): void => {
+    const registered = edgeElements.get(id) ?? []
+    registered.push(node)
+    edgeElements.set(id, registered)
   }
 
   for (const laidOut of layout.nodes) {
@@ -272,7 +295,10 @@ const render = (
     })
     const stateStatus = status(laidOut.node.active, laidOut.node.initial)
     card.append(stateContent(laidOut, stateStatus))
-    card.addEventListener("click", () => handlers.selectState(laidOut.node.path))
+    card.addEventListener(
+      "click",
+      (event) => handlers.selectState(laidOut.node.path, { x: event.clientX, y: event.clientY })
+    )
     card.addEventListener("dblclick", () => handlers.openStateDetails(laidOut.node.path))
     nodesLayer.append(card)
     registerStateElement(laidOut.node.path, card)
@@ -287,19 +313,33 @@ const render = (
     nodesLayer.append(dot)
   }
 
+  for (const runtime of layout.runtimeTargets) {
+    const target = element("span", "chart-runtime-target", runtime.target.label)
+    target.setAttribute("aria-hidden", "true")
+    position(target, runtime)
+    nodesLayer.append(target)
+  }
+
   const hoverTransition = (
     transitionId: string,
     source: string,
-    target: string,
+    target: string | null,
     hovered: boolean
   ): void => {
     transitionElements.get(transitionId)?.forEach((node) => node.classList.toggle("is-hovered", hovered))
     stateElements.get(source)?.forEach((node) => node.classList.toggle("is-hover-source", hovered))
-    stateElements.get(target)?.forEach((node) => node.classList.toggle("is-hover-target", hovered))
+    if (target !== null) {
+      stateElements.get(target)?.forEach((node) => node.classList.toggle("is-hover-target", hovered))
+    }
   }
 
   for (const laidOut of layout.edges) {
-    const group = svgElement("g", `chart-edge-group chart-edge-${laidOut.kind}`)
+    const group = svgElement(
+      "g",
+      `chart-edge-group chart-edge-${laidOut.kind}${
+        laidOut.kind === "transition" ? ` chart-transition-${laidOut.edge.kind}` : ""
+      }`
+    )
     const visible = svgElement("path", "chart-edge-line")
     const route = pathData(laidOut.points)
     visible.setAttribute("d", route)
@@ -311,6 +351,7 @@ const render = (
     if (laidOut.kind === "initial") continue
 
     registerTransitionElement(laidOut.edge.transitionId, group)
+    registerEdgeElement(laidOut.edge.id, group)
     const label = element(
       "button",
       `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}`,
@@ -324,7 +365,15 @@ const render = (
       width: laidOut.labelWidth,
       height: laidOut.labelHeight
     })
-    label.addEventListener("click", () => handlers.selectTransition(laidOut.edge.transitionId))
+    label.addEventListener(
+      "click",
+      (event) =>
+        handlers.selectTransition(
+          laidOut.edge.transitionId,
+          laidOut.edge.branchIds,
+          { x: event.clientX, y: event.clientY }
+        )
+    )
     label.addEventListener("dblclick", () => handlers.openTransitionDetails(laidOut.edge.transitionId))
     label.addEventListener(
       "mouseenter",
@@ -334,7 +383,15 @@ const render = (
       "mouseleave",
       () => hoverTransition(laidOut.edge.transitionId, laidOut.edge.source, laidOut.edge.target, false)
     )
-    hit.addEventListener("click", () => handlers.selectTransition(laidOut.edge.transitionId))
+    hit.addEventListener(
+      "click",
+      (event) =>
+        handlers.selectTransition(
+          laidOut.edge.transitionId,
+          laidOut.edge.branchIds,
+          { x: event.clientX, y: event.clientY }
+        )
+    )
     hit.addEventListener("dblclick", () => handlers.openTransitionDetails(laidOut.edge.transitionId))
     hit.addEventListener(
       "mouseenter",
@@ -346,6 +403,10 @@ const render = (
     )
     labelsLayer.append(label)
     registerTransitionElement(laidOut.edge.transitionId, label)
+    registerEdgeElement(laidOut.edge.id, label)
+    const controls = transitionControls.get(laidOut.edge.id) ?? []
+    controls.push(label)
+    transitionControls.set(laidOut.edge.id, controls)
   }
 
   viewport.addEventListener("keydown", (event) => {
@@ -425,6 +486,28 @@ const render = (
     })
   }
 
+  const revealStates = (paths: ReadonlyArray<string>): void => {
+    const leaves = paths.filter((path) => !paths.some((candidate) => candidate.startsWith(`${path}.`)))
+    const bounds = leaves
+      .map((path) => layout.nodes.find(({ node }) => node.path === path))
+      .filter((node): node is LaidOutChartNode => node !== undefined)
+    if (bounds.length === 0) return
+    const left = Math.min(...bounds.map(({ x }) => x)) * zoom
+    const top = Math.min(...bounds.map(({ y }) => y)) * zoom
+    const right = Math.max(...bounds.map(({ x, width }) => x + width)) * zoom
+    const bottom = Math.max(...bounds.map(({ y, height }) => y + height)) * zoom
+    const margin = 32
+    const visible = left >= viewport.scrollLeft + margin &&
+      top >= viewport.scrollTop + margin &&
+      right <= viewport.scrollLeft + viewport.clientWidth - margin &&
+      bottom <= viewport.scrollTop + viewport.clientHeight - margin
+    if (visible) return
+    viewport.scrollTo({
+      left: Math.max(0, (left + right - viewport.clientWidth) / 2),
+      top: Math.max(0, (top + bottom - viewport.clientHeight) / 2)
+    })
+  }
+
   const setZoom = (requested: number, anchor?: ChartZoomAnchor): number => {
     const next = clampZoom(requested)
     if (next === zoom) return zoom
@@ -469,6 +552,20 @@ const render = (
   return {
     update: (presentation) => {
       const active = new Set(presentation.activePaths)
+      const availableBranches = new Set(presentation.availableBranchIds)
+      const unavailableBranches = new Set(presentation.unavailableBranchIds)
+      stateControls.forEach((control) => {
+        control.disabled = presentation.simulationMode
+      })
+      transitionControls.forEach((controls, edgeId) => {
+        const edge = chartEdges.get(edgeId)
+        const interactive = edge?.branchIds.some((branchId) =>
+          availableBranches.has(branchId) || unavailableBranches.has(branchId)
+        )
+        controls.forEach((control) => {
+          control.disabled = presentation.simulationMode && !interactive
+        })
+      })
       stateElements.forEach((elements) =>
         elements.forEach((node) => {
           node.classList.remove(
@@ -480,7 +577,13 @@ const render = (
       )
       transitionElements.forEach((elements) =>
         elements.forEach((node) => {
-          node.classList.remove("is-selected", "is-incoming", "is-outgoing")
+          node.classList.remove(
+            "is-selected",
+            "is-incoming",
+            "is-outgoing",
+            "is-walkthrough-available",
+            "is-walkthrough-unavailable"
+          )
         })
       )
       stateStatuses.forEach((node, path) => {
@@ -489,6 +592,7 @@ const render = (
         node.classList.toggle("is-active", isActive)
         node.setAttribute("aria-label", statusLabel(isActive, isInitial))
       })
+      viewport.classList.toggle("is-simulating", presentation.simulationMode)
       if (presentation.selectedState !== null) {
         stateElements.get(presentation.selectedState)?.forEach((node) => node.classList.add("is-selected"))
       }
@@ -503,6 +607,19 @@ const render = (
       presentation.outgoingTransitionIds.forEach((id) =>
         transitionElements.get(id)?.forEach((node) => node.classList.add("is-outgoing"))
       )
+      layout.edges.forEach((laidOut) => {
+        if (laidOut.kind !== "transition") return
+        const available = laidOut.edge.branchIds.some((branchId) => availableBranches.has(branchId))
+        const unavailable = laidOut.edge.branchIds.some((branchId) => unavailableBranches.has(branchId))
+        const className = available
+          ? "is-walkthrough-available"
+          : unavailable
+          ? "is-walkthrough-unavailable"
+          : undefined
+        if (className !== undefined) {
+          edgeElements.get(laidOut.edge.id)?.forEach((node) => node.classList.add(className))
+        }
+      })
     },
     focusState: (path) => {
       const control = stateControls.get(path)
@@ -510,6 +627,7 @@ const render = (
       revealState(path)
     },
     revealState,
+    revealStates,
     getZoom: () => zoom,
     setZoom,
     fit

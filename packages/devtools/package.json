@@ -22,7 +22,7 @@
     ".": "./src/index.ts",
     "./DevToolsProtocol": "./src/DevToolsProtocol.ts",
     "./MachineDocument": "./src/MachineDocument.ts",
-    "./MachineSimulator": "./src/MachineSimulator.ts",
+    "./MachineWalkthrough": "./src/MachineWalkthrough.ts",
     "./package.json": "./package.json",
     "./internal/*": null
   },
@@ -68,7 +68,7 @@
       ".": "./dist/index.js",
       "./DevToolsProtocol": "./dist/DevToolsProtocol.js",
       "./MachineDocument": "./dist/MachineDocument.js",
-      "./MachineSimulator": "./dist/MachineSimulator.js",
+      "./MachineWalkthrough": "./dist/MachineWalkthrough.js",
       "./internal/*": null
     }
   },

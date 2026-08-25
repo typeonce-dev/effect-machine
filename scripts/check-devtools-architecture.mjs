@@ -34,7 +34,7 @@ const publicExports = [
   ".",
   "./DevToolsProtocol",
   "./MachineDocument",
-  "./MachineSimulator",
+  "./MachineWalkthrough",
   "./package.json",
   "./internal/*"
 ]

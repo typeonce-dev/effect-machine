@@ -37,6 +37,10 @@ describe("Static chart", () => {
       model.edges.filter((edge) => edge.transitionId === "Idle:transition:0").map((edge) => edge.label),
       ["Begin · 2 branches"]
     )
+    assert.deepStrictEqual(
+      model.edges.find((edge) => edge.transitionId === "Idle:transition:0")?.branchIds,
+      ["Idle:transition:0:branch:0", "Idle:transition:0:branch:1"]
+    )
     assert.deepStrictEqual(model.initials.map(({ target }) => target), ["Idle"])
   })
 
@@ -53,6 +57,66 @@ describe("Static chart", () => {
     assert.isAbove(application?.width ?? 0, idle?.width ?? 0)
     assert.strictEqual(transitionEdges.length, model.edges.length)
     assert.isTrue(transitionEdges.every((edge) => edge.points.length >= 2))
+  })
+
+  it("lays out targetless transitions as self-loops", async () => {
+    const model = makeChartModel(MachineDocument.make(machine, { snapshot }))
+    const refresh = model.edges.find((edge) => edge.label === "Refresh")
+
+    assert.strictEqual(refresh?.kind, "targetless")
+    assert.strictEqual(refresh?.target, null)
+    assert.deepStrictEqual(refresh?.branchIds, ["application.workflow.idle:transition:1:branch:0"])
+
+    const layout = await Effect.runPromise(layoutChart(model))
+    const laidOut = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.id === refresh?.id)
+    assert.strictEqual(laidOut?.kind, "transition")
+    if (laidOut?.kind === "transition") {
+      assert.strictEqual(laidOut.edge.source, "application.workflow.idle")
+      assert.strictEqual(laidOut.edge.target, null)
+      assert.isAtLeast(laidOut.points.length, 3)
+      assert.isAtLeast(
+        Math.max(...laidOut.points.map(({ x }) => x)) - Math.min(...laidOut.points.map(({ x }) => x)),
+        30
+      )
+    }
+  })
+
+  it("lays out runtime-resolved targets as explicit stubs", async () => {
+    const document = MachineDocument.make(plannerMachine)
+    const source = document.states.find(({ path }) => path === "Idle")!
+    const runtimeTransition: MachineDocument.Transition = {
+      id: "Idle:transition:runtime",
+      source: source.path,
+      trigger: { type: "event", event: "ResolveTarget" },
+      reenter: false,
+      acceptance: "required",
+      branches: [{
+        id: "Idle:transition:runtime:branch:0",
+        type: "direct",
+        target: null,
+        selection: { path: null, kind: "state", scope: "full" },
+        updates: []
+      }]
+    }
+    const model = makeChartModel({
+      ...document,
+      transitions: [...document.transitions, runtimeTransition]
+    })
+    const runtime = model.edges.find(({ transitionId }) => transitionId === runtimeTransition.id)
+    if (runtime === undefined) assert.fail("Expected a runtime transition edge")
+
+    assert.strictEqual(runtime.kind, "runtime")
+    assert.strictEqual(runtime.target, null)
+    assert.deepStrictEqual(model.runtimeTargets, [{
+      id: `runtime:${runtime.id}`,
+      edgeId: runtime.id,
+      parent: null,
+      label: "runtime target"
+    }])
+
+    const layout = await Effect.runPromise(layoutChart(model))
+    assert.strictEqual(layout.runtimeTargets.length, 1)
+    assert.isTrue(layout.edges.some((edge) => edge.kind === "transition" && edge.edge.id === runtime.id))
   })
 
   it("keeps the point below the pointer fixed while zooming", () => {

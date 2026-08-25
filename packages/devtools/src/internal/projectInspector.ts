@@ -39,14 +39,8 @@ interface EvaluationResponse {
   readonly results: ReadonlyArray<unknown>
 }
 
-interface SimulationWorkerRequest {
-  readonly _tag: "Simulate"
-  readonly root: string
-  readonly request: DevToolsProtocol.SimulationRequest
-}
-
-type WorkerRequest = EvaluationRequest | SimulationWorkerRequest
-type WorkerResponse = EvaluationResponse | DevToolsProtocol.SimulationResult
+type WorkerRequest = EvaluationRequest
+type WorkerResponse = EvaluationResponse
 
 const scriptKind = (file: string): ts.ScriptKind => {
   if (file.endsWith(".tsx")) return ts.ScriptKind.TSX
@@ -229,27 +223,6 @@ const evaluate = (
   )
 }
 
-const simulate = (
-  api: PublicApi,
-  request: DevToolsProtocol.SimulationRequest,
-  options: Pick<ProjectInspector.InspectOptions, "root">
-): Effect.Effect<DevToolsProtocol.SimulationResult, ProjectInspector.EvaluationError> =>
-  runWorker({ _tag: "Simulate", root: options.root, request }).pipe(
-    Effect.timeout("10 seconds"),
-    Effect.flatMap((response) => {
-      if (response._tag === "InspectedMachines") {
-        return Effect.fail(new Error("The isolated planner returned an inspection response"))
-      }
-      return Schema.decodeUnknownEffect(DevToolsProtocol.SimulationResult)(response)
-    }),
-    Effect.mapError((cause) =>
-      new api.EvaluationError({
-        message: "The isolated machine planner failed",
-        cause
-      })
-    )
-  )
-
 const make = (api: PublicApi) =>
   Effect.gen(function*() {
     const discover = yield* makeDiscovery(api)
@@ -258,8 +231,7 @@ const make = (api: PublicApi) =>
     return api.ProjectInspector.of({
       discover,
       evaluate: (candidates, options) => evaluate(api, candidates, options),
-      inspect,
-      simulate: (request, options) => simulate(api, request, options)
+      inspect
     })
   })
 
