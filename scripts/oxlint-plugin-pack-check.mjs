@@ -25,11 +25,19 @@ const run = (command, args, options = {}) => {
 }
 
 try {
-  const packed = run("pnpm", ["pack", "--pack-destination", destination], {
+  const packed = run("npm", [
+    "pack",
+    "--cache",
+    join(destination, "npm-cache"),
+    "--pack-destination",
+    destination,
+    "--json"
+  ], {
     cwd: packageRoot
   })
-  const archive = packed.stdout.trim().split("\n").at(-1)
-  if (archive === undefined) throw new Error("pnpm pack did not return an archive path")
+  const filename = JSON.parse(packed.stdout).at(0)?.filename
+  if (filename === undefined) throw new Error("npm pack did not return an archive filename")
+  const archive = join(destination, filename)
 
   const listing = run("tar", ["-tzf", archive]).stdout.trim().split("\n")
   const required = [
@@ -63,6 +71,28 @@ try {
     }, null, 2)
   )
   run("pnpm", ["install", "--prefer-offline", "--ignore-scripts"], { cwd: consumer })
+  const installedManifest = JSON.parse(
+    await readFile(
+      join(
+        consumer,
+        "node_modules",
+        "@typeonce",
+        "oxlint-plugin-effect-machine",
+        "package.json"
+      ),
+      "utf8"
+    )
+  )
+  const rootExport = installedManifest.exports?.["."]
+  const recommendedExport = installedManifest.exports?.["./recommended"]
+  if (
+    rootExport?.types !== "./dist/index.d.ts" ||
+    rootExport?.import !== "./dist/index.js" ||
+    recommendedExport?.types !== "./dist/recommended.d.ts" ||
+    recommendedExport?.import !== "./dist/recommended.js"
+  ) {
+    throw new Error("packed plugin entrypoints do not resolve to built files")
+  }
   await writeFile(
     join(consumer, ".oxlintrc.json"),
     JSON.stringify({
