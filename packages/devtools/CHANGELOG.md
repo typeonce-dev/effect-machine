@@ -1,5 +1,15 @@
 # @typeonce/effect-machine-devtools
 
+## 0.26.2
+
+### Patch Changes
+
+- fe42ce0: Keep the statechart available for machines that combine nested state updates with cross-hierarchy transitions.
+
+  Self-transitions now use deterministic local routes, and layout retries with relaxed port constraints before reporting a failure.
+
+  - @typeonce/effect-machine@0.26.2
+
 ## 0.26.1
 
 ### Patch Changes
