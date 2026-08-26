@@ -168,7 +168,7 @@ const stateContent = (layout: LaidOutChartNode, stateStatus: HTMLElement): Docum
     const activities = element("div", "chart-state-section")
     activities.append(element("div", "chart-section-label", "invokes"))
     layout.node.activities.slice(0, maxVisibleActivities).forEach((activity) => {
-      const row = element("div", "chart-activity-row")
+      const row = element("div", `chart-activity-row chart-activity-${activity.kind}`)
       row.append(
         element("span", "chart-activity-kind", activity.kind),
         element("span", "chart-activity-name", activity.label)
@@ -184,10 +184,83 @@ const stateContent = (layout: LaidOutChartNode, stateStatus: HTMLElement): Docum
   return fragment
 }
 
-const pathData = (points: ReadonlyArray<ChartPoint>): string => {
+const pointAlong = (start: ChartPoint, end: ChartPoint, distance: number): ChartPoint => {
+  const length = Math.abs(end.x - start.x) + Math.abs(end.y - start.y)
+  if (length === 0) return start
+  const ratio = distance / length
+  return {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio
+  }
+}
+
+export const chartEdgePathData = (points: ReadonlyArray<ChartPoint>, radius = 9): string => {
   const first = points[0]
   if (first === undefined) return ""
-  return points.slice(1).reduce((path, point) => `${path} L ${point.x} ${point.y}`, `M ${first.x} ${first.y}`)
+  if (points.length === 1) return `M ${first.x} ${first.y}`
+  let path = `M ${first.x} ${first.y}`
+  for (let index = 1; index < points.length - 1; index++) {
+    const previous = points[index - 1]!
+    const corner = points[index]!
+    const next = points[index + 1]!
+    const incoming = Math.abs(corner.x - previous.x) + Math.abs(corner.y - previous.y)
+    const outgoing = Math.abs(next.x - corner.x) + Math.abs(next.y - corner.y)
+    const cornerRadius = Math.min(radius, incoming / 2, outgoing / 2)
+    const before = pointAlong(corner, previous, cornerRadius)
+    const after = pointAlong(corner, next, cornerRadius)
+    path += ` L ${before.x} ${before.y} Q ${corner.x} ${corner.y} ${after.x} ${after.y}`
+  }
+  const last = points.at(-1)!
+  return `${path} L ${last.x} ${last.y}`
+}
+
+export interface ChartDirectionCue {
+  readonly start: ChartPoint
+  readonly end: ChartPoint
+}
+
+export const chartDirectionCue = (
+  points: ReadonlyArray<ChartPoint>,
+  minimumRouteLength = 280
+): ChartDirectionCue | null => {
+  const segments = points.slice(1).map((end, index) => {
+    const start = points[index]!
+    return {
+      start,
+      end,
+      length: Math.abs(end.x - start.x) + Math.abs(end.y - start.y)
+    }
+  })
+  const total = segments.reduce((sum, segment) => sum + segment.length, 0)
+  if (total < minimumRouteLength) return null
+  let remaining = total * 0.32
+  let selected: { readonly start: ChartPoint; readonly end: ChartPoint; readonly distance: number } | undefined
+  for (const segment of segments) {
+    if (segment.length >= 24 && remaining <= segment.length) {
+      selected = {
+        start: segment.start,
+        end: segment.end,
+        distance: Math.min(segment.length - 12, Math.max(12, remaining))
+      }
+      break
+    }
+    remaining -= segment.length
+  }
+  if (selected === undefined) {
+    const segment = [...segments].sort((left, right) => right.length - left.length)[0]
+    if (segment === undefined || segment.length < 24) return null
+    selected = { start: segment.start, end: segment.end, distance: segment.length / 2 }
+  }
+  const center = pointAlong(selected.start, selected.end, selected.distance)
+  const deltaX = selected.end.x - selected.start.x
+  const deltaY = selected.end.y - selected.start.y
+  const horizontal = Math.abs(deltaX) >= Math.abs(deltaY)
+  const directionX = horizontal ? Math.sign(deltaX) : 0
+  const directionY = horizontal ? 0 : Math.sign(deltaY)
+  return {
+    start: { x: center.x - directionX * 5, y: center.y - directionY * 5 },
+    end: { x: center.x + directionX * 5, y: center.y + directionY * 5 }
+  }
 }
 
 const setStateClass = (
@@ -219,16 +292,29 @@ const render = (
   const definitions = svgElement("defs")
   const marker = svgElement("marker")
   marker.id = "chart-arrow"
-  marker.setAttribute("viewBox", "0 0 10 10")
-  marker.setAttribute("refX", "9")
-  marker.setAttribute("refY", "5")
-  marker.setAttribute("markerWidth", "7")
-  marker.setAttribute("markerHeight", "7")
+  marker.setAttribute("viewBox", "0 0 12 12")
+  marker.setAttribute("refX", "11")
+  marker.setAttribute("refY", "6")
+  marker.setAttribute("markerWidth", "12")
+  marker.setAttribute("markerHeight", "12")
+  marker.setAttribute("markerUnits", "userSpaceOnUse")
   marker.setAttribute("orient", "auto-start-reverse")
   const arrow = svgElement("path")
-  arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z")
+  arrow.setAttribute("d", "M 1 1 L 11 6 L 1 11 z")
   marker.append(arrow)
-  definitions.append(marker)
+  const directionMarker = svgElement("marker")
+  directionMarker.id = "chart-direction"
+  directionMarker.setAttribute("viewBox", "0 0 8 8")
+  directionMarker.setAttribute("refX", "7")
+  directionMarker.setAttribute("refY", "4")
+  directionMarker.setAttribute("markerWidth", "8")
+  directionMarker.setAttribute("markerHeight", "8")
+  directionMarker.setAttribute("markerUnits", "userSpaceOnUse")
+  directionMarker.setAttribute("orient", "auto")
+  const directionArrow = svgElement("path")
+  directionArrow.setAttribute("d", "M 1 1 L 7 4 L 1 7 z")
+  directionMarker.append(directionArrow)
+  definitions.append(marker, directionMarker)
   svg.append(definitions)
   const nodesLayer = element("div", "chart-nodes")
   const labelsLayer = element("div", "chart-labels")
@@ -272,6 +358,15 @@ const render = (
     const registered = edgeElements.get(id) ?? []
     registered.push(node)
     edgeElements.set(id, registered)
+  }
+
+  for (const regionLayout of layout.regions) {
+    const region = element("div", "chart-unconnected-region")
+    region.title = "No statically known transition reaches these states. Runtime-resolved targets may still reach them."
+    position(region, regionLayout)
+    const label = element("div", "chart-unconnected-region-label", "No static path from initial")
+    region.append(label)
+    regions.append(region)
   }
 
   for (const laidOut of layout.nodes) {
@@ -337,16 +432,32 @@ const render = (
     const group = svgElement(
       "g",
       `chart-edge-group chart-edge-${laidOut.kind}${
-        laidOut.kind === "transition" ? ` chart-transition-${laidOut.edge.kind}` : ""
+        laidOut.kind === "transition"
+          ? ` chart-transition-${laidOut.edge.kind} chart-edge-trigger-${laidOut.edge.trigger.type}${
+            laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+          }`
+          : ""
       }`
     )
+    const casing = svgElement("path", "chart-edge-casing")
     const visible = svgElement("path", "chart-edge-line")
-    const route = pathData(laidOut.points)
+    const route = chartEdgePathData(laidOut.points)
+    casing.setAttribute("d", route)
     visible.setAttribute("d", route)
     visible.setAttribute("marker-end", "url(#chart-arrow)")
     const hit = svgElement("path", "chart-edge-hit")
     hit.setAttribute("d", route)
-    group.append(visible, hit)
+    group.append(casing, visible)
+    if (laidOut.kind === "transition") {
+      const cue = chartDirectionCue(laidOut.points)
+      if (cue !== null) {
+        const direction = svgElement("path", "chart-edge-direction")
+        direction.setAttribute("d", `M ${cue.start.x} ${cue.start.y} L ${cue.end.x} ${cue.end.y}`)
+        direction.setAttribute("marker-end", "url(#chart-direction)")
+        group.append(direction)
+      }
+    }
+    group.append(hit)
     svg.append(group)
     if (laidOut.kind === "initial") continue
 
@@ -354,7 +465,9 @@ const render = (
     registerEdgeElement(laidOut.edge.id, group)
     const label = element(
       "button",
-      `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}`,
+      `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}${
+        laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+      }`,
       laidOut.edge.label
     )
     label.type = "button"
