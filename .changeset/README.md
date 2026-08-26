@@ -13,7 +13,7 @@ Do not create a major changeset before 1.0. Backward compatibility is not a desi
 
 ## Synchronized package versions
 
-`@typeonce/effect-machine` and `@typeonce/effect-machine-devtools` belong to the same Changesets fixed group. Keep their package versions equal and use `workspace:^` for the devtools dependency on core. A release affecting either package publishes both at the same version, so users can select compatible packages by matching their versions.
+`@typeonce/effect-machine`, `@typeonce/effect-machine-devtools`, and `@typeonce/oxlint-plugin-effect-machine` belong to the same Changesets fixed group. Keep their package versions equal and use `workspace:^` for the devtools dependency on core. A release affecting any package publishes all three at the same version, so users can select compatible packages by matching their versions.
 
 ## Writing changelog entries
 

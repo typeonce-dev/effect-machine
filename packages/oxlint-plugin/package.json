@@ -1,0 +1,74 @@
+{
+  "name": "@typeonce/oxlint-plugin-effect-machine",
+  "version": "0.25.0",
+  "description": "Oxlint rules for Effect Machine models",
+  "author": "Sandro Maglione",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/typeonce-dev/effect-machine.git",
+    "directory": "packages/oxlint-plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/typeonce-dev/effect-machine/issues"
+  },
+  "homepage": "https://github.com/typeonce-dev/effect-machine/tree/main/packages/oxlint-plugin#readme",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "src/**/*.ts",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./recommended": {
+      "types": "./src/recommended.ts",
+      "import": "./src/recommended.ts"
+    },
+    "./package.json": "./package.json",
+    "./internal/*": null
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./recommended": {
+        "types": "./dist/recommended.d.ts",
+        "import": "./dist/recommended.js"
+      },
+      "./package.json": "./package.json",
+      "./internal/*": null
+    }
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "check": "tsc -b tsconfig.json"
+  },
+  "peerDependencies": {
+    "oxlint": ">=1.80.0 <2"
+  },
+  "dependencies": {
+    "@oxlint/plugins": "1.80.0"
+  },
+  "devDependencies": {
+    "oxlint": "1.80.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  }
+}

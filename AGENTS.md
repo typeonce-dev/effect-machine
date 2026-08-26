@@ -16,7 +16,7 @@ When compatibility, convenience, concision, and semantic clarity conflict, prefe
 ## Experimental versioning
 
 - The library is experimental and pre-1.0. Public additions and breaking API changes use a minor changeset; compatible fixes and implementation improvements use a patch changeset. Do not create major changesets before 1.0.
-- `@typeonce/effect-machine` and `@typeonce/effect-machine-devtools` release from one Changesets fixed group and must always have the same version. Keep their package versions, workspace dependency, and release configuration synchronized so users can install matching versions for compatibility.
+- `@typeonce/effect-machine`, `@typeonce/effect-machine-devtools`, and `@typeonce/oxlint-plugin-effect-machine` release from one Changesets fixed group and must always have the same version. Keep their package versions, workspace dependency, and release configuration synchronized so users can install matching versions for compatibility.
 - Backward compatibility is not currently a design goal. Change or remove an existing API whenever a clearer, safer, smaller long-term design replaces it.
 - Do not add deprecated aliases, compatibility wrappers, or parallel APIs solely to preserve an inferior existing design unless the user explicitly requests them.
 - Explain the resulting API and direct migration in changesets. Do not use changelog entries to credit an external library or narrate implementation history.
