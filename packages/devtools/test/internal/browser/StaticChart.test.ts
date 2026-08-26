@@ -6,6 +6,7 @@ import {
   chartSelfLoopLabelGap,
   ensureChartEdgeTerminalClearance,
   layoutChart,
+  layoutChartWith,
   selfLoopLabelPosition
 } from "../../../src/internal/browser/chart-layout.js"
 import { type ChartModel, type ChartNode, makeChartModel } from "../../../src/internal/browser/chart-model.js"
@@ -20,6 +21,7 @@ import {
 } from "../../../src/internal/browser/chart-renderer.js"
 import { machine, snapshot } from "../../../src/internal/browser/example-machine.js"
 import { invokeOutcomesMachine } from "../../../src/internal/browser/invoke-outcomes-example.js"
+import { layoutResilienceMachine } from "../../../src/internal/browser/layout-resilience-example.js"
 import { parallelCompletionMachine } from "../../../src/internal/browser/parallel-completion-example.js"
 import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
 import { transitionSemanticsMachine } from "../../../src/internal/browser/transition-semantics-example.js"
@@ -299,6 +301,72 @@ describe("Static chart", () => {
 
     assert.strictEqual(edge.edge.activityKind, "timer")
     assert.isAtMost(edge.label.y + edge.labelHeight / 2, parent.y + parent.height)
+  })
+
+  it("lays out nested updates alongside cross-hierarchy invoke outcomes", async () => {
+    const model = makeChartModel(MachineDocument.make(layoutResilienceMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const transitionEdges = layout.edges.filter((edge) => edge.kind === "transition")
+    const updates = transitionEdges.filter(({ edge }) => edge.kind === "targetless")
+
+    assert.strictEqual(transitionEdges.length, model.edges.length)
+    assert.strictEqual(updates.length, 3)
+    assert.deepStrictEqual(
+      new Set(updates.map(({ points }) => Math.max(...points.map(({ y }) => y)))).size,
+      3
+    )
+    assert.isTrue(
+      transitionEdges.some(({ edge }) => edge.source === "Editing.SubmittingLogin" && edge.target === "Navigating")
+    )
+    assert.isTrue(
+      transitionEdges.some(({ edge }) =>
+        edge.source === "Editing.RequestingVerification" && edge.target === "Verification"
+      )
+    )
+    assert.isTrue(
+      transitionEdges.some(({ edge }) =>
+        edge.source === "Editing.RequestingVerification" && edge.target === "Editing.Form.Failed"
+      )
+    )
+
+    const incomingFailures = transitionEdges.filter(({ edge }) =>
+      edge.trigger.type === "invoke" && edge.target === "Editing.Form.Failed"
+    )
+    assert.strictEqual(incomingFailures.length, 2)
+    assert.strictEqual(
+      new Set(incomingFailures.map(({ points }) => points.at(-2)?.x)).size,
+      incomingFailures.length
+    )
+
+    const externalFailure = transitionEdges.find(({ edge }) => edge.label === "submit-login · failure")
+    const emailChanged = updates.find(({ edge }) => edge.label === "EmailChanged")
+    if (externalFailure === undefined || emailChanged === undefined) {
+      assert.fail("Expected the external failure and update transitions")
+    }
+    const bounds = (transition: typeof externalFailure) => ({
+      left: transition.label.x - transition.labelWidth / 2,
+      right: transition.label.x + transition.labelWidth / 2,
+      top: transition.label.y - transition.labelHeight / 2,
+      bottom: transition.label.y + transition.labelHeight / 2
+    })
+    const externalBounds = bounds(externalFailure)
+    const updateBounds = bounds(emailChanged)
+    assert.isFalse(
+      externalBounds.left < updateBounds.right && externalBounds.right > updateBounds.left &&
+        externalBounds.top < updateBounds.bottom && externalBounds.bottom > updateBounds.top
+    )
+  })
+
+  it("retries layout with relaxed port constraints before reporting an error", async () => {
+    const model = makeChartModel(MachineDocument.make(layoutResilienceMachine))
+    const attempts: Array<string> = []
+    const failure = await Effect.runPromise(Effect.flip(layoutChartWith(model, async (_graph, constraints) => {
+      attempts.push(constraints)
+      throw new Error(`${constraints} layout failed`)
+    })))
+
+    assert.deepStrictEqual(attempts, ["fixed", "relaxed"])
+    assert.include(failure.message, "relaxed layout failed")
   })
 
   it("stacks parallel regions as vertical lanes", async () => {

@@ -82,6 +82,7 @@ export interface LaidOutChart {
 
 export class ChartLayoutError extends Data.TaggedError("ChartLayoutError")<{
   readonly cause: unknown
+  readonly message: string
 }> {}
 
 interface NodeMetric {
@@ -122,6 +123,26 @@ const runtimeNodeId = (target: ChartRuntimeTarget): string => `node:${target.id}
 const runtimeTargetPortId = (target: ChartRuntimeTarget): string => `port:${target.edgeId}:target`
 const unconnectedRegionId = (parent: string | null): string => `region:unconnected:${parent ?? "root"}`
 const isSelfTransition = (edge: ChartEdge): boolean => edge.kind === "targetless" || edge.target === edge.source
+type PortConstraints = "fixed" | "relaxed"
+
+export const chartEdgeTerminalClearance = 24
+export const chartSelfLoopLabelGap = 8
+export const chartSelfLoopParentAllowance = 78
+const chartSelfLoopRouteGap = 30
+const chartSelfLoopLaneGap = 52
+const chartTerminalLaneGap = 18
+const chartLabelCollisionGap = 8
+
+const selfLoopAllowance = (count: number): number =>
+  count === 0 ? 0 : chartSelfLoopParentAllowance + (count - 1) * chartSelfLoopLaneGap
+
+const isDescendantPath = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}.`)
+
+const externalIncomingCount = (model: ChartModel, source: string): number =>
+  model.edges.filter((edge) =>
+    edge.target !== null && isDescendantPath(edge.target, source) &&
+    edge.source !== source && !isDescendantPath(edge.source, source)
+  ).length
 
 interface UnconnectedRegion {
   readonly id: string
@@ -146,9 +167,10 @@ const unconnectedRegions = (
 }
 
 const portsByState = (
-  model: ChartModel,
-  edgePolicy: ReturnType<typeof makeChartLayoutPolicy>["edge"]
-): ReadonlyMap<string, ReadonlyArray<ElkPort>> => {
+  edges: ReadonlyArray<ChartEdge>,
+  edgePolicy: ReturnType<typeof makeChartLayoutPolicy>["edge"],
+  portConstraints: PortConstraints
+): Map<string, Array<ElkPort>> => {
   const ports = new Map<string, Array<ElkPort>>()
   const add = (path: string, id: string, side: ChartPortSide): void => {
     const statePorts = ports.get(path) ?? []
@@ -156,23 +178,20 @@ const portsByState = (
       id,
       width: 6,
       height: 6,
-      layoutOptions: {
-        "elk.port.side": side
-      }
+      ...(portConstraints === "fixed"
+        ? { layoutOptions: { "elk.port.side": side } }
+        : {})
     })
     ports.set(path, statePorts)
   }
 
-  for (const edge of model.edges) {
+  for (const edge of edges) {
     const policy = edgePolicy(edge)
     add(edge.source, sourcePortId(edge), policy.sourceSide)
     if (edge.kind === "target" && edge.target !== null) {
       add(edge.target, targetPortId(edge), policy.targetSide)
-    } else if (edge.kind === "targetless") {
-      add(edge.source, targetPortId(edge), policy.targetSide)
     }
   }
-  for (const initial of model.initials) add(initial.target, initialTargetPortId(initial), "WEST")
   return ports
 }
 
@@ -184,18 +203,31 @@ const labelMetric = (label: string): { readonly width: number; readonly height: 
 const makeGraph = (
   model: ChartModel,
   policy: ReturnType<typeof makeChartLayoutPolicy>,
-  regions: ReadonlyArray<UnconnectedRegion>
+  regions: ReadonlyArray<UnconnectedRegion>,
+  portConstraints: PortConstraints
 ): ElkNode => {
   const nodesByPath = new Map(model.nodes.map((node) => [node.path, node]))
   const regionsByParent = new Map(regions.map((region) => [region.parent, region]))
   const sourceByEdgeId = new Map(model.edges.map((edge) => [edge.id, edge.source]))
-  const selfLoopParents = new Set(
-    model.edges.flatMap((edge) => {
-      if (!isSelfTransition(edge)) return []
-      const parent = nodesByPath.get(edge.source)?.parent
-      return parent === null || parent === undefined ? [] : [parent]
-    })
-  )
+  const layoutEdges = model.edges.filter((edge) => !isSelfTransition(edge))
+  const selfLoopCounts = new Map<string, number>()
+  for (const edge of model.edges) {
+    if (isSelfTransition(edge)) {
+      selfLoopCounts.set(edge.source, (selfLoopCounts.get(edge.source) ?? 0) + 1)
+    }
+  }
+  const selfLoopAllowanceByParent = new Map<string, number>()
+  for (const [source, count] of selfLoopCounts) {
+    const parent = nodesByPath.get(source)?.parent
+    if (parent === null || parent === undefined) continue
+    selfLoopAllowanceByParent.set(
+      parent,
+      Math.max(
+        selfLoopAllowanceByParent.get(parent) ?? 0,
+        selfLoopAllowance(count + externalIncomingCount(model, source))
+      )
+    )
+  }
   const initialsByParent = new Map<string | null, Array<ChartInitial>>()
   for (const initial of model.initials) {
     const siblings = initialsByParent.get(initial.parent) ?? []
@@ -208,7 +240,19 @@ const makeGraph = (
     siblings.push(target)
     runtimeTargetsByParent.set(target.parent, siblings)
   }
-  const ports = portsByState(model, policy.edge)
+  const ports = portsByState(layoutEdges, policy.edge, portConstraints)
+  for (const initial of model.initials) {
+    const statePorts = ports.get(initial.target) ?? []
+    statePorts.push({
+      id: initialTargetPortId(initial),
+      width: 6,
+      height: 6,
+      ...(portConstraints === "fixed"
+        ? { layoutOptions: { "elk.port.side": "WEST" } }
+        : {})
+    })
+    ports.set(initial.target, statePorts)
+  }
 
   const initialNode = (initial: ChartInitial): ElkNode => ({
     id: initialNodeId(initial),
@@ -226,21 +270,25 @@ const makeGraph = (
       id: runtimeTargetPortId(target),
       width: 6,
       height: 6,
-      layoutOptions: { "elk.port.side": "WEST" }
+      ...(portConstraints === "fixed"
+        ? { layoutOptions: { "elk.port.side": "WEST" } }
+        : {})
     }],
-    layoutOptions: { "elk.portConstraints": "FIXED_SIDE" }
+    ...(portConstraints === "fixed"
+      ? { layoutOptions: { "elk.portConstraints": "FIXED_SIDE" } }
+      : {})
   })
 
   const stateNode = (node: ChartNode, suppressUnconnectedRegion: boolean): ElkNode => {
     const metric = nodeMetric(node)
     const nodePolicy = policy.node(node.path)
     const descendants = children(node.path, suppressUnconnectedRegion || !nodePolicy.staticPath)
-    const bottomPadding = 28 + (selfLoopParents.has(node.path) ? chartSelfLoopParentAllowance : 0)
+    const bottomPadding = 28 + (selfLoopAllowanceByParent.get(node.path) ?? 0)
     const common = {
       id: node.path,
       ports: [...ports.get(node.path) ?? []],
       layoutOptions: {
-        "elk.portConstraints": "FIXED_SIDE",
+        ...(portConstraints === "fixed" ? { "elk.portConstraints": "FIXED_SIDE" } : {}),
         "elk.spacing.portPort": "22",
         ...(nodePolicy.layerConstraint === null
           ? {}
@@ -311,7 +359,7 @@ const makeGraph = (
     id: "chart-root",
     children: children(null),
     edges: [
-      ...model.edges.map((edge): ElkExtendedEdge => {
+      ...layoutEdges.map((edge): ElkExtendedEdge => {
         const label = labelMetric(edge.label)
         const edgeLayout = policy.edge(edge)
         return {
@@ -432,32 +480,6 @@ const midpoint = (points: ReadonlyArray<ChartPoint>): ChartPoint => {
   return points.at(-1)!
 }
 
-const expandSelfLoop = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPoint> => {
-  const start = points[0]
-  const end = points.at(-1)
-  if (start === undefined || end === undefined) return points
-  if (Math.abs(start.y - end.y) <= Math.abs(start.x - end.x)) {
-    const outerY = Math.max(...points.map(({ y }) => y)) + 30
-    return compactPoints([
-      start,
-      { x: start.x, y: outerY },
-      { x: end.x, y: outerY },
-      end
-    ])
-  }
-  const outerX = Math.max(...points.map(({ x }) => x)) + 30
-  return compactPoints([
-    start,
-    { x: outerX, y: start.y },
-    { x: outerX, y: end.y },
-    end
-  ])
-}
-
-export const chartEdgeTerminalClearance = 24
-export const chartSelfLoopLabelGap = 8
-export const chartSelfLoopParentAllowance = 44
-
 const longestSegment = (
   points: ReadonlyArray<ChartPoint>,
   matches: (start: ChartPoint, end: ChartPoint) => boolean,
@@ -512,6 +534,33 @@ export const selfLoopLabelPosition = (
   }
 }
 
+const laidOutSelfTransition = (
+  edge: ChartEdge,
+  node: LaidOutChartNode,
+  lane: number
+): LaidOutChartTransition => {
+  const metric = labelMetric(edge.label)
+  const centerX = node.x + node.width / 2
+  const maximumHalfWidth = Math.max(24, node.width / 2 - 24)
+  const halfWidth = Math.min(maximumHalfWidth, Math.max(52, metric.width / 2 + 12))
+  const bottom = node.y + node.height
+  const outerY = bottom + chartSelfLoopRouteGap + lane * chartSelfLoopLaneGap
+  const points = ensureChartEdgeTerminalClearance([
+    { x: centerX - halfWidth, y: bottom },
+    { x: centerX - halfWidth, y: outerY },
+    { x: centerX + halfWidth, y: outerY },
+    { x: centerX + halfWidth, y: bottom }
+  ])
+  return {
+    kind: "transition",
+    edge,
+    points,
+    label: selfLoopLabelPosition(points, metric.width, metric.height),
+    labelWidth: metric.width,
+    labelHeight: metric.height
+  }
+}
+
 export const ensureChartEdgeTerminalClearance = (
   points: ReadonlyArray<ChartPoint>
 ): ReadonlyArray<ChartPoint> => {
@@ -542,6 +591,132 @@ export const ensureChartEdgeTerminalClearance = (
   }
   return compactPoints(result)
 }
+
+interface TerminalApproach {
+  readonly axis: "horizontal" | "vertical"
+  readonly direction: number
+  readonly end: ChartPoint
+  readonly bend: ChartPoint
+  readonly bendIndex: number
+}
+
+const terminalApproach = (points: ReadonlyArray<ChartPoint>): TerminalApproach | undefined => {
+  const end = points.at(-1)
+  const bend = points.at(-2)
+  const beforeBend = points.at(-3)
+  if (end === undefined || bend === undefined || beforeBend === undefined) return undefined
+  if (end.y === bend.y && beforeBend.x === bend.x) {
+    const direction = Math.sign(end.x - bend.x)
+    return direction === 0
+      ? undefined
+      : { axis: "vertical", direction, end, bend, bendIndex: points.length - 2 }
+  }
+  if (end.x === bend.x && beforeBend.y === bend.y) {
+    const direction = Math.sign(end.y - bend.y)
+    return direction === 0
+      ? undefined
+      : { axis: "horizontal", direction, end, bend, bendIndex: points.length - 2 }
+  }
+  return undefined
+}
+
+const moveTerminalApproach = (
+  points: ReadonlyArray<ChartPoint>,
+  approach: TerminalApproach,
+  distance: number
+): ReadonlyArray<ChartPoint> => {
+  const result = points.map((point) => ({ ...point }))
+  if (approach.axis === "vertical") {
+    const x = approach.end.x - approach.direction * distance
+    let first = approach.bendIndex
+    while (first > 0 && points[first - 1]!.x === approach.bend.x) first--
+    if (first === 0) {
+      const start = points[0]!
+      return compactPoints([
+        start,
+        { x, y: start.y },
+        { x, y: approach.end.y },
+        approach.end
+      ])
+    }
+    for (let index = first; index <= approach.bendIndex; index++) result[index]!.x = x
+  } else {
+    const y = approach.end.y - approach.direction * distance
+    let first = approach.bendIndex
+    while (first > 0 && points[first - 1]!.y === approach.bend.y) first--
+    if (first === 0) {
+      const start = points[0]!
+      return compactPoints([
+        start,
+        { x: start.x, y },
+        { x: approach.end.x, y },
+        approach.end
+      ])
+    }
+    for (let index = first; index <= approach.bendIndex; index++) result[index]!.y = y
+  }
+  return compactPoints(result)
+}
+
+const separateTerminalApproaches = (
+  transitions: ReadonlyArray<LaidOutChartTransition>
+): ReadonlyArray<LaidOutChartTransition> => {
+  const groups = new Map<
+    string,
+    Array<{ readonly edge: LaidOutChartTransition; readonly approach: TerminalApproach }>
+  >()
+  for (const edge of transitions) {
+    if (edge.edge.target === null || isSelfTransition(edge.edge)) continue
+    const approach = terminalApproach(edge.points)
+    if (approach === undefined) continue
+    const key = `${edge.edge.target}:${approach.axis}:${approach.direction}`
+    const group = groups.get(key) ?? []
+    group.push({ edge, approach })
+    groups.set(key, group)
+  }
+
+  const pointsByEdgeId = new Map<string, ReadonlyArray<ChartPoint>>()
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    group.sort((left, right) => {
+      const leftPosition = left.approach.axis === "vertical" ? left.approach.end.y : left.approach.end.x
+      const rightPosition = right.approach.axis === "vertical" ? right.approach.end.y : right.approach.end.x
+      return leftPosition - rightPosition || left.edge.edge.id.localeCompare(right.edge.edge.id)
+    })
+    group.forEach(({ approach, edge }, lane) => {
+      pointsByEdgeId.set(
+        edge.edge.id,
+        moveTerminalApproach(edge.points, approach, chartEdgeTerminalClearance + lane * chartTerminalLaneGap)
+      )
+    })
+  }
+  return transitions.map((edge) => {
+    const points = pointsByEdgeId.get(edge.edge.id)
+    return points === undefined ? edge : { ...edge, points }
+  })
+}
+
+interface ChartRect {
+  readonly left: number
+  readonly right: number
+  readonly top: number
+  readonly bottom: number
+}
+
+const labelRect = (
+  point: ChartPoint,
+  width: number,
+  height: number
+): ChartRect => ({
+  left: point.x - width / 2,
+  right: point.x + width / 2,
+  top: point.y - height / 2,
+  bottom: point.y + height / 2
+})
+
+const overlaps = (left: ChartRect, right: ChartRect, gap: number): boolean =>
+  left.left < right.right + gap && left.right > right.left - gap &&
+  left.top < right.bottom + gap && left.bottom > right.top - gap
 
 const collectLayout = (
   model: ChartModel,
@@ -611,40 +786,69 @@ const collectLayout = (
 
   const chartEdges = new Map(model.edges.map((edge) => [edge.id, edge]))
   const initialEdges = new Map(model.initials.map((initial) => [initial.id, initial]))
-  const edges = (graph.edges ?? []).flatMap((edge): ReadonlyArray<LaidOutChartTransition | LaidOutChartInitialEdge> => {
-    const offset = offsets.get(edge.container ?? graph.id) ?? { x: 0, y: 0 }
-    const points = edgePoints(edge, offset)
-    if (points === undefined) return []
-    const chartEdge = chartEdges.get(edge.id)
-    if (chartEdge !== undefined) {
-      const metric = labelMetric(chartEdge.label)
-      const label = edge.labels?.[0]
-      const selfTransition = isSelfTransition(chartEdge)
-      const routedPoints = selfTransition
-        ? expandSelfLoop(points)
-        : points
-      const transitionPoints = ensureChartEdgeTerminalClearance(routedPoints)
-      const labelWidth = label?.width ?? metric.width
-      const labelHeight = label?.height ?? metric.height
-      return [{
-        kind: "transition",
-        edge: chartEdge,
-        points: transitionPoints,
-        label: selfTransition
-          ? selfLoopLabelPosition(transitionPoints, labelWidth, labelHeight)
-          : label?.x === undefined || label.y === undefined
-          ? midpoint(transitionPoints)
-          : add(offset, {
-            x: label.x + labelWidth / 2,
-            y: label.y + labelHeight / 2
-          }),
-        labelWidth,
-        labelHeight
-      }]
+  const elkEdges = (graph.edges ?? []).flatMap(
+    (edge): ReadonlyArray<LaidOutChartTransition | LaidOutChartInitialEdge> => {
+      const offset = offsets.get(edge.container ?? graph.id) ?? { x: 0, y: 0 }
+      const points = edgePoints(edge, offset)
+      if (points === undefined) return []
+      const chartEdge = chartEdges.get(edge.id)
+      if (chartEdge !== undefined) {
+        const metric = labelMetric(chartEdge.label)
+        const label = edge.labels?.[0]
+        const transitionPoints = ensureChartEdgeTerminalClearance(points)
+        const labelWidth = label?.width ?? metric.width
+        const labelHeight = label?.height ?? metric.height
+        return [{
+          kind: "transition",
+          edge: chartEdge,
+          points: transitionPoints,
+          label: label?.x === undefined || label.y === undefined
+            ? midpoint(transitionPoints)
+            : add(offset, {
+              x: label.x + labelWidth / 2,
+              y: label.y + labelHeight / 2
+            }),
+          labelWidth,
+          labelHeight
+        }]
+      }
+      const initial = initialEdges.get(edge.id)
+      return initial === undefined ? [] : [{ kind: "initial", initial, points }]
     }
-    const initial = initialEdges.get(edge.id)
-    return initial === undefined ? [] : [{ kind: "initial", initial, points }]
+  )
+  const nodesByPath = new Map(nodes.map((node) => [node.node.path, node]))
+  const elkTransitions = separateTerminalApproaches(
+    elkEdges.filter((edge): edge is LaidOutChartTransition => edge.kind === "transition")
+  )
+  const occupiedLabels = elkTransitions.map((edge) => labelRect(edge.label, edge.labelWidth, edge.labelHeight))
+  const selfLoopLanes = new Map<string, number>()
+  const selfEdges = model.edges.flatMap((edge): ReadonlyArray<LaidOutChartTransition> => {
+    if (!isSelfTransition(edge)) return []
+    const node = nodesByPath.get(edge.source)
+    if (node === undefined) return []
+    let lane = selfLoopLanes.get(edge.source) ?? 0
+    let selfTransition = laidOutSelfTransition(edge, node, lane)
+    while (
+      occupiedLabels.some((occupied) =>
+        overlaps(
+          labelRect(selfTransition.label, selfTransition.labelWidth, selfTransition.labelHeight),
+          occupied,
+          chartLabelCollisionGap
+        )
+      )
+    ) {
+      lane++
+      selfTransition = laidOutSelfTransition(edge, node, lane)
+    }
+    selfLoopLanes.set(edge.source, lane + 1)
+    occupiedLabels.push(labelRect(selfTransition.label, selfTransition.labelWidth, selfTransition.labelHeight))
+    return [selfTransition]
   })
+  const edges: ReadonlyArray<LaidOutChartTransition | LaidOutChartInitialEdge> = [
+    ...elkTransitions,
+    ...elkEdges.filter((edge): edge is LaidOutChartInitialEdge => edge.kind === "initial"),
+    ...selfEdges
+  ]
 
   const transitionEdges = edges.filter((edge) => edge.kind === "transition")
   const contentWidth = Math.max(
@@ -675,12 +879,40 @@ const collectLayout = (
   }
 }
 
-export const layoutChart = (model: ChartModel): Effect.Effect<LaidOutChart, ChartLayoutError> =>
+type ChartLayoutEngine = (graph: ElkNode, portConstraints: PortConstraints) => Promise<ElkNode>
+
+const causeMessage = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
+
+export const layoutChartWith = (
+  model: ChartModel,
+  layout: ChartLayoutEngine
+): Effect.Effect<LaidOutChart, ChartLayoutError> =>
   Effect.suspend(() => {
     const policy = makeChartLayoutPolicy(model)
     const regions = unconnectedRegions(model, policy)
-    return Effect.tryPromise({
-      try: () => elk.layout(makeGraph(model, policy, regions)),
-      catch: (cause) => new ChartLayoutError({ cause })
-    }).pipe(Effect.map((graph) => collectLayout(model, graph, regions)))
+    const attempt = (portConstraints: PortConstraints) =>
+      Effect.tryPromise({
+        try: () => layout(makeGraph(model, policy, regions, portConstraints), portConstraints),
+        catch: (cause) => cause
+      })
+
+    return Effect.matchEffect(attempt("fixed"), {
+      onFailure: (fixedCause) =>
+        attempt("relaxed").pipe(
+          Effect.mapError((relaxedCause) =>
+            new ChartLayoutError({
+              cause: { fixed: fixedCause, relaxed: relaxedCause },
+              message: `ELK could not lay out the chart after retrying with relaxed port constraints: ${
+                causeMessage(relaxedCause)
+              }`
+            })
+          )
+        ),
+      onSuccess: Effect.succeed
+    }).pipe(
+      Effect.map((graph) => collectLayout(model, graph, regions))
+    )
   })
+
+export const layoutChart = (model: ChartModel): Effect.Effect<LaidOutChart, ChartLayoutError> =>
+  layoutChartWith(model, (graph) => elk.layout(graph))
