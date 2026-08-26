@@ -9,13 +9,13 @@ The package is experimental and pre-1.0. Minor releases may change its command o
 Core and devtools always release at the same version. Install matching versions:
 
 ```sh
-pnpm add @typeonce/effect-machine@latest effect@4.0.0-rc.111
+pnpm add @typeonce/effect-machine@latest effect@4.0.0-rc.112
 pnpm add --save-dev @typeonce/effect-machine-devtools@latest
 ```
 
 When pinning a release instead of using `latest`, use the same explicit version for both packages.
 
-The current release requires Node.js 22.19 or newer and Effect `4.0.0-rc.111`.
+The current release requires Node.js 22.19 or newer and Effect `4.0.0-rc.112`.
 
 ## Run the visualizer
 

@@ -34,7 +34,7 @@ Cluster and are exposed only through explicit integration boundaries.
 ## Install
 
 ```sh
-pnpm add @typeonce/effect-machine effect@4.0.0-rc.111
+pnpm add @typeonce/effect-machine effect@4.0.0-rc.112
 ```
 
 `effect` is an exact peer dependency. Install the version above and upgrade it
