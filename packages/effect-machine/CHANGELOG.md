@@ -1,5 +1,17 @@
 # @typeonce/effect-machine
 
+## 0.26.0
+
+### Minor Changes
+
+- 4130963: Add `@typeonce/oxlint-plugin-effect-machine` with recommended rules for redundant default resolvers, asynchronous planning callbacks, and one-use intermediate `Machine.make(...)` definitions.
+
+  All three Effect Machine packages now release at the same version.
+
+### Patch Changes
+
+- 806d2fd: Upgrade the exact Effect peer dependency and companion Effect packages to `4.0.0-rc.112`.
+
 ## 0.25.0
 
 ## 0.24.0

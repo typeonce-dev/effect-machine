@@ -1,5 +1,27 @@
 # @typeonce/effect-machine-devtools
 
+## 0.26.0
+
+### Minor Changes
+
+- 4130963: Add `@typeonce/oxlint-plugin-effect-machine` with recommended rules for redundant default resolvers, asynchronous planning callbacks, and one-use intermediate `Machine.make(...)` definitions.
+
+  All three Effect Machine packages now release at the same version.
+
+### Patch Changes
+
+- 5edaf24: Improve the static statechart so initial and reachable states follow a stable left-to-right order, reverse and self-transitions use dedicated routes, and transition labels stay clear of arrowheads and compound boundaries.
+
+  Distinguish automatic transitions with dashed lines and correlate invoke outcomes with muted colors for effect, timer, stream, process, and child-machine activities.
+
+  Stack parallel regions into vertical lanes, separate states with no statically known path from the initial state, and make long or intersecting routes easier to follow with rounded corners, edge casing, and direction cues.
+
+  Add a machine analysis inspector that reports declared public events without handlers and state subtrees without a statically known path from the initial configuration.
+
+- Updated dependencies [4130963]
+- Updated dependencies [806d2fd]
+  - @typeonce/effect-machine@0.26.0
+
 ## 0.25.0
 
 ### Minor Changes
