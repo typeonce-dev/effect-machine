@@ -27,31 +27,19 @@
   ],
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./recommended": {
-      "types": "./src/recommended.ts",
-      "import": "./src/recommended.ts"
+      "types": "./dist/recommended.d.ts",
+      "import": "./dist/recommended.js"
     },
     "./package.json": "./package.json",
     "./internal/*": null
   },
   "publishConfig": {
     "access": "public",
-    "provenance": true,
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js"
-      },
-      "./recommended": {
-        "types": "./dist/recommended.d.ts",
-        "import": "./dist/recommended.js"
-      },
-      "./package.json": "./package.json",
-      "./internal/*": null
-    }
+    "provenance": true
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
