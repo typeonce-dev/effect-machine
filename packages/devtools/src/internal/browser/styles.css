@@ -308,6 +308,31 @@ button {
   cursor: default;
 }
 
+.toolbar-button[aria-pressed="true"] {
+  color: #dce8ff;
+  background: rgb(65 103 165 / 28%);
+}
+
+.analysis-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.analysis-button[hidden] {
+  display: none;
+}
+
+.analysis-button-count {
+  min-width: 17px;
+  padding: 2px 5px;
+  border-radius: 8px;
+  color: #9da6b3;
+  background: #20242a;
+  font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: center;
+}
+
 .topology-chart {
   display: flex;
   flex: 1;
@@ -409,6 +434,23 @@ button {
 .chart-compound-parallel {
   border-color: #303845;
   background: rgb(20 24 30 / 74%);
+}
+
+.chart-unconnected-region {
+  position: absolute;
+  border: 1px dashed #353b44;
+  border-radius: 5px;
+  background: rgb(14 16 19 / 58%);
+}
+
+.chart-unconnected-region-label {
+  position: absolute;
+  top: 17px;
+  left: 24px;
+  color: #727984;
+  font: 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .chart-state {
@@ -631,15 +673,28 @@ button {
   user-select: none;
 }
 
+.chart-edge-casing,
 .chart-edge-line,
+.chart-edge-direction,
 .chart-edge-hit {
   fill: none;
 }
 
-.chart-edge-line {
+.chart-edge-casing {
+  stroke: #0b0c0e;
+  stroke-width: 5.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-edge-line,
+.chart-edge-direction {
   stroke: #626b77;
   stroke-width: 1.4;
   vector-effect: non-scaling-stroke;
+}
+
+.chart-edge-direction {
+  pointer-events: none;
 }
 
 .chart-edge-initial .chart-edge-line {
@@ -653,7 +708,8 @@ button {
   pointer-events: stroke;
 }
 
-#chart-arrow path {
+#chart-arrow path,
+#chart-direction path {
   fill: context-stroke;
 }
 
@@ -687,7 +743,8 @@ button {
   color: #d4b4e9;
 }
 
-.chart-edge-group.is-hovered .chart-edge-line {
+.chart-edge-group.is-hovered .chart-edge-line,
+.chart-edge-group.is-hovered .chart-edge-direction {
   stroke: #7c9ed2;
   stroke-width: 1.8;
 }
@@ -712,7 +769,12 @@ button {
 .chart-edge-group.chart-edge-activity-effect .chart-edge-line,
 .chart-edge-group.chart-edge-activity-timer .chart-edge-line,
 .chart-edge-group.chart-edge-activity-stream .chart-edge-line,
-.chart-edge-group.chart-edge-activity-machine .chart-edge-line {
+.chart-edge-group.chart-edge-activity-machine .chart-edge-line,
+.chart-edge-group.chart-edge-activity-process .chart-edge-direction,
+.chart-edge-group.chart-edge-activity-effect .chart-edge-direction,
+.chart-edge-group.chart-edge-activity-timer .chart-edge-direction,
+.chart-edge-group.chart-edge-activity-stream .chart-edge-direction,
+.chart-edge-group.chart-edge-activity-machine .chart-edge-direction {
   stroke: var(--chart-activity-color);
 }
 
@@ -726,22 +788,26 @@ button {
   background: var(--chart-activity-background);
 }
 
-.chart-edge-group.is-incoming .chart-edge-line {
+.chart-edge-group.is-incoming .chart-edge-line,
+.chart-edge-group.is-incoming .chart-edge-direction {
   stroke: #ed6a70;
   stroke-width: 2;
 }
 
-.chart-edge-group.is-outgoing .chart-edge-line {
+.chart-edge-group.is-outgoing .chart-edge-line,
+.chart-edge-group.is-outgoing .chart-edge-direction {
   stroke: #6eb6dc;
   stroke-width: 2;
 }
 
-.chart-edge-group.is-selected .chart-edge-line {
+.chart-edge-group.is-selected .chart-edge-line,
+.chart-edge-group.is-selected .chart-edge-direction {
   stroke: #8ab5ff;
   stroke-width: 2.5;
 }
 
-.chart-edge-group.is-walkthrough-available .chart-edge-line {
+.chart-edge-group.is-walkthrough-available .chart-edge-line,
+.chart-edge-group.is-walkthrough-available .chart-edge-direction {
   stroke: #d5aa57;
   stroke-width: 2;
 }
@@ -909,7 +975,7 @@ button {
 .inspector {
   position: absolute;
   z-index: 10;
-  top: 14px;
+  top: 60px;
   right: 14px;
   bottom: 14px;
   width: min(460px, calc(100% - 28px));
@@ -1047,6 +1113,13 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.analysis-summary {
+  margin: 12px 0 0;
+  color: #7f8690;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .state-annotations {
   margin-top: 18px;
 }
@@ -1143,6 +1216,33 @@ button {
   margin-top: 8px;
   border: 1px solid var(--line-soft);
   background: var(--surface-raised);
+}
+
+.analysis-card {
+  padding-bottom: 12px;
+}
+
+.analysis-card .state-link {
+  color: #e2e4e7;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.analysis-message,
+.analysis-qualification {
+  margin: 0;
+  padding: 0 12px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.analysis-message {
+  color: #b9bec6;
+}
+
+.analysis-qualification {
+  margin-top: 5px;
+  color: #747c87;
 }
 
 .card-header {
@@ -1620,7 +1720,7 @@ button {
   }
 
   .inspector {
-    top: 8px;
+    top: 54px;
     right: 8px;
     bottom: 8px;
     width: min(440px, calc(100% - 16px));
@@ -1644,6 +1744,10 @@ button {
 
   .inspector-content {
     padding: 48px 14px 18px;
+  }
+
+  .inspector {
+    top: 84px;
   }
 
   .zoom-controls {

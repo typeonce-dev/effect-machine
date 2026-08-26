@@ -10,6 +10,8 @@ import {
 } from "../../../src/internal/browser/chart-layout.js"
 import { type ChartModel, type ChartNode, makeChartModel } from "../../../src/internal/browser/chart-model.js"
 import {
+  chartDirectionCue,
+  chartEdgePathData,
   chartWheelZoom,
   chartZoomScrollPosition,
   isChartPan,
@@ -20,9 +22,33 @@ import { machine, snapshot } from "../../../src/internal/browser/example-machine
 import { invokeOutcomesMachine } from "../../../src/internal/browser/invoke-outcomes-example.js"
 import { parallelCompletionMachine } from "../../../src/internal/browser/parallel-completion-example.js"
 import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
+import { transitionSemanticsMachine } from "../../../src/internal/browser/transition-semantics-example.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
 
 describe("Static chart", () => {
+  it("rounds orthogonal bends and places direction cues on long routes", () => {
+    assert.strictEqual(
+      chartEdgePathData([
+        { x: 0, y: 0 },
+        { x: 40, y: 0 },
+        { x: 40, y: 30 },
+        { x: 100, y: 30 }
+      ], 10),
+      "M 0 0 L 30 0 Q 40 0 40 10 L 40 20 Q 40 30 50 30 L 100 30"
+    )
+    assert.deepStrictEqual(
+      chartDirectionCue([{ x: 0, y: 0 }, { x: 320, y: 0 }]),
+      { start: { x: 97.4, y: 0 }, end: { x: 107.4, y: 0 } }
+    )
+    const nearlyHorizontal = chartDirectionCue([
+      { x: 0, y: 100 },
+      { x: 320, y: 100 + 1e-9 }
+    ])
+    assert.strictEqual(nearlyHorizontal?.start.y, nearlyHorizontal?.end.y)
+    assert.closeTo((nearlyHorizontal?.end.x ?? 0) - (nearlyHorizontal?.start.x ?? 0), 10, 1e-9)
+    assert.strictEqual(chartDirectionCue([{ x: 0, y: 0 }, { x: 200, y: 0 }]), null)
+  })
+
   it("keeps an orthogonal terminal segment clear for the arrowhead", () => {
     assert.deepStrictEqual(
       ensureChartEdgeTerminalClearance([
@@ -119,12 +145,14 @@ describe("Static chart", () => {
     assert.deepStrictEqual(policy.children(null).map(({ path }) => path), ["Idle", "Done", "Detached"])
     assert.deepStrictEqual(policy.node("Idle"), {
       reachable: true,
+      staticPath: true,
       rank: 0,
       order: 0,
       layerConstraint: null
     })
     assert.strictEqual(policy.node("Done").layerConstraint, "LAST")
     assert.strictEqual(policy.node("Detached").reachable, false)
+    assert.strictEqual(policy.node("Detached").staticPath, false)
     assert.deepStrictEqual(policy.edge(model.edges[0]!), {
       direction: "forward",
       sourceSide: "EAST",
@@ -271,6 +299,63 @@ describe("Static chart", () => {
 
     assert.strictEqual(edge.edge.activityKind, "timer")
     assert.isAtMost(edge.label.y + edge.labelHeight / 2, parent.y + parent.height)
+  })
+
+  it("stacks parallel regions as vertical lanes", async () => {
+    const model = makeChartModel(MachineDocument.make(parallelCompletionMachine))
+    const policy = makeChartLayoutPolicy(model)
+    const layout = await Effect.runPromise(layoutChart(model))
+    const regions = layout.nodes
+      .filter(({ node }) => node.parent === "Order")
+      .sort((left, right) => left.y - right.y)
+
+    assert.deepStrictEqual(
+      regions.map(({ node }) => node.path).sort(),
+      ["Order.payment", "Order.fulfillment"].sort()
+    )
+    assert.isTrue(regions.every(({ node }) => policy.node(node.path).staticPath))
+    assert.isAtMost(regions[0]!.y + regions[0]!.height, regions[1]!.y)
+  })
+
+  it("groups states without a static path from the initial state", async () => {
+    const node = (path: string, initial = false): ChartNode => ({
+      path,
+      label: path,
+      type: "atomic",
+      parent: null,
+      children: [],
+      active: false,
+      initial,
+      fields: [],
+      activities: []
+    })
+    const model: ChartModel = {
+      machineId: "unconnected-region",
+      roots: ["Idle", "Detached"],
+      nodes: [node("Idle", true), node("Detached")],
+      edges: [],
+      runtimeTargets: [],
+      initials: [{ id: "initial:Idle", target: "Idle", parent: null }]
+    }
+    const layout = await Effect.runPromise(layoutChart(model))
+    const region = layout.regions[0]
+    const detached = layout.nodes.find(({ node }) => node.path === "Detached")
+
+    assert.deepStrictEqual(region?.nodePaths, ["Detached"])
+    assert.isAtLeast(detached?.x ?? 0, region?.x ?? Number.POSITIVE_INFINITY)
+    assert.isAtMost(
+      (detached?.x ?? Number.POSITIVE_INFINITY) + (detached?.width ?? 0),
+      (region?.x ?? 0) + (region?.width ?? 0)
+    )
+  })
+
+  it("separates the disconnected example state from the live topology", async () => {
+    const model = makeChartModel(MachineDocument.make(transitionSemanticsMachine))
+    const policy = makeChartLayoutPolicy(model)
+    const layout = await Effect.runPromise(layoutChart(model))
+
+    assert.strictEqual(policy.node("Disabled").staticPath, false)
+    assert.isTrue(layout.regions.some(({ nodePaths }) => nodePaths.includes("Disabled")))
   })
 
   it("lays out runtime-resolved targets as explicit stubs", async () => {

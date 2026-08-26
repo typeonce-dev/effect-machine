@@ -33,6 +33,9 @@ class Paused extends Schema.TaggedClass<Paused>("TransitionPaused")("Paused", {
 class Published extends Schema.TaggedClass<Published>("TransitionPublished")("Published", {
   result: Schema.String
 }) {}
+class Disabled extends Schema.TaggedClass<Disabled>("TransitionDisabled")("Disabled", {
+  reason: Schema.String
+}) {}
 
 class Create extends Schema.TaggedClass<Create>("TransitionCreate")("Create", {
   text: Schema.String,
@@ -67,6 +70,9 @@ class BumpWorkspace extends Schema.TaggedClass<BumpWorkspace>("TransitionBumpWor
   "BumpWorkspace",
   {}
 ) {}
+class Archive extends Schema.TaggedClass<Archive>("TransitionArchive")("Archive", {
+  reason: Schema.String
+}) {}
 
 const TransitionStates = Machine.states({
   Workspace: {
@@ -91,6 +97,7 @@ const TransitionStates = Machine.states({
     }
   },
   Paused,
+  Disabled,
   Published: { schema: Published, type: "final", output: Schema.String }
 })
 
@@ -121,7 +128,8 @@ export const transitionSemanticsMachine = Machine.make({
     Refresh,
     Ignore,
     MaybeHandle,
-    BumpWorkspace
+    BumpWorkspace,
+    Archive
   ),
   initial: (to) => to.Paused().resolve(({ target }) => target.decoded(new Paused({ reason: "not started" })))
 }).handle({
@@ -230,6 +238,7 @@ export const transitionSemanticsMachine = Machine.make({
         )
     }
   },
+  Disabled: {},
   Published: {
     output: ({ state }) => state.result
   }

@@ -45,6 +45,16 @@ export interface LaidOutChartRuntimeTarget {
   readonly height: number
 }
 
+export interface LaidOutChartRegion {
+  readonly kind: "unconnected"
+  readonly parent: string | null
+  readonly nodePaths: ReadonlyArray<string>
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
 export interface LaidOutChartTransition {
   readonly kind: "transition"
   readonly edge: ChartEdge
@@ -63,6 +73,7 @@ export interface LaidOutChartInitialEdge {
 export interface LaidOutChart {
   readonly width: number
   readonly height: number
+  readonly regions: ReadonlyArray<LaidOutChartRegion>
   readonly nodes: ReadonlyArray<LaidOutChartNode>
   readonly initials: ReadonlyArray<LaidOutChartInitial>
   readonly runtimeTargets: ReadonlyArray<LaidOutChartRuntimeTarget>
@@ -109,7 +120,30 @@ const initialNodeId = (initial: ChartInitial): string => `node:${initial.id}`
 const initialTargetPortId = (initial: ChartInitial): string => `port:${initial.id}:target`
 const runtimeNodeId = (target: ChartRuntimeTarget): string => `node:${target.id}`
 const runtimeTargetPortId = (target: ChartRuntimeTarget): string => `port:${target.edgeId}:target`
+const unconnectedRegionId = (parent: string | null): string => `region:unconnected:${parent ?? "root"}`
 const isSelfTransition = (edge: ChartEdge): boolean => edge.kind === "targetless" || edge.target === edge.source
+
+interface UnconnectedRegion {
+  readonly id: string
+  readonly parent: string | null
+  readonly nodePaths: ReadonlyArray<string>
+}
+
+const unconnectedRegions = (
+  model: ChartModel,
+  policy: ReturnType<typeof makeChartLayoutPolicy>
+): ReadonlyArray<UnconnectedRegion> => {
+  const parents = new Set<string | null>([null, ...model.nodes.map(({ parent }) => parent)])
+  return [...parents].flatMap((parent): ReadonlyArray<UnconnectedRegion> => {
+    if (parent !== null && !policy.node(parent).staticPath) return []
+    const nodePaths = policy.children(parent)
+      .filter(({ path }) => !policy.node(path).staticPath)
+      .map(({ path }) => path)
+    return nodePaths.length === 0
+      ? []
+      : [{ id: unconnectedRegionId(parent), parent, nodePaths }]
+  })
+}
 
 const portsByState = (
   model: ChartModel,
@@ -147,9 +181,14 @@ const labelMetric = (label: string): { readonly width: number; readonly height: 
   height: 26
 })
 
-const makeGraph = (model: ChartModel): ElkNode => {
-  const policy = makeChartLayoutPolicy(model)
+const makeGraph = (
+  model: ChartModel,
+  policy: ReturnType<typeof makeChartLayoutPolicy>,
+  regions: ReadonlyArray<UnconnectedRegion>
+): ElkNode => {
   const nodesByPath = new Map(model.nodes.map((node) => [node.path, node]))
+  const regionsByParent = new Map(regions.map((region) => [region.parent, region]))
+  const sourceByEdgeId = new Map(model.edges.map((edge) => [edge.id, edge.source]))
   const selfLoopParents = new Set(
     model.edges.flatMap((edge) => {
       if (!isSelfTransition(edge)) return []
@@ -171,66 +210,102 @@ const makeGraph = (model: ChartModel): ElkNode => {
   }
   const ports = portsByState(model, policy.edge)
 
-  const children = (parent: string | null): Array<ElkNode> => [
-    ...(initialsByParent.get(parent) ?? []).map((initial): ElkNode => ({
-      id: initialNodeId(initial),
-      width: 14,
-      height: 14,
+  const initialNode = (initial: ChartInitial): ElkNode => ({
+    id: initialNodeId(initial),
+    width: 14,
+    height: 14,
+    layoutOptions: {
+      "elk.layered.layering.layerConstraint": "FIRST"
+    }
+  })
+  const runtimeNode = (target: ChartRuntimeTarget): ElkNode => ({
+    id: runtimeNodeId(target),
+    width: 118,
+    height: 34,
+    ports: [{
+      id: runtimeTargetPortId(target),
+      width: 6,
+      height: 6,
+      layoutOptions: { "elk.port.side": "WEST" }
+    }],
+    layoutOptions: { "elk.portConstraints": "FIXED_SIDE" }
+  })
+
+  const stateNode = (node: ChartNode, suppressUnconnectedRegion: boolean): ElkNode => {
+    const metric = nodeMetric(node)
+    const nodePolicy = policy.node(node.path)
+    const descendants = children(node.path, suppressUnconnectedRegion || !nodePolicy.staticPath)
+    const bottomPadding = 28 + (selfLoopParents.has(node.path) ? chartSelfLoopParentAllowance : 0)
+    const common = {
+      id: node.path,
+      ports: [...ports.get(node.path) ?? []],
       layoutOptions: {
-        "elk.layered.layering.layerConstraint": "FIRST"
+        "elk.portConstraints": "FIXED_SIDE",
+        "elk.spacing.portPort": "22",
+        ...(nodePolicy.layerConstraint === null
+          ? {}
+          : { "elk.layered.layering.layerConstraint": nodePolicy.layerConstraint })
       }
-    })),
-    ...policy.children(parent).map((node): ElkNode => {
-      const metric = nodeMetric(node)
-      const descendants = children(node.path)
-      const nodePolicy = policy.node(node.path)
-      const bottomPadding = 28 + (selfLoopParents.has(node.path) ? chartSelfLoopParentAllowance : 0)
-      const common = {
-        id: node.path,
-        ports: [...ports.get(node.path) ?? []],
-        layoutOptions: {
-          "elk.portConstraints": "FIXED_SIDE",
-          "elk.spacing.portPort": "22",
-          ...(nodePolicy.layerConstraint === null
-            ? {}
-            : { "elk.layered.layering.layerConstraint": nodePolicy.layerConstraint })
-        }
-      }
-      if (descendants.length === 0) {
-        return {
-          ...common,
-          width: metric.width,
-          height: metric.height
-        }
-      }
+    }
+    if (descendants.length === 0) {
       return {
         ...common,
-        children: descendants,
-        layoutOptions: {
-          ...common.layoutOptions,
-          "elk.algorithm": "layered",
-          "elk.direction": "RIGHT",
-          "elk.padding": `[top=${metric.headerHeight + 28},left=28,bottom=${bottomPadding},right=28]`,
-          "elk.nodeSize.constraints": "MINIMUM_SIZE",
-          "elk.nodeSize.minimum": `(${metric.width}, ${metric.height})`,
-          "elk.spacing.nodeNode": "44",
-          "elk.layered.spacing.nodeNodeBetweenLayers": "108"
-        }
+        width: metric.width,
+        height: metric.height
       }
-    }),
-    ...(runtimeTargetsByParent.get(parent) ?? []).map((target): ElkNode => ({
-      id: runtimeNodeId(target),
-      width: 118,
-      height: 34,
-      ports: [{
-        id: runtimeTargetPortId(target),
-        width: 6,
-        height: 6,
-        layoutOptions: { "elk.port.side": "WEST" }
-      }],
-      layoutOptions: { "elk.portConstraints": "FIXED_SIDE" }
-    }))
-  ]
+    }
+    return {
+      ...common,
+      children: descendants,
+      layoutOptions: {
+        ...common.layoutOptions,
+        "elk.algorithm": "layered",
+        "elk.direction": node.type === "parallel" ? "DOWN" : "RIGHT",
+        "elk.padding": `[top=${metric.headerHeight + 28},left=28,bottom=${bottomPadding},right=28]`,
+        "elk.nodeSize.constraints": "MINIMUM_SIZE",
+        "elk.nodeSize.minimum": `(${metric.width}, ${metric.height})`,
+        "elk.spacing.nodeNode": "44",
+        "elk.layered.spacing.nodeNodeBetweenLayers": node.type === "parallel" ? "64" : "108"
+      }
+    }
+  }
+
+  function children(parent: string | null, suppressUnconnectedRegion = false): Array<ElkNode> {
+    const region = suppressUnconnectedRegion ? undefined : regionsByParent.get(parent)
+    const regionPaths = new Set(region?.nodePaths ?? [])
+    const initials = initialsByParent.get(parent) ?? []
+    const runtimeTargets = runtimeTargetsByParent.get(parent) ?? []
+    const states = policy.children(parent)
+    const regular: Array<ElkNode> = [
+      ...initials.filter(({ target }) => !regionPaths.has(target)).map(initialNode),
+      ...states.filter(({ path }) => !regionPaths.has(path)).map((node) => stateNode(node, suppressUnconnectedRegion)),
+      ...runtimeTargets
+        .filter(({ edgeId }) => !regionPaths.has(sourceByEdgeId.get(edgeId) ?? ""))
+        .map(runtimeNode)
+    ]
+    if (region === undefined) return regular
+
+    const regionChildren: Array<ElkNode> = [
+      ...initials.filter(({ target }) => regionPaths.has(target)).map(initialNode),
+      ...states.filter(({ path }) => regionPaths.has(path)).map((node) => stateNode(node, true)),
+      ...runtimeTargets
+        .filter(({ edgeId }) => regionPaths.has(sourceByEdgeId.get(edgeId) ?? ""))
+        .map(runtimeNode)
+    ]
+    regular.push({
+      id: region.id,
+      children: regionChildren,
+      layoutOptions: {
+        "elk.algorithm": "layered",
+        "elk.direction": "RIGHT",
+        "elk.padding": "[top=54,left=24,bottom=24,right=24]",
+        "elk.layered.layering.layerConstraint": "LAST",
+        "elk.spacing.nodeNode": "52",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "128"
+      }
+    })
+    return regular
+  }
 
   return {
     id: "chart-root",
@@ -468,11 +543,17 @@ export const ensureChartEdgeTerminalClearance = (
   return compactPoints(result)
 }
 
-const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
+const collectLayout = (
+  model: ChartModel,
+  graph: ElkNode,
+  unconnected: ReadonlyArray<UnconnectedRegion>
+): LaidOutChart => {
   const chartNodes = new Map(model.nodes.map((node) => [node.path, node]))
   const chartInitials = new Map(model.initials.map((initial) => [initialNodeId(initial), initial]))
   const chartRuntimeTargets = new Map(model.runtimeTargets.map((target) => [runtimeNodeId(target), target]))
+  const chartRegions = new Map(unconnected.map((region) => [region.id, region]))
   const offsets = new Map<string, ChartPoint>([[graph.id, { x: 0, y: 0 }]])
+  const regions: Array<LaidOutChartRegion> = []
   const nodes: Array<LaidOutChartNode> = []
   const initials: Array<LaidOutChartInitial> = []
   const runtimeTargets: Array<LaidOutChartRuntimeTarget> = []
@@ -480,6 +561,18 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
   const visit = (node: ElkNode, parentOffset: ChartPoint): void => {
     const absolute = add(parentOffset, { x: node.x ?? 0, y: node.y ?? 0 })
     offsets.set(node.id, absolute)
+    const chartRegion = chartRegions.get(node.id)
+    if (chartRegion !== undefined) {
+      regions.push({
+        kind: "unconnected",
+        parent: chartRegion.parent,
+        nodePaths: chartRegion.nodePaths,
+        x: absolute.x,
+        y: absolute.y,
+        width: node.width ?? 0,
+        height: node.height ?? 0
+      })
+    }
     const chartNode = chartNodes.get(node.id)
     if (chartNode !== undefined) {
       const metric = nodeMetric(chartNode)
@@ -574,6 +667,7 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
   return {
     width: Math.max(360, graph.width ?? 0, contentWidth + 20),
     height: Math.max(280, graph.height ?? 0, contentHeight + 20),
+    regions,
     nodes,
     initials,
     runtimeTargets,
@@ -582,7 +676,11 @@ const collectLayout = (model: ChartModel, graph: ElkNode): LaidOutChart => {
 }
 
 export const layoutChart = (model: ChartModel): Effect.Effect<LaidOutChart, ChartLayoutError> =>
-  Effect.tryPromise({
-    try: () => elk.layout(makeGraph(model)),
-    catch: (cause) => new ChartLayoutError({ cause })
-  }).pipe(Effect.map((graph) => collectLayout(model, graph)))
+  Effect.suspend(() => {
+    const policy = makeChartLayoutPolicy(model)
+    const regions = unconnectedRegions(model, policy)
+    return Effect.tryPromise({
+      try: () => elk.layout(makeGraph(model, policy, regions)),
+      catch: (cause) => new ChartLayoutError({ cause })
+    }).pipe(Effect.map((graph) => collectLayout(model, graph, regions)))
+  })

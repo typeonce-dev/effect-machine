@@ -4,6 +4,7 @@ export type ChartPortSide = "NORTH" | "EAST" | "SOUTH" | "WEST"
 
 export interface ChartNodeLayoutPolicy {
   readonly reachable: boolean
+  readonly staticPath: boolean
   readonly rank: number | null
   readonly order: number
   readonly layerConstraint: "LAST" | null
@@ -23,6 +24,7 @@ export interface ChartLayoutPolicy {
 
 const unreachableNode: ChartNodeLayoutPolicy = {
   reachable: false,
+  staticPath: false,
   rank: null,
   order: Number.MAX_SAFE_INTEGER,
   layerConstraint: null
@@ -62,6 +64,50 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
 
   const nodePolicies = new Map<string, ChartNodeLayoutPolicy>()
   const orderedChildren = new Map<string | null, ReadonlyArray<ChartNode>>()
+
+  const initialsByParent = new Map<string | null, Array<string>>()
+  for (const initial of model.initials) {
+    const initials = initialsByParent.get(initial.parent) ?? []
+    initials.push(initial.target)
+    initialsByParent.set(initial.parent, initials)
+  }
+  const outgoing = new Map<string, Array<string>>()
+  for (const edge of model.edges) {
+    if (edge.kind !== "target" || edge.target === null) continue
+    const targets = outgoing.get(edge.source) ?? []
+    targets.push(edge.target)
+    outgoing.set(edge.source, targets)
+  }
+
+  const staticPaths = new Set<string>()
+  const entered = new Set<string>()
+  const queue: Array<string> = []
+  const markReachable = (path: string): void => {
+    let current = nodes.get(path)
+    while (current !== undefined) {
+      if (!staticPaths.has(current.path)) {
+        staticPaths.add(current.path)
+        queue.push(current.path)
+      }
+      current = current.parent === null ? undefined : nodes.get(current.parent)
+    }
+  }
+  const enter = (path: string): void => {
+    const node = nodes.get(path)
+    if (node === undefined) return
+    markReachable(path)
+    if (entered.has(path)) return
+    entered.add(path)
+    if (node.type === "parallel") {
+      for (const child of node.children) enter(child)
+    } else if (node.type === "compound") {
+      for (const initial of initialsByParent.get(node.path) ?? []) enter(initial)
+    }
+  }
+  for (const initial of initialsByParent.get(null) ?? []) enter(initial)
+  for (let index = 0; index < queue.length; index++) {
+    for (const target of outgoing.get(queue[index]!) ?? []) enter(target)
+  }
 
   for (const [parent, children] of childrenByParent) {
     const childPaths = new Set(children.map(({ path }) => path))
@@ -110,6 +156,7 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
       const rank = ranks.get(node.path) ?? null
       nodePolicies.set(node.path, {
         reachable: rank !== null,
+        staticPath: staticPaths.has(node.path),
         rank,
         order,
         layerConstraint: node.type === "final" ? "LAST" : null

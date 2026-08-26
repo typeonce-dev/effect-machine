@@ -19,6 +19,7 @@ import {
   renderChart
 } from "./chart-renderer.js"
 import { type InputField, projectInputSchema } from "./input-form.js"
+import { analyzeVisualization, type VisualizerAnalysis } from "./visualizer-analysis.js"
 import {
   branchTargetApi,
   type IncomingTransition,
@@ -394,6 +395,8 @@ export const renderVisualizer = (
   diagnostics: ReadonlyArray<Diagnostic> = []
 ): void => {
   const model = makeVisualizerModel(visualization)
+  const analysis = analyzeVisualization(visualization)
+  const analysisCount = analysis.warnings.length + analysis.topologyNotes.length
   const transitionsById = new Map(visualization.transitions.map((transition) => [transition.id, transition]))
   const eventSchemas = new Map(visualization.inputs.events.map(({ event, schema }) => [event, schema]))
   const relatedFrom = new Set<string>()
@@ -405,6 +408,7 @@ export const renderVisualizer = (
   let selectedFrame: MachineWalkthrough.Frame | undefined
   let walkthrough: MachineWalkthrough.Session | undefined
   let chartView: ChartView | undefined
+  let inspectorView: "selection" | "analysis" | undefined
 
   const activePaths = (): ReadonlyArray<string> =>
     walkthrough === undefined ? model.activePaths : MachineWalkthrough.current(walkthrough).after.activePaths
@@ -417,7 +421,7 @@ export const renderVisualizer = (
   chartPanel.setAttribute("aria-label", `${model.machineId} topology`)
   const inspector = createElement("aside", "inspector")
   inspector.setAttribute("aria-live", "polite")
-  inspector.setAttribute("aria-label", "Selection details")
+  inspector.setAttribute("aria-label", "Machine inspector")
   inspector.hidden = true
   const inspectorClose = createElement("button", "inspector-close", "Close")
   inspectorClose.type = "button"
@@ -448,16 +452,28 @@ export const renderVisualizer = (
   const walkthroughButton = createElement("button", "toolbar-button", "Start simulation")
   walkthroughButton.type = "button"
   walkthroughButton.disabled = model.roots.length === 0
+  const analysisButton = createElement("button", "toolbar-button analysis-button")
+  analysisButton.type = "button"
+  analysisButton.hidden = analysisCount === 0
+  analysisButton.setAttribute("aria-pressed", "false")
+  analysisButton.append(
+    createElement("span", undefined, "Analysis"),
+    createElement("span", "analysis-button-count", String(analysisCount))
+  )
 
   const hideInspector = (): void => {
     inspectorContent.replaceChildren()
     inspector.hidden = true
+    inspectorView = undefined
     detailsButton.textContent = "View details"
+    analysisButton.setAttribute("aria-pressed", "false")
   }
 
-  const showInspector = (): void => {
+  const showInspector = (view: "selection" | "analysis"): void => {
     inspector.hidden = false
-    detailsButton.textContent = "Hide details"
+    inspectorView = view
+    detailsButton.textContent = view === "selection" ? "Hide details" : "View details"
+    analysisButton.setAttribute("aria-pressed", view === "analysis" ? "true" : "false")
   }
 
   const closeChoicePicker = (): void => {
@@ -467,7 +483,7 @@ export const renderVisualizer = (
 
   const renderInspection = (inspection: StateInspection): void => {
     inspectorContent.replaceChildren()
-    showInspector()
+    showInspector("selection")
     const header = createElement("header", "inspector-header")
     const breadcrumbs = createElement("nav", "breadcrumbs")
     breadcrumbs.setAttribute("aria-label", "State path")
@@ -528,7 +544,7 @@ export const renderVisualizer = (
 
   const renderTransitionInspection = (transition: VisualizationTransition): void => {
     inspectorContent.replaceChildren()
-    showInspector()
+    showInspector("selection")
     const header = createElement("header", "inspector-header")
     const titleRow = createElement("div", "inspector-title-row")
     const flags = createElement("div", "card-flags")
@@ -560,6 +576,82 @@ export const renderVisualizer = (
     }
   }
 
+  const renderAnalysis = (findings: VisualizerAnalysis): void => {
+    inspectorContent.replaceChildren()
+    showInspector("analysis")
+
+    const header = createElement("header", "inspector-header analysis-header")
+    const titleRow = createElement("div", "inspector-title-row")
+    titleRow.append(
+      createElement("h2", undefined, "Analysis"),
+      badge(String(findings.warnings.length + findings.topologyNotes.length), "count")
+    )
+    header.append(
+      titleRow,
+      createElement(
+        "p",
+        "analysis-summary",
+        "Static checks from the captured machine definition. Machine callbacks are not executed."
+      )
+    )
+    inspectorContent.append(header)
+
+    const warnings = createElement("section", "inspector-section analysis-section")
+    warnings.append(inspectionSection("Unhandled events", findings.warnings.length))
+    if (findings.warnings.length === 0) {
+      warnings.append(createElement("p", "section-empty", "Every declared public event has a registered handler."))
+    } else {
+      for (const warning of findings.warnings) {
+        const card = createElement("article", "inspection-card analysis-card")
+        const cardHeader = createElement("div", "card-header")
+        const title = createElement("div", "card-title")
+        title.append(createElement("strong", undefined, warning.event))
+        cardHeader.append(title, badge("no handler", "warning"))
+        card.append(
+          cardHeader,
+          createElement(
+            "p",
+            "analysis-message",
+            "This public event is declared, but no state registers a handler for it."
+          )
+        )
+        warnings.append(card)
+      }
+    }
+    inspectorContent.append(warnings)
+
+    const topology = createElement("section", "inspector-section analysis-section")
+    topology.append(inspectionSection("Topology notes", findings.topologyNotes.length))
+    if (findings.topologyNotes.length === 0) {
+      topology.append(createElement("p", "section-empty", "Every state appears on a static path from initial."))
+    } else {
+      for (const note of findings.topologyNotes) {
+        const card = createElement("article", "inspection-card analysis-card")
+        const cardHeader = createElement("div", "card-header")
+        const title = createElement("div", "card-title")
+        title.append(stateLink(note.path, note.label, navigateToState))
+        cardHeader.append(title, badge(note.type, "state"))
+        card.append(
+          cardHeader,
+          createElement(
+            "p",
+            "analysis-message",
+            note.descendantCount === 0
+              ? "No statically known path reaches this state from the machine's initial configuration."
+              : `No statically known path reaches this state or its ${note.descendantCount} descendants from the machine's initial configuration.`
+          ),
+          createElement(
+            "p",
+            "analysis-qualification",
+            "Runtime-resolved targets or a resumed snapshot may still reach it."
+          )
+        )
+        topology.append(card)
+      }
+    }
+    inspectorContent.append(topology)
+  }
+
   const renderPathGroup = (label: string, paths: ReadonlyArray<string>): HTMLElement => {
     const group = createElement("div", "trace-path-group")
     group.append(createElement("span", "trace-label", label))
@@ -572,7 +664,7 @@ export const renderVisualizer = (
 
   const renderWalkthroughTrace = (frame: MachineWalkthrough.Frame): void => {
     inspectorContent.replaceChildren()
-    showInspector()
+    showInspector("selection")
     const header = createElement("header", "inspector-header trace-header")
     const eyebrow = createElement("div", "inspector-eyebrow")
     eyebrow.append(badge("walkthrough", "active"))
@@ -916,7 +1008,7 @@ export const renderVisualizer = (
   inspectorClose.addEventListener("click", hideInspector)
   choicePickerClose.addEventListener("click", closeChoicePicker)
   detailsButton.addEventListener("click", () => {
-    if (!inspector.hidden) {
+    if (!inspector.hidden && inspectorView === "selection") {
       hideInspector()
     } else if (selectedFrame !== undefined) {
       renderWalkthroughTrace(selectedFrame)
@@ -926,6 +1018,13 @@ export const renderVisualizer = (
     } else if (selectedTransition !== undefined) {
       const transition = transitionsById.get(selectedTransition)
       if (transition !== undefined) renderTransitionInspection(transition)
+    }
+  })
+  analysisButton.addEventListener("click", () => {
+    if (!inspector.hidden && inspectorView === "analysis") {
+      hideInspector()
+    } else {
+      renderAnalysis(analysis)
     }
   })
   revealActiveButton.addEventListener("click", () => chartView?.revealStates(activePaths()))
@@ -971,7 +1070,7 @@ export const renderVisualizer = (
   const runtimeText = createElement("span")
   runtime.append(runtimeDot, runtimeText)
   const toolbarActions = createElement("div", "toolbar-actions")
-  toolbarActions.append(clearButton, detailsButton, walkthroughButton, revealActiveButton)
+  toolbarActions.append(clearButton, detailsButton, walkthroughButton, revealActiveButton, analysisButton)
   const zoomControls = createElement("div", "zoom-controls")
   zoomControls.setAttribute("role", "group")
   zoomControls.setAttribute("aria-label", "Chart zoom")
@@ -1002,10 +1101,11 @@ export const renderVisualizer = (
     revealActiveButton.disabled = active.size === 0
     clearButton.hidden = simulating
     detailsButton.hidden = simulating
+    analysisButton.hidden = simulating || analysisCount === 0
     chartPanel.classList.toggle("is-simulating", simulating)
     if (simulating) hideInspector()
     renderWalkthroughDock()
-    if (!simulating && !inspector.hidden) {
+    if (!simulating && !inspector.hidden && inspectorView === "selection") {
       if (selectedFrame !== undefined) {
         renderWalkthroughTrace(selectedFrame)
       } else if (selectedPath !== undefined) {
