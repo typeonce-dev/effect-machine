@@ -168,7 +168,7 @@ const stateContent = (layout: LaidOutChartNode, stateStatus: HTMLElement): Docum
     const activities = element("div", "chart-state-section")
     activities.append(element("div", "chart-section-label", "invokes"))
     layout.node.activities.slice(0, maxVisibleActivities).forEach((activity) => {
-      const row = element("div", "chart-activity-row")
+      const row = element("div", `chart-activity-row chart-activity-${activity.kind}`)
       row.append(
         element("span", "chart-activity-kind", activity.kind),
         element("span", "chart-activity-name", activity.label)
@@ -219,14 +219,15 @@ const render = (
   const definitions = svgElement("defs")
   const marker = svgElement("marker")
   marker.id = "chart-arrow"
-  marker.setAttribute("viewBox", "0 0 10 10")
-  marker.setAttribute("refX", "9")
-  marker.setAttribute("refY", "5")
-  marker.setAttribute("markerWidth", "7")
-  marker.setAttribute("markerHeight", "7")
+  marker.setAttribute("viewBox", "0 0 12 12")
+  marker.setAttribute("refX", "11")
+  marker.setAttribute("refY", "6")
+  marker.setAttribute("markerWidth", "12")
+  marker.setAttribute("markerHeight", "12")
+  marker.setAttribute("markerUnits", "userSpaceOnUse")
   marker.setAttribute("orient", "auto-start-reverse")
   const arrow = svgElement("path")
-  arrow.setAttribute("d", "M 0 0 L 10 5 L 0 10 z")
+  arrow.setAttribute("d", "M 1 1 L 11 6 L 1 11 z")
   marker.append(arrow)
   definitions.append(marker)
   svg.append(definitions)
@@ -337,7 +338,11 @@ const render = (
     const group = svgElement(
       "g",
       `chart-edge-group chart-edge-${laidOut.kind}${
-        laidOut.kind === "transition" ? ` chart-transition-${laidOut.edge.kind}` : ""
+        laidOut.kind === "transition"
+          ? ` chart-transition-${laidOut.edge.kind} chart-edge-trigger-${laidOut.edge.trigger.type}${
+            laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+          }`
+          : ""
       }`
     )
     const visible = svgElement("path", "chart-edge-line")
@@ -354,7 +359,9 @@ const render = (
     registerEdgeElement(laidOut.edge.id, group)
     const label = element(
       "button",
-      `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}`,
+      `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}${
+        laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
+      }`,
       laidOut.edge.label
     )
     label.type = "button"

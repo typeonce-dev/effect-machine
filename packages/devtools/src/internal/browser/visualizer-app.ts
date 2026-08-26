@@ -186,7 +186,7 @@ const renderActivity = (activity: VisualizationActivity, navigate: StateNavigato
   const title = createElement("div", "card-title")
   title.append(createElement("strong", undefined, activityTitle(activity)))
   const flags = createElement("div", "card-flags")
-  flags.append(badge(activity.type, "activity"))
+  flags.append(badge(activity.type, `activity badge-activity-${activity.type}`))
   header.append(title, flags)
   card.append(header)
 

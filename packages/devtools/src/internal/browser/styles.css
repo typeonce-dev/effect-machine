@@ -558,9 +558,49 @@ button {
 
 .chart-activity-kind {
   min-width: max-content;
-  color: #77a990;
+  color: var(--chart-activity-color, #77a990);
   overflow: visible;
   text-overflow: clip;
+}
+
+.chart-activity-process,
+.chart-edge-activity-process,
+.badge-activity-process {
+  --chart-activity-color: #a98978;
+  --chart-activity-border: #51433c;
+  --chart-activity-background: #191513;
+}
+
+.chart-activity-effect,
+.chart-edge-activity-effect,
+.badge-activity-effect {
+  --chart-activity-color: #7f9f8c;
+  --chart-activity-border: #42564b;
+  --chart-activity-background: #131815;
+}
+
+.chart-activity-timer,
+.chart-edge-activity-timer,
+.badge-activity-timer {
+  --chart-activity-color: #aaa07c;
+  --chart-activity-border: #57503c;
+  --chart-activity-background: #191812;
+}
+
+.chart-activity-stream,
+.chart-edge-activity-stream,
+.badge-activity-stream {
+  --chart-activity-color: #7898a2;
+  --chart-activity-border: #405259;
+  --chart-activity-background: #121719;
+}
+
+.chart-activity-machine,
+.chart-edge-activity-machine,
+.badge-activity-machine {
+  --chart-activity-color: #958aa8;
+  --chart-activity-border: #4d4658;
+  --chart-activity-background: #17151a;
 }
 
 .chart-more {
@@ -659,6 +699,31 @@ button {
 
 .chart-edge-group.chart-transition-runtime .chart-edge-line {
   stroke-dasharray: 5 5;
+}
+
+.chart-edge-group.chart-edge-trigger-always .chart-edge-line,
+.chart-edge-group.chart-edge-trigger-choice .chart-edge-line,
+.chart-edge-group.chart-edge-trigger-done .chart-edge-line,
+.chart-edge-group.chart-edge-trigger-invoke .chart-edge-line {
+  stroke-dasharray: 7 5;
+}
+
+.chart-edge-group.chart-edge-activity-process .chart-edge-line,
+.chart-edge-group.chart-edge-activity-effect .chart-edge-line,
+.chart-edge-group.chart-edge-activity-timer .chart-edge-line,
+.chart-edge-group.chart-edge-activity-stream .chart-edge-line,
+.chart-edge-group.chart-edge-activity-machine .chart-edge-line {
+  stroke: var(--chart-activity-color);
+}
+
+.chart-edge-label.chart-edge-activity-process,
+.chart-edge-label.chart-edge-activity-effect,
+.chart-edge-label.chart-edge-activity-timer,
+.chart-edge-label.chart-edge-activity-stream,
+.chart-edge-label.chart-edge-activity-machine {
+  border-color: var(--chart-activity-border);
+  color: var(--chart-activity-color);
+  background: var(--chart-activity-background);
 }
 
 .chart-edge-group.is-incoming .chart-edge-line {
@@ -825,6 +890,15 @@ button {
 .badge-activity {
   color: #a8ddc4;
   background: rgb(78 181 131 / 14%);
+}
+
+.badge-activity-process,
+.badge-activity-effect,
+.badge-activity-timer,
+.badge-activity-stream,
+.badge-activity-machine {
+  color: var(--chart-activity-color);
+  background: var(--chart-activity-background);
 }
 
 .badge-count {

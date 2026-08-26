@@ -42,6 +42,7 @@ export interface ChartEdge {
   readonly target: string | null
   readonly label: string
   readonly trigger: VisualizationTransition["trigger"]
+  readonly activityKind: ChartActivity["kind"] | null
   readonly reenter: boolean
   readonly acceptance: VisualizationTransition["acceptance"]
 }
@@ -156,6 +157,12 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
   const active = new Set(document.snapshot?.activePaths ?? [])
   const initialPaths = new Set([document.initial.target])
   const activities = new Map(document.activities.map((activity) => [activity.id, activity]))
+  const activitiesBySource = new Map<string, Map<string, ChartActivity["kind"]>>()
+  for (const activity of document.activities) {
+    const sourceActivities = activitiesBySource.get(activity.source) ?? new Map()
+    sourceActivities.set(activity.lifecycleId, activity.type)
+    activitiesBySource.set(activity.source, sourceActivities)
+  }
   const states = new Map(document.states.map((state) => [state.path, state]))
 
   for (const state of document.states) {
@@ -200,6 +207,9 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
         ? transitionLabel(transition, branches[0]!)
         : `${triggerLabel(transition)} · ${branches.length} branches`,
       trigger: transition.trigger,
+      activityKind: transition.trigger.type === "invoke"
+        ? activitiesBySource.get(transition.source)?.get(transition.trigger.id) ?? null
+        : null,
       reenter: transition.reenter,
       acceptance: transition.acceptance
     }))
