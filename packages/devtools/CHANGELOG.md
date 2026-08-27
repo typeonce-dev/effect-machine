@@ -1,5 +1,17 @@
 # @typeonce/effect-machine-devtools
 
+## 0.27.0
+
+### Minor Changes
+
+- eba4c2b: Add `effect-machine build` for publishing the project visualizer as a static website.
+
+  The command inspects the selected machines once, validates their documents, and writes relative HTML, CSS, JavaScript, `machines.json`, and build metadata to `--out-dir`. The generated site keeps the interactive statechart and topology walkthrough without a live devtools server or project code at viewing time.
+
+### Patch Changes
+
+- @typeonce/effect-machine@0.27.0
+
 ## 0.26.2
 
 ### Patch Changes
