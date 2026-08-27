@@ -8,6 +8,8 @@ import { mountMachineIndex } from "./machine-index.js"
 const root = document.querySelector<HTMLDivElement>("#app")
 if (root === null) throw new Error("Visualizer root element was not found")
 
+const staticData = document.querySelector<HTMLMetaElement>("meta[name=\"effect-machine-static-data\"]")?.content
+
 const showConnectionFailure = (message: string): void => {
   const failure = document.createElement("div")
   failure.className = "connection-failure"
@@ -39,4 +41,25 @@ const connect = Effect.acquireRelease(
   )
 )
 
-Effect.scoped(connect).pipe(BrowserRuntime.runMain)
+const loadStatic = (location: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(location)
+      if (!response.ok) throw new Error(`Could not load ${location}: ${response.status} ${response.statusText}`)
+      return response.json() as Promise<unknown>
+    },
+    catch: (cause) => cause instanceof Error ? cause : new Error(String(cause))
+  }).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(DevToolsProtocol.RegistrySnapshot)),
+    Effect.tap((snapshot) => Effect.sync(() => mountMachineIndex(root, snapshot))),
+    Effect.asVoid
+  )
+
+const run = staticData === undefined ? Effect.scoped(connect) : loadStatic(staticData)
+
+run.pipe(
+  Effect.catch((cause) =>
+    Effect.sync(() => showConnectionFailure(cause instanceof Error ? cause.message : String(cause)))
+  ),
+  BrowserRuntime.runMain
+)
