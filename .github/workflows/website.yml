@@ -38,7 +38,7 @@ jobs:
         run: |
           stars="$(gh api "repos/$GITHUB_REPOSITORY" --jq .stargazers_count)"
           echo "API_REFERENCE_GITHUB_STARS=$stars" >> "$GITHUB_ENV"
-      - run: pnpm docs:site
+      - run: pnpm website
         env:
           API_REFERENCE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
       - uses: actions/upload-pages-artifact@v4

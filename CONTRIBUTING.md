@@ -69,13 +69,19 @@ ensures every reflection can be consumed by the site-facing normalizer. It runs
 as part of `pnpm check`.
 
 `pnpm docs:site` turns that dataset into a multi-page static website under
-`.data/api-reference-site/v4` and creates its Pagefind search index. Run
-`pnpm docs:site:serve` to preview the latest generated site locally. Site output
-is also generated data and is not committed.
+`.data/api-reference-site/v4` and creates its Pagefind search index.
+`pnpm devtools:site` generates the devtools example-machine gallery under the
+isolated `.data/api-reference-site/v4/devtools` route. Run `pnpm website` to
+build both sites in deployment order, then `pnpm docs:site:serve` to preview the
+main site at `http://127.0.0.1:4173/` and the gallery at
+`http://127.0.0.1:4173/devtools/`. Site output is generated data and is not
+committed.
 
 The release workflow calls the GitHub Pages workflow after Changesets publishes
 a package. The Pages workflow can also be run manually to deploy the current
-commit before a release without invoking the package-release job. Pages supplies
+commit before a release without invoking the package-release job. It uploads the
+combined `pnpm website` output, keeping the API reference at the Pages root and
+the devtools gallery under `/devtools/`. Pages supplies
 `API_REFERENCE_BASE_PATH` during the build so project URLs and custom domains
 use the same generated site without configuration edits. It also reads the
 repository star count through GitHub's API and supplies it as
