@@ -16,7 +16,7 @@ tester.run("no-redundant-resolve", rule, {
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from({ id: "ready" })) })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from(), { reenter: true }) })`,
+Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from(), { reenter: true, actions: [] }) })`,
     `import { Machine } from "@typeonce/effect-machine"
 const other = { resolve: (_callback: unknown) => undefined }
 other.resolve(({ target }) => target.from())`,
@@ -54,6 +54,31 @@ StateMachine.make({ initial: (to) => to.Ready() })`,
 EM.Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => /* preserve */ target.from()) })`,
       output: null,
       errors: [{ messageId: "redundantResolver" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { on: {
+  Reset: (to) => to.full.Ready().resolve(({ target }) => target.from(), { reenter: true })
+} } })`,
+      output: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { on: {
+  Reset: (to) => to.full.Ready().reenter()
+} } })`,
+      errors: [{ messageId: "redundantReenterResolver" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.resolve(() => {}) } })`,
+      output: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none } })`,
+      errors: [{ messageId: "redundantTargetlessResolver" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.resolve(() => {}, { reenter: true }) } })`,
+      output: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.reenter() } })`,
+      errors: [{ messageId: "redundantReenterResolver" }]
     }
   ]
 })

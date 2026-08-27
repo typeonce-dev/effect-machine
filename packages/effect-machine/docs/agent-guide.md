@@ -318,6 +318,25 @@ machine.
 Do not start a promise inside a transition callback. A transition has no
 lifetime in which to own that work. A state does.
 
+Give every invocation declared by one state a unique lifecycle ID. Give every
+logic or child process that can be active at the same time a unique runtime
+address as well:
+
+```ts
+Loading: {
+  invoke: (from) => [
+    from.effect("load-document", loadDocument),
+    from.timer("load-timeout", "10 seconds")
+  ]
+}
+```
+
+Invocation outcomes are routed by state path and lifecycle ID, and overlapping
+children cannot own the same runtime address. If work is sequential, represent
+the sequence with separate states and transition from the first outcome. Do
+not depend on one child completing quickly enough for another declaration to
+reuse its identity.
+
 ### Choose state-owned or process-owned children
 
 Use `from.child(...)` when the child belongs to one state and must stop when

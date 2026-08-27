@@ -49,6 +49,24 @@ const isDefaultTargetConstruction = (
   node.callee.object.type === "Identifier" &&
   node.callee.object.name === binding
 
+const isEmptyResolver = (
+  node: ESTree.ArrowFunctionExpression | ESTree.Function
+): boolean => node.body?.type === "BlockStatement" && node.body.body.length === 0
+
+const isTargetlessReceiver = (node: ESTree.Expression): boolean =>
+  node.type === "MemberExpression" && staticMemberName(node) === "none"
+
+const isReenterOnlyOptions = (node: ESTree.Expression | undefined): boolean => {
+  if (node?.type !== "ObjectExpression" || node.properties.length !== 1) return false
+  const property = node.properties[0]
+  return property?.type === "Property" &&
+    !property.computed &&
+    property.key.type === "Identifier" &&
+    property.key.name === "reenter" &&
+    property.value.type === "Literal" &&
+    property.value.value === true
+}
+
 export const noRedundantResolve: Rule = {
   meta: {
     type: "suggestion",
@@ -59,7 +77,12 @@ export const noRedundantResolve: Rule = {
     fixable: "code",
     schema: [],
     messages: {
-      redundantResolver: "Remove this resolver. The selected target already applies default construction."
+      redundantResolver:
+        "Remove this resolver. The selected target already applies default construction, so use the target selector directly.",
+      redundantReenterResolver:
+        "Replace this resolver with .reenter(). It applies the same default construction while explicitly reentering the selected state.",
+      redundantTargetlessResolver:
+        "Remove this empty resolver. A targetless transition performs the same work as to.none; use to.none directly."
     }
   },
   create(context) {
@@ -69,7 +92,7 @@ export const noRedundantResolve: Rule = {
       CallExpression(node) {
         if (
           !hasMachineImport(bindings) ||
-          node.arguments.length !== 1 ||
+          (node.arguments.length !== 1 && node.arguments.length !== 2) ||
           node.callee.type !== "MemberExpression" ||
           staticMemberName(node.callee) !== "resolve"
         ) return
@@ -82,22 +105,31 @@ export const noRedundantResolve: Rule = {
         if (callback.async || callback.generator) return
         if (!isPlanningCallback(callback, bindings)) return
 
-        const binding = targetBinding(callback)
-        if (
-          binding === undefined ||
-          !isDefaultTargetConstruction(returnedExpression(callback), binding)
-        ) return
-
         const receiver = node.callee.object
-        if (context.sourceCode.getCommentsInside(node).length === 0) {
-          context.report({
-            node,
-            messageId: "redundantResolver",
-            fix: (fixer) => fixer.replaceText(node, context.sourceCode.getText(receiver))
-          })
-        } else {
-          context.report({ node, messageId: "redundantResolver" })
-        }
+        const binding = targetBinding(callback)
+        const defaultConstruction = binding !== undefined &&
+          isDefaultTargetConstruction(returnedExpression(callback), binding)
+        const targetless = isTargetlessReceiver(receiver) && isEmptyResolver(callback)
+        if (!defaultConstruction && !targetless) return
+
+        const options = node.arguments[1]
+        if (options?.type === "SpreadElement") return
+        const reenter = options === undefined ? false : isReenterOnlyOptions(options)
+        if (options !== undefined && !reenter) return
+
+        const messageId = reenter
+          ? "redundantReenterResolver"
+          : targetless
+          ? "redundantTargetlessResolver"
+          : "redundantResolver"
+        const replacement = `${context.sourceCode.getText(receiver)}${reenter ? ".reenter()" : ""}`
+        context.report({
+          node,
+          messageId,
+          ...(context.sourceCode.getCommentsInside(node).length === 0
+            ? { fix: (fixer) => fixer.replaceText(node, replacement) }
+            : undefined)
+        })
       },
       VariableDeclarator: (node) => recordMachineDefinition(bindings, node)
     }

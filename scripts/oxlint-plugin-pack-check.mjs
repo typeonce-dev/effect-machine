@@ -112,8 +112,18 @@ try {
     "--eval",
     `const plugin = (await import("@typeonce/oxlint-plugin-effect-machine")).default;
      const { recommended } = await import("@typeonce/oxlint-plugin-effect-machine/recommended");
-     if (plugin.meta?.name !== "effect-machine" || Object.keys(plugin.rules).length !== 3) process.exit(1);
-     if (Object.keys(recommended).length !== 3) process.exit(1);`
+     const expected = [
+       "no-async-planning-callback",
+       "no-browser-api-in-planning",
+       "no-conflicting-invocation-identity",
+       "no-nondeterministic-planning",
+       "no-redundant-resolve",
+       "prefer-inline-handle"
+     ];
+     const actual = Object.keys(plugin.rules).sort();
+     const configured = Object.keys(recommended).map((rule) => rule.replace("effect-machine/", "")).sort();
+     if (plugin.meta?.name !== "effect-machine" || JSON.stringify(actual) !== JSON.stringify(expected)) process.exit(1);
+     if (JSON.stringify(configured) !== JSON.stringify(expected)) process.exit(1);`
   ], { cwd: consumer })
 
   const lint = spawnSync(oxlint, ["-c", ".oxlintrc.json", "machine.ts"], {
