@@ -8,6 +8,7 @@ const repositoryRoot = resolve(import.meta.dirname, "..")
 const destination = await mkdtemp(join(tmpdir(), "effect-machine-devtools-pack-"))
 const consumer = join(destination, "consumer")
 const machineFile = join(consumer, "src", "machine.ts")
+const staticSite = join(consumer, "machine-site")
 let child
 const childOutput = []
 
@@ -124,8 +125,8 @@ try {
     throw new Error(`packed package versions differ: core ${corePackage.version}, devtools ${devtoolsPackage.version}`)
   }
   const help = run(binary, ["--help"], { cwd: consumer })
-  if (!help.stdout.includes("--watch-polling")) {
-    throw new Error("installed CLI help does not document the polling fallback")
+  if (!help.stdout.includes("--watch-polling") || !help.stdout.includes("build")) {
+    throw new Error("installed CLI help does not document live and static workflows")
   }
 
   run(process.execPath, [
@@ -143,6 +144,28 @@ try {
   ], { cwd: consumer, encoding: "utf8" })
   if (privateImport.status === 0 || !privateImport.stderr.includes("ERR_PACKAGE_PATH_NOT_EXPORTED")) {
     throw new Error("ProjectInspector is unexpectedly importable from the packed package")
+  }
+
+  const staticBuild = run(binary, [
+    "build",
+    "--root",
+    consumer,
+    "--out-dir",
+    staticSite
+  ], { cwd: consumer })
+  if (!staticBuild.stdout.includes("1 machine: packed-fixture")) {
+    throw new Error(`installed CLI did not report the generated machine\n${staticBuild.stdout.trim()}`)
+  }
+  const staticIndex = await readFile(join(staticSite, "index.html"), "utf8")
+  const staticSnapshot = JSON.parse(await readFile(join(staticSite, "machines.json"), "utf8"))
+  const staticManifest = JSON.parse(await readFile(join(staticSite, "manifest.json"), "utf8"))
+  if (
+    !staticIndex.includes('content="./machines.json"') ||
+    !staticIndex.includes('src="./assets/') ||
+    staticSnapshot.results?.[0]?.document?.machineId !== "packed-fixture" ||
+    staticManifest.machines?.[0]?.machineId !== "packed-fixture"
+  ) {
+    throw new Error("installed CLI generated an invalid static website")
   }
 
   const port = await availablePort()
@@ -223,7 +246,7 @@ try {
     )
   }
 
-  console.log("installed devtools CLI, worker, browser, live reload, shutdown, and failure handling passed")
+  console.log("installed devtools CLI, worker, browser, static build, live reload, shutdown, and failure handling passed")
 } catch (cause) {
   if (child !== undefined) {
     child.kill("SIGKILL")

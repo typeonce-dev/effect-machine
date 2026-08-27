@@ -2,6 +2,7 @@ node_modules/
 dist/
 references/
 .data/
+.effect-machine/
 *.tgz
 .DS_Store
 .pnpm-store
