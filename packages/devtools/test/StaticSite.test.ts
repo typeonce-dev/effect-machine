@@ -12,6 +12,7 @@ import * as ProjectInspector from "../src/ProjectInspector.js"
 const TestLayer = Layer.mergeAll(NodeServices.layer, ProjectInspector.layer)
 
 const localExampleMachineIds = [
+  "hierarchy-routing",
   "inspection-example",
   "invoke-gallery-child",
   "invoke-outcomes",

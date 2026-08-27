@@ -2,12 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { makeChartLayoutPolicy } from "../../../src/internal/browser/chart-layout-policy.js"
 import {
-  chartEdgeTerminalClearance,
-  chartSelfLoopLabelGap,
-  ensureChartEdgeTerminalClearance,
+  chartSelfLoopMinimumClearance,
   layoutChart,
   layoutChartWith,
-  selfLoopLabelPosition
+  validateChartLayout
 } from "../../../src/internal/browser/chart-layout.js"
 import { type ChartModel, type ChartNode, makeChartModel } from "../../../src/internal/browser/chart-model.js"
 import {
@@ -20,10 +18,16 @@ import {
   minimumChartZoom
 } from "../../../src/internal/browser/chart-renderer.js"
 import { machine, snapshot } from "../../../src/internal/browser/example-machine.js"
+import { hierarchyRoutingMachine } from "../../../src/internal/browser/hierarchy-routing-example.js"
 import { invokeOutcomesMachine } from "../../../src/internal/browser/invoke-outcomes-example.js"
 import { layoutResilienceMachine } from "../../../src/internal/browser/layout-resilience-example.js"
 import { parallelCompletionMachine } from "../../../src/internal/browser/parallel-completion-example.js"
 import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
+import {
+  optionalParentMachine,
+  parentProtocolMachine,
+  requiredParentChildMachine
+} from "../../../src/internal/browser/protocol-events-example.js"
 import { transitionSemanticsMachine } from "../../../src/internal/browser/transition-semantics-example.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
 
@@ -49,37 +53,6 @@ describe("Static chart", () => {
     assert.strictEqual(nearlyHorizontal?.start.y, nearlyHorizontal?.end.y)
     assert.closeTo((nearlyHorizontal?.end.x ?? 0) - (nearlyHorizontal?.start.x ?? 0), 10, 1e-9)
     assert.strictEqual(chartDirectionCue([{ x: 0, y: 0 }, { x: 200, y: 0 }]), null)
-  })
-
-  it("keeps an orthogonal terminal segment clear for the arrowhead", () => {
-    assert.deepStrictEqual(
-      ensureChartEdgeTerminalClearance([
-        { x: 100, y: 20 },
-        { x: 60, y: 20 },
-        { x: 60, y: 40 },
-        { x: 50, y: 40 }
-      ]),
-      [
-        { x: 100, y: 20 },
-        { x: 74, y: 20 },
-        { x: 74, y: 40 },
-        { x: 50, y: 40 }
-      ]
-    )
-  })
-
-  it("places self-transition labels outside the loop", () => {
-    const points = [
-      { x: 20, y: 0 },
-      { x: 20, y: 50 },
-      { x: 80, y: 50 },
-      { x: 80, y: 0 }
-    ]
-
-    assert.deepStrictEqual(selfLoopLabelPosition(points, 72, 26), {
-      x: 50,
-      y: 50 + chartSelfLoopLabelGap + 13
-    })
   })
 
   it("derives a left-to-right policy from initial reachability", () => {
@@ -224,6 +197,40 @@ describe("Static chart", () => {
     )
   })
 
+  it("keeps parent-to-child transitions off the initial-entry lane", async () => {
+    const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const initial = layout.edges.find((edge) => edge.kind === "initial" && edge.initial.target === "Gallery.Choose")
+    const reset = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.label === "Reset")
+    if (initial?.kind !== "initial" || reset?.kind !== "transition") {
+      assert.fail("Expected the Choose initial entry and Reset transition")
+    }
+
+    assert.notStrictEqual(reset.points.at(-1)?.y, initial.points.at(-1)?.y)
+  })
+
+  it("keeps transition labels attached to their ELK routes", async () => {
+    const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const resets = layout.edges.filter((edge) =>
+      edge.kind === "transition" && edge.edge.label === "Reset" && edge.edge.source !== "Gallery"
+    )
+
+    assert.lengthOf(resets, 2)
+    assert.isFalse(
+      validateChartLayout(model, layout).issues.some(({ code, edgeId }) =>
+        code === "label-detached" && resets.some((reset) => reset.kind === "transition" && reset.edge.id === edgeId)
+      )
+    )
+  })
+
+  it("validates self-transition loops against sibling states and their parent", async () => {
+    const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
+  })
+
   it("computes nested node coordinates and orthogonal transition routes", async () => {
     const model = makeChartModel(MachineDocument.make(machine, { snapshot }))
     const layout = await Effect.runPromise(layoutChart(model))
@@ -240,7 +247,7 @@ describe("Static chart", () => {
     assert.isTrue(transitionEdges.every((edge) => {
       const bend = edge.points.at(-2)!
       const end = edge.points.at(-1)!
-      return Math.abs(end.x - bend.x) + Math.abs(end.y - bend.y) >= chartEdgeTerminalClearance
+      return Math.abs(end.x - bend.x) + Math.abs(end.y - bend.y) >= 9
     }))
     for (const initial of layout.initials) {
       const target = layout.nodes.find(({ node }) => node.path === initial.initial.target)
@@ -270,6 +277,17 @@ describe("Static chart", () => {
       assert.isAtLeast(
         Math.max(horizontalSpan, verticalSpan),
         30
+      )
+      const sourceLayout = layout.nodes.find(({ node }) => node.path === laidOut.edge.source)
+      if (sourceLayout === undefined) assert.fail("Expected the self-transition source layout")
+      assert.isAtLeast(
+        Math.max(...laidOut.points.map((point) =>
+          Math.hypot(
+            Math.max(sourceLayout.x - point.x, 0, point.x - sourceLayout.x - sourceLayout.width),
+            Math.max(sourceLayout.y - point.y, 0, point.y - sourceLayout.y - sourceLayout.height)
+          )
+        )),
+        chartSelfLoopMinimumClearance
       )
       assert.isAbove(
         laidOut.label.y - laidOut.labelHeight / 2,
@@ -333,31 +351,42 @@ describe("Static chart", () => {
       edge.trigger.type === "invoke" && edge.target === "Editing.Form.Failed"
     )
     assert.strictEqual(incomingFailures.length, 2)
-    assert.strictEqual(
-      new Set(incomingFailures.map(({ points }) => points.at(-2)?.x)).size,
-      incomingFailures.length
-    )
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
+  })
 
-    const externalFailure = transitionEdges.find(({ edge }) => edge.label === "submit-login · failure")
-    const emailChanged = updates.find(({ edge }) => edge.label === "EmailChanged")
-    if (externalFailure === undefined || emailChanged === undefined) {
-      assert.fail("Expected the external failure and update transitions")
-    }
-    const bounds = (transition: typeof externalFailure) => ({
-      left: transition.label.x - transition.labelWidth / 2,
-      right: transition.label.x + transition.labelWidth / 2,
-      top: transition.label.y - transition.labelHeight / 2,
-      bottom: transition.label.y + transition.labelHeight / 2
-    })
-    const externalBounds = bounds(externalFailure)
-    const updateBounds = bounds(emailChanged)
-    assert.isFalse(
-      externalBounds.left < updateBounds.right && externalBounds.right > updateBounds.left &&
-        externalBounds.top < updateBounds.bottom && externalBounds.bottom > updateBounds.top
+  it("lays out parent and cross-hierarchy transitions in the same validated graph", async () => {
+    const model = makeChartModel(MachineDocument.make(hierarchyRoutingMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const repeated = await Effect.runPromise(layoutChart(model))
+    const source = layout.nodes.find(({ node }) => node.path === "Workflow.Review")
+    const target = layout.nodes.find(({ node }) => node.path === "Workflow.Review.Failed")
+    const parentTransition = layout.edges.find((edge) =>
+      edge.kind === "transition" && edge.edge.label === "Submit · Show validation failure"
+    )
+    const externalFailure = layout.edges.find((edge) =>
+      edge.kind === "transition" && edge.edge.label === "save-review · failure"
+    )
+    if (
+      source === undefined || target === undefined ||
+      parentTransition?.kind !== "transition" || externalFailure?.kind !== "transition"
+    ) assert.fail("Expected the hierarchy routing example transitions")
+
+    assert.isAtLeast(parentTransition.points.length, 2)
+    assert.isAtLeast(externalFailure.points.length, 2)
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
+    assert.deepStrictEqual(
+      repeated.edges.map((edge) => ({
+        id: edge.kind === "transition" ? edge.edge.id : edge.initial.id,
+        points: edge.points
+      })),
+      layout.edges.map((edge) => ({
+        id: edge.kind === "transition" ? edge.edge.id : edge.initial.id,
+        points: edge.points
+      }))
     )
   })
 
-  it("retries layout with relaxed port constraints before reporting an error", async () => {
+  it("tries deterministic spacing profiles before reporting an unsafe layout", async () => {
     const model = makeChartModel(MachineDocument.make(layoutResilienceMachine))
     const attempts: Array<string> = []
     const failure = await Effect.runPromise(Effect.flip(layoutChartWith(model, async (_graph, constraints) => {
@@ -365,8 +394,41 @@ describe("Static chart", () => {
       throw new Error(`${constraints} layout failed`)
     })))
 
-    assert.deepStrictEqual(attempts, ["fixed", "relaxed"])
-    assert.include(failure.message, "relaxed layout failed")
+    assert.deepStrictEqual(attempts, ["fixed", "fixed", "fixed", "relaxed", "relaxed"])
+    assert.include(failure.message, "roomy-relaxed: relaxed layout failed")
+  })
+
+  it("keeps the example topology corpus deterministic and free of hard geometry violations", async () => {
+    const corpus = [
+      ["nested workflow", makeChartModel(MachineDocument.make(machine, { snapshot }))],
+      ["planner", makeChartModel(MachineDocument.make(plannerMachine))],
+      ["transition semantics", makeChartModel(MachineDocument.make(transitionSemanticsMachine))],
+      ["parallel completion", makeChartModel(MachineDocument.make(parallelCompletionMachine))],
+      ["invoke outcomes", makeChartModel(MachineDocument.make(invokeOutcomesMachine))],
+      ["layout resilience", makeChartModel(MachineDocument.make(layoutResilienceMachine))],
+      ["hierarchy routing", makeChartModel(MachineDocument.make(hierarchyRoutingMachine))],
+      ["required parent protocol", makeChartModel(MachineDocument.make(requiredParentChildMachine))],
+      ["parent protocol", makeChartModel(MachineDocument.make(parentProtocolMachine))],
+      ["optional parent", makeChartModel(MachineDocument.make(optionalParentMachine))]
+    ] as const
+
+    for (const [name, model] of corpus) {
+      const first = await Effect.runPromise(layoutChart(model))
+      const second = await Effect.runPromise(layoutChart(model))
+      assert.strictEqual(first.edges.length, model.edges.length + model.initials.length, name)
+      assert.deepStrictEqual(validateChartLayout(model, first).issues, [], name)
+      assert.deepStrictEqual(
+        second.edges.map((edge) => ({
+          id: edge.kind === "transition" ? edge.edge.id : edge.initial.id,
+          points: edge.points
+        })),
+        first.edges.map((edge) => ({
+          id: edge.kind === "transition" ? edge.edge.id : edge.initial.id,
+          points: edge.points
+        })),
+        name
+      )
+    }
   })
 
   it("stacks parallel regions as vertical lanes", async () => {

@@ -340,6 +340,7 @@ const render = (
   const transitionElements = new Map<string, Array<Element>>()
   const edgeElements = new Map<string, Array<Element>>()
   const transitionControls = new Map<string, Array<HTMLButtonElement>>()
+  const parentByState = new Map(layout.nodes.map(({ node }) => [node.path, node.parent]))
   const chartEdges = new Map(
     layout.edges.flatMap((laidOut) => laidOut.kind === "transition" ? [[laidOut.edge.id, laidOut.edge] as const] : [])
   )
@@ -429,13 +430,15 @@ const render = (
   }
 
   for (const laidOut of layout.edges) {
+    const parentChild = laidOut.kind === "transition" && laidOut.edge.target !== null &&
+      parentByState.get(laidOut.edge.target) === laidOut.edge.source
     const group = svgElement(
       "g",
       `chart-edge-group chart-edge-${laidOut.kind}${
         laidOut.kind === "transition"
           ? ` chart-transition-${laidOut.edge.kind} chart-edge-trigger-${laidOut.edge.trigger.type}${
             laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
-          }`
+          }${parentChild ? " chart-edge-parent-child" : ""}`
           : ""
       }`
     )
@@ -448,6 +451,16 @@ const render = (
     const hit = svgElement("path", "chart-edge-hit")
     hit.setAttribute("d", route)
     group.append(casing, visible)
+    if (parentChild) {
+      const origin = laidOut.points[0]
+      if (origin !== undefined) {
+        const sourceAnchor = svgElement("circle", "chart-edge-parent-origin")
+        sourceAnchor.setAttribute("cx", String(origin.x))
+        sourceAnchor.setAttribute("cy", String(origin.y))
+        sourceAnchor.setAttribute("r", "4")
+        group.append(sourceAnchor)
+      }
+    }
     if (laidOut.kind === "transition") {
       const cue = chartDirectionCue(laidOut.points)
       if (cue !== null) {
@@ -467,10 +480,11 @@ const render = (
       "button",
       `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}${
         laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
-      }`,
+      }${parentChild ? " chart-edge-label-parent-child" : ""}`,
       laidOut.edge.label
     )
     label.type = "button"
+    if (parentChild) label.title = "Transition declared by the parent state"
     label.dataset.transitionId = laidOut.edge.transitionId
     position(label, {
       x: laidOut.label.x - laidOut.labelWidth / 2,

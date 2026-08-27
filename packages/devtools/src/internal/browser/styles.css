@@ -680,6 +680,13 @@ button {
   fill: none;
 }
 
+.chart-edge-parent-origin {
+  fill: #101318;
+  stroke: #89929e;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
 .chart-edge-casing {
   stroke: #0b0c0e;
   stroke-width: 5.5;
@@ -729,6 +736,23 @@ button {
   user-select: none;
 }
 
+.chart-edge-group.chart-edge-parent-child .chart-edge-line,
+.chart-edge-group.chart-edge-parent-child .chart-edge-direction,
+.chart-edge-group.chart-edge-parent-child .chart-edge-parent-origin {
+  stroke: #9187a7;
+}
+
+.chart-edge-group.chart-edge-parent-child .chart-edge-parent-origin {
+  fill: #1b1820;
+}
+
+.chart-edge-label-parent-child {
+  border-color: #4d465a;
+  color: #aea5c1;
+  background: #17151b;
+  box-shadow: inset 2px 0 #6f6681;
+}
+
 .chart-edge-label:not(:disabled):hover,
 .chart-edge-label:focus-visible,
 .chart-edge-group.is-hovered + .chart-edge-label {
@@ -744,7 +768,8 @@ button {
 }
 
 .chart-edge-group.is-hovered .chart-edge-line,
-.chart-edge-group.is-hovered .chart-edge-direction {
+.chart-edge-group.is-hovered .chart-edge-direction,
+.chart-edge-group.is-hovered .chart-edge-parent-origin {
   stroke: #7c9ed2;
   stroke-width: 1.8;
 }
@@ -774,7 +799,12 @@ button {
 .chart-edge-group.chart-edge-activity-effect .chart-edge-direction,
 .chart-edge-group.chart-edge-activity-timer .chart-edge-direction,
 .chart-edge-group.chart-edge-activity-stream .chart-edge-direction,
-.chart-edge-group.chart-edge-activity-machine .chart-edge-direction {
+.chart-edge-group.chart-edge-activity-machine .chart-edge-direction,
+.chart-edge-group.chart-edge-activity-process .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-activity-effect .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-activity-timer .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-activity-stream .chart-edge-parent-origin,
+.chart-edge-group.chart-edge-activity-machine .chart-edge-parent-origin {
   stroke: var(--chart-activity-color);
 }
 
@@ -789,19 +819,22 @@ button {
 }
 
 .chart-edge-group.is-incoming .chart-edge-line,
-.chart-edge-group.is-incoming .chart-edge-direction {
+.chart-edge-group.is-incoming .chart-edge-direction,
+.chart-edge-group.is-incoming .chart-edge-parent-origin {
   stroke: #ed6a70;
   stroke-width: 2;
 }
 
 .chart-edge-group.is-outgoing .chart-edge-line,
-.chart-edge-group.is-outgoing .chart-edge-direction {
+.chart-edge-group.is-outgoing .chart-edge-direction,
+.chart-edge-group.is-outgoing .chart-edge-parent-origin {
   stroke: #6eb6dc;
   stroke-width: 2;
 }
 
 .chart-edge-group.is-selected .chart-edge-line,
-.chart-edge-group.is-selected .chart-edge-direction {
+.chart-edge-group.is-selected .chart-edge-direction,
+.chart-edge-group.is-selected .chart-edge-parent-origin {
   stroke: #8ab5ff;
   stroke-width: 2.5;
 }
