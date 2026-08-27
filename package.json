@@ -23,8 +23,6 @@
     "docs:site:test": "node --test scripts/api-reference-site/*.test.mjs",
     "docs:site:check": "pnpm docs:site:test && pnpm docs:api && node scripts/api-reference-site/generate.mjs --check",
     "docs:site:serve": "node scripts/api-reference-site/serve.mjs",
-    "devtools:site": "pnpm --dir packages/devtools dev build --root ../.. --include \"packages/devtools/src/internal/browser/{example-machine,*-example}.ts\" --out-dir ../../.data/api-reference-site/v4/devtools",
-    "website": "pnpm docs:site && pnpm devtools:site",
     "test:consumer": "node scripts/test-consumer.mjs",
     "pack:check": "node scripts/pack-check.mjs",
     "devtools:pack-check": "node scripts/devtools-pack-check.mjs",
