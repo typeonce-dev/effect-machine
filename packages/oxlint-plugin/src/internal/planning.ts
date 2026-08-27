@@ -1,4 +1,5 @@
 import type { ESTree } from "@oxlint/plugins"
+import { unwrapExpression } from "./ast.js"
 import { isMachineHandleCall, isMachineMakeCall, type MachineBindings, staticMemberName } from "./imports.js"
 
 export type PlanningFunction = ESTree.ArrowFunctionExpression | ESTree.Function
@@ -16,7 +17,10 @@ const statePlanningProperties = new Set([
   "choice",
   "entry",
   "exit",
-  "invoke"
+  "initialize",
+  "invoke",
+  "onDone",
+  "output"
 ])
 
 const propertyName = (node: ESTree.Node): string | undefined => {
@@ -74,6 +78,26 @@ const isEventHandlerProperty = (
     isStateConfig(onProperty.parent, bindings)
 }
 
+const isHistoryDefaultProperty = (
+  node: ESTree.Node,
+  bindings: MachineBindings
+): boolean => {
+  if (node.type !== "Property" || propertyName(node) !== "default") return false
+  const historyEntry = node.parent
+  if (
+    historyEntry.type !== "ObjectExpression" ||
+    historyEntry.parent.type !== "Property" ||
+    historyEntry.parent.parent.type !== "ObjectExpression"
+  ) return false
+  const historyEntries = historyEntry.parent.parent
+  if (
+    historyEntries.parent.type !== "Property" ||
+    propertyName(historyEntries.parent) !== "history" ||
+    historyEntries.parent.parent.type !== "ObjectExpression"
+  ) return false
+  return isStateConfig(historyEntries.parent.parent, bindings)
+}
+
 const isPropertyPlanningCallback = (
   node: PlanningFunction,
   bindings: MachineBindings
@@ -89,10 +113,11 @@ const isPropertyPlanningCallback = (
   return name === "initial"
     ? isMachineMakeConfig(property.parent, bindings)
     : (name !== undefined && statePlanningProperties.has(name) && isStateConfig(property.parent, bindings)) ||
-      isEventHandlerProperty(property, bindings)
+      isEventHandlerProperty(property, bindings) ||
+      isHistoryDefaultProperty(property, bindings)
 }
 
-const enclosingFunction = (node: ESTree.Node): PlanningFunction | undefined => {
+export const enclosingFunction = (node: ESTree.Node): PlanningFunction | undefined => {
   let current: ESTree.Node | null = node.parent
   while (current !== null && current.type !== "Program") {
     if (
@@ -104,6 +129,40 @@ const enclosingFunction = (node: ESTree.Node): PlanningFunction | undefined => {
   return undefined
 }
 
+const selectorRoot = (node: ESTree.Expression): string | undefined => {
+  let expression = unwrapExpression(node)
+  while (expression.type === "CallExpression" || expression.type === "MemberExpression") {
+    expression = unwrapExpression(
+      expression.type === "CallExpression"
+        ? expression.callee
+        : expression.object
+    )
+  }
+  return expression.type === "Identifier" ? expression.name : undefined
+}
+
+export const enclosingPlanningCallback = (
+  node: ESTree.Node,
+  bindings: MachineBindings
+): PlanningFunction | undefined => {
+  const callback = enclosingFunction(node)
+  return callback !== undefined && isPlanningCallback(callback, bindings)
+    ? callback
+    : undefined
+}
+
+export const isInvokePlanningCallback = (
+  node: PlanningFunction,
+  bindings: MachineBindings
+): boolean => {
+  const property = node.parent
+  return property.type === "Property" &&
+    property.value === node &&
+    propertyName(property) === "invoke" &&
+    property.parent.type === "ObjectExpression" &&
+    isStateConfig(property.parent, bindings)
+}
+
 export const isPlanningCallback = (
   node: PlanningFunction,
   bindings: MachineBindings
@@ -112,12 +171,15 @@ export const isPlanningCallback = (
 
   const parent = node.parent
   if (parent.type === "CallExpression" && parent.arguments.includes(node)) {
-    const method = parent.callee.type === "MemberExpression"
-      ? staticMemberName(parent.callee)
-      : undefined
+    if (parent.callee.type !== "MemberExpression") return false
+    const method = staticMemberName(parent.callee)
     if (method !== undefined && directPlanningMethods.has(method)) {
       const owner = enclosingFunction(parent)
-      return owner !== undefined && isPlanningCallback(owner, bindings)
+      const selector = owner?.params[0]
+      return owner !== undefined &&
+        selector?.type === "Identifier" &&
+        selectorRoot(parent.callee.object) === selector.name &&
+        isPlanningCallback(owner, bindings)
     }
   }
   return false

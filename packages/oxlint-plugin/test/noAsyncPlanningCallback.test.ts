@@ -23,7 +23,26 @@ Machine.make({ initial: (to) => to.Ready(), metadata: { initial: async () => und
     `import { Machine } from "@typeonce/effect-machine"
 const other = { handle: (_config: unknown) => undefined }
 other.handle({ Ready: { entry: async () => undefined } })`,
-    `const machine = { initial: async () => undefined }`
+    `const machine = { initial: async () => undefined }`,
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { invoke: (from) => [
+  from.effect("fetch", () => fetch("/api")),
+  from.timer("delay", () => setTimeout(() => undefined, 1))
+] } })`,
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: ({ fetch, setTimeout }) => {
+  fetch()
+  setTimeout()
+} } })`,
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: () => {
+  const later = () => Promise.resolve()
+  return later
+} } })`,
+    `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: () =>
+  other.resolve(async () => fetch("/helper"))
+} })`
   ],
   invalid: [
     {
@@ -62,6 +81,49 @@ Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: {
   invoke: async (from) => from.timer("tick", 1)
 } })`,
       errors: Array.from({ length: 5 }, () => ({ messageId: "asyncPlanning" }))
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => {
+  fetch("/initial")
+  new Promise(() => undefined)
+  Promise.all([])
+  setTimeout(() => undefined, 1)
+  queueMicrotask(() => undefined)
+  process.nextTick(() => undefined)
+  return to.Ready()
+} })`,
+      errors: Array.from({ length: 6 }, () => ({ messageId: "asyncOperation" }))
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: {
+  initialize: ({ builder }) => {
+    globalThis["fetch"]("/initialize")
+    return builder.from()
+  },
+  output: ({ state }) => {
+    window.setInterval(() => undefined, 100)
+    return state
+  },
+  onDone: (to) => {
+    self.requestAnimationFrame(() => undefined)
+    return to.none
+  },
+  history: { recent: { default: (to) => {
+    requestIdleCallback(() => undefined)
+    return to.none
+  } } }
+} })`,
+      errors: Array.from({ length: 4 }, () => ({ messageId: "asyncOperation" }))
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ initial: async (to) => {
+  await fetch("/initial")
+  return to.Ready()
+} })`,
+      errors: [{ messageId: "asyncPlanning" }]
     }
   ]
 })

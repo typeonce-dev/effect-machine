@@ -37,12 +37,16 @@ export const recordMachineImport = (
 export const hasMachineImport = (bindings: MachineBindings): boolean =>
   bindings.machine.size > 0 || bindings.namespaces.size > 0
 
-export const staticMemberName = (node: ESTree.Node): string | undefined =>
-  node.type === "MemberExpression" &&
-    !node.computed &&
-    node.property.type === "Identifier"
+export const staticMemberName = (node: ESTree.Node): string | undefined => {
+  if (node.type !== "MemberExpression") return undefined
+  return node.computed
+    ? node.property.type === "Literal" && typeof node.property.value === "string"
+      ? node.property.value
+      : undefined
+    : node.property.type === "Identifier"
     ? node.property.name
     : undefined
+}
 
 const isNamespaceMachine = (
   node: ESTree.Node,
@@ -55,6 +59,24 @@ const isNamespaceMachine = (
   node.property.type === "Identifier" &&
   node.property.name === "Machine"
 
+const isMachineReference = (
+  node: ESTree.Node,
+  bindings: MachineBindings
+): boolean =>
+  node.type === "Identifier"
+    ? bindings.machine.has(node.name)
+    : isNamespaceMachine(node, bindings)
+
+export const isMachineMemberCall = (
+  node: ESTree.Node,
+  member: string,
+  bindings: MachineBindings
+): node is ESTree.CallExpression =>
+  node.type === "CallExpression" &&
+  node.callee.type === "MemberExpression" &&
+  staticMemberName(node.callee) === member &&
+  isMachineReference(node.callee.object, bindings)
+
 export const isMachineMakeCall = (
   node: ESTree.CallExpression,
   bindings: MachineBindings
@@ -64,10 +86,7 @@ export const isMachineMakeCall = (
     staticMemberName(node.callee) !== "make"
   ) return false
 
-  const receiver = node.callee.object
-  return receiver.type === "Identifier"
-    ? bindings.machine.has(receiver.name)
-    : isNamespaceMachine(receiver, bindings)
+  return isMachineReference(node.callee.object, bindings)
 }
 
 export const recordMachineDefinition = (

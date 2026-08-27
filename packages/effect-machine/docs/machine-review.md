@@ -8,6 +8,14 @@ Read the [Effect Machine agent guide](./agent-guide.md) for statechart modeling
 and [Effect Atom and React patterns](./effect-atom-react.md) for integration
 patterns.
 
+Run the recommended rules from
+[`@typeonce/oxlint-plugin-effect-machine`](../../oxlint-plugin/README.md) before
+the manual review. They catch provable duplicate invocation identities,
+asynchronous work, browser access, nondeterminism, and redundant resolvers in
+direct same-module machine definitions. Continue with this review for
+cross-module ownership and architectural questions that syntax alone cannot
+answer.
+
 ## Review the responsibility boundaries
 
 Use this split when deciding where code belongs:
