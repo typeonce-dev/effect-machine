@@ -1,6 +1,6 @@
 # Effect Atom and React patterns
 
-This guide records the folder organization and three integration patterns
+This guide records the folder organization and four integration patterns
 validated in the process app. Use the API reference for individual AtomMachine
 operations. Read the [Effect Machine agent guide](./agent-guide.md) for
 statechart modeling, transitions, services, and testing.
@@ -74,35 +74,56 @@ export const counterStateAtom = AtomMachine.select(
 Consumers read `counterStateAtom` and use `counterMachineAtom.send` directly.
 Do not add a redundant `counterSendAtom` alias.
 
-## 2. A machine with startup input selected through a family
+## 2. A keyed machine with startup input
 
-Use the family key as machine identity. The same value can also be startup
-input:
+`AtomMachine.family` uses the machine input as both startup input and family
+key. It returns one direct atom family for each entry in `atoms`:
 
 ```ts
 import { machineAtoms } from "@/lib/atom-runtime"
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Atom } from "effect/unstable/reactivity"
 import { processMachine } from "./machine"
 
-export const processFamily = Atom.family((query: string) => {
-  const machine = machineAtoms.make(processMachine, { query })
-
-  return {
-    detailsAtom: AtomMachine.select(machine, "process"),
-    resultAtom: AtomMachine.select(machine, "process.Ready"),
-    sendAtom: machine.send
-  }
+export const processAtoms = machineAtoms.family(processMachine, {
+  atoms: {
+    details: AtomMachine.select("process"),
+    result: AtomMachine.select("process.Ready"),
+    send: (machine) => machine.send
+  },
+  label: (input, name) => `process:${input.query}:${name}`
 })
 ```
 
-A consumer calls `processFamily(query)` and uses the returned focused atoms. If
-several nested components need the same scope, an optional Context can expose
-`ReturnType<typeof processFamily>`. The provider resolves the query once instead
-of drilling it through every component.
+React consumes each projected family directly:
 
-Changing `query` selects another family member and therefore another machine.
-If a changing value should update the current workflow, model it as an event.
+```tsx
+const input = { query }
+const details = useAtomValue(processAtoms.details(input))
+const send = useAtomSet(processAtoms.send(input))
+```
+
+Each public atom retains its private machine bridge. Keeping only `details` or
+only `send` is safe. The bridge still starts lazily in the registry and stops
+when that registry releases or disposes it. A writable source remains writable,
+and a projection keeps the source atom's equality function.
+
+The family uses Effect `Equal` and `Hash` semantics. Equal records such as
+`{ query: "effect" }` select the same family value even when reconstructed.
+Keep inputs immutable because mutating a hashed key makes later lookup
+unreliable. Different input values select independent machines. If a changing
+value should update one running workflow, model the change as an event instead
+of putting it in the machine input.
+
+Service-free machines use the module function directly:
+
+```ts
+export const processAtoms = AtomMachine.family(processMachine, {
+  atoms: {
+    details: AtomMachine.select("process"),
+    send: (machine) => machine.send
+  }
+})
+```
 
 ## 3. Reusing one machine definition for multiple instances
 
@@ -127,8 +148,6 @@ export function makeDialogScope() {
 export type DialogScope = ReturnType<typeof makeDialogScope>
 ```
 
-Choose one of the following ownership forms.
-
 ### React-tree-owned instance
 
 ```tsx
@@ -150,56 +169,10 @@ Each provider owns one independent dialog. Descendants use a small
 `DialogScope` through props when Context is unnecessary. Do not add a wrapper
 component whose only job is forwarding the scope.
 
-### Stable keyed instances shared across scattered components
-
-Use one private family to create the scope for an ID. Public selector families
-reach that same scope:
-
-```ts
-import { Atom } from "effect/unstable/reactivity"
-
-const dialogScopeFamily = Atom.family((dialogId: string) => {
-  const scope = makeDialogScope()
-
-  return {
-    isOpenAtom: scope.isOpenAtom.pipe(
-      Atom.withLabel(`dialog:${dialogId}:isOpen-source`)
-    ),
-    openStateAtom: scope.openStateAtom.pipe(
-      Atom.withLabel(`dialog:${dialogId}:openState-source`)
-    ),
-    sendAtom: scope.sendAtom.pipe(
-      Atom.withLabel(`dialog:${dialogId}:send-source`)
-    )
-  }
-})
-
-export const dialogIsOpenFamily = Atom.family((dialogId: string) => {
-  const scope = dialogScopeFamily(dialogId)
-
-  return Atom.transform(
-    scope.sendAtom,
-    (get) => get(scope.isOpenAtom)
-  ).pipe(Atom.withLabel(`dialog:${dialogId}:isOpen`))
-})
-
-export const dialogOpenStateFamily = Atom.family((dialogId: string) => {
-  const scope = dialogScopeFamily(dialogId)
-
-  return Atom.transform(
-    scope.sendAtom,
-    (get) => get(scope.openStateAtom)
-  ).pipe(Atom.withLabel(`dialog:${dialogId}:openState`))
-})
-```
-
-Components using the same `dialogId` share one machine. Different IDs create
-independent machines. The two public projections let consumers subscribe
-independently. Both remain writable through `Atom.transform`, so either can send
-the inferred dialog events.
-
-Use `dialogId` in atom labels for diagnostics. Do not pass it into
-`dialogMachine` as unused fake input.
+For a no-input machine, use one module-level bridge or an explicitly owned
+React scope. Do not add a family key that the machine does not consume. When an
+ID is part of startup semantics, declare it in the machine input and use
+`AtomMachine.family`.
 
 ## 4. Selecting process-owned child machines
 
@@ -211,17 +184,22 @@ const Plant = Machine.childFamily(plantMachine)
 
 export const centralMachineAtom = machineAtoms.make(centralMachine)
 
-export const plantScopeFamily = Atom.family((plantId: string) => {
-  const plant = centralMachineAtom.child(Plant(plantId))
-
-  return {
-    stateAtom: plant.state,
-    isBrokenAtom: AtomMachine.matchesChild(plant, "Broken"),
-    sendAtom: plant.send,
-    stopAtom: plant.stop
+export const plantAtoms = AtomMachine.familyChild(centralMachineAtom, {
+  child: (plantId: string) => Plant(plantId),
+  atoms: {
+    state: (plant) => plant.state,
+    isBroken: AtomMachine.matchesChild("Broken"),
+    send: (plant) => plant.send,
+    stop: (plant) => plant.stop
   }
 })
+
+const broken = useAtomValue(plantAtoms.isBroken(plantId))
+const send = useAtomSet(plantAtoms.send(plantId))
 ```
+
+`familyChild` keeps child lookup separate from root machine startup. Each
+projected atom retains the child bridge returned for its key.
 
 `Plant(plantId)` may be reconstructed wherever the id is available. Child
 lookup and bridge reuse match by machine identity and id, not descriptor object

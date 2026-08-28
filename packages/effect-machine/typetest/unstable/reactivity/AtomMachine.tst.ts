@@ -330,6 +330,137 @@ describe("AtomMachine", () => {
     expect(AtomMachine.select).type.not.toBeCallableWith(parent, "Ready.network")
   })
 
+  it("supports data-last root and child selectors", () => {
+    type Snapshot = Machine.Machine.Snapshot<typeof NestedStates.states>
+    type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
+    const parent = null as unknown as Parent
+    const selected = AtomMachine.select("Ready.editor.Editing")(parent)
+    const selectedSnapshot = AtomMachine.selectSnapshot("Ready.editor")(parent)
+    const matched = AtomMachine.matches("Ready.network.Online")(parent)
+    const invalid = AtomMachine.select("Ready.editor.Missing")
+
+    const Child = Machine.child(
+      "nested",
+      null as unknown as Machine.Machine<typeof NestedStates.states, readonly [typeof Tick]>
+    )
+    const child = null as unknown as AtomMachine.ChildOf<Parent, typeof Child>
+    const childSelected = AtomMachine.selectChild("Ready.editor.Saving")(child)
+    const childSelectedSnapshot = AtomMachine.selectSnapshotChild("Ready.editor")(child)
+    const childMatched = AtomMachine.matchesChild("Ready.network.Offline")(child)
+    const invalidChild = AtomMachine.matchesChild("Ready.network.Missing")
+
+    expect<Atom.Success<typeof selected>>().type.toBe<Option.Option<Editing>>()
+    expect<Atom.Success<typeof selectedSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+    >()
+    expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
+    expect(invalid).type.not.toBeCallableWith(parent)
+    expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Saving>>()
+    expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+    >()
+    expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
+    expect(invalidChild).type.not.toBeCallableWith(child)
+  })
+
+  it("infers keyed root family inputs and exact projected atoms", () => {
+    const machine = Machine.make({
+      states: States.states,
+      events: Machine.events(Tick),
+      input: Schema.String,
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+    }).handle({
+      Idle: {}
+    })
+    const atoms = AtomMachine.family(machine, {
+      atoms: {
+        selected: AtomMachine.select("Idle"),
+        snapshot: AtomMachine.selectSnapshot("Idle"),
+        matched: AtomMachine.matches("Idle"),
+        state: (machine) => machine.state,
+        send: (machine) => machine.send
+      }
+    })
+
+    const selected = atoms.selected("one")
+    const snapshot = atoms.snapshot("one")
+    const matched = atoms.matched("one")
+    const state = atoms.state("one")
+    const send = atoms.send("one")
+
+    expect<Atom.Success<typeof selected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof snapshot>>().type.toBe<
+      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+    >()
+    expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
+    expect<Atom.Success<typeof state>>().type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+    expect<typeof send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
+      Machine.Machine.EventInput<Tick>
+    >()
+    expect(atoms.selected).type.not.toBeCallableWith(1)
+    expect(AtomMachine.family).type.not.toBeCallableWith(makeMachine(), {
+      atoms: {
+        state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.state
+      }
+    })
+  })
+
+  it("preserves bound runtime errors and child protocols through families", () => {
+    const machine = Machine.make({
+      states: States.states,
+      events: Machine.events(Tick),
+      input: Schema.String,
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+    }).handle({
+      Idle: {
+        invoke: (from) => from.effect("read-multiplier", () => Effect.as(Multiplier, undefined)).onDone((to) => to.none)
+      }
+    })
+    const runtime = Atom.runtime(
+      Layer.merge(
+        Layer.succeed(Multiplier, 2),
+        Layer.effectDiscard(Effect.fail({ _tag: "StartFailure" } as const satisfies StartFailure))
+      )
+    )
+    const atoms = AtomMachine.bind(runtime).family(machine, {
+      atoms: {
+        result: (machine) => machine.result,
+        send: (machine) => machine.send
+      }
+    })
+    type FamilyFailure = Atom.Failure<ReturnType<typeof atoms.result>>
+
+    const childMachine = makeMachine()
+    const Child = Machine.childFamily(childMachine)
+    const parent = AtomMachine.make(
+      Machine.make({
+        states: States.states,
+        events: Machine.events(),
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      }).handle({ Idle: {} })
+    )
+    const children = AtomMachine.familyChild(parent, {
+      child: (id: string) => Child(id),
+      atoms: {
+        selected: AtomMachine.selectChild("Idle"),
+        matched: AtomMachine.matchesChild("Idle"),
+        send: (child) => child.send
+      }
+    })
+
+    expect<Extract<FamilyFailure, StartFailure>>().type.toBe<StartFailure>()
+    expect<unknown extends FamilyFailure ? true : false>().type.toBe<false>()
+    expect(AtomMachine.family).type.not.toBeCallableWith(machine, {
+      atoms: { state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.state }
+    })
+    expect<Atom.Success<ReturnType<typeof children.selected>>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<ReturnType<typeof children.matched>>>().type.toBe<boolean>()
+    expect<ReturnType<typeof children.send> extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
+      Machine.Machine.EventInput<Tick>
+    >()
+    expect(children.selected).type.not.toBeCallableWith(1)
+  })
+
   it("accepts machines without external requirements", () => {
     expect(AtomMachine.make).type.toBeCallableWith(makeMachine())
   })

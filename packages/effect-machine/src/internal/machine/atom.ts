@@ -8,6 +8,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
 import * as Fiber from "effect/Fiber"
+import * as MutableHashMap from "effect/MutableHashMap"
 import * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -77,6 +78,47 @@ const preparedByMachineAtom = new WeakMap<
   object,
   Atom.Atom<AsyncResult.AsyncResult<Machine.Prepared<any, any, any, any, any, any, any>, any>>
 >()
+
+type WeakFamilyEntry<Value extends object> = {
+  readonly ref: WeakRef<Value>
+}
+
+// This follows Atom.family, but cleanup is generation-aware. A finalizer for a
+// collected value must not remove a newer value installed for the same key.
+const retainedFamily = <Key, Value extends object>(
+  makeValue: (key: Key) => Value
+): (key: Key) => Value => {
+  if (typeof WeakRef === "undefined" || typeof FinalizationRegistry === "undefined") {
+    return Atom.family(makeValue)
+  }
+
+  const values = MutableHashMap.empty<Key, WeakFamilyEntry<Value>>()
+  const registry = new FinalizationRegistry<{
+    readonly key: Key
+    readonly entry: WeakFamilyEntry<Value>
+  }>(({ entry, key }) => {
+    const current = MutableHashMap.get(values, key)
+    if (Option.isSome(current) && current.value === entry) {
+      MutableHashMap.remove(values, key)
+    }
+  })
+
+  return (key) => {
+    const current = MutableHashMap.get(values, key)
+    if (Option.isSome(current)) {
+      const value = current.value.ref.deref()
+      if (value !== undefined) {
+        return value
+      }
+    }
+
+    const value = makeValue(key)
+    const entry = { ref: new WeakRef(value) }
+    MutableHashMap.set(values, key, entry)
+    registry.register(value, { key, entry })
+    return value
+  }
+}
 
 const runMachineAtomEffect = <State, Event, Error, Output, Emitted, StartError, Requirements>(
   get: Atom.AtomContext,
@@ -738,6 +780,69 @@ const resumeWithRuntime = (
   return makeFromRefAtom(ref as any)
 }
 
+type FamilyBridge = MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>
+
+type FamilyOptions = {
+  readonly atoms: Readonly<Record<string, (bridge: FamilyBridge) => Atom.Atom<any>>>
+  readonly label?: (key: any, atomName: string) => string | undefined
+}
+
+const retainFamilyOwner = <Source extends Atom.Atom<any>>(
+  owner: { readonly bridge: FamilyBridge },
+  source: Source,
+  label: string | undefined
+): Atom.WithoutSerializable<Source> => {
+  const retained = { owner, source }
+  let atom: Atom.Atom<any> = Atom.transform(
+    source,
+    (get) => get(retained.source),
+    { initialValueTarget: source }
+  ).pipe(
+    Atom.withEquality((value, next) => retained.source.equals(value, next))
+  )
+  if (label !== undefined) {
+    atom = atom.pipe(Atom.withLabel(label))
+  }
+  return atom as unknown as Atom.WithoutSerializable<Source>
+}
+
+const makeFamily = (
+  makeBridge: (key: any) => FamilyBridge,
+  options: FamilyOptions
+): Readonly<Record<string, (key: any) => Atom.Atom<any>>> => {
+  const owners = retainedFamily((key: any) => ({ bridge: makeBridge(key) }))
+  const atoms: Record<string, (key: any) => Atom.Atom<any>> = {}
+
+  for (const atomName of Object.keys(options.atoms)) {
+    const project = options.atoms[atomName]!
+    atoms[atomName] = retainedFamily((key: any) => {
+      const owner = owners(key)
+      const source = project(owner.bridge)
+      return retainFamilyOwner(owner, source, options.label?.(key, atomName))
+    })
+  }
+
+  return atoms
+}
+
+export const family = (
+  machine: Machine.Machine.Any,
+  options: FamilyOptions
+): Readonly<Record<string, (key: any) => Atom.Atom<any>>> =>
+  makeFamily(
+    (input) => (make as any)(machine, input),
+    options
+  )
+
+export const familyChild = (
+  parent: MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
+  options: FamilyOptions & { readonly child: (key: any) => Machine.ChildMachine.Any }
+): Readonly<Record<string, (key: any) => Atom.Atom<any>>> =>
+  makeFamily(
+    (key) => parent.child(options.child(key)),
+    options
+  )
+
 export const bind = <Services, RuntimeError>(
   runtime: Atom.AtomRuntime<Services, RuntimeError>
 ): Bound<Services, RuntimeError> => ({
@@ -749,5 +854,10 @@ export const bind = <Services, RuntimeError>(
       >["make"],
   resume:
     ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) =>
-      resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"]
+      resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"],
+  family: ((machine: Machine.Machine.Any, options: FamilyOptions) =>
+    makeFamily(
+      (input) => makeWithRuntime(runtime, machine, [input]),
+      options
+    )) as Bound<Services, RuntimeError>["family"]
 })

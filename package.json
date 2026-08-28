@@ -4,7 +4,7 @@
   "packageManager": "pnpm@10.17.1",
   "scripts": {
     "build": "pnpm --recursive --filter \"./packages/**\" run build",
-    "test": "vitest run",
+    "test": "node --expose-gc ./node_modules/vitest/vitest.mjs run",
     "test:types": "pnpm --dir packages/effect-machine test:types",
     "devtools": "pnpm --dir packages/devtools dev",
     "visualizer": "pnpm devtools",
