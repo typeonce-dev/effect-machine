@@ -24,7 +24,9 @@ export const classifyChanges = ({
   changedFiles
 }) => {
   const sourceChanged = changedFiles.some((path) =>
-    path.startsWith("src/") || path.startsWith("packages/effect-machine/src/")
+    path.startsWith("src/") ||
+    path.startsWith("packages/effect-machine/src/") ||
+    path.startsWith("packages/effect-machine-react/src/")
   )
   const dependencyChanged = relevantDependenciesChanged(beforePackageJson, afterPackageJson)
   const classifierChanged = changedFiles.includes("scripts/ci-changes.mjs")

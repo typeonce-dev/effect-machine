@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm --recursive --filter \"./packages/**\" run build",
     "test": "node --expose-gc ./node_modules/vitest/vitest.mjs run",
-    "test:types": "pnpm --dir packages/effect-machine test:types",
+    "test:types": "pnpm --recursive --filter \"./packages/effect-machine*\" run test:types",
     "devtools": "pnpm --dir packages/devtools dev",
     "visualizer": "pnpm devtools",
     "visualizer:build": "pnpm --dir packages/devtools build",
@@ -25,9 +25,10 @@
     "docs:site:serve": "node scripts/api-reference-site/serve.mjs",
     "test:consumer": "node scripts/test-consumer.mjs",
     "pack:check": "node scripts/pack-check.mjs",
+    "react:pack-check": "node scripts/react-pack-check.mjs",
     "devtools:pack-check": "node scripts/devtools-pack-check.mjs",
     "oxlint-plugin:pack-check": "node scripts/oxlint-plugin-pack-check.mjs",
-    "check": "pnpm format:check && pnpm check:architecture && pnpm check:ci && pnpm docs:api:check && pnpm docs:site:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check && pnpm devtools:pack-check && pnpm oxlint-plugin:pack-check",
+    "check": "pnpm format:check && pnpm check:architecture && pnpm check:ci && pnpm docs:api:check && pnpm docs:site:check && pnpm typecheck && pnpm build && pnpm test && pnpm test:types && pnpm test:consumer && pnpm pack:check && pnpm react:pack-check && pnpm devtools:pack-check && pnpm oxlint-plugin:pack-check",
     "changeset": "changeset",
     "version-packages": "changeset version && dprint fmt",
     "release": "pnpm build && changeset publish"

@@ -557,6 +557,41 @@ const selectSnapshotByPath = <
 ): Option.Option<SnapshotByIdentifier<State, Path>> =>
   Topology.getSnapshotByPath(snapshot, path) as Option.Option<SnapshotByIdentifier<State, Path>>
 
+type SelectorKind =
+  | "matches"
+  | "matchesChild"
+  | "select"
+  | "selectChild"
+  | "selectSnapshot"
+  | "selectSnapshotChild"
+
+const selectorsByBridge = new WeakMap<object, Map<SelectorKind, Map<string, Atom.Atom<any>>>>()
+
+const cachedSelector = <A>(
+  bridge: object,
+  kind: SelectorKind,
+  path: string,
+  make: () => Atom.Atom<A>
+): Atom.Atom<A> => {
+  let selectorsByKind = selectorsByBridge.get(bridge)
+  if (selectorsByKind === undefined) {
+    selectorsByKind = new Map()
+    selectorsByBridge.set(bridge, selectorsByKind)
+  }
+  let selectorsByPath = selectorsByKind.get(kind)
+  if (selectorsByPath === undefined) {
+    selectorsByPath = new Map()
+    selectorsByKind.set(kind, selectorsByPath)
+  }
+  const cached = selectorsByPath.get(path)
+  if (cached !== undefined) {
+    return cached as Atom.Atom<A>
+  }
+  const selector = make()
+  selectorsByPath.set(path, selector)
+  return selector
+}
+
 export const select = <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
   Event,
@@ -571,8 +606,14 @@ export const select = <
 ): Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
 > =>
-  Atom.mapResult(self.result, (snapshot) => selectValueByPath(snapshot, path)).pipe(
-    Atom.withEquality(Equal.equals)
+  cachedSelector(
+    self,
+    "select",
+    path,
+    () =>
+      Atom.mapResult(self.result, (snapshot) => selectValueByPath(snapshot, path)).pipe(
+        Atom.withEquality(Equal.equals)
+      )
   )
 
 export const selectSnapshot = <
@@ -589,8 +630,14 @@ export const selectSnapshot = <
 ): Atom.Atom<
   AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
 > =>
-  Atom.mapResult(self.result, (snapshot) => selectSnapshotByPath(snapshot, path)).pipe(
-    Atom.withEquality(Equal.equals)
+  cachedSelector(
+    self,
+    "selectSnapshot",
+    path,
+    () =>
+      Atom.mapResult(self.result, (snapshot) => selectSnapshotByPath(snapshot, path)).pipe(
+        Atom.withEquality(Equal.equals)
+      )
   )
 
 export const selectChild = <
@@ -606,10 +653,11 @@ export const selectChild = <
     StartError | RefError<Machine.ChildMachine.Ref<Child>>
   >
 > =>
-  Atom.mapResult(
-    self.result,
-    Option.flatMap((snapshot) => selectValueByPath(snapshot, path))
-  ).pipe(Atom.withEquality(Equal.equals))
+  cachedSelector(self, "selectChild", path, () =>
+    Atom.mapResult(
+      self.result,
+      Option.flatMap((snapshot) => selectValueByPath(snapshot, path))
+    ).pipe(Atom.withEquality(Equal.equals)))
 
 export const selectSnapshotChild = <
   Child extends Machine.ChildMachine.Any,
@@ -624,10 +672,11 @@ export const selectSnapshotChild = <
     StartError | RefError<Machine.ChildMachine.Ref<Child>>
   >
 > =>
-  Atom.mapResult(
-    self.result,
-    Option.flatMap((snapshot) => selectSnapshotByPath(snapshot, path))
-  ).pipe(Atom.withEquality(Equal.equals))
+  cachedSelector(self, "selectSnapshotChild", path, () =>
+    Atom.mapResult(
+      self.result,
+      Option.flatMap((snapshot) => selectSnapshotByPath(snapshot, path))
+    ).pipe(Atom.withEquality(Equal.equals)))
 
 export const matches = <
   State extends Machine.Machine.AtomicSnapshot<string, unknown>,
@@ -641,8 +690,14 @@ export const matches = <
   self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
   path: Path
 ): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> =>
-  Atom.mapResult(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))).pipe(
-    Atom.withEquality(Equal.equals)
+  cachedSelector(
+    self,
+    "matches",
+    path,
+    () =>
+      Atom.mapResult(self.result, (snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path))).pipe(
+        Atom.withEquality(Equal.equals)
+      )
   )
 
 export const matchesChild = <
@@ -655,10 +710,11 @@ export const matchesChild = <
 ): Atom.Atom<
   AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
 > =>
-  Atom.mapResult(
-    self.result,
-    Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
-  ).pipe(Atom.withEquality(Equal.equals))
+  cachedSelector(self, "matchesChild", path, () =>
+    Atom.mapResult(
+      self.result,
+      Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
+    ).pipe(Atom.withEquality(Equal.equals)))
 
 type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
   Machine.Machine.Services<M>,

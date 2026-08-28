@@ -49,9 +49,10 @@ statechart, and the result runs as an Effect-managed machine.
 
 ## Packages
 
-The workspace publishes three packages at the same version:
+The workspace publishes four packages at the same version:
 
 - [`@typeonce/effect-machine`](./packages/effect-machine/README.md) contains the machine runtime, testing modules, and documentation.
+- [`@typeonce/effect-machine-react`](./packages/effect-machine-react/README.md) owns machine atoms in React without subscribing their owners to machine state.
 - [`@typeonce/effect-machine-devtools`](./packages/devtools/README.md) contains the publishable local machine visualizer and CLI.
 - [`@typeonce/oxlint-plugin-effect-machine`](./packages/oxlint-plugin/README.md) checks Effect Machine models for common structural mistakes.
 

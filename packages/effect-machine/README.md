@@ -750,13 +750,21 @@ applications. Service-free machines can use `AtomMachine.make(Counter)`.
 The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 `send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,
 `AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
-equality-aware derivations. Hooks from `@effect/atom-react` use a shared default
-registry. Add `RegistryProvider` only when a subtree needs separate registry
-identity or disposal.
+equality-aware derivations. Repeating one of these calls with the same bridge
+and state path returns the same atom.
 
-For a machine with startup input, `AtomMachine.family` uses that input as the
-family key and exposes direct atom families. Each returned atom retains its
-private machine bridge while preserving lazy registry startup and disposal:
+Use `useMachineAtom` from `@typeonce/effect-machine-react` when one React
+subtree owns the machine. It mounts the machine without subscribing the owner
+to state. Pass the returned machine atom through props or Context, then call
+`useAtomSuspense(AtomMachine.selectSnapshot(machine, path))` in the descendant
+that renders that state slot. Hooks from `@effect/atom-react` use a shared
+default registry. Add `RegistryProvider` only when a subtree needs separate
+registry identity or disposal.
+
+When consumers need keyed lookup for a machine with startup input,
+`AtomMachine.family` uses that input as the family key and exposes direct atom
+families. Each returned atom retains its private machine bridge while
+preserving lazy registry startup and disposal:
 
 ```ts
 const processAtoms = AtomMachine.bind(runtime).family(processMachine, {

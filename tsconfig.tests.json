@@ -1,10 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.json",
-  "include": ["packages/*/test/**/*.ts"],
+  "include": ["packages/*/test/**/*.ts", "packages/*/test/**/*.tsx"],
   "exclude": ["**/dist/**", "**/node_modules/**", "references/**"],
   "references": [
-    { "path": "packages/effect-machine" }
+    { "path": "packages/effect-machine" },
+    { "path": "packages/effect-machine-react" }
   ],
   "compilerOptions": {
     "composite": false,
@@ -14,9 +15,11 @@
     "declarationMap": false,
     "sourceMap": false,
     "types": ["node", "vitest/globals"],
+    "jsx": "react-jsx",
     "paths": {
       "@typeonce/effect-machine": ["./packages/effect-machine/src/index.ts"],
-      "@typeonce/effect-machine/*": ["./packages/effect-machine/src/*.ts"]
+      "@typeonce/effect-machine/*": ["./packages/effect-machine/src/*.ts"],
+      "@typeonce/effect-machine-react": ["./packages/effect-machine-react/src/index.ts"]
     }
   }
 }

@@ -5,6 +5,7 @@
   "fixed": [
     [
       "@typeonce/effect-machine",
+      "@typeonce/effect-machine-react",
       "@typeonce/effect-machine-devtools",
       "@typeonce/oxlint-plugin-effect-machine"
     ]

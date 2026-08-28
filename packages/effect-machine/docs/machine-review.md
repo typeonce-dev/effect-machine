@@ -65,11 +65,24 @@ const handlers = {
 Review check: search for `.resolve(...)` callbacks that only return an empty
 `target.from()` and remove the callback.
 
-## Use retained families for keyed machine input
+## Choose React ownership or keyed family lookup
 
-Effect Atom keeps a family value for an equal key while that returned value is
-reachable. Current runtimes may hold family values through `WeakRef`. Retaining
-one field from a composite family value does not retain the composite itself:
+Use `useMachineAtom` when one React subtree owns the workflow, including a
+machine with startup input:
+
+```tsx
+const machine = useMachineAtom(() => machineAtoms.make(processMachine, input))
+```
+
+Pass the stable machine through props or Context. Startup input is captured
+once. Send an event to change the running workflow, or change the owner's React
+key to replace it.
+
+Use `AtomMachine.family` when unrelated consumers must find one shared machine
+by its startup input. Effect Atom keeps a family value for an equal key while
+that returned value is reachable. Current runtimes may hold family values
+through `WeakRef`. Retaining one field from a composite family value does not
+retain the composite itself:
 
 ```ts
 // Unsafe when consumers retain only stateAtom or sendAtom
@@ -82,8 +95,8 @@ const processScope = Atom.family((input: ProcessInput) => {
 })
 ```
 
-Use `AtomMachine.family` for an input-bearing machine. It returns direct atom
-families whose atoms retain the private machine bridge:
+`AtomMachine.family` returns direct atom families whose atoms retain the
+private machine bridge:
 
 ```ts
 export const processAtoms = machineAtoms.family(processMachine, {
@@ -101,14 +114,14 @@ No component `useMemo` is needed. The registry retains the public atom while a
 hook subscribes to it, and that atom retains the machine owner. Equal inputs
 use Effect `Equal` and `Hash` semantics and select the same family value.
 
-For a no-input machine, use one module-level bridge or a lazy
-`useState(makeScope)` value owned by a React subtree. Do not add an unused key.
+For a no-input machine, use one module-level bridge or `useMachineAtom` in the
+owning React subtree. Do not add an unused family key.
 
 Review check: search for composite `Atom.family` values that own a machine,
-`useMemo` around family lookup, and component-local calls to
-`machineAtoms.make`. Replace an input-bearing machine with
-`AtomMachine.family`. Give a no-input instance an explicit module or React-tree
-owner.
+`useMemo` around family lookup, repeated input propagation through one React
+subtree, and component-local calls to `machineAtoms.make` without a stable
+owner. Choose `AtomMachine.family` only when consumers need shared keyed
+lookup.
 
 ## Justify each `RegistryProvider`
 
