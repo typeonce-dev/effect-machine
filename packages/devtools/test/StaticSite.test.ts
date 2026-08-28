@@ -22,6 +22,7 @@ const localExampleMachineIds = [
   "parent-child-protocol",
   "planner-example",
   "required-parent-child",
+  "shared-terminal-routing",
   "transition-semantics"
 ]
 

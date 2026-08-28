@@ -3,6 +3,19 @@ import { mountVisualizer } from "./visualizer.js"
 
 let selectedKey: string | undefined
 
+export const machineIndexScrollLeft = (
+  scrollLeft: number,
+  viewportWidth: number,
+  selectedLeft: number,
+  selectedWidth: number
+): number => {
+  if (selectedLeft < scrollLeft) return selectedLeft
+  const selectedRight = selectedLeft + selectedWidth
+  return selectedRight > scrollLeft + viewportWidth
+    ? selectedRight - viewportWidth
+    : scrollLeft
+}
+
 const createElement = <Tag extends keyof HTMLElementTagNameMap>(
   tag: Tag,
   className?: string,
@@ -36,6 +49,7 @@ const statusLabel = (result: MachineResult): string => {
 }
 
 export const mountMachineIndex = (root: HTMLElement, snapshot: RegistrySnapshot): void => {
+  const previousScrollLeft = root.querySelector<HTMLElement>(".machine-index")?.scrollLeft ?? 0
   const results = [...snapshot.results].sort((left, right) => resultLabel(left).localeCompare(resultLabel(right)))
   if (selectedKey === undefined || !results.some((result) => result.key === selectedKey)) {
     selectedKey = results[0]?.key
@@ -78,4 +92,13 @@ export const mountMachineIndex = (root: HTMLElement, snapshot: RegistrySnapshot)
 
   shell.append(index, view)
   root.replaceChildren(shell)
+  const selected = index.querySelector<HTMLElement>(".machine-row.is-selected")
+  index.scrollLeft = selected === null
+    ? previousScrollLeft
+    : machineIndexScrollLeft(
+      previousScrollLeft,
+      index.clientWidth,
+      selected.offsetLeft,
+      selected.offsetWidth
+    )
 }

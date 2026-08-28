@@ -271,13 +271,12 @@ const renderContractField = (
   if (omit.has(label)) return null
   const row = createElement("div", "input-contract-field")
   const heading = createElement("div", "input-field-heading")
-  const identity = createElement("div", "input-field-identity")
-  identity.append(
-    createElement("span", "input-label", label),
+  const contract = createElement("div", "input-field-contract")
+  contract.append(
     createElement("span", "input-field-type", inputType(field)),
     createElement("span", required ? "input-required" : "input-optional", required ? "required" : "optional")
   )
-  heading.append(identity)
+  heading.append(createElement("span", "input-label", label), contract)
   row.append(heading)
   const constraints = inputConstraints(field)
   if (constraints.length > 0) {
@@ -348,6 +347,55 @@ const contractSummary = (schema: InputSchema | null): string | null => {
   return fields.slice(0, 3).map(({ key, required, field }) => `${key}${required ? "" : "?"}: ${inputType(field)}`).join(
     " · "
   ) + (fields.length > 3 ? ` · +${fields.length - 3}` : "")
+}
+
+type ValueShape = string | ReadonlyArray<ValueShape> | { readonly [key: string]: ValueShape }
+
+const typePreview = (field: InputField): string => {
+  switch (field._tag) {
+    case "String":
+      return field.format === undefined ? "string" : `string (${field.format})`
+    case "Number":
+      return field.integer ? "integer" : "number"
+    case "Boolean":
+      return "boolean"
+    case "Enum":
+      return field.values.map(String).join(" | ")
+    case "Literal":
+      return String(field.value)
+    case "Object":
+      return "object"
+    case "Array":
+      return `${typePreview(field.item)}[]`
+    case "Union":
+      return [...new Set(field.alternatives.map(typePreview))].join(" | ")
+    case "Unsupported":
+      return "unknown"
+  }
+}
+
+const fieldValueShape = (field: InputField): ValueShape => {
+  if (field._tag === "Object") {
+    return Object.fromEntries(
+      field.fields
+        .filter(({ key }) => key !== "_tag")
+        .map(({ key, required, field }) => [required ? key : `${key}?`, fieldValueShape(field)])
+    )
+  }
+  if (field._tag === "Array") return [fieldValueShape(field.item)]
+  return typePreview(field)
+}
+
+export const valueShape = (schema: InputSchema): ValueShape => fieldValueShape(projectInputSchema(schema))
+
+const renderValueShape = (title: string, schema: InputSchema): HTMLElement => {
+  const section = createElement("section", "inspector-section value-shape-section")
+  section.append(inspectionSection(title))
+  const code = createElement("code", undefined, JSON.stringify(valueShape(schema), null, 2))
+  const block = createElement("pre", "value-shape-block")
+  block.append(code)
+  section.append(block)
+  return section
 }
 
 const triggerName = (trigger: Trigger): string => {
@@ -517,6 +565,13 @@ export const renderVisualizer = (
       header.append(annotations)
     }
     inspectorContent.append(header)
+
+    if (
+      inspection.state.valueSchema !== null &&
+      contractSummary(inspection.state.valueSchema) !== null
+    ) {
+      inspectorContent.append(renderValueShape("Value", inspection.state.valueSchema))
+    }
 
     if (inspection.outgoing.length > 0) {
       const transitions = createElement("section", "inspector-section")

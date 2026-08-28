@@ -455,8 +455,10 @@ button {
 
 .chart-state {
   position: absolute;
-  display: block;
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 12px;
   border: 1px solid #30363f;
   border-radius: 4px;
   color: #d9dce1;
@@ -493,7 +495,6 @@ button {
 
 .chart-state-heading,
 .chart-state-identity,
-.chart-field-row,
 .chart-activity-row {
   display: flex;
   min-width: 0;
@@ -523,18 +524,7 @@ button {
   box-shadow: 0 0 0 3px rgb(117 167 255 / 10%);
 }
 
-.chart-state-status.is-initial {
-  border-color: #d9a441;
-  background: #d9a441;
-  box-shadow: 0 0 0 3px rgb(217 164 65 / 12%);
-}
-
-.chart-state-status.is-active.is-initial {
-  box-shadow: 0 0 0 2px #14181d, 0 0 0 4px var(--accent);
-}
-
 .chart-state-name,
-.chart-field-name,
 .chart-activity-name {
   min-width: 0;
   overflow: hidden;
@@ -546,8 +536,6 @@ button {
   font-size: 12px;
 }
 
-.chart-section-label,
-.chart-field-type,
 .chart-activity-kind,
 .chart-more {
   color: #7e8792;
@@ -555,28 +543,20 @@ button {
   line-height: 1.3;
 }
 
-.chart-section-label,
 .chart-activity-kind {
   text-transform: uppercase;
 }
 
 .chart-state-section {
   width: min(300px, 100%);
-  margin-top: 11px;
-  padding-top: 8px;
+  margin-top: 8px;
+  padding-top: 7px;
   border-top: 1px solid #242a31;
 }
 
-.chart-section-label {
-  margin-bottom: 4px;
-  letter-spacing: 0.06em;
-}
-
-.chart-field-row,
 .chart-activity-row {
   display: grid;
-  min-height: 22px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 20px;
   gap: 10px;
 }
 
@@ -584,13 +564,11 @@ button {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-.chart-field-name,
 .chart-activity-name {
   color: #c4c9d0;
   font-size: 10px;
 }
 
-.chart-field-type,
 .chart-activity-kind {
   flex: 0 1 auto;
   overflow: hidden;
@@ -646,15 +624,15 @@ button {
 }
 
 .chart-more {
-  min-height: 18px;
-  padding-top: 3px;
+  min-height: 16px;
+  padding-top: 2px;
 }
 
 .chart-initial {
   position: absolute;
   border-radius: 50%;
-  background: #9ba3ae;
-  box-shadow: 0 0 0 3px rgb(155 163 174 / 8%);
+  background: #b0965d;
+  box-shadow: 0 0 0 2px rgb(176 150 93 / 10%);
   pointer-events: none;
 }
 
@@ -705,7 +683,8 @@ button {
 }
 
 .chart-edge-initial .chart-edge-line {
-  stroke: #89929e;
+  stroke: #9f8a5c;
+  stroke-width: 1.2;
 }
 
 .chart-edge-hit {
@@ -716,7 +695,8 @@ button {
 }
 
 #chart-arrow path,
-#chart-direction path {
+#chart-direction path,
+#chart-initial-arrow path {
   fill: context-stroke;
 }
 
@@ -1613,13 +1593,19 @@ button {
   gap: 12px;
 }
 
-.input-field-identity,
+.input-field-contract,
 .input-constraints {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+}
+
+.input-field-contract {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .input-label,
@@ -1679,6 +1665,18 @@ button {
 
 .input-unsupported {
   color: #d7a5a2;
+}
+
+.value-shape-block {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  color: #b8c1ce;
+  background: var(--surface-raised);
+  font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-x: auto;
+  tab-size: 2;
+  white-space: pre;
 }
 
 .trace-topology {
