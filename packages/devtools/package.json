@@ -1,6 +1,6 @@
 {
   "name": "@typeonce/effect-machine-devtools",
-  "version": "0.27.1",
+  "version": "0.28.0",
   "description": "Local development tools for Effect Machine",
   "author": "Sandro Maglione",
   "repository": {
