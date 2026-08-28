@@ -1,208 +1,293 @@
-# Effect Atom and React patterns
+# Effect Atom and React
 
-This guide records the folder organization and four integration patterns
-validated in the process app. Use the API reference for individual AtomMachine
-operations. Read the [Effect Machine agent guide](./agent-guide.md) for
-statechart modeling, transitions, services, and testing.
+React code should own one stable machine atom, pass it through props or
+Context, and subscribe in the descendants that render machine state. Keep the
+machine definition free of React dependencies.
+
+Read the [Effect Machine agent guide](./agent-guide.md) for statechart
+modeling, transitions, services, and testing.
 
 ## Recommended folder structure
 
 ```text
 src/
-├── context/                 # Optional React Context adapters
-│   ├── dialog-context.tsx
-│   └── process-context.tsx
+├── context/
+│   └── auth-machine-context.tsx  # React ownership and distribution
 ├── lib/
-│   ├── atom-runtime.ts      # Shared bound AtomMachine runtime
-│   └── services/            # Generic Effect business services
-│       └── query-processor.ts
+│   ├── atom-runtime.ts           # Shared bound AtomMachine runtime
+│   └── services/
 └── machines/
-    ├── counter/
-    │   ├── machine.ts       # Machine implementation
-    │   └── atom.ts          # Focused atoms for React
-    ├── process/
-    │   ├── machine.ts
-    │   └── atom.ts
-    └── dialog/
-        ├── machine.ts
-        └── atom.ts
+    └── auth-machine.ts           # States, events, and behavior
 ```
 
-Keep these responsibilities separate:
+`machine.ts` owns the workflow. A Context module only creates and distributes
+the machine atom. State-slot components decide which state paths they render.
 
-- `machine.ts` defines states, events, transitions, statechart behavior, and
-  Effect service requirements. It has no React dependency.
-- `atom.ts` adapts that machine to the shared bound AtomMachine runtime and
-  exports the focused atoms React needs.
-- `lib/services/` contains reusable business services used by machines.
-- `context/` is optional. It only distributes an already-created machine scope
-  through a React subtree.
-- `lib/atom-runtime.ts` binds AtomMachine once to the application's Effect
-  service layer:
+Bind service-backed machines once at the application runtime:
 
 ```ts
 import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { Atom } from "effect/unstable/reactivity"
-import { QueryProcessor } from "./services/query-processor"
+import { AppLayer } from "./app-layer"
 
-const atomRuntime = Atom.runtime(QueryProcessor.layer)
+const atomRuntime = Atom.runtime(AppLayer)
 
-export const machineAtoms = AtomMachine.bind(atomRuntime)
+export const MachineAtoms = AtomMachine.bind(atomRuntime)
 ```
 
-Each `machineAtoms.make` call still creates an independent machine bridge.
+Service-free machines can use `AtomMachine.make` directly.
 
-## 1. One global actor with no input
+## Own a machine in one React subtree
 
-Use a module-level bridge when a no-input machine intentionally has one
-application-wide instance:
-
-```ts
-import { machineAtoms } from "@/lib/atom-runtime"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { counterMachine } from "./machine"
-
-export const counterMachineAtom = machineAtoms.make(counterMachine)
-
-export const counterStateAtom = AtomMachine.select(
-  counterMachineAtom,
-  "counter"
-)
-```
-
-"Global" means every import reaches this bridge under the same atom registry.
-Consumers read `counterStateAtom` and use `counterMachineAtom.send` directly.
-Do not add a redundant `counterSendAtom` alias.
-
-## 2. A keyed machine with startup input
-
-`AtomMachine.family` uses the machine input as both startup input and family
-key. It returns one direct atom family for each entry in `atoms`:
-
-```ts
-import { machineAtoms } from "@/lib/atom-runtime"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { processMachine } from "./machine"
-
-export const processAtoms = machineAtoms.family(processMachine, {
-  atoms: {
-    details: AtomMachine.select("process"),
-    result: AtomMachine.select("process.Ready"),
-    send: (machine) => machine.send
-  },
-  label: (input, name) => `process:${input.query}:${name}`
-})
-```
-
-React consumes each projected family directly:
+Use `useMachineAtom` when a provider, route, dialog, or other React subtree
+owns one machine instance:
 
 ```tsx
-const input = { query }
-const details = useAtomValue(processAtoms.details(input))
-const send = useAtomSet(processAtoms.send(input))
-```
+import { useMachineAtom } from "@typeonce/effect-machine-react"
+import { createContext, type ReactNode, useContext } from "react"
+import { AuthMachine, type AuthMachineInput } from "../machines/auth-machine"
+import { MachineAtoms } from "../lib/atom-runtime"
 
-Each public atom retains its private machine bridge. Keeping only `details` or
-only `send` is safe. The bridge still starts lazily in the registry and stops
-when that registry releases or disposes it. A writable source remains writable,
-and a projection keeps the source atom's equality function.
+const makeAuthMachine = (input: AuthMachineInput) => MachineAtoms.make(AuthMachine, input)
+type AuthMachineAtom = ReturnType<typeof makeAuthMachine>
 
-The family uses Effect `Equal` and `Hash` semantics. Equal records such as
-`{ query: "effect" }` select the same family value even when reconstructed.
-Keep inputs immutable because mutating a hashed key makes later lookup
-unreliable. Different input values select independent machines. If a changing
-value should update one running workflow, model the change as an event instead
-of putting it in the machine input.
+const AuthMachineContext = createContext<AuthMachineAtom | null>(null)
 
-Service-free machines use the module function directly:
-
-```ts
-export const processAtoms = AtomMachine.family(processMachine, {
-  atoms: {
-    details: AtomMachine.select("process"),
-    send: (machine) => machine.send
-  }
-})
-```
-
-## 3. Reusing one machine definition for multiple instances
-
-Define the dialog adapter once:
-
-```ts
-import { machineAtoms } from "@/lib/atom-runtime"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { dialogMachine } from "./machine"
-
-export function makeDialogScope() {
-  const machine = machineAtoms.make(dialogMachine)
-
-  return {
-    isOpenAtom: AtomMachine.matches(machine, "Open"),
-    isClosedAtom: AtomMachine.matches(machine, "Closed"),
-    openStateAtom: AtomMachine.select(machine, "Open"),
-    sendAtom: machine.send
-  }
-}
-
-export type DialogScope = ReturnType<typeof makeDialogScope>
-```
-
-### React-tree-owned instance
-
-```tsx
-const DialogContext = createContext<DialogScope | null>(null)
-
-export function DialogProvider({ children }: { children: ReactNode }) {
-  const [scope] = useState(makeDialogScope)
+export function AuthMachineProvider({
+  children,
+  input
+}: {
+  readonly children: ReactNode
+  readonly input: AuthMachineInput
+}) {
+  const machine = useMachineAtom(() => makeAuthMachine(input))
 
   return (
-    <DialogContext.Provider value={scope}>
+    <AuthMachineContext.Provider value={machine}>
       {children}
-    </DialogContext.Provider>
+    </AuthMachineContext.Provider>
+  )
+}
+
+export function useAuthMachine(): AuthMachineAtom {
+  const machine = useContext(AuthMachineContext)
+  if (machine === null) {
+    throw new Error("useAuthMachine must be used inside AuthMachineProvider")
+  }
+  return machine
+}
+```
+
+The provider strongly owns the complete `MachineAtom`. The hook mounts
+`machine.ref` after React commits the owner, but it does not read `state`,
+`snapshot`, or `result`. Machine updates therefore do not rerender the
+provider.
+
+The factory captures startup input once. A later `input` prop change does not
+replace the running workflow. Send an event when the change belongs to that
+workflow. Change the provider's React key when React should own a new machine:
+
+```tsx
+<AuthMachineProvider key={attemptId} input={input}>
+  <AuthCard />
+</AuthMachineProvider>
+```
+
+Put the owner above a Suspense boundary. React can then retain the same machine
+while a state-reading descendant suspends.
+
+## Render state-owned data
+
+Subscribe in the smallest component that renders a state path:
+
+```tsx
+import { useAtomSuspense } from "@effect/atom-react"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
+import { Option } from "effect"
+
+function EditingFields() {
+  const machine = useAuthMachine()
+  const editing = useAtomSuspense(
+    AtomMachine.selectSnapshot(machine, "Editing")
+  ).value
+
+  return Option.match(editing, {
+    onNone: () => null,
+    onSome: ({ value }) => <EmailField email={value.email} />
+  })
+}
+```
+
+`AtomMachine.select` returns the selected state value.
+`AtomMachine.selectSnapshot` also retains the selected state's child topology.
+Both return `Option.none()` while the path is inactive. Do not replace that
+absence with an empty string, `null`, or a global boolean.
+
+Repeated calls with the same machine and path return the same atom, so path
+selection is safe during render without `useMemo`. Equal selected values do not
+notify the component.
+
+Nested paths keep the same ownership:
+
+```tsx
+function PasswordField() {
+  const machine = useAuthMachine()
+  const password = useAtomSuspense(
+    AtomMachine.select(machine, "Editing.Password")
+  ).value
+
+  return Option.match(password, {
+    onNone: () => null,
+    onSome: ({ password }) => <input type="password" value={password} />
+  })
+}
+```
+
+Place independent subscriptions in independent descendants:
+
+```tsx
+function AuthCard() {
+  return (
+    <>
+      <EditingFields />
+      <VerificationFields />
+      <FailureMessage />
+      <SubmitButton />
+    </>
   )
 }
 ```
 
-Each provider owns one independent dialog. Descendants use a small
-`useDialog()` hook and subscribe to the focused atom they need. Pass
-`DialogScope` through props when Context is unnecessary. Do not add a wrapper
-component whose only job is forwarding the scope.
+Atom granularity cannot isolate hooks that all live in `AuthCard`. Any selected
+change rerenders the component that called the hook.
 
-For a no-input machine, use one module-level bridge or an explicitly owned
-React scope. Do not add a family key that the machine does not consume. When an
-ID is part of startup semantics, declare it in the machine input and use
-`AtomMachine.family`.
+## Send without subscribing
 
-## 4. Selecting process-owned child machines
+Use the writable atom directly:
 
-Bind a machine definition once when a parent owns a runtime-sized set of child
-machines:
+```tsx
+import { useAtomSet } from "@effect/atom-react"
 
-```ts
-const Plant = Machine.childFamily(plantMachine)
+function SubmitButton() {
+  const machine = useAuthMachine()
+  const send = useAtomSet(machine.send)
 
-export const centralMachineAtom = machineAtoms.make(centralMachine)
-
-export const plantAtoms = AtomMachine.familyChild(centralMachineAtom, {
-  child: (plantId: string) => Plant(plantId),
-  atoms: {
-    state: (plant) => plant.state,
-    isBroken: AtomMachine.matchesChild("Broken"),
-    send: (plant) => plant.send,
-    stop: (plant) => plant.stop
-  }
-})
-
-const broken = useAtomValue(plantAtoms.isBroken(plantId))
-const send = useAtomSet(plantAtoms.send(plantId))
+  return (
+    <button onClick={() => send({ _tag: "Submitted" })}>
+      Continue
+    </button>
+  )
+}
 ```
 
-`familyChild` keeps child lookup separate from root machine startup. Each
-projected atom retains the child bridge returned for its key.
+`useAtomSet` mounts the writable atom and does not subscribe the component to
+its value.
 
-`Plant(plantId)` may be reconstructed wherever the id is available. Child
-lookup and bridge reuse match by machine identity and id, not descriptor object
-identity. Before the parent spawns that child, selectors contain `Option.none`
-and `matchesChild` is `false`. They follow the child after startup and return to
-the inactive values after it stops.
+## Whole-result and custom selections
+
+Reading the full result is correct when a component renders the complete
+machine state:
+
+```tsx
+function AuthScreen() {
+  const machine = useAuthMachine()
+  const state = useAtomSuspense(machine.result).value
+
+  return AuthStates.match(state, {
+    Editing: (editing) => <EditingScreen state={editing} />,
+    Verification: (verification) => <VerificationScreen state={verification} />,
+    Failed: (failed) => <FailureScreen state={failed} />
+  })
+}
+```
+
+That component rerenders for every result change. Current
+`@effect/atom-react` does not select from the successful value in
+`useAtomSuspense`. Until it does, use typed path selectors for state-owned UI,
+or declare a custom derived atom once in a strongly owned scope. Do not create
+a fresh derived atom on every render.
+
+## Share a keyed machine outside one React owner
+
+`AtomMachine.family` is for registry-owned machines that unrelated consumers
+find by startup input. It is not the default for one React-owned workflow.
+
+```ts
+export const processAtoms = MachineAtoms.family(ProcessMachine, {
+  atoms: {
+    details: AtomMachine.select("Processing"),
+    ready: AtomMachine.matches("Ready"),
+    send: (machine) => machine.send
+  }
+})
+```
+
+Consumers use the input as the shared identity key:
+
+```tsx
+const details = useAtomSuspense(processAtoms.details(input)).value
+const send = useAtomSet(processAtoms.send(input))
+```
+
+Each public projection retains its private machine owner. Keeping only
+`details(input)` or `send(input)` is safe. Do not return a weakly held composite
+scope and retain only one field from it.
+
+Family keys use Effect `Equal` and `Hash` semantics. Keep them immutable. If a
+changing value should update one running workflow, model it as an event instead
+of changing the family key.
+
+## Module-owned machines
+
+A no-input machine may intentionally have one module-owned identity:
+
+```ts
+export const CounterMachineAtom = MachineAtoms.make(CounterMachine)
+export const CounterStateAtom = AtomMachine.select(CounterMachineAtom, "Count")
+```
+
+Every consumer using the same `AtomRegistry` reaches the same running machine.
+Different registries still run independent instances.
+
+## Child machines
+
+Direct child selectors follow the active child and preserve inactivity:
+
+```tsx
+const editor = machine.child(Editor)
+const editing = useAtomSuspense(
+  AtomMachine.selectSnapshotChild(editor, "Editing")
+).value
+```
+
+An inactive child or path returns `Option.none()`. Re-entry follows the
+replacement child instance.
+
+Use `AtomMachine.familyChild` when a parent owns a runtime-sized set of keyed
+children:
+
+```ts
+const Plant = Machine.childFamily(PlantMachine)
+
+export const plantAtoms = AtomMachine.familyChild(CentralMachineAtom, {
+  child: (plantId: string) => Plant(plantId),
+  atoms: {
+    broken: AtomMachine.matchesChild("Broken"),
+    state: (plant) => plant.state,
+    send: (plant) => plant.send
+  }
+})
+```
+
+## Registry and rendering semantics
+
+A `MachineAtom` identifies one machine per `AtomRegistry`. Passing the same
+machine atom through two registry providers creates two independent runtimes.
+Unmounting a React owner releases its mount. The registry stops the machine
+after its final subscription and configured idle retention expire.
+`registry.dispose()` stops it immediately.
+
+`useMachineAtom` does not start a machine during server rendering because
+React effects do not run on the server. Reading a machine atom during server
+render follows `@effect/atom-react` server-read behavior, so choose an explicit
+client boundary when server startup would be undesirable.

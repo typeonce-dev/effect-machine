@@ -158,6 +158,12 @@ describe("AtomMachine", () => {
       const selected = AtomMachine.select(bridge, "Idle")
       const selectedSnapshot = AtomMachine.selectSnapshot(bridge, "Idle")
       const matched = AtomMachine.matches(bridge, "Idle")
+      assert.strictEqual(AtomMachine.select(bridge, "Idle"), selected)
+      assert.strictEqual(AtomMachine.select("Idle")(bridge), selected)
+      assert.strictEqual(AtomMachine.selectSnapshot(bridge, "Idle"), selectedSnapshot)
+      assert.strictEqual(AtomMachine.selectSnapshot("Idle")(bridge), selectedSnapshot)
+      assert.strictEqual(AtomMachine.matches(bridge, "Idle"), matched)
+      assert.strictEqual(AtomMachine.matches("Idle")(bridge), matched)
       const observed = yield* AtomMachine.emissions(bridge).pipe(
         Stream.take(1),
         Stream.runCollect,
@@ -270,6 +276,12 @@ describe("AtomMachine", () => {
       const selectedCount = AtomMachine.selectChild(childAtoms, "Count")
       const selectedCountSnapshot = AtomMachine.selectSnapshotChild(childAtoms, "Count")
       const countMatches = AtomMachine.matchesChild(childAtoms, "Count")
+      assert.strictEqual(AtomMachine.selectChild(childAtoms, "Count"), selectedCount)
+      assert.strictEqual(AtomMachine.selectChild("Count")(childAtoms), selectedCount)
+      assert.strictEqual(AtomMachine.selectSnapshotChild(childAtoms, "Count"), selectedCountSnapshot)
+      assert.strictEqual(AtomMachine.selectSnapshotChild("Count")(childAtoms), selectedCountSnapshot)
+      assert.strictEqual(AtomMachine.matchesChild(childAtoms, "Count"), countMatches)
+      assert.strictEqual(AtomMachine.matchesChild("Count")(childAtoms), countMatches)
       const parentRef = yield* AtomRegistry.getResult(registry, parentAtoms.ref)
       const directChild = yield* parentRef.child(Child)
       assert(Option.isNone(directChild))
@@ -460,6 +472,22 @@ describe("AtomMachine", () => {
       })()
       assert.strictEqual(await waitForCollection(weak), true)
     }
+  })
+
+  it("does not retain abandoned bridges through the selector cache", async () => {
+    if (globalThis.gc === undefined) return
+
+    const refs = (() => {
+      const bridge = AtomMachine.make(makeCounterMachine())
+      const selector = AtomMachine.selectSnapshot(bridge, "Count")
+      return {
+        bridge: new WeakRef(bridge),
+        selector: new WeakRef(selector)
+      }
+    })()
+
+    assert.strictEqual(await waitForCollection(refs.selector), true)
+    assert.strictEqual(await waitForCollection(refs.bridge), true)
   })
 
   it.effect("retains one keyed machine owner through every public projection", () =>

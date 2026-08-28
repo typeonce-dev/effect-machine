@@ -387,8 +387,8 @@ type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [Valu
  * Selects the typed value for an active state path.
  *
  * Valid paths and their selected value types are inferred from the bridge.
- * The derived atom suppresses structurally equal updates. Keep the returned
- * atom stable when constructing it inside a component.
+ * The derived atom suppresses structurally equal updates. Repeated calls with
+ * the same bridge and path return the same atom.
  *
  * **Example**
  *
@@ -465,8 +465,8 @@ export const select: {
  * Selects the typed logical snapshot for an active state path.
  *
  * Unlike {@link select}, the selected value retains its child snapshot
- * topology. The derived atom suppresses structurally equal updates. Keep the
- * returned atom stable when constructing it inside a component.
+ * topology. The derived atom suppresses structurally equal updates. Repeated
+ * calls with the same bridge and path return the same atom.
  *
  * @category combinators
  * @since 0.7.0
@@ -519,8 +519,8 @@ export const selectSnapshot: {
  * Selects the typed value for an active state path in a directly owned child.
  *
  * Valid paths and their selected value types are inferred from the child
- * bridge. An inactive child produces `Option.none()`. Keep the returned atom
- * stable when constructing it inside a component.
+ * bridge. An inactive child produces `Option.none()`. Repeated calls with the
+ * same child bridge and path return the same atom.
  *
  * **Example**
  *
@@ -578,7 +578,8 @@ export const selectChild: {
  *
  * An inactive child or state path produces `Option.none()`. Unlike
  * {@link selectChild}, the selected value retains its child snapshot topology.
- * The derived atom suppresses structurally equal updates.
+ * The derived atom suppresses structurally equal updates. Repeated calls with
+ * the same child bridge and path return the same atom.
  *
  * @category combinators
  * @since 0.7.0
@@ -625,8 +626,9 @@ export const selectSnapshotChild: {
  * Returns whether a state path is active.
  *
  * Valid paths are inferred from the bridge snapshot.
- * The derived atom suppresses equal updates. Runtime failures remain in the
- * typed failure channel.
+ * The derived atom suppresses equal updates. Repeated calls with the same
+ * bridge and path return the same atom. Runtime failures remain in the typed
+ * failure channel.
  *
  * **Example**
  *
@@ -697,8 +699,8 @@ export const matches: {
  * Returns whether a state path is active in a directly owned child.
  *
  * Valid paths are inferred from the child bridge snapshot.
- * An inactive child produces `false`. Keep the returned atom stable when
- * constructing it inside a component.
+ * An inactive child produces `false`. Repeated calls with the same child
+ * bridge and path return the same atom.
  *
  * @category combinators
  * @since 0.4.0

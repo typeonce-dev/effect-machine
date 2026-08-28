@@ -36,10 +36,12 @@ const releaseFiles = changedFiles.filter(
   (path) =>
     path.startsWith("src/") ||
     path.startsWith("packages/effect-machine/src/") ||
+    path.startsWith("packages/effect-machine-react/src/") ||
     path.startsWith("packages/devtools/src/") ||
     path.startsWith("packages/oxlint-plugin/src/") ||
     path === "package.json" ||
     path === "packages/effect-machine/package.json" ||
+    path === "packages/effect-machine-react/package.json" ||
     path === "packages/devtools/package.json" ||
     path === "packages/oxlint-plugin/package.json"
 )
