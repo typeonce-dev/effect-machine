@@ -4,6 +4,7 @@
  * @since 0.4.0
  */
 
+import { dual } from "effect/Function"
 import type * as Option from "effect/Option"
 import type * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
@@ -351,6 +352,37 @@ type SnapshotByIdentifier<State, Path extends SnapshotIdentifier<State>> = Snaps
 
 type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.ChildMachine.Ref<Child>>
 
+type ChildSnapshot<Child extends Machine.ChildMachine.Any> = Machine.Machine.Snapshot<
+  Machine.Machine.States<Child["machine"]>
+>
+
+const InvalidSelectorPathTypeId = "~effect/reactivity/AtomMachine/InvalidSelectorPath"
+const SelectorProjectionTypeId = "~effect/reactivity/AtomMachine/SelectorProjection"
+
+type SelectorProjectionKind =
+  | "select"
+  | "selectSnapshot"
+  | "matches"
+  | "selectChild"
+  | "selectSnapshotChild"
+  | "matchesChild"
+
+interface SelectorProjection<Kind extends SelectorProjectionKind, Path extends string> {
+  readonly [SelectorProjectionTypeId]: {
+    readonly kind: Kind
+    readonly path: Path
+  }
+}
+
+type EnsureSelectorPath<State, Path extends string> = [Path] extends [SnapshotIdentifier<State>] ? unknown : {
+  readonly [InvalidSelectorPathTypeId]: Path
+}
+
+type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [ValuedSnapshotIdentifier<State>] ? unknown
+  : {
+    readonly [InvalidSelectorPathTypeId]: Path
+  }
+
 /**
  * Selects the typed value for an active state path.
  *
@@ -385,17 +417,49 @@ type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.Child
  * @category combinators
  * @since 0.4.0
  */
-export const select: <
-  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
-  Event,
-  Error,
-  Output,
-  StartError,
-  Emitted,
-  const Path extends ValuedSnapshotIdentifier<State>
->(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path) => Atom.Atom<
-  AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
-> = internal.select
+export const select: {
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown> = never,
+    Event = never,
+    Error = never,
+    Output = never,
+    StartError = never,
+    Emitted = never,
+    const Path extends ValuedSnapshotIdentifier<State> = ValuedSnapshotIdentifier<State>
+  >(path: Path):
+    & SelectorProjection<"select", Path>
+    & ((self: MachineAtom<State, Event, Error, Output, StartError, Emitted>) => Atom.Atom<
+      AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"select", Path>
+    & (<
+      State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+      Event,
+      Error,
+      Output,
+      StartError,
+      Emitted
+    >(
+      self: MachineAtom<State, Event, Error, Output, StartError, Emitted> & EnsureValuedSelectorPath<State, Path>
+    ) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotValueByIdentifier<State, Extract<Path, ValuedSnapshotIdentifier<State>>>>,
+        StartError | Error
+      >
+    >)
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+    Event,
+    Error,
+    Output,
+    StartError,
+    Emitted,
+    const Path extends ValuedSnapshotIdentifier<State>
+  >(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path): Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<SnapshotValueByIdentifier<State, Path>>, StartError | Error>
+  >
+} = dual(2, internal.select)
 
 /**
  * Selects the typed logical snapshot for an active state path.
@@ -407,17 +471,49 @@ export const select: <
  * @category combinators
  * @since 0.7.0
  */
-export const selectSnapshot: <
-  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
-  Event,
-  Error,
-  Output,
-  StartError,
-  Emitted,
-  const Path extends SnapshotIdentifier<State>
->(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path) => Atom.Atom<
-  AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
-> = internal.selectSnapshot
+export const selectSnapshot: {
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown> = never,
+    Event = never,
+    Error = never,
+    Output = never,
+    StartError = never,
+    Emitted = never,
+    const Path extends SnapshotIdentifier<State> = SnapshotIdentifier<State>
+  >(path: Path):
+    & SelectorProjection<"selectSnapshot", Path>
+    & ((self: MachineAtom<State, Event, Error, Output, StartError, Emitted>) => Atom.Atom<
+      AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"selectSnapshot", Path>
+    & (<
+      State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+      Event,
+      Error,
+      Output,
+      StartError,
+      Emitted
+    >(
+      self: MachineAtom<State, Event, Error, Output, StartError, Emitted> & EnsureSelectorPath<State, Path>
+    ) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotByIdentifier<State, Extract<Path, SnapshotIdentifier<State>>>>,
+        StartError | Error
+      >
+    >)
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+    Event,
+    Error,
+    Output,
+    StartError,
+    Emitted,
+    const Path extends SnapshotIdentifier<State>
+  >(self: MachineAtom<State, Event, Error, Output, StartError, Emitted>, path: Path): Atom.Atom<
+    AsyncResult.AsyncResult<Option.Option<SnapshotByIdentifier<State, Path>>, StartError | Error>
+  >
+} = dual(2, internal.selectSnapshot)
 
 /**
  * Selects the typed value for an active state path in a directly owned child.
@@ -436,16 +532,45 @@ export const selectSnapshot: <
  * @category combinators
  * @since 0.4.0
  */
-export const selectChild: <
-  Child extends Machine.ChildMachine.Any,
-  StartError,
-  const Path extends ValuedSnapshotIdentifier<ChildState<Child>>
->(self: ChildMachineAtom<Child, StartError>, path: Path) => Atom.Atom<
-  AsyncResult.AsyncResult<
-    Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
-    StartError | RefError<Machine.ChildMachine.Ref<Child>>
+export const selectChild: {
+  <
+    Child extends Machine.ChildMachine.Any = never,
+    StartError = never,
+    const Path extends ValuedSnapshotIdentifier<ChildState<Child>> = ValuedSnapshotIdentifier<ChildState<Child>>
+  >(path: Path):
+    & SelectorProjection<"selectChild", Path>
+    & ((self: ChildMachineAtom<Child, StartError>) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
+        StartError | RefError<Machine.ChildMachine.Ref<Child>>
+      >
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"selectChild", Path>
+    & (<
+      Child extends Machine.ChildMachine.Any,
+      StartError
+    >(
+      self: ChildMachineAtom<Child, StartError> & EnsureValuedSelectorPath<ChildState<Child>, Path>
+    ) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<
+          SnapshotValueByIdentifier<ChildState<Child>, Extract<Path, ValuedSnapshotIdentifier<ChildState<Child>>>>
+        >,
+        StartError | RefError<Machine.ChildMachine.Ref<Child>>
+      >
+    >)
+  <
+    Child extends Machine.ChildMachine.Any,
+    StartError,
+    const Path extends ValuedSnapshotIdentifier<ChildState<Child>>
+  >(self: ChildMachineAtom<Child, StartError>, path: Path): Atom.Atom<
+    AsyncResult.AsyncResult<
+      Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
+      StartError | RefError<Machine.ChildMachine.Ref<Child>>
+    >
   >
-> = internal.selectChild
+} = dual(2, internal.selectChild)
 
 /**
  * Selects the typed logical snapshot for an active state path in an invoked
@@ -458,16 +583,43 @@ export const selectChild: <
  * @category combinators
  * @since 0.7.0
  */
-export const selectSnapshotChild: <
-  Child extends Machine.ChildMachine.Any,
-  StartError,
-  const Path extends SnapshotIdentifier<ChildState<Child>>
->(self: ChildMachineAtom<Child, StartError>, path: Path) => Atom.Atom<
-  AsyncResult.AsyncResult<
-    Option.Option<SnapshotByIdentifier<ChildState<Child>, Path>>,
-    StartError | RefError<Machine.ChildMachine.Ref<Child>>
+export const selectSnapshotChild: {
+  <
+    Child extends Machine.ChildMachine.Any = never,
+    StartError = never,
+    const Path extends SnapshotIdentifier<ChildState<Child>> = SnapshotIdentifier<ChildState<Child>>
+  >(path: Path):
+    & SelectorProjection<"selectSnapshotChild", Path>
+    & ((self: ChildMachineAtom<Child, StartError>) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotByIdentifier<ChildState<Child>, Path>>,
+        StartError | RefError<Machine.ChildMachine.Ref<Child>>
+      >
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"selectSnapshotChild", Path>
+    & (<
+      Child extends Machine.ChildMachine.Any,
+      StartError
+    >(
+      self: ChildMachineAtom<Child, StartError> & EnsureSelectorPath<ChildState<Child>, Path>
+    ) => Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotByIdentifier<ChildState<Child>, Extract<Path, SnapshotIdentifier<ChildState<Child>>>>>,
+        StartError | RefError<Machine.ChildMachine.Ref<Child>>
+      >
+    >)
+  <
+    Child extends Machine.ChildMachine.Any,
+    StartError,
+    const Path extends SnapshotIdentifier<ChildState<Child>>
+  >(self: ChildMachineAtom<Child, StartError>, path: Path): Atom.Atom<
+    AsyncResult.AsyncResult<
+      Option.Option<SnapshotByIdentifier<ChildState<Child>, Path>>,
+      StartError | RefError<Machine.ChildMachine.Ref<Child>>
+    >
   >
-> = internal.selectSnapshotChild
+} = dual(2, internal.selectSnapshotChild)
 
 /**
  * Returns whether a state path is active.
@@ -501,18 +653,45 @@ export const selectSnapshotChild: <
  * @category combinators
  * @since 0.4.0
  */
-export const matches: <
-  State extends Machine.Machine.AtomicSnapshot<string, unknown>,
-  Event,
-  Error,
-  Output,
-  StartError,
-  Emitted,
-  const Path extends SnapshotIdentifier<State>
->(
-  self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
-  path: Path
-) => Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>> = internal.matches
+export const matches: {
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown> = never,
+    Event = never,
+    Error = never,
+    Output = never,
+    StartError = never,
+    Emitted = never,
+    const Path extends SnapshotIdentifier<State> = SnapshotIdentifier<State>
+  >(path: Path):
+    & SelectorProjection<"matches", Path>
+    & ((self: MachineAtom<State, Event, Error, Output, StartError, Emitted>) => Atom.Atom<
+      AsyncResult.AsyncResult<boolean, StartError | Error>
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"matches", Path>
+    & (<
+      State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+      Event,
+      Error,
+      Output,
+      StartError,
+      Emitted
+    >(
+      self: MachineAtom<State, Event, Error, Output, StartError, Emitted> & EnsureSelectorPath<State, Path>
+    ) => Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>>)
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+    Event,
+    Error,
+    Output,
+    StartError,
+    Emitted,
+    const Path extends SnapshotIdentifier<State>
+  >(
+    self: MachineAtom<State, Event, Error, Output, StartError, Emitted>,
+    path: Path
+  ): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>>
+} = dual(2, internal.matches)
 
 /**
  * Returns whether a state path is active in a directly owned child.
@@ -524,13 +703,34 @@ export const matches: <
  * @category combinators
  * @since 0.4.0
  */
-export const matchesChild: <
-  Child extends Machine.ChildMachine.Any,
-  StartError,
-  const Path extends SnapshotIdentifier<ChildState<Child>>
->(self: ChildMachineAtom<Child, StartError>, path: Path) => Atom.Atom<
-  AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
-> = internal.matchesChild
+export const matchesChild: {
+  <
+    Child extends Machine.ChildMachine.Any = never,
+    StartError = never,
+    const Path extends SnapshotIdentifier<ChildState<Child>> = SnapshotIdentifier<ChildState<Child>>
+  >(path: Path):
+    & SelectorProjection<"matchesChild", Path>
+    & ((self: ChildMachineAtom<Child, StartError>) => Atom.Atom<
+      AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+    >)
+  <const Path extends string>(path: Path):
+    & SelectorProjection<"matchesChild", Path>
+    & (<
+      Child extends Machine.ChildMachine.Any,
+      StartError
+    >(
+      self: ChildMachineAtom<Child, StartError> & EnsureSelectorPath<ChildState<Child>, Path>
+    ) => Atom.Atom<
+      AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+    >)
+  <
+    Child extends Machine.ChildMachine.Any,
+    StartError,
+    const Path extends SnapshotIdentifier<ChildState<Child>>
+  >(self: ChildMachineAtom<Child, StartError>, path: Path): Atom.Atom<
+    AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+  >
+} = dual(2, internal.matchesChild)
 
 const BoundRequirementsTypeId = "~effect/reactivity/AtomMachine/BoundRequirements"
 
@@ -602,6 +802,98 @@ type MachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.EmittedEvent<M>
 >
 
+type FamilyBridge = MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>
+
+type RootFamilySelectorProjection<State> =
+  | SelectorProjection<"select", ValuedSnapshotIdentifier<State>>
+  | SelectorProjection<"selectSnapshot", SnapshotIdentifier<State>>
+  | SelectorProjection<"matches", SnapshotIdentifier<State>>
+
+type ChildFamilySelectorProjection<Child extends Machine.ChildMachine.Any> =
+  | SelectorProjection<"selectChild", ValuedSnapshotIdentifier<ChildSnapshot<Child>>>
+  | SelectorProjection<"selectSnapshotChild", SnapshotIdentifier<ChildSnapshot<Child>>>
+  | SelectorProjection<"matchesChild", SnapshotIdentifier<ChildSnapshot<Child>>>
+
+type FamilyProjectionRecord<Bridge extends FamilyBridge, SelectorProjection = never> = Readonly<
+  Record<string, ((bridge: Bridge) => Atom.Atom<any>) | SelectorProjection>
+>
+
+type FamilyProjectedSelectorAtom<
+  Kind extends SelectorProjectionKind,
+  Path extends string,
+  Bridge extends FamilyBridge
+> = Bridge extends
+  MachineAtom<infer State, infer _Event, infer Error, infer _Output, infer StartError, infer _Emitted> ?
+  Kind extends "select" ? Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotValueByIdentifier<State, Extract<Path, ValuedSnapshotIdentifier<State>>>>,
+        StartError | Error
+      >
+    >
+  : Kind extends "selectSnapshot" ? Atom.Atom<
+      AsyncResult.AsyncResult<
+        Option.Option<SnapshotByIdentifier<State, Extract<Path, SnapshotIdentifier<State>>>>,
+        StartError | Error
+      >
+    >
+  : Kind extends "matches" ? Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>>
+  : never
+  : Bridge extends ChildMachineAtom<infer Child, infer StartError> ? Kind extends "selectChild" ? Atom.Atom<
+        AsyncResult.AsyncResult<
+          Option.Option<
+            SnapshotValueByIdentifier<
+              ChildSnapshot<Child>,
+              Extract<Path, ValuedSnapshotIdentifier<ChildSnapshot<Child>>>
+            >
+          >,
+          StartError | RefError<Machine.ChildMachine.Ref<Child>>
+        >
+      >
+    : Kind extends "selectSnapshotChild" ? Atom.Atom<
+        AsyncResult.AsyncResult<
+          Option.Option<
+            SnapshotByIdentifier<ChildSnapshot<Child>, Extract<Path, SnapshotIdentifier<ChildSnapshot<Child>>>>
+          >,
+          StartError | RefError<Machine.ChildMachine.Ref<Child>>
+        >
+      >
+    : Kind extends "matchesChild" ? Atom.Atom<
+        AsyncResult.AsyncResult<boolean, StartError | RefError<Machine.ChildMachine.Ref<Child>>>
+      >
+    : never
+  : never
+
+type FamilyProjectedAtom<Projection, Bridge extends FamilyBridge> = Projection extends
+  SelectorProjection<infer Kind, infer Path> ? FamilyProjectedSelectorAtom<Kind, Path, Bridge>
+  : Projection extends (bridge: Bridge) => infer Source ? Source extends Atom.Atom<any> ? Source : never
+  : never
+
+type FamilyAtoms<
+  Key,
+  Bridge extends FamilyBridge,
+  Projections extends Readonly<Record<string, unknown>>
+> = {
+  readonly [Name in keyof Projections]: (
+    key: Key
+  ) => Atom.WithoutSerializable<FamilyProjectedAtom<Projections[Name], Bridge>>
+}
+
+const FamilyInputRequiredTypeId = "~effect/reactivity/AtomMachine/FamilyInputRequired"
+
+type EnsureFamilyInput<M extends Machine.Machine.Any> = [Machine.Machine.Input<M>] extends [never] ? {
+    readonly [FamilyInputRequiredTypeId]: "AtomMachine.family requires a machine with startup input"
+  }
+  : unknown
+
+type FamilyOptions<
+  Key,
+  Bridge extends FamilyBridge,
+  Projections extends Readonly<Record<string, unknown>>
+> = {
+  readonly atoms: Projections
+  readonly label?: (key: Key, atomName: keyof Projections & string) => string | undefined
+}
+
 type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = MachineAtom<
   Machine.Machine.Snapshot<Machine.Machine.States<M>>,
   Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
@@ -644,7 +936,122 @@ export interface Bound<Services, RuntimeError = never> {
       & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     snapshot: Machine.Machine.Snapshot<Machine.Machine.States<M>>
   ) => ResumedMachineAtomOf<M, RuntimeError>
+
+  /**
+   * Creates retained atom families for independent machine inputs using the
+   * bound runtime.
+   *
+   * Each machine input is also the family key. Every projected atom retains
+   * its private machine bridge while the projected atom remains reachable.
+   *
+   * @since 0.28.0
+   */
+  readonly family: <
+    M extends Machine.Machine.Any,
+    const Projections extends FamilyProjectionRecord<
+      MachineAtomOf<NoInfer<M>, RuntimeError>,
+      RootFamilySelectorProjection<Machine.Machine.Snapshot<Machine.Machine.States<NoInfer<M>>>>
+    >
+  >(
+    machine:
+      & M
+      & EnsureBoundRequirements<Services, NoInfer<M>>
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>
+      & EnsureFamilyInput<NoInfer<M>>,
+    options: FamilyOptions<
+      Machine.Machine.Input<NoInfer<M>>,
+      MachineAtomOf<NoInfer<M>, RuntimeError>,
+      Projections
+    >
+  ) => FamilyAtoms<Machine.Machine.Input<M>, MachineAtomOf<M, RuntimeError>, Projections>
 }
+
+/**
+ * Creates retained atom families for independent machine inputs.
+ *
+ * The machine input is both startup input and family identity. Each property
+ * in `atoms` projects one public atom family from a private machine bridge.
+ * Retaining any projected atom retains that bridge without keeping its
+ * registry runtime mounted. Keys follow Effect `Equal` and `Hash` semantics.
+ * The optional `label` function labels each public projected atom.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const processAtoms = AtomMachine.family(processMachine, {
+ *   atoms: {
+ *     ready: AtomMachine.matches("Ready"),
+ *     state: (machine) => machine.state,
+ *     send: (machine) => machine.send
+ *   }
+ * })
+ *
+ * const readyAtom = processAtoms.ready("effect")
+ * const sendAtom = processAtoms.send("effect")
+ * ```
+ *
+ * @category constructors
+ * @since 0.28.0
+ */
+export const family: <
+  M extends Machine.Machine.Any,
+  const Projections extends FamilyProjectionRecord<
+    MachineAtomOf<NoInfer<M>, never>,
+    RootFamilySelectorProjection<Machine.Machine.Snapshot<Machine.Machine.States<NoInfer<M>>>>
+  >
+>(
+  machine:
+    & M
+    & EnsureNoExternalRequirements<MachineRequirementsOf<NoInfer<M>>>
+    & EnsureMachineExecutable<NoInfer<M>>
+    & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>
+    & EnsureFamilyInput<NoInfer<M>>,
+  options: FamilyOptions<
+    Machine.Machine.Input<NoInfer<M>>,
+    MachineAtomOf<NoInfer<M>, never>,
+    Projections
+  >
+) => FamilyAtoms<Machine.Machine.Input<M>, MachineAtomOf<M, never>, Projections> = internal.family as any
+
+/**
+ * Creates retained atom families for keyed direct-child lookup.
+ *
+ * The `child` function maps each family key to one direct child descriptor.
+ * Every projected atom retains the resulting child bridge while the projected
+ * atom remains reachable. Keys follow Effect `Equal` and `Hash` semantics.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const Plant = Machine.childFamily(plantMachine)
+ *
+ * const plantAtoms = AtomMachine.familyChild(parentMachineAtom, {
+ *   child: (plantId: string) => Plant(plantId),
+ *   atoms: {
+ *     broken: AtomMachine.matchesChild("Broken"),
+ *     state: (child) => child.state,
+ *     send: (child) => child.send
+ *   }
+ * })
+ * ```
+ *
+ * @category constructors
+ * @since 0.28.0
+ */
+export const familyChild: <
+  Key,
+  Parent extends MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
+  Child extends Machine.ChildMachine.Any,
+  const Projections extends FamilyProjectionRecord<ChildOf<Parent, Child>, ChildFamilySelectorProjection<Child>>
+>(
+  parent: Parent,
+  options: {
+    readonly child: (key: Key) => Child
+    readonly atoms: Projections
+    readonly label?: (key: Key, atomName: keyof Projections & string) => string | undefined
+  }
+) => FamilyAtoms<Key, ChildOf<Parent, Child>, Projections> = internal.familyChild as any
 
 /**
  * Creates atoms backed by a running machine.

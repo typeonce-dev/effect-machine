@@ -750,16 +750,45 @@ applications. Service-free machines can use `AtomMachine.make(Counter)`.
 The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 `send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,
 `AtomMachine.selectSnapshot`, and `AtomMachine.matches` for typed,
-equality-aware derivations. React applications using `@effect/atom-react` need
-a `RegistryProvider`.
+equality-aware derivations. Hooks from `@effect/atom-react` use a shared default
+registry. Add `RegistryProvider` only when a subtree needs separate registry
+identity or disposal.
+
+For a machine with startup input, `AtomMachine.family` uses that input as the
+family key and exposes direct atom families. Each returned atom retains its
+private machine bridge while preserving lazy registry startup and disposal:
+
+```ts
+const processAtoms = AtomMachine.bind(runtime).family(processMachine, {
+  atoms: {
+    details: AtomMachine.select("Processing"),
+    ready: AtomMachine.matches("Ready"),
+    send: (machine) => machine.send
+  }
+})
+
+const detailsAtom = processAtoms.details(input)
+const sendAtom = processAtoms.send(input)
+```
+
+The key follows Effect `Equal` and `Hash` semantics. Equal input values reuse
+the same public atom while it remains reachable. The family does not keep an
+unbounded strong cache on platforms with weak references. Keep keys immutable.
 
 Descriptors reconstructed from a `Machine.childFamily` resolve the same child
 bridge by machine identity and id:
 
 ```ts
 const Plant = Machine.childFamily(plantMachine)
-const plantAtom = centralAtom.child(Plant(selectedPlantId))
-const brokenAtom = AtomMachine.matchesChild(plantAtom, "Broken")
+const plants = AtomMachine.familyChild(centralAtom, {
+  child: (plantId: string) => Plant(plantId),
+  atoms: {
+    broken: AtomMachine.matchesChild("Broken"),
+    send: (plant) => plant.send
+  }
+})
+
+const brokenAtom = plants.broken(selectedPlantId)
 ```
 
 Emissions stay streams rather than becoming retained atom state:

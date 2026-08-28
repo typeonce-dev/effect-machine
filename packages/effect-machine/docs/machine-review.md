@@ -65,27 +65,16 @@ const handlers = {
 Review check: search for `.resolve(...)` callbacks that only return an empty
 `target.from()` and remove the callback.
 
-## Let `Atom.family` own keyed identity
+## Use retained families for keyed machine input
 
-Treat `useMemo` around an atom family lookup as a warning sign. `Atom.family`
-already returns the same retained object for the same key, including when
-separate components perform the lookup.
-
-```tsx
-// Redundant and local to one component
-const scope = useMemo(() => processFamily(processId), [processId])
-
-// The family owns identity
-const scope = processFamily(processId)
-```
-
-If the component constructs the atoms or machine scope directly, move that
-construction into a module-level family:
+Effect Atom keeps a family value for an equal key while that returned value is
+reachable. Current runtimes may hold family values through `WeakRef`. Retaining
+one field from a composite family value does not retain the composite itself:
 
 ```ts
-export const processFamily = Atom.family((processId: string) => {
-  const machine = machineAtoms.make(processMachine, { processId })
-
+// Unsafe when consumers retain only stateAtom or sendAtom
+const processScope = Atom.family((input: ProcessInput) => {
+  const machine = machineAtoms.make(processMachine, input)
   return {
     stateAtom: AtomMachine.select(machine, "process"),
     sendAtom: machine.send
@@ -93,17 +82,33 @@ export const processFamily = Atom.family((processId: string) => {
 })
 ```
 
-Use a stable domain key. A new key means a different machine instance. Send an
-event when a value should update the current workflow instead.
+Use `AtomMachine.family` for an input-bearing machine. It returns direct atom
+families whose atoms retain the private machine bridge:
 
-`useMemo` may still be useful for unrelated expensive calculations. It should
-not establish atom or machine identity. For one instance owned only by a React
-subtree, use a lazy `useState(makeScope)` initializer as described in the React
-guide.
+```ts
+export const processAtoms = machineAtoms.family(processMachine, {
+  atoms: {
+    state: AtomMachine.select("process"),
+    send: (machine) => machine.send
+  }
+})
 
-Review check: search for `useMemo` around atom creation, family lookup, or
-`machineAtoms.make`. Replace component-local identity with `Atom.family`, or
-with an intentional component-owned scope.
+const stateAtom = processAtoms.state(input)
+const sendAtom = processAtoms.send(input)
+```
+
+No component `useMemo` is needed. The registry retains the public atom while a
+hook subscribes to it, and that atom retains the machine owner. Equal inputs
+use Effect `Equal` and `Hash` semantics and select the same family value.
+
+For a no-input machine, use one module-level bridge or a lazy
+`useState(makeScope)` value owned by a React subtree. Do not add an unused key.
+
+Review check: search for composite `Atom.family` values that own a machine,
+`useMemo` around family lookup, and component-local calls to
+`machineAtoms.make`. Replace an input-bearing machine with
+`AtomMachine.family`. Give a no-input instance an explicit module or React-tree
+owner.
 
 ## Justify each `RegistryProvider`
 

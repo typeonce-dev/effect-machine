@@ -7,8 +7,57 @@ import ts from "typescript"
 const projectRoot = path.resolve(import.meta.dirname, "../packages/effect-machine")
 const virtualFile = path.join(projectRoot, "invoke-autocomplete.fixture.ts")
 const source = `
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import { Machine } from "./src/index.js"
+import { AtomMachine } from "./src/unstable/reactivity/index.js"
+
+class AtomIdle extends Schema.TaggedClass<AtomIdle>("AtomIdle")("AtomIdle", {}) {}
+class AtomReady extends Schema.TaggedClass<AtomReady>("AtomReady")("AtomReady", {}) {}
+const AtomStates = Machine.states({ AtomIdle, AtomReady })
+const atomDefinition = Machine.make({
+  states: AtomStates.states,
+  events: Machine.events(),
+  input: Schema.String,
+  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
+}).handle({ AtomIdle: {}, AtomReady: {} })
+
+AtomMachine.family(atomDefinition, {
+  atoms: {
+    selected: AtomMachine.select("AtomIdle"),
+    snapshot: AtomMachine.selectSnapshot("AtomIdle"),
+    matched: AtomMachine.matches("AtomReady")
+  }
+})
+
+const atomChildDefinition = Machine.make({
+  states: AtomStates.states,
+  events: Machine.events(),
+  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
+}).handle({ AtomIdle: {}, AtomReady: {} })
+const AtomChild = Machine.childFamily(atomChildDefinition)
+const atomParent = AtomMachine.make(Machine.make({
+  states: AtomStates.states,
+  events: Machine.events(),
+  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
+}).handle({ AtomIdle: {}, AtomReady: {} }))
+AtomMachine.familyChild(atomParent, {
+  child: (id: string) => AtomChild(id),
+  atoms: {
+    childSelected: AtomMachine.selectChild("AtomIdle"),
+    childMatched: AtomMachine.matchesChild("AtomReady")
+  }
+})
+AtomMachine.familyChild(atomParent, {
+  child: (id: string) => AtomChild(id),
+  atoms: {
+    // @ts-expect-error empty paths keep the completion position unfiltered
+    childSelectedCompletion: AtomMachine.selectChild(""),
+    // @ts-expect-error empty paths keep the completion position unfiltered
+    childSnapshotCompletion: AtomMachine.selectSnapshotChild(""),
+    // @ts-expect-error empty paths keep the completion position unfiltered
+    childMatchedCompletion: AtomMachine.matchesChild("")
+  }
+})
 
 const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
 const definition = Machine.make({
@@ -179,6 +228,38 @@ const completions = (marker) => {
   assert.notEqual(position, -1)
   return new Set(service.getCompletionsAtPosition(virtualFile, position, {})?.entries.map((entry) => entry.name))
 }
+
+const stringCompletions = (prefix) => {
+  const position = source.indexOf(prefix)
+  assert.notEqual(position, -1)
+  return new Set(service.getCompletionsAtPosition(virtualFile, position + prefix.length, {})?.entries.map((entry) => entry.name))
+}
+
+test("contextually completes data-last AtomMachine selectors", () => {
+  const selected = stringCompletions('selected: AtomMachine.select("')
+  assert.equal(selected.has("AtomIdle"), true)
+  assert.equal(selected.has("AtomReady"), true)
+
+  const snapshot = stringCompletions('snapshot: AtomMachine.selectSnapshot("')
+  assert.equal(snapshot.has("AtomIdle"), true)
+  assert.equal(snapshot.has("AtomReady"), true)
+
+  const matched = stringCompletions('matched: AtomMachine.matches("')
+  assert.equal(matched.has("AtomIdle"), true)
+  assert.equal(matched.has("AtomReady"), true)
+
+  const childSelected = stringCompletions('childSelectedCompletion: AtomMachine.selectChild("')
+  assert.equal(childSelected.has("AtomIdle"), true)
+  assert.equal(childSelected.has("AtomReady"), true)
+
+  const childSnapshot = stringCompletions('childSnapshotCompletion: AtomMachine.selectSnapshotChild("')
+  assert.equal(childSnapshot.has("AtomIdle"), true)
+  assert.equal(childSnapshot.has("AtomReady"), true)
+
+  const childMatched = stringCompletions('childMatchedCompletion: AtomMachine.matchesChild("')
+  assert.equal(childMatched.has("AtomIdle"), true)
+  assert.equal(childMatched.has("AtomReady"), true)
+})
 
 test("contextually completes Effect invocation factories while authoring", () => {
   const sources = completions("invoke-sources")

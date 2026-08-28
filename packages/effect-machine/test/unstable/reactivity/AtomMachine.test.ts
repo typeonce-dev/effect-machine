@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
+import { Cause, Data, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import { Machine } from "../../../src/index.js"
 import { AtomMachine } from "../../../src/unstable/reactivity/index.js"
@@ -80,6 +80,42 @@ const makeCounterMachine = () =>
     },
     Done: {}
   })
+
+const makeInputCounterMachine = () =>
+  Machine.make({
+    states: CounterStates.states,
+    events: Machine.events(Finish),
+    input: Schema.Number,
+    initial: (to) => to.Count().resolve(({ input, target }) => target.decoded(new Count({ value: input })))
+  }).handle({
+    Count: {
+      on: {
+        Finish: (to) =>
+          to.full.Count().resolve(({ state, event, target }) =>
+            target.decoded(new Count({ value: state.value + event.by }))
+          )
+      }
+    },
+    Done: {}
+  })
+
+const forceGc = async () => {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    globalThis.gc?.()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+const waitForCollection = async (ref: WeakRef<object>) => {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    globalThis.gc?.()
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    if (ref.deref() === undefined) {
+      return true
+    }
+  }
+  return false
+}
 
 describe("AtomMachine", () => {
   it.effect("observes prepared live inspection before atom startup", () =>
@@ -337,6 +373,133 @@ describe("AtomMachine", () => {
       yield* Effect.sync(() => registry.set(childAtoms.stop, undefined))
       assert(Option.isNone(yield* waitForResult(registry, childAtoms.ref, Option.isNone)))
       assert.strictEqual(yield* AtomRegistry.getResult(registry, matches), false)
+    })))
+
+  it.effect("creates retained atom families for dynamically spawned children", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const childMachine = makeCounterMachine()
+      const Child = Machine.childFamily(childMachine)
+      const parent = Machine.make({
+        states: { Count },
+        events: Machine.events(),
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      }).handle({
+        Count: {
+          invoke: (from) =>
+            from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
+              .onFailure((to) => to.none)
+        }
+      })
+      const parentAtoms = AtomMachine.make(parent)
+      const children = AtomMachine.familyChild(parentAtoms, {
+        child: (id: string) => Child(id),
+        atoms: {
+          count: AtomMachine.selectChild("Count"),
+          matches: AtomMachine.matchesChild("Count"),
+          send: (child) => child.send
+        },
+        label: (id, name) => `counter:${id}:${name}`
+      })
+      const count = children.count("dynamic")
+      const send = children.send("dynamic")
+
+      assert.strictEqual(children.count("dynamic"), count)
+      assert.notStrictEqual(children.count("missing"), count)
+      assert.strictEqual(count.label?.[0], "counter:dynamic:count")
+      yield* mount(registry, count)
+      const initial = yield* waitForResult(registry, count, Option.isSome)
+      assert(Option.isSome(initial))
+      assert.strictEqual(initial.value.value, 0)
+
+      yield* Effect.sync(() => registry.set(send, new Finish({ by: 3 })))
+      const updated = yield* waitForResult(
+        registry,
+        count,
+        (value) => Option.isSome(value) && value.value.value === 3
+      )
+      assert(Option.isSome(updated))
+      assert.strictEqual(updated.value.value, 3)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, children.matches("dynamic")), true)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, children.matches("missing")), false)
+    })))
+
+  it("uses Effect key equality without retaining family values permanently", async () => {
+    class FamilyKey extends Data.Class<{ readonly id: string }> {}
+    const machine = makeInputCounterMachine()
+    const atoms = AtomMachine.family(machine, {
+      atoms: {
+        state: (machine) => machine.state
+      }
+    })
+    const equalFirst = new FamilyKey({ id: "same" })
+    const equalSecond = new FamilyKey({ id: "same" })
+    const plainFirst = { id: "same" }
+    const plainSecond = { id: "same" }
+    const plainDifferent = { id: "different" }
+    const anyInputMachine = Machine.make({
+      states: CounterStates.states,
+      events: Machine.events(),
+      input: Schema.Any,
+      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+    }).handle({ Count: {}, Done: {} })
+    const anyInputAtoms = AtomMachine.family(anyInputMachine, {
+      atoms: { state: (machine) => machine.state }
+    })
+
+    assert.strictEqual(anyInputAtoms.state(equalFirst), anyInputAtoms.state(equalSecond))
+    assert.strictEqual(anyInputAtoms.state(plainFirst), anyInputAtoms.state(plainSecond))
+    assert.notStrictEqual(anyInputAtoms.state(plainFirst), anyInputAtoms.state(plainDifferent))
+    assert.strictEqual(atoms.state(1), atoms.state(1))
+    assert.notStrictEqual(atoms.state(1), atoms.state(2))
+
+    if (globalThis.gc !== undefined) {
+      const weak = (() => {
+        const atom = atoms.state(99)
+        return new WeakRef(atom)
+      })()
+      assert.strictEqual(await waitForCollection(weak), true)
+    }
+  })
+
+  it.effect("retains one keyed machine owner through every public projection", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const atoms = AtomMachine.family(makeInputCounterMachine(), {
+        atoms: {
+          count: AtomMachine.select("Count"),
+          equal: (machine) => machine.state.pipe(Atom.withEquality(() => true)),
+          ref: (machine) => machine.ref,
+          send: (machine) => machine.send,
+          state: (machine) => machine.state
+        }
+      })
+      const send = atoms.send(4)
+
+      yield* Effect.promise(forceGc)
+      const count = atoms.count(4)
+      const state = atoms.state(4)
+      assert.strictEqual(state.keepAlive, false)
+      assert.strictEqual(atoms.equal(4).equals(AsyncResult.initial(), AsyncResult.success({} as never)), true)
+      yield* mount(registry, state)
+      yield* Effect.sync(() => registry.set(send, new Finish({ by: 5 })))
+
+      const updated = yield* waitForResult(registry, count, (value) => Option.isSome(value) && value.value.value === 9)
+      assert(Option.isSome(updated))
+      assert.strictEqual(updated.value.value, 9)
+
+      const secondRegistry = AtomRegistry.make()
+      assert.strictEqual((yield* AtomRegistry.getResult(secondRegistry, state)).value.value, 4)
+      secondRegistry.dispose()
+
+      const ref = yield* AtomRegistry.getResult(registry, atoms.ref(4))
+      const stopped = yield* Machine.watch(ref).pipe(
+        Stream.runCollect,
+        Effect.forkScoped
+      )
+      yield* Effect.sync(() => registry.dispose())
+      const events = Array.from(yield* Fiber.join(stopped))
+      assert.strictEqual(events.at(-1)?._tag, "Stopped")
     })))
 
   it.effect("exposes snapshots and sends events", () =>
