@@ -5,15 +5,7 @@ import type {
   State as VisualizationState,
   Transition as VisualizationTransition
 } from "../../MachineDocument.js"
-import { type InputField, projectInputSchema } from "./input-form.js"
 import { stateLabel, triggerLabel } from "./visualizer-model.js"
-
-export interface ChartField {
-  readonly key: string
-  readonly label: string
-  readonly type: string
-  readonly required: boolean
-}
 
 export interface ChartActivity {
   readonly id: string
@@ -29,7 +21,6 @@ export interface ChartNode {
   readonly children: ReadonlyArray<string>
   readonly active: boolean
   readonly initial: boolean
-  readonly fields: ReadonlyArray<ChartField>
   readonly activities: ReadonlyArray<ChartActivity>
 }
 
@@ -67,53 +58,6 @@ export interface ChartModel {
   readonly edges: ReadonlyArray<ChartEdge>
   readonly runtimeTargets: ReadonlyArray<ChartRuntimeTarget>
   readonly initials: ReadonlyArray<ChartInitial>
-}
-
-const literalType = (value: string | number | boolean | null): string =>
-  typeof value === "string" ? JSON.stringify(value) : String(value)
-
-const fieldType = (field: InputField): string => {
-  switch (field._tag) {
-    case "String":
-      return field.format ?? "string"
-    case "Number":
-      return field.integer ? "integer" : "number"
-    case "Boolean":
-      return "boolean"
-    case "Enum":
-      return field.values.map(literalType).join(" | ")
-    case "Literal":
-      return literalType(field.value)
-    case "Object":
-      return "object"
-    case "Array":
-      return `${fieldType(field.item)}[]`
-    case "Union":
-      return field.alternatives.map(fieldType).join(" | ")
-    case "Unsupported":
-      return "unknown"
-  }
-}
-
-const stateFields = (state: VisualizationState): ReadonlyArray<ChartField> => {
-  if (state.valueSchema === null) return []
-  const projected = projectInputSchema(state.valueSchema)
-  if (projected._tag !== "Object") {
-    return [{
-      key: "value",
-      label: projected.title ?? "value",
-      type: fieldType(projected),
-      required: true
-    }]
-  }
-  return projected.fields
-    .filter(({ key }) => key !== "_tag")
-    .map(({ field, key, required }) => ({
-      key,
-      label: field.title ?? key,
-      type: fieldType(field),
-      required
-    }))
 }
 
 const activityLabel = (activity: VisualizationActivity): string => {
@@ -177,7 +121,6 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
     children: [...state.children],
     active: active.has(state.path),
     initial: initialPaths.has(state.path),
-    fields: stateFields(state),
     activities: state.activityIds.flatMap((id): ReadonlyArray<ChartActivity> => {
       const activity = activities.get(id)
       return activity === undefined ? [] : [{ id, kind: activity.type, label: activityLabel(activity) }]

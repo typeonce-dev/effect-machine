@@ -1,7 +1,11 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { ELK as ElkApi, ELKConstructorArguments, ElkNode } from "elkjs/lib/elk-api.js"
+import ELKBundle from "elkjs/lib/elk.bundled.js"
 import { makeChartLayoutPolicy } from "../../../src/internal/browser/chart-layout-policy.js"
 import {
+  chartEdgeLabelSpacing,
+  chartRouteLength,
   chartSelfLoopMinimumClearance,
   layoutChart,
   layoutChartWith,
@@ -28,10 +32,13 @@ import {
   parentProtocolMachine,
   requiredParentChildMachine
 } from "../../../src/internal/browser/protocol-events-example.js"
+import { sharedTerminalRoutingMachine } from "../../../src/internal/browser/shared-terminal-routing-example.js"
 import { transitionSemanticsMachine } from "../../../src/internal/browser/transition-semantics-example.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
 
 describe("Static chart", () => {
+  const ELK = ELKBundle as unknown as new(args?: ELKConstructorArguments) => ElkApi
+
   it("rounds orthogonal bends and places direction cues on long routes", () => {
     assert.strictEqual(
       chartEdgePathData([
@@ -55,7 +62,7 @@ describe("Static chart", () => {
     assert.strictEqual(chartDirectionCue([{ x: 0, y: 0 }, { x: 200, y: 0 }]), null)
   })
 
-  it("derives a left-to-right policy from initial reachability", () => {
+  it("derives a top-to-bottom policy from initial reachability", () => {
     const node = (path: string, type: ChartNode["type"] = "atomic"): ChartNode => ({
       path,
       label: path,
@@ -64,7 +71,6 @@ describe("Static chart", () => {
       children: [],
       active: false,
       initial: path === "Idle",
-      fields: [],
       activities: []
     })
     const model: ChartModel = {
@@ -123,44 +129,99 @@ describe("Static chart", () => {
       staticPath: true,
       rank: 0,
       order: 0,
-      layerConstraint: null
+      layerConstraint: "FIRST"
     })
     assert.strictEqual(policy.node("Done").layerConstraint, "LAST")
     assert.strictEqual(policy.node("Detached").reachable, false)
     assert.strictEqual(policy.node("Detached").staticPath, false)
     assert.deepStrictEqual(policy.edge(model.edges[0]!), {
       direction: "forward",
-      sourceSide: "EAST",
-      targetSide: "WEST"
+      sourceSide: "SOUTH",
+      targetSide: "NORTH"
     })
     assert.deepStrictEqual(policy.edge(model.edges[1]!), {
       direction: "backward",
-      sourceSide: "WEST",
-      targetSide: "EAST"
+      sourceSide: "NORTH",
+      targetSide: "SOUTH"
     })
     assert.deepStrictEqual(policy.edge(model.edges[2]!), {
       direction: "self",
-      sourceSide: "SOUTH",
-      targetSide: "SOUTH"
+      sourceSide: "EAST",
+      targetSide: "EAST"
     })
   })
 
-  it("projects state fields, invocation metadata, and transition branches", () => {
+  it("uses side lanes for transitions crossing a parent boundary", () => {
+    const node = (path: string, parent: string | null, children: ReadonlyArray<string>): ChartNode => ({
+      path,
+      label: path,
+      type: children.length === 0 ? "atomic" : "compound",
+      parent,
+      children,
+      active: false,
+      initial: path === "Workflow" || path === "Workflow.Idle",
+      activities: []
+    })
+    const edges: ChartModel["edges"] = [
+      {
+        id: "enter",
+        transitionId: "enter",
+        branchIds: ["enter"],
+        kind: "target",
+        source: "Workflow",
+        target: "Workflow.Idle",
+        label: "Enter",
+        trigger: { type: "event", event: "Enter" },
+        activityKind: null,
+        reenter: false,
+        acceptance: "required"
+      },
+      {
+        id: "leave",
+        transitionId: "leave",
+        branchIds: ["leave"],
+        kind: "target",
+        source: "Workflow.Idle",
+        target: "Workflow",
+        label: "Leave",
+        trigger: { type: "event", event: "Leave" },
+        activityKind: null,
+        reenter: false,
+        acceptance: "required"
+      }
+    ]
+    const policy = makeChartLayoutPolicy({
+      machineId: "hierarchy-policy",
+      roots: ["Workflow"],
+      nodes: [
+        node("Workflow", null, ["Workflow.Idle"]),
+        node("Workflow.Idle", "Workflow", [])
+      ],
+      edges,
+      runtimeTargets: [],
+      initials: [
+        { id: "initial:Workflow", target: "Workflow", parent: null },
+        { id: "initial:Workflow.Idle", target: "Workflow.Idle", parent: "Workflow" }
+      ]
+    })
+
+    assert.deepStrictEqual(policy.edge(edges[0]!), {
+      direction: "forward",
+      sourceSide: "EAST",
+      targetSide: "EAST"
+    })
+    assert.deepStrictEqual(policy.edge(edges[1]!), {
+      direction: "backward",
+      sourceSide: "WEST",
+      targetSide: "WEST"
+    })
+  })
+
+  it("projects invocation metadata and transition branches without state value fields", () => {
     const document = MachineDocument.make(plannerMachine)
     const model = makeChartModel(document)
-    const idle = model.nodes.find((node) => node.path === "Idle")
     const working = model.nodes.find((node) => node.path === "Working")
 
-    assert.deepStrictEqual(idle?.fields, [{
-      key: "owner",
-      label: "owner",
-      type: "string",
-      required: true
-    }])
-    assert.deepStrictEqual(working?.fields.map(({ key, type }) => ({ key, type })), [
-      { key: "owner", type: "string" },
-      { key: "job", type: "string" }
-    ])
     assert.deepStrictEqual(working?.activities.map(({ kind, label }) => ({ kind, label })), [
       { kind: "effect", label: "monitor-job" }
     ])
@@ -197,16 +258,79 @@ describe("Static chart", () => {
     )
   })
 
-  it("keeps parent-to-child transitions off the initial-entry lane", async () => {
+  it("keeps value-bearing states compact while reserving room for invocations", async () => {
+    const layout = await Effect.runPromise(layoutChart(makeChartModel(MachineDocument.make(plannerMachine))))
+    const idle = layout.nodes.find((node) => node.node.path === "Idle")
+    const working = layout.nodes.find((node) => node.node.path === "Working")
+
+    assert.strictEqual(idle?.height, 52)
+    assert.isAtMost(idle?.width ?? Number.POSITIVE_INFINITY, 160)
+    assert.isAbove(working?.height ?? 0, idle?.height ?? Number.POSITIVE_INFINITY)
+    assert.isAtMost(
+      (idle?.y ?? Number.POSITIVE_INFINITY) + (idle?.height ?? 0),
+      working?.y ?? Number.NEGATIVE_INFINITY
+    )
+  })
+
+  it("places a compact initial marker entering the target from above", async () => {
     const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
     const layout = await Effect.runPromise(layoutChart(model))
     const initial = layout.edges.find((edge) => edge.kind === "initial" && edge.initial.target === "Gallery.Choose")
-    const reset = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.label === "Reset")
-    if (initial?.kind !== "initial" || reset?.kind !== "transition") {
-      assert.fail("Expected the Choose initial entry and Reset transition")
+    const marker = layout.initials.find((entry) => entry.initial.target === "Gallery.Choose")
+    const target = layout.nodes.find((node) => node.node.path === "Gallery.Choose")
+    if (initial?.kind !== "initial" || marker === undefined || target === undefined) {
+      assert.fail("Expected the Choose initial marker")
     }
 
-    assert.notStrictEqual(reset.points.at(-1)?.y, initial.points.at(-1)?.y)
+    assert.isAtLeast(marker.x, target.x)
+    assert.isBelow(marker.x + marker.width, target.x + target.width)
+    assert.isBelow(marker.y + marker.height, target.y)
+    assert.deepStrictEqual(initial.points.at(-1), { x: marker.x + marker.width / 2, y: target.y })
+    assert.isBelow(
+      initial.points.slice(1).reduce((length, point, index) => {
+        const previous = initial.points[index]!
+        return length + Math.abs(point.x - previous.x) + Math.abs(point.y - previous.y)
+      }, 0),
+      30
+    )
+  })
+
+  it("attaches invoke failures to the Failed state instead of a nearby route", async () => {
+    const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const failed = layout.nodes.find(({ node }) => node.path === "Failed")
+    const failures = layout.edges.filter((edge) =>
+      edge.kind === "transition" && edge.edge.trigger.type === "invoke" && edge.edge.target === "Failed"
+    )
+    if (failed === undefined) assert.fail("Expected the Failed state")
+
+    assert.lengthOf(failures, 3)
+    for (const failure of failures) {
+      const end = failure.points.at(-1)!
+      assert.strictEqual(end.y, failed.y)
+      assert.isAtLeast(end.x, failed.x)
+      assert.isAtMost(end.x, failed.x + failed.width)
+    }
+  })
+
+  it("leaves an atomic source through its boundary before turning", async () => {
+    const model = makeChartModel(MachineDocument.make(invokeOutcomesMachine))
+    const layout = await Effect.runPromise(layoutChart(model))
+    const failed = layout.nodes.find(({ node }) => node.path === "Failed")
+    const reset = layout.edges.find((edge) =>
+      edge.kind === "transition" && edge.edge.source === "Failed" && edge.edge.label === "Reset"
+    )
+    if (failed === undefined || reset?.kind !== "transition") {
+      assert.fail("Expected the Failed reset transition")
+    }
+
+    const start = reset.points[0]!
+    const next = reset.points[1]!
+    assert.strictEqual(start.y, failed.y)
+    assert.isAtLeast(start.x, failed.x)
+    assert.isAtMost(start.x, failed.x + failed.width)
+    assert.strictEqual(next.x, start.x)
+    assert.isBelow(next.y, start.y)
   })
 
   it("keeps transition labels attached to their ELK routes", async () => {
@@ -251,8 +375,26 @@ describe("Static chart", () => {
     }))
     for (const initial of layout.initials) {
       const target = layout.nodes.find(({ node }) => node.path === initial.initial.target)
-      assert.isBelow(initial.x + initial.width, target?.x ?? Number.POSITIVE_INFINITY)
+      assert.isBelow(initial.y + initial.height, target?.y ?? Number.POSITIVE_INFINITY)
+      assert.isAtLeast(initial.x, target?.x ?? Number.NEGATIVE_INFINITY)
+      assert.isBelow(initial.x + initial.width, (target?.x ?? 0) + (target?.width ?? 0))
     }
+
+    const online = layout.nodes.find(({ node }) => node.path === "application.connection.online")
+    const offline = layout.nodes.find(({ node }) => node.path === "application.connection.offline")
+    const disconnect = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.label === "Disconnect")
+    if (online === undefined || offline === undefined || disconnect?.kind !== "transition") {
+      assert.fail("Expected the connection flow")
+    }
+    assert.isAtMost(offline.y - online.y - online.height, 180)
+    assert.isTrue(
+      disconnect.points.slice(1).some((point, index) => {
+        const previous = disconnect.points[index]!
+        return previous.x === point.x && disconnect.label.x === point.x &&
+          disconnect.label.y >= Math.min(previous.y, point.y) &&
+          disconnect.label.y <= Math.max(previous.y, point.y)
+      })
+    )
   })
 
   it("lays out targetless transitions as self-loops", async () => {
@@ -290,16 +432,16 @@ describe("Static chart", () => {
         chartSelfLoopMinimumClearance
       )
       assert.isAbove(
-        laidOut.label.y - laidOut.labelHeight / 2,
-        Math.max(...laidOut.points.map(({ y }) => y))
+        laidOut.label.x - laidOut.labelWidth / 2,
+        Math.max(...laidOut.points.map(({ x }) => x))
       )
-      assert.isAtMost(laidOut.label.y + laidOut.labelHeight / 2, layout.height)
+      assert.isAtMost(laidOut.label.x + laidOut.labelWidth / 2, layout.width)
       const source = model.nodes.find(({ path }) => path === laidOut.edge.source)
       const parent = source?.parent === null
         ? undefined
         : layout.nodes.find(({ node }) => node.path === source?.parent)
       if (parent !== undefined) {
-        assert.isAtMost(laidOut.label.y + laidOut.labelHeight / 2, parent.y + parent.height)
+        assert.isAtMost(laidOut.label.x + laidOut.labelWidth / 2, parent.x + parent.width)
       }
     }
   })
@@ -330,7 +472,7 @@ describe("Static chart", () => {
     assert.strictEqual(transitionEdges.length, model.edges.length)
     assert.strictEqual(updates.length, 3)
     assert.deepStrictEqual(
-      new Set(updates.map(({ points }) => Math.max(...points.map(({ y }) => y)))).size,
+      new Set(updates.map(({ points }) => Math.max(...points.map(({ x }) => x)))).size,
       3
     )
     assert.isTrue(
@@ -373,6 +515,9 @@ describe("Static chart", () => {
 
     assert.isAtLeast(parentTransition.points.length, 2)
     assert.isAtLeast(externalFailure.points.length, 2)
+    assert.strictEqual(parentTransition.points[0]?.y, source.y + source.headerHeight)
+    assert.isAtLeast(Math.min(...externalFailure.points.map(({ y }) => y)), target.y)
+    assert.isBelow(chartRouteLength(externalFailure.points), 500)
     assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
     assert.deepStrictEqual(
       repeated.edges.map((edge) => ({
@@ -389,13 +534,55 @@ describe("Static chart", () => {
   it("tries deterministic spacing profiles before reporting an unsafe layout", async () => {
     const model = makeChartModel(MachineDocument.make(layoutResilienceMachine))
     const attempts: Array<string> = []
-    const failure = await Effect.runPromise(Effect.flip(layoutChartWith(model, async (_graph, constraints) => {
+    const labelSpacings: Array<unknown> = []
+    const failure = await Effect.runPromise(Effect.flip(layoutChartWith(model, async (graph, constraints) => {
       attempts.push(constraints)
+      labelSpacings.push(graph.layoutOptions?.["elk.spacing.edgeLabel"])
       throw new Error(`${constraints} layout failed`)
     })))
 
     assert.deepStrictEqual(attempts, ["fixed", "fixed", "fixed", "relaxed", "relaxed"])
+    assert.deepStrictEqual(labelSpacings, Array.from({ length: 5 }, () => String(chartEdgeLabelSpacing)))
     assert.include(failure.message, "roomy-relaxed: relaxed layout failed")
+  })
+
+  it("falls back to a chart with only label-to-route warnings after exhausting clean layouts", async () => {
+    const model = makeChartModel(MachineDocument.make(sharedTerminalRoutingMachine))
+    const elk = new ELK()
+    let cachedLayout: Promise<ElkNode> | undefined
+    const engine = (graph: ElkNode): Promise<ElkNode> => cachedLayout ??= elk.layout(graph)
+    let attempts = 0
+    const layout = await Effect.runPromise(layoutChartWith(
+      model,
+      async (graph) => {
+        attempts++
+        return engine(graph)
+      },
+      (_model, candidate) => ({
+        valid: false,
+        issues: [{ code: "label-route-overlap", edgeId: model.edges[0]!.id, relatedId: model.edges[1]!.id }],
+        crossings: 0,
+        routeLength: candidate.edges.reduce((total, edge) => total + chartRouteLength(edge.points), 0)
+      })
+    ))
+
+    assert.strictEqual(attempts, 5)
+    assert.strictEqual(layout.edges.length, model.edges.length + model.initials.length)
+
+    const failure = await Effect.runPromise(Effect.flip(layoutChartWith(
+      model,
+      engine,
+      () => ({
+        valid: false,
+        issues: [
+          { code: "label-route-overlap", edgeId: model.edges[0]!.id, relatedId: model.edges[1]!.id },
+          { code: "route-overlap", edgeId: model.edges[0]!.id, relatedId: model.edges[1]!.id }
+        ],
+        crossings: 0,
+        routeLength: 0
+      })
+    )))
+    assert.include(failure.message, "route-overlap")
   })
 
   it("keeps the example topology corpus deterministic and free of hard geometry violations", async () => {
@@ -407,6 +594,7 @@ describe("Static chart", () => {
       ["invoke outcomes", makeChartModel(MachineDocument.make(invokeOutcomesMachine))],
       ["layout resilience", makeChartModel(MachineDocument.make(layoutResilienceMachine))],
       ["hierarchy routing", makeChartModel(MachineDocument.make(hierarchyRoutingMachine))],
+      ["shared terminal routing", makeChartModel(MachineDocument.make(sharedTerminalRoutingMachine))],
       ["required parent protocol", makeChartModel(MachineDocument.make(requiredParentChildMachine))],
       ["parent protocol", makeChartModel(MachineDocument.make(parentProtocolMachine))],
       ["optional parent", makeChartModel(MachineDocument.make(optionalParentMachine))]
@@ -431,20 +619,20 @@ describe("Static chart", () => {
     }
   })
 
-  it("stacks parallel regions as vertical lanes", async () => {
+  it("places parallel regions side by side while each region flows downward", async () => {
     const model = makeChartModel(MachineDocument.make(parallelCompletionMachine))
     const policy = makeChartLayoutPolicy(model)
     const layout = await Effect.runPromise(layoutChart(model))
     const regions = layout.nodes
       .filter(({ node }) => node.parent === "Order")
-      .sort((left, right) => left.y - right.y)
+      .sort((left, right) => left.x - right.x)
 
     assert.deepStrictEqual(
       regions.map(({ node }) => node.path).sort(),
       ["Order.payment", "Order.fulfillment"].sort()
     )
     assert.isTrue(regions.every(({ node }) => policy.node(node.path).staticPath))
-    assert.isAtMost(regions[0]!.y + regions[0]!.height, regions[1]!.y)
+    assert.isAtMost(regions[0]!.x + regions[0]!.width, regions[1]!.x)
   })
 
   it("groups states without a static path from the initial state", async () => {
@@ -456,7 +644,6 @@ describe("Static chart", () => {
       children: [],
       active: false,
       initial,
-      fields: [],
       activities: []
     })
     const model: ChartModel = {
@@ -486,6 +673,19 @@ describe("Static chart", () => {
 
     assert.strictEqual(policy.node("Disabled").staticPath, false)
     assert.isTrue(layout.regions.some(({ nodePaths }) => nodePaths.includes("Disabled")))
+
+    const recent = layout.nodes.find(({ node }) => node.path === "Workspace.recent")
+    const resume = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.label === "ResumeShallow")
+    if (recent === undefined || resume?.kind !== "transition") assert.fail("Expected the shallow history transition")
+    const approach = resume.points.at(-2)!
+    const end = resume.points.at(-1)!
+    assert.isTrue(approach.x === end.x || approach.y === end.y)
+    assert.isTrue(
+      (end.x === recent.x || end.x === recent.x + recent.width) &&
+          end.y >= recent.y && end.y <= recent.y + recent.height ||
+        (end.y === recent.y || end.y === recent.y + recent.height) &&
+          end.x >= recent.x && end.x <= recent.x + recent.width
+    )
   })
 
   it("lays out runtime-resolved targets as explicit stubs", async () => {

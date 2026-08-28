@@ -6,8 +6,7 @@ import {
   type LaidOutChart,
   type LaidOutChartNode,
   layoutChart,
-  maxVisibleActivities,
-  maxVisibleFields
+  maxVisibleActivities
 } from "./chart-layout.js"
 import { makeChartModel } from "./chart-model.js"
 
@@ -130,7 +129,7 @@ const statusLabel = (active: boolean, initial: boolean): string => {
 const status = (active: boolean, initial: boolean): HTMLSpanElement => {
   const dot = element(
     "span",
-    `chart-state-status${active ? " is-active" : ""}${initial ? " is-initial" : ""}`
+    `chart-state-status${active ? " is-active" : ""}`
   )
   dot.dataset.initial = String(initial)
   dot.setAttribute("aria-label", statusLabel(active, initial))
@@ -147,26 +146,8 @@ const stateContent = (layout: LaidOutChartNode, stateStatus: HTMLElement): Docum
   heading.append(identity)
   fragment.append(heading)
 
-  if (layout.node.fields.length > 0) {
-    const fields = element("div", "chart-state-section")
-    fields.append(element("div", "chart-section-label", "value"))
-    layout.node.fields.slice(0, maxVisibleFields).forEach((field) => {
-      const row = element("div", "chart-field-row")
-      row.append(
-        element("span", "chart-field-name", `${field.label}${field.required ? "" : "?"}`),
-        element("span", "chart-field-type", field.type)
-      )
-      fields.append(row)
-    })
-    if (layout.node.fields.length > maxVisibleFields) {
-      fields.append(more(layout.node.fields.length - maxVisibleFields))
-    }
-    fragment.append(fields)
-  }
-
   if (layout.node.activities.length > 0) {
     const activities = element("div", "chart-state-section")
-    activities.append(element("div", "chart-section-label", "invokes"))
     layout.node.activities.slice(0, maxVisibleActivities).forEach((activity) => {
       const row = element("div", `chart-activity-row chart-activity-${activity.kind}`)
       row.append(
@@ -314,7 +295,19 @@ const render = (
   const directionArrow = svgElement("path")
   directionArrow.setAttribute("d", "M 1 1 L 7 4 L 1 7 z")
   directionMarker.append(directionArrow)
-  definitions.append(marker, directionMarker)
+  const initialMarker = svgElement("marker")
+  initialMarker.id = "chart-initial-arrow"
+  initialMarker.setAttribute("viewBox", "0 0 8 8")
+  initialMarker.setAttribute("refX", "7")
+  initialMarker.setAttribute("refY", "4")
+  initialMarker.setAttribute("markerWidth", "7")
+  initialMarker.setAttribute("markerHeight", "7")
+  initialMarker.setAttribute("markerUnits", "userSpaceOnUse")
+  initialMarker.setAttribute("orient", "auto")
+  const initialArrow = svgElement("path")
+  initialArrow.setAttribute("d", "M 1 1 L 7 4 L 1 7 z")
+  initialMarker.append(initialArrow)
+  definitions.append(marker, directionMarker, initialMarker)
   svg.append(definitions)
   const nodesLayer = element("div", "chart-nodes")
   const labelsLayer = element("div", "chart-labels")
@@ -447,7 +440,10 @@ const render = (
     const route = chartEdgePathData(laidOut.points)
     casing.setAttribute("d", route)
     visible.setAttribute("d", route)
-    visible.setAttribute("marker-end", "url(#chart-arrow)")
+    visible.setAttribute(
+      "marker-end",
+      laidOut.kind === "initial" ? "url(#chart-initial-arrow)" : "url(#chart-arrow)"
+    )
     const hit = svgElement("path", "chart-edge-hit")
     hit.setAttribute("d", route)
     group.append(casing, visible)

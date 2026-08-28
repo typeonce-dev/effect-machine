@@ -7,7 +7,7 @@ export interface ChartNodeLayoutPolicy {
   readonly staticPath: boolean
   readonly rank: number | null
   readonly order: number
-  readonly layerConstraint: "LAST" | null
+  readonly layerConstraint: "FIRST" | "LAST" | null
 }
 
 export interface ChartEdgeLayoutPolicy {
@@ -159,17 +159,17 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
         staticPath: staticPaths.has(node.path),
         rank,
         order,
-        layerConstraint: node.type === "final" ? "LAST" : null
+        layerConstraint: rank === 0 ? "FIRST" : node.type === "final" ? "LAST" : null
       })
     })
   }
 
   const edgePolicy = (edge: ChartEdge): ChartEdgeLayoutPolicy => {
     if (edge.kind === "targetless" || edge.target === edge.source) {
-      return { direction: "self", sourceSide: "SOUTH", targetSide: "SOUTH" }
+      return { direction: "self", sourceSide: "EAST", targetSide: "EAST" }
     }
     if (edge.target === null) {
-      return { direction: "forward", sourceSide: "EAST", targetSide: "WEST" }
+      return { direction: "forward", sourceSide: "SOUTH", targetSide: "NORTH" }
     }
 
     const sourceLineage = lineage(edge.source, nodes)
@@ -182,10 +182,10 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
       differentAt++
     }
     if (differentAt === sourceLineage.length) {
-      return { direction: "forward", sourceSide: "EAST", targetSide: "WEST" }
+      return { direction: "forward", sourceSide: "EAST", targetSide: "EAST" }
     }
     if (differentAt === targetLineage.length) {
-      return { direction: "backward", sourceSide: "WEST", targetSide: "EAST" }
+      return { direction: "backward", sourceSide: "WEST", targetSide: "WEST" }
     }
 
     const source = nodePolicies.get(sourceLineage[differentAt]!) ?? unreachableNode
@@ -193,9 +193,14 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
     const backward = source.rank !== null && target.rank !== null
       ? target.rank < source.rank || target.rank === source.rank && target.order < source.order
       : target.order < source.order
+    if (nodes.get(edge.source)?.parent !== nodes.get(edge.target)?.parent) {
+      return backward
+        ? { direction: "backward", sourceSide: "WEST", targetSide: "WEST" }
+        : { direction: "forward", sourceSide: "EAST", targetSide: "EAST" }
+    }
     return backward
-      ? { direction: "backward", sourceSide: "WEST", targetSide: "EAST" }
-      : { direction: "forward", sourceSide: "EAST", targetSide: "WEST" }
+      ? { direction: "backward", sourceSide: "NORTH", targetSide: "SOUTH" }
+      : { direction: "forward", sourceSide: "SOUTH", targetSide: "NORTH" }
   }
 
   return {
