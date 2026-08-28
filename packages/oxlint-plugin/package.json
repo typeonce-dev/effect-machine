@@ -1,6 +1,6 @@
 {
   "name": "@typeonce/oxlint-plugin-effect-machine",
-  "version": "0.27.1",
+  "version": "0.28.0",
   "description": "Oxlint rules for Effect Machine models",
   "author": "Sandro Maglione",
   "repository": {
