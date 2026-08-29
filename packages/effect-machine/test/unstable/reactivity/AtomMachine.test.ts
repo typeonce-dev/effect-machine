@@ -214,9 +214,11 @@ describe("AtomMachine", () => {
         Done: {}
       })
       const bridge = AtomMachine.resume(machine, { path: "Count" as const, value: new Count({ value: 5 }) })
+      const canFinish = AtomMachine.can(new Finish({ by: 1 }))(bridge)
       const firstRegistry = AtomRegistry.make()
       const secondRegistry = AtomRegistry.make()
 
+      assert.strictEqual(yield* AtomRegistry.getResult(firstRegistry, canFinish), true)
       const first = yield* AtomRegistry.getResult(firstRegistry, bridge.ref)
       const firstAgain = yield* AtomRegistry.getResult(firstRegistry, bridge.ref)
       const second = yield* AtomRegistry.getResult(secondRegistry, bridge.ref)
@@ -474,18 +476,22 @@ describe("AtomMachine", () => {
     }
   })
 
-  it("does not retain abandoned bridges through the selector cache", async () => {
+  it("does not retain abandoned bridges through projection caches", async () => {
     if (globalThis.gc === undefined) return
 
+    const canFinish = AtomMachine.can(new Finish({ by: 1 }))
     const refs = (() => {
       const bridge = AtomMachine.make(makeCounterMachine())
       const selector = AtomMachine.selectSnapshot(bridge, "Count")
+      const acceptance = canFinish(bridge)
       return {
+        acceptance: new WeakRef(acceptance),
         bridge: new WeakRef(bridge),
         selector: new WeakRef(selector)
       }
     })()
 
+    assert.strictEqual(await waitForCollection(refs.acceptance), true)
     assert.strictEqual(await waitForCollection(refs.selector), true)
     assert.strictEqual(await waitForCollection(refs.bridge), true)
   })
@@ -495,6 +501,7 @@ describe("AtomMachine", () => {
       const registry = yield* makeRegistry
       const atoms = AtomMachine.family(makeInputCounterMachine(), {
         atoms: {
+          canFinish: AtomMachine.can(new Finish({ by: 1 })),
           count: AtomMachine.select("Count"),
           equal: (machine) => machine.state.pipe(Atom.withEquality(() => true)),
           ref: (machine) => machine.ref,
@@ -508,6 +515,7 @@ describe("AtomMachine", () => {
       const count = atoms.count(4)
       const state = atoms.state(4)
       assert.strictEqual(state.keepAlive, false)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, atoms.canFinish(4)), true)
       assert.strictEqual(atoms.equal(4).equals(AsyncResult.initial(), AsyncResult.success({} as never)), true)
       yield* mount(registry, state)
       yield* Effect.sync(() => registry.set(send, new Finish({ by: 5 })))
@@ -572,6 +580,10 @@ describe("AtomMachine", () => {
       const boundCounter = makeBoundCounter(3)
       yield* mount(registry, boundCounter.state)
       assert.strictEqual((yield* AtomRegistry.getResult(registry, boundCounter.state)).value.value, 3)
+      assert.strictEqual(
+        yield* AtomRegistry.getResult(registry, AtomMachine.can(new Finish({ by: 1 }))(boundCounter)),
+        true
+      )
     })))
 
   it.effect("provides equality-aware typed state selectors", () =>
@@ -607,6 +619,155 @@ describe("AtomMachine", () => {
       assert(Option.isSome(updated))
       assert.strictEqual(updated.value.value, 2)
       assert.strictEqual(doneMatchNotifications, 1)
+    })))
+
+  it.effect("projects static and reactive event acceptance across runtime lifecycles", () =>
+    Effect.scoped(Effect.gen(function*() {
+      class CanIdle extends Schema.TaggedClass<CanIdle>("AtomCanIdle")("CanIdle", {}) {}
+      class CanDone extends Schema.TaggedClass<CanDone>("AtomCanDone")("CanDone", {}) {}
+      class Check extends Schema.TaggedClass<Check>("AtomCanCheck")("Check", {
+        accept: Schema.Boolean
+      }) {}
+      class Complete extends Schema.TaggedClass<Complete>("AtomCanComplete")("Complete", {}) {}
+      const events = Machine.events(Check, Complete)
+      const states = Machine.states({
+        CanIdle,
+        CanDone: { schema: CanDone, type: "final" }
+      })
+      let requiredResolverCalls = 0
+      let declinableResolverCalls = 0
+      const machine = Machine.make({
+        states: states.states,
+        events,
+        initial: (to) => to.CanIdle().resolve(({ target }) => target.decoded(new CanIdle({})))
+      }).handle({
+        CanIdle: {
+          on: {
+            Check: (to) =>
+              to.none.resolve(({ event, decline }) => {
+                declinableResolverCalls++
+                return event.accept ? undefined : decline()
+              }, { declinable: true }),
+            Complete: (to) =>
+              to.full.CanDone().resolve(({ target }) => {
+                requiredResolverCalls++
+                return target.decoded(new CanDone({}))
+              })
+          }
+        },
+        CanDone: {}
+      })
+      const registry = yield* makeRegistry
+      const bridge = AtomMachine.make(machine)
+      const checkEvent = Atom.make(events.Check({ accept: false }))
+      const checkAllowed = AtomMachine.can(checkEvent)
+      const completeAllowed = AtomMachine.can(events.Complete())
+      const canCheck = checkAllowed(bridge)
+      const canComplete = completeAllowed(bridge)
+      let canCheckNotifications = 0
+
+      assert.strictEqual(checkAllowed(bridge), canCheck)
+      assert.strictEqual(completeAllowed(bridge), canComplete)
+      assert.notStrictEqual(AtomMachine.can(events.Complete())(bridge), canComplete)
+      yield* mount(registry, canCheck)
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          registry.subscribe(canCheck, () => {
+            canCheckNotifications++
+          }, { immediate: true })
+        ),
+        (release) => Effect.sync(release)
+      )
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, canCheck), false)
+      assert.strictEqual(declinableResolverCalls, 1)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, canComplete), true)
+      assert.strictEqual(requiredResolverCalls, 0)
+
+      yield* Effect.sync(() => registry.set(checkEvent, events.Check({ accept: false })))
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, canCheck), false)
+      assert.strictEqual(canCheckNotifications, 1)
+      yield* Effect.sync(() => registry.set(checkEvent, events.Check({ accept: true })))
+      assert.strictEqual(yield* waitForResult(registry, canCheck, (accepted) => accepted), true)
+      assert.strictEqual(declinableResolverCalls, 3)
+      assert.strictEqual(canCheckNotifications, 2)
+
+      const invalid = AtomMachine.can({ _tag: "Check", accept: "invalid" } as any)(bridge)
+      const invalidError = yield* AtomRegistry.getResult(registry, invalid).pipe(Effect.flip)
+      assert.instanceOf(invalidError, Machine.MachineSchemaDecodeError)
+
+      yield* Effect.sync(() => registry.set(bridge.send, events.Complete()))
+      yield* waitForResult(registry, bridge.snapshot, (snapshot) => snapshot.status === "done")
+      assert.strictEqual(yield* waitForResult(registry, canCheck, (accepted) => !accepted), false)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, canComplete), false)
+      assert.strictEqual(requiredResolverCalls, 1)
+
+      const stoppedBridge = AtomMachine.make(machine)
+      const stoppedCanComplete = completeAllowed(stoppedBridge)
+      yield* mount(registry, stoppedCanComplete)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, stoppedCanComplete), true)
+      yield* Effect.sync(() => registry.set(stoppedBridge.stop, undefined))
+      yield* waitForResult(registry, stoppedBridge.snapshot, (snapshot) => snapshot.status === "stopped")
+      assert.strictEqual(
+        yield* waitForResult(registry, stoppedCanComplete, (accepted) => !accepted),
+        false
+      )
+    })))
+
+  it.effect("propagates machine startup and runtime failures through acceptance projections", () =>
+    Effect.scoped(Effect.gen(function*() {
+      class Published extends Schema.TaggedClass<Published>("AtomCanPublished")("Published", {
+        value: Schema.Number
+      }) {}
+      const emissions = Machine.emittedEvents(Published)
+      const startupMachine = Machine.make({
+        states: CounterStates.states,
+        events: Machine.events(Finish),
+        emittedEvents: emissions,
+        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      }).handle({
+        Count: {
+          entry: (_, enqueue) => {
+            enqueue.emit(emissions.Published({ value: "invalid" } as never))
+          }
+        },
+        Done: {}
+      })
+      const registry = yield* makeRegistry
+      const startupBridge = AtomMachine.make(startupMachine)
+      const startupCanFinish = AtomMachine.can(new Finish({ by: 1 }))(startupBridge)
+      const startupError = yield* AtomRegistry.getResult(registry, startupCanFinish).pipe(Effect.flip)
+      assert.instanceOf(startupError, Machine.MachineSchemaDecodeError)
+
+      class FaultIdle extends Schema.TaggedClass<FaultIdle>("AtomCanFaultIdle")("FaultIdle", {}) {}
+      class FaultLoading extends Schema.TaggedClass<FaultLoading>("AtomCanFaultLoading")("FaultLoading", {}) {}
+      class Begin extends Schema.TaggedClass<Begin>("AtomCanBegin")("Begin", {}) {}
+      const failure = new Error("runtime failed")
+      const faultMachine = Machine.make({
+        states: { FaultIdle, FaultLoading },
+        events: Machine.events(Begin),
+        initial: (to) => to.FaultIdle().resolve(({ target }) => target.decoded(new FaultIdle({})))
+      }).handle({
+        FaultIdle: {
+          on: {
+            Begin: (to) => to.full.FaultLoading().resolve(({ target }) => target.decoded(new FaultLoading({})))
+          }
+        },
+        FaultLoading: {
+          invoke: (from) => from.effect("fail", () => Effect.die(failure))
+        }
+      })
+      const faultBridge = AtomMachine.make(faultMachine)
+      const canBegin = AtomMachine.can(new Begin({}))(faultBridge)
+      yield* mount(registry, canBegin)
+      assert.strictEqual(yield* AtomRegistry.getResult(registry, canBegin), true)
+      yield* Effect.sync(() => registry.set(faultBridge.send, new Begin({})))
+      yield* waitForResult(registry, faultBridge.snapshot, (snapshot) => snapshot.status === "error")
+
+      const result = registry.get(canBegin)
+      assert(AsyncResult.isFailure(result))
+      assert.strictEqual(Cause.squash(result.cause), failure)
+      assert(Option.isSome(result.previousSuccess))
+      assert.strictEqual(result.previousSuccess.value.value, false)
     })))
 
   it.effect("selects compound and parallel state paths from the bridge snapshot", () =>
