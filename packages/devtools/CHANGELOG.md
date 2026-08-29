@@ -1,5 +1,12 @@
 # @typeonce/effect-machine-devtools
 
+## 0.31.0
+
+### Patch Changes
+
+- Updated dependencies [9ec7ef4]
+  - @typeonce/effect-machine@0.31.0
+
 ## 0.30.0
 
 ### Patch Changes
