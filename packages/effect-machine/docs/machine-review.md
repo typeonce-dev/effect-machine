@@ -71,7 +71,8 @@ Use `useMachineAtom` when one React subtree owns the workflow, including a
 machine with startup input:
 
 ```tsx
-const machine = useMachineAtom(() => machineAtoms.make(processMachine, input))
+const makeProcessMachine = machineAtoms.factory(processMachine)
+const machine = useMachineAtom(() => makeProcessMachine(input))
 ```
 
 Pass the stable machine through props or Context. Startup input is captured

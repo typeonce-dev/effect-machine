@@ -249,8 +249,9 @@ const definition = Machine.make({
 })
 ```
 
-Handlers see both protocols. Typed `send` and `Machine.plan` accept only public
-events. Event tags must be unique and public/internal tags must be disjoint.
+Handlers see both protocols. Typed `send`, `Machine.can`, and `Machine.plan`
+accept only public events. Event tags must be unique and public/internal tags
+must be disjoint.
 
 Export the descriptor returned by `Machine.events` instead of exporting its
 schemas. This keeps the deferred constructors as the standard way to create
@@ -554,6 +555,23 @@ remain total and cannot use declinable transitions. Completion and invocation
 outcomes have no ancestor candidate: declining one ignores that lifecycle
 occurrence and leaves the current configuration active.
 
+Use `Machine.can` when a caller needs to test a concrete event against a
+snapshot. The direct and machine-specialized forms have the same semantics:
+
+```ts
+const canSubmit = yield * Machine.can(machine, snapshot, Submit({ draft }))
+
+const canMachine = Machine.can(machine)
+const canCancel = yield * canMachine(snapshot, Cancel())
+```
+
+`can` returns `true` when at least one required or non-declined handler accepts
+the event. Targetless transitions count as accepted. Invalid event input fails
+with `MachineSchemaDecodeError`; a valid unhandled event returns `false`.
+Declinable resolvers run to decide acceptance, but collected commands,
+emissions, and raised events are discarded. Required resolvers and transition
+lifecycle do not run.
+
 ## Statechart capabilities
 
 `Machine.states` supports:
@@ -746,6 +764,19 @@ const counterAtom = AtomMachine.bind(runtime).make(Counter)
 
 Binding a shared runtime once is the canonical form for service-backed
 applications. Service-free machines can use `AtomMachine.make(Counter)`.
+Use `factory` when the same definition constructs several independent bridges:
+
+```ts
+const MachineAtoms = AtomMachine.bind(runtime)
+const makeProcessMachine = MachineAtoms.factory(ProcessMachine)
+
+const first = makeProcessMachine({ processId: "first" })
+const second = makeProcessMachine({ processId: "second" })
+type ProcessMachineAtom = ReturnType<typeof makeProcessMachine>
+```
+
+Each call creates a fresh lazy bridge. `factory` does not cache by input;
+`AtomMachine.family` remains the keyed shared-identity interface.
 
 The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 `send` and `stop` atoms, and `child(descriptor)`. Use `AtomMachine.select`,

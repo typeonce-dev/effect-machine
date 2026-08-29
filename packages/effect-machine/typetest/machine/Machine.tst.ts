@@ -787,6 +787,15 @@ describe("Machine", () => {
       DownInitial.decoded(new Down({})),
       new SignInCompleted({ userId: "user-1" })
     )
+    expect(Machine.can).type.not.toBeCallableWith(
+      machine,
+      DownInitial.decoded(new Down({})),
+      new SignInCompleted({ userId: "user-1" })
+    )
+    expect(Machine.can(machine)).type.not.toBeCallableWith(
+      DownInitial.decoded(new Down({})),
+      new SignInCompleted({ userId: "user-1" })
+    )
     const publicEvents = Machine.events(SignIn)
     const overlappingInternalEvents = Machine.internalEvents(SignIn)
     expect(Machine.make).type.not.toBeCallableWith({
@@ -1042,7 +1051,22 @@ describe("Machine", () => {
     expect(Machine.enabled).type.toBeCallableWith(machine, DownInitial.decoded(new Down({})))
     expect(Machine.isFinal).type.toBeCallableWith(machine, DownInitial.decoded(new Down({})))
 
+    const can = Machine.can(
+      machine,
+      DownInitial.decoded(new Down({})),
+      new SignIn({ userId: "user-1" })
+    )
+    const canMachine = Machine.can(machine)
+    expect<Effect.Success<typeof can>>().type.toBe<boolean>()
+    expect<Effect.Error<typeof can>>().type.toBe<Machine.MachineSchemaDecodeError>()
+    expect(canMachine).type.toBeCallableWith(
+      DownInitial.decoded(new Down({})),
+      new SignIn({ userId: "user-1" })
+    )
+
     expect(Machine.plan).type.not.toBeCallableWith(machine, new Down({}), new SignIn({ userId: "user-1" }))
+    expect(Machine.can).type.not.toBeCallableWith(machine, new Down({}), new SignIn({ userId: "user-1" }))
+    expect(canMachine).type.not.toBeCallableWith(new Down({}), new SignIn({ userId: "user-1" }))
     expect(Machine.enabled).type.not.toBeCallableWith(machine, new Down({}))
     expect(Machine.isFinal).type.not.toBeCallableWith(machine, new Down({}))
   })

@@ -906,7 +906,7 @@ type ResumedMachineAtomOf<M extends Machine.Machine.Any, RuntimeError> = Machine
 >
 
 /**
- * An `AtomMachine` factory with one owned Effect runtime.
+ * `AtomMachine` constructors bound to one owned Effect runtime.
  *
  * @category models
  * @since 0.4.0
@@ -928,6 +928,22 @@ export interface Bound<Services, RuntimeError = never> {
       & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>,
     ...args: MachineInputArgsOf<M>
   ) => MachineAtomOf<M, RuntimeError>
+
+  /**
+   * Specializes a machine definition into a reusable bridge constructor.
+   *
+   * Every call creates an independent machine bridge. Startup remains lazy
+   * and begins only when an `AtomRegistry` reads or mounts the bridge.
+   *
+   * @since 0.30.0
+   */
+  readonly factory: <M extends Machine.Machine.Any>(
+    machine:
+      & M
+      & EnsureBoundRequirements<Services, NoInfer<M>>
+      & EnsureMachineExecutable<NoInfer<M>>
+      & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>
+  ) => (...args: MachineInputArgsOf<M>) => MachineAtomOf<M, RuntimeError>
 
   /** Creates a lazy bridge from a decoded logical snapshot. */
   readonly resume: <M extends Machine.Machine.Any>(
@@ -1141,6 +1157,33 @@ export const make: {
 } = internal.make
 
 /**
+ * Specializes a machine definition into a reusable bridge constructor.
+ *
+ * The returned function preserves the machine's startup input arity and exact
+ * bridge type. Every call creates a fresh `MachineAtom`; it does not cache by
+ * input or start the machine before an `AtomRegistry` reads or mounts it.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const makeSearchMachine = AtomMachine.factory(searchMachine)
+ * const search = makeSearchMachine({ query: "effect" })
+ *
+ * type SearchMachineAtom = ReturnType<typeof makeSearchMachine>
+ * ```
+ *
+ * @category constructors
+ * @since 0.30.0
+ */
+export const factory: <M extends Machine.Machine.Any>(
+  machine:
+    & M
+    & EnsureNoExternalRequirements<MachineRequirementsOf<NoInfer<M>>>
+    & EnsureMachineExecutable<NoInfer<M>>
+    & Machine.Machine.RootCompatible<Machine.Machine.ParentEvents<NoInfer<M>>>
+) => (...args: MachineInputArgsOf<M>) => MachineAtomOf<M, never> = internal.factory
+
+/**
  * Creates a lazy atom bridge from a decoded logical snapshot.
  *
  * The bridge owns one freshly resumed runtime per `AtomRegistry`, with the same
@@ -1162,11 +1205,12 @@ export const resume: {
 } = internal.resume
 
 /**
- * Creates an `AtomMachine` factory that owns a shared Effect runtime.
+ * Binds `AtomMachine` constructors to a shared Effect runtime.
  *
  * Use this when an application runs many machines from the same service layer.
- * The returned factory keeps runtime provisioning at the composition boundary,
- * while every call to `make` still creates an independent machine bridge.
+ * The returned interface keeps runtime provisioning at the composition seam,
+ * while every call to `make` or a specialized `factory` still creates an
+ * independent machine bridge.
  *
  * @category constructors
  * @since 0.4.0

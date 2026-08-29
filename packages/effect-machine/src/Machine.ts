@@ -9302,6 +9302,120 @@ export const enabled: <
 ) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled as any
 
 /**
+ * Tests whether a concrete event would select at least one transition from a
+ * decoded snapshot.
+ *
+ * **Details**
+ *
+ * Required handlers are accepted from their structural eligibility.
+ * Declinable handlers run their resolver only far enough to decide whether
+ * they accept the event. Any commands, emissions, or raised events collected
+ * during that check are discarded.
+ *
+ * Event input is decoded through the machine's public event protocol. Invalid
+ * input fails with `MachineSchemaDecodeError`. Final snapshots and valid events
+ * with no accepting handler return `false`.
+ *
+ * **Gotchas**
+ *
+ * This query does not execute transitions or stabilize the resulting machine.
+ * It does not run entry, exit, always, completion, child lifecycle, or command
+ * effects. A `true` result therefore describes event acceptance only.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const canCheckout = Machine.can(checkoutMachine)
+ *
+ * const canSubmit = yield* canCheckout(snapshot, {
+ *   _tag: "SubmitOrder"
+ * })
+ * ```
+ *
+ * @category getters
+ * @since 0.30.0
+ */
+export const can: {
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    const Input extends Schema.Top = typeof Schema.Void,
+    UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+    E = never,
+    R = never,
+    InitialE = never,
+    InitialR = never,
+    FinalStates extends Machine.StateIdentifier<States> = never,
+    Output = never,
+    OutputStates extends Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  >(
+    machine:
+      & Machine<
+        States,
+        Events,
+        Input,
+        UnhandledStates,
+        E,
+        R,
+        InitialE,
+        InitialR,
+        FinalStates,
+        Output,
+        Emits,
+        OutputStates,
+        InputEvents,
+        ParentEvents
+      >
+      & EnsureExecutable<States, UnhandledStates, OutputStates>
+      & Machine.RootCompatible<ParentEvents>
+  ): (
+    state: Machine.Snapshot<States>,
+    event: Machine.EventInputOf<InputEvents>
+  ) => Effect.Effect<boolean, MachineSchemaDecodeError>
+  <
+    const States extends Machine.StateSchemas,
+    const Events extends ReadonlyArray<Machine.TaggedSchema>,
+    const Emits extends ReadonlyArray<Machine.TaggedSchema>,
+    const Input extends Schema.Top = typeof Schema.Void,
+    UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
+    E = never,
+    R = never,
+    InitialE = never,
+    InitialR = never,
+    FinalStates extends Machine.StateIdentifier<States> = never,
+    Output = never,
+    OutputStates extends Machine.StateIdentifier<States> = never,
+    InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
+    ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  >(
+    machine:
+      & Machine<
+        States,
+        Events,
+        Input,
+        UnhandledStates,
+        E,
+        R,
+        InitialE,
+        InitialR,
+        FinalStates,
+        Output,
+        Emits,
+        OutputStates,
+        InputEvents,
+        ParentEvents
+      >
+      & EnsureExecutable<States, UnhandledStates, OutputStates>
+      & Machine.RootCompatible<ParentEvents>,
+    state: Machine.Snapshot<States>,
+    event: Machine.EventInputOf<InputEvents>
+  ): Effect.Effect<boolean, MachineSchemaDecodeError>
+} = internal.can as any
+
+/**
  * Plans the next state snapshot synchronously.
  *
  * **Details**

@@ -428,7 +428,10 @@ describe("AtomMachine", () => {
         send: (machine) => machine.send
       }
     })
+    const makeBoundMachine = AtomMachine.bind(runtime).factory(machine)
+    const boundMachine = makeBoundMachine("one")
     type FamilyFailure = Atom.Failure<ReturnType<typeof atoms.result>>
+    type FactoryFailure = Atom.Failure<typeof boundMachine.result>
 
     const childMachine = makeMachine()
     const Child = Machine.childFamily(childMachine)
@@ -449,6 +452,8 @@ describe("AtomMachine", () => {
     })
 
     expect<Extract<FamilyFailure, StartFailure>>().type.toBe<StartFailure>()
+    expect<Extract<FactoryFailure, StartFailure>>().type.toBe<StartFailure>()
+    expect(AtomMachine.factory).type.not.toBeCallableWith(machine)
     expect<unknown extends FamilyFailure ? true : false>().type.toBe<false>()
     expect(AtomMachine.family).type.not.toBeCallableWith(machine, {
       atoms: { state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.state }
@@ -463,6 +468,39 @@ describe("AtomMachine", () => {
 
   it("accepts machines without external requirements", () => {
     expect(AtomMachine.make).type.toBeCallableWith(makeMachine())
+  })
+
+  it("specializes machine definitions into inferred bridge constructors", () => {
+    const makeBridge = AtomMachine.factory(makeMachine())
+    const bridge = makeBridge()
+    type Bridge = ReturnType<typeof makeBridge>
+
+    expect(makeBridge).type.toBeCallableWith()
+    expect(makeBridge).type.not.toBeCallableWith("input")
+    expect<typeof bridge>().type.toBe<Bridge>()
+    expect<Atom.Success<typeof bridge.state>>().type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+
+    const inputMachine = Machine.make({
+      states: States.states,
+      events: Machine.events(Tick),
+      input: Schema.String,
+      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+    }).handle({ Idle: {} })
+    const makeInputBridge = AtomMachine.factory(inputMachine)
+    expect(makeInputBridge).type.toBeCallableWith("input")
+    expect(makeInputBridge).type.not.toBeCallableWith()
+    expect(makeInputBridge).type.not.toBeCallableWith(1)
+
+    const runtime = Atom.runtime(
+      Layer.effectDiscard(Effect.fail({ _tag: "StartFailure" } as const satisfies StartFailure))
+    )
+    const makeBoundBridge = AtomMachine.bind(runtime).factory(makeMachine())
+    const boundBridge = makeBoundBridge()
+    type BoundFailure = Atom.Failure<ReturnType<typeof makeBoundBridge>["result"]>
+
+    expect<Extract<BoundFailure, StartFailure>>().type.toBe<StartFailure>()
+    expect<unknown extends BoundFailure ? true : false>().type.toBe<false>()
+    expect<typeof boundBridge>().type.toBe<ReturnType<typeof makeBoundBridge>>()
   })
 
   it("preserves bound runtime errors in the result failure channel", () => {
@@ -515,8 +553,10 @@ describe("AtomMachine", () => {
     const bound = AtomMachine.bind(runtime)
 
     expect(AtomMachine.make).type.not.toBeCallableWith(incomplete)
+    expect(AtomMachine.factory).type.not.toBeCallableWith(incomplete)
     expect(AtomMachine.make).type.not.toBeCallableWith(runtime, incomplete)
     expect(bound.make).type.not.toBeCallableWith(incomplete)
+    expect(bound.factory).type.not.toBeCallableWith(incomplete)
 
     const complete = incomplete.handle({
       Done: {
@@ -528,7 +568,9 @@ describe("AtomMachine", () => {
 
     expect<Output>().type.toBe<string>()
     expect(AtomMachine.make).type.toBeCallableWith(complete)
+    expect(AtomMachine.factory).type.toBeCallableWith(complete)
     expect(AtomMachine.make).type.not.toBeCallableWith(runtime, complete)
     expect(bound.make).type.toBeCallableWith(complete)
+    expect(bound.factory).type.toBeCallableWith(complete)
   })
 })

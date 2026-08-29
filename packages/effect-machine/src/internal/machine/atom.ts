@@ -801,6 +801,9 @@ export const make: {
   return result
 }) as any
 
+export const factory =
+  ((machine: Machine.Machine.Any) => (...args: ReadonlyArray<unknown>) => (make as any)(machine, ...args)) as any
+
 export const resume: {
   <M extends Machine.Machine.Any>(
     machine:
@@ -901,19 +904,25 @@ export const familyChild = (
 
 export const bind = <Services, RuntimeError>(
   runtime: Atom.AtomRuntime<Services, RuntimeError>
-): Bound<Services, RuntimeError> => ({
-  make:
+): Bound<Services, RuntimeError> => {
+  const makeBound =
     ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) =>
       makeWithRuntime(runtime, machine, args)) as Bound<
         Services,
         RuntimeError
-      >["make"],
-  resume:
-    ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) =>
-      resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"],
-  family: ((machine: Machine.Machine.Any, options: FamilyOptions) =>
-    makeFamily(
-      (input) => makeWithRuntime(runtime, machine, [input]),
-      options
-    )) as Bound<Services, RuntimeError>["family"]
-})
+      >["make"]
+  return {
+    make: makeBound,
+    factory:
+      ((machine: Machine.Machine.Any) => (...args: ReadonlyArray<unknown>) =>
+        (makeBound as any)(machine, ...args)) as Bound<Services, RuntimeError>["factory"],
+    resume:
+      ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) =>
+        resumeWithRuntime(runtime, machine, snapshot)) as Bound<Services, RuntimeError>["resume"],
+    family: ((machine: Machine.Machine.Any, options: FamilyOptions) =>
+      makeFamily(
+        (input) => makeWithRuntime(runtime, machine, [input]),
+        options
+      )) as Bound<Services, RuntimeError>["family"]
+  }
+}
