@@ -79,6 +79,8 @@ const preparedByMachineAtom = new WeakMap<
   Atom.Atom<AsyncResult.AsyncResult<Machine.Prepared<any, any, any, any, any, any, any>, any>>
 >()
 
+const machineByMachineAtom = new WeakMap<object, Machine.Machine.Any>()
+
 type WeakFamilyEntry<Value extends object> = {
   readonly ref: WeakRef<Value>
 }
@@ -422,7 +424,8 @@ const makeChildSelector = <StartError>(
 }
 
 const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
-  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>>
+  ref: Atom.Atom<AsyncResult.AsyncResult<Machine.MachineRef<State, Event, Error, Output, Emitted>, StartError>>,
+  machine: Machine.Machine.Any
 ): MachineAtom<State, Event, Error, Output, StartError, Emitted> => {
   const snapshot = Atom.readable((
     get
@@ -498,7 +501,7 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
   const optionalRef = Atom.mapResult(ref, Option.some)
   const child = makeChildSelector<StartError>(optionalRef as any)
 
-  return {
+  const result = {
     ref,
     snapshot,
     state: Atom.mapResult(snapshot, (snapshot) => snapshot.state),
@@ -507,6 +510,8 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
     stop,
     child
   }
+  machineByMachineAtom.set(result, machine)
+  return result
 }
 
 type SnapshotNode<State> = State extends Machine.Machine.AtomicSnapshot<string, unknown> ?
@@ -716,6 +721,57 @@ export const matchesChild = <
       Option.exists((snapshot) => Option.isSome(Topology.getSnapshotByPath(snapshot, path)))
     ).pipe(Atom.withEquality(Equal.equals)))
 
+export const can = (event: unknown) => {
+  const byBridge = new WeakMap<object, Atom.Atom<AsyncResult.AsyncResult<boolean, any>>>()
+  return (self: MachineAtom<any, any, any, any, any, any>): Atom.Atom<AsyncResult.AsyncResult<boolean, any>> => {
+    const cached = byBridge.get(self)
+    if (cached !== undefined) return cached
+
+    const machine = machineByMachineAtom.get(self)
+    const query: (
+      state: Machine.Machine.Snapshot<any>,
+      event: unknown
+    ) => Effect.Effect<boolean, Machine.MachineSchemaDecodeError> = machine === undefined
+      ? () => Effect.die(new Error("AtomMachine.can requires a machine atom created by AtomMachine"))
+      : internalMachine.can(machine) as (
+        state: Machine.Machine.Snapshot<any>,
+        event: unknown
+      ) => Effect.Effect<boolean, Machine.MachineSchemaDecodeError>
+
+    const result = Atom.readable((get): AsyncResult.AsyncResult<boolean, any> => {
+      const current = get(self.snapshot)
+      const previous = get.self<AsyncResult.AsyncResult<boolean, any>>()
+      if (AsyncResult.isInitial(current)) {
+        return AsyncResult.initial(current.waiting)
+      } else if (AsyncResult.isFailure(current)) {
+        return AsyncResult.failureWithPrevious(current.cause, {
+          previous,
+          waiting: current.waiting
+        })
+      } else if (current.value.status === "error") {
+        return AsyncResult.failureWithPrevious(current.value.cause, {
+          previous,
+          waiting: current.waiting
+        })
+      } else if (current.value.status !== "active") {
+        return AsyncResult.success(false, { waiting: current.waiting })
+      }
+
+      const input = Atom.isAtom(event) ? get(event) : event
+      const exit = Effect.runSyncExit(query(current.value.state, input))
+      return exit._tag === "Success"
+        ? AsyncResult.success(exit.value, { waiting: current.waiting })
+        : AsyncResult.failureWithPrevious(exit.cause, {
+          previous,
+          waiting: current.waiting
+        })
+    }).pipe(Atom.withEquality(Equal.equals))
+
+    byBridge.set(self, result)
+    return result
+  }
+}
+
 type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
   Machine.Machine.Services<M>,
   Machine.Machine.Event<M>,
@@ -796,7 +852,7 @@ export const make: {
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
   const prepared = Atom.make(() => internalMachine.prepare(machine as any, ...(args as [])))
   const ref = Atom.make((get) => startPreparedMachineAtomEffect(get, prepared as any))
-  const result = makeFromRefAtom(ref as any)
+  const result = makeFromRefAtom(ref as any, machine)
   preparedByMachineAtom.set(result, prepared as any)
   return result
 }) as any
@@ -815,7 +871,7 @@ export const resume: {
   ): ResumedMachineAtomOf<M, never>
 } = ((machine: Machine.Machine.Any, snapshot: Machine.Machine.Snapshot<any>) => {
   const ref = Atom.make((get) => resumeMachineAtomEffect(get, machine, snapshot))
-  return makeFromRefAtom(ref as any)
+  return makeFromRefAtom(ref as any, machine)
 }) as any
 
 const makeWithRuntime = (
@@ -825,7 +881,7 @@ const makeWithRuntime = (
 ): MachineAtom<any, any, any, any, any, any> => {
   const prepared = runtime.atom(() => internalMachine.prepare(machine as any, ...(args as [])))
   const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
-  const result = makeFromRefAtom(ref as any)
+  const result = makeFromRefAtom(ref as any, machine)
   preparedByMachineAtom.set(result, prepared as any)
   return result
 }
@@ -836,7 +892,7 @@ const resumeWithRuntime = (
   snapshot: Machine.Machine.Snapshot<any>
 ): MachineAtom<any, any, any, any, any, any> => {
   const ref = runtime.atom((get) => resumeMachineAtomEffect(get, machine, snapshot))
-  return makeFromRefAtom(ref as any)
+  return makeFromRefAtom(ref as any, machine)
 }
 
 type FamilyBridge = MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>

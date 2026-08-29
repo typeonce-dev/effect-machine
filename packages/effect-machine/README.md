@@ -784,6 +784,19 @@ The bridge exposes `ref`, `snapshot`, `state`, fail-aware `result`, writable
 equality-aware derivations. Repeating one of these calls with the same bridge
 and state path returns the same atom.
 
+Use `AtomMachine.can` to project concrete event acceptance. Declare the
+projection once and apply it to compatible bridges:
+
+```ts
+const submitAllowed = AtomMachine.can(Events.Submit({ draft }))
+const canSubmitAtom = submitAllowed(machineAtom)
+```
+
+Pass an `Atom<EventInput>` instead when the event payload changes reactively.
+Each projection returns the same derived atom for repeated applications to one
+bridge. Startup and runtime failures remain typed, while done and stopped
+machines return `false`.
+
 Use `useMachineAtom` from `@typeonce/effect-machine-react` when one React
 subtree owns the machine. It mounts the machine without subscribing the owner
 to state. Pass the returned machine atom through props or Context, then call
@@ -800,6 +813,7 @@ preserving lazy registry startup and disposal:
 ```ts
 const processAtoms = AtomMachine.bind(runtime).family(processMachine, {
   atoms: {
+    canStart: AtomMachine.can(ProcessEvents.Start()),
     details: AtomMachine.select("Processing"),
     ready: AtomMachine.matches("Ready"),
     send: (machine) => machine.send

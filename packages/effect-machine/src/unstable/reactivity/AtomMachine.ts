@@ -358,6 +358,7 @@ type ChildSnapshot<Child extends Machine.ChildMachine.Any> = Machine.Machine.Sna
 
 const InvalidSelectorPathTypeId = "~effect/reactivity/AtomMachine/InvalidSelectorPath"
 const SelectorProjectionTypeId = "~effect/reactivity/AtomMachine/SelectorProjection"
+const InvalidCanEventTypeId = "~effect/reactivity/AtomMachine/InvalidCanEvent"
 
 type SelectorProjectionKind =
   | "select"
@@ -372,6 +373,30 @@ interface SelectorProjection<Kind extends SelectorProjectionKind, Path extends s
     readonly kind: Kind
     readonly path: Path
   }
+}
+
+type EnsureCanEvent<AcceptedEvent, Input> = [Input] extends [AcceptedEvent] ? unknown : {
+  readonly [InvalidCanEventTypeId]: {
+    readonly input: Input
+    readonly accepted: AcceptedEvent
+  }
+}
+
+interface CanProjection<Input> {
+  <
+    State extends Machine.Machine.AtomicSnapshot<string, unknown>,
+    AcceptedEvent,
+    Error,
+    Output,
+    StartError,
+    Emitted
+  >(
+    self:
+      & MachineAtom<State, AcceptedEvent, Error, Output, StartError, Emitted>
+      & EnsureCanEvent<AcceptedEvent, Input>
+  ): Atom.Atom<
+    AsyncResult.AsyncResult<boolean, StartError | Error | Machine.MachineSchemaDecodeError>
+  >
 }
 
 type EnsureSelectorPath<State, Path extends string> = [Path] extends [SnapshotIdentifier<State>] ? unknown : {
@@ -694,6 +719,37 @@ export const matches: {
     path: Path
   ): Atom.Atom<AsyncResult.AsyncResult<boolean, StartError | Error>>
 } = dual(2, internal.matches)
+
+/**
+ * Reactively tests whether a concrete event would be accepted by a running
+ * machine.
+ *
+ * Declare the returned projection once, then apply it to compatible machine
+ * bridges. Repeated applications to the same bridge return the same atom. An
+ * event atom is read reactively when acceptance depends on a changing payload.
+ *
+ * Startup remains in the source `AsyncResult`. Active snapshots use
+ * {@link Machine.can}; done and stopped snapshots produce `false`, while
+ * runtime and schema failures remain in the typed failure channel.
+ *
+ * **Example**
+ *
+ * ```ts
+ * const submitAllowed = AtomMachine.can(AuthEvents.Submitted())
+ * const canSubmitAtom = submitAllowed(authMachineAtom)
+ *
+ * const submitEvent = Atom.map(draftAtom, (draft) =>
+ *   AuthEvents.Submitted({ draft }))
+ * const reactiveSubmitAllowed = AtomMachine.can(submitEvent)
+ * ```
+ *
+ * @category combinators
+ * @since 0.31.0
+ */
+export const can: {
+  <Input>(event: Atom.Atom<Input>): CanProjection<Input>
+  <const Input>(event: Input): CanProjection<Input>
+} = internal.can
 
 /**
  * Returns whether a state path is active in a directly owned child.

@@ -185,42 +185,26 @@ its value.
 
 ## Query concrete event acceptance
 
-`Machine.can` composes with `machine.snapshot` through a derived atom. Declare
-the projection once for a module-level machine, or create it once alongside a
-React-owned machine:
+`AtomMachine.can` turns one concrete event input into a reusable machine
+projection. Declare the projection once, then apply it to the React-owned
+machine. Repeated applications to the same machine return the same atom:
 
 ```tsx
-import { Effect, Equal } from "effect"
-import { Atom } from "effect/unstable/reactivity"
-import { Machine } from "@typeonce/effect-machine"
+import { AtomMachine } from "@typeonce/effect-machine/reactivity"
 import { useAtomSet, useAtomSuspense } from "@effect/atom-react"
-import { useState } from "react"
+import { AuthEvents } from "../machines/auth-machine"
 
-const makeCanSubmitAtom = (machine: AuthMachineAtom) =>
-  Atom.make((get) =>
-    get.result(machine.snapshot).pipe(
-      Effect.flatMap((snapshot) => {
-        if (snapshot.status === "active") {
-          return Machine.can(AuthMachine, snapshot.state, { _tag: "Submitted" })
-        }
-        if (snapshot.status === "error") {
-          return Effect.failCause(snapshot.cause)
-        }
-        return Effect.succeed(false)
-      })
-    )
-  ).pipe(Atom.withEquality(Equal.equals))
+const submitAllowed = AtomMachine.can(AuthEvents.Submitted())
 
 function SubmitButton() {
   const machine = useAuthMachine()
-  const [canSubmitAtom] = useState(() => makeCanSubmitAtom(machine))
-  const canSubmit = useAtomSuspense(canSubmitAtom).value
+  const canSubmit = useAtomSuspense(submitAllowed(machine)).value
   const send = useAtomSet(machine.send)
 
   return (
     <button
       disabled={!canSubmit}
-      onClick={() => send({ _tag: "Submitted" })}
+      onClick={() => send(AuthEvents.Submitted())}
     >
       Continue
     </button>
@@ -229,9 +213,22 @@ function SubmitButton() {
 ```
 
 Startup still suspends, startup and runtime failures reach the error boundary,
-and invalid event input remains a `MachineSchemaDecodeError`. Done and stopped
-machines return `false`. When the event payload itself changes reactively, read
-it from another atom inside the same derived atom.
+and invalid event input for an active machine remains a
+`MachineSchemaDecodeError`. Done and stopped machines return `false`.
+
+When acceptance depends on a changing payload, project an event atom instead:
+
+```ts
+import { Atom } from "effect/unstable/reactivity"
+
+const submitEvent = Atom.map(draftAtom, (draft) =>
+  AuthEvents.Submitted({ draft }))
+
+const submitAllowed = AtomMachine.can(submitEvent)
+```
+
+Changes to `draftAtom` recompute acceptance. The event atom contains the event
+input itself rather than an `AsyncResult`.
 
 ## Whole-result and custom selections
 

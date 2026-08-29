@@ -363,10 +363,36 @@ describe("AtomMachine", () => {
     expect(invalidChild).type.not.toBeCallableWith(child)
   })
 
+  it("infers static and reactive event acceptance projections", () => {
+    type Snapshot = Machine.Machine.Snapshot<typeof States.states>
+    type Parent = AtomMachine.MachineAtom<
+      Snapshot,
+      Machine.Machine.EventInput<Tick>,
+      RuntimeFailure,
+      never,
+      StartFailure
+    >
+    const parent = null as unknown as Parent
+    const Events = Machine.events(Tick)
+    const staticProjection = AtomMachine.can(Events.Tick())
+    const reactiveProjection = AtomMachine.can(Atom.make(Events.Tick()))
+    const staticCan = staticProjection(parent)
+    const reactiveCan = reactiveProjection(parent)
+    const invalidProjection = AtomMachine.can(new InternalTick({}))
+
+    expect<Atom.Success<typeof staticCan>>().type.toBe<boolean>()
+    expect<Atom.Success<typeof reactiveCan>>().type.toBe<boolean>()
+    expect<Atom.Failure<typeof staticCan>>().type.toBe<
+      StartFailure | RuntimeFailure | Machine.MachineSchemaDecodeError
+    >()
+    expect(invalidProjection).type.not.toBeCallableWith(parent)
+  })
+
   it("infers keyed root family inputs and exact projected atoms", () => {
+    const Events = Machine.events(Tick)
     const machine = Machine.make({
       states: States.states,
-      events: Machine.events(Tick),
+      events: Events,
       input: Schema.String,
       initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
     }).handle({
@@ -374,6 +400,7 @@ describe("AtomMachine", () => {
     })
     const atoms = AtomMachine.family(machine, {
       atoms: {
+        canTick: AtomMachine.can(Events.Tick()),
         selected: AtomMachine.select("Idle"),
         snapshot: AtomMachine.selectSnapshot("Idle"),
         matched: AtomMachine.matches("Idle"),
@@ -383,12 +410,14 @@ describe("AtomMachine", () => {
     })
 
     const selected = atoms.selected("one")
+    const canTick = atoms.canTick("one")
     const snapshot = atoms.snapshot("one")
     const matched = atoms.matched("one")
     const state = atoms.state("one")
     const send = atoms.send("one")
 
     expect<Atom.Success<typeof selected>>().type.toBe<Option.Option<Idle>>()
+    expect<Atom.Success<typeof canTick>>().type.toBe<boolean>()
     expect<Atom.Success<typeof snapshot>>().type.toBe<
       Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
     >()
