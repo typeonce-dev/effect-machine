@@ -1876,6 +1876,17 @@ export const enabled = <
   return tags
 }
 
+const canSync = (
+  machine: Machine.Any,
+  state: Machine.Snapshot<any>,
+  event: unknown
+): boolean => {
+  const decodedEvent = decodeEventSync(machine, event)
+  if (isFinalState(machine, state)) return false
+  const configuration = normalizeConfigurationSync(machine, state)
+  return selectEventTransitions(machine, configuration, decodedEvent as any).length > 0
+}
+
 const microstep = <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
@@ -2299,6 +2310,20 @@ const planningEffect = <A>(thunk: () => A): Effect.Effect<A, InfiniteTransitionE
         : Effect.die(error)
     }
   })
+
+const schemaEffect = <A>(thunk: () => A): Effect.Effect<A, MachineSchemaDecodeError> =>
+  Effect.suspend(() => {
+    try {
+      return Effect.succeed(thunk())
+    } catch (error) {
+      return error instanceof MachineSchemaDecodeError ? Effect.fail(error) : Effect.die(error)
+    }
+  })
+
+export const can = (...args: readonly [Machine.Any] | readonly [Machine.Any, Machine.Snapshot<any>, unknown]) => {
+  const query = (state: Machine.Snapshot<any>, event: unknown) => schemaEffect(() => canSync(args[0], state, event))
+  return args.length === 1 ? query : query(args[1], args[2])
+}
 
 export const plan = (machine: Machine.Any, state: Machine.Snapshot<any>, event: unknown) =>
   planningEffect(() => planSync(machine as any, state, event as any))

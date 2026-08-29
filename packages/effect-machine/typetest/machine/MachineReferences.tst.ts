@@ -218,11 +218,18 @@ describe("machine reference event channels", () => {
       null as unknown as Machine.Machine.Snapshot<typeof states.states>,
       Events.Ping()
     )
+    expect(Machine.can).type.not.toBeCallableWith(requiredParentMachine)
+    expect(Machine.can).type.not.toBeCallableWith(
+      requiredParentMachine,
+      null as unknown as Machine.Machine.Snapshot<typeof states.states>,
+      Events.Ping()
+    )
     expect(Machine.resume).type.not.toBeCallableWith(
       requiredParentMachine,
       null as unknown as Machine.Machine.Snapshot<typeof states.states>
     )
     expect(AtomMachine.make).type.not.toBeCallableWith(requiredParentMachine)
+    expect(AtomMachine.factory).type.not.toBeCallableWith(requiredParentMachine)
     expect(AtomMachine.resume).type.not.toBeCallableWith(
       requiredParentMachine,
       null as unknown as Machine.Machine.Snapshot<typeof states.states>

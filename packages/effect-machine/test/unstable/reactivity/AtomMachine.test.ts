@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Cause, Data, Deferred, Effect, Fiber, Option, Ref, Schema, Stream } from "effect"
+import { Cause, Data, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect"
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity"
 import { Machine } from "../../../src/index.js"
 import { AtomMachine } from "../../../src/unstable/reactivity/index.js"
@@ -552,6 +552,26 @@ describe("AtomMachine", () => {
         path: "Count" as const,
         value: new Count({ value: 2 })
       })
+    })))
+
+  it.effect("creates fresh inferred bridges from reusable constructors", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const registry = yield* makeRegistry
+      const makeCounter = AtomMachine.factory(makeInputCounterMachine())
+      const first = makeCounter(1)
+      const second = makeCounter(2)
+      assert.notStrictEqual(first, second)
+
+      yield* mount(registry, first.state)
+      yield* mount(registry, second.state)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, first.state)).value.value, 1)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, second.state)).value.value, 2)
+
+      const bound = AtomMachine.bind(Atom.runtime(Layer.empty))
+      const makeBoundCounter = bound.factory(makeInputCounterMachine())
+      const boundCounter = makeBoundCounter(3)
+      yield* mount(registry, boundCounter.state)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, boundCounter.state)).value.value, 3)
     })))
 
   it.effect("provides equality-aware typed state selectors", () =>

@@ -1567,6 +1567,16 @@ describe("Machine", () => {
         )
 
         assertMachineSchemaDecodeError(error, "event", { event: "NonEmptySubmit" })
+
+        const canError = yield* Effect.flip(
+          Machine.can(
+            machine,
+            { path: "NonEmptyIdle" as const, value: new NonEmptyIdle({ userId: "user-1" }) },
+            unsafeTagged({ _tag: "NonEmptySubmit", value: "" })
+          )
+        )
+
+        assertMachineSchemaDecodeError(canError, "event", { event: "NonEmptySubmit" })
       }))
 
     it.effect("surfaces sent event decode failures through the machine lifecycle", () =>
@@ -2265,6 +2275,92 @@ describe("Machine", () => {
       })
     }))
 
+  it.effect("queries concrete event acceptance without executing required transitions", () =>
+    Effect.gen(function*() {
+      class Idle extends Schema.TaggedClass<Idle>("CanIdle")("Idle", {}) {}
+      class Done extends Schema.TaggedClass<Done>("CanDone")("Done", {}) {}
+      class Check extends Schema.TaggedClass<Check>("CanCheck")("Check", {
+        accept: Schema.Boolean
+      }) {}
+      class Consume extends Schema.TaggedClass<Consume>("CanConsume")("Consume", {}) {}
+      class Finish extends Schema.TaggedClass<Finish>("CanFinish")("Finish", {}) {}
+      class Ignore extends Schema.TaggedClass<Ignore>("CanIgnore")("Ignore", {}) {}
+      class Raised extends Schema.TaggedClass<Raised>("CanRaised")("Raised", {}) {}
+      const states = Machine.states({
+        Idle,
+        Done: { schema: Done, type: "final" }
+      })
+      let requiredResolverCalls = 0
+      let declinableResolverCalls = 0
+      let raisedResolverCalls = 0
+      let lifecycleCalls = 0
+      const machine = Machine.make({
+        states: states.states,
+        events: Machine.events(Check, Consume, Finish, Ignore),
+        internalEvents: Machine.internalEvents(Raised),
+        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      }).handle({
+        Idle: {
+          exit: () => {
+            lifecycleCalls++
+          },
+          on: {
+            Check: (to) =>
+              to.none.resolve(({ event, decline }, enqueue) => {
+                declinableResolverCalls++
+                if (!event.accept) return decline()
+                enqueue.raise(new Raised({}))
+                return undefined
+              }, { declinable: true }),
+            Consume: (to) =>
+              to.none.resolve(() => {
+                requiredResolverCalls++
+                return undefined
+              }),
+            Finish: (to) =>
+              to.full.Done().resolve(({ target }) => {
+                requiredResolverCalls++
+                return target.decoded(new Done({}))
+              }),
+            Raised: (to) =>
+              to.none.resolve(() => {
+                raisedResolverCalls++
+                return undefined
+              })
+          }
+        },
+        Done: {
+          entry: () => {
+            lifecycleCalls++
+          }
+        }
+      })
+
+      const initial = yield* Machine.planInitial(machine)
+      const canMachine = Machine.can(machine)
+
+      assert.isTrue(yield* Machine.can(machine, initial.state, new Check({ accept: true })))
+      assert.isFalse(yield* canMachine(initial.state, new Check({ accept: false })))
+      assert.strictEqual(declinableResolverCalls, 2)
+      assert.strictEqual(raisedResolverCalls, 0)
+
+      assert.isTrue(yield* canMachine(initial.state, new Consume({})))
+      assert.isTrue(yield* canMachine(initial.state, new Finish({})))
+      assert.strictEqual(requiredResolverCalls, 0)
+      assert.strictEqual(lifecycleCalls, 0)
+
+      assert.isFalse(yield* canMachine(initial.state, new Ignore({})))
+
+      yield* Machine.plan(machine, initial.state, new Check({ accept: true }))
+      assert.strictEqual(raisedResolverCalls, 1)
+
+      const finished = yield* Machine.plan(machine, initial.state, new Finish({}))
+      assert.isTrue(finished.done)
+      assert.strictEqual(requiredResolverCalls, 1)
+      assert.strictEqual(lifecycleCalls, 2)
+      assert.isFalse(yield* canMachine(finished.next, new Finish({})))
+    }))
+
   it.effect("lets declinable child handlers yield to ancestors without retaining queued work", () =>
     Effect.gen(function*() {
       class Notice extends Schema.TaggedClass<Notice>("DeclineNotice")("Notice", {}) {}
@@ -2325,6 +2421,9 @@ describe("Machine", () => {
         "declinable"
       )
       const initial = yield* Machine.planInitial(machine)
+      assert.isTrue(yield* Machine.can(machine, initial.state, new Authorize({ code: "child" })))
+      assert.isTrue(yield* Machine.can(machine)(initial.state, new Authorize({ code: "consume" })))
+      assert.isTrue(yield* Machine.can(machine, initial.state, new Authorize({ code: "parent" })))
       const child = yield* Machine.plan(machine, initial.state, new Authorize({ code: "child" }))
       assert.strictEqual(child.next.path, "payment")
       if (child.next.path === "payment") assert.strictEqual(child.next.state.path, "payment.authorized")
@@ -2399,6 +2498,7 @@ describe("Machine", () => {
 
       const initial = yield* Machine.planInitial(machine)
       assert.deepStrictEqual(Machine.enabled(machine, initial.state), ["Ping"])
+      assert.isFalse(yield* Machine.can(machine, initial.state, new Ping({})))
       const planned = yield* Machine.plan(machine, initial.state, new Ping({}))
       assert.deepStrictEqual(planned.next, initial.state)
       assert.deepStrictEqual(planned.microsteps, [])
@@ -2494,6 +2594,10 @@ describe("Machine", () => {
       })
 
       const initial = yield* Machine.planInitial(machine)
+      assert.isTrue(yield* Machine.can(machine, initial.state, new Ping({ handleRight: true })))
+      assert.strictEqual(parentCalls, 0)
+      assert.isTrue(yield* Machine.can(machine, initial.state, new Ping({ handleRight: false })))
+      assert.strictEqual(parentCalls, 0)
       const descendant = yield* Machine.plan(machine, initial.state, new Ping({ handleRight: true }))
       assert.strictEqual(descendant.next.path, "root")
       assert.deepStrictEqual(descendant.microsteps[0]?.transitions.map(({ source }) => source), ["root.right"])

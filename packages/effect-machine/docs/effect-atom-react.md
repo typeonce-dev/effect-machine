@@ -48,7 +48,7 @@ import { createContext, type ReactNode, useContext } from "react"
 import { AuthMachine, type AuthMachineInput } from "../machines/auth-machine"
 import { MachineAtoms } from "../lib/atom-runtime"
 
-const makeAuthMachine = (input: AuthMachineInput) => MachineAtoms.make(AuthMachine, input)
+const makeAuthMachine = MachineAtoms.factory(AuthMachine)
 type AuthMachineAtom = ReturnType<typeof makeAuthMachine>
 
 const AuthMachineContext = createContext<AuthMachineAtom | null>(null)
@@ -182,6 +182,56 @@ function SubmitButton() {
 
 `useAtomSet` mounts the writable atom and does not subscribe the component to
 its value.
+
+## Query concrete event acceptance
+
+`Machine.can` composes with `machine.snapshot` through a derived atom. Declare
+the projection once for a module-level machine, or create it once alongside a
+React-owned machine:
+
+```tsx
+import { Effect, Equal } from "effect"
+import { Atom } from "effect/unstable/reactivity"
+import { Machine } from "@typeonce/effect-machine"
+import { useAtomSet, useAtomSuspense } from "@effect/atom-react"
+import { useState } from "react"
+
+const makeCanSubmitAtom = (machine: AuthMachineAtom) =>
+  Atom.make((get) =>
+    get.result(machine.snapshot).pipe(
+      Effect.flatMap((snapshot) => {
+        if (snapshot.status === "active") {
+          return Machine.can(AuthMachine, snapshot.state, { _tag: "Submitted" })
+        }
+        if (snapshot.status === "error") {
+          return Effect.failCause(snapshot.cause)
+        }
+        return Effect.succeed(false)
+      })
+    )
+  ).pipe(Atom.withEquality(Equal.equals))
+
+function SubmitButton() {
+  const machine = useAuthMachine()
+  const [canSubmitAtom] = useState(() => makeCanSubmitAtom(machine))
+  const canSubmit = useAtomSuspense(canSubmitAtom).value
+  const send = useAtomSet(machine.send)
+
+  return (
+    <button
+      disabled={!canSubmit}
+      onClick={() => send({ _tag: "Submitted" })}
+    >
+      Continue
+    </button>
+  )
+}
+```
+
+Startup still suspends, startup and runtime failures reach the error boundary,
+and invalid event input remains a `MachineSchemaDecodeError`. Done and stopped
+machines return `false`. When the event payload itself changes reactively, read
+it from another atom inside the same derived atom.
 
 ## Whole-result and custom selections
 

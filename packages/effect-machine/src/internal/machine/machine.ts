@@ -2176,6 +2176,8 @@ export const enabled = <
   state: Machine.Snapshot<States>
 ): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine as any, state)
 
+export const can = internalPlanner.can
+
 export const plan: <
   const States extends Machine.StateSchemas,
   const Events extends ReadonlyArray<Machine.TaggedSchema>,
