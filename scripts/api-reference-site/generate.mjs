@@ -801,6 +801,50 @@ export const parseChangelog = (markdown, releaseDates = new Map()) => {
   }).filter((release) => release.groups.length > 0)
 }
 
+const dependencyReleaseLine = /^\s*(?:-\s+)?@typeonce\/[a-z0-9-]+@\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?\s*$/iu
+
+const normalizeAggregatedDescription = (description) => description
+  .split("\n")
+  .filter((line) => !dependencyReleaseLine.test(line))
+  .join("\n")
+  .replace(/\n{3,}/gu, "\n\n")
+  .trim()
+
+const releaseGroupOrder = new Map([["major", 0], ["minor", 1], ["patch", 2]])
+
+export const mergeChangelogs = (changelogs) => {
+  const releases = new Map()
+  for (const changelog of changelogs) {
+    for (const release of changelog) {
+      const merged = releases.get(release.version) ?? {
+        version: release.version,
+        date: release.date,
+        groups: new Map()
+      }
+      if (merged.date === undefined && release.date !== undefined) merged.date = release.date
+      for (const group of release.groups) {
+        const entries = merged.groups.get(group.type) ?? new Map()
+        for (const entry of group.entries) {
+          const description = normalizeAggregatedDescription(entry.description)
+          if (description.length > 0) entries.set(description, { description })
+        }
+        merged.groups.set(group.type, entries)
+      }
+      releases.set(release.version, merged)
+    }
+  }
+  return [...releases.values()].map((release) => ({
+    version: release.version,
+    date: release.date,
+    groups: [...release.groups].map(([type, entries]) => ({
+      type,
+      entries: [...entries.values()]
+    })).filter((group) => group.entries.length > 0)
+      .sort((left, right) => (releaseGroupOrder.get(left.type) ?? 3) - (releaseGroupOrder.get(right.type) ?? 3))
+  })).filter((release) => release.groups.length > 0)
+    .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true }))
+}
+
 export const parseChangeset = (markdown, packageName) => {
   const match = /^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]+)$/u.exec(markdown.trim())
   if (match === null) return undefined
@@ -841,27 +885,52 @@ const parseChangeGroups = (markdown) => {
   return groups.filter((candidate) => candidate.entries.length > 0)
 }
 
+const readFixedPackageNames = (packageName) => {
+  const config = readJson(join(repositoryDirectory, ".changeset", "config.json"))
+  const fixed = Array.isArray(config.fixed)
+    ? config.fixed.find((group) => Array.isArray(group) && group.includes(packageName))
+    : undefined
+  return fixed === undefined ? [packageName] : fixed.filter((name) => typeof name === "string")
+}
+
+const packageDirectory = (packageName) => {
+  const packagesDirectory = join(repositoryDirectory, "packages")
+  for (const entry of readdirSync(packagesDirectory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const directory = join(packagesDirectory, entry.name)
+    const manifestPath = join(directory, "package.json")
+    if (isFile(manifestPath) && readJson(manifestPath).name === packageName) return directory
+  }
+  throw new Error(`Cannot find workspace package ${packageName}`)
+}
+
 const readChangelog = (packageName) => {
-  const releases = parseChangelog(
-    readFileSync(join(repositoryDirectory, "packages", "effect-machine", "CHANGELOG.md"), "utf8"),
-    readReleaseDates(packageName)
-  )
+  const packageNames = readFixedPackageNames(packageName)
+  const releaseDates = readReleaseDates(packageName)
+  const releases = mergeChangelogs(packageNames.map((name) => parseChangelog(
+    readFileSync(join(packageDirectory(name), "CHANGELOG.md"), "utf8"),
+    releaseDates
+  )))
   const pending = readdirSync(join(repositoryDirectory, ".changeset"), { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "README.md")
     .sort((left, right) => left.name.localeCompare(right.name))
-    .map((entry) => parseChangeset(
-      readFileSync(join(repositoryDirectory, ".changeset", entry.name), "utf8"),
-      packageName
-    ))
+    .flatMap((entry) => {
+      const markdown = readFileSync(join(repositoryDirectory, ".changeset", entry.name), "utf8")
+      return packageNames.map((name) => parseChangeset(markdown, name))
+    })
     .filter((entry) => entry !== undefined)
   if (pending.length === 0) return releases
   const grouped = new Map()
-  for (const entry of pending) grouped.set(entry.type, [...grouped.get(entry.type) ?? [], entry])
+  for (const entry of pending) {
+    const descriptions = grouped.get(entry.type) ?? new Map()
+    descriptions.set(entry.description, entry)
+    grouped.set(entry.type, descriptions)
+  }
   return [{
     version: "unreleased",
     groups: ["major", "minor", "patch"]
       .filter((type) => grouped.has(type))
-      .map((type) => ({ type, entries: grouped.get(type) }))
+      .map((type) => ({ type, entries: [...grouped.get(type).values()] }))
   }, ...releases]
 }
 
@@ -1143,6 +1212,10 @@ const validateSite = (outputDirectory, site) => {
     ...site.modules.map((module) => join(module.route, "index.html"))
   ]) {
     if (!isFile(safeResolve(outputDirectory, path))) throw new Error(`Missing generated site file: ${path}`)
+  }
+  const changelog = readFileSync(safeResolve(outputDirectory, "changelog/index.html"), "utf8")
+  if (!changelog.includes(`id="release-${slugify(site.package.version)}"`)) {
+    throw new Error(`Generated changelog does not include current package version ${site.package.version}`)
   }
 }
 
