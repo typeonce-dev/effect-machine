@@ -1,5 +1,13 @@
 # @typeonce/effect-machine
 
+## 0.31.2
+
+### Patch Changes
+
+- 65e4722: Fix initial choice resolvers so schema-backed `containingState` and `ancestors` are decoded before the choice runs.
+
+  This makes `.from(...)` state construction behave the same for transient initial choices as it does for ordinary active-state entry.
+
 ## 0.31.1
 
 ## 0.31.0
