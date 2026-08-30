@@ -1,5 +1,15 @@
 # @typeonce/effect-machine-devtools
 
+## 0.31.1
+
+### Patch Changes
+
+- a822392: Make statecharts easier to scan with compact graphical badges for automatic transitions, invocation outcomes, stream updates, snapshots, choices, and branch groups.
+
+  Failure transitions now use a distinct red treatment, while state cards, activity colors, and transition labels use a colorblind-friendly palette with stronger foreground contrast.
+
+  - @typeonce/effect-machine@0.31.1
+
 ## 0.31.0
 
 ### Patch Changes

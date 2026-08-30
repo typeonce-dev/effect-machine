@@ -1,5 +1,7 @@
 # @typeonce/oxlint-plugin-effect-machine
 
+## 0.31.1
+
 ## 0.31.0
 
 ## 0.30.0

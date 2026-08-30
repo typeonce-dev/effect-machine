@@ -1,5 +1,11 @@
 # @typeonce/effect-machine-react
 
+## 0.31.1
+
+### Patch Changes
+
+- @typeonce/effect-machine@0.31.1
+
 ## 0.31.0
 
 ### Patch Changes
