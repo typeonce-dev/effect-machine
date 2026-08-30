@@ -1,6 +1,6 @@
 {
   "name": "@typeonce/effect-machine-react",
-  "version": "0.31.1",
+  "version": "0.31.2",
   "description": "React ownership hooks for Effect Machine atoms",
   "author": "Sandro Maglione",
   "repository": {
