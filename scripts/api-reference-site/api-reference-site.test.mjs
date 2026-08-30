@@ -4,6 +4,7 @@ import {
   highlightCode,
   githubRepository,
   moduleRoute,
+  mergeChangelogs,
   normalizeBasePath,
   normalizeGitHubStars,
   normalizeOrigin,
@@ -187,6 +188,48 @@ Add snapshot selectors.
 
 Ignore this package.
 `, "@typeonce/effect-machine"), undefined)
+})
+
+test("merges synchronized package changelogs without dependency-only entries", () => {
+  const dates = new Map([["1.2.1", "2026-08-30"], ["1.2.0", "2026-08-29"]])
+  const core = parseChangelog(`# Core
+
+## 1.2.1
+
+## 1.2.0
+
+### Minor Changes
+
+- abc1234: Add a core API.
+`, dates)
+  const devtools = parseChangelog(`# Devtools
+
+## 1.2.1
+
+### Patch Changes
+
+- def5678: Improve the visualizer.
+
+  - @typeonce/effect-machine@1.2.1
+`, dates)
+  const react = parseChangelog(`# React
+
+## 1.2.1
+
+### Patch Changes
+
+- @typeonce/effect-machine@1.2.1
+`, dates)
+
+  assert.deepEqual(mergeChangelogs([core, devtools, react]), [{
+    version: "1.2.1",
+    date: "2026-08-30",
+    groups: [{ type: "patch", entries: [{ description: "Improve the visualizer." }] }]
+  }, {
+    version: "1.2.0",
+    date: "2026-08-29",
+    groups: [{ type: "minor", entries: [{ description: "Add a core API." }] }]
+  }])
 })
 
 test("renders a navigable changelog with release dates", () => {
