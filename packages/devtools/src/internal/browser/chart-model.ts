@@ -24,6 +24,15 @@ export interface ChartNode {
   readonly activities: ReadonlyArray<ChartActivity>
 }
 
+export type ChartEdgeBadge =
+  | { readonly type: "always" }
+  | { readonly type: "completion" }
+  | { readonly type: "choice" }
+  | { readonly type: "failure" }
+  | { readonly type: "element" }
+  | { readonly type: "snapshot" }
+  | { readonly type: "branches"; readonly count: number }
+
 export interface ChartEdge {
   readonly id: string
   readonly transitionId: string
@@ -32,6 +41,8 @@ export interface ChartEdge {
   readonly source: string
   readonly target: string | null
   readonly label: string
+  readonly accessibleLabel: string
+  readonly badges: ReadonlyArray<ChartEdgeBadge>
   readonly trigger: VisualizationTransition["trigger"]
   readonly activityKind: ChartActivity["kind"] | null
   readonly reenter: boolean
@@ -77,6 +88,43 @@ const transitionLabel = (transition: VisualizationTransition, branch: Visualizat
   const trigger = triggerLabel(transition)
   return branch.type === "branch" ? `${trigger} · ${branch.title}` : trigger
 }
+
+interface TriggerPresentation {
+  readonly label: string
+  readonly badges: ReadonlyArray<ChartEdgeBadge>
+}
+
+const triggerPresentation = (transition: VisualizationTransition): TriggerPresentation => {
+  switch (transition.trigger.type) {
+    case "event":
+      return { label: transition.trigger.event, badges: [] }
+    case "always":
+      return { label: "", badges: [{ type: "always" }] }
+    case "done":
+      return { label: "", badges: [{ type: "completion" }] }
+    case "choice":
+      return { label: "", badges: [{ type: "choice" }] }
+    case "invoke":
+      return {
+        label: transition.trigger.id,
+        badges: [{ type: transition.trigger.outcome === "done" ? "completion" : transition.trigger.outcome }]
+      }
+  }
+}
+
+const visibleLabel = (transition: VisualizationTransition, branches: ReadonlyArray<VisualizationBranch>): string => {
+  const presentation = triggerPresentation(transition)
+  if (branches.length !== 1 || branches[0]?.type !== "branch") return presentation.label
+  return [presentation.label, branches[0].title].filter((part) => part.length > 0).join(" · ")
+}
+
+const labelBadges = (
+  transition: VisualizationTransition,
+  branches: ReadonlyArray<VisualizationBranch>
+): ReadonlyArray<ChartEdgeBadge> => [
+  ...triggerPresentation(transition).badges,
+  ...(branches.length > 1 ? [{ type: "branches" as const, count: branches.length }] : [])
+]
 
 interface EdgeGroup {
   readonly kind: ChartEdge["kind"]
@@ -146,9 +194,11 @@ export const makeChartModel = (document: VisualizationDocument): ChartModel => {
       kind,
       source: transition.source,
       target,
-      label: branches.length === 1
+      label: visibleLabel(transition, branches),
+      accessibleLabel: branches.length === 1
         ? transitionLabel(transition, branches[0]!)
         : `${triggerLabel(transition)} · ${branches.length} branches`,
+      badges: labelBadges(transition, branches),
       trigger: transition.trigger,
       activityKind: transition.trigger.type === "invoke"
         ? activitiesBySource.get(transition.source)?.get(transition.trigger.id) ?? null

@@ -8,7 +8,7 @@ import {
   layoutChart,
   maxVisibleActivities
 } from "./chart-layout.js"
-import { makeChartModel } from "./chart-model.js"
+import { type ChartEdgeBadge, makeChartModel } from "./chart-model.js"
 
 export interface ChartHandlers {
   readonly selectState: (path: string, anchor: ChartInteractionAnchor) => void
@@ -106,6 +106,57 @@ const svgElement = <Tag extends keyof SVGElementTagNameMap>(
 ): SVGElementTagNameMap[Tag] => {
   const node = document.createElementNS("http://www.w3.org/2000/svg", tag)
   if (className !== undefined) node.setAttribute("class", className)
+  return node
+}
+
+const badgeIcon = (badge: ChartEdgeBadge): SVGSVGElement => {
+  const icon = svgElement("svg", "chart-edge-badge-icon")
+  icon.setAttribute("viewBox", "0 0 14 14")
+  icon.setAttribute("aria-hidden", "true")
+  const path = svgElement("path")
+  switch (badge.type) {
+    case "completion":
+      path.setAttribute("d", "M 3 7.2 L 5.7 9.7 L 11 4.2")
+      break
+    case "failure":
+      path.setAttribute("d", "M 4 4 L 10 10 M 10 4 L 4 10")
+      break
+    case "element":
+      path.setAttribute("d", "M 2 7 H 4.2 L 5.7 3.8 L 8.1 10.2 L 9.7 7 H 12")
+      break
+    case "snapshot": {
+      const ring = svgElement("circle")
+      ring.setAttribute("cx", "7")
+      ring.setAttribute("cy", "7")
+      ring.setAttribute("r", "3.5")
+      const point = svgElement("circle")
+      point.setAttribute("cx", "7")
+      point.setAttribute("cy", "7")
+      point.setAttribute("r", "1.2")
+      point.classList.add("chart-edge-badge-icon-fill")
+      icon.append(ring, point)
+      return icon
+    }
+    case "always":
+      path.setAttribute(
+        "d",
+        "M 2 7 C 3.3 4.5 4.9 4.5 7 7 C 9.1 9.5 10.7 9.5 12 7 C 10.7 4.5 9.1 4.5 7 7 C 4.9 9.5 3.3 9.5 2 7"
+      )
+      break
+    case "choice":
+    case "branches":
+      path.setAttribute("d", "M 7 11 V 7.5 M 7 7.5 L 3.5 4 M 7 7.5 L 10.5 4")
+      break
+  }
+  icon.append(path)
+  return icon
+}
+
+const edgeBadge = (badge: ChartEdgeBadge): HTMLSpanElement => {
+  const node = element("span", `chart-edge-badge chart-edge-badge-${badge.type}`)
+  node.setAttribute("aria-hidden", "true")
+  node.append(badgeIcon(badge))
+  if (badge.type === "branches") node.append(element("span", "chart-edge-badge-count", String(badge.count)))
   return node
 }
 
@@ -425,13 +476,15 @@ const render = (
   for (const laidOut of layout.edges) {
     const parentChild = laidOut.kind === "transition" && laidOut.edge.target !== null &&
       parentByState.get(laidOut.edge.target) === laidOut.edge.source
+    const failure = laidOut.kind === "transition" &&
+      laidOut.edge.badges.some((badge) => badge.type === "failure")
     const group = svgElement(
       "g",
       `chart-edge-group chart-edge-${laidOut.kind}${
         laidOut.kind === "transition"
           ? ` chart-transition-${laidOut.edge.kind} chart-edge-trigger-${laidOut.edge.trigger.type}${
             laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
-          }${parentChild ? " chart-edge-parent-child" : ""}`
+          }${parentChild ? " chart-edge-parent-child" : ""}${failure ? " chart-edge-failure" : ""}`
           : ""
       }`
     )
@@ -476,11 +529,21 @@ const render = (
       "button",
       `chart-edge-label chart-edge-label-${laidOut.edge.trigger.type}${
         laidOut.edge.activityKind === null ? "" : ` chart-edge-activity-${laidOut.edge.activityKind}`
-      }${parentChild ? " chart-edge-label-parent-child" : ""}`,
-      laidOut.edge.label
+      }${parentChild ? " chart-edge-label-parent-child" : ""}${failure ? " chart-edge-label-failure" : ""}${
+        laidOut.edge.label.length === 0 ? " chart-edge-label-icon-only" : ""
+      }${laidOut.edge.label.length > 0 && laidOut.edge.badges.length > 0 ? " chart-edge-label-corner-badge" : ""}`
     )
     label.type = "button"
+    label.setAttribute("aria-label", laidOut.edge.accessibleLabel)
     if (parentChild) label.title = "Transition declared by the parent state"
+    if (laidOut.edge.label.length > 0) {
+      label.append(element("span", "chart-edge-label-text", laidOut.edge.label))
+    }
+    if (laidOut.edge.badges.length > 0) {
+      const badges = element("span", "chart-edge-badges")
+      badges.append(...laidOut.edge.badges.map(edgeBadge))
+      label.append(badges)
+    }
     label.dataset.transitionId = laidOut.edge.transitionId
     position(label, {
       x: laidOut.label.x - laidOut.labelWidth / 2,
