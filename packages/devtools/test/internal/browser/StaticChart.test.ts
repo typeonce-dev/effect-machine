@@ -86,6 +86,8 @@ describe("Static chart", () => {
           source: "Idle",
           target: "Done",
           label: "Advance",
+          accessibleLabel: "Advance",
+          badges: [],
           trigger: { type: "event", event: "Advance" },
           activityKind: null,
           reenter: false,
@@ -99,6 +101,8 @@ describe("Static chart", () => {
           source: "Done",
           target: "Idle",
           label: "Return",
+          accessibleLabel: "Return",
+          badges: [],
           trigger: { type: "event", event: "Return" },
           activityKind: null,
           reenter: false,
@@ -112,6 +116,8 @@ describe("Static chart", () => {
           source: "Idle",
           target: null,
           label: "Refresh",
+          accessibleLabel: "Refresh",
+          badges: [],
           trigger: { type: "event", event: "Refresh" },
           activityKind: null,
           reenter: false,
@@ -171,6 +177,8 @@ describe("Static chart", () => {
         source: "Workflow",
         target: "Workflow.Idle",
         label: "Enter",
+        accessibleLabel: "Enter",
+        badges: [],
         trigger: { type: "event", event: "Enter" },
         activityKind: null,
         reenter: false,
@@ -184,6 +192,8 @@ describe("Static chart", () => {
         source: "Workflow.Idle",
         target: "Workflow",
         label: "Leave",
+        accessibleLabel: "Leave",
+        badges: [],
         trigger: { type: "event", event: "Leave" },
         activityKind: null,
         reenter: false,
@@ -226,8 +236,16 @@ describe("Static chart", () => {
       { kind: "effect", label: "monitor-job" }
     ])
     assert.deepStrictEqual(
-      model.edges.filter((edge) => edge.transitionId === "Idle:transition:0").map((edge) => edge.label),
-      ["Begin · 2 branches"]
+      model.edges.filter((edge) => edge.transitionId === "Idle:transition:0").map((edge) => ({
+        label: edge.label,
+        accessibleLabel: edge.accessibleLabel,
+        badges: edge.badges
+      })),
+      [{
+        label: "Begin",
+        accessibleLabel: "Begin · 2 branches",
+        badges: [{ type: "branches", count: 2 }]
+      }]
     )
     assert.deepStrictEqual(
       model.edges.find((edge) => edge.transitionId === "Idle:transition:0")?.branchIds,
@@ -255,6 +273,43 @@ describe("Static chart", () => {
         ["status-worker", "process"],
         ["preview-worker", "machine"]
       ])
+    )
+  })
+
+  it("projects every framework transition label as a graphical badge", () => {
+    const models = [
+      makeChartModel(MachineDocument.make(invokeOutcomesMachine)),
+      makeChartModel(MachineDocument.make(transitionSemanticsMachine)),
+      makeChartModel(MachineDocument.make(plannerMachine))
+    ]
+    const badgeTypes = new Set(
+      models.flatMap(({ edges }) => edges.flatMap(({ badges }) => badges.map(({ type }) => type)))
+    )
+
+    assert.deepStrictEqual(
+      badgeTypes,
+      new Set([
+        "always",
+        "completion",
+        "choice",
+        "failure",
+        "element",
+        "snapshot",
+        "branches"
+      ])
+    )
+
+    const invokeEdges = models[0]!.edges.filter(({ trigger }) => trigger.type === "invoke")
+    assert.isTrue(
+      invokeEdges.every(({ label, trigger }) =>
+        trigger.type === "invoke" && label.includes(trigger.id) && !label.includes(trigger.outcome)
+      )
+    )
+    const automaticEdges = models[1]!.edges.filter(({ trigger }) =>
+      trigger.type === "always" || trigger.type === "done" || trigger.type === "choice"
+    )
+    assert.isTrue(
+      automaticEdges.every(({ label }) => label !== "Always" && label !== "On completion" && label !== "Choice")
     )
   })
 
@@ -506,7 +561,10 @@ describe("Static chart", () => {
       edge.kind === "transition" && edge.edge.label === "Submit · Show validation failure"
     )
     const externalFailure = layout.edges.find((edge) =>
-      edge.kind === "transition" && edge.edge.label === "save-review · failure"
+      edge.kind === "transition" &&
+      edge.edge.trigger.type === "invoke" &&
+      edge.edge.trigger.id === "save-review" &&
+      edge.edge.trigger.outcome === "failure"
     )
     if (
       source === undefined || target === undefined ||

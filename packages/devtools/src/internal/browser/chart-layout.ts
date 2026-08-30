@@ -319,10 +319,24 @@ const portsByState = (
   return ports
 }
 
-const labelMetric = (label: string): { readonly width: number; readonly height: number } => ({
-  width: Math.min(230, Math.max(72, label.length * 7 + 20)),
-  height: 26
-})
+const badgeWidth = (badge: ChartEdge["badges"][number]): number => badge.type === "branches" ? 21 : 11
+
+const labelMetric = (edge: ChartEdge): { readonly width: number; readonly height: number } => {
+  const badgesWidth = edge.badges.reduce((width, badge) => width + badgeWidth(badge), 0) +
+    Math.max(0, edge.badges.length - 1) * 3
+  if (edge.label.length === 0) {
+    return {
+      width: Math.max(20, badgesWidth + 4),
+      height: 20
+    }
+  }
+  const bodyWidth = Math.min(226, Math.max(52, edge.label.length * 7 + 20))
+  const hasCornerBadge = edge.badges.length > 0
+  return {
+    width: bodyWidth + (hasCornerBadge ? 4 : 0),
+    height: 26 + (hasCornerBadge ? 4 : 0)
+  }
+}
 
 const makeGraph = (
   model: ChartModel,
@@ -443,14 +457,14 @@ const makeGraph = (
     children: children(null),
     edges: [
       ...model.edges.map((edge): ElkExtendedEdge => {
-        const label = labelMetric(edge.label)
+        const label = labelMetric(edge)
         const edgeLayout = policy.edge(edge)
         const runtimeTarget = edge.kind === "runtime" ? runtimeByEdgeId.get(edge.id) : undefined
         return {
           id: edge.id,
           sources: [sourcePortId(edge)],
           targets: [runtimeTarget === undefined ? targetPortId(edge) : runtimeTargetPortId(runtimeTarget)],
-          labels: [{ text: edge.label, width: label.width, height: label.height }],
+          labels: [{ text: edge.accessibleLabel, width: label.width, height: label.height }],
           layoutOptions: {
             "elk.layered.priority.direction": edgeLayout.direction === "forward" ? "10" : "1",
             "elk.layered.priority.shortness": "5",
@@ -1076,7 +1090,7 @@ const collectLayout = (
         nodesByPath,
         nodes
       )
-      const metric = labelMetric(chartEdge.label)
+      const metric = labelMetric(chartEdge)
       const label = edge.labels?.[0]
       const labelWidth = label?.width ?? metric.width
       const labelHeight = label?.height ?? metric.height

@@ -13,6 +13,20 @@
   --accent: #75a7ff;
   --accent-bg: rgb(75 125 255 / 18%);
   --orange: #f0a35b;
+  --danger: #d8757b;
+  --danger-strong: #efafb3;
+  --danger-background: #241416;
+  --danger-border: #945057;
+  --chart-surface: #171c23;
+  --chart-surface-raised: #1a2028;
+  --chart-border: #3a4551;
+  --chart-border-soft: #303944;
+  --chart-text: #d5dbe3;
+  --chart-text-muted: #a2acb8;
+  --chart-completion: #82b4c8;
+  --chart-failure: var(--danger);
+  --chart-source: #d18f68;
+  --chart-target: #78a9c9;
 }
 
 * {
@@ -104,7 +118,7 @@ body {
 }
 
 .machine-row-status.status-ready {
-  background: #67c894;
+  background: #67a9cf;
 }
 
 .machine-row-status.status-partial {
@@ -112,7 +126,7 @@ body {
 }
 
 .machine-row-status.status-error {
-  background: #df6964;
+  background: var(--danger);
 }
 
 .machine-row-label,
@@ -161,7 +175,7 @@ body {
 }
 
 .connection-failure {
-  color: #e4b4b1;
+  color: var(--danger-strong);
 }
 
 button {
@@ -215,8 +229,8 @@ button {
 }
 
 .badge-error {
-  color: #f2aaa7;
-  background: rgb(224 89 84 / 14%);
+  color: var(--danger-strong);
+  background: rgb(190 72 82 / 15%);
 }
 
 .toolbar {
@@ -426,14 +440,14 @@ button {
 
 .chart-compound {
   position: absolute;
-  border: 1px solid #272c33;
+  border: 1px solid var(--chart-border-soft);
   border-radius: 5px;
-  background: rgb(18 21 25 / 72%);
+  background: rgb(21 26 32 / 78%);
 }
 
 .chart-compound-parallel {
-  border-color: #303845;
-  background: rgb(20 24 30 / 74%);
+  border-color: var(--chart-border);
+  background: rgb(24 30 38 / 80%);
 }
 
 .chart-unconnected-region {
@@ -459,10 +473,10 @@ button {
   flex-direction: column;
   justify-content: center;
   padding: 12px;
-  border: 1px solid #30363f;
+  border: 1px solid var(--chart-border);
   border-radius: 4px;
-  color: #d9dce1;
-  background: #14181d;
+  color: var(--chart-text);
+  background: var(--chart-surface);
   box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
   overflow: hidden;
   text-align: left;
@@ -473,8 +487,8 @@ button {
 
 .chart-state-compound,
 .chart-state-parallel {
-  border-color: #353c47;
-  background: #171b21;
+  border-color: #465362;
+  background: var(--chart-surface-raised);
 }
 
 .chart-state-final {
@@ -483,7 +497,7 @@ button {
 
 .chart-state-history,
 .chart-state-choice {
-  background: #18171d;
+  background: #1c1a21;
 }
 
 .chart-state:not(:disabled):hover,
@@ -538,7 +552,7 @@ button {
 
 .chart-activity-kind,
 .chart-more {
-  color: #7e8792;
+  color: var(--chart-text-muted);
   font-size: 9px;
   line-height: 1.3;
 }
@@ -551,7 +565,7 @@ button {
   width: min(300px, 100%);
   margin-top: 8px;
   padding-top: 7px;
-  border-top: 1px solid #242a31;
+  border-top: 1px solid #333d48;
 }
 
 .chart-activity-row {
@@ -565,7 +579,7 @@ button {
 }
 
 .chart-activity-name {
-  color: #c4c9d0;
+  color: #d1d7df;
   font-size: 10px;
 }
 
@@ -578,7 +592,7 @@ button {
 
 .chart-activity-kind {
   min-width: max-content;
-  color: var(--chart-activity-color, #77a990);
+  color: var(--chart-activity-color, #82a9cb);
   overflow: visible;
   text-overflow: clip;
 }
@@ -586,41 +600,41 @@ button {
 .chart-activity-process,
 .chart-edge-activity-process,
 .badge-activity-process {
-  --chart-activity-color: #a98978;
-  --chart-activity-border: #51433c;
-  --chart-activity-background: #191513;
+  --chart-activity-color: #c99a82;
+  --chart-activity-border: #624d42;
+  --chart-activity-background: #1d1714;
 }
 
 .chart-activity-effect,
 .chart-edge-activity-effect,
 .badge-activity-effect {
-  --chart-activity-color: #7f9f8c;
-  --chart-activity-border: #42564b;
-  --chart-activity-background: #131815;
+  --chart-activity-color: #82a9cb;
+  --chart-activity-border: #435c71;
+  --chart-activity-background: #121a22;
 }
 
 .chart-activity-timer,
 .chart-edge-activity-timer,
 .badge-activity-timer {
-  --chart-activity-color: #aaa07c;
-  --chart-activity-border: #57503c;
-  --chart-activity-background: #191812;
+  --chart-activity-color: #c1ad73;
+  --chart-activity-border: #625842;
+  --chart-activity-background: #1c1a13;
 }
 
 .chart-activity-stream,
 .chart-edge-activity-stream,
 .badge-activity-stream {
-  --chart-activity-color: #7898a2;
-  --chart-activity-border: #405259;
-  --chart-activity-background: #121719;
+  --chart-activity-color: #75a9ad;
+  --chart-activity-border: #3f5c5f;
+  --chart-activity-background: #111a1b;
 }
 
 .chart-activity-machine,
 .chart-edge-activity-machine,
 .badge-activity-machine {
-  --chart-activity-color: #958aa8;
-  --chart-activity-border: #4d4658;
-  --chart-activity-background: #17151a;
+  --chart-activity-color: #a99cbd;
+  --chart-activity-border: #574e67;
+  --chart-activity-background: #1a1720;
 }
 
 .chart-more {
@@ -701,19 +715,151 @@ button {
 }
 
 .chart-edge-label {
+  --chart-edge-label-background: #151a20;
+  --chart-edge-label-border: #3a4551;
+  --chart-edge-label-shadow: none;
   position: absolute;
+  display: flex;
   padding: 4px 7px;
-  border: 1px solid #2c333c;
-  border-radius: 3px;
-  color: #c0c7d0;
-  background: #101318;
+  border: 0;
+  align-items: center;
+  justify-content: center;
+  color: #d1d7df;
+  background: transparent;
   font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
   white-space: nowrap;
   cursor: pointer;
   pointer-events: auto;
   user-select: none;
+}
+
+.chart-edge-label::before {
+  position: absolute;
+  border: 1px solid var(--chart-edge-label-border);
+  border-radius: 3px;
+  background: var(--chart-edge-label-background);
+  box-shadow: var(--chart-edge-label-shadow);
+  content: "";
+  inset: 0;
+}
+
+.chart-edge-label-corner-badge {
+  padding: 8px 11px 4px 7px;
+}
+
+.chart-edge-label-corner-badge::before {
+  top: 4px;
+  right: 4px;
+}
+
+.chart-edge-label-text {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-edge-badges {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+}
+
+.chart-edge-label-icon-only {
+  display: flex;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.chart-edge-label-icon-only::before {
+  display: none;
+}
+
+.chart-edge-label-icon-only .chart-edge-badges {
+  position: static;
+}
+
+.chart-edge-badge {
+  display: inline-flex;
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: #161b22;
+}
+
+.chart-edge-badge-icon {
+  width: 8px;
+  height: 8px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.chart-edge-badge-icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+.chart-edge-badge-completion {
+  color: var(--chart-completion);
+}
+
+.chart-edge-badge-failure {
+  color: var(--chart-failure);
+}
+
+.chart-edge-badge-element {
+  color: #7fadb7;
+}
+
+.chart-edge-badge-snapshot {
+  color: #aaa0bd;
+}
+
+.chart-edge-badge-always {
+  color: #b8a66f;
+}
+
+.chart-edge-badge-choice {
+  color: #aa9abd;
+}
+
+.chart-edge-badge-branches {
+  width: auto;
+  min-width: 21px;
+  padding: 0 2px;
+  border-radius: 6px;
+  gap: 1px;
+  color: #a3acb8;
+}
+
+.chart-edge-badge-branches .chart-edge-badge-icon {
+  width: 7px;
+  height: 7px;
+}
+
+.chart-edge-badge-count {
+  font-size: 6px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .chart-edge-group.chart-edge-parent-child .chart-edge-line,
@@ -727,16 +873,16 @@ button {
 }
 
 .chart-edge-label-parent-child {
-  border-color: #4d465a;
+  --chart-edge-label-background: #17151b;
+  --chart-edge-label-border: #4d465a;
+  --chart-edge-label-shadow: inset 2px 0 #6f6681;
   color: #aea5c1;
-  background: #17151b;
-  box-shadow: inset 2px 0 #6f6681;
 }
 
 .chart-edge-label:not(:disabled):hover,
 .chart-edge-label:focus-visible,
 .chart-edge-group.is-hovered + .chart-edge-label {
-  border-color: #53657e;
+  --chart-edge-label-border: #53657e;
   color: #fff;
   outline: none;
 }
@@ -793,22 +939,34 @@ button {
 .chart-edge-label.chart-edge-activity-timer,
 .chart-edge-label.chart-edge-activity-stream,
 .chart-edge-label.chart-edge-activity-machine {
-  border-color: var(--chart-activity-border);
+  --chart-edge-label-background: var(--chart-activity-background);
+  --chart-edge-label-border: var(--chart-activity-border);
   color: var(--chart-activity-color);
-  background: var(--chart-activity-background);
+}
+
+.chart-edge-group.chart-edge-failure .chart-edge-line,
+.chart-edge-group.chart-edge-failure .chart-edge-direction,
+.chart-edge-group.chart-edge-failure .chart-edge-parent-origin {
+  stroke: var(--chart-failure);
+}
+
+.chart-edge-label.chart-edge-label-failure {
+  --chart-edge-label-background: var(--danger-background);
+  --chart-edge-label-border: var(--danger-border);
+  color: var(--danger-strong);
 }
 
 .chart-edge-group.is-incoming .chart-edge-line,
 .chart-edge-group.is-incoming .chart-edge-direction,
 .chart-edge-group.is-incoming .chart-edge-parent-origin {
-  stroke: #ed6a70;
+  stroke: var(--chart-source);
   stroke-width: 2;
 }
 
 .chart-edge-group.is-outgoing .chart-edge-line,
 .chart-edge-group.is-outgoing .chart-edge-direction,
 .chart-edge-group.is-outgoing .chart-edge-parent-origin {
-  stroke: #6eb6dc;
+  stroke: var(--chart-target);
   stroke-width: 2;
 }
 
@@ -826,38 +984,38 @@ button {
 }
 
 .chart-edge-label.is-hovered {
-  border-color: #526783;
+  --chart-edge-label-border: #526783;
   color: #dbe8ff;
 }
 
 .chart-edge-label.is-walkthrough-unavailable {
-  border-color: #4e4a43;
+  --chart-edge-label-background: #151412;
+  --chart-edge-label-border: #4e4a43;
   color: #8d8679;
-  background: #151412;
 }
 
 .chart-edge-label.is-incoming {
-  border-color: #a9484e;
-  color: #ffd0d2;
-  background: #251416;
+  --chart-edge-label-background: #241914;
+  --chart-edge-label-border: #8e5f43;
+  color: #f0b590;
 }
 
 .chart-edge-label.is-outgoing {
-  border-color: #47758d;
-  color: #c5e8f7;
-  background: #111c22;
+  --chart-edge-label-background: #111c24;
+  --chart-edge-label-border: #4d7188;
+  color: #a9d3e7;
 }
 
 .chart-edge-label.is-selected {
-  border-color: #719ce0;
+  --chart-edge-label-background: #18253a;
+  --chart-edge-label-border: #719ce0;
   color: #fff;
-  background: #18253a;
 }
 
 .chart-edge-label.is-walkthrough-available {
-  border-color: #8d713c;
+  --chart-edge-label-background: #211b12;
+  --chart-edge-label-border: #8d713c;
   color: #f0d39a;
-  background: #211b12;
 }
 
 .chart-state.is-selected,
@@ -870,22 +1028,22 @@ button {
 .chart-compound.is-related-to,
 .chart-state.is-hover-target,
 .chart-compound.is-hover-target {
-  border-color: #4f829a;
-  background: rgb(48 112 140 / 24%);
+  border-color: #5e8aa3;
+  background: rgb(54 112 143 / 30%);
 }
 
 .chart-state.is-related-from,
 .chart-compound.is-related-from,
 .chart-state.is-hover-source,
 .chart-compound.is-hover-source {
-  border-color: #a94b52;
-  background: rgb(151 48 57 / 26%);
+  border-color: #9b684c;
+  background: rgb(149 84 48 / 30%);
 }
 
 .chart-state.is-related-from.is-related-to,
 .chart-compound.is-related-from.is-related-to {
-  border-color: #6e708f;
-  background: linear-gradient(135deg, rgb(151 48 57 / 28%) 0 50%, rgb(48 112 140 / 26%) 50% 100%);
+  border-color: #777a91;
+  background: linear-gradient(135deg, rgb(149 84 48 / 30%) 0 50%, rgb(54 112 143 / 30%) 50% 100%);
 }
 
 .chart-viewport.is-simulating .chart-state:disabled,
@@ -922,11 +1080,11 @@ button {
 }
 
 .chart-layout-error {
-  color: #d58d89;
+  color: var(--danger);
 }
 
 .chart-layout-error strong {
-  color: #efb0ac;
+  color: var(--danger-strong);
 }
 
 .inspector-eyebrow,
@@ -967,8 +1125,8 @@ button {
 }
 
 .badge-activity {
-  color: #a8ddc4;
-  background: rgb(78 181 131 / 14%);
+  color: #acd0e5;
+  background: rgb(82 145 183 / 16%);
 }
 
 .badge-activity-process,
@@ -1044,7 +1202,7 @@ button {
 }
 
 .failure-kind {
-  color: #f2aaa7;
+  color: var(--danger-strong);
   font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1059,9 +1217,9 @@ button {
   max-width: 900px;
   margin: 4px 0 0;
   padding: 14px 16px;
-  border-left: 2px solid #a54743;
-  color: #e4b4b1;
-  background: #151112;
+  border-left: 2px solid var(--danger-border);
+  color: var(--danger-strong);
+  background: var(--danger-background);
   font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow: auto;
   white-space: pre-wrap;
@@ -1664,7 +1822,7 @@ button {
 }
 
 .input-unsupported {
-  color: #d7a5a2;
+  color: var(--danger-strong);
 }
 
 .value-shape-block {
