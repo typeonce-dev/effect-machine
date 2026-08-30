@@ -1277,15 +1277,19 @@ function resolveChoiceTarget(
       if (choice === undefined || typeof choice.transition !== "function") {
         throw new Error(`Machine choice state "${node.path}" requires an implementation`)
       }
+      const provisionalValues = new Map(configuration.values)
+      for (const [path, value] of Object.entries(extracted.values)) {
+        const valueNode = getNode(machine, path)
+        if (valueNode.schema !== undefined) {
+          provisionalValues.set(path, decodeStateValueSync(machine, valueNode, value))
+        }
+      }
       const provisional: ActiveConfiguration = {
         active: new Set([
           ...configuration.active,
           ...Object.keys(extracted.values)
         ]),
-        values: new Map([
-          ...configuration.values,
-          ...Object.entries(extracted.values)
-        ]),
+        values: provisionalValues,
         outputs: configuration.outputs,
         history: configuration.history,
         ...(configuration.machineReferences === undefined ? {} : { machineReferences: configuration.machineReferences })

@@ -129,6 +129,73 @@ describe("Machine choice pseudo-states", () => {
       ])
     }))
 
+  it.effect("decodes initial state constructions before resolving a choice", () =>
+    Effect.gen(function*() {
+      class Root extends Schema.TaggedClass<Root>("ChoiceInputRoot")("ChoiceInputRoot", {
+        enabled: Schema.Boolean
+      }) {}
+      class NestedFlow extends Schema.TaggedClass<NestedFlow>("ChoiceInputFlow")("ChoiceInputFlow", {
+        score: Schema.Number
+      }) {}
+      const states = Machine.states({
+        Root: {
+          schema: Root,
+          initial: "Flow",
+          states: {
+            Flow: {
+              schema: NestedFlow,
+              initial: "Routing",
+              states: {
+                Routing: { type: "choice" },
+                Approved,
+                Rejected
+              }
+            }
+          }
+        }
+      })
+      let observedContext: { readonly enabled: boolean; readonly score: number } | undefined
+      const inputChoice = Machine.make({
+        states: states.states,
+        events: Machine.events(),
+        input: Schema.Struct({ enabled: Schema.Boolean, score: Schema.Number }),
+        initial: (to) =>
+          to.Root.initial.resolve(({ input, target }) =>
+            target.from({ enabled: input.enabled }, (root) =>
+              root.Flow.from({ score: input.score }, (flow) => flow.Routing()))
+          )
+      }).handle({
+        Root: {
+          states: {
+            Flow: {
+              states: {
+                Routing: {
+                  choice: (to) =>
+                    to.branches({
+                      approved: { target: to.local.Approved() },
+                      rejected: { target: to.local.Rejected() }
+                    }).resolve(({ ancestors, containingState, select }) => {
+                      observedContext = {
+                        enabled: ancestors.Root.enabled,
+                        score: containingState.score
+                      }
+                      return ancestors.Root.enabled && containingState.score >= 70
+                        ? select.approved.decoded(new Approved({}))
+                        : select.rejected.decoded(new Rejected({}))
+                    })
+                }
+              }
+            }
+          }
+        }
+      })
+
+      const plan = yield* Machine.planInitial(inputChoice, { enabled: true, score: 80 })
+      assert.deepStrictEqual(observedContext, { enabled: true, score: 80 })
+      assert.strictEqual(plan.state.state.state.path, "Root.Flow.Approved")
+      assert.strictEqual(plan.microsteps[0]?.transitions[0]?.branchKey, "approved")
+    }))
+
   it.effect("targets a choice from an event and preserves that event", () =>
     Effect.gen(function*() {
       const initial = yield* Machine.planInitial(machine)

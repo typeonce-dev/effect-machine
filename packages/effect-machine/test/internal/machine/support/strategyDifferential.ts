@@ -113,9 +113,10 @@ export const verifyPlannerStrategies: (options: {
 
 export const openWithRuntimeStrategy = (
   machine: Machine.Machine.Any,
-  strategy: "generic" | "compiled"
+  strategy: "generic" | "compiled",
+  ...args: ReadonlyArray<unknown>
 ): Effect.Effect<Machine.MachineRef<any, any, any, any>, unknown> =>
-  Process.startWithRuntimeStrategyForTesting(machine, strategy) as any
+  Process.startWithRuntimeStrategyForTesting(machine, strategy, ...args) as any
 
 export const prepareWithRuntimeStrategy = (
   machine: Machine.Machine.Any,

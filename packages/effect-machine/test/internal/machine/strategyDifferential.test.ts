@@ -879,6 +879,99 @@ describe("machine planner and runtime strategies", () => {
       assert.deepStrictEqual(results[1], results[0])
     }) as Effect.Effect<void, unknown, any>)
 
+  it.effect("matches initial choice invoke and retry lifecycles across managed runtimes", () =>
+    Effect.gen(function*() {
+      class Flow extends Schema.TaggedClass<Flow>("StrategyChoiceFlow")("StrategyChoiceFlow", {
+        authenticated: Schema.Boolean
+      }) {}
+      class Retry extends Schema.TaggedClass<Retry>("StrategyChoiceRetry")("StrategyChoiceRetry", {}) {}
+      const states = Machine.states({
+        Flow: {
+          schema: Flow,
+          initial: "Routing",
+          states: {
+            Routing: { type: "choice" },
+            Checking: {},
+            Failed: {},
+            Plans: {},
+            MemberNavigating: {}
+          }
+        }
+      })
+      const waitForPath = (ref: Machine.MachineRef<any, any, any, any>, path: string) =>
+        Effect.gen(function*() {
+          for (let index = 0; index < 100; index += 1) {
+            if ((yield* ref.state).state.path === path) return
+            yield* Effect.yieldNow
+          }
+          return assert.fail(`machine did not reach ${path}`)
+        })
+      const results: Array<unknown> = []
+
+      for (const strategy of ["generic", "compiled"] as const) {
+        let membershipAttempts = 0
+        let navigationRuns = 0
+        const machine = Machine.make({
+          states: states.states,
+          events: Machine.events(Retry),
+          input: Schema.Struct({ authenticated: Schema.Boolean }),
+          initial: (to) => to.Flow.initial.resolve(({ input, target }) => target.from(input, (flow) => flow.Routing()))
+        }).handle({
+          Flow: {
+            states: {
+              Routing: {
+                choice: (to) =>
+                  to.branches({
+                    authenticated: { target: to.local.Checking() },
+                    anonymous: { target: to.local.Plans() }
+                  }).resolve(({ containingState, select }) =>
+                    containingState.authenticated ? select.authenticated.from() : select.anonymous.from()
+                  )
+              },
+              Checking: {
+                invoke: (from) =>
+                  from.effect("membership", () =>
+                    Effect.suspend(() => {
+                      membershipAttempts += 1
+                      return membershipAttempts === 1 ? Effect.fail("offline") : Effect.succeed("active")
+                    })).onDone((to) => to.local.MemberNavigating()).onFailure((to) => to.local.Failed())
+              },
+              Failed: {
+                on: {
+                  StrategyChoiceRetry: (to) => to.local.Checking()
+                }
+              },
+              MemberNavigating: {
+                invoke: (from) =>
+                  from.effect("navigate", () =>
+                    Effect.sync(() => {
+                      navigationRuns += 1
+                    }).pipe(Effect.andThen(Effect.never)))
+              }
+            }
+          }
+        })
+
+        assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
+        const ref = yield* openWithRuntimeStrategy(machine, strategy, { authenticated: true })
+        yield* waitForPath(ref, "Flow.Failed")
+        yield* ref.send(new Retry({}))
+        yield* waitForPath(ref, "Flow.MemberNavigating")
+        for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
+        results.push({
+          membershipAttempts,
+          navigationRuns,
+          path: (yield* ref.state).state.path
+        })
+        yield* ref.stop
+      }
+
+      assert.deepStrictEqual(results, [
+        { membershipAttempts: 2, navigationRuns: 1, path: "Flow.MemberNavigating" },
+        { membershipAttempts: 2, navigationRuns: 1, path: "Flow.MemberNavigating" }
+      ])
+    }) as Effect.Effect<void, unknown, any>)
+
   it.effect("matches generic and indexed invoke failure traces", () =>
     Effect.gen(function*() {
       class Loading extends Schema.TaggedClass<Loading>("StrategyInvokeFailureLoading")("Loading", {}) {}
