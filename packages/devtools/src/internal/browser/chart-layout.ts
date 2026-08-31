@@ -380,7 +380,7 @@ const makeGraph = (
       id: node.path,
       ports: [...ports.get(node.path) ?? []],
       layoutOptions: {
-        ...(profile.portConstraints === "fixed" && node.children.length === 0
+        ...(profile.portConstraints === "fixed"
           ? { "elk.portConstraints": "FIXED_SIDE" }
           : {}),
         "elk.spacing.portPort": "24",
@@ -508,6 +508,17 @@ const add = (left: ChartPoint, right: ChartPoint): ChartPoint => ({
   y: left.y + right.y
 })
 
+const between = (value: number, first: number, second: number): boolean =>
+  value >= Math.min(first, second) && value <= Math.max(first, second)
+
+const redundantCollinearPoint = (
+  start: ChartPoint,
+  middle: ChartPoint,
+  end: ChartPoint
+): boolean =>
+  start.x === middle.x && middle.x === end.x && between(middle.y, start.y, end.y) ||
+  start.y === middle.y && middle.y === end.y && between(middle.x, start.x, end.x)
+
 const compactPoints = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPoint> => {
   const result: Array<ChartPoint> = []
   for (const point of points) {
@@ -516,8 +527,7 @@ const compactPoints = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPo
     const beforePrevious = result.at(-2)
     if (
       beforePrevious !== undefined && previous !== undefined &&
-      (beforePrevious.x === previous.x && previous.x === point.x ||
-        beforePrevious.y === previous.y && previous.y === point.y)
+      redundantCollinearPoint(beforePrevious, previous, point)
     ) {
       result[result.length - 1] = point
     } else {
@@ -589,7 +599,7 @@ const horizontalBoundaryIntersection = (
   return { x: start.x <= end.x ? minimum : maximum, y }
 }
 
-const trimRouteFromCompoundHeader = (
+const anchorRouteAtCompoundHeader = (
   points: ReadonlyArray<ChartPoint>,
   node: LaidOutChartNode
 ): ReadonlyArray<ChartPoint> => {
@@ -604,7 +614,16 @@ const trimRouteFromCompoundHeader = (
     )
     if (intersection !== null) return compactPoints([intersection, ...points.slice(index)])
   }
-  return points
+  const first = points[0]
+  const next = points[1]
+  if (first === undefined || next === undefined) return points
+  const anchor = {
+    x: Math.min(node.x + node.width, Math.max(node.x, first.x)),
+    y: boundary
+  }
+  return first.x === next.x
+    ? compactPoints([anchor, ...points.slice(1)])
+    : compactPoints([anchor, { x: next.x, y: boundary }, ...points.slice(1)])
 }
 
 const normalizeHierarchyRoute = (
@@ -614,13 +633,13 @@ const normalizeHierarchyRoute = (
 ): ReadonlyArray<ChartPoint> => {
   if (edge.target !== null && isDescendantPath(edge.target, edge.source)) {
     const source = nodes.get(edge.source)
-    return source === undefined ? points : trimRouteFromCompoundHeader(points, source)
+    return source === undefined ? points : anchorRouteAtCompoundHeader(points, source)
   }
   if (edge.target !== null && isDescendantPath(edge.source, edge.target)) {
     const target = nodes.get(edge.target)
     return target === undefined
       ? points
-      : [...trimRouteFromCompoundHeader([...points].reverse(), target)].reverse()
+      : [...anchorRouteAtCompoundHeader([...points].reverse(), target)].reverse()
   }
   return points
 }
@@ -646,6 +665,23 @@ const endpointSide = (point: ChartPoint, node: LaidOutChartNode): RouteSide => {
     ["EAST", Math.abs(point.x - rect.right)]
   ]
   return distances.sort((left, right) => left[1] - right[1])[0]![0]
+}
+
+const endpointStepSide = (
+  boundary: ChartPoint,
+  adjacent: ChartPoint,
+  node: LaidOutChartNode
+): RouteSide => {
+  const rect = routeNodeRect(node)
+  if (boundary.y === adjacent.y) {
+    if (boundary.x === rect.left) return "WEST"
+    if (boundary.x === rect.right) return "EAST"
+  }
+  if (boundary.x === adjacent.x) {
+    if (boundary.y === rect.top) return "NORTH"
+    if (boundary.y === rect.bottom) return "SOUTH"
+  }
+  return endpointSide(boundary, node)
 }
 
 const outwardPoint = (point: ChartPoint, side: RouteSide, distance: number): ChartPoint => {
@@ -1348,7 +1384,7 @@ export const validateChartLayout = (
         }
         if (nodeBoundaryDistance(start, source) > 0.5) {
           report("detached-source", transition.edge.id, transition.edge.source)
-        } else if (!isOutwardStep(start, next, endpointSide(start, source))) {
+        } else if (!isOutwardStep(start, next, endpointStepSide(start, next, source))) {
           report("wrong-source-direction", transition.edge.id, transition.edge.source)
         }
       }
@@ -1364,7 +1400,10 @@ export const validateChartLayout = (
       const target = layout.nodes.find(({ node }) => node.path === transition.edge.target)
       if (target !== undefined && nodeBoundaryDistance(end, target) > 0.5) {
         report("detached-terminal", transition.edge.id, transition.edge.target)
-      } else if (target !== undefined && bend !== undefined && !isOutwardStep(end, bend, endpointSide(end, target))) {
+      } else if (
+        target !== undefined && bend !== undefined &&
+        !isOutwardStep(end, bend, endpointStepSide(end, bend, target))
+      ) {
         report("wrong-terminal-direction", transition.edge.id, transition.edge.target)
       }
     }
@@ -1446,11 +1485,14 @@ export const validateChartLayout = (
   }
 
   const allSegments = segments(layout)
+  const transitionIds = new Map(model.edges.map((edge) => [edge.id, edge.transitionId]))
   for (let left = 0; left < allSegments.length; left++) {
     for (let right = left + 1; right < allSegments.length; right++) {
       const first = allSegments[left]!
       const second = allSegments[right]!
       if (first.edgeId === second.edgeId) continue
+      const firstTransition = transitionIds.get(first.edgeId)
+      if (firstTransition !== undefined && firstTransition === transitionIds.get(second.edgeId)) continue
       if (collinearOverlap(first, second) > 4) report("route-overlap", first.edgeId, second.edgeId)
     }
   }

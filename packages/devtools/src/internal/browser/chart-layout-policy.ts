@@ -182,10 +182,10 @@ export const makeChartLayoutPolicy = (model: ChartModel): ChartLayoutPolicy => {
       differentAt++
     }
     if (differentAt === sourceLineage.length) {
-      return { direction: "forward", sourceSide: "EAST", targetSide: "EAST" }
+      return { direction: "forward", sourceSide: "SOUTH", targetSide: "NORTH" }
     }
     if (differentAt === targetLineage.length) {
-      return { direction: "backward", sourceSide: "WEST", targetSide: "WEST" }
+      return { direction: "backward", sourceSide: "NORTH", targetSide: "SOUTH" }
     }
 
     const source = nodePolicies.get(sourceLineage[differentAt]!) ?? unreachableNode

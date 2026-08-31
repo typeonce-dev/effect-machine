@@ -36,6 +36,173 @@ import { sharedTerminalRoutingMachine } from "../../../src/internal/browser/shar
 import { transitionSemanticsMachine } from "../../../src/internal/browser/transition-semantics-example.js"
 import * as MachineDocument from "../../../src/MachineDocument.js"
 
+const chartNode = (
+  path: string,
+  parent: string | null,
+  children: ReadonlyArray<string>,
+  initial = false
+): ChartNode => ({
+  path,
+  label: path.split(".").at(-1)!,
+  type: children.length === 0 ? "atomic" : "compound",
+  parent,
+  children,
+  active: false,
+  initial,
+  activities: []
+})
+
+const chartEdge = (
+  id: string,
+  source: string,
+  target: string,
+  label: string
+): ChartModel["edges"][number] => ({
+  id,
+  transitionId: id.includes(":branch:") ? id.slice(0, id.indexOf(":branch:")) : id,
+  branchIds: [id],
+  kind: "target",
+  source,
+  target,
+  label,
+  accessibleLabel: label,
+  badges: [],
+  trigger: { type: "event", event: label },
+  activityKind: null,
+  reenter: false,
+  acceptance: "required"
+})
+
+const parentReturnModel = (): ChartModel => ({
+  machineId: "parent-return-regression",
+  roots: ["Flow"],
+  nodes: [
+    chartNode("Flow", null, ["Flow.UploadingImage", "Flow.UploadFailed", "Flow.Saving"], true),
+    chartNode("Flow.UploadingImage", "Flow", [], true),
+    chartNode("Flow.UploadFailed", "Flow", []),
+    chartNode("Flow.Saving", "Flow", [])
+  ],
+  edges: [
+    chartEdge(
+      "Flow.UploadingImage:transition:0:branch:0",
+      "Flow.UploadingImage",
+      "Flow",
+      "upload done"
+    ),
+    chartEdge(
+      "Flow.UploadingImage:transition:1:branch:0",
+      "Flow.UploadingImage",
+      "Flow.UploadFailed",
+      "upload failed"
+    ),
+    chartEdge("Flow.UploadFailed:transition:0:branch:0", "Flow.UploadFailed", "Flow.Saving", "retry")
+  ],
+  runtimeTargets: [],
+  initials: [
+    { id: "initial:Flow", target: "Flow", parent: null },
+    { id: "initial:Flow.UploadingImage", target: "Flow.UploadingImage", parent: "Flow" }
+  ]
+})
+
+const deepBranchModel = (): ChartModel => {
+  const dialogs = ["About", "Membership", "Menu", "Profile", "Saved"] as const
+  const dialogNodes = dialogs.flatMap((dialog): ReadonlyArray<ChartNode> => {
+    const path = `Scope.Open.${dialog}`
+    const children = dialog === "Profile"
+      ? ["Tracking", "Ready", "LoggingOut", "LogoutFailed", "Reloading"]
+      : ["Tracking", "Ready"]
+    return [
+      chartNode(path, "Scope.Open", children.map((child) => `${path}.${child}`), dialog === "About"),
+      ...children.map((child) => chartNode(`${path}.${child}`, path, [], child === "Tracking"))
+    ]
+  })
+  return {
+    machineId: "deep-branch-regression",
+    roots: ["Scope"],
+    nodes: [
+      chartNode(
+        "Scope",
+        null,
+        [
+          "Scope.CheckingAccess",
+          "Scope.Closed",
+          "Scope.Open",
+          "Scope.OpeningPanel",
+          "Scope.NavigatingMembership"
+        ],
+        true
+      ),
+      chartNode("Scope.CheckingAccess", "Scope", [], true),
+      chartNode("Scope.Closed", "Scope", []),
+      chartNode("Scope.Open", "Scope", dialogs.map((dialog) => `Scope.Open.${dialog}`)),
+      ...dialogNodes,
+      chartNode("Scope.OpeningPanel", "Scope", []),
+      chartNode("Scope.NavigatingMembership", "Scope", [])
+    ],
+    edges: [
+      ...dialogs.map((dialog, index) =>
+        chartEdge(
+          `Scope:transition:0:branch:${index}`,
+          "Scope",
+          `Scope.Open.${dialog}`,
+          `open ${dialog.toLowerCase()}`
+        )
+      ),
+      ...dialogs.map((dialog, index) =>
+        chartEdge(
+          `Scope.Open.${dialog}.Tracking:transition:${index}:branch:0`,
+          `Scope.Open.${dialog}.Tracking`,
+          `Scope.Open.${dialog}.Ready`,
+          "tracked"
+        )
+      ),
+      chartEdge("Scope.Open:transition:1:branch:0", "Scope.Open", "Scope.Closed", "close"),
+      chartEdge("Scope.Open:transition:2:branch:0", "Scope.Open", "Scope.OpeningPanel", "open panel"),
+      chartEdge(
+        "Scope.Open.Profile.Ready:transition:0:branch:0",
+        "Scope.Open.Profile.Ready",
+        "Scope.Open.Profile.LoggingOut",
+        "logout"
+      ),
+      chartEdge(
+        "Scope.Open.Profile.LoggingOut:transition:0:branch:0",
+        "Scope.Open.Profile.LoggingOut",
+        "Scope.Open.Profile.Reloading",
+        "logout done"
+      ),
+      chartEdge(
+        "Scope.Open.Profile.LoggingOut:transition:1:branch:0",
+        "Scope.Open.Profile.LoggingOut",
+        "Scope.Open.Profile.LogoutFailed",
+        "logout failed"
+      ),
+      chartEdge(
+        "Scope.Open.Profile.LogoutFailed:transition:0:branch:0",
+        "Scope.Open.Profile.LogoutFailed",
+        "Scope.Open.Profile.LoggingOut",
+        "retry logout"
+      ),
+      chartEdge(
+        "Scope.Open.Profile.Reloading:transition:0:branch:0",
+        "Scope.Open.Profile.Reloading",
+        "Scope.Closed",
+        "reload done"
+      )
+    ],
+    runtimeTargets: [],
+    initials: [
+      { id: "initial:Scope", target: "Scope", parent: null },
+      { id: "initial:Scope.CheckingAccess", target: "Scope.CheckingAccess", parent: "Scope" },
+      { id: "initial:Scope.Open.About", target: "Scope.Open.About", parent: "Scope.Open" },
+      ...dialogs.map((dialog) => ({
+        id: `initial:Scope.Open.${dialog}.Tracking`,
+        target: `Scope.Open.${dialog}.Tracking`,
+        parent: `Scope.Open.${dialog}`
+      }))
+    ]
+  }
+}
+
 describe("Static chart", () => {
   const ELK = ELKBundle as unknown as new(args?: ELKConstructorArguments) => ElkApi
 
@@ -157,7 +324,7 @@ describe("Static chart", () => {
     })
   })
 
-  it("uses side lanes for transitions crossing a parent boundary", () => {
+  it("keeps hierarchy transitions aligned with the vertical chart flow", () => {
     const node = (path: string, parent: string | null, children: ReadonlyArray<string>): ChartNode => ({
       path,
       label: path,
@@ -217,13 +384,13 @@ describe("Static chart", () => {
 
     assert.deepStrictEqual(policy.edge(edges[0]!), {
       direction: "forward",
-      sourceSide: "EAST",
-      targetSide: "EAST"
+      sourceSide: "SOUTH",
+      targetSide: "NORTH"
     })
     assert.deepStrictEqual(policy.edge(edges[1]!), {
       direction: "backward",
-      sourceSide: "WEST",
-      targetSide: "WEST"
+      sourceSide: "NORTH",
+      targetSide: "SOUTH"
     })
   })
 
@@ -575,7 +742,9 @@ describe("Static chart", () => {
     assert.isAtLeast(externalFailure.points.length, 2)
     assert.strictEqual(parentTransition.points[0]?.y, source.y + source.headerHeight)
     assert.isAtLeast(Math.min(...externalFailure.points.map(({ y }) => y)), target.y)
-    assert.isBelow(chartRouteLength(externalFailure.points), 500)
+    const directDistance = Math.abs(externalFailure.points[0]!.x - externalFailure.points.at(-1)!.x) +
+      Math.abs(externalFailure.points[0]!.y - externalFailure.points.at(-1)!.y)
+    assert.isAtMost(chartRouteLength(externalFailure.points), directDistance + 80)
     assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
     assert.deepStrictEqual(
       repeated.edges.map((edge) => ({
@@ -587,6 +756,48 @@ describe("Static chart", () => {
         points: edge.points
       }))
     )
+  })
+
+  it("routes child-to-parent returns with a safe terminal and sibling outcome", async () => {
+    const model = parentReturnModel()
+    const layout = await Effect.runPromise(layoutChart(model))
+    const flow = layout.nodes.find(({ node }) => node.path === "Flow")
+    const parentReturn = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.target === "Flow")
+    const siblingOutcome = layout.edges.find((edge) =>
+      edge.kind === "transition" && edge.edge.target === "Flow.UploadFailed"
+    )
+    if (flow === undefined || parentReturn?.kind !== "transition" || siblingOutcome?.kind !== "transition") {
+      assert.fail("Expected the parent return and sibling outcome")
+    }
+
+    const returnEnd = parentReturn.points.at(-1)!
+    const returnBend = parentReturn.points.at(-2)!
+    assert.strictEqual(returnEnd.y, flow.y + flow.headerHeight)
+    assert.strictEqual(returnBend.x, returnEnd.x)
+    assert.isAtLeast(returnBend.y - returnEnd.y, 9)
+    assert.isAtLeast(chartRouteLength(siblingOutcome.points.slice(-2)), 9)
+
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
+  })
+
+  it("routes compound fan-out to deeply nested children without crossing nodes", async () => {
+    const model = deepBranchModel()
+    const layout = await Effect.runPromise(layoutChart(model))
+    const scope = layout.nodes.find(({ node }) => node.path === "Scope")
+    const branches = layout.edges.filter((edge) => edge.kind === "transition" && edge.edge.source === "Scope")
+    if (scope === undefined) assert.fail("Expected the Scope state")
+
+    assert.lengthOf(branches, 5)
+    for (const branch of branches) {
+      if (branch.kind !== "transition") assert.fail("Expected a transition branch")
+      const target = layout.nodes.find(({ node }) => node.path === branch.edge.target)
+      if (target === undefined) assert.fail("Expected a nested branch target")
+      assert.strictEqual(branch.points[0]?.y, scope.y + scope.headerHeight)
+      assert.strictEqual(branch.points.at(-1)?.y, target.y)
+      assert.isAtLeast(chartRouteLength(branch.points.slice(-2)), 9)
+    }
+
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
   })
 
   it("tries deterministic spacing profiles before reporting an unsafe layout", async () => {
