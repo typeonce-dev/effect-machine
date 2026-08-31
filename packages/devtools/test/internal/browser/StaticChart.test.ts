@@ -7,6 +7,7 @@ import {
   chartEdgeLabelSpacing,
   chartRouteLength,
   chartSelfLoopMinimumClearance,
+  type LaidOutChartTransition,
   layoutChart,
   layoutChartWith,
   validateChartLayout
@@ -27,6 +28,7 @@ import { hierarchyRoutingMachine } from "../../../src/internal/browser/hierarchy
 import { invokeOutcomesMachine } from "../../../src/internal/browser/invoke-outcomes-example.js"
 import { layoutResilienceMachine } from "../../../src/internal/browser/layout-resilience-example.js"
 import { parallelCompletionMachine } from "../../../src/internal/browser/parallel-completion-example.js"
+import { parallelOwnerRoutingMachine } from "../../../src/internal/browser/parallel-owner-routing-example.js"
 import { plannerMachine } from "../../../src/internal/browser/planner-example.js"
 import {
   optionalParentMachine,
@@ -395,19 +397,46 @@ describe("Static chart", () => {
     })
   })
 
-  it("presents transitions from an owner to any nested descendant as parent-child", () => {
-    assert.isTrue(isParentChildTransition(
-      chartEdge("print-requested", "Print", "Print.Operation.Printing", "PrintRequested")
-    ))
-    assert.isTrue(isParentChildTransition(
-      chartEdge("child-failure", "Print", "Print.Operation.Active", "print-mobile-dialog")
-    ))
-    assert.isFalse(isParentChildTransition(
-      chartEdge("sibling", "Print.Operation.Active", "Print.Operation.Printing", "PrintRequested")
-    ))
-    assert.isFalse(isParentChildTransition(
-      chartEdge("return", "Print.Operation.Printing", "Print", "Print finished")
-    ))
+  it("presents deep transitions from a parallel owner as parent-child", async () => {
+    const model = makeChartModel(MachineDocument.make(parallelOwnerRoutingMachine))
+    const transitions = model.edges.filter((edge) => edge.source === "Print")
+    assert.deepStrictEqual(
+      transitions.map(({ label, target }) => ({ label, target })),
+      [
+        { label: "PrintRequested", target: "Print.Operation.Printing" },
+        { label: "parallel-owner-child", target: "Print.Operation.Active" }
+      ]
+    )
+    assert.isTrue(transitions.every(isParentChildTransition))
+
+    const layout = await Effect.runPromise(layoutChart(model))
+    const source = layout.nodes.find(({ node }) => node.path === "Print")
+    const operation = layout.nodes.find(({ node }) => node.path === "Print.Operation")
+    const laidOut = layout.edges.filter(
+      (edge): edge is LaidOutChartTransition => edge.kind === "transition" && edge.edge.source === "Print"
+    )
+    if (source === undefined || operation === undefined) assert.fail("Expected the parallel owner and target region")
+    assert.lengthOf(laidOut, 2)
+    for (const edge of laidOut) {
+      const start = edge.points[0]!
+      const end = edge.points.at(-1)!
+      const target = layout.nodes.find(({ node }) => node.path === edge.edge.target)
+      const initial = layout.initials.find(({ initial }) => initial.target === edge.edge.target)
+      if (target === undefined) assert.fail("Expected the descendant target")
+      assert.strictEqual(start.y, source.y + source.headerHeight)
+      assert.isAtLeast(Math.min(...edge.points.map(({ x }) => x)), operation.x - 24)
+      assert.isAtMost(Math.max(...edge.points.map(({ x }) => x)), operation.x + operation.width + 24)
+      assert.isAtLeast(edge.label.x - edge.labelWidth / 2, 20)
+      assert.isAtMost(edge.label.x + edge.labelWidth / 2, layout.width - 20)
+      const sourceLaneX = edge.points[0]!.x
+      const targetCenterX = target.x + target.width / 2
+      assert.strictEqual(Math.sign(edge.label.x - sourceLaneX), Math.sign(targetCenterX - sourceLaneX))
+      if (initial !== undefined) assert.isAtMost(edge.points.at(-2)!.y, initial.y - 12)
+      assert.strictEqual(end.y, target.y)
+      const directDistance = Math.abs(start.x - end.x) + Math.abs(start.y - end.y)
+      assert.isAtMost(chartRouteLength(edge.points), directDistance + 32)
+    }
+    assert.deepStrictEqual(validateChartLayout(model, layout).issues, [])
   })
 
   it("projects invocation metadata and transition branches without state value fields", () => {
