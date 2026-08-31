@@ -10,7 +10,14 @@ import type {
 } from "elkjs/lib/elk-api.js"
 import ELKBundle from "elkjs/lib/elk.bundled.js"
 import { type ChartPortSide, makeChartLayoutPolicy } from "./chart-layout-policy.js"
-import type { ChartEdge, ChartInitial, ChartModel, ChartNode, ChartRuntimeTarget } from "./chart-model.js"
+import {
+  type ChartEdge,
+  type ChartInitial,
+  type ChartModel,
+  type ChartNode,
+  type ChartRuntimeTarget,
+  isChartStateDescendant
+} from "./chart-model.js"
 
 export const maxVisibleActivities = 3
 export const chartSelfLoopMinimumClearance = 24
@@ -259,8 +266,6 @@ const runtimeNodeId = (target: ChartRuntimeTarget): string => `node:${target.id}
 const runtimeTargetPortId = (target: ChartRuntimeTarget): string => `port:${target.edgeId}:target`
 const unconnectedRegionId = (parent: string | null): string => `region:unconnected:${parent ?? "root"}`
 const isSelfTransition = (edge: ChartEdge): boolean => edge.kind === "targetless" || edge.target === edge.source
-const isDescendantPath = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}.`)
-
 const selfLoopsBySource = (edges: ReadonlyArray<ChartEdge>): ReadonlyMap<string, number> => {
   const counts = new Map<string, number>()
   for (const edge of edges) {
@@ -631,11 +636,11 @@ const normalizeHierarchyRoute = (
   points: ReadonlyArray<ChartPoint>,
   nodes: ReadonlyMap<string, LaidOutChartNode>
 ): ReadonlyArray<ChartPoint> => {
-  if (edge.target !== null && isDescendantPath(edge.target, edge.source)) {
+  if (edge.target !== null && isChartStateDescendant(edge.target, edge.source)) {
     const source = nodes.get(edge.source)
     return source === undefined ? points : anchorRouteAtCompoundHeader(points, source)
   }
-  if (edge.target !== null && isDescendantPath(edge.source, edge.target)) {
+  if (edge.target !== null && isChartStateDescendant(edge.source, edge.target)) {
     const target = nodes.get(edge.target)
     return target === undefined
       ? points
@@ -1335,8 +1340,8 @@ const collinearOverlap = (left: OrthogonalSegment, right: OrthogonalSegment): nu
 
 const transitionTouchesNode = (edge: ChartEdge, path: string): boolean => {
   const target = edgeTargetPath(edge)
-  return edge.source === path || isDescendantPath(edge.source, path) ||
-    target === path || target !== null && isDescendantPath(target, path)
+  return edge.source === path || isChartStateDescendant(edge.source, path) ||
+    target === path || target !== null && isChartStateDescendant(target, path)
 }
 
 const laidOutEdgeId = (edge: LaidOutChartTransition | LaidOutChartInitialEdge): string =>
@@ -1456,7 +1461,7 @@ export const validateChartLayout = (
   for (const initial of initialEdges) {
     for (const node of layout.nodes) {
       const containsTarget = node.node.path === initial.initial.target ||
-        isDescendantPath(initial.initial.target, node.node.path)
+        isChartStateDescendant(initial.initial.target, node.node.path)
       const obstacle = node.node.children.length > 0 && containsTarget
         ? nodeHeaderRect(node)
         : nodeRect(node)

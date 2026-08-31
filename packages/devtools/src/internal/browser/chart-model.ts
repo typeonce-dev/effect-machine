@@ -71,6 +71,8 @@ export interface ChartModel {
   readonly initials: ReadonlyArray<ChartInitial>
 }
 
+export const isChartStateDescendant = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}.`)
+
 const activityLabel = (activity: VisualizationActivity): string => {
   switch (activity.type) {
     case "machine":

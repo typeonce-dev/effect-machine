@@ -18,6 +18,7 @@ import {
   chartWheelZoom,
   chartZoomScrollPosition,
   isChartPan,
+  isParentChildTransition,
   maximumChartZoom,
   minimumChartZoom
 } from "../../../src/internal/browser/chart-renderer.js"
@@ -392,6 +393,21 @@ describe("Static chart", () => {
       sourceSide: "NORTH",
       targetSide: "SOUTH"
     })
+  })
+
+  it("presents transitions from an owner to any nested descendant as parent-child", () => {
+    assert.isTrue(isParentChildTransition(
+      chartEdge("print-requested", "Print", "Print.Operation.Printing", "PrintRequested")
+    ))
+    assert.isTrue(isParentChildTransition(
+      chartEdge("child-failure", "Print", "Print.Operation.Active", "print-mobile-dialog")
+    ))
+    assert.isFalse(isParentChildTransition(
+      chartEdge("sibling", "Print.Operation.Active", "Print.Operation.Printing", "PrintRequested")
+    ))
+    assert.isFalse(isParentChildTransition(
+      chartEdge("return", "Print.Operation.Printing", "Print", "Print finished")
+    ))
   })
 
   it("projects invocation metadata and transition branches without state value fields", () => {
