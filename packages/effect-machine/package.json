@@ -1,6 +1,6 @@
 {
   "name": "@typeonce/effect-machine",
-  "version": "0.31.2",
+  "version": "0.31.3",
   "description": "Schema-first state machines and statecharts for Effect",
   "author": "Sandro Maglione",
   "repository": {
