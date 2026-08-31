@@ -19,6 +19,8 @@ const localExampleMachineIds = [
   "layout-resilience",
   "optional-parent-protocol",
   "parallel-completion",
+  "parallel-owner-routing",
+  "parallel-owner-routing-child",
   "parent-child-protocol",
   "planner-example",
   "required-parent-child",

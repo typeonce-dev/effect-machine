@@ -8,7 +8,7 @@ import {
   layoutChart,
   maxVisibleActivities
 } from "./chart-layout.js"
-import { type ChartEdgeBadge, makeChartModel } from "./chart-model.js"
+import { type ChartEdge, type ChartEdgeBadge, isChartStateDescendant, makeChartModel } from "./chart-model.js"
 
 export interface ChartHandlers {
   readonly selectState: (path: string, anchor: ChartInteractionAnchor) => void
@@ -59,6 +59,9 @@ export interface ChartInteractionAnchor {
 export const minimumChartZoom = 0.2
 export const maximumChartZoom = 1.6
 export const chartPanThreshold = 5
+
+export const isParentChildTransition = (edge: ChartEdge): boolean =>
+  edge.target !== null && isChartStateDescendant(edge.target, edge.source)
 
 const clampZoom = (zoom: number): number => Math.min(maximumChartZoom, Math.max(minimumChartZoom, zoom))
 
@@ -384,7 +387,6 @@ const render = (
   const transitionElements = new Map<string, Array<Element>>()
   const edgeElements = new Map<string, Array<Element>>()
   const transitionControls = new Map<string, Array<HTMLButtonElement>>()
-  const parentByState = new Map(layout.nodes.map(({ node }) => [node.path, node.parent]))
   const chartEdges = new Map(
     layout.edges.flatMap((laidOut) => laidOut.kind === "transition" ? [[laidOut.edge.id, laidOut.edge] as const] : [])
   )
@@ -474,8 +476,7 @@ const render = (
   }
 
   for (const laidOut of layout.edges) {
-    const parentChild = laidOut.kind === "transition" && laidOut.edge.target !== null &&
-      parentByState.get(laidOut.edge.target) === laidOut.edge.source
+    const parentChild = laidOut.kind === "transition" && isParentChildTransition(laidOut.edge)
     const failure = laidOut.kind === "transition" &&
       laidOut.edge.badges.some((badge) => badge.type === "failure")
     const group = svgElement(

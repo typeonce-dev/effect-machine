@@ -10,11 +10,22 @@ import type {
 } from "elkjs/lib/elk-api.js"
 import ELKBundle from "elkjs/lib/elk.bundled.js"
 import { type ChartPortSide, makeChartLayoutPolicy } from "./chart-layout-policy.js"
-import type { ChartEdge, ChartInitial, ChartModel, ChartNode, ChartRuntimeTarget } from "./chart-model.js"
+import {
+  type ChartEdge,
+  type ChartInitial,
+  type ChartModel,
+  type ChartNode,
+  type ChartRuntimeTarget,
+  isChartStateDescendant
+} from "./chart-model.js"
 
 export const maxVisibleActivities = 3
 export const chartSelfLoopMinimumClearance = 24
 export const chartEdgeLabelSpacing = 5
+
+const initialMarkerTopOffset = 17
+const initialMarkerSize = 7
+const initialMarkerRouteClearance = 12
 
 export interface ChartPoint {
   readonly x: number
@@ -259,8 +270,6 @@ const runtimeNodeId = (target: ChartRuntimeTarget): string => `node:${target.id}
 const runtimeTargetPortId = (target: ChartRuntimeTarget): string => `port:${target.edgeId}:target`
 const unconnectedRegionId = (parent: string | null): string => `region:unconnected:${parent ?? "root"}`
 const isSelfTransition = (edge: ChartEdge): boolean => edge.kind === "targetless" || edge.target === edge.source
-const isDescendantPath = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}.`)
-
 const selfLoopsBySource = (edges: ReadonlyArray<ChartEdge>): ReadonlyMap<string, number> => {
   const counts = new Map<string, number>()
   for (const edge of edges) {
@@ -380,7 +389,7 @@ const makeGraph = (
       id: node.path,
       ports: [...ports.get(node.path) ?? []],
       layoutOptions: {
-        ...(profile.portConstraints === "fixed" && node.children.length === 0
+        ...(profile.portConstraints === "fixed"
           ? { "elk.portConstraints": "FIXED_SIDE" }
           : {}),
         "elk.spacing.portPort": "24",
@@ -508,6 +517,17 @@ const add = (left: ChartPoint, right: ChartPoint): ChartPoint => ({
   y: left.y + right.y
 })
 
+const between = (value: number, first: number, second: number): boolean =>
+  value >= Math.min(first, second) && value <= Math.max(first, second)
+
+const redundantCollinearPoint = (
+  start: ChartPoint,
+  middle: ChartPoint,
+  end: ChartPoint
+): boolean =>
+  start.x === middle.x && middle.x === end.x && between(middle.y, start.y, end.y) ||
+  start.y === middle.y && middle.y === end.y && between(middle.x, start.x, end.x)
+
 const compactPoints = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPoint> => {
   const result: Array<ChartPoint> = []
   for (const point of points) {
@@ -516,8 +536,7 @@ const compactPoints = (points: ReadonlyArray<ChartPoint>): ReadonlyArray<ChartPo
     const beforePrevious = result.at(-2)
     if (
       beforePrevious !== undefined && previous !== undefined &&
-      (beforePrevious.x === previous.x && previous.x === point.x ||
-        beforePrevious.y === previous.y && previous.y === point.y)
+      redundantCollinearPoint(beforePrevious, previous, point)
     ) {
       result[result.length - 1] = point
     } else {
@@ -589,7 +608,7 @@ const horizontalBoundaryIntersection = (
   return { x: start.x <= end.x ? minimum : maximum, y }
 }
 
-const trimRouteFromCompoundHeader = (
+const anchorRouteAtCompoundHeader = (
   points: ReadonlyArray<ChartPoint>,
   node: LaidOutChartNode
 ): ReadonlyArray<ChartPoint> => {
@@ -604,25 +623,16 @@ const trimRouteFromCompoundHeader = (
     )
     if (intersection !== null) return compactPoints([intersection, ...points.slice(index)])
   }
-  return points
-}
-
-const normalizeHierarchyRoute = (
-  edge: ChartEdge,
-  points: ReadonlyArray<ChartPoint>,
-  nodes: ReadonlyMap<string, LaidOutChartNode>
-): ReadonlyArray<ChartPoint> => {
-  if (edge.target !== null && isDescendantPath(edge.target, edge.source)) {
-    const source = nodes.get(edge.source)
-    return source === undefined ? points : trimRouteFromCompoundHeader(points, source)
+  const first = points[0]
+  const next = points[1]
+  if (first === undefined || next === undefined) return points
+  const anchor = {
+    x: Math.min(node.x + node.width, Math.max(node.x, first.x)),
+    y: boundary
   }
-  if (edge.target !== null && isDescendantPath(edge.source, edge.target)) {
-    const target = nodes.get(edge.target)
-    return target === undefined
-      ? points
-      : [...trimRouteFromCompoundHeader([...points].reverse(), target)].reverse()
-  }
-  return points
+  return first.x === next.x
+    ? compactPoints([anchor, ...points.slice(1)])
+    : compactPoints([anchor, { x: next.x, y: boundary }, ...points.slice(1)])
 }
 
 type RouteSide = "NORTH" | "EAST" | "SOUTH" | "WEST"
@@ -646,6 +656,23 @@ const endpointSide = (point: ChartPoint, node: LaidOutChartNode): RouteSide => {
     ["EAST", Math.abs(point.x - rect.right)]
   ]
   return distances.sort((left, right) => left[1] - right[1])[0]![0]
+}
+
+const endpointStepSide = (
+  boundary: ChartPoint,
+  adjacent: ChartPoint,
+  node: LaidOutChartNode
+): RouteSide => {
+  const rect = routeNodeRect(node)
+  if (boundary.y === adjacent.y) {
+    if (boundary.x === rect.left) return "WEST"
+    if (boundary.x === rect.right) return "EAST"
+  }
+  if (boundary.x === adjacent.x) {
+    if (boundary.y === rect.top) return "NORTH"
+    if (boundary.y === rect.bottom) return "SOUTH"
+  }
+  return endpointSide(boundary, node)
 }
 
 const outwardPoint = (point: ChartPoint, side: RouteSide, distance: number): ChartPoint => {
@@ -740,6 +767,90 @@ const routeIsClear = (
     return (previous.x === point.x || previous.y === point.y) &&
       obstacles.every((obstacle) => !segmentCrossesInterior(previous, point, obstacle))
   })
+
+const localDescendantRoute = (
+  edge: ChartEdge,
+  points: ReadonlyArray<ChartPoint>,
+  source: LaidOutChartNode,
+  target: LaidOutChartNode,
+  nodes: ReadonlyArray<LaidOutChartNode>,
+  lanes: Map<string, number>
+): ReadonlyArray<ChartPoint> | null => {
+  const targetPath = edge.target
+  if (
+    targetPath === null || source.node.type !== "parallel" ||
+    endpointSide(points.at(-1)!, target) !== "NORTH"
+  ) return null
+  const containers = nodes.filter((node) =>
+    node.node.children.length > 0 &&
+    node.node.path !== edge.source &&
+    node.node.path !== edge.target &&
+    isChartStateDescendant(node.node.path, edge.source) &&
+    isChartStateDescendant(targetPath, node.node.path)
+  )
+  if (containers.length === 0) return null
+
+  const sourceHeader = nodeHeaderRect(source)
+  const targetRect = routeNodeRect(target)
+  const end = pointOnNodeBoundary(points.at(-1)!, target, "NORTH")
+  const targetStub = {
+    x: end.x,
+    y: targetRect.top - initialMarkerTopOffset - initialMarkerRouteClearance
+  }
+  if (targetStub.y <= sourceHeader.bottom) return null
+
+  const containerHeaders = containers.map(nodeHeaderRect)
+  const left = Math.min(...containerHeaders.map((header) => header.left))
+  const right = Math.max(...containerHeaders.map((header) => header.right))
+  const candidates = (["left", "right"] as const).flatMap((side) => {
+    const key = `descendant:${edge.source}:${containers[0]!.node.path}:${side}`
+    const lane = lanes.get(key) ?? 0
+    const x = side === "left" ? left - 12 - lane * 8 : right + 12 + lane * 8
+    if (x < sourceHeader.left || x > sourceHeader.right) return []
+    const route = compactPoints([
+      { x, y: sourceHeader.bottom },
+      { x, y: targetStub.y },
+      targetStub,
+      end
+    ])
+    return routeIsClear(route, routeObstacles(edge, nodes))
+      ? [{ key, lane, route }]
+      : []
+  })
+  const selected =
+    candidates.sort((leftCandidate, rightCandidate) =>
+      chartRouteLength(leftCandidate.route) + leftCandidate.lane * 8 -
+      (chartRouteLength(rightCandidate.route) + rightCandidate.lane * 8)
+    )[0]
+  if (selected === undefined || chartRouteLength(selected.route) + 16 >= chartRouteLength(points)) return null
+  lanes.set(selected.key, selected.lane + 1)
+  return selected.route
+}
+
+const normalizeHierarchyRoute = (
+  edge: ChartEdge,
+  points: ReadonlyArray<ChartPoint>,
+  nodes: ReadonlyMap<string, LaidOutChartNode>,
+  allNodes: ReadonlyArray<LaidOutChartNode>,
+  lanes: Map<string, number>
+): ReadonlyArray<ChartPoint> => {
+  if (edge.target !== null && isChartStateDescendant(edge.target, edge.source)) {
+    const source = nodes.get(edge.source)
+    const target = nodes.get(edge.target)
+    if (source === undefined) return points
+    return target === undefined
+      ? anchorRouteAtCompoundHeader(points, source)
+      : localDescendantRoute(edge, points, source, target, allNodes, lanes) ??
+        anchorRouteAtCompoundHeader(points, source)
+  }
+  if (edge.target !== null && isChartStateDescendant(edge.source, edge.target)) {
+    const target = nodes.get(edge.target)
+    return target === undefined
+      ? points
+      : [...anchorRouteAtCompoundHeader([...points].reverse(), target)].reverse()
+  }
+  return points
+}
 
 const sameSideRoute = (
   points: ReadonlyArray<ChartPoint>,
@@ -906,9 +1017,18 @@ const routeLabelCandidates = (
   points: ReadonlyArray<ChartPoint>,
   fallback: ChartPoint,
   width: number,
-  height: number
+  height: number,
+  nodes: ReadonlyArray<LaidOutChartNode>
 ): ReadonlyArray<ChartPoint> => {
   if (isSelfTransition(edge)) return [fallback]
+  const source = nodes.find(({ node }) => node.path === edge.source)
+  const target = edge.target === null
+    ? undefined
+    : nodes.find(({ node }) => node.path === edge.target)
+  const localDescendantTarget = source?.node.type === "parallel" && target !== undefined &&
+      target.node.parent !== source.node.path && isChartStateDescendant(target.node.path, source.node.path)
+    ? target
+    : undefined
   const candidates = points.slice(1).flatMap((end, index) => {
     const start = points[index]!
     const horizontal = start.y === end.y
@@ -924,10 +1044,17 @@ const routeLabelCandidates = (
     return [0.5, 2 / 3, 1 / 3].flatMap((ratio) => {
       const distance = length * ratio
       if (distance < clearance || length - distance < clearance) return []
-      return [{
+      const onRoute = {
         x: start.x + (end.x - start.x) * ratio,
         y: start.y + (end.y - start.y) * ratio
-      }]
+      }
+      if (horizontal || localDescendantTarget === undefined) return [onRoute]
+      const targetCenter = localDescendantTarget.x + localDescendantTarget.width / 2
+      const direction = targetCenter < onRoute.x ? -1 : 1
+      return [{
+        x: onRoute.x + direction * (width / 2 + chartEdgeLabelSpacing),
+        y: onRoute.y
+      }, onRoute]
     })
   })
   return [...ordered, fallback].filter((candidate, index, all) =>
@@ -946,7 +1073,8 @@ const placeTransitionLabels = (
       transition.points,
       transition.label,
       transition.labelWidth,
-      transition.labelHeight
+      transition.labelHeight,
+      nodes
     )
     const position = candidates.find((candidate) => {
       const candidateRect = labelRect(candidate, transition.labelWidth, transition.labelHeight)
@@ -1052,9 +1180,9 @@ const collectLayout = (
     initials.push({
       initial,
       x: target.x + 9,
-      y: target.y - 17,
-      width: 7,
-      height: 7
+      y: target.y - initialMarkerTopOffset,
+      width: initialMarkerSize,
+      height: initialMarkerSize
     })
   }
 
@@ -1076,7 +1204,7 @@ const collectLayout = (
             chartEdge,
             shortenTransitionRoute(
               chartEdge,
-              normalizeHierarchyRoute(chartEdge, elkPoints, nodesByPath),
+              normalizeHierarchyRoute(chartEdge, elkPoints, nodesByPath, nodes, hierarchyLanes),
               nodesByPath,
               nodes,
               directLanes
@@ -1129,31 +1257,65 @@ const collectLayout = (
     ...transitionEdges,
     ...initialEdges
   ]
-  const contentWidth = Math.max(
+  const contentLeft = Math.min(
+    ...nodes.map(({ x }) => x),
+    ...regions.map(({ x }) => x),
+    ...initials.map(({ x }) => x),
+    ...runtimeTargets.map(({ x }) => x),
+    ...edges.flatMap(({ points }) => points.map(({ x }) => x)),
+    ...transitionEdges.map(({ label, labelWidth }) => label.x - labelWidth / 2)
+  )
+  const contentTop = Math.min(
+    ...nodes.map(({ y }) => y),
+    ...regions.map(({ y }) => y),
+    ...initials.map(({ y }) => y),
+    ...runtimeTargets.map(({ y }) => y),
+    ...edges.flatMap(({ points }) => points.map(({ y }) => y)),
+    ...transitionEdges.map(({ label, labelHeight }) => label.y - labelHeight / 2)
+  )
+  const contentRight = Math.max(
     0,
     ...nodes.map(({ width, x }) => x + width),
+    ...regions.map(({ width, x }) => x + width),
     ...initials.map(({ width, x }) => x + width),
     ...runtimeTargets.map(({ width, x }) => x + width),
     ...edges.flatMap(({ points }) => points.map(({ x }) => x)),
     ...transitionEdges.map(({ label, labelWidth }) => label.x + labelWidth / 2)
   )
-  const contentHeight = Math.max(
+  const contentBottom = Math.max(
     0,
     ...nodes.map(({ height, y }) => y + height),
+    ...regions.map(({ height, y }) => y + height),
     ...initials.map(({ height, y }) => y + height),
     ...runtimeTargets.map(({ height, y }) => y + height),
     ...edges.flatMap(({ points }) => points.map(({ y }) => y)),
     ...transitionEdges.map(({ label, labelHeight }) => label.y + labelHeight / 2)
   )
+  const shiftX = Math.max(0, 20 - contentLeft)
+  const shiftY = Math.max(0, 20 - contentTop)
+  const translatePoint = ({ x, y }: ChartPoint): ChartPoint => ({ x: x + shiftX, y: y + shiftY })
+  const translatedTransitionEdges = transitionEdges.map((edge): LaidOutChartTransition => ({
+    ...edge,
+    points: edge.points.map(translatePoint),
+    label: translatePoint(edge.label)
+  }))
+  const translatedInitialEdges = initialEdges.map((edge): LaidOutChartInitialEdge => ({
+    ...edge,
+    points: edge.points.map(translatePoint)
+  }))
 
   return {
-    width: Math.max(360, graph.width ?? 0, contentWidth + 20),
-    height: Math.max(280, graph.height ?? 0, contentHeight + 20),
-    regions,
-    nodes,
-    initials,
-    runtimeTargets,
-    edges
+    width: Math.max(360, (graph.width ?? 0) + shiftX, contentRight + shiftX + 20),
+    height: Math.max(280, (graph.height ?? 0) + shiftY, contentBottom + shiftY + 20),
+    regions: regions.map((region) => ({ ...region, x: region.x + shiftX, y: region.y + shiftY })),
+    nodes: nodes.map((node) => ({ ...node, x: node.x + shiftX, y: node.y + shiftY })),
+    initials: initials.map((initial) => ({ ...initial, x: initial.x + shiftX, y: initial.y + shiftY })),
+    runtimeTargets: runtimeTargets.map((target) => ({
+      ...target,
+      x: target.x + shiftX,
+      y: target.y + shiftY
+    })),
+    edges: [...translatedTransitionEdges, ...translatedInitialEdges]
   }
 }
 
@@ -1299,8 +1461,8 @@ const collinearOverlap = (left: OrthogonalSegment, right: OrthogonalSegment): nu
 
 const transitionTouchesNode = (edge: ChartEdge, path: string): boolean => {
   const target = edgeTargetPath(edge)
-  return edge.source === path || isDescendantPath(edge.source, path) ||
-    target === path || target !== null && isDescendantPath(target, path)
+  return edge.source === path || isChartStateDescendant(edge.source, path) ||
+    target === path || target !== null && isChartStateDescendant(target, path)
 }
 
 const laidOutEdgeId = (edge: LaidOutChartTransition | LaidOutChartInitialEdge): string =>
@@ -1348,7 +1510,7 @@ export const validateChartLayout = (
         }
         if (nodeBoundaryDistance(start, source) > 0.5) {
           report("detached-source", transition.edge.id, transition.edge.source)
-        } else if (!isOutwardStep(start, next, endpointSide(start, source))) {
+        } else if (!isOutwardStep(start, next, endpointStepSide(start, next, source))) {
           report("wrong-source-direction", transition.edge.id, transition.edge.source)
         }
       }
@@ -1364,7 +1526,10 @@ export const validateChartLayout = (
       const target = layout.nodes.find(({ node }) => node.path === transition.edge.target)
       if (target !== undefined && nodeBoundaryDistance(end, target) > 0.5) {
         report("detached-terminal", transition.edge.id, transition.edge.target)
-      } else if (target !== undefined && bend !== undefined && !isOutwardStep(end, bend, endpointSide(end, target))) {
+      } else if (
+        target !== undefined && bend !== undefined &&
+        !isOutwardStep(end, bend, endpointStepSide(end, bend, target))
+      ) {
         report("wrong-terminal-direction", transition.edge.id, transition.edge.target)
       }
     }
@@ -1417,7 +1582,7 @@ export const validateChartLayout = (
   for (const initial of initialEdges) {
     for (const node of layout.nodes) {
       const containsTarget = node.node.path === initial.initial.target ||
-        isDescendantPath(initial.initial.target, node.node.path)
+        isChartStateDescendant(initial.initial.target, node.node.path)
       const obstacle = node.node.children.length > 0 && containsTarget
         ? nodeHeaderRect(node)
         : nodeRect(node)
@@ -1446,11 +1611,14 @@ export const validateChartLayout = (
   }
 
   const allSegments = segments(layout)
+  const transitionIds = new Map(model.edges.map((edge) => [edge.id, edge.transitionId]))
   for (let left = 0; left < allSegments.length; left++) {
     for (let right = left + 1; right < allSegments.length; right++) {
       const first = allSegments[left]!
       const second = allSegments[right]!
       if (first.edgeId === second.edgeId) continue
+      const firstTransition = transitionIds.get(first.edgeId)
+      if (firstTransition !== undefined && firstTransition === transitionIds.get(second.edgeId)) continue
       if (collinearOverlap(first, second) > 4) report("route-overlap", first.edgeId, second.edgeId)
     }
   }
