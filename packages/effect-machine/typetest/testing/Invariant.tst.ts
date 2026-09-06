@@ -8,17 +8,20 @@ describe("MachineTest invariants", () => {
   class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", { amount: Schema.Int }) {}
   class Internal extends Schema.TaggedClass<Internal>("Internal")("Internal", {}) {}
 
-  const States = Machine.states({ idle: Idle })
+  const States = Machine.state({ initial: "idle", states: { idle: Idle } })
   const machine = Machine.make({
-    states: States.states,
-    events: Machine.events(Tick),
-    internalEvents: Machine.internalEvents(Internal),
-    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({ count: 0 }))))
+    root: States,
+    events: Machine.eventsFromSchemas(Tick),
+    internalEvents: Machine.internalEventsFromSchemas(Internal),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({ count: 0 })))))
   }).handle({
-    idle: {
-      on: {
-        Tick: (to) => to.none,
-        Internal: (to) => to.none
+    states: {
+      idle: {
+        on: {
+          Tick: (to) => to.none,
+          Internal: (to) => to.none
+        }
       }
     }
   })
@@ -28,15 +31,15 @@ describe("MachineTest invariants", () => {
   it("infers exact state, event, and trace evidence from a machine-bound builder", () => {
     const state = define.state("state", (context) => {
       expect(context.machine).type.toBe<typeof machine>()
-      expect(context.snapshot.value).type.toBe<Idle>()
-      expect(context.configuration[0]).type.toBe<"idle" | undefined>()
+      expect(context.snapshot.state.value).type.toBe<Idle>()
+      expect(context.configuration[0]).type.toBe<"" | "idle" | undefined>()
       expect(context.event).type.toBe<Tick | Internal | Machine.InitialEvent | undefined>()
       return true
     })
     const step = define.step("step", (context) => {
       expect(context.event).type.toBe<Tick>()
-      expect(context.before.value).type.toBe<Idle>()
-      expect(context.after.value).type.toBe<Idle>()
+      expect(context.before.state.value).type.toBe<Idle>()
+      expect(context.after.state.value).type.toBe<Idle>()
       return true
     })
     const trace = define.trace("trace", (context) => {
@@ -62,7 +65,7 @@ describe("MachineTest invariants", () => {
     expect<Effect.Services<typeof checked>>().type.toBe<never>()
     expect<Effect.Error<typeof checked>["trace"]>().type.toBe<MachineTest.Trace<typeof machine>>()
     expect<Effect.Error<typeof checked>["violations"][number]["configuration"]>().type.toBe<
-      ReadonlyArray<"idle"> | undefined
+      ReadonlyArray<"" | "idle"> | undefined
     >()
 
     const asserted = MachineTest.assertInvariants(machine, trace, [define.state("state", () => true)])

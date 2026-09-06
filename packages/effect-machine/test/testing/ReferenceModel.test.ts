@@ -923,7 +923,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       assert.include(fields(conflictError), "step.plan.next.activePaths")
 
       const initial = simultaneous.initial.startingState as any
-      const omitted = { ...initial, states: { left: initial.states.left } }
+      const omitted = { ...initial, state: { ...initial.state, states: { left: initial.state.states.left } } }
       const omittedPaths = ["workflow", "workflow.left", "workflow.left.idle"]
       const omittedTrace = {
         ...simultaneous,
@@ -963,64 +963,71 @@ describe("MachineTest finite-model reference interpreter", () => {
       const Outside = Schema.TaggedStruct("Outside", { version: Schema.Number })
       const Local = Schema.TaggedStruct("Local", {})
       const Exit = Schema.TaggedStruct("Exit", {})
-      const states = Machine.states({
-        root: {
-          schema: Root,
-          type: "parallel",
-          states: {
-            left: {
-              schema: Left,
-              initial: "idle",
-              states: { idle: LeftIdle, done: LeftDone }
-            },
-            right: {
-              schema: Right,
-              initial: "idle",
-              states: { idle: RightIdle }
+      const states = Machine.state({
+        initial: "root",
+        states: {
+          root: {
+            schema: Root,
+            type: "parallel",
+            states: {
+              left: {
+                schema: Left,
+                initial: "idle",
+                states: { idle: LeftIdle, done: LeftDone }
+              },
+              right: {
+                schema: Right,
+                initial: "idle",
+                states: { idle: RightIdle }
+              }
             }
-          }
-        },
-        outside: Outside
+          },
+          outside: Outside
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Local, Exit),
-        initial: (to) =>
-          to.root.initial.resolve(({ target }) =>
-            target.decoded({ _tag: "Root", version: 0 }, (regions) =>
-              regions
-                .left.decoded(
-                  { _tag: "Left", version: 0 },
-                  (left) => left.idle.decoded({ _tag: "LeftIdle", version: 0 })
-                )
-                .right.decoded(
-                  { _tag: "Right", version: 0 },
-                  (right) => right.idle.decoded({ _tag: "RightIdle", version: 0 })
-                ))
+        root: states,
+        events: Machine.eventsFromSchemas(Local, Exit),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.root.decoded({ _tag: "Root", version: 0 }, (regions) =>
+                regions
+                  .left.decoded(
+                    { _tag: "Left", version: 0 },
+                    (left) => left.idle.decoded({ _tag: "LeftIdle", version: 0 })
+                  )
+                  .right.decoded(
+                    { _tag: "Right", version: 0 },
+                    (right) => right.idle.decoded({ _tag: "RightIdle", version: 0 })
+                  ))
+            )
           )
       }).handle({
-        root: {
-          states: {
-            left: {
-              states: {
-                idle: {
-                  on: {
-                    Local: (to) =>
-                      to.local.done().resolve(({ target }) => target.decoded({ _tag: "LeftDone", version: 1 })),
-                    Exit: (to) =>
-                      to.full.outside().resolve(({ target }) => target.decoded({ _tag: "Outside", version: 1 }))
+        states: {
+          root: {
+            states: {
+              left: {
+                states: {
+                  idle: {
+                    on: {
+                      Local: (to) =>
+                        to.local.done().resolve(({ target }) => target.decoded({ _tag: "LeftDone", version: 1 })),
+                      Exit: (to) =>
+                        to.branch.outside().resolve(({ target }) => target.decoded({ _tag: "Outside", version: 1 }))
+                    }
                   }
                 }
-              }
-            },
-            right: {
-              states: {
-                idle: {
-                  on: {
-                    Local: (to) =>
-                      to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 1 })),
-                    Exit: (to) =>
-                      to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 2 }))
+              },
+              right: {
+                states: {
+                  idle: {
+                    on: {
+                      Local: (to) =>
+                        to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 1 })),
+                      Exit: (to) =>
+                        to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 2 }))
+                    }
                   }
                 }
               }
@@ -1031,11 +1038,11 @@ describe("MachineTest finite-model reference interpreter", () => {
 
       const initial = yield* Machine.planInitial(machine)
       const local = yield* Machine.plan(machine, initial.state, { _tag: "Local" })
-      assert.strictEqual((local.next as any).states.left.state.path, "root.left.done")
-      assert.strictEqual((local.next as any).states.right.state.value.version, 1)
+      assert.strictEqual((local.next as any).state.states.left.state.path, "root.left.done")
+      assert.strictEqual((local.next as any).state.states.right.state.value.version, 1)
 
       const exited = yield* Machine.plan(machine, initial.state, { _tag: "Exit" })
-      assert.strictEqual(exited.next.path, "outside")
+      assert.strictEqual(exited.next.state.path, "outside")
       assert.deepStrictEqual(exited.microsteps[0]!.transitions.map(({ source }) => source), [
         "root.left.idle",
         "root.right.idle"
@@ -1254,7 +1261,7 @@ describe("MachineTest finite-model reference interpreter", () => {
         "left"
       ])
       assert.deepStrictEqual(reference.steps[2]?.microsteps[0]?.entryPaths, ["right", "right.idle"])
-      assert.deepStrictEqual(reference.steps[2]?.microsteps[0]?.transitions[0]?.target, "right")
+      assert.deepStrictEqual(reference.steps[2]?.microsteps[0]?.transitions[0]?.target, "right.idle")
 
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, {
@@ -1335,14 +1342,18 @@ describe("MachineTest finite-model reference interpreter", () => {
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [] })
       const right = {
-        path: "root" as const,
-        value: { _tag: "State_root", value: 0 },
+        path: "" as const,
+        value: undefined,
         state: {
-          path: "root.right" as const,
-          value: { _tag: "State_root_right", value: 2 }
+          path: "root" as const,
+          value: { _tag: "State_root", value: 0 },
+          state: {
+            path: "root.right" as const,
+            value: { _tag: "State_root_right", value: 2 }
+          }
         }
       }
-      const rightPaths = ["root", "root.right"]
+      const rightPaths = ["", "root", "root.right"]
       const corrupted = {
         ...trace,
         initial: {
@@ -1362,9 +1373,9 @@ describe("MachineTest finite-model reference interpreter", () => {
         finalConfiguration: rightPaths
       } as typeof trace
 
-      // The trace is self-consistent and every state/value is schema-valid,
-      // but it does not represent the model's declared initial state.
-      yield* MachineTest.verify(machine, corrupted)
+      // Default root initialization makes the declared initial branch checkable.
+      const structuralError = yield* MachineTest.verify(machine, corrupted).pipe(Effect.flip)
+      assert.include(structuralError.violations.map(({ law }) => law), "definitions.initial")
       const error = yield* MachineTest.verifyModel(model, corrupted).pipe(Effect.flip)
       assert.include(fields(error), "initial.startingState.activePaths")
       assert.include(fields(error), "trace.final.activePaths")
@@ -1876,6 +1887,7 @@ describe("MachineTest finite-model reference interpreter", () => {
       const trace = yield* MachineTest.run(machine, { events: [event("Resume")] })
 
       assert.deepStrictEqual(trace.finalConfiguration, [
+        "",
         "workspace",
         "workspace.editor",
         "workspace.editor.writing",

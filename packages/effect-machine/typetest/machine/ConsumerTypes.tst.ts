@@ -7,12 +7,15 @@ class InSession extends Schema.TaggedClass<InSession>("ConsumerTypesInSession")(
   role: Schema.Literals(["offerer", "proposer"])
 }) {}
 
-const States = Machine.states({
-  root: {
-    initial: "Idle",
-    states: {
-      Idle: {},
-      InSession
+const States = Machine.state({
+  initial: "root",
+  states: {
+    root: {
+      initial: "Idle",
+      states: {
+        Idle: {},
+        InSession
+      }
     }
   }
 })
@@ -23,34 +26,37 @@ const StartupInput = Schema.Struct({
 })
 
 const definition = Machine.make({
-  states: States.states,
-  events: Machine.events(),
+  root: States,
+  events: Machine.eventsFromSchemas(),
   input: StartupInput,
-  initial: (to) =>
-    to.root.initial.resolve(({ input, target }) => {
+  initialConfiguration: (root) =>
+    root.resolve(({ input, target }) => {
       expect(input).type.toBe<typeof StartupInput.Type>()
-      return target.from((root) => root.Idle.from())
+      return target.from((to) => to.root.from((root) => root.Idle.from()))
     })
 })
 
 const machine = definition.handle({
-  root: {
-    states: {
-      Idle: {},
-      InSession: {}
+  states: {
+    root: {
+      states: {
+        Idle: {},
+        InSession: {}
+      }
     }
   }
 })
 
 const voidMachine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) => to.root.initial.resolve(({ target }) => target.from((root) => root.Idle.from()))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.root.from((root) => root.Idle.from())))
 })
 
 describe("consumer type extractors", () => {
   it("extracts complete snapshots from defined states and machines", () => {
-    expect<Machine.Snapshot<typeof States>>().type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+    expect<Machine.Snapshot<typeof States>>().type.toBe<Machine.Snapshot<typeof States>>()
     expect<Machine.Snapshot<typeof machine>>().type.toBe<Machine.Snapshot<typeof States>>()
   })
 
@@ -66,10 +72,10 @@ describe("consumer type extractors", () => {
 
   it("extracts path-rooted snapshots including structural states", () => {
     expect<Machine.SnapshotAt<typeof States, "root">>().type.toBe<
-      Machine.Machine.SnapshotByIdentifier<typeof States.states, "root">
+      Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "root">
     >()
     expect<Machine.SnapshotAt<typeof machine, "root.Idle">>().type.toBe<
-      Machine.Machine.SnapshotByIdentifier<typeof States.states, "root.Idle">
+      Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "root.Idle">
     >()
 
     // @ts-expect-error!

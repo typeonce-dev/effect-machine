@@ -42,56 +42,41 @@ in lockstep with this package.
 
 ## Quick start
 
-Define schemas first, derive the state topology, then add behavior:
+Start with events and root-owned data. A data-only machine needs no child states:
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Schema } from "effect"
 
-const State = Schema.TaggedUnion({
-  Running: { count: Schema.Number }
-})
-
-const States = Machine.states({
-  Idle: {},
-  Running: State.cases.Running
-})
-
-const CounterEvent = Machine.events(
-  Schema.TaggedUnion({
-    Start: {},
-    Increment: {},
-    Stop: {}
-  })
-)
-
+const Root = Machine.state({ fields: { count: Schema.Number } })
+const Events = Machine.events({ Increment: { by: Schema.Number } })
 const CounterDefinition = Machine.make({
-  id: "Counter",
-  states: States.states,
-  events: CounterEvent,
-  initial: (to) => to.Idle()
+  root: Root,
+  events: Events,
+  initial: (root) => root.from(() => ({ count: 0 }))
 })
-
 const Counter = CounterDefinition.handle({
-  Idle: {
-    on: {
-      Start: (to) => to.full.Running().resolve(({ target }) => target.from({ count: 0 }))
-    }
-  },
-  Running: {
-    on: {
-      Increment: (to) => to.full.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
-      Stop: (to) => to.full.Idle()
-    }
+  on: {
+    Increment: (to) =>
+      to.self.update.from(({ current, event }) => ({
+        count: current.count + event.by
+      }))
   }
 })
 
-const program = Effect.gen(function*() {
+const program = Effect.scoped(Effect.gen(function*() {
   const ref = yield* Machine.start(Counter)
-  yield* ref.send(CounterEvent.Start())
-  yield* ref.send(CounterEvent.Increment())
-})
+  yield* ref.send(Events.Increment({ by: 1 }))
+}))
 ```
+
+`self.update` replaces the owner's complete value without exiting and reentering
+it. Its children and scoped work remain active. Add `initial` and `states` to
+the same root descriptor when the workflow needs distinct modes; the root data
+survives transitions between those children.
+
+See [the root API guide](./docs/root-api.md) for topology-only machines,
+initialization, reusable schemas, guards, migration, and observation contracts.
 
 `handle` creates a complete implementation boundary. Its result does not
 expose `handle`, so all behavior for one machine belongs in the same handler
@@ -109,26 +94,25 @@ const TestingCounter = CounterDefinition.handle(testingHandlers)
 
 ## Modeling workflow
 
-Use this order to preserve inference and keep boundaries explicit:
+1. Define reusable domain schemas where they express a domain boundary.
+2. Declare one root with `Machine.state`. Use inline children or mount reusable
+   descriptors under `states`. `fields` builds a tagged schema; `schema` keeps
+   an existing schema and its construction behavior.
+3. Declare field records with `Machine.events`, `Machine.internalEvents`, and
+   `Machine.emittedEvents`. Import existing tagged unions or tagged classes with
+   the corresponding `eventsFromSchemas`, `internalEventsFromSchemas`, or
+   `emittedEventsFromSchemas` constructor.
+4. Pass the root descriptor to `Machine.make({ root, events })`. Supply root
+   values with `initial`; declared child defaults determine startup topology.
+5. Implement root behavior directly in `handle`, with child behavior in its
+   `states` property. Add runtime, Atom, testing, or Cluster adapters at the
+   application boundary.
 
-1. Define domain schemas used by state and by shared event fields.
-2. Declare topology with `Machine.states`, naming a tagged state union
-   when its `.cases` are reused.
-3. Create event descriptors with `Machine.events`, `Machine.internalEvents`,
-   and `Machine.emittedEvents`, passing tagged unions or tagged classes directly.
-4. Create the machine and implement every active state with
-   `Machine.make({...}).handle({...})`.
-5. Add child descriptors, then runtime, Atom, testing, or cluster adapters at
-   the application boundary.
-
-Keep one-off topology inline in `Machine.states`. Use `Machine.state` only when
-the same active state definition is mounted more than once; tagged schemas are
-already reusable without it. For repeated finite regions, derive names with
-`States.path(...)` so every literal in the path family is checked against the
-complete tree. Type full-snapshot helpers as `Machine.Snapshot<typeof States>`
-or `Machine.Snapshot<typeof machine>`, schema-backed state payloads as
-`Machine.Value<typeof States, Path>`, and path-rooted snapshots as
-`Machine.SnapshotAt<typeof States, Path>`.
+The root has path `""`; children retain paths such as `Editing` and
+`Editing.Form`. Use `Root.path(...)` to validate path literals. Type full
+snapshots as `Machine.Snapshot<typeof Root>` or `Machine.Snapshot<typeof machine>`,
+state values as `Machine.Value<typeof Root, Path>`, and selected snapshots as
+`Machine.SnapshotAt<typeof Root, Path>`.
 
 ### Make invalid states unrepresentable
 
@@ -187,20 +171,24 @@ Omit `schema` when a state represents control flow but owns no data. Use `{}`
 instead of defining an empty tagged schema:
 
 ```ts
-const States = Machine.states({
-  Form: {
-    initial: "Editing",
-    states: {
-      Editing: {},
-      Saving
+const States = Machine.state({
+  initial: "Form",
+  states: {
+    Form: {
+      initial: "Editing",
+      states: {
+        Editing: {},
+        Saving
+      }
     }
   }
 })
 
 const definition = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) => to.Form.initial.resolve(({ target }) => target.from((form) => form.Editing.from()))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Form.from((form) => form.Editing.from())))
 })
 ```
 
@@ -212,7 +200,7 @@ schema-backed paths. Add a schema later if the state starts owning data.
 Keep data-bearing state schemas together in a named `Schema.TaggedUnion` and
 reference its cases from the topology. For a standalone state schema whose
 class identity is useful, declare a named `Schema.TaggedClass`. Do not bury
-one-off tagged schema declarations inside `Machine.states`.
+inline `fields` in a `Machine.state` descriptor.
 
 Put data on the narrowest state where it is valid. If sibling phases share
 data, put it on their compound parent.
@@ -224,24 +212,24 @@ belong in `internalEvents`. Ephemeral outward notifications have their own
 `emittedEvents` protocol:
 
 ```ts
-export const CommandEvent = Machine.events(
+export const CommandEvent = Machine.eventsFromSchemas(
   Schema.TaggedUnion({ Save: {} })
 )
 export type PublicCommandEvent = Machine.EventOf<typeof CommandEvent>
-const InternalEvent = Machine.internalEvents(
+const InternalEvent = Machine.internalEventsFromSchemas(
   Schema.TaggedUnion({
     Saved: { id: Schema.String },
     SaveFailed: { message: Schema.String }
   })
 )
-const Emissions = Machine.emittedEvents(
+const Emissions = Machine.emittedEventsFromSchemas(
   Schema.TaggedUnion({
     SaveObserved: { id: Schema.String }
   })
 )
 
 const definition = Machine.make({
-  states: States.states,
+  root: States,
   events: CommandEvent,
   internalEvents: InternalEvent,
   emittedEvents: Emissions,
@@ -352,28 +340,30 @@ machine mailbox and is processed later. A machine that requires an owner
 declares the subset of parent inputs it may send with `Machine.parent`:
 
 ```ts
-const ParentEvents = Machine.events(ChildFinished)
+const ParentEvents = Machine.eventsFromSchemas(ChildFinished)
 
 const child = Machine.make({
-  states: ChildStates.states,
+  root: ChildStates,
   events: ChildEvents,
   parent: Machine.parent(ParentEvents),
   initial: (to) => to.Working()
 }).handle({
-  Working: {
-    on: {
-      Finish: (to) =>
-        to.full.Done().resolve(({ parent, target }, enqueue) => {
-          enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-          return target.from()
-        })
-    }
-  },
-  Done: {}
+  states: {
+    Working: {
+      on: {
+        Finish: (to) =>
+          to.branch.Done().resolve(({ parent, target }, enqueue) => {
+            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+            return target.from()
+          })
+      }
+    },
+    Done: {}
+  }
 })
 
 const Child = Machine.child("worker", child)
-const ParentInputs = Machine.events(Start, ParentEvents)
+const ParentInputs = Machine.eventsFromSchemas(Start, ParentEvents)
 ```
 
 `parent` is statically present in every child callback, and root APIs such as
@@ -409,7 +399,7 @@ paths. `parent` always means the owning machine target.
 | `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
 
 Every required transition handler selects a target from its inline `to`
-builder. Return a bare selection such as `to.full.Idle()` when the selected
+builder. Return a bare selection such as `to.local.Idle()` when the selected
 builder supports zero-argument construction; the machine applies the same
 default construction as `target.from()`. This includes empty schemas and
 schemas whose constructor fields are all optional or defaulted. TypeScript
@@ -427,7 +417,7 @@ restarts the source while retaining its configuration.
 
 Topology-only definition instructions are values: `to.none`, declared
 `.initial` and history selections, and `to.local.with`. Concrete state and
-choice destinations remain calls such as `to.full.Running()`. Runtime named
+choice destinations remain calls such as `to.local.Running()`. Runtime named
 branch builders remain callable, including `select.unchanged()`, because their
 result carries the selected branch evidence.
 
@@ -574,7 +564,7 @@ lifecycle do not run.
 
 ## Statechart capabilities
 
-`Machine.states` supports:
+`Machine.state` supports:
 
 - atomic states;
 - compound states with one active child;
@@ -599,16 +589,18 @@ State-scoped work starts on entry and is interrupted on exit:
 
 ```ts
 machine.handle({
-  Loading: {
-    invoke: (from) =>
-      from.effect("save-document", () => saveDocument)
-        .onDone((to) => to.full.Saved().resolve(({ output, target }) => target.from({ id: output.id })))
-        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
-  },
-  Waiting: {
-    invoke: (from) =>
-      from.timer("save-timeout", "3 seconds")
-        .onDone((to) => to.full.Failed().resolve(({ target }) => target.from({ message: "Timed out" })))
+  states: {
+    Loading: {
+      invoke: (from) =>
+        from.effect("save-document", () => saveDocument)
+          .onDone((to) => to.branch.Saved().resolve(({ output, target }) => target.from({ id: output.id })))
+          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
+    },
+    Waiting: {
+      invoke: (from) =>
+        from.timer("save-timeout", "3 seconds")
+          .onDone((to) => to.branch.Failed().resolve(({ target }) => target.from({ message: "Timed out" })))
+    }
   }
 })
 ```
@@ -621,11 +613,13 @@ the completed chain is the value returned by the callback:
 
 ```ts
 machine.handle({
-  Loading: {
-    invoke: (from) =>
-      from.effect("load-document", ({ state }) => loadDocument(state.documentId))
-        .onDone((to) => to.full.Ready().resolve(({ output, target }) => target.from({ document: output })))
-        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: error.message })))
+  states: {
+    Loading: {
+      invoke: (from) =>
+        from.effect("load-document", ({ state }) => loadDocument(state.documentId))
+          .onDone((to) => to.branch.Ready().resolve(({ output, target }) => target.from({ document: output })))
+          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: error.message })))
+    }
   }
 })
 ```
@@ -636,16 +630,18 @@ macrostep commits:
 
 ```ts
 machine.handle({
-  Listening: {
-    invoke: (from) =>
-      from.stream("channel", () => channelMessages)
-        .onElement((to) =>
-          to.none.resolve(({ element }, enqueue) => {
-            enqueue.raise(Events.MessageReceived({ message: element }))
-          })
-        )
-        .onDone((to) => to.none)
-        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ error })))
+  states: {
+    Listening: {
+      invoke: (from) =>
+        from.stream("channel", () => channelMessages)
+          .onElement((to) =>
+            to.none.resolve(({ element }, enqueue) => {
+              enqueue.raise(Events.MessageReceived({ message: element }))
+            })
+          )
+          .onDone((to) => to.none)
+          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ error })))
+    }
   }
 })
 ```
@@ -667,16 +663,18 @@ const machine = Machine.make({
   parent: Machine.parent(ParentEvents)
   // ...
 }).handle({
-  Saving: {
-    invoke: (from) =>
-      from.effect("notify-parent", () => saveDocument)
-        .onDone((to) =>
-          to.none.resolve(({ parent, self }, enqueue) => {
-            enqueue.sendTo(self, Commands.Save())
-            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-          })
-        )
-        .onFailure((to) => to.none)
+  states: {
+    Saving: {
+      invoke: (from) =>
+        from.effect("notify-parent", () => saveDocument)
+          .onDone((to) =>
+            to.none.resolve(({ parent, self }, enqueue) => {
+              enqueue.sendTo(self, Commands.Save())
+              enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
+            })
+          )
+          .onFailure((to) => to.none)
+    }
   }
 })
 ```
@@ -690,11 +688,13 @@ transitions retain the exact owning state and machine protocols.
 const refreshCache = Cache.refresh
 
 machine.handle({
-  Active: {
-    invoke: (from) => [
-      from.effect("refresh-cache", () => refreshCache).onDone((to) => to.none).onFailure((to) => to.none),
-      from.timer("expire-session", "5 minutes").onDone((to) => to.full.Expired())
-    ]
+  states: {
+    Active: {
+      invoke: (from) => [
+        from.effect("refresh-cache", () => refreshCache).onDone((to) => to.none).onFailure((to) => to.none),
+        from.timer("expire-session", "5 minutes").onDone((to) => to.branch.Expired())
+      ]
+    }
   }
 })
 ```
@@ -720,19 +720,21 @@ open set of children that must survive state changes:
 const Plant = Machine.childFamily(plantMachine)
 
 const central = Machine.make({
-  events: Machine.events(ResourcesOffered, PlantBroken)
+  events: Machine.eventsFromSchemas(ResourcesOffered, PlantBroken)
   // ...
 }).handle({
-  Commissioning: {
-    invoke: (from) =>
-      from.effect("commission-wave", ({ children, state }) =>
-        Effect.forEach(
-          state.plants,
-          (input) => children.spawn(Plant(input.id), { input }),
-          { discard: true }
-        ))
-        .onDone((to) => to.full.Operating())
-        .onFailure((to) => to.full.CommissioningFailed())
+  states: {
+    Commissioning: {
+      invoke: (from) =>
+        from.effect("commission-wave", ({ children, state }) =>
+          Effect.forEach(
+            state.plants,
+            (input) => children.spawn(Plant(input.id), { input }),
+            { discard: true }
+          ))
+          .onDone((to) => to.branch.Operating())
+          .onFailure((to) => to.branch.CommissioningFailed())
+    }
   }
 })
 ```
@@ -857,7 +859,10 @@ or child instance.
 
 ## Persistence
 
-Logical snapshots can be validated for storage or transport:
+Logical snapshots use codec version 2, including the root at path `""`. Earlier
+encoded snapshots are rejected; migrate persisted data explicitly before decoding.
+
+Snapshots can be validated for storage or transport:
 
 ```ts
 const encoded = yield * Machine.encodeSnapshot(machine, snapshot)

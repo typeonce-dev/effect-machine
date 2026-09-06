@@ -16,6 +16,7 @@ const canonicalMacrostep = Effect.fn(function*(
   planned: ReturnType<ExecutionPlan.CompiledExecutionPlan["plan"]>
 ) {
   return {
+    event: planned.event,
     next: yield* encodeState(machine, executionPlan.snapshot(planned.next)),
     commands: planned.commands,
     emittedEvents: planned.emittedEvents,
@@ -96,9 +97,9 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
   return selected.strategy
 })
 
-export const verifyPlannerStrategies: (options: {
+export const verifyPlannerStrategies: <Event extends { readonly _tag: PropertyKey }>(options: {
   readonly machine: Machine.Machine.Any
-  readonly events: ReadonlyArray<{ readonly _tag: PropertyKey }>
+  readonly events: ReadonlyArray<Event>
   readonly expected?: "indexed-flat" | "indexed-hierarchical" | "generic"
   readonly initialArgs?: ReadonlyArray<unknown>
   readonly label: string

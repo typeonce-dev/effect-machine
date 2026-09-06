@@ -374,7 +374,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
       if (key.includes(".")) {
         throw new Error(`Machine state keys cannot contain ".": "${key}"`)
       }
-      const path = parent === undefined ? key : `${parent}.${key}`
+      const path = parent === undefined || parent === "" ? key : `${parent}.${key}`
       const definition = getStateNodeDefinition(path, tree[key]!)
       let node: Machine.StateNode
       let childStates: Machine.StateTree | undefined
@@ -401,7 +401,7 @@ export const compileStateNodes = (states: Machine.StateSchemas): Machine.StateNo
             history: undefined,
             parent,
             children: [],
-            initial: `${path}.${definition.initial}`
+            initial: path === "" ? definition.initial : `${path}.${definition.initial}`
           }
           childStates = definition.states
           break
@@ -627,7 +627,7 @@ export const getSnapshotByPath = (
   if (snapshot.path === path) {
     return Option.some(snapshot)
   }
-  if (!path.startsWith(`${snapshot.path}.`)) {
+  if (snapshot.path !== "" && !path.startsWith(`${snapshot.path}.`)) {
     return Option.none()
   }
   if (parents !== undefined) {

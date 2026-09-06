@@ -25,13 +25,54 @@ class CompositionService extends Context.Service<CompositionService, string>()(
 class CompositionFailure extends Data.TaggedError("CompositionFailure")<{}> {}
 
 const handled = machine.handle({
-  App: {
-    states: {
-      Workspace: {
-        history: {
-          recent: {
-            default: ({ target }) =>
-              target.App.from(App.make({}), (app) =>
+  states: {
+    App: {
+      states: {
+        Workspace: {
+          history: {
+            recent: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.App.from(App.make({}), (app) =>
+                    app.Workspace.from(
+                      Workspace.make({}),
+                      (workspace) =>
+                        workspace
+                          .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
+                          .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
+                    ))
+                )
+            }
+          },
+          output: ({ outputs }) => ({
+            Editor: outputs.Editor,
+            Sync: outputs.Sync
+          }),
+          states: {
+            Editor: {
+              states: {
+                Editing: {
+                  entry: () => {}
+                },
+                Done: {
+                  output: ({ state }) => state.value
+                }
+              }
+            },
+            Sync: {
+              states: {
+                Idle: {},
+                Done: {
+                  output: ({ state }) => state.value
+                }
+              }
+            }
+          }
+        },
+        Route: {
+          choice: (to) =>
+            to.branch.App().resolve(({ target }) =>
+              target.from(App.make({}), (app) =>
                 app.Workspace.from(
                   Workspace.make({}),
                   (workspace) =>
@@ -39,45 +80,8 @@ const handled = machine.handle({
                       .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
                       .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
                 ))
-          }
-        },
-        output: ({ outputs }) => ({
-          Editor: outputs.Editor,
-          Sync: outputs.Sync
-        }),
-        states: {
-          Editor: {
-            states: {
-              Editing: {
-                entry: () => {}
-              },
-              Done: {
-                output: ({ state }) => state.value
-              }
-            }
-          },
-          Sync: {
-            states: {
-              Idle: {},
-              Done: {
-                output: ({ state }) => state.value
-              }
-            }
-          }
+            )
         }
-      },
-      Route: {
-        choice: (to) =>
-          to.full.App().resolve(({ target }) =>
-            target.from(App.make({}), (app) =>
-              app.Workspace.from(
-                Workspace.make({}),
-                (workspace) =>
-                  workspace
-                    .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
-                    .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
-              ))
-          )
       }
     }
   }
@@ -87,7 +91,7 @@ type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof handled>, never>>
 type ServicesAreExact = Expect<Equal<Machine.Machine.Services<typeof handled>, never>>
 type OutputIsExact = Expect<
   Equal<
-    Machine.Machine.OutputByIdentifier<typeof States.states, "App.Workspace">,
+    Machine.Machine.OutputByIdentifier<{ readonly "": typeof States.node }, "App.Workspace">,
     { readonly Editor: string; readonly Sync: number }
   >
 >

@@ -9,26 +9,31 @@ describe("event validation across execution strategies", () => {
     it.effect(`rejects mutated decoded events in the ${strategy} planner`, () =>
       Effect.gen(function*() {
         const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
-        const events = Machine.events(Set)
+        const events = Machine.eventsFromSchemas(Set)
         let retained: unknown
         const machine = Machine.make({
-          states: { Ready: Schema.TaggedStruct("Ready", {}) },
+          root: Machine.state({ initial: "Ready", states: { Ready: Schema.TaggedStruct("Ready", {}) } }),
           events,
-          initial: (to) => to.Ready().resolve(({ target }) => target.decoded({ _tag: "Ready" }))
+          initialConfiguration: (root) =>
+            root.resolve(({ target }) => target.from((to) => to.Ready.decoded({ _tag: "Ready" })))
         }).handle({
-          Ready: {
-            on: {
-              Set: (to) =>
-                to.none.resolve(({ event }) => {
-                  retained = event
-                })
+          states: {
+            Ready: {
+              on: {
+                Set: (to) =>
+                  to.none.resolve(({ event }) => {
+                    retained = event
+                  })
+              }
             }
           }
         })
         const initial = yield* Machine.planInitial(machine)
         const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, strategy)
         assert.strictEqual(selected.strategy, strategy === "auto" ? "indexed-flat" : "generic")
-        const state = selected.plan.fromConfiguration(Configuration.normalizeConfigurationSync(machine, initial.state))
+        const state = selected.plan.fromConfiguration(
+          Configuration.normalizeConfigurationSync<Machine.Machine.States<typeof machine>>(machine, initial.state)
+        )
         selected.plan.plan(state, events.Set({ value: 1 }), true)
         Object.assign(retained as object, { value: "invalid" })
         assert.throws(() => selected.plan.plan(state, retained, true), Machine.MachineSchemaDecodeError)

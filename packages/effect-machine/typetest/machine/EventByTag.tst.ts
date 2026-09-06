@@ -31,32 +31,34 @@ describe("Machine.EventByTag", () => {
   })
 
   it("narrows handler contexts for every finite tag", () => {
-    const states = Machine.states({ Idle })
+    const states = Machine.state({ initial: "Idle", states: { Idle } })
     Machine.make({
-      states: states.states,
-      events: Machine.events(FiniteUnion),
-      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+      root: states,
+      events: Machine.eventsFromSchemas(FiniteUnion),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     }).handle({
-      Idle: {
-        on: {
-          Alpha: (to) =>
-            to.none.resolve(({ event }) => {
-              expect(event).type.toBe<{
-                readonly _tag: "Alpha"
-                readonly payload: string
-                readonly count: number
-              }>()
-              return undefined
-            }),
-          Beta: (to) =>
-            to.none.resolve(({ event }) => {
-              expect(event).type.toBe<{
-                readonly _tag: "Beta"
-                readonly payload: string
-                readonly count: number
-              }>()
-              return undefined
-            })
+      states: {
+        Idle: {
+          on: {
+            Alpha: (to) =>
+              to.none.resolve(({ event }) => {
+                expect(event).type.toBe<{
+                  readonly _tag: "Alpha"
+                  readonly payload: string
+                  readonly count: number
+                }>()
+                return undefined
+              }),
+            Beta: (to) =>
+              to.none.resolve(({ event }) => {
+                expect(event).type.toBe<{
+                  readonly _tag: "Beta"
+                  readonly payload: string
+                  readonly count: number
+                }>()
+                return undefined
+              })
+          }
         }
       }
     })

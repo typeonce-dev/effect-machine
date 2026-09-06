@@ -7,59 +7,62 @@ class DeepIdle extends Schema.TaggedClass<DeepIdle>("DeepIdle")("DeepIdle", { va
 class DeepDone extends Schema.TaggedClass<DeepDone>("DeepDone")("DeepDone", { value: Schema.String }) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", { value: Schema.String }) {}
 
-const States = Machine.states({
-  n0: {
-    schema: NodeState,
-    initial: "n1",
-    states: {
-      n1: {
-        schema: NodeState,
-        initial: "n2",
-        states: {
-          n2: {
-            schema: NodeState,
-            initial: "n3",
-            states: {
-              n3: {
-                schema: NodeState,
-                initial: "n4",
-                states: {
-                  n4: {
-                    schema: NodeState,
-                    initial: "n5",
-                    states: {
-                      n5: {
-                        schema: NodeState,
-                        initial: "n6",
-                        states: {
-                          n6: {
-                            schema: NodeState,
-                            initial: "n7",
-                            states: {
-                              n7: {
-                                schema: NodeState,
-                                initial: "n8",
-                                states: {
-                                  n8: {
-                                    schema: NodeState,
-                                    initial: "n9",
-                                    states: {
-                                      n9: {
-                                        schema: NodeState,
-                                        initial: "n10",
-                                        states: {
-                                          n10: {
-                                            schema: NodeState,
-                                            initial: "n11",
-                                            states: {
-                                              n11: {
-                                                schema: NodeState,
-                                                initial: "idle",
-                                                states: {
-                                                  idle: DeepIdle,
-                                                  done: {
-                                                    schema: DeepDone,
-                                                    type: "final"
+const States = Machine.state({
+  initial: "n0",
+  states: {
+    n0: {
+      schema: NodeState,
+      initial: "n1",
+      states: {
+        n1: {
+          schema: NodeState,
+          initial: "n2",
+          states: {
+            n2: {
+              schema: NodeState,
+              initial: "n3",
+              states: {
+                n3: {
+                  schema: NodeState,
+                  initial: "n4",
+                  states: {
+                    n4: {
+                      schema: NodeState,
+                      initial: "n5",
+                      states: {
+                        n5: {
+                          schema: NodeState,
+                          initial: "n6",
+                          states: {
+                            n6: {
+                              schema: NodeState,
+                              initial: "n7",
+                              states: {
+                                n7: {
+                                  schema: NodeState,
+                                  initial: "n8",
+                                  states: {
+                                    n8: {
+                                      schema: NodeState,
+                                      initial: "n9",
+                                      states: {
+                                        n9: {
+                                          schema: NodeState,
+                                          initial: "n10",
+                                          states: {
+                                            n10: {
+                                              schema: NodeState,
+                                              initial: "n11",
+                                              states: {
+                                                n11: {
+                                                  schema: NodeState,
+                                                  initial: "idle",
+                                                  states: {
+                                                    idle: DeepIdle,
+                                                    done: {
+                                                      schema: DeepDone,
+                                                      type: "final"
+                                                    }
                                                   }
                                                 }
                                               }
@@ -99,47 +102,49 @@ const initial = (() => {
       state
     }
   }
-  return state as Machine.Machine.Snapshot<typeof States.states>
+  return { path: "", value: undefined, state } as Machine.Snapshot<typeof States>
 })()
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Advance),
-  initial: (to) => to.n0.initial.resolve(() => initial)
+  root: States,
+  events: Machine.eventsFromSchemas(Advance),
+  initialConfiguration: (to) => to.resolve(() => initial)
 }).handle({
-  n0: {
-    states: {
-      n1: {
-        states: {
-          n2: {
-            states: {
-              n3: {
-                states: {
-                  n4: {
-                    states: {
-                      n5: {
-                        states: {
-                          n6: {
-                            states: {
-                              n7: {
-                                states: {
-                                  n8: {
-                                    states: {
-                                      n9: {
-                                        states: {
-                                          n10: {
-                                            states: {
-                                              n11: {
-                                                states: {
-                                                  idle: {
-                                                    on: {
-                                                      Advance: (to) =>
-                                                        to.local.done().resolve(({ event, target }) =>
-                                                          target.decoded(new DeepDone({ value: event.value }))
-                                                        )
-                                                    }
-                                                  },
-                                                  done: {}
+  states: {
+    n0: {
+      states: {
+        n1: {
+          states: {
+            n2: {
+              states: {
+                n3: {
+                  states: {
+                    n4: {
+                      states: {
+                        n5: {
+                          states: {
+                            n6: {
+                              states: {
+                                n7: {
+                                  states: {
+                                    n8: {
+                                      states: {
+                                        n9: {
+                                          states: {
+                                            n10: {
+                                              states: {
+                                                n11: {
+                                                  states: {
+                                                    idle: {
+                                                      on: {
+                                                        Advance: (to) =>
+                                                          to.local.done().resolve(({ event, target }) =>
+                                                            target.decoded(new DeepDone({ value: event.value }))
+                                                          )
+                                                      }
+                                                    },
+                                                    done: {}
+                                                  }
                                                 }
                                               }
                                             }

@@ -21,31 +21,33 @@ class FinishStream extends Schema.TaggedClass<FinishStream>("InvokeFinishStream"
   value: Schema.Number
 }) {}
 
-const States = Machine.states({ Idle, Loading, Complete, Failed })
+const States = Machine.state({ initial: "Idle", states: { Idle, Loading, Complete, Failed } })
 
 describe("inline invoke", () => {
   it("exposes only source-relevant, unhandled lifecycle methods", () => {
     let inspected = false
     Machine.make({
-      states: States.states,
-      events: Machine.events(),
-      initial: (to) => to.Loading().resolve(({ target }) => target.from())
+      root: States,
+      events: Machine.eventsFromSchemas(),
+      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
     }).handle({
-      Loading: {
-        invoke: (from) => {
-          const timer = from.timer("timeout", "1 second")
-          assert.isFalse("onFailure" in timer)
-          assert.isFalse("onElement" in timer)
-          assert.isFalse("onSnapshot" in timer)
-          const completed = timer.onDone((to) => to.none)
-          assert.isFalse("onDone" in completed)
-          inspected = true
-          return completed
-        }
-      },
-      Complete: {},
-      Failed: {},
-      Idle: {}
+      states: {
+        Loading: {
+          invoke: (from) => {
+            const timer = from.timer("timeout", "1 second")
+            assert.isFalse("onFailure" in timer)
+            assert.isFalse("onElement" in timer)
+            assert.isFalse("onSnapshot" in timer)
+            const completed = timer.onDone((to) => to.none)
+            assert.isFalse("onDone" in completed)
+            inspected = true
+            return completed
+          }
+        },
+        Complete: {},
+        Failed: {},
+        Idle: {}
+      }
     })
     assert.isTrue(inspected)
   })
@@ -53,55 +55,60 @@ describe("inline invoke", () => {
   it.effect("ignores an invocation outcome when its transition declines", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Effect.succeed("ignored")).onDone((to) =>
-              to.full.Complete().resolve(({ decline }) => decline(), { declinable: true })
-            )
-        },
-        Complete: {},
-        Failed: {},
-        Idle: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Effect.succeed("ignored")).onDone((to) =>
+                to.branch.Complete().resolve(({ decline }) => decline(), { declinable: true })
+              )
+          },
+          Complete: {},
+          Failed: {},
+          Idle: {}
+        }
       })
 
       assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.acceptance, "declinable")
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-      assert.deepStrictEqual(yield* ref.state, { path: "Loading" as const, value: new Loading({}) })
+      assert.deepStrictEqual((yield* ref.state).state, { path: "Loading" as const, value: new Loading({}) })
     }))
 
   it.effect("handles Stream elements sequentially before completion", () =>
     Effect.gen(function*() {
-      const states = Machine.states({ Collecting, Complete })
+      const states = Machine.state({ initial: "Collecting", states: { Collecting, Complete } })
       const definition = Machine.make({
-        states: states.states,
-        events: Machine.events(Add),
-        initial: (to) => to.Collecting().resolve(({ target }) => target.decoded(new Collecting({ values: [] })))
+        root: states,
+        events: Machine.eventsFromSchemas(Add),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Collecting.decoded(new Collecting({ values: [] }))))
       })
       const machine = definition.handle({
-        Collecting: {
-          invoke: (from) =>
-            from.stream("numbers", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
-              to.none.resolve(({ element }, enqueue) => {
-                enqueue.raise(new Add({ value: element }))
-              })
-            ).onDone((to) =>
-              to.full.Complete().resolve(({ state, target }) =>
-                target.decoded(new Complete({ value: state.values.join(",") }))
-              )
-            ),
-          on: {
-            Add: (to) =>
-              to.full.Collecting().resolve(({ event, state, target }) =>
-                target.decoded(new Collecting({ values: [...state.values, event.value] }))
-              )
-          }
-        },
-        Complete: {}
+        states: {
+          Collecting: {
+            invoke: (from) =>
+              from.stream("numbers", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
+                to.none.resolve(({ element }, enqueue) => {
+                  enqueue.raise(new Add({ value: element }))
+                })
+              ).onDone((to) =>
+                to.branch.Complete().resolve(({ state, target }) =>
+                  target.decoded(new Complete({ value: state.values.join(",") }))
+                )
+              ),
+            on: {
+              Add: (to) =>
+                to.branch.Collecting().resolve(({ event, state, target }) =>
+                  target.decoded(new Collecting({ values: [...state.values, event.value] }))
+                )
+            }
+          },
+          Complete: {}
+        }
       })
 
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [
@@ -113,7 +120,7 @@ describe("inline invoke", () => {
           branches: [{
             type: "direct",
             target: "Collecting",
-            selection: { path: "Collecting", kind: "state", scope: "full" },
+            selection: { path: "Collecting", kind: "state", scope: "branch" },
             updates: []
           }]
         },
@@ -137,7 +144,7 @@ describe("inline invoke", () => {
           branches: [{
             type: "direct",
             target: "Complete",
-            selection: { path: "Complete", kind: "state", scope: "full" },
+            selection: { path: "Complete", kind: "state", scope: "branch" },
             updates: []
           }]
         }
@@ -145,11 +152,11 @@ describe("inline invoke", () => {
 
       const ref = yield* Machine.start(machine)
       yield* ref.changes.pipe(
-        Stream.filter((snapshot) => snapshot.state.path === "Complete"),
+        Stream.filter((snapshot) => snapshot.state.state.path === "Complete"),
         Stream.take(1),
         Stream.runDrain
       )
-      assert.deepStrictEqual(yield* ref.state, {
+      assert.deepStrictEqual((yield* ref.state).state, {
         path: "Complete" as const,
         value: new Complete({ value: "1,2,3" })
       })
@@ -158,28 +165,30 @@ describe("inline invoke", () => {
   it.effect("routes a Stream typed failure through onFailure", () =>
     Effect.gen(function*() {
       const definition = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       })
       const machine = definition.handle({
-        Loading: {
-          invoke: (from) =>
-            from.stream("updates", () => Stream.fail("offline")).onDone((to) => to.none).onFailure((to) =>
-              to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
-            )
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.stream("updates", () => Stream.fail("offline")).onDone((to) => to.none).onFailure((to) =>
+                to.branch.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
+              )
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)
       yield* ref.changes.pipe(
-        Stream.filter((snapshot) => snapshot.state.path === "Failed"),
+        Stream.filter((snapshot) => snapshot.state.state.path === "Failed"),
         Stream.take(1),
         Stream.runDrain
       )
-      assert.deepStrictEqual(yield* ref.state, {
+      assert.deepStrictEqual((yield* ref.state).state, {
         path: "Failed" as const,
         value: new Failed({ message: "offline" })
       })
@@ -189,16 +198,18 @@ describe("inline invoke", () => {
     Effect.gen(function*() {
       const defect = new Error("stream defect")
       const definition = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       })
       const machine = definition.handle({
-        Loading: {
-          invoke: (from) => from.stream("updates", () => Stream.die(defect)).onDone((to) => to.none)
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) => from.stream("updates", () => Stream.die(defect)).onDone((to) => to.none)
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)
@@ -220,32 +231,34 @@ describe("inline invoke", () => {
         }))
       )
       const definition = Machine.make({
-        states: States.states,
-        events: Machine.events(FinishStream),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(FinishStream),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       })
       const machine = definition.handle({
-        Loading: {
-          invoke: (from) =>
-            from.stream("updates", () => source).onElement((to) =>
-              to.none.resolve(({ element }, enqueue) => {
-                enqueue.raise(new FinishStream({ value: element }))
-              })
-            ).onDone((to) => to.none),
-          on: {
-            FinishStream: (to) =>
-              to.full.Complete().resolve(({ event, target }) =>
-                target.decoded(new Complete({ value: String(event.value) }))
-              )
-          }
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.stream("updates", () => source).onElement((to) =>
+                to.none.resolve(({ element }, enqueue) => {
+                  enqueue.raise(new FinishStream({ value: element }))
+                })
+              ).onDone((to) => to.none),
+            on: {
+              FinishStream: (to) =>
+                to.branch.Complete().resolve(({ event, target }) =>
+                  target.decoded(new Complete({ value: String(event.value) }))
+                )
+            }
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)
       yield* ref.changes.pipe(
-        Stream.filter((snapshot) => snapshot.state.path === "Complete"),
+        Stream.filter((snapshot) => snapshot.state.state.path === "Complete"),
         Stream.take(1),
         Stream.runDrain
       )
@@ -258,18 +271,20 @@ describe("inline invoke", () => {
   it.effect("plans a successful Effect outcome directly", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
-              to.full.Complete().resolve(({ output, target }) => target.decoded(new Complete({ value: output })))
-            )
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
+                to.branch.Complete().resolve(({ output, target }) => target.decoded(new Complete({ value: output })))
+              )
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
@@ -280,59 +295,69 @@ describe("inline invoke", () => {
         branches: [{
           type: "direct",
           target: "Complete",
-          selection: { path: "Complete", kind: "state", scope: "full" },
+          selection: { path: "Complete", kind: "state", scope: "branch" },
           updates: []
         }]
       }])
 
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-      assert.deepStrictEqual(yield* ref.state, { path: "Complete" as const, value: new Complete({ value: "ready" }) })
+      assert.deepStrictEqual((yield* ref.state).state, {
+        path: "Complete" as const,
+        value: new Complete({ value: "ready" })
+      })
     }))
 
   it.effect("plans a typed Effect failure directly", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.from()))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Effect.fail("offline")).onFailure((to) =>
-              to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
-            )
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Effect.fail("offline")).onFailure((to) =>
+                to.branch.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error })))
+              )
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-      assert.deepStrictEqual(yield* ref.state, { path: "Failed" as const, value: new Failed({ message: "offline" }) })
+      assert.deepStrictEqual((yield* ref.state).state, {
+        path: "Failed" as const,
+        value: new Failed({ message: "offline" })
+      })
     }))
 
   it.effect("fails the owning machine when an Effect source factory defects", () =>
     Effect.gen(function*() {
       const defect = new Error("source defect")
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(Start),
-        initial: (to) => to.Idle().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(Start),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
       }).handle({
-        Idle: {
-          on: {
-            Start: (to) => to.full.Loading().resolve(({ target }) => target.from())
-          }
-        },
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", (): Effect.Effect<string> => {
-              throw defect
-            }).onDone((to) => to.none)
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Idle: {
+            on: {
+              Start: (to) => to.branch.Loading().resolve(({ target }) => target.from())
+            }
+          },
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", (): Effect.Effect<string> => {
+                throw defect
+              }).onDone((to) => to.none)
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)
@@ -353,20 +378,22 @@ describe("inline invoke", () => {
         run: () => Effect.never
       })
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(Start),
-        initial: (to) => to.Idle().resolve(({ target }) => target.from())
+        root: States,
+        events: Machine.eventsFromSchemas(Start),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
       }).handle({
-        Idle: {
-          on: {
-            Start: (to) => to.full.Loading().resolve(({ target }) => target.from())
-          }
-        },
-        Loading: {
-          invoke: (from) => from.logic("worker", { address: Machine.childAddress("worker"), logic: logic })
-        },
-        Complete: {},
-        Failed: {}
+        states: {
+          Idle: {
+            on: {
+              Start: (to) => to.branch.Loading().resolve(({ target }) => target.from())
+            }
+          },
+          Loading: {
+            invoke: (from) => from.logic("worker", { address: Machine.childAddress("worker"), logic: logic })
+          },
+          Complete: {},
+          Failed: {}
+        }
       })
 
       const ref = yield* Machine.start(machine)

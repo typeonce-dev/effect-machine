@@ -59,6 +59,8 @@ import {
 
 interface IndexedExecutionDescriptor {
   readonly flat: boolean
+  /** Distinguishes structural nodes from valued slots, including decoded undefined. */
+  readonly valued: ReadonlyArray<boolean>
   readonly nodes: ReadonlyArray<Machine.StateNode>
   readonly indexByPath: ReadonlyMap<string, number>
   readonly parentIndices: ReadonlyArray<number>
@@ -140,12 +142,6 @@ const compileIndexedExecutionDescriptor = (
     if (node.type === "choice" || node.type === "history") {
       return undefined
     }
-    // Structural active states deliberately use the generic semantic
-    // reference until the indexed value table represents absent values as an
-    // explicit capability rather than an `undefined` slot.
-    if (node.schema === undefined) {
-      return undefined
-    }
     if (node.type === "atomic" || node.type === "final") {
       leafPaths.push(node.path)
     }
@@ -210,7 +206,20 @@ const compileIndexedExecutionDescriptor = (
     dispatchByLeaf.set(leafIndex, dispatch)
   }
   return {
-    flat: nodes.every((node) => node.parent === undefined && (node.type === "atomic" || node.type === "final")),
+    valued: Object.freeze(nodes.map((node) => node.schema !== undefined)),
+    // A structural root with direct leaves has the same event kernel as an
+    // atomic root. Root behavior and targets that can rebuild the root retain
+    // the hierarchical planner so their entry and exit boundaries stay explicit.
+    flat: nodes.every((node) => node.parent === undefined && (node.type === "atomic" || node.type === "final")) || (
+      nodes[0]?.path === "" && nodes[0].type === "compound" && nodes[0].schema === undefined &&
+      (machine.handlers[""] === undefined || Reflect.ownKeys(machine.handlers[""]).length === 0) &&
+      nodes.slice(1).every((node) => node.parent === "" && (node.type === "atomic" || node.type === "final")) &&
+      [...transitionsByPath.values()].every((events) =>
+        [...events.values()].every((transition) =>
+          transition.targets !== undefined && transition.targets.every((path) => path !== "")
+        )
+      )
+    ),
     nodes,
     indexByPath,
     parentIndices,
@@ -276,7 +285,7 @@ const ownedIndexedStateFromActive = (
     const index = descriptor.indexByPath.get(path)
     if (index === undefined) throw new Error(`Machine expected indexed active path "${path}"`)
     active[index] = 1
-    values[index] = configuration.values.get(path)
+    if (descriptor.valued[index]) values[index] = configuration.values.get(path)
   }
   for (const [path, output] of configuration.outputs) {
     const index = descriptor.indexByPath.get(path)
@@ -306,7 +315,7 @@ const activeConfigurationFromIndexedState = (
     if (configuration.active[index] !== 1) continue
     const path = descriptor.nodes[index]!.path
     active.add(path)
-    values.set(path, configuration.values[index])
+    if (descriptor.valued[index]) values.set(path, configuration.values[index])
   }
   for (const index of configuration.completedOrder) {
     if (configuration.completed[index] === 1) {
@@ -324,7 +333,7 @@ const snapshotFromIndexedStateStatePath = (
   const node = descriptor.nodes[index]!
   const snapshot: Record<string, unknown> = {
     path: node.path,
-    value: configuration.values[index]
+    value: descriptor.valued[index] ? configuration.values[index] : undefined
   }
   if (node.type === "compound") {
     const childIndex = descriptor.childIndices[index]!.find((childIndex) => configuration.active[childIndex] === 1)
@@ -383,7 +392,9 @@ const makeIndexedTransitionContext = (
   const parentIndex = descriptor.parentIndices[sourceIndex]!
   const ancestors: Record<string, unknown> = {}
   for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
-    ancestors[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
+    if (descriptor.valued[ancestorIndex]) {
+      ancestors[descriptor.nodes[ancestorIndex]!.path] = configuration.values[ancestorIndex]
+    }
   }
   return {
     ...resolveMachineReferences(machine, machineReferences),
@@ -426,6 +437,7 @@ export interface ExecutionMicrostep<State = unknown> {
 }
 
 export interface ExecutionMacrostep<State = unknown> {
+  readonly event: unknown
   readonly next: State
   readonly commands: ReadonlyArray<RuntimeCommand>
   readonly emittedEvents: ReadonlyArray<unknown>
@@ -564,11 +576,10 @@ const collectIndexedEvaluatedTransition = (
       const index = descriptor.indexByPath.get(stateUpdate.path)
       const node = index === undefined ? undefined : descriptor.nodes[index]
       if (
-        index === undefined || node === undefined || state.active[index] !== 1 || node.schema === undefined ||
-        (node.type !== "compound" && node.type !== "parallel")
+        index === undefined || node === undefined || state.active[index] !== 1 || node.schema === undefined
       ) {
         throw new Error(
-          `Machine state update owner "${stateUpdate.path}" must be an active valued compound or parallel state`
+          `Machine state update owner "${stateUpdate.path}" must be an active valued state`
         )
       }
       return {
@@ -794,6 +805,7 @@ const planIndexedFlatState = (
         throw new Error("Machine reached a terminal indexed configuration without a completed root output")
       }
       return {
+        event: decoded,
         next: ownedIndexedStateFromActive(descriptor, completed),
         commands: commands ?? emptyExecutionValues,
         emittedEvents: emittedEvents ?? emptyExecutionValues,
@@ -820,7 +832,15 @@ const planIndexedFlatState = (
         },
         transition.evaluate
       )
-      const target = transitionResult.state
+      const update = isStateUpdate(transitionResult.state) ? transitionResult.state : undefined
+      const target = update === undefined ? transitionResult.state : undefined
+      if (update !== undefined) {
+        const node = descriptor.nodes[sourceIndex]!
+        if (update.path !== sourcePath || node.schema === undefined) {
+          throw new Error(`Machine state update owner "${update.path}" must be the active valued state`)
+        }
+        updateOwnedIndexedValue(current, sourceIndex, decodeStateValueSync(machine, node, update.value))
+      }
       validateDeclaredTransitionTarget(
         sourcePath,
         { type: "event", event: event._tag },
@@ -871,7 +891,7 @@ const planIndexedFlatState = (
               branchKey: transitionResult.branchKey,
               target: target === undefined ? undefined : getTargetNodePath(target as any),
               resolvedTarget: target === undefined ? undefined : getTargetNodePath(target as any),
-              updates: []
+              updates: update === undefined ? [] : [update.path]
             }]
           }
           : undefined),
@@ -901,6 +921,7 @@ const planIndexedFlatState = (
     const raised = raisedEvents?.[raisedIndex]
     if (raised === undefined) {
       return {
+        event: decoded,
         next: current,
         commands: commands ?? emptyExecutionValues,
         emittedEvents: emittedEvents ?? emptyExecutionValues,
@@ -935,6 +956,7 @@ const planIndexedState = (
       input
     )
     return {
+      event: planned.event,
       next: ownedIndexedStateFromActive(descriptor, planned.next),
       commands: planned.commands,
       emittedEvents: planned.emittedEvents,
@@ -966,6 +988,7 @@ const planIndexedState = (
         throw new Error("Machine reached a terminal indexed configuration without a completed root output")
       }
       return {
+        event: decoded,
         next: ownedIndexedStateFromActive(descriptor, completed),
         commands: [],
         emittedEvents: [],
@@ -979,6 +1002,7 @@ const planIndexedState = (
   const selections = selectIndexedEventTransitions(machine, descriptor, configuration, decoded, machineReferences)
   if (selections.length === 0) {
     return {
+      event: decoded,
       next: configuration,
       commands: [],
       emittedEvents: [],
@@ -1021,6 +1045,7 @@ const planIndexedState = (
           throw new Error("Machine reached a terminal indexed configuration without a completed root output")
         }
         return {
+          event: decoded,
           next: current,
           commands,
           emittedEvents,
@@ -1034,6 +1059,7 @@ const planIndexedState = (
     const raised = raisedEvents[raisedIndex]
     if (raised === undefined) {
       return {
+        event: decoded,
         next: current,
         commands,
         emittedEvents,
@@ -1103,43 +1129,74 @@ const makeIndexedExecutionPlan = (
   snapshot: (state) => snapshotFromIndexedState(indexed, state as OwnedIndexedState),
   plan: (state, event, retainMicrosteps = false, machineReferences) =>
     planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps, machineReferences),
-  initial: (args, machineReferences) => {
-    const inputArgs = machine.input === undefined
-      ? args
-      : args.length === 0
-      ? (decodeInputSync(machine, machine.input, undefined), args)
-      : [decodeInputSync(machine, machine.input, args[0])]
-    const initial = machine.initial(...inputArgs as any)
-    const normalized = normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
-    const active = machineReferences === undefined ? normalized : withMachineReferences(normalized, machineReferences)
-    validateInitialConfiguration(machine, active)
-    const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
-    const configuration = ownedIndexedStateFromActive(indexed, completed)
-    const state = snapshotFromIndexedState(indexed, configuration)
-    const done = isActiveFinalConfiguration(machine, completed)
-    if (!done) {
-      return {
-        state,
-        configuration,
-        activeConfiguration: completed,
-        initialEntryPaths: getInitialEntryPaths(machine, completed),
-        done: false,
-        output: undefined
+  // Initializers may enqueue commands and emissions. Managed startup owns that
+  // work through the generic initial planner; indexed event execution remains valid.
+  ...(Object.values(machine.handlers as Record<string, Machine.AnyStateConfig>).some((config) =>
+      "initialize" in config
+    ) ?
+    {} :
+    {
+      initial: (args: ReadonlyArray<unknown>, machineReferences?: PlanningMachineReferences) => {
+        const inputArgs = machine.input === undefined
+          ? args
+          : args.length === 0
+          ? (decodeInputSync(machine, machine.input, undefined), args)
+          : [decodeInputSync(machine, machine.input, args[0])]
+        const initial = machine.initial(...inputArgs as any)
+        const resolved = isInitialTarget(initial)
+          ? resolveInitialTarget(
+            machine,
+            {
+              active: new Set(),
+              values: new Map(),
+              outputs: new Map(),
+              history: new Map(),
+              ...(machineReferences === undefined ? {} : { machineReferences })
+            },
+            initial,
+            InitialEvent
+          ).target
+          : initial
+        const normalized = isInitialTarget(initial)
+          ? normalizeTargetConfigurationSync(machine, {
+            active: new Set(),
+            values: new Map(),
+            outputs: new Map(),
+            history: new Map()
+          }, resolved)
+          : normalizeConfigurationSync(machine, resolved as Machine.Snapshot<any>)
+        const active = machineReferences === undefined
+          ? normalized
+          : withMachineReferences(normalized, machineReferences)
+        if (machine.initialDefinition.selection.kind === "initial") validateInitialConfiguration(machine, active)
+        const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
+        const configuration = ownedIndexedStateFromActive(indexed, completed)
+        const state = snapshotFromIndexedState(indexed, configuration)
+        const done = isActiveFinalConfiguration(machine, completed)
+        if (!done) {
+          return {
+            state,
+            configuration,
+            activeConfiguration: completed,
+            initialEntryPaths: getInitialEntryPaths(machine, completed),
+            done: false,
+            output: undefined
+          }
+        }
+        const root = getRootPath(machine, completed)
+        if (!completed.outputs.has(root)) {
+          throw new Error("Machine reached a terminal configuration without a completed root output")
+        }
+        return {
+          state,
+          configuration,
+          activeConfiguration: completed,
+          initialEntryPaths: getInitialEntryPaths(machine, completed),
+          done: true,
+          output: completed.outputs.get(root)
+        }
       }
-    }
-    const root = getRootPath(machine, completed)
-    if (!completed.outputs.has(root)) {
-      throw new Error("Machine reached a terminal configuration without a completed root output")
-    }
-    return {
-      state,
-      configuration,
-      activeConfiguration: completed,
-      initialEntryPaths: getInitialEntryPaths(machine, completed),
-      done: true,
-      output: completed.outputs.get(root)
-    }
-  }
+    })
 })
 
 export type ExecutionPlanStrategy = "generic" | "indexed-flat" | "indexed-hierarchical" | "auto"

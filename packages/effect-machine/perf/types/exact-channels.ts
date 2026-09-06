@@ -9,19 +9,21 @@ type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
 
 const complete = machine.handle({
-  Idle: {
-    entry: () => {},
-    on: {
-      Start: (to) =>
-        to.full.Done().resolve(({ event, target }, enqueue) => {
-          enqueue.emit(Notice.make({ value: event.value }))
-          return target.from(Done.make({ value: event.value }))
-        }),
-      Loaded: (to) => to.full.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+  states: {
+    Idle: {
+      entry: () => {},
+      on: {
+        Start: (to) =>
+          to.branch.Done().resolve(({ event, target }, enqueue) => {
+            enqueue.emit(Notice.make({ value: event.value }))
+            return target.from(Done.make({ value: event.value }))
+          }),
+        Loaded: (to) => to.branch.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+      }
+    },
+    Done: {
+      output: ({ state }) => state.value
     }
-  },
-  Done: {
-    output: ({ state }) => state.value
   }
 })
 
@@ -31,7 +33,7 @@ type InputSchemaIsExact = Expect<
 type InputIsExact = Expect<Equal<Machine.Machine.Input<typeof complete>, { readonly seed: number }>>
 type InputEventIsExact = Expect<Equal<Machine.Machine.InputEvent<typeof complete>, typeof Start.Type>>
 type EventIsExact = Expect<Equal<Machine.Machine.Event<typeof complete>, typeof Start.Type | typeof Loaded.Type>>
-type EmitIsExact = Expect<Equal<Machine.Machine.Emit<typeof complete>, typeof Notice.Type>>
+type EmitIsExact = Expect<Equal<Machine.Machine.EmittedEvent<typeof complete>, typeof Notice.Type>>
 type InitialErrorIsExact = Expect<Equal<Machine.Machine.InitialError<typeof complete>, never>>
 type InitialServicesAreExact = Expect<Equal<Machine.Machine.InitialServices<typeof complete>, never>>
 type ErrorIsExact = Expect<Equal<Machine.Machine.Error<typeof complete>, never>>

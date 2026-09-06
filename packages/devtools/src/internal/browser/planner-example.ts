@@ -64,18 +64,21 @@ class Cancel extends Schema.TaggedClass<Cancel>("PlannerCancel")("Cancel", { rea
 class AutoFinish extends Schema.TaggedClass<AutoFinish>("PlannerAutoFinish")("AutoFinish", {}) {}
 class Planned extends Schema.TaggedClass<Planned>("PlannerPlanned")("Planned", { job: Schema.String }) {}
 
-const Events = Machine.events(Begin, Cancel)
-const InternalEvents = Machine.internalEvents(AutoFinish)
-const Emissions = Machine.emittedEvents(Planned)
-const States = Machine.states({
-  Idle,
-  Working,
-  Finished: { schema: Finished, type: "final", output: Schema.String }
+const Events = Machine.eventsFromSchemas(Begin, Cancel)
+const InternalEvents = Machine.internalEventsFromSchemas(AutoFinish)
+const Emissions = Machine.emittedEventsFromSchemas(Planned)
+const States = Machine.state({
+  initial: "Idle",
+  states: {
+    Idle,
+    Working,
+    Finished: { schema: Finished, type: "final", output: Schema.String }
+  }
 })
 
 export const plannerMachine = Machine.make({
   id: "planner-example",
-  states: States.states,
+  root: States,
   events: Events,
   internalEvents: InternalEvents,
   emittedEvents: Emissions,
@@ -109,37 +112,40 @@ export const plannerMachine = Machine.make({
       })
     )
   }),
-  initial: (to) => to.Idle().resolve(({ input, target }) => target.decoded(new Idle({ owner: input.owner })))
+  initialConfiguration: (root) =>
+    root.resolve(({ input, target }) => target.from((to) => to.Idle.decoded(new Idle({ owner: input.owner }))))
 }).handle({
-  Idle: {
-    on: {
-      Begin: (to) =>
-        to.branches({
-          urgent: { title: "Finish immediately", target: to.full.Working() },
-          normal: { title: "Wait in working", target: to.full.Working() }
-        }).resolve(({ event, self, select, state }, enqueue) => {
-          enqueue.emit(new Planned({ job: event.job }))
-          enqueue.sendTo(self, Events.Cancel({ reason: "planner command example" }))
-          if (event.priority === "urgent") enqueue.raise(InternalEvents.AutoFinish())
-          const working = new Working({ owner: state.owner, job: event.job })
-          return event.priority === "urgent"
-            ? select.urgent.decoded(working)
-            : select.normal.decoded(working)
-        })
+  states: {
+    Idle: {
+      on: {
+        Begin: (to) =>
+          to.branches({
+            urgent: { title: "Finish immediately", target: to.branch.Working() },
+            normal: { title: "Wait in working", target: to.branch.Working() }
+          }).resolve(({ event, self, select, state }, enqueue) => {
+            enqueue.emit(new Planned({ job: event.job }))
+            enqueue.sendTo(self, Events.Cancel({ reason: "planner command example" }))
+            if (event.priority === "urgent") enqueue.raise(InternalEvents.AutoFinish())
+            const working = new Working({ owner: state.owner, job: event.job })
+            return event.priority === "urgent"
+              ? select.urgent.decoded(working)
+              : select.normal.decoded(working)
+          })
+      }
+    },
+    Working: {
+      invoke: (from) => from.effect("monitor-job", () => Effect.never),
+      on: {
+        AutoFinish: (to) =>
+          to.branch.Finished().resolve(({ state, target }) => target.decoded(new Finished({ job: state.job }))),
+        Cancel: (to) =>
+          to.branch.Idle().resolve(({ event, state, target }) =>
+            target.decoded(new Idle({ owner: `${state.owner} · ${event.reason}` }))
+          )
+      }
+    },
+    Finished: {
+      output: ({ state }) => state.job
     }
-  },
-  Working: {
-    invoke: (from) => from.effect("monitor-job", () => Effect.never),
-    on: {
-      AutoFinish: (to) =>
-        to.full.Finished().resolve(({ state, target }) => target.decoded(new Finished({ job: state.job }))),
-      Cancel: (to) =>
-        to.full.Idle().resolve(({ event, state, target }) =>
-          target.decoded(new Idle({ owner: `${state.owner} · ${event.reason}` }))
-        )
-    }
-  },
-  Finished: {
-    output: ({ state }) => state.job
   }
 })

@@ -10,31 +10,18 @@ Effect-native, schema-first, completely type-safe state machines and statecharts
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 
-const States = Machine.states({
-  Locked: {},
-  Unlocked: {}
+const Root = Machine.state({
+  initial: "Locked",
+  states: { Locked: {}, Unlocked: {} }
 })
+const Events = Machine.events({ Coin: {}, Push: {} })
 
-const Events = Machine.events(
-  Schema.TaggedUnion({
-    Coin: {},
-    Push: {}
-  })
-)
-
-const Turnstile = Machine.make({
-  id: "Turnstile",
-  states: States.states,
-  events: Events,
-  initial: (to) => to.Locked()
-}).handle({
-  Locked: {
-    on: { Coin: (to) => to.full.Unlocked() }
-  },
-  Unlocked: {
-    on: { Push: (to) => to.full.Locked() }
+const Turnstile = Machine.make({ root: Root, events: Events }).handle({
+  states: {
+    Locked: { on: { Coin: (to) => to.local.Unlocked() } },
+    Unlocked: { on: { Push: (to) => to.local.Locked() } }
   }
 })
 
@@ -44,8 +31,7 @@ const program = Effect.gen(function*() {
 })
 ```
 
-State and event schemas define the protocol. The handler tree defines the
-statechart, and the result runs as an Effect-managed machine.
+State and event schemas define the protocol. The root defines the topology and the handler tree adds behavior, and the result runs as an Effect-managed machine.
 
 ## Packages
 

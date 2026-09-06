@@ -11,15 +11,18 @@ import { Effect, Schema, Stream } from "effect"
 import { Machine } from "./src/index.js"
 import { AtomMachine } from "./src/unstable/reactivity/index.js"
 
+const rootCompletion = Machine.state({ /*root-properties*/ initial: "Idle", states: { Idle: {} } })
+void rootCompletion
+
 class AtomIdle extends Schema.TaggedClass<AtomIdle>("AtomIdle")("AtomIdle", {}) {}
 class AtomReady extends Schema.TaggedClass<AtomReady>("AtomReady")("AtomReady", {}) {}
-const AtomStates = Machine.states({ AtomIdle, AtomReady })
+const AtomStates = Machine.state({ initial: "AtomIdle", states: { AtomIdle, AtomReady } })
 const atomDefinition = Machine.make({
-  states: AtomStates.states,
-  events: Machine.events(),
+  root: AtomStates,
+  events: Machine.eventsFromSchemas(),
   input: Schema.String,
-  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
-}).handle({ AtomIdle: {}, AtomReady: {} })
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
+}).handle({ states: { AtomIdle: {}, AtomReady: {} } })
 
 AtomMachine.family(atomDefinition, {
   atoms: {
@@ -30,16 +33,16 @@ AtomMachine.family(atomDefinition, {
 })
 
 const atomChildDefinition = Machine.make({
-  states: AtomStates.states,
-  events: Machine.events(),
-  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
-}).handle({ AtomIdle: {}, AtomReady: {} })
+  root: AtomStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
+}).handle({ states: { AtomIdle: {}, AtomReady: {} } })
 const AtomChild = Machine.childFamily(atomChildDefinition)
 const atomParent = AtomMachine.make(Machine.make({
-  states: AtomStates.states,
-  events: Machine.events(),
-  initial: (to) => to.AtomIdle().resolve(({ target }) => target.decoded(new AtomIdle({})))
-}).handle({ AtomIdle: {}, AtomReady: {} }))
+  root: AtomStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
+}).handle({ states: { AtomIdle: {}, AtomReady: {} } }))
 AtomMachine.familyChild(atomParent, {
   child: (id: string) => AtomChild(id),
   atoms: {
@@ -52,71 +55,67 @@ AtomMachine.familyChild(atomParent, {
   atoms: {
     // @ts-expect-error empty paths keep the completion position unfiltered
     childSelectedCompletion: AtomMachine.selectChild(""),
-    // @ts-expect-error empty paths keep the completion position unfiltered
     childSnapshotCompletion: AtomMachine.selectSnapshotChild(""),
-    // @ts-expect-error empty paths keep the completion position unfiltered
     childMatchedCompletion: AtomMachine.matchesChild("")
   }
 })
 
-const States = Machine.states({ Loading: {}, Done: {}, Failed: {} })
+const States = Machine.state({ initial: "Loading", states: { Loading: {}, Done: {}, Failed: {} } })
 const definition = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to./*initial-selector*/Loading()./*initial-operations*/resolve(({ /*initial-context*/ ...context }) =>
-      context.target./*initial-exact-target*/from())
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) => root./*initial-operations*/resolve(({ /*initial-context*/ ...context }) => context.target./*initial-exact-target*/from(to => to./*initial-selector*/Loading.from()))
 })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     invoke: (from) =>
       from./*invoke-sources*/effect("load", ({ /*invoke-source-context*/ ...context }) =>
         Effect.fail("offline").pipe(Effect.as(context.event._tag)))
       .onDone((to) =>
-        to.full./*done-target*/Done()./*selected-operations*/resolve(({ /*done-context*/ ...context }) =>
+        to.branch./*done-target*/Done()./*selected-operations*/resolve(({ /*done-context*/ ...context }) =>
           context.target./*done-exact-target*/from()))
       .onFailure((to) =>
-        to.full.Failed().resolve(({ /*failure-context*/ ...context }) =>
+        to.branch.Failed().resolve(({ /*failure-context*/ ...context }) =>
           context.target.from()))
   },
   Done: {},
   Failed: {}
-})
+} })
 
 const requiredParentDefinition = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  parent: Machine.parent(Machine.events()),
-  initial: (to) => to.Loading()
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  parent: Machine.parent(Machine.eventsFromSchemas()),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.Loading.from()))
 })
 
-requiredParentDefinition.handle({
+requiredParentDefinition.handle({ states: {
   Loading: {
     invoke: (from) =>
       from.effect("required-parent", ({ /*required-parent-context*/ ...context }) => Effect.never)
   },
   Done: {},
   Failed: {}
-})
+} })
 
 const optionalParentDefinition = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  parent: Machine.optionalParent(Machine.events()),
-  initial: (to) => to.Loading()
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  parent: Machine.optionalParent(Machine.eventsFromSchemas()),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.Loading.from()))
 })
 
-optionalParentDefinition.handle({
+optionalParentDefinition.handle({ states: {
   Loading: {
     invoke: (from) =>
       from.effect("optional-parent", ({ /*optional-parent-context*/ ...context }) => Effect.never)
   },
   Done: {},
   Failed: {}
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     invoke: (from) =>
       from.stream("updates", () => Stream.make(1))
@@ -126,9 +125,9 @@ definition.handle({
   },
   Done: {},
   Failed: {}
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     invoke: (from) =>
       from.effect("incomplete", () => Effect.fail("offline").pipe(Effect.as(1)))
@@ -137,58 +136,58 @@ definition.handle({
   },
   Done: {},
   Failed: {}
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) => to./*transition-selector*/none
   }
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) =>
       to.none.resolve(({ /*targetless-context*/ ...context }) => undefined)
   }
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) =>
-      to./*target-scopes*/full.Done().resolve(({ /*transition-context*/ ...context }) =>
+      to./*target-scopes*/branch.Done().resolve(({ /*transition-context*/ ...context }) =>
         context.target./*transition-exact-target*/from())
   }
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) =>
       to.branches({
         ready: {
           title: "ready",
-          target: to./*branch-target-scopes*/full.Done()
+          target: to./*branch-target-scopes*/branch.Done()
         },
         unchanged: { target: to.none }
       }).resolve(({ /*branch-resolve-context*/ ...context }) =>
         context.select./*branch-select-keys*/ready.from())
   }
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) =>
       to.none.resolve(({ /*required-context*/ ...context }) => undefined)
   }
-})
+} })
 
-definition.handle({
+definition.handle({ states: {
   Loading: {
     always: (to) =>
       to.none.resolve(({ /*declinable-context*/ ...context }) => context.decline(), {
         declinable: true
       })
   }
-})
+} })
 
 `
 
@@ -386,4 +385,12 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(selected.has("resolve"), true)
   assert.equal(selected.has("reenter"), true)
 
+})
+
+
+test("completes root definition fields and topology", () => {
+  const root = completions("root-properties")
+  for (const key of ["fields", "schema", "type", "output", "annotations"]) {
+    assert.equal(root.has(key), true, key)
+  }
 })

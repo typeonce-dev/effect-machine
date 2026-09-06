@@ -10,24 +10,26 @@ class Notice extends Schema.TaggedClass<Notice>("LiveInspectionNotice")("Notice"
   value: Schema.Number
 }) {}
 
-const states = Machine.states({ Idle })
-const Events = Machine.events(Increment)
-const Emissions = Machine.emittedEvents(Notice)
+const states = Machine.state({ initial: "Idle", states: { Idle } })
+const Events = Machine.eventsFromSchemas(Increment)
+const Emissions = Machine.emittedEventsFromSchemas(Notice)
 
 const machine = Machine.make({
   id: "counter",
-  states: states.states,
+  root: states,
   events: Events,
   emittedEvents: Emissions,
-  initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
 }).handle({
-  Idle: {
-    on: {
-      Increment: (to) =>
-        to.full.Idle().resolve(({ event, target }, enqueue) => {
-          enqueue.emit(Emissions.Notice({ value: event.by }))
-          return target.decoded(new Idle({}))
-        })
+  states: {
+    Idle: {
+      on: {
+        Increment: (to) =>
+          to.branch.Idle().resolve(({ event, target }, enqueue) => {
+            enqueue.emit(Emissions.Notice({ value: event.by }))
+            return target.decoded(new Idle({}))
+          })
+      }
     }
   }
 })
@@ -101,13 +103,13 @@ describe("Machine live inspection", () => {
   it.effect("is hot, non-replayed, and completes when startup fails", () =>
     Effect.scoped(Effect.gen(function*() {
       const invalid = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Idle().resolve(() => {
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (to) =>
+          to.resolve(() => {
             throw new Error("boom")
           })
-      }).handle({ Idle: {} })
+      }).handle({ states: { Idle: {} } })
       const prepared = yield* Machine.prepare(invalid)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
@@ -127,12 +129,14 @@ describe("Machine live inspection", () => {
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         id: "activity-root",
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          invoke: (from) => from.effect("worker", () => Effect.never)
+        states: {
+          Idle: {
+            invoke: (from) => from.effect("worker", () => Effect.never)
+          }
         }
       })
       const prepared = yield* Machine.prepare(active)
@@ -176,12 +180,14 @@ describe("Machine live inspection", () => {
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         id: "stream-activity-root",
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          invoke: (from) => from.stream("updates", () => Stream.never).onDone((to) => to.none)
+        states: {
+          Idle: {
+            invoke: (from) => from.stream("updates", () => Stream.never).onDone((to) => to.none)
+          }
         }
       })
       const prepared = yield* Machine.prepare(active)
@@ -212,44 +218,53 @@ describe("Machine live inspection", () => {
       class ParentIdle extends Schema.TaggedClass<ParentIdle>("InspectionParentIdle")("ParentIdle", {}) {}
       class ParentDone extends Schema.TaggedClass<ParentDone>("InspectionParentDone")("ParentDone", {}) {}
 
-      const ParentEvents = Machine.events(ChildReady)
-      const ChildEvents = Machine.events(Trigger)
-      const childStates = Machine.states({ ChildIdle })
+      const ParentEvents = Machine.eventsFromSchemas(ChildReady)
+      const ChildEvents = Machine.eventsFromSchemas(Trigger)
+      const childStates = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
       const childMachine = Machine.make({
         id: "child-machine",
-        states: childStates.states,
+        root: childStates,
         events: ChildEvents,
         parent: Machine.parent(ParentEvents),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
       }).handle({
-        ChildIdle: {
-          on: {
-            Trigger: (to) =>
-              to.none.resolve(({ parent }, enqueue) => {
-                enqueue.sendTo(parent, ParentEvents.ChildReady())
-                return undefined
-              })
+        states: {
+          ChildIdle: {
+            on: {
+              Trigger: (to) =>
+                to.none.resolve(({ parent }, enqueue) => {
+                  enqueue.sendTo(parent, ParentEvents.ChildReady())
+                  return undefined
+                })
+            }
           }
         }
       })
       const Child = Machine.child("child", childMachine)
-      const parentStates = Machine.states({
-        ParentIdle,
-        ParentDone: { schema: ParentDone, type: "final" }
+      const parentStates = Machine.state({
+        initial: "ParentIdle",
+        states: {
+          ParentIdle,
+          ParentDone: { schema: ParentDone, type: "final" }
+        }
       })
       const parentMachine = Machine.make({
         id: "parent-machine",
-        states: parentStates.states,
-        events: Machine.events(ParentEvents),
-        initial: (to) => to.ParentIdle().resolve(({ target }) => target.decoded(new ParentIdle({})))
+        root: parentStates,
+        events: Machine.eventsFromSchemas(ParentEvents),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ParentIdle.decoded(new ParentIdle({}))))
       }).handle({
-        ParentIdle: {
-          invoke: (from) => from.child(Child),
-          on: {
-            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
-          }
-        },
-        ParentDone: {}
+        states: {
+          ParentIdle: {
+            invoke: (from) => from.child(Child),
+            on: {
+              ChildReady: (to) => to.branch.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
+            }
+          },
+          ParentDone: {}
+        }
       })
 
       const prepared = yield* Machine.prepare(parentMachine)

@@ -30,10 +30,10 @@ export interface TextTree {
 
 const nodeLabel = (node: VisualizationState, active: ReadonlySet<string>): string => {
   const status = active.has(node.path) ? "●" : "○"
-  const label = node.title === null ? node.key : `${node.title} (${node.key})`
+  const label = node.title === null ? (node.path === "" ? "(root)" : node.key) : `${node.title} (${node.key})`
   const details: Array<string> = node.type === "atomic" ? [] : [node.type]
   if (node.initial !== null) {
-    details.push(`initial: ${node.initial.slice(node.path.length + 1)}`)
+    details.push(`initial: ${node.initial.slice(node.path === "" ? 0 : node.path.length + 1)}`)
   }
   if (node.history !== null) {
     details.push(node.history)

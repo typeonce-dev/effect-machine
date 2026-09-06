@@ -10,25 +10,22 @@ const InternalEvent = Schema.TaggedStruct("InternalEvent", { value: Schema.Strin
 
 describe("machine protocols", () => {
   it("rejects forged, misclassified, and overlapping event descriptors", () => {
-    const states = Machine.states({ ProtocolIdle })
-    const initial = (to: Machine.Machine.InitialSelector<typeof states.states>) =>
-      to.ProtocolIdle().resolve(() => ({ path: "ProtocolIdle" as const, value: new ProtocolIdle({}) }))
+    const states = Machine.state({ initial: "ProtocolIdle", states: { ProtocolIdle } })
 
     assert.throws(
-      () => Machine.make({ states: states.states, events: [PublicEvent] as any, initial }),
+      () => Machine.make({ root: states, events: [PublicEvent] as any }),
       /expected an event protocol/
     )
     assert.throws(
-      () => Machine.make({ states: states.states, events: Machine.internalEvents(PublicEvent) as any, initial }),
+      () => Machine.make({ root: states, events: Machine.internalEventsFromSchemas(PublicEvent) as any }),
       /expected a public event protocol/
     )
     assert.throws(
       () =>
         Machine.make({
-          states: states.states,
-          events: Machine.events(PublicEvent),
-          internalEvents: Machine.internalEvents(PublicEvent) as any,
-          initial
+          root: states,
+          events: Machine.eventsFromSchemas(PublicEvent),
+          internalEvents: Machine.internalEventsFromSchemas(PublicEvent) as any
         }),
       /must be disjoint/
     )
@@ -36,13 +33,14 @@ describe("machine protocols", () => {
 
   it.effect("keeps the complete event protocol private across handler clones", () =>
     Effect.gen(function*() {
-      const states = Machine.states({ ProtocolIdle })
+      const states = Machine.state({ initial: "ProtocolIdle", states: { ProtocolIdle } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(PublicEvent),
-        internalEvents: Machine.internalEvents(InternalEvent),
-        initial: (to) => to.ProtocolIdle().resolve(({ target }) => target.decoded(new ProtocolIdle({})))
-      }).handle({})
+        root: states,
+        events: Machine.eventsFromSchemas(PublicEvent),
+        internalEvents: Machine.internalEventsFromSchemas(InternalEvent),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ProtocolIdle.decoded(new ProtocolIdle({}))))
+      }).handle({ states: {} })
 
       assert.strictEqual(Object.hasOwn(machine, "eventSchemas"), false)
       assert.deepStrictEqual(

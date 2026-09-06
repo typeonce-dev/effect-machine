@@ -1,13 +1,13 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 
-const internalEvents = Machine.internalEvents(Schema.TaggedStruct("Loaded", {}))
+const internalEvents = Machine.internalEventsFromSchemas(Schema.TaggedStruct("Loaded", {}))
 const machine = Machine.make({
-  states: { Idle: {} },
-  events: Machine.events(),
+  root: Machine.state({ initial: "Idle", states: { Idle: {} } }),
+  events: Machine.eventsFromSchemas(),
   internalEvents,
-  initial: (to) => to.Idle()
-}).handle({ Idle: { on: { Loaded: (to) => to.none } } })
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
+}).handle({ states: { Idle: { on: { Loaded: (to) => to.none } } } })
 
 export const canLoad = Effect.gen(function*() {
   const initial = yield* Machine.planInitial(machine)

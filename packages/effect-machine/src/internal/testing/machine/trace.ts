@@ -57,7 +57,7 @@ export const rawConfigurationPaths = <M extends AnyMachine>(
 export const appendTrace = <M extends AnyMachine>(
   machine: ReadyMachine<M>,
   trace: Trace<M>,
-  event: Machine.Machine.InputEvent<M>,
+  event: Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
   scenario: Scenario<M>
 ): Effect.Effect<Trace<M>, RunFailure<RunError<M>, M>, RunServices<M>> => {
   const index = trace.steps.length
@@ -83,13 +83,13 @@ export const appendTrace = <M extends AnyMachine>(
         index,
         before,
         beforeConfiguration,
-        event,
+        event: plan.event,
         plan,
         after: plan.next,
         afterConfiguration: rawConfigurationPaths(machine, plan.next)
       }
       return {
-        scenario,
+        scenario: { ...scenario, events: [...trace.steps.map((step) => step.event), plan.event] },
         initial: trace.initial,
         steps: [...trace.steps, step],
         final: plan.next,
@@ -135,7 +135,7 @@ export const run: <M extends AnyMachine>(
     configuration: rawConfigurationPaths(machine, initial.state)
   }
   let trace: Trace<M> = {
-    scenario,
+    scenario: { ...scenario, events: [] },
     initial: initialTrace,
     steps: [],
     final: initial.state,

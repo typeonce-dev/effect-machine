@@ -192,7 +192,7 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
-type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
+type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents<M>
 
 /**
  * Cluster adapter for one machine definition and entity type.
@@ -232,7 +232,7 @@ export interface ClusterMachine<
    */
   readonly toLayer: <R = never>(options?: {
     readonly enqueue?: (
-      event: Machine.Machine.EmitOf<MachineEmits<M>>
+      event: Machine.Machine.EmittedEventOf<MachineEmits<M>>
     ) => Effect.Effect<void, unknown, R>
   }) => Layer.Layer<never, never, Storage | MessageStorage.MessageStorage | Sharding.Sharding | R | Services>
 }
@@ -241,7 +241,7 @@ type MachineServices<M extends Machine.Machine.Any> =
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<Machine.Machine.Services<M> | Machine.Machine.InitialServices<M>>,
     Machine.Machine.Event<M>,
-    Machine.Machine.Emit<M>
+    Machine.Machine.EmittedEvent<M>
   >
   | Machine.Machine.SnapshotDecodingServices<Machine.Machine.States<M>>
   | Machine.Machine.SnapshotEncodingServices<Machine.Machine.States<M>>
@@ -354,15 +354,12 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })
  * ```
@@ -433,7 +430,7 @@ export const make: <
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<R | InitialR>,
     Machine.Machine.EventOf<Events>,
-    Machine.Machine.EmitOf<Emits>
+    Machine.Machine.EmittedEventOf<Emits>
   >
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>

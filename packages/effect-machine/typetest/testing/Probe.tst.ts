@@ -10,17 +10,20 @@ describe("MachineTest probe", () => {
   class PublicEvent extends Schema.TaggedClass<PublicEvent>("ProbeTypePublicEvent")("PublicEvent", {}) {}
   class InternalEvent extends Schema.TaggedClass<InternalEvent>("ProbeTypeInternalEvent")("InternalEvent", {}) {}
 
-  const states = Machine.states({ State })
+  const states = Machine.state({ initial: "State", states: { State } })
   const machine = Machine.make({
-    states: states.states,
-    events: Machine.events(PublicEvent),
-    internalEvents: Machine.internalEvents(InternalEvent),
-    initial: (to) => to.State().resolve(({ target }) => (target.decoded(new State({ count: 0 }))))
+    root: states,
+    events: Machine.eventsFromSchemas(PublicEvent),
+    internalEvents: Machine.internalEventsFromSchemas(InternalEvent),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => (target.from((to) => to.State.decoded(new State({ count: 0 })))))
   }).handle({
-    State: {
-      on: {
-        PublicEvent: (to) => to.none,
-        InternalEvent: (to) => to.none
+    states: {
+      State: {
+        on: {
+          PublicEvent: (to) => to.none,
+          InternalEvent: (to) => to.none
+        }
       }
     }
   })
@@ -32,7 +35,7 @@ describe("MachineTest probe", () => {
 
     expect<Effect.Success<typeof attached>["machine"]>().type.toBe<typeof machine>()
     expect<Effect.Success<typeof sent>>().type.toBe<MachineTest.ProbeStep<typeof machine>>()
-    expect<Effect.Success<typeof sent>["before"]["value"]>().type.toBe<State>()
+    expect<Effect.Success<typeof sent>["before"]["state"]["value"]>().type.toBe<State>()
     expect<Effect.Success<typeof sent>["event"]>().type.toBe<PublicEvent>()
     expect<Effect.Success<typeof sent>["plan"]["microsteps"][number]["event"]>().type.toBe<
       PublicEvent | InternalEvent | Machine.InitialEvent
@@ -57,8 +60,8 @@ describe("MachineTest probe", () => {
                 model: model + 1,
                 expected: model + 1,
                 await: probe.await.until((snapshot) => {
-                  expect(snapshot.state.value).type.toBe<State>()
-                  return snapshot.state.value.count >= 0
+                  expect(snapshot.state.state.value).type.toBe<State>()
+                  return snapshot.state.state.value.count >= 0
                 })
               }),
             assert: ({ actual }) => {
@@ -87,9 +90,9 @@ describe("MachineTest probe", () => {
     const invariant = MachineTest.runtimeInvariants(machine)
     const laws = [
       invariant.snapshot("state is typed", ({ snapshot, command }) => {
-        expect(snapshot.state.value).type.toBe<State>()
+        expect(snapshot.state.state.value).type.toBe<State>()
         expect(command).type.toBe<MachineTest.RuntimeCommand<PublicEvent> | undefined>()
-        return snapshot.state.value.count >= 0
+        return snapshot.state.state.value.count >= 0
       }),
       invariant.command("public commands are typed", ({ command, result }) => {
         expect(command).type.toBe<MachineTest.RuntimeCommand<PublicEvent>>()

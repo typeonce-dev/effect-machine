@@ -463,7 +463,7 @@ describe("Static chart", () => {
       model.edges.find((edge) => edge.transitionId === "Idle:transition:0")?.branchIds,
       ["Idle:transition:0:branch:0", "Idle:transition:0:branch:1"]
     )
-    assert.deepStrictEqual(model.initials.map(({ target }) => target), ["Idle"])
+    assert.deepStrictEqual(model.initials.map(({ target }) => target), ["", "Idle"])
   })
 
   it("links invoke outcome edges to their declared activity type", () => {
@@ -1031,7 +1031,7 @@ describe("Static chart", () => {
     assert.deepStrictEqual(model.runtimeTargets, [{
       id: `runtime:${runtime.id}`,
       edgeId: runtime.id,
-      parent: null,
+      parent: "",
       label: "runtime target"
     }])
 

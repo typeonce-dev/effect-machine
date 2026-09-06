@@ -18,10 +18,10 @@ describe("Interactive text visualization", () => {
     const idle = document.states.find((state) => state.path === "application.workflow.idle")
 
     assert.deepStrictEqual(document.initial, {
-      target: "application",
-      selection: { path: "application", kind: "initial", scope: "initial" }
+      target: "",
+      selection: { path: "", kind: "state", scope: "initial" }
     })
-    assert.deepStrictEqual(document.roots, ["application", "disabled"])
+    assert.deepStrictEqual(document.roots, [""])
     assert.deepStrictEqual(idle?.transitionIds, [
       "application.workflow.idle:transition:0",
       "application.workflow.idle:transition:1"
@@ -50,6 +50,7 @@ describe("Interactive text visualization", () => {
     )
     assert.deepStrictEqual(document.snapshot, {
       activePaths: [
+        "",
         "application",
         "application.workflow",
         "application.workflow.idle",
@@ -69,14 +70,14 @@ describe("Interactive text visualization", () => {
 
   it("projects a state-only topology and structured state inspection", () => {
     const model = makeVisualizerModel(buildDocument())
-    const application = model.roots[0]
+    const application = model.roots[0]?.children[0]
     const workflow = application?.children[0]
     const idle = workflow?.children[0]
     const inspection = idle === undefined ? undefined : model.inspectState(idle.path)
 
     assert.deepStrictEqual(
       model.roots.map((root) => root.path),
-      ["application", "disabled"]
+      [""]
     )
     assert.strictEqual(application?.active, true)
     assert.strictEqual(application?.initial, true)
@@ -94,7 +95,7 @@ describe("Interactive text visualization", () => {
     assert.strictEqual(model.inspectEvent("Start").candidate, true)
     assert.deepStrictEqual(
       inspection?.breadcrumbs.map((item) => item.path),
-      ["application", "application.workflow", "application.workflow.idle"]
+      ["", "application", "application.workflow", "application.workflow.idle"]
     )
   })
 
@@ -125,7 +126,7 @@ describe("Interactive text visualization", () => {
 
     assert.deepStrictEqual(
       begin?.branches.map((branch) => branchTargetApi(plannerDocument, begin.source, branch)),
-      ["to.full.Working()", "to.full.Working()"]
+      ["to.branch.Working()", "to.branch.Working()"]
     )
 
     assert.strictEqual(
@@ -176,7 +177,7 @@ describe("Interactive text visualization", () => {
       }),
       "to.none"
     )
-    assert.strictEqual(api("application", document.initial.selection), "to.application.initial")
+    assert.strictEqual(api("application", document.initial.selection), "to")
   })
 
   it("accepts an empty partial topology", () => {

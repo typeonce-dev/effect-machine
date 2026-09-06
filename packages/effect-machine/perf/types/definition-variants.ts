@@ -8,39 +8,45 @@ type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
 
 const complete = machine.handle({
-  Flow: {
-    history: {
-      recent: {
-        default: ({ target }) => target.Flow.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({})))
-      }
-    },
-    states: {
-      Route: {
-        choice: (to) => to.local.Idle().resolve(({ target }) => target.from(Idle.make({})))
-      },
-      Idle: {
-        on: {
-          Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+  states: {
+    Flow: {
+      history: {
+        recent: {
+          default: ({ target }) =>
+            target.from((tree) => tree.Flow.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({}))))
         }
       },
-      Running: {
-        on: {
-          Finish: (to) => to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+      states: {
+        Route: {
+          choice: (to) => to.local.Idle().resolve(({ target }) => target.from(Idle.make({})))
+        },
+        Idle: {
+          on: {
+            Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+          }
+        },
+        Running: {
+          on: {
+            Finish: (to) =>
+              to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+          }
+        },
+        Done: {
+          output: ({ state }) => state.value
         }
-      },
-      Done: {
-        output: ({ state }) => state.value
       }
     }
   }
 })
 
 const idleOnly = machine.handle({
-  Flow: {
-    states: {
-      Idle: {
-        on: {
-          Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+  states: {
+    Flow: {
+      states: {
+        Idle: {
+          on: {
+            Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+          }
         }
       }
     }
@@ -48,11 +54,14 @@ const idleOnly = machine.handle({
 })
 
 const runningOnly = machine.handle({
-  Flow: {
-    states: {
-      Running: {
-        on: {
-          Finish: (to) => to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+  states: {
+    Flow: {
+      states: {
+        Running: {
+          on: {
+            Finish: (to) =>
+              to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+          }
         }
       }
     }

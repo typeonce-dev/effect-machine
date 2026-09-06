@@ -18,38 +18,41 @@ const AnnotatedIdle = Idle.annotate({
   description: "No persistence work is active"
 })
 
-const States = Machine.states({
-  Workflow: {
-    schema: AnnotatedWorkflow,
-    initial: "Idle",
-    states: {
-      Idle: AnnotatedIdle,
-      Routing: {
-        type: "choice",
-        annotations: {
-          title: "Select persistence route",
-          description: "Routes according to the current document"
-        }
-      },
-      Recent: {
-        type: "history",
-        history: "deep",
-        annotations: {
-          title: "Previous workflow state",
-          documentation: "https://example.test/docs/history"
-        }
-      },
-      Done
+const States = Machine.state({
+  initial: "Workflow",
+  states: {
+    Workflow: {
+      schema: AnnotatedWorkflow,
+      initial: "Idle",
+      states: {
+        Idle: AnnotatedIdle,
+        Routing: {
+          type: "choice",
+          annotations: {
+            title: "Select persistence route",
+            description: "Routes according to the current document"
+          }
+        },
+        Recent: {
+          type: "history",
+          history: "deep",
+          annotations: {
+            title: "Previous workflow state",
+            documentation: "https://example.test/docs/history"
+          }
+        },
+        Done
+      }
     }
   }
 })
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.Workflow.initial.resolve(({ target }) =>
-      target.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) => to.Workflow.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({}))))
     )
 })
 

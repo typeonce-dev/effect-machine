@@ -31,7 +31,6 @@
           "title": "Define state topology",
           "description": "Declare the complete state tree and its schema-backed values before constructing the machine.",
           "entries": [
-            { "declaration": "states" },
             { "declaration": "state" }
           ]
         },
@@ -84,9 +83,9 @@
       ],
       "usageSections": [
         {
-          "owner": "states",
+          "owner": "state",
           "title": "State node configuration",
-          "description": "Properties accepted while declaring the state tree passed to `Machine.states`.",
+          "description": "Properties accepted by root and nested `Machine.state` descriptors.",
           "roots": [
             { "reflection": "Machine.AtomicStateNodeConfig", "label": "Atomic and final states" },
             { "reflection": "Machine.CompoundStateNodeConfig", "label": "Compound states" },
@@ -176,8 +175,7 @@
         "planInitial",
         "resume",
         "state",
-        "start",
-        "states"
+        "start"
       ]
     },
     {

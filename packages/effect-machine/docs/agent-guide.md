@@ -22,12 +22,12 @@ const CounterState = Schema.TaggedUnion({
   Running: { count: Schema.Number }
 })
 
-export const CounterStates = Machine.states({
+export const CounterStates = Machine.state({ initial: "Idle", states: {
   Idle: {},
   Running: CounterState.cases.Running
-})
+} })
 
-export const CounterEvents = Machine.events(
+export const CounterEvents = Machine.eventsFromSchemas(
   Schema.TaggedUnion({
     Start: {},
     Increment: {},
@@ -37,27 +37,27 @@ export const CounterEvents = Machine.events(
 
 export const CounterMachine = Machine.make({
   id: "Counter",
-  states: CounterStates.states,
+  root: CounterStates,
   events: CounterEvents,
-  initial: (to) => to.Idle()
-}).handle({
+  initialConfiguration: root => root.resolve(({ target }) => target.from(to => to.Idle.from()))
+}).handle({ states: {
   Idle: {
     on: {
-      Start: (to) => to.full.Running().resolve(({ target }) => target.from({ count: 0 }))
+      Start: (to) => to.branch.Running().resolve(({ target }) => target.from({ count: 0 }))
     }
   },
   Running: {
     on: {
-      Increment: (to) => to.full.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
-      Stop: (to) => to.full.Idle()
+      Increment: (to) => to.branch.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
+      Stop: (to) => to.branch.Idle()
     }
   }
-})
+} })
 ```
 
 Each step has one job:
 
-- `Machine.states` declares the state tree and the data owned by each state.
+- `Machine.state` declares the root, its child topology, and state-owned data.
 - `Machine.events` declares the public messages the machine accepts and returns
   typed event constructors.
 - `Machine.make` joins the state tree, event protocol, input, and initial state.
@@ -106,12 +106,12 @@ const RequestState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const RequestStates = Machine.states({
+const RequestStates = Machine.state({ initial: "Idle", states: {
   Idle: {},
   Loading: {},
   Ready: RequestState.cases.Ready,
   Failed: RequestState.cases.Failed
-})
+} })
 ```
 
 The machine can now be `Loading`, `Ready`, or `Failed`. It cannot construct a
@@ -139,7 +139,7 @@ const DocumentState = Schema.TaggedUnion({
   }
 })
 
-const DocumentStates = Machine.states({
+const DocumentStates = Machine.state({ initial: "Closed", states: {
   Closed: {},
   Open: {
     // Editing, Saving, and SaveFailed all need the document and draft.
@@ -152,7 +152,7 @@ const DocumentStates = Machine.states({
       SaveFailed: DocumentState.cases.SaveFailed
     }
   }
-})
+} })
 ```
 
 Do not copy `documentId` and `draft` into every child. Copies can disagree after
@@ -165,22 +165,22 @@ Hierarchy owns behavior as well as data. Define a transition on the lowest
 compound state whose children share it.
 
 ```ts
-const DocumentEvents = Machine.events(
+const DocumentEvents = Machine.eventsFromSchemas(
   Schema.TaggedUnion({
     Close: {}
   })
 )
 
 const DocumentMachine = Machine.make({
-  states: DocumentStates.states,
+  root: DocumentStates,
   events: DocumentEvents,
   initial: (to) => to.Closed()
-}).handle({
+}).handle({ states: {
   Closed: {},
   Open: {
     on: {
       // All Open children close the document in the same way.
-      Close: (to) => to.full.Closed()
+      Close: (to) => to.branch.Closed()
     },
     states: {
       Editing: {},
@@ -188,7 +188,7 @@ const DocumentMachine = Machine.make({
       SaveFailed: {}
     }
   }
-})
+} })
 ```
 
 The machine checks the deepest active state first, then its ancestors. Put a
@@ -202,7 +202,7 @@ after domain actions and outcomes. Do not expose state setters such as
 `SetLoading` or `SetError`.
 
 ```ts
-export const CheckoutEvents = Machine.events(
+export const CheckoutEvents = Machine.eventsFromSchemas(
   Schema.TaggedUnion({
     Submit: {},
     Cancel: {}
@@ -210,23 +210,23 @@ export const CheckoutEvents = Machine.events(
 )
 
 const CheckoutMachine = Machine.make({
-  states: CheckoutStates.states,
+  root: CheckoutStates,
   events: CheckoutEvents,
   initial: (to) => to.Editing()
-}).handle({
+}).handle({ states: {
   Editing: {
     on: {
-      Submit: (to) => to.full.Submitting()
+      Submit: (to) => to.branch.Submitting()
     }
   },
   Submitting: {
     on: {
       // Cancel has meaning while work is in progress.
-      Cancel: (to) => to.full.Editing()
+      Cancel: (to) => to.branch.Editing()
     }
   },
   Complete: {}
-})
+} })
 ```
 
 The sender requests `Submit`. The machine decides whether `Submit` has a
@@ -243,7 +243,7 @@ child in every region. A parallel model therefore accepts the full product of
 those regions.
 
 ```ts
-const ScreenStates = Machine.states({
+const ScreenStates = Machine.state({ initial: "Screen", states: {
   Screen: {
     type: "parallel",
     states: {
@@ -263,7 +263,7 @@ const ScreenStates = Machine.states({
       }
     }
   }
-})
+} })
 ```
 
 This model permits all four combinations: online with a closed panel, online
@@ -286,29 +286,29 @@ const LoadState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const LoadStates = Machine.states({
+const LoadStates = Machine.state({ initial: "Idle", states: {
   Idle: {},
   Loading: LoadState.cases.Loading,
   Ready: LoadState.cases.Ready,
   Failed: LoadState.cases.Failed
-})
+} })
 
 const LoadMachine = Machine.make({
-  states: LoadStates.states,
-  events: Machine.events(),
-  initial: (to) => to.Idle()
-}).handle({
+  root: LoadStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: root => root.resolve(({ target }) => target.from(to => to.Idle.from()))
+}).handle({ states: {
   Idle: {},
   Loading: {
     invoke: (from) =>
       from
         .effect("load-document", ({ state }) => loadDocument(state.documentId))
-        .onDone((to) => to.full.Ready().resolve(({ output, target }) => target.from({ content: output })))
-        .onFailure((to) => to.full.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
+        .onDone((to) => to.branch.Ready().resolve(({ output, target }) => target.from({ content: output })))
+        .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
   },
   Ready: {},
   Failed: {}
-})
+} })
 ```
 
 `loadDocument` may require Effect services. Those requirements remain on the
@@ -356,8 +356,8 @@ Commissioning: {
         { discard: true }
       )
     )
-    .onDone((to) => to.full.Running())
-    .onFailure((to) => to.full.Failed())
+    .onDone((to) => to.branch.Running())
+    .onFailure((to) => to.branch.Failed())
 }
 ```
 
@@ -374,24 +374,24 @@ A transition should choose the next state from the current snapshot and event.
 Use ordinary TypeScript conditions when one event has several valid outcomes.
 
 ```ts
-const ReviewEvents = Machine.events(
+const ReviewEvents = Machine.eventsFromSchemas(
   Schema.TaggedUnion({
     Evaluate: { score: Schema.Number }
   })
 )
 
 const ReviewMachine = Machine.make({
-  states: ReviewStates.states,
+  root: ReviewStates,
   events: ReviewEvents,
   initial: (to) => to.Pending()
-}).handle({
+}).handle({ states: {
   Pending: {
     on: {
       Evaluate: (to) =>
         to
           .branches({
-            accepted: { target: to.full.Accepted() },
-            rejected: { target: to.full.Rejected() }
+            accepted: { target: to.branch.Accepted() },
+            rejected: { target: to.branch.Rejected() }
           })
           .resolve(({ event, select }) =>
             event.score >= 80
@@ -402,7 +402,7 @@ const ReviewMachine = Machine.make({
   },
   Accepted: {},
   Rejected: {}
-})
+} })
 ```
 
 Given the same snapshot and event, the handler should choose the same result.

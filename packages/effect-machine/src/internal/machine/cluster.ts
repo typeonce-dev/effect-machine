@@ -98,7 +98,7 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
-type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
+type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents<M>
 
 const hasInvokes = (machine: Machine.Machine.Any): boolean =>
   Reflect.ownKeys(machine.handlers).some((key) => machine.handlers[key as string]?.invoke !== undefined)
@@ -225,7 +225,7 @@ export const make = <
   | ExcludeCompatibleRuntime<
     Machine.ExecutionServices<R | InitialR>,
     Machine.Machine.EventOf<Events>,
-    Machine.Machine.EmitOf<Emits>
+    Machine.Machine.EmittedEventOf<Emits>
   >
   | Machine.Machine.SnapshotDecodingServices<States>
   | Machine.Machine.SnapshotEncodingServices<States>
@@ -261,7 +261,7 @@ export const make = <
     | ExcludeCompatibleRuntime<
       Machine.ExecutionServices<R | InitialR>,
       Machine.Machine.EventOf<Events>,
-      Machine.Machine.EmitOf<Emits>
+      Machine.Machine.EmittedEventOf<Emits>
     >
     | Machine.Machine.SnapshotDecodingServices<States>
     | Machine.Machine.SnapshotEncodingServices<States>
@@ -283,7 +283,7 @@ export const make = <
             Effect.mapError((error) => reject("PersistenceFailure", String(error.cause)))
           )
           let current: Machine.Machine.Snapshot<States> | undefined
-          const emitted: Array<Machine.Machine.EmitOf<MachineEmits<M>>> = []
+          const emitted: Array<Machine.Machine.EmittedEventOf<MachineEmits<M>>> = []
 
           if (Option.isSome(loaded.checkpoint)) {
             const checkpoint = loaded.checkpoint.value

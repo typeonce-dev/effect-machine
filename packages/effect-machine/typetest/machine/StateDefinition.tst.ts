@@ -14,28 +14,32 @@ describe("exact state definitions", () => {
       title: "Idle",
       arbitrarySchemaAnnotation: { owner: "machine-team" }
     })
-    const states = Machine.states({
-      Atomic: { schema: Idle, type: "active" },
-      SchemaAtomic: AnnotatedIdle,
-      Final: { schema: Done, type: "final", output: Schema.String },
-      Compound: {
-        schema: Root,
-        initial: "Idle",
-        states: {
-          Idle,
-          Choice: { type: "choice", annotations: { title: "Route" } },
-          History: { type: "history", history: "deep", annotations: { description: "Resume" } }
+    const states = Machine.state({
+      initial: "Atomic",
+      states: {
+        Atomic: { schema: Idle, type: "active" },
+        SchemaAtomic: AnnotatedIdle,
+        Final: { schema: Done, type: "final", output: Schema.String },
+        Compound: {
+          schema: Root,
+          initial: "Idle",
+          states: {
+            Idle,
+            Choice: { type: "choice", annotations: { title: "Route" } },
+            History: { type: "history", history: "deep", annotations: { description: "Resume" } }
+          }
+        },
+        Parallel: {
+          schema: Root,
+          type: "parallel",
+          output: Schema.String,
+          states: { Region: Idle }
         }
-      },
-      Parallel: {
-        schema: Root,
-        type: "parallel",
-        output: Schema.String,
-        states: { Region: Idle }
       }
     })
 
-    expect<Machine.Machine.StateNodeIdentifier<typeof states.states>>().type.toBe<
+    expect<Machine.Machine.StateNodeIdentifier<{ readonly "": typeof states.node }>>().type.toBe<
+      | ""
       | "Atomic"
       | "SchemaAtomic"
       | "Final"
@@ -49,26 +53,41 @@ describe("exact state definitions", () => {
   })
 
   it("rejects unknown properties for every state kind, including nested nodes", () => {
-    expect(Machine.states).type.not.toBeCallableWith({
-      Idle: { schema: Idle, unknown: true }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Idle",
+      states: {
+        Idle: { schema: Idle, unknown: true }
+      }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Done: { schema: Done, type: "final", unknown: true }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Done",
+      states: {
+        Done: { schema: Done, type: "final", unknown: true }
+      }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: { schema: Root, initial: "Idle", states: { Idle }, unknown: true }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: { schema: Root, initial: "Idle", states: { Idle }, unknown: true }
+      }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: { schema: Root, type: "parallel", states: { Idle }, unknown: true }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: { schema: Root, type: "parallel", states: { Idle }, unknown: true }
+      }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: {
-        schema: Root,
-        initial: "Idle",
-        states: {
-          Idle,
-          History: { type: "history", unknown: true },
-          Choice: { type: "choice", unknown: true }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: {
+          schema: Root,
+          initial: "Idle",
+          states: {
+            Idle,
+            History: { type: "history", unknown: true },
+            Choice: { type: "choice", unknown: true }
+          }
         }
       }
     })
@@ -80,7 +99,7 @@ describe("exact state definitions", () => {
           states: { Idle: { schema: Idle, nestedUnknown: true } }
         }
       },
-      events: Machine.events(),
+      events: Machine.eventsFromSchemas(),
       initial: (): never => {
         throw new Error("unreachable")
       }
@@ -90,24 +109,27 @@ describe("exact state definitions", () => {
   it("rejects empty, dotted, numeric-form, symbol, and __proto__ keys recursively", () => {
     const symbolKey = Symbol("state")
 
-    expect(Machine.states).type.not.toBeCallableWith({ "": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "bad.path": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ 0: Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "01": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "-1": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "1e3": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "0x10": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ " 1": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "1 ": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ " ": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ "\t": Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ [symbolKey]: Idle })
-    expect(Machine.states).type.not.toBeCallableWith({ __proto__: Idle })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: {
-        schema: Root,
-        initial: "bad.path",
-        states: { "bad.path": Idle }
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "", states: { "": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "bad.path", states: { "bad.path": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "0", states: { 0: Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "01", states: { "01": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "-1", states: { "-1": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "1e3", states: { "1e3": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "0x10", states: { "0x10": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: " 1", states: { " 1": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "1 ", states: { "1 ": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: " ", states: { " ": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "\t", states: { "\t": Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: symbolKey, states: { [symbolKey]: Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({ initial: "__proto__", states: { __proto__: Idle } })
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: {
+          schema: Root,
+          initial: "bad.path",
+          states: { "bad.path": Idle }
+        }
       }
     })
 
@@ -135,17 +157,23 @@ describe("exact state definitions", () => {
   })
 
   it("rejects child keys reserved by definition-time target selectors", () => {
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: {
-        initial: "initial",
-        states: { initial: Idle }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: {
+          initial: "initial",
+          states: { initial: Idle }
+        }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Root: {
-        schema: Root,
-        initial: "with",
-        states: { with: Idle }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Root",
+      states: {
+        Root: {
+          schema: Root,
+          initial: "with",
+          states: { with: Idle }
+        }
       }
     })
   })
@@ -159,27 +187,30 @@ describe("exact state definitions", () => {
         Applying: Done
       }
     })
-    const States = Machine.states({
-      root: {
-        type: "parallel",
-        states: {
-          trading: {
-            type: "parallel",
-            states: {
-              slot1: TradingSlot,
-              slot2: TradingSlot,
-              slot3: TradingSlot,
-              slot4: TradingSlot,
-              slot5: TradingSlot,
-              slot6: TradingSlot
-            }
-          },
-          teamStatus: {
-            initial: "TeamLoaded",
-            states: {
-              TeamLoaded: {
-                initial: "SlotSelected",
-                states: { SlotSelected: Idle }
+    const States = Machine.state({
+      initial: "root",
+      states: {
+        root: {
+          type: "parallel",
+          states: {
+            trading: {
+              type: "parallel",
+              states: {
+                slot1: TradingSlot,
+                slot2: TradingSlot,
+                slot3: TradingSlot,
+                slot4: TradingSlot,
+                slot5: TradingSlot,
+                slot6: TradingSlot
+              }
+            },
+            teamStatus: {
+              initial: "TeamLoaded",
+              states: {
+                TeamLoaded: {
+                  initial: "SlotSelected",
+                  states: { SlotSelected: Idle }
+                }
               }
             }
           }
@@ -197,7 +228,7 @@ describe("exact state definitions", () => {
     expect(inSessionPath(3)).type.toBe<"root.trading.slot3.InSession">()
     expect<ReturnType<typeof offeredIfSlot>>().type.toBe<boolean>()
     expect<Machine.Snapshot<typeof States>>().type.toBe<
-      Machine.Machine.Snapshot<typeof States.states>
+      Machine.Snapshot<typeof States>
     >()
 
     const invalidFamily = null as unknown as `root.trading.slot${TeamSlot}.Missing`

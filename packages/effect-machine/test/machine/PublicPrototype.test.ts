@@ -6,11 +6,11 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 
 it("uses the public pipeable and inspectable prototypes", () => {
-  const states = Machine.states({ Idle })
+  const states = Machine.state({ initial: "Idle", states: { Idle } })
   const machine = Machine.make({
-    states: states.states,
-    events: Machine.events(Start),
-    initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle()))
+    root: states,
+    events: Machine.eventsFromSchemas(Start),
+    initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle())))
   })
 
   assert.strictEqual(machine.pipe((value) => value), machine)

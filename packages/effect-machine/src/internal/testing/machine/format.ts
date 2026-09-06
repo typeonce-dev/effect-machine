@@ -53,7 +53,8 @@ const canonicalize = (value: unknown, active: WeakSet<object>): unknown => {
 
 export const formatValue = (value: unknown): string => JSON.stringify(canonicalize(value, new WeakSet()))
 
-const formatConfiguration = (paths: ReadonlyArray<string>): string => `[${paths.join(", ")}]`
+const formatConfiguration = (paths: ReadonlyArray<string>): string =>
+  `[${paths.map((path) => path === "" ? "(root)" : path).join(", ")}]`
 
 const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Microstep<M, any>>): Array<string> =>
   microsteps.map((microstep, index) => {

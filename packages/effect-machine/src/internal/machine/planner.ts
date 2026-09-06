@@ -57,6 +57,7 @@ import {
   isStateUpdate,
   isTarget,
   makeChoiceTarget,
+  makeStateInput,
   makeTarget,
   TargetSnapshotTypeId
 } from "./topology.js"
@@ -331,7 +332,9 @@ const completeHistoryConfiguration = (
         if (child.schema !== undefined) {
           const initializer = machine.handlers[path]?.initialize
           if (initializer === undefined) {
-            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
+            values.set(child.path, decodeStateValueSync(machine, child, makeStateInput({})))
+            changed = true
+            continue
           }
           const initialized = collectStateInitializer(machine, initializer, {
             ...resolveMachineReferences(machine, current),
@@ -361,9 +364,6 @@ const completeHistoryConfiguration = (
             machineReferences: configuration.machineReferences
           } as ActiveConfiguration
           const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initialize
-          if (valuedMissing.length > 0 && initializer === undefined) {
-            throw new Error(`Machine shallow history requires an initial value implementation for state "${path}"`)
-          }
           const initialized = initializer === undefined ? undefined : collectStateInitializer(machine, initializer, {
             ...resolveMachineReferences(machine, current),
             state: current.values.get(path),
@@ -379,8 +379,11 @@ const completeHistoryConfiguration = (
             const child = getNode(machine, childPath)
             active.add(child.path)
             if (child.schema !== undefined) {
+              if (initialized === undefined) {
+                values.set(child.path, decodeStateValueSync(machine, child, makeStateInput({})))
+                continue
+              }
               if (
-                initialized === undefined ||
                 initializedValues === undefined || !Object.prototype.hasOwnProperty.call(initializedValues, child.key)
               ) {
                 throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
@@ -455,6 +458,7 @@ function resolveHistoryTarget(
     const completed = completeHistoryConfiguration(machine, restored, event)
     const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.parent)
     const values = Object.fromEntries(completed.configuration.values)
+    if (target.parent !== "" && configuration.active.has("")) delete values[""]
     return {
       target: makeTarget(target.parent as any, snapshot.value as any, {
         snapshot: snapshot as any,
@@ -474,7 +478,7 @@ function resolveHistoryTarget(
   }
   const collected = collectTransition(machine, fallback, {
     event,
-    target: getTargetBuilder(machine, target.parent).full,
+    target: getTargetBuilder(machine, target.parent).full[""],
     owner: target.parent
   })
   if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
@@ -518,6 +522,7 @@ function resolveHistoryTarget(
   }
   const snapshot = snapshotFromConfigurationAtPath(machine, fallbackConfiguration, target.parent)
   const values = Object.fromEntries(fallbackConfiguration.values)
+  if (target.parent !== "" && configuration.active.has("")) delete values[""]
   return {
     target: makeTarget(target.parent as any, snapshot.value as any, {
       snapshot: snapshot as any,
@@ -752,7 +757,7 @@ const collectStateActions = <
 ) => {
   const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<Machine.EventOf<Events>> = []
-  const emittedEvents: Array<Machine.EmitOf<Emits>> = []
+  const emittedEvents: Array<Machine.EmittedEventOf<Emits>> = []
   for (const path of paths) {
     const collected = collectStateAction<
       Machine.StateActionContext<States, Events, Emits, Machine.StateIdentifier<States>>,
@@ -771,7 +776,7 @@ const collectStateActions = <
     )
     commands.push(...collected.commands)
     raisedEvents.push(...collected.raisedEvents)
-    emittedEvents.push(...collected.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>)
+    emittedEvents.push(...collected.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>)
   }
   return { commands, emittedEvents, raisedEvents }
 }
@@ -1083,7 +1088,7 @@ export const validateDeclaredTransitionTarget = (
   const actual = typeof target === "object" && target !== null && "path" in target
     ? String(target.path)
     : "<unknown>"
-  if (!declaredTargets.some((path) => actual === path || actual.startsWith(`${path}.`))) {
+  if (!declaredTargets.some((path) => actual === path || (path === "" || actual.startsWith(`${path}.`)))) {
     const triggerLabel = trigger.type === "event" ? String(trigger.event) : trigger.type
     throw new Error(
       `Machine transition from "${sourcePath}" on "${triggerLabel}" returned target "${actual}" outside declared targets: ${
@@ -1373,10 +1378,9 @@ const collectEvaluatedTransition = <
     ? (() => {
       const node = getNode(machine, stateUpdate.path)
       if (
-        !state.active.has(node.path) || node.schema === undefined ||
-        (node.type !== "compound" && node.type !== "parallel")
+        !state.active.has(node.path) || node.schema === undefined
       ) {
-        throw new Error(`Machine state update owner "${node.path}" must be an active valued compound or parallel state`)
+        throw new Error(`Machine state update owner "${node.path}" must be an active valued state`)
       }
       return {
         path: node.path,
@@ -1694,13 +1698,17 @@ export const planInitialSync = <
     : args.length === 0
     ? (decodeInputSync(machine, machine.input, undefined), args)
     : [decodeInputSync(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
-  const state = machine.initial(...inputArgs)
+  const initial = machine.initial(...inputArgs)
   const emptyConfiguration: ActiveConfiguration = {
     active: new Set(),
     values: new Map(),
     outputs: new Map(),
     history: new Map()
   }
+  const rootResolution = isInitialTarget(initial)
+    ? resolveInitialTarget(machine, emptyConfiguration, initial, InitialEvent)
+    : undefined
+  const state = rootResolution?.target ?? initial
   const initialChoice = choiceFromTarget(state)
   const choiceResolution = initialChoice === undefined
     ? undefined
@@ -1716,9 +1724,11 @@ export const planInitialSync = <
   const initialHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
   const resolvedInitialTargets: Array<unknown> = []
   for (
-    const target of choiceResolution === undefined
+    const target of choiceResolution !== undefined
+      ? [choiceResolution.target, ...choiceResolution.additionalTargets]
+      : rootResolution === undefined
       ? []
-      : [choiceResolution.target, ...choiceResolution.additionalTargets]
+      : [rootResolution.target]
   ) {
     if (!isHistoryTarget(target)) {
       resolvedInitialTargets.push(target)
@@ -1731,7 +1741,7 @@ export const planInitialSync = <
     initialHistoryEmittedEvents.push(...history.emittedEvents)
     initialHistoryChoiceTransitions.push(...history.transitions)
   }
-  let resolvedConfiguration = choiceResolution === undefined
+  let resolvedConfiguration = resolvedInitialTargets.length === 0
     ? normalizeConfigurationSync<States>(machine, state as Machine.Snapshot<States>)
     : normalizeTargetConfigurationSync<States>(
       machine,
@@ -1748,18 +1758,21 @@ export const planInitialSync = <
     )
   }
   const configuration: ActiveConfiguration = resolvedConfiguration
-  validateInitialConfiguration(machine, configuration)
+  if (machine.initialDefinition.selection.kind === "initial") validateInitialConfiguration(machine, configuration)
   const startingState = snapshotFromConfiguration<States>(machine, configuration)
   const initialEntryPaths = getInitialEntryPaths(machine, configuration)
   const commands = [
+    ...(rootResolution?.commands ?? []),
     ...(choiceResolution?.commands ?? []),
     ...initialHistoryActions
   ]
   const raisedEvents = [
+    ...(rootResolution?.raisedEvents ?? []),
     ...(choiceResolution?.raisedEvents ?? []),
     ...initialHistoryRaisedEvents
   ]
   const emittedEvents = [
+    ...(rootResolution?.emittedEvents ?? []),
     ...(choiceResolution?.emittedEvents ?? []),
     ...initialHistoryEmittedEvents
   ]
@@ -1777,21 +1790,27 @@ export const planInitialSync = <
     [...entry.commands],
     [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
     [...emittedEvents, ...entry.emittedEvents],
-    choiceResolution === undefined ? [] : [{
-      next: configuration,
-      event: InitialEvent,
-      transitions: [...choiceResolution.transitions, ...initialHistoryChoiceTransitions],
-      commands: [...choiceResolution.commands, ...initialHistoryActions],
-      raisedEvents: [
-        ...choiceResolution.raisedEvents,
-        ...initialHistoryRaisedEvents
-      ] as ReadonlyArray<Machine.EventOf<Events>>,
-      emittedEvents: [...choiceResolution.emittedEvents, ...initialHistoryEmittedEvents],
-      exitPaths: [],
-      entryPaths: [],
-      changed: false,
-      stabilize: false
-    }]
+    choiceResolution === undefined && (rootResolution?.transitions.length ?? 0) === 0 &&
+      initialHistoryChoiceTransitions.length === 0 ?
+      [] :
+      [{
+        next: configuration,
+        event: InitialEvent,
+        transitions: [
+          ...(rootResolution?.transitions ?? []),
+          ...(choiceResolution?.transitions ?? []),
+          ...initialHistoryChoiceTransitions
+        ],
+        commands,
+        raisedEvents: [
+          ...raisedEvents
+        ] as ReadonlyArray<Machine.EventOf<Events>>,
+        emittedEvents,
+        exitPaths: [],
+        entryPaths: [],
+        changed: false,
+        stabilize: false
+      }]
   )
 
   const planned = {
@@ -1802,7 +1821,7 @@ export const planInitialSync = <
       ...commands,
       ...settled.commands
     ],
-    emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+    emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
     microsteps: settled.microsteps.map((step) => ({
       next: snapshotFromConfiguration<States>(machine, step.next),
       event: step.event,
@@ -2195,6 +2214,7 @@ const macrostepConfiguration = <
       throw new Error("Machine reached a terminal configuration without a completed root output")
     }
     return {
+      event: decodedEvent,
       next: completed.configuration,
       commands: [],
       emittedEvents: [],
@@ -2213,6 +2233,7 @@ const macrostepConfiguration = <
     )
   if (selections.length === 0) {
     return {
+      event: decodedEvent,
       next: configuration,
       commands: [],
       emittedEvents: [],
@@ -2231,7 +2252,10 @@ const macrostepConfiguration = <
   const raisedEvents = [...step.raisedEvents]
   const emittedEvents = [...step.emittedEvents]
   const microsteps = [step]
-  return settle(machine, step.next, decodedEvent as any, commands, raisedEvents, emittedEvents, microsteps)
+  return {
+    ...settle(machine, step.next, decodedEvent as any, commands, raisedEvents, emittedEvents, microsteps),
+    event: decodedEvent
+  }
 }
 
 const snapshotMacrostep = <
@@ -2242,9 +2266,10 @@ const snapshotMacrostep = <
   Output
 >(
   machine: Machine.Any,
-  settled: MacrostepPlan<ActiveConfiguration, Event, E, R, Output>
-): MacrostepPlan<Machine.Snapshot<States>, Event, E, R, Output> => {
+  settled: MacrostepPlan<ActiveConfiguration, Event, E, R, Output> & { readonly event: unknown }
+): MacrostepPlan<Machine.Snapshot<States>, Event, E, R, Output> & { readonly event: unknown } => {
   const planned = {
+    event: settled.event,
     next: snapshotFromConfiguration<States>(machine, settled.next),
     commands: settled.commands,
     emittedEvents: settled.emittedEvents,

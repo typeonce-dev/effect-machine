@@ -27,14 +27,14 @@ export const probe = <M extends AnyMachine, Error, Output>(
   machine: M,
   ref: Machine.MachineRef<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-    Machine.Machine.InputEvent<M>,
+    Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
     Error,
     Output
   >
 ): Effect.Effect<Probe<M, Error, Output>, ProbeUnavailableError> => {
   const acknowledged = (ref as Runtime.MachineRef<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-    Machine.Machine.InputEvent<M>,
+    Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
     Error,
     Output
   >)[Runtime.acknowledgedSend]
@@ -61,12 +61,12 @@ export const probe = <M extends AnyMachine, Error, Output>(
         ) => boolean
       ) => ({ _tag: "Until", predicate } as const)
     }),
-    sendAndAwait: (event: Machine.Machine.InputEvent<M>) =>
+    sendAndAwait: (event: Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>) =>
       acknowledged.call(ref, event).pipe(
         Effect.map(({ after, before, plan }) => {
           const eventPlan = plan as ProbePlan<M>
           return Object.freeze({
-            event,
+            event: eventPlan.event,
             before,
             plan: eventPlan,
             after,

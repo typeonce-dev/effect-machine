@@ -69,27 +69,30 @@ describe("machine activity lifecycle model", () => {
         (commands) =>
           Effect.gen(function*() {
             const probe = yield* makeActivityProbe
-            const states = Machine.states({ Idle, Active })
+            const states = Machine.state({ initial: "Idle", states: { Idle, Active } })
             const machine = Machine.make({
-              states: states.states,
-              events: Machine.events(Enter, Leave, Restart),
-              initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+              root: states,
+              events: Machine.eventsFromSchemas(Enter, Leave, Restart),
+              initialConfiguration: (root) =>
+                root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
             }).handle({
-              Idle: {
-                on: {
-                  Enter: (to) => to.full.Active().resolve(({ target }) => target.decoded(new Active({})))
-                }
-              },
-              Active: {
-                invoke: (from) =>
-                  from.logic("activity", {
-                    address: Machine.childAddress("activity"),
-                    logic: probe.logic("active", { _tag: "Blocked" })
-                  }).onDone((to) => to.none).onFailure((to) => to.none),
-                on: {
-                  Leave: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
-                  Restart: (to) =>
-                    to.full.Active().resolve(({ target }) => target.decoded(new Active({})), { reenter: true })
+              states: {
+                Idle: {
+                  on: {
+                    Enter: (to) => to.branch.Active().resolve(({ target }) => target.decoded(new Active({})))
+                  }
+                },
+                Active: {
+                  invoke: (from) =>
+                    from.logic("activity", {
+                      address: Machine.childAddress("activity"),
+                      logic: probe.logic("active", { _tag: "Blocked" })
+                    }).onDone((to) => to.none).onFailure((to) => to.none),
+                  on: {
+                    Leave: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
+                    Restart: (to) =>
+                      to.branch.Active().resolve(({ target }) => target.decoded(new Active({})), { reenter: true })
+                  }
                 }
               }
             })
@@ -107,7 +110,7 @@ describe("machine activity lifecycle model", () => {
                   break
                 case "leave":
                   if (active) {
-                    yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.path === "Idle")
+                    yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
                     active = false
                   } else {
                     yield* actor.send(new Leave({}))
@@ -136,28 +139,34 @@ describe("machine activity lifecycle model", () => {
   it.effect("records immediate invoke completion and cleanup exactly once", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.states({
-        Active,
-        Done: { schema: Done, type: "final", output: Schema.Number }
+      const states = Machine.state({
+        initial: "Active",
+        states: {
+          Active,
+          Done: { schema: Done, type: "final", output: Schema.Number }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        internalEvents: Machine.internalEvents(Completed),
-        initial: (to) => to.Active().resolve(({ target }) => target.decoded(new Active({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        internalEvents: Machine.internalEventsFromSchemas(Completed),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
       }).handle({
-        Active: {
-          invoke: (from) =>
-            from.logic("immediate", {
-              address: Machine.childAddress("immediate"),
-              logic: probe.immediate("immediate", (epoch) => new Completed({ epoch }))
-            }).onDone((to) =>
-              to.full.Done().resolve(({ output, target }) => target.decoded(new Done({ epoch: output.epoch })))
-            )
-              .onFailure((to) => to.none)
-        },
-        Done: {
-          output: ({ state }) => state.epoch
+        states: {
+          Active: {
+            invoke: (from) =>
+              from.logic("immediate", {
+                address: Machine.childAddress("immediate"),
+                logic: probe.immediate("immediate", (epoch) => new Completed({ epoch }))
+              }).onDone((to) =>
+                to.branch.Done().resolve(({ output, target }) => target.decoded(new Done({ epoch: output.epoch })))
+              )
+                .onFailure((to) => to.none)
+          },
+          Done: {
+            output: ({ state }) => state.epoch
+          }
         }
       })
 
@@ -176,37 +185,40 @@ describe("machine activity lifecycle model", () => {
       class EpochActive extends Schema.TaggedClass<EpochActive>("ActivityEpochActive")("EpochActive", {
         acknowledged: Schema.Number
       }) {}
-      const states = Machine.states({ Active: EpochActive, Done })
+      const states = Machine.state({ initial: "Active", states: { Active: EpochActive, Done } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Restart, QueueBarrier),
-        internalEvents: Machine.internalEvents(Completed),
-        initial: (to) => to.Active().resolve(({ target }) => target.decoded(new EpochActive({ acknowledged: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(Restart, QueueBarrier),
+        internalEvents: Machine.internalEventsFromSchemas(Completed),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new EpochActive({ acknowledged: 0 }))))
       }).handle({
-        Active: {
-          invoke: (from) =>
-            from.logic("epoch", {
-              address: Machine.childAddress("epoch"),
-              logic: probe.logic("epoch", {
-                _tag: "StaleOnCancel",
-                event: (epoch) => new Completed({ epoch })
-              })
-            }).onDone((to) => to.none).onFailure((to) => to.none),
-          on: {
-            Restart: (to) =>
-              to.full.Active().resolve(
-                ({ state, target }) => target.decoded(new EpochActive({ acknowledged: state.acknowledged })),
-                { reenter: true }
-              ),
-            QueueBarrier: (to) =>
-              to.full.Active().resolve(({ state, target }) =>
-                target.decoded(new EpochActive({ acknowledged: state.acknowledged + 1 }))
-              ),
-            Completed: (to) =>
-              to.full.Done().resolve(({ event, target }) => target.decoded(new Done({ epoch: event.epoch })))
-          }
-        },
-        Done: {}
+        states: {
+          Active: {
+            invoke: (from) =>
+              from.logic("epoch", {
+                address: Machine.childAddress("epoch"),
+                logic: probe.logic("epoch", {
+                  _tag: "StaleOnCancel",
+                  event: (epoch) => new Completed({ epoch })
+                })
+              }).onDone((to) => to.none).onFailure((to) => to.none),
+            on: {
+              Restart: (to) =>
+                to.branch.Active().resolve(
+                  ({ state, target }) => target.decoded(new EpochActive({ acknowledged: state.acknowledged })),
+                  { reenter: true }
+                ),
+              QueueBarrier: (to) =>
+                to.branch.Active().resolve(({ state, target }) =>
+                  target.decoded(new EpochActive({ acknowledged: state.acknowledged + 1 }))
+                ),
+              Completed: (to) =>
+                to.branch.Done().resolve(({ event, target }) => target.decoded(new Done({ epoch: event.epoch })))
+            }
+          },
+          Done: {}
+        }
       })
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
@@ -223,16 +235,16 @@ describe("machine activity lifecycle model", () => {
       yield* sendAndWaitForActiveState(
         actor,
         new QueueBarrier({}),
-        (state) => state.path === "Active" && state.value.acknowledged === 1
+        (state) => state.state.path === "Active" && state.state.value.acknowledged === 1
       )
 
       const active = yield* actor.snapshot
       assert.strictEqual(active.status, "active")
       if (active.status === "active") {
-        assert.strictEqual(active.state.path, "Active")
-        assert.instanceOf(active.state.value, EpochActive)
-        if (active.state.value instanceof EpochActive) {
-          assert.strictEqual(active.state.value.acknowledged, 1)
+        assert.strictEqual(active.state.state.path, "Active")
+        assert.instanceOf(active.state.state.value, EpochActive)
+        if (active.state.state.value instanceof EpochActive) {
+          assert.strictEqual(active.state.state.value.acknowledged, 1)
         }
       }
       const beforeStop = yield* probe.records
@@ -260,67 +272,76 @@ describe("machine activity lifecycle model", () => {
       class RightActive extends Schema.TaggedClass<RightActive>("ActivityRightActive")("RightActive", {}) {}
       class LeaveLeft extends Schema.TaggedClass<LeaveLeft>("ActivityLeaveLeft")("LeaveLeft", {}) {}
       const machine = Machine.make({
-        states: {
-          Root: {
-            schema: Root,
-            type: "parallel",
-            states: {
-              left: {
-                schema: Left,
-                initial: "active",
-                states: { active: LeftActive, idle: LeftIdle }
-              },
-              right: {
-                schema: Right,
-                initial: "active",
-                states: { active: RightActive }
+        root: Machine.state({
+          initial: "Root",
+          states: {
+            Root: {
+              schema: Root,
+              type: "parallel",
+              states: {
+                left: {
+                  schema: Left,
+                  initial: "active",
+                  states: { active: LeftActive, idle: LeftIdle }
+                },
+                right: {
+                  schema: Right,
+                  initial: "active",
+                  states: { active: RightActive }
+                }
               }
             }
           }
-        },
-        events: Machine.events(LeaveLeft),
-        initial: (to) =>
-          to.Root.initial.resolve(() => ({
-            path: "Root" as const,
-            value: new Root({}),
-            states: {
-              left: {
-                path: "Root.left" as const,
-                value: new Left({}),
-                state: { path: "Root.left.active" as const, value: new LeftActive({}) }
-              },
-              right: {
-                path: "Root.right" as const,
-                value: new Right({}),
-                state: { path: "Root.right.active" as const, value: new RightActive({}) }
+        }),
+        events: Machine.eventsFromSchemas(LeaveLeft),
+        initialConfiguration: (to) =>
+          to.resolve(() => ({
+            path: "" as const,
+            value: undefined,
+            state: {
+              path: "Root" as const,
+              value: new Root({}),
+              states: {
+                left: {
+                  path: "Root.left" as const,
+                  value: new Left({}),
+                  state: { path: "Root.left.active" as const, value: new LeftActive({}) }
+                },
+                right: {
+                  path: "Root.right" as const,
+                  value: new Right({}),
+                  state: { path: "Root.right.active" as const, value: new RightActive({}) }
+                }
               }
             }
           }))
       }).handle({
-        Root: {
-          states: {
-            left: {
-              states: {
-                active: {
-                  invoke: (from) =>
-                    from.logic("left-activity", {
-                      address: Machine.childAddress("left-activity"),
-                      logic: probe.logic("left", { _tag: "Blocked" })
-                    }).onDone((to) => to.none).onFailure((to) => to.none),
-                  on: {
-                    LeaveLeft: (to) => to.local.idle().resolve(({ target }) => target.decoded(new LeftIdle({})))
+        states: {
+          Root: {
+            states: {
+              left: {
+                states: {
+                  active: {
+                    invoke: (from) =>
+                      from.logic("left-activity", {
+                        address: Machine.childAddress("left-activity"),
+                        logic: probe.logic("left", { _tag: "Blocked" })
+                      }).onDone((to) => to.none).onFailure((to) => to.none),
+                    on: {
+                      LeaveLeft: (to) => to.local.idle().resolve(({ target }) => target.decoded(new LeftIdle({})))
+                    }
                   }
                 }
-              }
-            },
-            right: {
-              states: {
-                active: {
-                  invoke: (from) =>
-                    from.logic("right-activity", {
-                      address: Machine.childAddress("right-activity"),
-                      logic: probe.logic("right", { _tag: "Blocked" })
-                    }).onDone((to) => to.none).onFailure((to) => to.none)
+              },
+              right: {
+                states: {
+                  active: {
+                    invoke: (from) =>
+                      from.logic("right-activity", {
+                        address: Machine.childAddress("right-activity"),
+                        logic: probe.logic("right", { _tag: "Blocked" })
+                      }).onDone((to) => to.none).onFailure((to) => to.none)
+                  }
                 }
               }
             }
@@ -334,7 +355,7 @@ describe("machine activity lifecycle model", () => {
       yield* sendAndWaitForActiveState(
         actor,
         new LeaveLeft({}),
-        (state) => state.states.left.state.path === "Root.left.idle"
+        (state) => state.state.states.left.state.path === "Root.left.idle"
       )
 
       const afterLeftExit = yield* probe.records
@@ -354,41 +375,44 @@ describe("machine activity lifecycle model", () => {
   it.effect("cancels a state-owned timer before virtual time advances", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.states({ Idle, Active, Done })
+      const states = Machine.state({ initial: "Idle", states: { Idle, Active, Done } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Leave),
-        internalEvents: Machine.internalEvents(TimerFired),
-        initial: (to) => to.Active().resolve(({ target }) => target.decoded(new Active({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Leave),
+        internalEvents: Machine.internalEventsFromSchemas(TimerFired),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
       }).handle({
-        Idle: {},
-        Active: {
-          invoke: (
-            from
-          ) => [
-            from.logic("timed-activity", {
-              address: Machine.childAddress("timed-activity"),
-              logic: probe.logic("timed", { _tag: "Blocked" })
-            }).onDone((to) => to.none).onFailure((to) => to.none),
-            from.timer("deadline", "1 hour").onDone((to) =>
-              to.full.Done().resolve(({ target }) => target.decoded(new Done({ epoch: -1 })))
-            )
-          ],
-          on: {
-            Leave: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({})))
-          }
-        },
-        Done: {}
+        states: {
+          Idle: {},
+          Active: {
+            invoke: (
+              from
+            ) => [
+              from.logic("timed-activity", {
+                address: Machine.childAddress("timed-activity"),
+                logic: probe.logic("timed", { _tag: "Blocked" })
+              }).onDone((to) => to.none).onFailure((to) => to.none),
+              from.timer("deadline", "1 hour").onDone((to) =>
+                to.branch.Done().resolve(({ target }) => target.decoded(new Done({ epoch: -1 })))
+              )
+            ],
+            on: {
+              Leave: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+            }
+          },
+          Done: {}
+        }
       })
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
 
-      yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.path === "Idle")
+      yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
       yield* TestClock.adjust("2 hours")
 
       const snapshot = yield* actor.snapshot
       assert.strictEqual(snapshot.status, "active")
-      if (snapshot.status === "active") assert.strictEqual(snapshot.state.path, "Idle")
+      if (snapshot.status === "active") assert.strictEqual(snapshot.state.state.path, "Idle")
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "cancelled", "timed"), 1)
       assertOneExitPerStart(records)
@@ -398,29 +422,32 @@ describe("machine activity lifecycle model", () => {
   it.effect("cleans sibling activities when an invoked child fails", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.states({ Active })
+      const states = Machine.state({ initial: "Active", states: { Active } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Active().resolve(({ target }) => target.decoded(new Active({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
       }).handle({
-        Active: {
-          invoke: (
-            from
-          ) => [
-            from.logic("failing", {
-              address: Machine.childAddress("failing"),
-              logic: probe.logic("failing", { _tag: "Failure" })
-            }).onDone((to) => to.none).onFailure((to) =>
-              to.none.resolve(({ error }) => {
-                throw error
-              })
-            ),
-            from.logic("sibling", {
-              address: Machine.childAddress("sibling"),
-              logic: probe.logic("sibling", { _tag: "Blocked" })
-            }).onDone((to) => to.none).onFailure((to) => to.none)
-          ]
+        states: {
+          Active: {
+            invoke: (
+              from
+            ) => [
+              from.logic("failing", {
+                address: Machine.childAddress("failing"),
+                logic: probe.logic("failing", { _tag: "Failure" })
+              }).onDone((to) => to.none).onFailure((to) =>
+                to.none.resolve(({ error }) => {
+                  throw error
+                })
+              ),
+              from.logic("sibling", {
+                address: Machine.childAddress("sibling"),
+                logic: probe.logic("sibling", { _tag: "Blocked" })
+              }).onDone((to) => to.none).onFailure((to) => to.none)
+            ]
+          }
         }
       })
       const actor = yield* Machine.start(machine)
@@ -444,25 +471,28 @@ describe("machine activity lifecycle model", () => {
   it.effect("waits for every activity cleanup before parent stop completes", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.states({ Active })
+      const states = Machine.state({ initial: "Active", states: { Active } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Active().resolve(({ target }) => target.decoded(new Active({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
       }).handle({
-        Active: {
-          invoke: (
-            from
-          ) => [
-            from.logic("first", {
-              address: Machine.childAddress("first"),
-              logic: probe.logic("first", { _tag: "Blocked" })
-            }).onDone((to) => to.none).onFailure((to) => to.none),
-            from.logic("second", {
-              address: Machine.childAddress("second"),
-              logic: probe.logic("second", { _tag: "Blocked" })
-            }).onDone((to) => to.none).onFailure((to) => to.none)
-          ]
+        states: {
+          Active: {
+            invoke: (
+              from
+            ) => [
+              from.logic("first", {
+                address: Machine.childAddress("first"),
+                logic: probe.logic("first", { _tag: "Blocked" })
+              }).onDone((to) => to.none).onFailure((to) => to.none),
+              from.logic("second", {
+                address: Machine.childAddress("second"),
+                logic: probe.logic("second", { _tag: "Blocked" })
+              }).onDone((to) => to.none).onFailure((to) => to.none)
+            ]
+          }
         }
       })
       const actor = yield* Machine.start(machine)

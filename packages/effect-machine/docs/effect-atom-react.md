@@ -39,84 +39,60 @@ Service-free machines can use `AtomMachine.make` directly.
 
 ## Own a machine in one React subtree
 
-Use `useMachineAtom` when a provider, route, dialog, or other React subtree
-owns one machine instance:
+Create a context from a factory. Each Provider owns a fresh bridge in its current
+Atom registry; it does not subscribe to state changes.
 
 ```tsx
-import { useMachineAtom } from "@typeonce/effect-machine-react"
-import { createContext, type ReactNode, useContext } from "react"
-import { AuthMachine, type AuthMachineInput } from "../machines/auth-machine"
+import { createMachineContext } from "@typeonce/effect-machine-react"
+import { AuthMachine } from "../machines/auth-machine"
 import { MachineAtoms } from "../lib/atom-runtime"
 
-const makeAuthMachine = MachineAtoms.factory(AuthMachine)
-type AuthMachineAtom = ReturnType<typeof makeAuthMachine>
+export const Auth = createMachineContext(MachineAtoms.factory(AuthMachine))
+export const useAuthMachine = Auth.useMachine
 
-const AuthMachineContext = createContext<AuthMachineAtom | null>(null)
-
-export function AuthMachineProvider({
-  children,
-  input
-}: {
-  readonly children: ReactNode
-  readonly input: AuthMachineInput
-}) {
-  const machine = useMachineAtom(() => makeAuthMachine(input))
-
+function AuthRoute({ input, attemptId }: Props) {
   return (
-    <AuthMachineContext.Provider value={machine}>
-      {children}
-    </AuthMachineContext.Provider>
+    <Auth.Provider key={attemptId} input={input}>
+      <Suspense fallback={<Loading />}>
+        <AuthCard />
+      </Suspense>
+    </Auth.Provider>
   )
 }
-
-export function useAuthMachine(): AuthMachineAtom {
-  const machine = useContext(AuthMachineContext)
-  if (machine === null) {
-    throw new Error("useAuthMachine must be used inside AuthMachineProvider")
-  }
-  return machine
-}
 ```
 
-The provider strongly owns the complete `MachineAtom`. The hook mounts
-`machine.ref` after React commits the owner, but it does not read `state`,
-`snapshot`, or `result`. Machine updates therefore do not rerender the
-provider.
+Input is startup-only. Send events to update the existing workflow; change the
+Provider's React key to create a new one. Keep the Provider above Suspense so
+suspension does not discard the owner. Supply an Atom RegistryProvider at the
+application boundary. The same factory used by two Providers creates isolated
+machines, even when their inputs are equal.
 
-The factory captures startup input once. A later `input` prop change does not
-replace the running workflow. Send an event when the change belongs to that
-workflow. Change the provider's React key when React should own a new machine:
-
-```tsx
-<AuthMachineProvider key={attemptId} input={input}>
-  <AuthCard />
-</AuthMachineProvider>
-```
-
-Put the owner above a Suspense boundary. React can then retain the same machine
-while a state-reading descendant suspends.
+`useMachineAtom(() => makeMachine(input))` remains available for custom owners.
+It mounts the reference after commit without reading `result` or `snapshot`.
 
 ## Render state-owned data
 
-Subscribe in the smallest component that renders a state path:
+Render a typed path in the smallest component that needs it:
 
 ```tsx
-import { useAtomSuspense } from "@effect/atom-react"
-import { AtomMachine } from "@typeonce/effect-machine/reactivity"
-import { Option } from "effect"
+import { MachineState } from "@typeonce/effect-machine-react"
 
 function EditingFields() {
   const machine = useAuthMachine()
-  const editing = useAtomSuspense(
-    AtomMachine.selectSnapshot(machine, "Editing")
-  ).value
-
-  return Option.match(editing, {
-    onNone: () => null,
-    onSome: ({ value }) => <EmailField email={value.email} />
-  })
+  return (
+    <MachineState machine={machine} path="Editing" inactive={null}>
+      {({ value }) => <EmailField email={value.email} />}
+    </MachineState>
+  )
 }
 ```
+
+`MachineState` subscribes only its renderer. The path determines the callback's
+snapshot type. Startup suspends, failures reach the nearest error boundary,
+and an inactive path renders `inactive` (null by default).
+
+For custom hooks, `useAtomSuspense(AtomMachine.selectSnapshot(machine, path)).value`
+returns an Option of the selected snapshot.
 
 `AtomMachine.select` returns the selected state value.
 `AtomMachine.selectSnapshot` also retains the selected state's child topology.
@@ -240,11 +216,7 @@ function AuthScreen() {
   const machine = useAuthMachine()
   const state = useAtomSuspense(machine.result).value
 
-  return AuthStates.match(state, {
-    Editing: (editing) => <EditingScreen state={editing} />,
-    Verification: (verification) => <VerificationScreen state={verification} />,
-    Failed: (failed) => <FailureScreen state={failed} />
-  })
+  return <MachineSummary snapshot={state} />
 }
 ```
 
@@ -320,7 +292,7 @@ export const plantAtoms = AtomMachine.familyChild(CentralMachineAtom, {
   child: (plantId: string) => Plant(plantId),
   atoms: {
     broken: AtomMachine.matchesChild("Broken"),
-    state: (plant) => plant.state,
+    state: (plant) => plant.result,
     send: (plant) => plant.send
   }
 })

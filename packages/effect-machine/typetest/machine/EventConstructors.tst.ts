@@ -26,14 +26,14 @@ describe("Machine event constructor collections", () => {
     value: Schema.String
   })
 
-  const states = Machine.states({ Idle: {} })
-  const events = Machine.events(PublicEvent, SetLabel, FiniteEvent)
-  const internalEvents = Machine.internalEvents(InternalEvent)
+  const states = Machine.state({ initial: "Idle", states: { Idle: {} } })
+  const events = Machine.eventsFromSchemas(PublicEvent, SetLabel, FiniteEvent)
+  const internalEvents = Machine.internalEventsFromSchemas(InternalEvent)
   const machine = Machine.make({
-    states: states.states,
+    root: states,
     events,
     internalEvents,
-    initial: (to) => to.Idle().resolve(({ target }) => (target.from()))
+    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.from())))
   })
 
   it("derives public constructors and their schema make inputs", () => {
@@ -72,15 +72,13 @@ describe("Machine event constructor collections", () => {
 
   it("keeps public and internal protocol descriptors nominally separate", () => {
     expect(Machine.make).type.not.toBeCallableWith({
-      states: states.states,
-      events: internalEvents,
-      initial: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
+      root: states,
+      events: internalEvents
     })
     expect(Machine.make).type.not.toBeCallableWith({
-      states: states.states,
+      root: states,
       events,
-      internalEvents: events,
-      initial: (to: Machine.Machine.InitialSelector<typeof states.states>) => to.Idle()
+      internalEvents: events
     })
 
     const Reset = Schema.TaggedStruct("Reset", {})
@@ -89,11 +87,11 @@ describe("Machine event constructor collections", () => {
 
   it("keeps open discriminator schemas in the protocol without inventing constructor keys", () => {
     const OpenEvent = Schema.Struct({ _tag: Schema.String, value: Schema.Number })
-    const openEvents = Machine.events(OpenEvent)
+    const openEvents = Machine.eventsFromSchemas(OpenEvent)
     const openMachine = Machine.make({
-      states: states.states,
+      root: states,
       events: openEvents,
-      initial: (to) => to.Idle().resolve(({ target }) => (target.from()))
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.from())))
     })
 
     expect(openEvents.Dynamic).type.toRaiseError()
@@ -101,30 +99,38 @@ describe("Machine event constructor collections", () => {
   })
 
   it("accepts public constructions at machine delivery boundaries", () => {
-    expect(Machine.plan(machine.handle({ Idle: {} }), { path: "Idle", value: undefined }, events.Reset())).type.not
+    expect(
+      Machine.plan(machine.handle({ states: { Idle: {} } }), {
+        path: "",
+        value: undefined,
+        state: { path: "Idle", value: undefined }
+      }, events.Reset())
+    ).type.not
       .toRaiseError()
   })
 
   it("accepts internal constructions raised from invocation handlers", () => {
     expect(
       machine.handle({
-        Idle: {
-          invoke: (
-            from
-          ) => [
-            from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
-              to.none.resolve(({ output }, enqueue) => {
-                enqueue.raise(internalEvents.Loaded({ value: output }))
-                return undefined
-              })
-            ),
-            from.timer("timeout", "1 second").onDone((to) =>
-              to.none.resolve((_, enqueue) => {
-                enqueue.raise(internalEvents.Failed())
-                return undefined
-              })
-            )
-          ]
+        states: {
+          Idle: {
+            invoke: (
+              from
+            ) => [
+              from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
+                to.none.resolve(({ output }, enqueue) => {
+                  enqueue.raise(internalEvents.Loaded({ value: output }))
+                  return undefined
+                })
+              ),
+              from.timer("timeout", "1 second").onDone((to) =>
+                to.none.resolve((_, enqueue) => {
+                  enqueue.raise(internalEvents.Failed())
+                  return undefined
+                })
+              )
+            ]
+          }
         }
       })
     ).type.not.toRaiseError()

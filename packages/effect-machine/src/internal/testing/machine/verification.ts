@@ -325,7 +325,7 @@ const targetWithinSelection = (
   return selection.kind === "state" &&
     (selection.scope === "local" || selection.scope === "branch") &&
     (selectedNode?.type === "compound" || selectedNode?.type === "parallel") &&
-    target.startsWith(`${selection.path}.`)
+    (selection.path === "" || target.startsWith(`${selection.path}.`))
 }
 
 const finiteTagValues = (ast: SchemaAST.AST): ReadonlyArray<PropertyKey> | undefined => {
@@ -490,8 +490,8 @@ export const coverage = <M extends AnyMachine>(
   for (const trace of traces) {
     scenarioEvents += trace.scenario.events.length
     if (trace.scenario.events.length === 0) emptyScenarios += 1
-    for (const event of trace.scenario.events) {
-      const tag = event._tag
+    for (const step of trace.steps) {
+      const tag = step.event._tag
       eventCounts.set(tag, (eventCounts.get(tag) ?? 0) + 1)
     }
 
@@ -1218,7 +1218,10 @@ export const verify = <M extends AnyMachine>(
       if (node.type === "final") return true
       if (node.type === "compound") {
         const child = node.children.find((candidate) => active.has(candidate))
-        return child !== undefined && byPath.get(child)?.type === "final"
+        return child !== undefined && (path === ""
+          ? !definitions.some((definition) => definition.source === child && definition.trigger.type === "done") &&
+            isCompletedControl(child, active)
+          : byPath.get(child)?.type === "final")
       }
       if (node.type === "parallel") {
         return node.children.length > 0 && node.children.every((child) => isCompletedControl(child, active))
@@ -1730,6 +1733,21 @@ export const verify = <M extends AnyMachine>(
     const initialLocation: VerificationLocation = { eventIndex: undefined }
     const starting = inspectSnapshot(trace.initial.startingState, initialLocation, "initial starting state")
     if (selected.has("definitions")) {
+      if (initialDefinition.selection.kind === "initial") {
+        for (const path of starting.paths) {
+          const node = byPath.get(path)
+          if (node?.type !== "compound") continue
+          const child = node.children.find((child) => starting.active.has(child))
+          if (byPath.get(node.initial ?? "")?.type !== "choice" && child !== node.initial) {
+            add(
+              "definitions.initial",
+              initialLocation,
+              `initial state "${path}" must enter declared child "${node.initial}"`,
+              path
+            )
+          }
+        }
+      }
       const startingRoots = starting.paths.filter((path) => byPath.get(path)?.parent === undefined)
       const routedRoot = startingRoots.length === 1 && startingRoots[0] !== initialDefinition.target
         ? initialChoiceRouteRoot()

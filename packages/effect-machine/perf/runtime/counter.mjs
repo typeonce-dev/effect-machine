@@ -49,7 +49,7 @@ const CounterStates = benchmarkApi.states({
   }
 })
 
-export const counterMachine = Machine.make({
+export const counterMachine = benchmarkApi.make({
   id: "RuntimeBenchmarkCounter",
   states: CounterStates.states,
   events: benchmarkApi.events(CounterEvent.cases.Increment, CounterEvent.cases.Finish),
@@ -78,7 +78,7 @@ export const counterMachine = Machine.make({
 const ParentState = Schema.TaggedUnion({ Active: {} })
 const ParentStates = benchmarkApi.states({ Active: ParentState.cases.Active })
 const CounterChild = Machine.child("counter", counterMachine)
-const counterParentMachine = Machine.make({
+const counterParentMachine = benchmarkApi.make({
   id: "RuntimeBenchmarkCounterParent",
   states: ParentStates.states,
   events: benchmarkApi.events(),
@@ -92,7 +92,7 @@ const counterParentMachine = Machine.make({
   }
 })
 
-const counterSnapshotParentMachine = Machine.make({
+const counterSnapshotParentMachine = benchmarkApi.make({
   id: "RuntimeBenchmarkSnapshotCounterParent",
   states: ParentStates.states,
   events: benchmarkApi.events(),
@@ -138,7 +138,7 @@ const HierarchicalStates = benchmarkApi.states({
   }
 })
 
-const hierarchicalCounterMachine = Machine.make({
+const hierarchicalCounterMachine = benchmarkApi.make({
   id: "RuntimeBenchmarkHierarchicalCounter",
   states: HierarchicalStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish),
@@ -194,7 +194,7 @@ const ParallelStates = benchmarkApi.states({
   }
 })
 
-const parallelCounterMachine = Machine.make({
+const parallelCounterMachine = benchmarkApi.make({
   id: "RuntimeBenchmarkParallelCounter",
   states: ParallelStates.states,
   events: benchmarkApi.events(HierarchicalEvent.cases.IncrementLeft, HierarchicalEvent.cases.IncrementRight, HierarchicalEvent.cases.Finish),
@@ -218,11 +218,11 @@ const parallelCounterMachine = Machine.make({
       Finish: benchmarkApi.transition({
         target: (to) => to.full.Complete(),
         resolve: ({ snapshot, target }) => target.from({
-          value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+          value: benchmarkApi.snapshot(snapshot).states.Left.value.value + benchmarkApi.snapshot(snapshot).states.Right.value.value
         })
       }, ({ snapshot, target }) =>
         target.full.Complete.from({
-          value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+          value: benchmarkApi.snapshot(snapshot).states.Left.value.value + benchmarkApi.snapshot(snapshot).states.Right.value.value
         }))
     },
     states: {
@@ -267,7 +267,7 @@ const initialParallelSnapshot = Effect.runSync(
   Machine.planInitial(parallelCounterMachine).pipe(Effect.map((planned) => planned.state))
 )
 
-export const counterValue = (snapshot) => snapshot.value.value
+export const counterValue = (snapshot) => benchmarkApi.snapshot(snapshot).value.value
 
 export const planCounterBatch = (size) => {
   return Effect.runSync(
@@ -288,7 +288,7 @@ const planHierarchicalCounterBatch = (size) =>
       for (let index = 0; index < size; index += 1) {
         snapshot = (yield* Machine.plan(hierarchicalCounterMachine, snapshot, hierarchicalIncrementEvent)).next
       }
-      return snapshot.state.value.value
+      return benchmarkApi.snapshot(snapshot).state.value.value
     })
   )
 
@@ -303,7 +303,8 @@ const planParallelCounterBatch = (size) =>
           index % 2 === 0 ? parallelIncrementLeftEvent : parallelIncrementRightEvent
         )).next
       }
-      return snapshot.states.Left.value.value + snapshot.states.Right.value.value
+      const active = benchmarkApi.snapshot(snapshot)
+      return active.states.Left.value.value + active.states.Right.value.value
     })
   )
 

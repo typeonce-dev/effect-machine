@@ -280,7 +280,7 @@ describe("MachineTest finite models", () => {
         readonly initial: string | undefined
       } => ({
         path,
-        parent,
+        parent: parent ?? "",
         type: node._tag === "Atomic"
           ? "atomic"
           : node._tag === "Final"
@@ -301,7 +301,13 @@ describe("MachineTest finite models", () => {
       }))
       assert.deepStrictEqual(
         actualStates.map(({ children, initial, parent, path, type }) => ({ children, initial, parent, path, type })),
-        expected
+        [{
+          path: "",
+          parent: undefined,
+          type: "compound",
+          children: model.roots.map(({ key }) => key),
+          initial: model.initial
+        }, ...expected]
       )
 
       const actualTransitions = Machine.transitionDefinitions(machine)
@@ -397,7 +403,7 @@ describe("MachineTest finite models", () => {
       const machine = MachineTest.compileModel(model)
       const trace = yield* MachineTest.run(machine, { events: [] })
 
-      assert.deepStrictEqual(trace.initial.startingState.value, { _tag: "State_done", value: 42 })
+      assert.deepStrictEqual((trace.initial.startingState as any).state.value, { _tag: "State_done", value: 42 })
       assert.strictEqual(trace.initial.plan.done, true)
       assert.strictEqual(trace.initial.plan.output, "completed")
       yield* MachineTest.verify(machine, trace)

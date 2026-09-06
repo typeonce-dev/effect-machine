@@ -573,10 +573,7 @@ const runtimeTargetPath = (index: ModelIndex, transition: FiniteTransition): str
   if (target.node._tag === "Choice") {
     return runtimeTargetPath(index, { ...transition, target: resolveChoicePath(index, target.path) })
   }
-  // A same-root branch builder identifies the concrete initialized leaf. A
-  // full builder replaces the root with a complete snapshot and identifies
-  // that snapshot's root even when it contains initialized descendants.
-  if (source.root !== target.root) return target.path
+  // Branch builders preserve the deepest concrete selection within their declared bound.
 
   const initial = (path: string): string => {
     const current = getState(index, path)
@@ -603,7 +600,7 @@ const runtimeTargetPath = (index: ModelIndex, transition: FiniteTransition): str
     const next = target.path.slice(current.path.length + 1).split(".")[0]!
     return inspect(`${current.path}.${next}`)
   }
-  return inspect(source.root)
+  return inspect(source.root === target.root ? source.root : target.root)
 }
 
 const entryChoicePath = (index: ModelIndex, path: string): string | undefined => {
@@ -916,8 +913,6 @@ const transitionRecord = (index: ModelIndex, transition: FiniteTransition): Refe
     ? transition.target
     : transition.target === undefined
     ? runtimeTargetPath(index, transition)
-    : getState(index, transition.source).root !== getState(index, transition.target).root
-    ? transition.target
     : entryChoicePath(index, transition.target) ?? runtimeTargetPath(index, transition),
   resolvedTarget: transition.target === undefined
     ? runtimeTargetPath(index, transition)
@@ -1269,7 +1264,7 @@ const projectState = (snapshot: unknown): ActualStateProjection => {
   const values: Record<string, unknown> = {}
   const visit = (current: unknown): void => {
     if (!isRecord(current)) return
-    if (typeof current.path === "string") {
+    if (typeof current.path === "string" && current.path !== "") {
       activePaths.push(current.path)
       values[current.path] = current.value
     }
@@ -1282,7 +1277,9 @@ const projectState = (snapshot: unknown): ActualStateProjection => {
   return {
     activePaths,
     values,
-    completions: isRecord(snapshot) && Array.isArray(snapshot.completed) ? snapshot.completed : [],
+    completions: isRecord(snapshot) && Array.isArray(snapshot.completed)
+      ? snapshot.completed.filter((completion) => !isRecord(completion) || completion.path !== "")
+      : [],
     history: isRecord(snapshot) && isRecord(snapshot.history) ? snapshot.history : {}
   }
 }
@@ -1402,7 +1399,13 @@ export const verifyModelTrace = (
     add(
       location,
       `${field}.history`,
-      historyOrderIndependent(expected.history),
+      historyOrderIndependent(
+        Object.fromEntries(
+          Object.entries(expected.history).map((
+            [path, record]
+          ) => [path, { ...record, active: ["", ...record.active] }])
+        )
+      ),
       historyOrderIndependent(projected.history)
     )
   }
@@ -1422,26 +1425,26 @@ export const verifyModelTrace = (
   add(
     initialLocation,
     "initial.startingConfiguration",
-    reference.initial.startingState.activePaths,
+    ["", ...reference.initial.startingState.activePaths],
     get(actualInitial, "startingConfiguration")
   )
   add(
     initialLocation,
     "initial.initialEntryPaths",
-    reference.initial.initialEntryPaths,
+    ["", ...reference.initial.initialEntryPaths],
     get(actualInitial, "initialEntryPaths")
   )
   add(
     initialLocation,
     "initial.plan.initialEntryPaths",
-    reference.initial.initialEntryPaths,
+    ["", ...reference.initial.initialEntryPaths],
     get(actualInitialPlan, "initialEntryPaths")
   )
   compareState(initialLocation, "initial.plan.state", reference.initial.state, get(actualInitialPlan, "state"))
   add(
     initialLocation,
     "initial.configuration",
-    reference.initial.state.activePaths,
+    ["", ...reference.initial.state.activePaths],
     get(actualInitial, "configuration")
   )
   add(
@@ -1463,7 +1466,7 @@ export const verifyModelTrace = (
     add(location, "step.index", expected.index, get(actual, "index"))
     add(location, "step.event", expected.event, eventTag(get(actual, "event")))
     compareState(location, "step.before", expected.before, get(actual, "before"))
-    add(location, "step.beforeConfiguration", expected.before.activePaths, get(actual, "beforeConfiguration"))
+    add(location, "step.beforeConfiguration", ["", ...expected.before.activePaths], get(actual, "beforeConfiguration"))
 
     const actualMicrosteps = array(get(actualPlan, "microsteps"))
     add(location, "step.plan.microsteps.length", expected.microsteps.length, actualMicrosteps.length)
@@ -1490,14 +1493,19 @@ export const verifyModelTrace = (
 
     compareState(location, "step.plan.next", expected.after, get(actualPlan, "next"))
     compareState(location, "step.after", expected.after, get(actual, "after"))
-    add(location, "step.afterConfiguration", expected.after.activePaths, get(actual, "afterConfiguration"))
+    add(location, "step.afterConfiguration", ["", ...expected.after.activePaths], get(actual, "afterConfiguration"))
     add(location, "step.plan.done", expected.done, get(actualPlan, "done"))
     add(location, "step.plan.output", expected.output, get(actualPlan, "output"))
   }
 
   const finalLocation: ModelVerificationLocation = { phase: "final" }
   compareState(finalLocation, "trace.final", reference.final, get(actualTrace, "final"))
-  add(finalLocation, "trace.finalConfiguration", reference.final.activePaths, get(actualTrace, "finalConfiguration"))
+  add(
+    finalLocation,
+    "trace.finalConfiguration",
+    ["", ...reference.final.activePaths],
+    get(actualTrace, "finalConfiguration")
+  )
 
   return mismatches.length === 0
     ? Effect.void

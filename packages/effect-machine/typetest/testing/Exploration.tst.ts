@@ -9,18 +9,21 @@ describe("MachineTest exploration", () => {
   class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
   class Internal extends Schema.TaggedClass<Internal>("Internal")("Internal", {}) {}
 
-  const States = Machine.states({ counter: Counter })
+  const States = Machine.state({ initial: "counter", states: { counter: Counter } })
   const machine = Machine.make({
-    states: States.states,
-    events: Machine.events(Increment),
-    internalEvents: Machine.internalEvents(Internal),
+    root: States,
+    events: Machine.eventsFromSchemas(Increment),
+    internalEvents: Machine.internalEventsFromSchemas(Internal),
     input: Input,
-    initial: (to) => to.counter().resolve(({ input, target }) => target.decoded(new Counter({ count: input.seed })))
+    initialConfiguration: (root) =>
+      root.resolve(({ input, target }) => target.from((to) => to.counter.decoded(new Counter({ count: input.seed }))))
   }).handle({
-    counter: {
-      on: {
-        Increment: (to) => to.none,
-        Internal: (to) => to.none
+    states: {
+      counter: {
+        on: {
+          Increment: (to) => to.none,
+          Internal: (to) => to.none
+        }
       }
     }
   })
@@ -29,13 +32,13 @@ describe("MachineTest exploration", () => {
     const explored = MachineTest.explore(machine, {
       input: new Input({ seed: 0 }),
       events: (context) => {
-        expect(context.snapshot.value).type.toBe<Counter>()
-        expect(context.configuration[0]).type.toBe<"counter" | undefined>()
+        expect(context.snapshot.state.value).type.toBe<Counter>()
+        expect(context.configuration[0]).type.toBe<"" | "counter" | undefined>()
         return [new Increment({})]
       },
       stateKey: (context) => {
         expect(context.trace).type.toBe<MachineTest.Trace<typeof machine>>()
-        return context.snapshot.value.count
+        return context.snapshot.state.value.count
       }
     })
 
@@ -47,12 +50,12 @@ describe("MachineTest exploration", () => {
     expect<Effect.Services<typeof explored>>().type.toBe<never>()
 
     type Exploration = Effect.Success<typeof explored>
-    expect<Exploration["transitionCoverage"]["definitions"]["hits"][number]["source"]>().type.toBe<"counter">()
+    expect<Exploration["transitionCoverage"]["definitions"]["hits"][number]["source"]>().type.toBe<"" | "counter">()
     expect<Exploration["transitionCoverage"]["branches"]["hits"][number]["trigger"]>().type.toBe<
       Machine.Machine.TransitionTrigger<"Increment" | "Internal">
     >()
     expect<Exploration["transitionCoverage"]["branches"]["hits"][number]["branch"]>().type.toBe<
-      Machine.Machine.TransitionBranch<"counter">
+      Machine.Machine.TransitionBranch<"" | "counter">
     >()
   })
 
@@ -60,7 +63,7 @@ describe("MachineTest exploration", () => {
     const exploration = {} as MachineTest.Exploration<typeof machine, number>
     const reachable = MachineTest.assertReachable(exploration, "one", ({ key, snapshot }) => {
       expect(key).type.toBe<number>()
-      expect(snapshot.value).type.toBe<Counter>()
+      expect(snapshot.state.value).type.toBe<Counter>()
       return key === 1
     })
     const unreachable = MachineTest.assertUnreachable(exploration, "two", ({ key }) => key === 2)
@@ -73,10 +76,11 @@ describe("MachineTest exploration", () => {
 
   it("forbids input for machines without an input schema", () => {
     const noInput = Machine.make({
-      states: States.states,
-      events: Machine.events(Increment),
-      initial: (to) => to.counter().resolve(({ target }) => (target.decoded(new Counter({ count: 0 }))))
-    }).handle({ counter: {} })
+      root: States,
+      events: Machine.eventsFromSchemas(Increment),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.counter.decoded(new Counter({ count: 0 })))))
+    }).handle({ states: { counter: {} } })
     type Options = MachineTest.ExploreOptions<typeof noInput, string>
     expect<Options["input"]>().type.toBe<undefined>()
   })

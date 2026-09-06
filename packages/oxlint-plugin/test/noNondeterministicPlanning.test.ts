@@ -14,13 +14,13 @@ const rule = plugin.rules["no-nondeterministic-planning"]
 tester.run("no-nondeterministic-planning", rule, {
   valid: [
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: ({ event }) => new Date(event.timestamp) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ event }) => new Date(event.timestamp) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: ({ Date, Math }) => [Date.now(), Math.random()] } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ Date, Math }) => [Date.now(), Math.random()] } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { invoke: (from) => from.effect("random", () => crypto.randomUUID()) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("random", () => crypto.randomUUID()) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { output: ({ state }) => Date.parse(state.createdAt) } })`
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { output: ({ state }) => Date.parse(state.createdAt) } } })`
   ],
   invalid: [
     {
@@ -44,11 +44,11 @@ Machine.make({ initial: (to) => {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: {
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
   initialize: ({ builder }) => globalThis.Date.now() ? builder.from() : builder.from(),
   onDone: (to) => window.Math.random() ? to.none : to.none,
   history: { recent: { default: (to) => self.crypto.randomUUID() ? to.none : to.none } }
-} })`,
+} } })`,
       errors: Array.from({ length: 3 }, () => ({ messageId: "nondeterministic" }))
     }
   ]

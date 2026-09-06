@@ -20,51 +20,57 @@ class Noop extends Schema.TaggedClass<Noop>("RuntimeNoop")("Noop", {}) {}
 class Ignored extends Schema.TaggedClass<Ignored>("RuntimeIgnored")("Ignored", {}) {}
 class Burst extends Schema.TaggedClass<Burst>("RuntimeBurst")("Burst", {}) {}
 
-const CounterStates = Machine.states({ Counter })
+const CounterStates = Machine.state({ initial: "Counter", states: { Counter } })
 
 const makeCounterMachine = () =>
   Machine.make({
-    states: CounterStates.states,
-    events: Machine.events(Add),
-    internalEvents: Machine.internalEvents(InternalAdd),
-    initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
+    root: CounterStates,
+    events: Machine.eventsFromSchemas(Add),
+    internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
   }).handle({
-    Counter: {
-      on: {
-        Add: (to) =>
-          to.full.Counter().resolve(({ event, state, target }) =>
-            target.decoded(new Counter({ count: state.count + event.amount }))
-          ),
-        InternalAdd: (to) =>
-          to.full.Counter().resolve(({ event, state, target }) =>
-            target.decoded(new Counter({ count: state.count + event.amount }))
-          )
+    states: {
+      Counter: {
+        on: {
+          Add: (to) =>
+            to.branch.Counter().resolve(({ event, state, target }) =>
+              target.decoded(new Counter({ count: state.count + event.amount }))
+            ),
+          InternalAdd: (to) =>
+            to.branch.Counter().resolve(({ event, state, target }) =>
+              target.decoded(new Counter({ count: state.count + event.amount }))
+            )
+        }
       }
     }
   })
 
 const causalMachine = Machine.make({
-  states: CounterStates.states,
-  events: Machine.events(Add, Noop, Ignored, Burst),
-  internalEvents: Machine.internalEvents(InternalAdd),
-  initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
+  root: CounterStates,
+  events: Machine.eventsFromSchemas(Add, Noop, Ignored, Burst),
+  internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
 }).handle({
-  Counter: {
-    on: {
-      Add: (to) =>
-        to.full.Counter().resolve(({ event, state, target }) =>
-          target.decoded(new Counter({ count: state.count + event.amount }))
-        ),
-      Noop: (to) => to.none,
-      Burst: (to) =>
-        to.full.Counter().resolve(({ state, target }, enqueue) => {
-          enqueue.raise(new InternalAdd({ amount: 10 }))
-          return target.decoded(new Counter({ count: state.count + 1 }))
-        }),
-      InternalAdd: (to) =>
-        to.full.Counter().resolve(({ event, state, target }) =>
-          target.decoded(new Counter({ count: state.count + event.amount }))
-        )
+  states: {
+    Counter: {
+      on: {
+        Add: (to) =>
+          to.branch.Counter().resolve(({ event, state, target }) =>
+            target.decoded(new Counter({ count: state.count + event.amount }))
+          ),
+        Noop: (to) => to.none,
+        Burst: (to) =>
+          to.branch.Counter().resolve(({ state, target }, enqueue) => {
+            enqueue.raise(new InternalAdd({ amount: 10 }))
+            return target.decoded(new Counter({ count: state.count + 1 }))
+          }),
+        InternalAdd: (to) =>
+          to.branch.Counter().resolve(({ event, state, target }) =>
+            target.decoded(new Counter({ count: state.count + event.amount }))
+          )
+      }
     }
   }
 })
@@ -73,7 +79,8 @@ type CounterMachine = ReturnType<typeof makeCounterMachine>
 type CounterSnapshot = Machine.Machine.Snapshot<Machine.Machine.States<CounterMachine>>
 type CounterRuntimeSnapshot = Machine.RuntimeSnapshot<CounterSnapshot, any, any>
 
-const snapshotCount = (snapshot: CounterRuntimeSnapshot | undefined): number | undefined => snapshot?.state.value.count
+const snapshotCount = (snapshot: CounterRuntimeSnapshot | undefined): number | undefined =>
+  snapshot?.state.state.value.count
 
 const propertyMachine = makeCounterMachine()
 const generatedRuntimeCommands = MachineTest.runtimeCommands(propertyMachine, {
@@ -242,20 +249,23 @@ describe("MachineTest runtime commands", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {}
-      const states = Machine.states({ Waiting, TimedOut })
+      const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Waiting().resolve(({ target }) => target.decoded(new Waiting({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        internalEvents: Machine.internalEventsFromSchemas(Timeout),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Waiting.decoded(new Waiting({}))))
       }).handle({
-        Waiting: {
-          invoke: (from) =>
-            from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
-            )
-        },
-        TimedOut: {}
+        states: {
+          Waiting: {
+            invoke: (from) =>
+              from.timer("timeout", "1 second").onDone((to) =>
+                to.branch.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
+              )
+          },
+          TimedOut: {}
+        }
       })
       const ref = yield* Machine.start(machine)
       const commands = [
@@ -279,19 +289,19 @@ describe("MachineTest runtime commands", () => {
             model,
             expected: model.path,
             synchronize: model.path === "TimedOut"
-              ? MachineTest.RuntimeSynchronization.until((snapshot) => snapshot.state.path === "TimedOut")
+              ? MachineTest.RuntimeSynchronization.until((snapshot) => snapshot.state.state.path === "TimedOut")
               : MachineTest.RuntimeSynchronization.current
           })
         },
         assert: ({ actual, command, model }) =>
           Effect.sync(() => {
             if (command._tag === "Checkpoint") {
-              assert.strictEqual(actual.snapshot?.state.path, model.path)
+              assert.strictEqual(actual.snapshot?.state.state.path, model.path)
             }
           })
       })
 
-      assert.strictEqual(transcript.records[3]?.actual.snapshot?.state.path, "TimedOut")
+      assert.strictEqual(transcript.records[3]?.actual.snapshot?.state.state.path, "TimedOut")
       yield* ref.stop
     }))
 
@@ -616,9 +626,9 @@ describe("MachineTest causal runtime commands", () => {
         },
         assert: ({ actual, expected }) =>
           Effect.sync(() => {
-            assert.strictEqual(actual.snapshot.state.value.count, expected)
+            assert.strictEqual(actual.snapshot.state.state.value.count, expected)
             if (actual.result._tag === "SendProcessed") {
-              assert.strictEqual(actual.result.step.after.value.count, expected)
+              assert.strictEqual(actual.result.step.after.state.value.count, expected)
             }
           })
       })
@@ -636,8 +646,8 @@ describe("MachineTest causal runtime commands", () => {
       }
       assert.strictEqual(changed?.actual.result._tag, "SendProcessed")
       if (changed?.actual.result._tag === "SendProcessed") {
-        assert.strictEqual(changed.actual.result.step.before.value.count, 0)
-        assert.strictEqual(changed.actual.result.step.after.value.count, 2)
+        assert.strictEqual(changed.actual.result.step.before.state.value.count, 0)
+        assert.strictEqual(changed.actual.result.step.after.state.value.count, 2)
       }
       assert.strictEqual(burst?.actual.result._tag, "SendProcessed")
       if (burst?.actual.result._tag === "SendProcessed") {
@@ -645,10 +655,10 @@ describe("MachineTest causal runtime commands", () => {
           burst.actual.result.step.plan.microsteps.map(({ event }) => event._tag),
           ["Burst", "InternalAdd"]
         )
-        assert.strictEqual(burst.actual.result.step.before.value.count, 2)
-        assert.strictEqual(burst.actual.result.step.after.value.count, 13)
+        assert.strictEqual(burst.actual.result.step.before.state.value.count, 2)
+        assert.strictEqual(burst.actual.result.step.after.state.value.count, 13)
       }
-      assert.strictEqual(transcript.final.state.value.count, 13)
+      assert.strictEqual(transcript.final.state.state.value.count, 13)
       yield* ref.stop
     }))
 
@@ -681,13 +691,13 @@ describe("MachineTest causal runtime commands", () => {
           },
           assert: ({ actual, expected }) =>
             Effect.sync(() => {
-              assert.strictEqual(actual.snapshot.state.value.count, expected)
+              assert.strictEqual(actual.snapshot.state.state.value.count, expected)
               if (actual.result._tag === "SendProcessed") {
-                assert.strictEqual(actual.result.step.after.value.count, expected)
+                assert.strictEqual(actual.result.step.after.state.value.count, expected)
               }
             })
         })
-        assert.strictEqual(transcript.finalModel, transcript.final.state.value.count)
+        assert.strictEqual(transcript.finalModel, transcript.final.state.state.value.count)
         yield* ref.stop
       }),
     { fastCheck: { numRuns: 100, seed: 31_590 } }
@@ -722,20 +732,23 @@ describe("MachineTest causal runtime commands", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("CausalWaiting")("Waiting", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("CausalTimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {}
-      const states = Machine.states({ Waiting, TimedOut })
+      const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
       const timerMachine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Waiting().resolve(({ target }) => target.decoded(new Waiting({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        internalEvents: Machine.internalEventsFromSchemas(Timeout),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Waiting.decoded(new Waiting({}))))
       }).handle({
-        Waiting: {
-          invoke: (from) =>
-            from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
-            )
-        },
-        TimedOut: {}
+        states: {
+          Waiting: {
+            invoke: (from) =>
+              from.timer("timeout", "1 second").onDone((to) =>
+                to.branch.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
+              )
+          },
+          TimedOut: {}
+        }
       })
       const ref = yield* Machine.start(timerMachine)
       const probe = yield* MachineTest.probe(timerMachine, ref)
@@ -745,16 +758,16 @@ describe("MachineTest causal runtime commands", () => {
           Effect.succeed({
             model: "TimedOut" as const,
             expected: "TimedOut" as const,
-            await: probe.await.until((snapshot) => snapshot.state.path === "TimedOut")
+            await: probe.await.until((snapshot) => snapshot.state.state.path === "TimedOut")
           }),
         assert: ({ actual, expected }) =>
           Effect.sync(() => {
-            assert.strictEqual(actual.snapshot.state.path, expected)
+            assert.strictEqual(actual.snapshot.state.state.path, expected)
             assert.isAtLeast(actual.awaited.length, 1)
           })
       })
 
-      assert.strictEqual(transcript.final.state.path, "TimedOut")
+      assert.strictEqual(transcript.final.state.state.path, "TimedOut")
       yield* ref.stop
 
       const verifiedRef = yield* Machine.start(timerMachine)
@@ -764,7 +777,7 @@ describe("MachineTest causal runtime commands", () => {
         verifiedProbe,
         [MachineTest.advanceCommand(1_000)],
         {
-          await: () => verifiedProbe.await.until((snapshot) => snapshot.state.path === "TimedOut"),
+          await: () => verifiedProbe.await.until((snapshot) => snapshot.state.state.path === "TimedOut"),
           invariants: [
             invariant.snapshot(
               "awaited timer observations remain active",
@@ -773,7 +786,7 @@ describe("MachineTest causal runtime commands", () => {
             ),
             invariant.transcript(
               "the awaited timer reaches TimedOut",
-              ({ transcript }) => transcript.final.state.path === "TimedOut"
+              ({ transcript }) => transcript.final.state.state.path === "TimedOut"
             )
           ]
         }
@@ -862,7 +875,7 @@ describe("MachineTest causal runtime commands", () => {
       const report = yield* MachineTest.checkRuntimeInvariants(causalMachine, transcript, [
         invariant.snapshot(
           "count is non-negative",
-          ({ snapshot }) => snapshot.state.value.count >= 0
+          ({ snapshot }) => snapshot.state.state.value.count >= 0
         ),
         invariant.command(
           "add is processed",
@@ -888,7 +901,7 @@ describe("MachineTest causal runtime commands", () => {
         ),
         invariant.snapshot(
           "the final retained snapshot is available",
-          ({ snapshot }) => snapshot.state.value.count === 2,
+          ({ snapshot }) => snapshot.state.state.value.count === 2,
           { observe: "final" }
         )
       ])
@@ -923,7 +936,8 @@ describe("MachineTest causal runtime commands", () => {
       const failure = yield* MachineTest.assertRuntimeInvariants(causalMachine, transcript, [
         invariant.snapshot(
           "count stays non-negative",
-          ({ snapshot }) => snapshot.state.value.count >= 0 || `negative count: ${snapshot.state.value.count}`
+          ({ snapshot }) =>
+            snapshot.state.state.value.count >= 0 || `negative count: ${snapshot.state.state.value.count}`
         ),
         invariant.command(
           "burst is exercised",
@@ -963,14 +977,14 @@ describe("MachineTest causal runtime commands", () => {
         MachineTest.sendCommand(new Burst({}))
       ], {
         invariants: [
-          invariant.snapshot("count stays non-negative", ({ snapshot }) => snapshot.state.value.count >= 0),
+          invariant.snapshot("count stays non-negative", ({ snapshot }) => snapshot.state.state.value.count >= 0),
           invariant.command("every send is acknowledged", ({ command, result }) =>
             command._tag !== "Send" || result._tag === "SendProcessed")
         ]
       })
 
       assert.strictEqual(transcript.records.length, 3)
-      assert.strictEqual(transcript.final.state.value.count, 14)
+      assert.strictEqual(transcript.final.state.state.value.count, 14)
       assert.strictEqual("finalModel" in transcript, false)
       yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
       yield* ref.stop
@@ -1003,7 +1017,7 @@ describe("MachineTest causal runtime commands", () => {
                 command._tag !== "Send" || command.event._tag !== "Add" ||
                 result._tag !== "SendProcessed"
               ) return true
-              return result.step.after.value.count === result.step.before.value.count + command.event.amount
+              return result.step.after.state.value.count === result.step.before.state.value.count + command.event.amount
             })
           ]
         })

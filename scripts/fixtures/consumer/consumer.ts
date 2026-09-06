@@ -18,39 +18,42 @@ const InternalEvent = Schema.TaggedUnion({
   Loaded: { value: Schema.String }
 })
 
-const States = Machine.states(State.cases)
-const PublicEvents = Machine.events(PublicEvent)
-const InternalEvents = Machine.internalEvents(InternalEvent)
+const States = Machine.state({ initial: "Idle", states: State.cases })
+const PublicEvents = Machine.eventsFromSchemas(PublicEvent)
+const InternalEvents = Machine.internalEventsFromSchemas(InternalEvent)
 
 const machine = Machine.make({
   id: "Consumer",
-  states: States.states,
+  root: States,
   events: PublicEvents,
   internalEvents: InternalEvents,
-  initial: (to) => to.Idle().resolve(({ target }) => target.decoded(State.cases.Idle.make({})))
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Idle.decoded(State.cases.Idle.make({}))))
 }).handle({
-  Idle: {
-    on: {
-      Start: (to) =>
-        to.branches({
-          cached: { target: to.full.Loading() },
-          measured: { target: to.none },
-          named: { target: to.full.Done() },
-          confirmed: { target: to.full.Idle() }
-        }).resolve(({ select }) => select.cached.decoded(State.cases.Loading.make({})))
-    }
-  },
-  Loading: {
-    invoke: (from) => [
-      from.effect("fixture-load", () => Effect.succeed("ready")).onDone((to) => to.none),
-      from.timer("fixture-delay", "1 second").onDone((to) => to.none)
-    ],
-    on: {
-      Loaded: (to) =>
-        to.full.Done().resolve(({ event, target }) => target.decoded(State.cases.Done.make({ value: event.value })))
-    }
-  },
-  Done: {}
+  states: {
+    Idle: {
+      on: {
+        Start: (to) =>
+          to.branches({
+            cached: { target: to.branch.Loading() },
+            measured: { target: to.none },
+            named: { target: to.branch.Done() },
+            confirmed: { target: to.branch.Idle() }
+          }).resolve(({ select }) => select.cached.decoded(State.cases.Loading.make({})))
+      }
+    },
+    Loading: {
+      invoke: (from) => [
+        from.effect("fixture-load", () => Effect.succeed("ready")).onDone((to) => to.none),
+        from.timer("fixture-delay", "1 second").onDone((to) => to.none)
+      ],
+      on: {
+        Loaded: (to) =>
+          to.branch.Done().resolve(({ event, target }) => target.decoded(State.cases.Done.make({ value: event.value })))
+      }
+    },
+    Done: {}
+  }
 })
 
 const atoms = AtomMachine.make(machine)

@@ -22,34 +22,36 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
   amount: Schema.Int
 }) {}
 
-const States = Machine.states({ Idle, Ready })
+const States = Machine.state({ initial: "Idle", states: { Idle, Ready } })
 
 const makeTraceMachine = (onAction: () => void) =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Start, Add),
+    root: States,
+    events: Machine.eventsFromSchemas(Start, Add),
     input: TestInput,
-    initial: (to) =>
-      to.Ready().resolve(({ input, target }) =>
-        target.decoded(new Ready({ count: input.userId.length - input.userId.length }))
+    initialConfiguration: (root) =>
+      root.resolve(({ input, target }) =>
+        target.from((to) => to.Ready.decoded(new Ready({ count: input.userId.length - input.userId.length })))
       )
   }).handle({
-    Idle: {
-      on: {
-        Start: (to) =>
-          to.full.Ready().resolve(({ target }) => {
-            onAction()
-            return target.decoded(new Ready({ count: 0 }))
-          })
-      }
-    },
-    Ready: {
-      on: {
-        Add: (to) =>
-          to.full.Ready().resolve(({ event, state, target }) => {
-            onAction()
-            return target.decoded(new Ready({ count: state.count + event.amount }))
-          })
+    states: {
+      Idle: {
+        on: {
+          Start: (to) =>
+            to.branch.Ready().resolve(({ target }) => {
+              onAction()
+              return target.decoded(new Ready({ count: 0 }))
+            })
+        }
+      },
+      Ready: {
+        on: {
+          Add: (to) =>
+            to.branch.Ready().resolve(({ event, state, target }) => {
+              onAction()
+              return target.decoded(new Ready({ count: state.count + event.amount }))
+            })
+        }
       }
     }
   })
@@ -100,10 +102,11 @@ describe("MachineTest", () => {
       )
     })
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(),
+      root: States,
+      events: Machine.eventsFromSchemas(),
       input: PositiveInput,
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({ userId: "user-1" })))
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({ userId: "user-1" }))))
     })
 
     const generated = MachineTest.scenarios(machine)
@@ -119,9 +122,10 @@ describe("MachineTest", () => {
 
   it("rejects a non-empty minimum for machines without public events", () => {
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(),
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({ userId: "user-1" })))
+      root: States,
+      events: Machine.eventsFromSchemas(),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({ userId: "user-1" }))))
     })
 
     assert.throws(
@@ -144,13 +148,13 @@ describe("MachineTest", () => {
       const trace = yield* MachineTest.run(machine, scenario)
 
       assert.strictEqual(actionsExecuted, 2)
-      assert.deepStrictEqual(trace.initial.startingConfiguration, ["Ready"])
-      assert.deepStrictEqual(trace.initial.initialEntryPaths, ["Ready"])
-      assert.deepStrictEqual(trace.initial.startingState.value, new Ready({ count: 0 }))
-      assert.deepStrictEqual(trace.initial.configuration, ["Ready"])
+      assert.deepStrictEqual(trace.initial.startingConfiguration, ["", "Ready"])
+      assert.deepStrictEqual(trace.initial.initialEntryPaths, ["", "Ready"])
+      assert.deepStrictEqual(trace.initial.startingState.state.value, new Ready({ count: 0 }))
+      assert.deepStrictEqual(trace.initial.configuration, ["", "Ready"])
       assert.strictEqual(trace.initial.plan.microsteps.length, 0)
-      assert.deepStrictEqual(trace.steps.map((step) => (step.after.value as Ready).count), [2, 5])
-      assert.deepStrictEqual(trace.finalConfiguration, ["Ready"])
+      assert.deepStrictEqual(trace.steps.map((step) => (step.after.state.value as Ready).count), [2, 5])
+      assert.deepStrictEqual(trace.finalConfiguration, ["", "Ready"])
       const formatted = MachineTest.formatTrace(trace)
       assert.strictEqual(
         formatted.split("\n")[0],
@@ -158,7 +162,7 @@ describe("MachineTest", () => {
       )
       assert.match(formatted, /microstep 0: event=/)
       assert.match(formatted, / next=/)
-      assert.match(formatted, /final: configuration=\[Ready\]/)
+      assert.match(formatted, /final: configuration=\[\(root\), Ready\]/)
     }))
 
   it.effect("retains only transitions that survive parallel conflict resolution", () =>
@@ -171,55 +175,59 @@ describe("MachineTest", () => {
       class Disabled extends Schema.TaggedClass<Disabled>("Disabled")("Disabled", {}) {}
       class Stop extends Schema.TaggedClass<Stop>("Stop")("Stop", {}) {}
 
-      const ParallelStates = Machine.states({
-        app: {
-          schema: App,
-          type: "parallel",
-          states: {
-            left: {
-              schema: Left,
-              initial: "idle",
-              states: { idle: LeftIdle }
-            },
-            right: {
-              schema: Right,
-              initial: "idle",
-              states: { idle: RightIdle }
+      const ParallelStates = Machine.state({
+        initial: "app",
+        states: {
+          app: {
+            schema: App,
+            type: "parallel",
+            states: {
+              left: {
+                schema: Left,
+                initial: "idle",
+                states: { idle: LeftIdle }
+              },
+              right: {
+                schema: Right,
+                initial: "idle",
+                states: { idle: RightIdle }
+              }
             }
-          }
-        },
-        disabled: Disabled
+          },
+          disabled: Disabled
+        }
       })
       const machine = Machine.make({
-        states: ParallelStates.states,
-        events: Machine.events(Stop),
-        initial: (to) =>
-          to.app.initial.resolve(({ target }) =>
-            target.decoded(
-              new App({}),
-              (app) =>
+        root: ParallelStates,
+        events: Machine.eventsFromSchemas(Stop),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.app.decoded(new App({}), (app) =>
                 app
                   .left.decoded(new Left({}), (left) => left.idle.decoded(new LeftIdle({})))
-                  .right.decoded(new Right({}), (right) => right.idle.decoded(new RightIdle({})))
+                  .right.decoded(new Right({}), (right) => right.idle.decoded(new RightIdle({}))))
             )
           )
       }).handle({
-        app: {
-          states: {
-            left: {
-              states: {
-                idle: {
-                  on: {
-                    Stop: (to) => to.full.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+        states: {
+          app: {
+            states: {
+              left: {
+                states: {
+                  idle: {
+                    on: {
+                      Stop: (to) => to.branch.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+                    }
                   }
                 }
-              }
-            },
-            right: {
-              states: {
-                idle: {
-                  on: {
-                    Stop: (to) => to.full.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+              },
+              right: {
+                states: {
+                  idle: {
+                    on: {
+                      Stop: (to) => to.branch.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+                    }
                   }
                 }
               }
@@ -230,6 +238,7 @@ describe("MachineTest", () => {
 
       const initial = yield* Machine.planInitial(machine)
       assert.deepStrictEqual(initial.initialEntryPaths, [
+        "",
         "app",
         "app.left",
         "app.left.idle",
@@ -253,13 +262,20 @@ describe("MachineTest", () => {
   it.effect("reports both targets as undefined for a targetless transition", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { Idle },
-        events: Machine.events(Start),
-        initial: (to) => to.Idle().resolve(() => ({ path: "Idle" as const, value: new Idle({ userId: "user-1" }) }))
+        root: Machine.state({ initial: "Idle", states: { Idle } }),
+        events: Machine.eventsFromSchemas(Start),
+        initialConfiguration: (to) =>
+          to.resolve(() => ({
+            path: "" as const,
+            value: undefined,
+            state: { path: "Idle" as const, value: new Idle({ userId: "user-1" }) }
+          }))
       }).handle({
-        Idle: {
-          on: {
-            Start: (to) => to.none
+        states: {
+          Idle: {
+            on: {
+              Start: (to) => to.none
+            }
           }
         }
       })

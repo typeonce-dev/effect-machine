@@ -38,31 +38,34 @@ class Editing extends Schema.TaggedClass<Editing>("StructuralEditing")("Editing"
   draft: Schema.String
 }) {}
 
-const States = Machine.states({
-  player: {
-    type: "parallel",
-    annotations: { title: "Player" },
-    states: {
-      transport: {
-        initial: "Empty",
-        states: {
-          Empty: {},
-          Loading,
-          Ready: {
-            schema: Ready,
-            initial: "Paused",
-            states: {
-              Paused: {},
-              Playing
+const States = Machine.state({
+  initial: "player",
+  states: {
+    player: {
+      type: "parallel",
+      annotations: { title: "Player" },
+      states: {
+        transport: {
+          initial: "Empty",
+          states: {
+            Empty: {},
+            Loading,
+            Ready: {
+              schema: Ready,
+              initial: "Paused",
+              states: {
+                Paused: {},
+                Playing
+              }
             }
           }
-        }
-      },
-      settings: {
-        initial: "Audible",
-        states: {
-          Audible,
-          Muted
+        },
+        settings: {
+          initial: "Audible",
+          states: {
+            Audible,
+            Muted
+          }
         }
       }
     }
@@ -71,59 +74,63 @@ const States = Machine.states({
 
 const makeMachine = () =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(SourceSelected, Loaded, Play, Mute),
-    initial: (to) =>
-      to.player.initial.resolve(({ target }) =>
-        target.from((player) =>
-          player
-            .transport.from((transport) => transport.Empty.from())
-            .settings.from((settings) => settings.Audible.from({ volume: 1 }))
+    root: States,
+    events: Machine.eventsFromSchemas(SourceSelected, Loaded, Play, Mute),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) =>
+        target.from((to) =>
+          to.player.from((player) =>
+            player
+              .transport.from((transport) => transport.Empty.from())
+              .settings.from((settings) => settings.Audible.from({ volume: 1 }))
+          )
         )
       )
   }).handle({
-    player: {
-      states: {
-        transport: {
-          states: {
-            Empty: {
-              on: {
-                SourceSelected: (to) =>
-                  to.local.Loading().resolve(({ event, state, target }) => {
-                    assert.strictEqual(state, undefined)
-                    return target.from({ url: event.url })
-                  })
-              }
-            },
-            Loading: {
-              on: {
-                Loaded: (to) =>
-                  to.local.Ready().resolve(({ event, state, target }) => {
-                    assert.strictEqual(state._tag, "Loading")
-                    return target.from(
-                      { duration: event.duration },
-                      (ready) => ready.Paused.from()
-                    )
-                  })
-              }
-            },
-            Ready: {
-              states: {
-                Paused: {
-                  on: {
-                    Play: (to) =>
-                      to.local.Playing().resolve(({ containingState, state, target }) => {
-                        assert.strictEqual(state, undefined)
-                        return target.from({ position: Math.min(0, containingState.duration) })
-                      })
-                  }
-                },
-                Playing: {
-                  on: {
-                    Mute: (to) =>
-                      to.branch.player.settings.Muted().resolve(({ event, target }) =>
-                        target.from({ volume: event.volume })
+    states: {
+      player: {
+        states: {
+          transport: {
+            states: {
+              Empty: {
+                on: {
+                  SourceSelected: (to) =>
+                    to.local.Loading().resolve(({ event, state, target }) => {
+                      assert.strictEqual(state, undefined)
+                      return target.from({ url: event.url })
+                    })
+                }
+              },
+              Loading: {
+                on: {
+                  Loaded: (to) =>
+                    to.local.Ready().resolve(({ event, state, target }) => {
+                      assert.strictEqual(state._tag, "Loading")
+                      return target.from(
+                        { duration: event.duration },
+                        (ready) => ready.Paused.from()
                       )
+                    })
+                }
+              },
+              Ready: {
+                states: {
+                  Paused: {
+                    on: {
+                      Play: (to) =>
+                        to.local.Playing().resolve(({ containingState, state, target }) => {
+                          assert.strictEqual(state, undefined)
+                          return target.from({ position: Math.min(0, containingState.duration) })
+                        })
+                    }
+                  },
+                  Playing: {
+                    on: {
+                      Mute: (to) =>
+                        to.branch.player.settings.Muted().resolve(({ event, target }) =>
+                          target.from({ volume: event.volume })
+                        )
+                    }
                   }
                 }
               }
@@ -134,72 +141,86 @@ const makeMachine = () =>
     }
   })
 
-const HistoryStates = Machine.states({
-  flow: {
-    initial: "section",
-    states: {
-      section: {
-        initial: "Idle",
-        states: {
-          Idle: {},
-          Editing
-        }
-      },
-      recent: { type: "history" },
-      exact: { type: "history", history: "deep" }
-    }
-  },
-  away: {}
+const HistoryStates = Machine.state({
+  initial: "away",
+  states: {
+    flow: {
+      initial: "section",
+      states: {
+        section: {
+          initial: "Idle",
+          states: {
+            Idle: {},
+            Editing
+          }
+        },
+        recent: { type: "history" },
+        exact: { type: "history", history: "deep" }
+      }
+    },
+    away: {}
+  }
 })
 
 const historyFallback = () => ({
-  path: "flow" as const,
+  path: "" as const,
   value: undefined,
   state: {
-    path: "flow.section" as const,
+    path: "flow" as const,
     value: undefined,
-    state: { path: "flow.section.Idle" as const, value: undefined }
+    state: {
+      path: "flow.section" as const,
+      value: undefined,
+      state: { path: "flow.section.Idle" as const, value: undefined }
+    }
   }
 })
 
 const historyMachine = Machine.make({
-  states: HistoryStates.states,
-  events: Machine.events(Edit, Leave, ResumeShallow, ResumeDeep),
-  initial: (to) =>
-    to.flow.initial.resolve(({ target }) => target.from((flow) => flow.section.from((section) => section.Idle.from())))
+  root: HistoryStates,
+  events: Machine.eventsFromSchemas(Edit, Leave, ResumeShallow, ResumeDeep),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) => to.flow.from((flow) => flow.section.from((section) => section.Idle.from())))
+    )
 }).handle({
-  flow: {
-    history: {
-      recent: { default: historyFallback },
-      exact: { default: historyFallback }
-    },
-    on: {
-      Leave: (to) => to.full.away().resolve(({ target }) => target.from())
-    },
-    states: {
-      section: {
-        states: {
-          Idle: {
-            on: {
-              Edit: (to) => to.local.Editing().resolve(({ event, target }) => target.from({ draft: event.draft }))
+  states: {
+    flow: {
+      history: {
+        recent: { default: historyFallback },
+        exact: { default: historyFallback }
+      },
+      on: {
+        Leave: (to) => to.branch.away().resolve(({ target }) => target.from())
+      },
+      states: {
+        section: {
+          states: {
+            Idle: {
+              on: {
+                Edit: (to) => to.local.Editing().resolve(({ event, target }) => target.from({ draft: event.draft }))
+              }
             }
           }
         }
       }
-    }
-  },
-  away: {
-    on: {
-      ResumeShallow: (to) => to.history.flow.recent.resolve(({ target }) => target()),
-      ResumeDeep: (to) => to.history.flow.exact.resolve(({ target }) => target())
+    },
+    away: {
+      on: {
+        ResumeShallow: (to) => to.history.flow.recent.resolve(({ target }) => target()),
+        ResumeDeep: (to) => to.history.flow.exact.resolve(({ target }) => target())
+      }
     }
   }
 })
 
-const FinalStates = Machine.states({
-  Done: {
-    type: "final",
-    output: Schema.String
+const FinalStates = Machine.state({
+  initial: "Done",
+  states: {
+    Done: {
+      type: "final",
+      output: Schema.String
+    }
   }
 })
 
@@ -208,7 +229,7 @@ describe("structural active states", () => {
     Effect.gen(function*() {
       const planned = yield* Machine.planInitial(makeMachine())
       const snapshot = planned.state
-      assert.deepStrictEqual(snapshot, {
+      assert.deepStrictEqual(snapshot.state, {
         path: "player" as const,
         value: undefined,
         states: {
@@ -284,6 +305,7 @@ describe("structural active states", () => {
       const encoded = yield* Machine.encodeSnapshot(machine, started.state)
 
       assert.deepStrictEqual(encoded.active, [
+        { path: "" as const },
         { path: "player" as const },
         { path: "player.transport" as const },
         { path: "player.transport.Empty" as const },
@@ -325,14 +347,16 @@ describe("structural active states", () => {
   it.effect("keeps final output independent from a state value schema", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: FinalStates.states,
-        events: Machine.events(),
-        initial: (to) => to.Done().resolve(({ target }) => target.from())
+        root: FinalStates,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Done.from()))
       }).handle({
-        Done: {
-          output: ({ state }) => {
-            assert.strictEqual(state, undefined)
-            return "complete"
+        states: {
+          Done: {
+            output: ({ state }) => {
+              assert.strictEqual(state, undefined)
+              return "complete"
+            }
           }
         }
       })
@@ -341,9 +365,10 @@ describe("structural active states", () => {
       assert.isTrue(planned.done)
       assert.strictEqual(planned.output, "complete")
       assert.deepStrictEqual(planned.state, {
-        path: "Done" as const,
+        path: "",
         value: undefined,
-        completed: [{ path: "Done" as const, output: "complete" }]
+        state: { path: "Done", value: undefined },
+        completed: [{ path: "Done", output: "complete" }, { path: "", output: "complete" }]
       })
     }))
 })
