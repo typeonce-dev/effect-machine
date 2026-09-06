@@ -3,7 +3,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
-import type { MachineRef } from "./runtime.js"
+import type { MachineRef } from "./runtimeProtocol.js"
 
 export type ChildDescriptor = {
   readonly id: string

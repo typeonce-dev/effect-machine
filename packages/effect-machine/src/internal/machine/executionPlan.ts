@@ -24,6 +24,7 @@ import {
   withMachineReferences
 } from "./configuration.js"
 import { InfiniteTransitionError, StoppedError } from "./errors.js"
+import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import {
   broadenTransitionBoundary,
@@ -114,7 +115,7 @@ const indexedStateConfigKeys: ReadonlySet<PropertyKey> = new Set([
 
 // Fail closed so a newly introduced semantic field must explicitly opt into
 // indexed execution instead of being accepted before the kernel supports it.
-const supportsIndexedStateConfig = (config: Machine.AnyStateConfig | undefined): boolean => {
+const supportsIndexedStateConfig = (config: CapturedStateConfig | undefined): boolean => {
   if (config === undefined) {
     return true
   }
@@ -149,7 +150,7 @@ const compileIndexedExecutionDescriptor = (
       finalPaths.push(node.path)
     }
 
-    const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
+    const config = toImpl(machine).handlers[node.path] as CapturedStateConfig | undefined
     if (!supportsIndexedStateConfig(config)) {
       return undefined
     }
@@ -212,7 +213,7 @@ const compileIndexedExecutionDescriptor = (
     // the hierarchical planner so their entry and exit boundaries stay explicit.
     flat: nodes.every((node) => node.parent === undefined && (node.type === "atomic" || node.type === "final")) || (
       nodes[0]?.path === "" && nodes[0].type === "compound" && nodes[0].schema === undefined &&
-      (machine.handlers[""] === undefined || Reflect.ownKeys(machine.handlers[""]).length === 0) &&
+      (toImpl(machine).handlers[""] === undefined || Reflect.ownKeys(toImpl(machine).handlers[""]!).length === 0) &&
       nodes.slice(1).every((node) => node.parent === "" && (node.type === "atomic" || node.type === "final")) &&
       [...transitionsByPath.values()].every((events) =>
         [...events.values()].every((transition) =>
@@ -816,7 +817,7 @@ const planIndexedFlatState = (
     }
 
     const sourcePath = descriptor.nodes[sourceIndex]!.path
-    const transition = normalizeTransition(machine.handlers[sourcePath]?.on?.[event._tag])
+    const transition = normalizeTransition(toImpl(machine).handlers[sourcePath]?.on?.[event._tag])
     if (transition !== undefined) {
       const transitionResult = collectIndexedTransition(
         machine,
@@ -1131,7 +1132,7 @@ const makeIndexedExecutionPlan = (
     planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps, machineReferences),
   // Initializers may enqueue commands and emissions. Managed startup owns that
   // work through the generic initial planner; indexed event execution remains valid.
-  ...(Object.values(machine.handlers as Record<string, Machine.AnyStateConfig>).some((config) =>
+  ...(Object.values(toImpl(machine).handlers as Record<string, CapturedStateConfig>).some((config) =>
       "initialize" in config
     ) ?
     {} :

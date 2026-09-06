@@ -4,91 +4,25 @@
  * @since 0.4.0
  */
 import * as Cause from "effect/Cause"
-import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { ClusterError, ClusterSchema, Entity, EntityAddress, MessageStorage, Snowflake } from "effect/unstable/cluster"
+import { ClusterSchema, Entity, MessageStorage } from "effect/unstable/cluster"
+import type { EntityAddress, Snowflake } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
 import type * as Machine from "../../Machine.js"
-import type { Checkpoint, ClusterMachine, LoadResult } from "../../unstable/cluster/ClusterMachine.js"
+import type { Checkpoint } from "../../unstable/cluster/ClusterMachine.js"
+import type { ClusterMachine } from "../../unstable/cluster/ClusterMachine.js"
+import { Accepted, CommitResult, Rejected, type RejectionReason, SendResult, Storage } from "./clusterProtocol.js"
+import { toImpl } from "./implementation.js"
 import * as internalMachine from "./machine.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 import type { ExcludeCompatibleRuntime } from "./requirements.js"
 
 type EntityAddress = EntityAddress.EntityAddress
-type PersistenceError = ClusterError.PersistenceError
 type Snowflake = Snowflake.Snowflake
-
-export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
-
-export const CommitResult = {
-  Committed: (): CommitResult.Committed => ({ _tag: "Committed" }),
-  Duplicate: (): CommitResult.Duplicate => ({ _tag: "Duplicate" })
-}
-
-export declare namespace CommitResult {
-  /**
-   * Indicates that the request id and checkpoint were committed atomically.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export interface Committed {
-    readonly _tag: "Committed"
-  }
-
-  /**
-   * Indicates that the request id was already committed.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export interface Duplicate {
-    readonly _tag: "Duplicate"
-  }
-}
-
-export class Storage extends Context.Service<Storage, {
-  readonly load: (
-    address: EntityAddress,
-    requestId: Snowflake
-  ) => Effect.Effect<LoadResult, PersistenceError>
-  readonly commit: (
-    address: EntityAddress,
-    checkpoint: Checkpoint
-  ) => Effect.Effect<CommitResult, PersistenceError>
-}>()("effect/cluster/ClusterMachine/Storage") {}
-
-export class Accepted extends Schema.TaggedClass<Accepted>("effect/cluster/ClusterMachine/Accepted")(
-  "Accepted",
-  {}
-) {}
-
-export const RejectionReason = Schema.Literals([
-  "MachineIdMismatch",
-  "VersionMismatch",
-  "InvalidCheckpoint",
-  "UnsupportedProcessLocal",
-  "TransitionFailure",
-  "SnapshotEncodeFailure",
-  "PersistenceFailure",
-  "EmissionFailure"
-])
-
-export type RejectionReason = typeof RejectionReason.Type
-
-export class Rejected extends Schema.TaggedClass<Rejected>("effect/cluster/ClusterMachine/Rejected")(
-  "Rejected",
-  {
-    reason: RejectionReason,
-    message: Schema.String
-  }
-) {}
-
-export const SendResult = Schema.Union([Accepted, Rejected])
 
 type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.Rpc<
   "send",
@@ -101,7 +35,7 @@ type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<
 type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.EmittedEvents<M>
 
 const hasInvokes = (machine: Machine.Machine.Any): boolean =>
-  Reflect.ownKeys(machine.handlers).some((key) => machine.handlers[key as string]?.invoke !== undefined)
+  Reflect.ownKeys(toImpl(machine).handlers).some((key) => toImpl(machine).handlers[key as string]?.invoke !== undefined)
 
 const reject = (reason: RejectionReason, message: string): Rejected => new Rejected({ reason, message })
 

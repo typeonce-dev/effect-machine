@@ -207,6 +207,12 @@ export const checkArchitecture = ({
   const program = readProject(root, tsconfigPath)
   const edges = collectEdges(program, root)
   const runtimeEdges = edges.filter((edge) => !edge.typeOnly)
+  const runtimeModules = new Set([
+    "src/internal/machine/runtime.ts",
+    "src/internal/machine/runtimeProtocol.ts",
+    "src/internal/machine/runtimeGeneric.ts",
+    "src/internal/machine/runtimeCompiled.ts"
+  ])
   const diagnostics = []
   const entrypoints = new Set([
     "src/index.ts",
@@ -221,7 +227,10 @@ export const checkArchitecture = ({
       "runtimeInvariant", "exploration", "probe", "trace", "format"
     ].map((name) => `src/internal/testing/machine/${name}.ts`))],
     ["src/unstable/reactivity/AtomMachine.ts", new Set(["src/internal/machine/atom.ts"])],
-    ["src/unstable/cluster/ClusterMachine.ts", new Set(["src/internal/machine/cluster.ts"])]
+    ["src/unstable/cluster/ClusterMachine.ts", new Set([
+      "src/internal/machine/cluster.ts",
+      "src/internal/machine/clusterProtocol.ts"
+    ])]
   ])
   const forbiddenSemanticDependencies = new Map([
     ["src/internal/machine/topology.ts", new Set([
@@ -290,6 +299,12 @@ export const checkArchitecture = ({
     ])]
   ])
 
+  for (const forbidden of forbiddenSemanticDependencies.values()) {
+    if (forbidden.has("src/internal/machine/runtime.ts")) {
+      for (const module of runtimeModules) forbidden.add(module)
+    }
+  }
+
   for (const edge of edges) {
     if (entrypoints.has(edge.source) && edge.target.includes("/internal/")) {
       diagnostics.push(diagnostic(
@@ -336,7 +351,7 @@ export const checkArchitecture = ({
         "src/internal/machine/executionPlan.ts",
         "src/internal/machine/invocation.ts",
         "src/internal/machine/process.ts",
-        "src/internal/machine/runtime.ts"
+        ...runtimeModules
       ].includes(edge.target)
     ) {
       diagnostics.push(diagnostic(
@@ -357,7 +372,7 @@ export const checkArchitecture = ({
       ))
     }
     if (
-      edge.source === "src/internal/machine/runtime.ts" &&
+      runtimeModules.has(edge.source) &&
       [
         "src/internal/machine/configuration.ts",
         "src/internal/machine/executionPlan.ts",

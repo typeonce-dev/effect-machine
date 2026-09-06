@@ -29,13 +29,14 @@ import type {
 import * as Activities from "./activities.js"
 import * as Configuration from "./configuration.js"
 import type { ChildAlreadyExistsError, InfiniteTransitionError, StartupError } from "./errors.js"
+import type { CapturedStateConfig } from "./implementation.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as internalPlanner from "./planner.js"
 import * as internalProcess from "./process.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
 import type { ExcludeCompatibleRuntime } from "./requirements.js"
-import * as internalRuntime from "./runtime.js"
+import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
@@ -92,7 +93,7 @@ const Proto = {
 
 const makeWithHandlers = (
   self: Definition.Any,
-  handlers: Machine.StateConfigs<any, any, any, any, any, any, any>
+  handlers: Readonly<Record<string, CapturedStateConfig>>
 ): Machine.Any => {
   const machine = Object.create(Proto)
   machine.states = self.states
@@ -1059,7 +1060,7 @@ const captureInvokeDefinition = (
 }
 
 const flattenHandlers = (
-  handlers: Record<PropertyKey, Machine.AnyStateConfig>,
+  handlers: Record<PropertyKey, CapturedStateConfig>,
   stateNodes: Machine.StateNodes,
   states: Machine.StateTree,
   prefix: string,
@@ -1111,7 +1112,7 @@ const flattenHandlers = (
         throw new Error(`Machine choice state "${path}" requires a transition`)
       }
     }
-    handlers[path] = stateConfig as Machine.AnyStateConfig
+    handlers[path] = stateConfig as CapturedStateConfig
     if (childConfig !== undefined) {
       const node = Topology.getStateNodeDefinition(path, states[key]!)
       if (node.states === undefined) {
@@ -1127,7 +1128,7 @@ const flattenHandlers = (
 
 const makeHandle = (self: Definition.Any): Definition.Any["handle"] =>
   ((config: Record<string, unknown>) => {
-    const handlers: Record<PropertyKey, Machine.AnyStateConfig> = Object.create(null)
+    const handlers: Record<PropertyKey, CapturedStateConfig> = Object.create(null)
     flattenHandlers(handlers, self.stateNodes, self.states, "", { "": config })
     return makeWithHandlers(self, handlers)
   }) as Definition.Any["handle"]

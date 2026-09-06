@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import type { Machine, Runtime } from "../../Machine.js"
 import type { RuntimeCommand } from "./command.js"
 import { decodeEmit, decodeEvent } from "./protocol.js"
-import type { ProcessScope } from "./runtime.js"
+import type { ProcessScope } from "./runtimeProtocol.js"
 
 export const makeLiveRuntime = <Events, Emits>(
   machine: Machine.Any,

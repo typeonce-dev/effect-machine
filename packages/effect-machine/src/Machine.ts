@@ -28,7 +28,7 @@ import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
 import type { ExcludeCompatibleRuntime } from "./internal/machine/requirements.js"
-import type * as internalRuntime from "./internal/machine/runtime.js"
+import type * as internalRuntime from "./internal/machine/runtimeProtocol.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
 
@@ -111,9 +111,30 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Gotchas**
  *
- * Declarative first-class guards are not part of the current API. Conditional
- * behavior can be expressed in typed handlers with ordinary TypeScript control
- * flow. Use `after` for cancellable state-scoped delayed events.
+ * Use `.guard(predicate)` to decline a transition before constructing its next
+ * state. Use `.resolve(..., { declinable: true })` when conditional resolution
+ * needs to return `decline()`. Use `after` for cancellable state-scoped delays.
+ *
+ * **Example**
+ *
+ * ```ts
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Schema } from "effect"
+ *
+ * const events = Machine.events({ Add: { by: Schema.Number } })
+ * export const counter = Machine.make({
+ *   root: Machine.state({ fields: { count: Schema.Number } }),
+ *   events,
+ *   initial: (root) => root.from(() => ({ count: 0 }))
+ * }).handle({
+ *   on: {
+ *     Add: (to) =>
+ *       to.self.update.guard(({ event }) => event.by > 0).from(({ current, event }) => ({
+ *         count: current.count + event.by
+ *       }))
+ *   }
+ * })
+ * ```
  *
  * @category models
  * @since 0.4.0

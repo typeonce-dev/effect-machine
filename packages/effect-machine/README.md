@@ -939,8 +939,9 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Declarative first-class guards are not currently part of the API; use ordinary
-TypeScript conditions. Pull requests that change `src/` or `package.json` need
+Use `.guard(predicate)` to decline a transition before state construction, or
+`.resolve(..., { declinable: true })` to use `decline()` during resolution.
+Pull requests that change `src/` or `package.json` need
 a changeset and the performance checks described in `AGENTS.md`.
 
 When equivalent Machine modules ship in Effect, this package is intended to
