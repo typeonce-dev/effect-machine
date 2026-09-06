@@ -58,6 +58,24 @@ const makeFlatMachine = () => {
 }
 
 describe("machine planner and runtime strategies", () => {
+  for (const strategy of ["generic", "compiled"] as const) {
+    it.effect(`keeps independent root lifecycles isolated with the ${strategy} runtime`, () =>
+      Effect.gen(function*() {
+        const machine = makeFlatMachine()
+        const first = yield* openWithRuntimeStrategy(machine, strategy)
+        const second = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* first.send(new Increment({}))
+        yield* first.stop
+        yield* second.send(new Increment({}))
+        yield* second.send(new Finish({}))
+        assert.strictEqual(yield* second.join, 1)
+        assert.strictEqual((yield* first.snapshot).status, "stopped")
+        const third = yield* openWithRuntimeStrategy(machine, strategy)
+        yield* third.send(new Finish({}))
+        assert.strictEqual(yield* third.join, 0)
+      }))
+  }
+
   it.effect("matches generic and indexed-flat planning including targetless and reentering transitions", () =>
     verifyPlannerStrategies({
       machine: makeFlatMachine(),

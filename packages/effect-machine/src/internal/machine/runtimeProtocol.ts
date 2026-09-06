@@ -511,15 +511,28 @@ export interface ProcessRuntime {
 export const makeProcessRuntime = (
   start: StartProcess,
   startCompiledSync: ProcessRuntime["startCompiledSync"]
-): Effect.Effect<ProcessRuntime> =>
-  Effect.sync(() => {
-    let sessionIdCounter = 0
-    return {
-      start,
-      startCompiledSync,
-      nextSessionId: Effect.sync(() => `machine:${sessionIdCounter++}`)
+): Effect.Effect<ProcessRuntime> => {
+  // Strategy hooks belong to the shared prototype. Each root owns only its
+  // session counter and optional inspection runtime, independent of other roots.
+  class Runtime implements ProcessRuntime {
+    declare inspection?: InspectionRuntime.Runtime
+    readonly nextSessionId: Effect.Effect<string>
+
+    constructor() {
+      let sessionIdCounter = 0
+      this.nextSessionId = Effect.sync(() => `machine:${sessionIdCounter++}`)
     }
-  })
+
+    get start(): StartProcess {
+      return start
+    }
+
+    get startCompiledSync(): ProcessRuntime["startCompiledSync"] {
+      return startCompiledSync
+    }
+  }
+  return Effect.sync(() => new Runtime())
+}
 
 export const inspectionSubject = (
   logic: ProcessLogic<any, any, any, any, any, any>,

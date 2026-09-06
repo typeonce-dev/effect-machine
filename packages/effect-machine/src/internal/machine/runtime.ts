@@ -24,6 +24,8 @@ const startLogicInternal: StartProcess = ((
     ? startCompactCompiledInternal(logic, options)
     : startGenericInternal(logic, options)) as StartProcess
 
+const makeRuntime = makeProcessRuntime(startLogicInternal, startCompiledSync)
+
 export type ProcessRuntimeStrategy = "generic" | "compiled" | "auto"
 
 const startProcessWithStrategy = Effect.fnUntraced(function*(
@@ -33,7 +35,7 @@ const startProcessWithStrategy = Effect.fnUntraced(function*(
     readonly id?: string
   }
 ) {
-  const runtime = yield* makeProcessRuntime(startLogicInternal, startCompiledSync)
+  const runtime = yield* makeRuntime
   const internalOptions: StartInternalOptions = options === undefined
     ? {
       detached: true,
@@ -98,7 +100,7 @@ export const startProcess: <
     readonly id?: string
   }
 ) {
-  const runtime = yield* makeProcessRuntime(startLogicInternal, startCompiledSync)
+  const runtime = yield* makeRuntime
   return yield* startLogicInternal(
     logic,
     options === undefined
@@ -129,7 +131,7 @@ const prepareProcessWithStrategy = Effect.fnUntraced(function*<
     readonly id?: string
   }
 ) {
-  const runtime = yield* makeProcessRuntime(startLogicInternal, startCompiledSync)
+  const runtime = yield* makeRuntime
   const sessionId = yield* runtime.nextSessionId
   const inspection = yield* InspectionRuntime.make(sessionId)
   runtime.inspection = inspection
