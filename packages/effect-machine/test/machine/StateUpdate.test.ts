@@ -380,9 +380,8 @@ describe("state value updates", () => {
                   Quiet: (to) =>
                     to.local.update.resolve(({ current, owner }) => owner.from({ count: current.count + 1 })),
                   Loud: (to) =>
-                    to.local.update.resolve(
-                      ({ current, owner }) => owner.from({ count: current.count + 1 }),
-                      { reenter: true }
+                    to.local.update.reenter().resolve(
+                      ({ current, owner }) => owner.from({ count: current.count + 1 })
                     )
                 }
               }

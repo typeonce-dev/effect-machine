@@ -307,7 +307,7 @@ describe("Machine structural visualization", () => {
       states: {
         idle: {
           on: {
-            Refresh: (to) => to.none.resolve(() => undefined, { reenter: true })
+            Refresh: (to) => to.none.reenter().resolve(() => undefined)
           },
           always: (to) => to.none,
           onDone: (to) => to.none

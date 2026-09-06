@@ -94,6 +94,20 @@ const scenarios = [
     maxMarginalInstantiations: 145_000
   },
   {
+    id: "transition-construction-control",
+    label: "transition construction control",
+    file: "transition-construction-control.ts",
+    hidden: true
+  },
+  {
+    id: "transition-construction",
+    label: "atomic construction, guards, and reentry",
+    file: "transition-construction.ts",
+    control: "transition-construction-control",
+    maxInstantiations: 145_000,
+    maxMarginalInstantiations: 115_000
+  },
+  {
     id: "dynamic-invoke-control",
     label: "dynamic invocation control",
     file: "dynamic-invoke-control.ts",

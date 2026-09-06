@@ -19,13 +19,15 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
 
   const fluentTransition = (definition) => (to) => {
     const selection = selectInstruction(definition.target(hasRoot ? { ...to, full: to.branch } : to))
+    const reentered = definition.reenter === true && typeof selection.reenter === "function" ? selection.reenter() : undefined
     if (definition.resolve !== undefined) {
-      return selection.resolve(definition.resolve, {
-        ...(definition.reenter === true ? { reenter: true } : {}),
+      const chainable = reentered !== undefined && typeof reentered.resolve === "function"
+      return (chainable ? reentered : selection).resolve(definition.resolve, {
+        ...(definition.reenter === true && !chainable ? { reenter: true } : {}),
         ...(definition.declinable === true ? { declinable: true } : {})
       })
     }
-    return definition.reenter === true ? selection.reenter() : selection
+    return reentered ?? selection
   }
 
   const fluentInitial = (definition) => (to) => {

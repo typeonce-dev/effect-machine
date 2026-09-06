@@ -47,7 +47,7 @@ const makeFlatMachine = () => {
           Noop: (to) => to.none,
           Increment: (to) =>
             to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
-          Reenter: (to) => to.none.resolve(() => undefined, { reenter: true }),
+          Reenter: (to) => to.none.reenter().resolve(() => undefined),
           Finish: (to) =>
             to.branch.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
         }
@@ -224,9 +224,8 @@ describe("machine planner and runtime strategies", () => {
                         ExitRoot: (to) =>
                           to.branch.Root.update.resolve(({ owner }) => owner.decoded(new Root({ revision: 3 }))),
                         ReenterUpdate: (to) =>
-                          to.local.update.resolve(
-                            ({ current, owner }) => owner.decoded(new Left({ value: current.value + 1 })),
-                            { reenter: true }
+                          to.local.update.reenter().resolve(
+                            ({ current, owner }) => owner.decoded(new Left({ value: current.value + 1 }))
                           )
                       }
                     }
@@ -1216,11 +1215,8 @@ describe("machine planner and runtime strategies", () => {
                 ),
               on: {
                 Reenter: (to) =>
-                  to.branch.Loading().resolve(
-                    ({ state, target }) => target.decoded(new Loading({ epoch: state.epoch + 1 })),
-                    {
-                      reenter: true
-                    }
+                  to.branch.Loading().reenter().resolve(
+                    ({ state, target }) => target.decoded(new Loading({ epoch: state.epoch + 1 }))
                   ),
                 Stale: (to) => to.branch.Failed().resolve(({ target }) => target.decoded(new Failed({})))
               }

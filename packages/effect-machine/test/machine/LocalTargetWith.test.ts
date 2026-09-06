@@ -39,9 +39,8 @@ describe("local compound target selection", () => {
           search: {
             on: {
               UpdateQuery: (to) =>
-                to.local.with.resolve(
-                  ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
-                  { reenter: true }
+                to.local.with.reenter().resolve(
+                  ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from())
                 )
             },
             states: {

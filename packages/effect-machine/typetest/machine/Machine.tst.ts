@@ -1194,7 +1194,7 @@ describe("Machine", () => {
                   title: "active user",
                   target: to.none
                 }
-              }).resolve(({ event, select, state }) => {
+              }).reenter().resolve(({ event, select, state }) => {
                 expect(event).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
                 expect(select.recognized.decoded).type.toBeCallableWith(new Down({}))
@@ -1209,7 +1209,7 @@ describe("Machine", () => {
                   default:
                     return select.recognized.decoded(new Down({}))
                 }
-              }, { reenter: true })
+              })
           }
         }
       }

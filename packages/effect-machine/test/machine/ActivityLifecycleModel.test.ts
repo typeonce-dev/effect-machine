@@ -91,7 +91,7 @@ describe("machine activity lifecycle model", () => {
                   on: {
                     Leave: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
                     Restart: (to) =>
-                      to.branch.Active().resolve(({ target }) => target.decoded(new Active({})), { reenter: true })
+                      to.branch.Active().reenter().resolve(({ target }) => target.decoded(new Active({})))
                   }
                 }
               }
@@ -205,9 +205,8 @@ describe("machine activity lifecycle model", () => {
               }).onDone((to) => to.none).onFailure((to) => to.none),
             on: {
               Restart: (to) =>
-                to.branch.Active().resolve(
-                  ({ state, target }) => target.decoded(new EpochActive({ acknowledged: state.acknowledged })),
-                  { reenter: true }
+                to.branch.Active().reenter().resolve(
+                  ({ state, target }) => target.decoded(new EpochActive({ acknowledged: state.acknowledged }))
                 ),
               QueueBarrier: (to) =>
                 to.branch.Active().resolve(({ state, target }) =>

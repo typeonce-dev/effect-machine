@@ -190,7 +190,7 @@ export const transitionSemanticsMachine = Machine.make({
                   ? select.publish.decoded(new WorkspaceFinished({ result: "published directly" }))
                   : select.review.decoded(new Review({ requestedBy: event.requestedBy }))
               ),
-            Refresh: (to) => to.none.resolve(() => undefined, { reenter: true }),
+            Refresh: (to) => to.none.reenter(),
             Ignore: (to) => to.none,
             MaybeHandle: (to) =>
               to.none.resolve(({ decline, event }) => event.accept ? undefined : decline(), {

@@ -88,13 +88,13 @@ describe("Machine state-value updates", () => {
                           expect(to.history).type.not.toHaveProperty("update")
                           expect(to.none).type.not.toHaveProperty("update")
 
-                          return to.local.update.resolve(({ current, owner, state }) => {
+                          return to.local.update.reenter().resolve(({ current, owner, state }) => {
                             expect(state).type.toBe<SignedOut>()
                             expect(current).type.toBe<Auth>()
                             expect(owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
                             expect(owner.from).type.toBeCallableWith({ user: "next" })
                             return owner.decoded(new Auth({ user: "next" }))
-                          }, { reenter: true })
+                          })
                         }
                       }
                     }
