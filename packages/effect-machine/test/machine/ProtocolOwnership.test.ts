@@ -7,19 +7,22 @@ describe("protocol ownership", () => {
     Effect.gen(function*() {
       const State = Schema.TaggedStruct("State", {})
       const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
-      const events = Machine.events(Set)
+      const events = Machine.eventsFromSchemas(Set)
       let retained: unknown
       const machine = Machine.make({
-        states: { State },
+        root: Machine.state({ initial: "State", states: { State } }),
         events,
-        initial: (to) => to.State().resolve(({ target }) => target.decoded({ _tag: "State" }))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
       }).handle({
-        State: {
-          on: {
-            Set: (to) =>
-              to.none.resolve(({ event }) => {
-                retained = event
-              })
+        states: {
+          State: {
+            on: {
+              Set: (to) =>
+                to.none.resolve(({ event }) => {
+                  retained = event
+                })
+            }
           }
         }
       })
@@ -36,14 +39,15 @@ describe("protocol ownership", () => {
     Effect.gen(function*() {
       const State = Schema.TaggedStruct("State", {})
       const Internal = Schema.TaggedStruct("Internal", {})
-      const internalEvents = Machine.internalEvents(Internal)
+      const internalEvents = Machine.internalEventsFromSchemas(Internal)
       const machine = Machine.make({
-        states: { State },
-        events: Machine.events(),
+        root: Machine.state({ initial: "State", states: { State } }),
+        events: Machine.eventsFromSchemas(),
         internalEvents,
-        initial: (to) => to.State().resolve(({ target }) => target.decoded({ _tag: "State" }))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
       })
-        .handle({ State: { on: { Internal: (to) => to.none } } })
+        .handle({ states: { State: { on: { Internal: (to) => to.none } } } })
       const initial = yield* Machine.planInitial(machine)
       assert.isTrue(yield* Machine.can(machine, initial.state, { _tag: "Internal" }))
       assert.isTrue(yield* Machine.can(machine)(initial.state, internalEvents.Internal()))
@@ -61,9 +65,10 @@ describe("protocol ownership", () => {
           )
         const State = Schema.TaggedStruct("State", { value: Value })
         const machine = Machine.make({
-          states: { State },
-          events: Machine.events(),
-          initial: (to) => to.State().resolve(({ target }) => target.decoded({ _tag: "State", value: 1 }))
+          root: Machine.state({ initial: "State", states: { State } }),
+          events: Machine.eventsFromSchemas(),
+          initialConfiguration: (root) =>
+            root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State", value: 1 })))
         })
         const initial = yield* Machine.planInitial(machine)
         const operation: Effect.Effect<unknown, Machine.MachineSchemaDecodeError | Machine.MachineSchemaEncodeError> =

@@ -36,9 +36,12 @@ class Online extends Schema.TaggedClass<Online>("Online")("Online", {}) {}
 
 class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 
-const CounterStates = Machine.states({
-  Count,
-  Done: { schema: Done, type: "final" }
+const CounterStates = Machine.state({
+  initial: "Count",
+  states: {
+    Count,
+    Done: { schema: Done, type: "final" }
+  }
 })
 
 const makeRegistry = Effect.acquireRelease(
@@ -66,37 +69,43 @@ const waitForResult = <A, E>(
 
 const makeCounterMachine = () =>
   Machine.make({
-    states: CounterStates.states,
-    events: Machine.events(Finish),
-    initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+    root: CounterStates,
+    events: Machine.eventsFromSchemas(Finish),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
   }).handle({
-    Count: {
-      on: {
-        Finish: (to) =>
-          to.full.Count().resolve(({ state, event, target }) =>
-            target.decoded(new Count({ value: state.value + event.by }))
-          )
-      }
-    },
-    Done: {}
+    states: {
+      Count: {
+        on: {
+          Finish: (to) =>
+            to.branch.Count().resolve(({ state, event, target }) =>
+              target.decoded(new Count({ value: state.value + event.by }))
+            )
+        }
+      },
+      Done: {}
+    }
   })
 
 const makeInputCounterMachine = () =>
   Machine.make({
-    states: CounterStates.states,
-    events: Machine.events(Finish),
+    root: CounterStates,
+    events: Machine.eventsFromSchemas(Finish),
     input: Schema.Number,
-    initial: (to) => to.Count().resolve(({ input, target }) => target.decoded(new Count({ value: input })))
+    initialConfiguration: (root) =>
+      root.resolve(({ input, target }) => target.from((to) => to.Count.decoded(new Count({ value: input }))))
   }).handle({
-    Count: {
-      on: {
-        Finish: (to) =>
-          to.full.Count().resolve(({ state, event, target }) =>
-            target.decoded(new Count({ value: state.value + event.by }))
-          )
-      }
-    },
-    Done: {}
+    states: {
+      Count: {
+        on: {
+          Finish: (to) =>
+            to.branch.Count().resolve(({ state, event, target }) =>
+              target.decoded(new Count({ value: state.value + event.by }))
+            )
+        }
+      },
+      Done: {}
+    }
   })
 
 const forceGc = async () => {
@@ -138,18 +147,20 @@ describe("AtomMachine", () => {
     Effect.scoped(Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("AtomPreparedIdle")("Idle", {}) {}
       class ReadyEmission extends Schema.TaggedClass<ReadyEmission>("AtomPreparedReady")("ReadyEmission", {}) {}
-      const states = Machine.states({ Idle })
-      const Emissions = Machine.emittedEvents(ReadyEmission)
+      const states = Machine.state({ initial: "Idle", states: { Idle } })
+      const Emissions = Machine.emittedEventsFromSchemas(ReadyEmission)
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
+        root: states,
+        events: Machine.eventsFromSchemas(),
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          entry: (_, enqueue) => {
-            enqueue.emit(Emissions.ReadyEmission())
-            return undefined
+        states: {
+          Idle: {
+            entry: (_, enqueue) => {
+              enqueue.emit(Emissions.ReadyEmission())
+              return undefined
+            }
           }
         }
       })
@@ -187,33 +198,39 @@ describe("AtomMachine", () => {
       const invokeStarts = yield* Ref.make(0)
       const invokeStopped = yield* Deferred.make<void>()
       const machine = Machine.make({
-        states: CounterStates.states,
-        events: Machine.events(Finish),
-        initial: (to) =>
-          to.Count().resolve(({ target }) => {
+        root: CounterStates,
+        events: Machine.eventsFromSchemas(Finish),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => {
             initialCalls += 1
-            return target.decoded(new Count({ value: 0 }))
+            return target.from((to) => to.Count.decoded(new Count({ value: 0 })))
           })
       }).handle({
-        Count: {
-          invoke: (from) =>
-            from.logic("active", {
-              address: Machine.childAddress("active"),
-              logic: Machine.logic({
-                initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
-                run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
-              })
-            }),
-          on: {
-            Finish: (to) =>
-              to.full.Count().resolve(({ event, state, target }) =>
-                target.decoded(new Count({ value: state.value + event.by }))
-              )
-          }
-        },
-        Done: {}
+        states: {
+          Count: {
+            invoke: (from) =>
+              from.logic("active", {
+                address: Machine.childAddress("active"),
+                logic: Machine.logic({
+                  initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
+                  run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
+                })
+              }),
+            on: {
+              Finish: (to) =>
+                to.branch.Count().resolve(({ event, state, target }) =>
+                  target.decoded(new Count({ value: state.value + event.by }))
+                )
+            }
+          },
+          Done: {}
+        }
       })
-      const bridge = AtomMachine.resume(machine, { path: "Count" as const, value: new Count({ value: 5 }) })
+      const bridge = AtomMachine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Count" as const, value: new Count({ value: 5 }) }
+      })
       const canFinish = AtomMachine.can(new Finish({ by: 1 }))(bridge)
       const firstRegistry = AtomRegistry.make()
       const secondRegistry = AtomRegistry.make()
@@ -225,7 +242,7 @@ describe("AtomMachine", () => {
       assert.strictEqual(first.sessionId, firstAgain.sessionId)
       assert.strictEqual(first, firstAgain)
       assert.notStrictEqual(first, second)
-      assert.deepStrictEqual(yield* AtomRegistry.getResult(firstRegistry, bridge.state), {
+      assert.deepStrictEqual((yield* AtomRegistry.getResult(firstRegistry, bridge.result)).state, {
         path: "Count" as const,
         value: new Count({ value: 5 })
       })
@@ -251,20 +268,23 @@ describe("AtomMachine", () => {
       const childMachine = makeCounterMachine()
       const Child = Machine.child("counter", childMachine)
       const parent = Machine.make({
-        states: { Count, ValueRead },
-        events: Machine.events(Finish, ReadValue),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: Machine.state({ initial: "Count", states: { Count, ValueRead } }),
+        events: Machine.eventsFromSchemas(Finish, ReadValue),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          on: {
-            Finish: (to) =>
-              to.full.ValueRead().resolve(({ target }) => target.decoded(new ValueRead({ value: "active" })))
-          }
-        },
-        ValueRead: {
-          invoke: (from) => from.child(Child).onDone((to) => to.none),
-          on: {
-            ReadValue: (to) => to.full.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        states: {
+          Count: {
+            on: {
+              Finish: (to) =>
+                to.branch.ValueRead().resolve(({ target }) => target.decoded(new ValueRead({ value: "active" })))
+            }
+          },
+          ValueRead: {
+            invoke: (from) => from.child(Child).onDone((to) => to.none),
+            on: {
+              ReadValue: (to) => to.branch.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+            }
           }
         }
       })
@@ -302,18 +322,18 @@ describe("AtomMachine", () => {
         Stream.runCollect,
         Effect.forkScoped
       )
-      yield* mount(registry, childAtoms.state)
+      yield* mount(registry, childAtoms.result)
       yield* Effect.sync(() => registry.set(parentAtoms.send, new Finish({ by: 0 })))
-      yield* waitForResult(registry, parentAtoms.state, (state) => state.path === "ValueRead")
+      yield* waitForResult(registry, parentAtoms.result, (state) => state.state.path === "ValueRead")
       yield* Fiber.join(childChange)
       assert(Option.isSome(yield* parentRef.child(Child)))
       assert(Option.isSome(yield* parentRef.child(Alias)))
       assert(Option.isNone(yield* parentRef.child(Impostor)))
-      assert(Option.isNone(yield* AtomRegistry.getResult(registry, impostorAtoms.state)))
+      assert(Option.isNone(yield* AtomRegistry.getResult(registry, impostorAtoms.result)))
 
-      const initial = yield* waitForResult(registry, childAtoms.state, Option.isSome)
+      const initial = yield* waitForResult(registry, childAtoms.result, Option.isSome)
       assert(Option.isSome(initial))
-      assert.strictEqual(initial.value.value.value, 0)
+      assert.strictEqual(initial.value.state.value.value, 0)
       const selectedInitial = yield* waitForResult(registry, selectedCount, Option.isSome)
       assert(Option.isSome(selectedInitial))
       assert.strictEqual(selectedInitial.value.value, 0)
@@ -328,8 +348,8 @@ describe("AtomMachine", () => {
       yield* Effect.sync(() => registry.set(childAtoms.send, new Finish({ by: 2 })))
       const updated = yield* waitForResult(
         registry,
-        childAtoms.state,
-        (state) => Option.isSome(state) && state.value.value.value === 2
+        childAtoms.result,
+        (state) => Option.isSome(state) && state.value.state.value.value === 2
       )
       assert(Option.isSome(updated))
       const selectedUpdated = yield* waitForResult(
@@ -361,14 +381,17 @@ describe("AtomMachine", () => {
       const childMachine = makeCounterMachine()
       const Child = Machine.childFamily(childMachine)
       const parent = Machine.make({
-        states: { Count },
-        events: Machine.events(),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: Machine.state({ initial: "Count", states: { Count } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          invoke: (from) =>
-            from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
-              .onFailure((to) => to.none)
+        states: {
+          Count: {
+            invoke: (from) =>
+              from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
+                .onFailure((to) => to.none)
+          }
         }
       })
       const parentAtoms = AtomMachine.make(parent)
@@ -378,7 +401,7 @@ describe("AtomMachine", () => {
       const selected = AtomMachine.selectChild(childAtoms, "Count")
       const matches = AtomMachine.matchesChild(childAtoms, "Count")
 
-      yield* mount(registry, childAtoms.state)
+      yield* mount(registry, childAtoms.result)
       const active = yield* waitForResult(registry, selected, Option.isSome)
       assert(Option.isSome(active))
       assert.strictEqual(active.value.value, 0)
@@ -395,14 +418,17 @@ describe("AtomMachine", () => {
       const childMachine = makeCounterMachine()
       const Child = Machine.childFamily(childMachine)
       const parent = Machine.make({
-        states: { Count },
-        events: Machine.events(),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: Machine.state({ initial: "Count", states: { Count } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          invoke: (from) =>
-            from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
-              .onFailure((to) => to.none)
+        states: {
+          Count: {
+            invoke: (from) =>
+              from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
+                .onFailure((to) => to.none)
+          }
         }
       })
       const parentAtoms = AtomMachine.make(parent)
@@ -443,7 +469,7 @@ describe("AtomMachine", () => {
     const machine = makeInputCounterMachine()
     const atoms = AtomMachine.family(machine, {
       atoms: {
-        state: (machine) => machine.state
+        state: (machine) => machine.result
       }
     })
     const equalFirst = new FamilyKey({ id: "same" })
@@ -452,13 +478,14 @@ describe("AtomMachine", () => {
     const plainSecond = { id: "same" }
     const plainDifferent = { id: "different" }
     const anyInputMachine = Machine.make({
-      states: CounterStates.states,
-      events: Machine.events(),
+      root: CounterStates,
+      events: Machine.eventsFromSchemas(),
       input: Schema.Any,
-      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
-    }).handle({ Count: {}, Done: {} })
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
+    }).handle({ states: { Count: {}, Done: {} } })
     const anyInputAtoms = AtomMachine.family(anyInputMachine, {
-      atoms: { state: (machine) => machine.state }
+      atoms: { state: (machine) => machine.result }
     })
 
     assert.strictEqual(anyInputAtoms.state(equalFirst), anyInputAtoms.state(equalSecond))
@@ -503,10 +530,10 @@ describe("AtomMachine", () => {
         atoms: {
           canFinish: AtomMachine.can(new Finish({ by: 1 })),
           count: AtomMachine.select("Count"),
-          equal: (machine) => machine.state.pipe(Atom.withEquality(() => true)),
+          equal: (machine) => machine.result.pipe(Atom.withEquality(() => true)),
           ref: (machine) => machine.ref,
           send: (machine) => machine.send,
-          state: (machine) => machine.state
+          state: (machine) => machine.result
         }
       })
       const send = atoms.send(4)
@@ -525,7 +552,7 @@ describe("AtomMachine", () => {
       assert.strictEqual(updated.value.value, 9)
 
       const secondRegistry = AtomRegistry.make()
-      assert.strictEqual((yield* AtomRegistry.getResult(secondRegistry, state)).value.value, 4)
+      assert.strictEqual((yield* AtomRegistry.getResult(secondRegistry, state)).state.value.value, 4)
       secondRegistry.dispose()
 
       const ref = yield* AtomRegistry.getResult(registry, atoms.ref(4))
@@ -548,15 +575,19 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(initial, {
         status: "active",
         state: {
-          path: "Count" as const,
-          value: new Count({ value: 0 })
+          path: "" as const,
+          value: undefined,
+          state: {
+            path: "Count" as const,
+            value: new Count({ value: 0 })
+          }
         }
       })
 
       yield* Effect.sync(() => registry.set(bridge.send, new Finish({ by: 2 })))
 
-      const state = yield* waitForResult(registry, bridge.state, (state) => state.value.value === 2)
-      assert.deepStrictEqual(state, {
+      const state = yield* waitForResult(registry, bridge.result, (state) => state.state.value.value === 2)
+      assert.deepStrictEqual(state.state, {
         path: "Count" as const,
         value: new Count({ value: 2 })
       })
@@ -570,16 +601,16 @@ describe("AtomMachine", () => {
       const second = makeCounter(2)
       assert.notStrictEqual(first, second)
 
-      yield* mount(registry, first.state)
-      yield* mount(registry, second.state)
-      assert.strictEqual((yield* AtomRegistry.getResult(registry, first.state)).value.value, 1)
-      assert.strictEqual((yield* AtomRegistry.getResult(registry, second.state)).value.value, 2)
+      yield* mount(registry, first.result)
+      yield* mount(registry, second.result)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, first.result)).state.value.value, 1)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, second.result)).state.value.value, 2)
 
       const bound = AtomMachine.bind(Atom.runtime(Layer.empty))
       const makeBoundCounter = bound.factory(makeInputCounterMachine())
       const boundCounter = makeBoundCounter(3)
-      yield* mount(registry, boundCounter.state)
-      assert.strictEqual((yield* AtomRegistry.getResult(registry, boundCounter.state)).value.value, 3)
+      yield* mount(registry, boundCounter.result)
+      assert.strictEqual((yield* AtomRegistry.getResult(registry, boundCounter.result)).state.value.value, 3)
       assert.strictEqual(
         yield* AtomRegistry.getResult(registry, AtomMachine.can(new Finish({ by: 1 }))(boundCounter)),
         true
@@ -629,33 +660,39 @@ describe("AtomMachine", () => {
         accept: Schema.Boolean
       }) {}
       class Complete extends Schema.TaggedClass<Complete>("AtomCanComplete")("Complete", {}) {}
-      const events = Machine.events(Check, Complete)
-      const states = Machine.states({
-        CanIdle,
-        CanDone: { schema: CanDone, type: "final" }
+      const events = Machine.eventsFromSchemas(Check, Complete)
+      const states = Machine.state({
+        initial: "CanIdle",
+        states: {
+          CanIdle,
+          CanDone: { schema: CanDone, type: "final" }
+        }
       })
       let requiredResolverCalls = 0
       let declinableResolverCalls = 0
       const machine = Machine.make({
-        states: states.states,
+        root: states,
         events,
-        initial: (to) => to.CanIdle().resolve(({ target }) => target.decoded(new CanIdle({})))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.CanIdle.decoded(new CanIdle({}))))
       }).handle({
-        CanIdle: {
-          on: {
-            Check: (to) =>
-              to.none.resolve(({ event, decline }) => {
-                declinableResolverCalls++
-                return event.accept ? undefined : decline()
-              }, { declinable: true }),
-            Complete: (to) =>
-              to.full.CanDone().resolve(({ target }) => {
-                requiredResolverCalls++
-                return target.decoded(new CanDone({}))
-              })
-          }
-        },
-        CanDone: {}
+        states: {
+          CanIdle: {
+            on: {
+              Check: (to) =>
+                to.none.resolve(({ event, decline }) => {
+                  declinableResolverCalls++
+                  return event.accept ? undefined : decline()
+                }, { declinable: true }),
+              Complete: (to) =>
+                to.branch.CanDone().resolve(({ target }) => {
+                  requiredResolverCalls++
+                  return target.decoded(new CanDone({}))
+                })
+            }
+          },
+          CanDone: {}
+        }
       })
       const registry = yield* makeRegistry
       const bridge = AtomMachine.make(machine)
@@ -718,19 +755,22 @@ describe("AtomMachine", () => {
       class Published extends Schema.TaggedClass<Published>("AtomCanPublished")("Published", {
         value: Schema.Number
       }) {}
-      const emissions = Machine.emittedEvents(Published)
+      const emissions = Machine.emittedEventsFromSchemas(Published)
       const startupMachine = Machine.make({
-        states: CounterStates.states,
-        events: Machine.events(Finish),
+        root: CounterStates,
+        events: Machine.eventsFromSchemas(Finish),
         emittedEvents: emissions,
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          entry: (_, enqueue) => {
-            enqueue.emit(emissions.Published({ value: "invalid" } as never))
-          }
-        },
-        Done: {}
+        states: {
+          Count: {
+            entry: (_, enqueue) => {
+              enqueue.emit(emissions.Published({ value: "invalid" } as never))
+            }
+          },
+          Done: {}
+        }
       })
       const registry = yield* makeRegistry
       const startupBridge = AtomMachine.make(startupMachine)
@@ -743,17 +783,20 @@ describe("AtomMachine", () => {
       class Begin extends Schema.TaggedClass<Begin>("AtomCanBegin")("Begin", {}) {}
       const failure = new Error("runtime failed")
       const faultMachine = Machine.make({
-        states: { FaultIdle, FaultLoading },
-        events: Machine.events(Begin),
-        initial: (to) => to.FaultIdle().resolve(({ target }) => target.decoded(new FaultIdle({})))
+        root: Machine.state({ initial: "FaultIdle", states: { FaultIdle, FaultLoading } }),
+        events: Machine.eventsFromSchemas(Begin),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.FaultIdle.decoded(new FaultIdle({}))))
       }).handle({
-        FaultIdle: {
-          on: {
-            Begin: (to) => to.full.FaultLoading().resolve(({ target }) => target.decoded(new FaultLoading({})))
+        states: {
+          FaultIdle: {
+            on: {
+              Begin: (to) => to.branch.FaultLoading().resolve(({ target }) => target.decoded(new FaultLoading({})))
+            }
+          },
+          FaultLoading: {
+            invoke: (from) => from.effect("fail", () => Effect.die(failure))
           }
-        },
-        FaultLoading: {
-          invoke: (from) => from.effect("fail", () => Effect.die(failure))
         }
       })
       const faultBridge = AtomMachine.make(faultMachine)
@@ -772,53 +815,60 @@ describe("AtomMachine", () => {
 
   it.effect("selects compound and parallel state paths from the bridge snapshot", () =>
     Effect.scoped(Effect.gen(function*() {
-      const states = Machine.states({
-        Ready: {
-          schema: Ready,
-          type: "parallel",
-          states: {
-            editor: {
-              schema: Editor,
-              initial: "Editing",
-              states: {
-                Editing,
-                Saving
-              }
-            },
-            network: {
-              schema: Network,
-              initial: "Online",
-              states: {
-                Online,
-                Offline
+      const states = Machine.state({
+        initial: "Ready",
+        states: {
+          Ready: {
+            schema: Ready,
+            type: "parallel",
+            states: {
+              editor: {
+                schema: Editor,
+                initial: "Editing",
+                states: {
+                  Editing,
+                  Saving
+                }
+              },
+              network: {
+                schema: Network,
+                initial: "Online",
+                states: {
+                  Online,
+                  Offline
+                }
               }
             }
           }
         }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Ready.initial.resolve(({ target }) =>
-            target.decoded(new Ready({}), (ready) =>
-              ready
-                .editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
-                .network.decoded(new Network({}), (network) => network.Online.decoded(new Online({}))))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.Ready.decoded(new Ready({}), (ready) =>
+                ready
+                  .editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
+                  .network.decoded(new Network({}), (network) => network.Online.decoded(new Online({}))))
+            )
           )
       }).handle({
-        Ready: {
-          states: {
-            editor: {
-              states: {
-                Editing: {},
-                Saving: {}
-              }
-            },
-            network: {
-              states: {
-                Online: {},
-                Offline: {}
+        states: {
+          Ready: {
+            states: {
+              editor: {
+                states: {
+                  Editing: {},
+                  Saving: {}
+                }
+              },
+              network: {
+                states: {
+                  Online: {},
+                  Offline: {}
+                }
               }
             }
           }
@@ -887,8 +937,12 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(snapshot, {
         status: "stopped",
         state: {
-          path: "Count" as const,
-          value: new Count({ value: 0 })
+          path: "" as const,
+          value: undefined,
+          state: {
+            path: "Count" as const,
+            value: new Count({ value: 0 })
+          }
         }
       })
     })))
@@ -925,27 +979,33 @@ describe("AtomMachine", () => {
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry
       const machine = Machine.make({
-        states: {
-          Count,
-          Done: {
-            schema: Done,
-            type: "final",
-            output: Schema.Number
+        root: Machine.state({
+          initial: "Count",
+          states: {
+            Count,
+            Done: {
+              schema: Done,
+              type: "final",
+              output: Schema.Number
+            }
           }
-        },
-        events: Machine.events(Finish),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 1 })))
+        }),
+        events: Machine.eventsFromSchemas(Finish),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 1 }))))
       }).handle({
-        Count: {
-          on: {
-            Finish: (to) =>
-              to.full.Done().resolve(({ state, event, target }) =>
-                target.decoded(new Done({ value: state.value + event.by }))
-              )
+        states: {
+          Count: {
+            on: {
+              Finish: (to) =>
+                to.branch.Done().resolve(({ state, event, target }) =>
+                  target.decoded(new Done({ value: state.value + event.by }))
+                )
+            }
+          },
+          Done: {
+            output: ({ state }) => state.value
           }
-        },
-        Done: {
-          output: ({ state }) => state.value
         }
       })
       const bridge = AtomMachine.make(machine)
@@ -957,9 +1017,13 @@ describe("AtomMachine", () => {
       assert.deepStrictEqual(snapshot, {
         status: "done",
         state: {
-          path: "Done" as const,
-          value: new Done({ value: 4 }),
-          completed: [{ path: "Done" as const, output: 4 }]
+          path: "" as const,
+          value: undefined,
+          state: {
+            path: "Done" as const,
+            value: new Done({ value: 4 })
+          },
+          completed: [{ path: "Done" as const, output: 4 }, { path: "" as const, output: 4 }]
         },
         output: 4
       })

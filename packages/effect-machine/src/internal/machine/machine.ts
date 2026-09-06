@@ -3,7 +3,7 @@ import * as Inspectable from "effect/Inspectable"
 import * as Option from "effect/Option"
 import { Prototype as PipeablePrototype } from "effect/Pipeable"
 import { hasProperty } from "effect/Predicate"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type {
@@ -23,6 +23,7 @@ import type {
   ParentMode,
   RuntimeOutcome,
   SpawnOptions,
+  State,
   StoppedError
 } from "../../Machine.js"
 import * as Activities from "./activities.js"
@@ -78,34 +79,6 @@ type SpawnResult<State, Event, Error, Requirements, Output, SpawnError, InitialE
   SpawnError | InitialError,
   MachineRuntimeRequirement | SpawnRequirements<Requirements>
 >
-type DefineStateTreeInput<States extends Machine.StateSchemas> = States
-type ValidateDefinedStates<States extends Machine.StateSchemas> = [States] extends
-  [Machine.ValidateStateSchemas<States>] ? []
-  : [validation: Machine.ValidateStateSchemas<States>]
-type InvalidDefinedStateTreeInput<States extends Machine.StateSchemas> = [States] extends
-  [Machine.ValidateStateSchemas<States>] ? never
-  : States & Machine.ValidateStateSchemas<States>
-type ReusableStateNodeConfig =
-  | Machine.AtomicStateNodeConfig
-  | Machine.CompoundStateNodeConfig
-  | Machine.ParallelStateNodeConfig
-interface StateConstructor {
-  <const Node extends ReusableStateNodeConfig>(node: Node): Node
-}
-interface StatesConstructor {
-  <const States extends Machine.StateSchemas>(
-    states: States,
-    ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): Machine.DefinedStates<States>
-  <const States extends Machine.StateSchemas>(states: InvalidDefinedStateTreeInput<States>): never
-}
-type ValidateInputEventProtocol<InputEvents extends ReadonlyArray<Machine.TaggedSchema>> = InputEvents extends
-  ReadonlyArray<Machine.TaggedSchema> ? unknown : never
-type ValidateInternalEventProtocol<
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>
-> = InputEvents | InternalEvents extends ReadonlyArray<Machine.TaggedSchema> ? unknown : never
-
 const Proto = {
   ...Inspectable.BaseProto,
   ...PipeablePrototype,
@@ -123,6 +96,7 @@ const makeWithHandlers = (
 ): Machine.Any => {
   const machine = Object.create(Proto)
   machine.states = self.states
+  machine.root = self.root
   machine.events = self.events
   machine.internalEvents = self.internalEvents
   machine.emittedEvents = self.emittedEvents
@@ -165,7 +139,7 @@ type DirectTransitionDescriptor = {
   readonly [TransitionBuilderDescriptorTypeId]: typeof TransitionBuilderDescriptorTypeId
   readonly type: "direct"
   readonly selection: Topology.TargetSelection
-  readonly resolve?: (context: any, enqueue: unknown) => unknown
+  readonly resolver?: (context: any, enqueue: unknown) => unknown
   readonly reenter: boolean
   readonly declinable: boolean
 }
@@ -209,7 +183,7 @@ const makeDirectTransitionDescriptor = (
   resolve: ((context: any, enqueue: unknown) => unknown) | undefined,
   options: unknown
 ): DirectTransitionDescriptor => {
-  const shared: Omit<DirectTransitionDescriptor, "resolve"> = {
+  const shared: Omit<DirectTransitionDescriptor, "resolver"> = {
     [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
     type: "direct",
     selection: plainTargetSelection(selection),
@@ -217,12 +191,34 @@ const makeDirectTransitionDescriptor = (
   }
   return resolve === undefined
     ? Object.freeze(shared)
-    : Object.freeze({ ...shared, resolve })
+    : Object.freeze({ ...shared, resolver: resolve })
+}
+
+const guardedSelection = (selection: Topology.TargetSelection, predicate: (context: any) => boolean): object => {
+  const wrap = (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
+    makeDirectTransitionDescriptor(
+      selection,
+      (context, enqueue) => predicate(context) ? resolve(context, enqueue) : Topology.makeDeclined(),
+      { ...transitionOptions(options), declinable: true }
+    )
+  return Object.freeze({
+    ...wrap((
+      context
+    ) => (selection.kind === "none" ? Topology.makeNoTarget() : constructSelectedTarget(context.target))),
+    from: (value: (context: any) => unknown) => wrap((context) => context.target.from(value(context))),
+    decoded: (value: (context: any) => unknown) => wrap((context) => context.target.decoded(value(context))),
+    resolve: wrap
+  })
 }
 
 const decorateTransitionSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
   Object.freeze({
     ...selection,
+    guard: (predicate: (context: any) => boolean) => guardedSelection(selection, predicate),
+    from: (value: (context: any) => unknown) =>
+      makeDirectTransitionDescriptor(selection, (context) => context.target.from(value(context)), undefined),
+    decoded: (value: (context: any) => unknown) =>
+      makeDirectTransitionDescriptor(selection, (context) => context.target.decoded(value(context)), undefined),
     resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
       makeDirectTransitionDescriptor(selection, resolve, options),
     reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true }),
@@ -243,14 +239,16 @@ const decorateTransitionSelection = (selection: Topology.TargetSelection): Topol
     }
   })
 
-const decorateStateUpdateSelection = (selection: Topology.TargetSelection): Topology.TargetSelection => {
-  const update = (
-    resolve: (context: any, enqueue: unknown) => unknown,
-    options?: unknown
-  ) => makeDirectTransitionDescriptor(selection, resolve, options)
-  Object.assign(update, selection)
-  return Object.freeze(update) as unknown as Topology.TargetSelection
-}
+const decorateStateUpdateSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
+  Object.freeze({
+    ...selection,
+    from: (value: (context: any) => unknown) =>
+      makeDirectTransitionDescriptor(selection, (context) => context.owner.from(value(context)), undefined),
+    decoded: (value: (context: any) => unknown) =>
+      makeDirectTransitionDescriptor(selection, (context) => context.owner.decoded(value(context)), undefined),
+    resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
+      makeDirectTransitionDescriptor(selection, resolve, options)
+  })
 
 const noneTransitionSelection = decorateTransitionSelection(Topology.noneTargetSelection)
 
@@ -267,6 +265,10 @@ const makeInitialBuilderDescriptor = (
 const decorateInitialSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
   Object.freeze({
     ...selection,
+    from: (value: (context: any) => unknown) =>
+      makeInitialBuilderDescriptor(selection, (context) => context.target.from(value(context))),
+    decoded: (value: (context: any) => unknown) =>
+      makeInitialBuilderDescriptor(selection, (context) => context.target.decoded(value(context))),
     resolve: (resolve: (context: any) => unknown) => makeInitialBuilderDescriptor(selection, resolve)
   })
 
@@ -293,6 +295,12 @@ const decorateInitialSelectorNode = (node: unknown): unknown => {
 
 const decorateTransitionSelectorNode = (node: unknown): unknown => {
   if (Topology.isTargetSelection(node)) {
+    if (node.kind === "state" && node.scope === "full" && hasProperty(node, "initial")) {
+      return Object.freeze({
+        ...decorateTransitionSelection(node),
+        initial: decorateTransitionSelection(node.initial as Topology.TargetSelection)
+      })
+    }
     if (node.kind === "update") return decorateStateUpdateSelection(node)
     return node === Topology.noneTargetSelection ? noneTransitionSelection : decorateTransitionSelection(node)
   }
@@ -361,7 +369,7 @@ const normalizeTransitionBuilder = (
   }
   return {
     target: () => descriptor.selection,
-    resolve: descriptor.resolve,
+    resolve: descriptor.resolver,
     reenter: descriptor.reenter,
     declinable: descriptor.declinable
   }
@@ -431,7 +439,7 @@ const makeSelectionNode = (
     }
     if (
       scope === "branch" && source !== undefined && node.schema !== undefined &&
-      (source === path || source.startsWith(`${path}.`)) &&
+      (source === path || Configuration.isDescendantOf(source, path)) &&
       getTargetBuilderNode(stateNodes, source).type !== "choice"
     ) {
       Object.defineProperty(method, "update", {
@@ -439,6 +447,9 @@ const makeSelectionNode = (
         enumerable: true
       })
     }
+  }
+  if (node.type === "atomic" && scope === "branch" && source === path && node.schema !== undefined) {
+    Object.defineProperty(method, "update", { value: makeStateUpdateSelection(path, "branch"), enumerable: true })
   }
   return method
 }
@@ -464,15 +475,12 @@ const makeTargetSelector = (
   stateNodes: Machine.StateNodes,
   source: string
 ): unknown => {
-  const full: Record<string, unknown> = {}
-  for (const node of stateNodes.byPath.values()) {
-    if (node.parent === undefined && node.type !== "history" && node.type !== "choice") {
-      full[node.key] = makeSelectionNode(stateNodes, node.path, "full")
-    }
-  }
+  const full = Object.assign({}, makeSelectionValue("state", "", "full"), {
+    initial: makeSelectionValue("initial", "", "full")
+  })
   const branch: Record<string, unknown> = {}
-  const root = getTargetBuilderNode(stateNodes, source.split(".")[0]!)
-  branch[root.key] = makeSelectionNode(stateNodes, root.path, "branch", source)
+  const root = getTargetBuilderNode(stateNodes, stateNodes.roots[0]!)
+  addSelectionChildren(branch, stateNodes, root.path, "branch", source)
   const local: Record<string, unknown> = {}
   const localScope = getLocalTargetScope(stateNodes, source)
   if (localScope !== undefined) {
@@ -487,10 +495,15 @@ const makeTargetSelector = (
   }
   return {
     none: Topology.noneTargetSelection,
+    self: getTargetBuilderNode(stateNodes, source).schema === undefined ||
+        getTargetBuilderNode(stateNodes, source).type === "final"
+      ? {}
+      : { update: makeStateUpdateSelection(source, "branch") },
+    root: makeSelectionNode(stateNodes, root.path, "branch", source),
     local,
     branch,
     full,
-    history: makeHistorySelectionTree(stateNodes, undefined)
+    history: makeHistorySelectionTree(stateNodes, "")
   }
 }
 
@@ -581,6 +594,7 @@ const getSelectionBuilder = (
   let parts = selection.path!.split(".")
   if (selection.kind === "history") {
     builder = target.history
+    if (selection.path !== "") parts.unshift("")
   } else if (selection.scope === "local") {
     builder = target.local
     const scope = getLocalTargetScope(stateNodes, source)
@@ -589,11 +603,12 @@ const getSelectionBuilder = (
         builder = builder.with
         parts = []
       } else {
-        parts = selection.path!.slice(scope.length + 1).split(".")
+        parts = (scope === "" ? selection.path! : selection.path!.slice(scope.length + 1)).split(".")
       }
     }
   } else if (selection.scope === "branch") {
     builder = target.branch
+    if (selection.path !== "") parts.unshift("")
   } else {
     builder = target.full
   }
@@ -646,7 +661,7 @@ const validateResolvedSelection = (
     (selectedNode?.type === "compound" || selectedNode?.type === "parallel")
   if (
     resultPath === undefined ||
-    (resultPath !== selection.path && !(acceptsDescendant && resultPath.startsWith(`${selection.path}.`)))
+    (resultPath !== selection.path && !(acceptsDescendant && Configuration.isDescendantOf(resultPath, selection.path!)))
   ) {
     throw new Error(
       `Machine transition resolver selected "${selection.path}" but constructed "${resultPath ?? "<invalid>"}"`
@@ -1082,7 +1097,7 @@ const flattenHandlers = (
 const makeHandle = (self: Definition.Any): Definition.Any["handle"] =>
   ((config: Record<string, unknown>) => {
     const handlers: Record<PropertyKey, Machine.AnyStateConfig> = Object.create(null)
-    flattenHandlers(handlers, self.stateNodes, self.states, "", config)
+    flattenHandlers(handlers, self.stateNodes, self.states, "", { "": config })
     return makeWithHandlers(self, handlers)
   }) as Definition.Any["handle"]
 
@@ -1123,18 +1138,6 @@ export const isFinal = <
   state: Machine.Snapshot<States>
 ): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine as any, state)
 
-const makeInitialSelector = (stateNodes: Machine.StateNodes): unknown => {
-  const selector: Record<string, unknown> = {}
-  for (const node of stateNodes.byPath.values()) {
-    if (node.parent === undefined && node.type !== "history" && node.type !== "choice") {
-      selector[node.key] = node.type === "atomic" || node.type === "final"
-        ? makeSelectionMethod("state", node.path, "initial")
-        : Object.freeze({ initial: makeSelectionValue("initial", node.path, "initial") })
-    }
-  }
-  return Object.freeze(selector)
-}
-
 const getInitialSelectionBuilder = (
   initialBuilder: Record<string, any>,
   selection: Topology.TargetSelection
@@ -1152,17 +1155,18 @@ const getInitialSelectionBuilder = (
 
 const captureInitialBranch = (
   definition: unknown,
-  stateNodes: Machine.StateNodes,
-  initialBuilder: Record<string, any>
+  initialBuilder: Record<string, any>,
+  configuration: boolean
 ): {
   readonly selection: Topology.TargetSelection
   readonly resolve?: (context: any) => unknown
   readonly builder: Record<string, any>
 } => {
-  if (typeof definition !== "function") {
+  if (definition !== undefined && typeof definition !== "function") {
     throw new Error("Machine initial definition must be a target-first callback")
   }
-  const result = definition(decorateInitialSelectorNode(makeInitialSelector(stateNodes)))
+  const selector = decorateInitialSelection(makeSelectionValue(configuration ? "state" : "initial", "", "initial"))
+  const result = definition === undefined ? selector : definition(selector)
   let selection: Topology.TargetSelection
   let resolve: ((context: any) => unknown) | undefined
   if (Topology.isTargetSelection(result)) {
@@ -1198,13 +1202,17 @@ const validateInitialSelection = (result: unknown, selection: Topology.TargetSel
 const compileInitial = (
   definition: unknown,
   states: Machine.StateTree,
-  stateNodes: Machine.StateNodes
+  stateNodes: Machine.StateNodes,
+  configuration = false
 ): {
   readonly initial: (input?: unknown) => unknown
   readonly definition: Machine.InitialDefinition
 } => {
-  const initialBuilder = makeSnapshotBuilder(states, { mode: "initial", prefix: "" }) as Record<string, any>
-  const branch = captureInitialBranch(definition, stateNodes, initialBuilder)
+  const rootNode = getTargetBuilderNode(stateNodes, "")
+  const initialBuilder = configuration ?
+    makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Record<string, any>
+    : { "": withFrom((value: unknown) => Topology.makeInitialTarget("", value), "leaf", rootNode.schema !== undefined) }
+  const branch = captureInitialBranch(definition, initialBuilder, configuration)
   return {
     initial: (input?: unknown) => {
       const result = branch.resolve === undefined
@@ -1220,62 +1228,35 @@ const compileInitial = (
   }
 }
 
-export const state: StateConstructor = (<const Node extends ReusableStateNodeConfig>(node: Node): Node => {
-  StateDefinition.validateStateDefinitions({ state: node }, "Machine.state")
-  return StateDefinition.captureStateDefinitions({ state: node }).state
-}) as StateConstructor
+export const state = (node: unknown): State<Machine.StateNodeConfig> => {
+  const captured = StateDefinition.captureRoot(node) as Machine.StateNodeConfig
+  const access = makeStateHelpers()
+  return Object.freeze({ ...access, "~effect/Machine/State": "~effect/Machine/State", node: captured })
+}
 
-export const states: StatesConstructor = (<const States extends Machine.StateSchemas>(
-  states: States
-): Machine.DefinedStates<States> => {
-  StateDefinition.validateStateDefinitions(states, "Machine.states")
-  const captured = StateDefinition.captureStateDefinitions(states)
+const makeStateHelpers = (): Machine.StateAccessors<{ readonly "": Machine.StateNodeConfig }> => {
   return {
-    states: captured,
-    path: ((path: string) => path) as Machine.DefinedStates<States>["path"],
+    path: ((path: string) => path) as Machine.StateAccessors<{ readonly "": Machine.StateNodeConfig }>["path"],
     get:
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
         Topology.getSnapshotByPath(snapshot, path).pipe(
           Option.map((snapshot) => snapshot.value)
-        )) as Machine.DefinedStates<States>["get"],
+        )) as Machine.StateAccessors<{ readonly "": Machine.StateNodeConfig }>["get"],
     getWithParents: ((snapshot, path) => {
       const parents: Record<string, unknown> = {}
       return Topology.getSnapshotByPath(snapshot, path, parents).pipe(
         Option.map((snapshot) => ({ value: snapshot.value, parents }))
       )
-    }) as Machine.DefinedStates<States>["getWithParents"],
-    getSnapshot: Topology.getSnapshotByPath as unknown as Machine.DefinedStates<States>["getSnapshot"],
+    }) as Machine.StateAccessors<{ readonly "": Machine.StateNodeConfig }>["getWithParents"],
+    getSnapshot: Topology.getSnapshotByPath as unknown as Machine.StateAccessors<
+      { readonly "": Machine.StateNodeConfig }
+    >["getSnapshot"],
     matches:
       ((snapshot: Machine.AtomicSnapshot<string, unknown>, path: string) =>
-        Option.isSome(Topology.getSnapshotByPath(snapshot, path))) as Machine.DefinedStates<States>["matches"]
+        Option.isSome(Topology.getSnapshotByPath(snapshot, path))) as Machine.StateAccessors<
+          { readonly "": Machine.StateNodeConfig }
+        >["matches"]
   }
-}) as StatesConstructor
-
-type MakeConfig<
-  States extends Machine.StateSchemas,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  Input extends Schema.Top,
-  InitialE,
-  InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentDeclaration extends Parent.Any | undefined
-> = {
-  readonly id?: string
-  readonly states: States & DefineStateTreeInput<NoInfer<States>>
-  readonly events:
-    & Machine.EventProtocol<"public", InputEvents>
-    & ValidateInputEventProtocol<NoInfer<InputEvents>>
-  readonly internalEvents?:
-    & Machine.EventProtocol<"internal", InternalEvents>
-    & ValidateInternalEventProtocol<
-      NoInfer<InputEvents>,
-      NoInfer<InternalEvents>
-    >
-  readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
-  readonly parent?: ParentDeclaration
-  readonly input?: Input
-  readonly initial: unknown
 }
 
 type MakeResult<
@@ -1300,40 +1281,7 @@ type MakeResult<
   Machine.ParentEventsOf<ParentDeclaration>
 >
 
-interface Make {
-  <
-    const States extends Machine.StateSchemas,
-    const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const Input extends Schema.Top = typeof Schema.Void,
-    InitialE = never,
-    InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentDeclaration extends Parent.Any | undefined = undefined
-  >(
-    config: MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
-    ..._validation: ValidateDefinedStates<NoInfer<States>>
-  ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
-  <
-    const States extends Machine.StateSchemas,
-    const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-    const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const Input extends Schema.Top = typeof Schema.Void,
-    InitialE = never,
-    InitialR = never,
-    const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentDeclaration extends Parent.Any | undefined = undefined
-  >(
-    config:
-      & Omit<
-        MakeConfig<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>,
-        "states"
-      >
-      & { readonly states: InvalidDefinedStateTreeInput<States> }
-  ): never
-}
-
-export const make: Make = (<
+export const make = <
   const States extends Machine.StateSchemas,
   const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
   const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
@@ -1345,7 +1293,8 @@ export const make: Make = (<
 >(
   config: {
     readonly id?: string
-    readonly states: States
+    readonly root: State<Machine.StateNodeConfig>
+    readonly initialConfiguration?: unknown
     readonly events: Machine.EventProtocol<"public", InputEvents>
     readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
     readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
@@ -1354,10 +1303,10 @@ export const make: Make = (<
     readonly initial: unknown
   }
 ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration> => {
-  StateDefinition.validateStateDefinitions(config.states, "Machine.make")
-  const states = StateDefinition.captureStateDefinitions(config.states)
+  const states = Object.freeze({ "": config.root.node })
   const self = Object.create(Proto)
   self.states = states
+  self.root = config.root
   self.events = config.events
   self.internalEvents = config.internalEvents ?? Protocol.makeEventProtocol("internal", [] as const)
   self.emittedEvents = config.emittedEvents ?? Protocol.makeEventProtocol("emitted", [] as const)
@@ -1365,7 +1314,12 @@ export const make: Make = (<
   self.input = config.input
   self.id = config.id
   self.stateNodes = Topology.compileStateNodes(states)
-  const compiledInitial = compileInitial(config.initial, states, self.stateNodes)
+  const compiledInitial = compileInitial(
+    config.initialConfiguration ?? config.initial,
+    states,
+    self.stateNodes,
+    config.initialConfiguration !== undefined
+  )
   self.initial = compiledInitial.initial
   self.initialDefinition = compiledInitial.definition
   self.makeTargetBuilder = makeTargetBuilder(states, self.stateNodes)
@@ -1373,7 +1327,7 @@ export const make: Make = (<
   self.handle = makeHandle(self)
   Protocol.setProtocol(self)
   return self
-}) as Make
+}
 
 const flattenEventProtocolInputs = <Kind extends Machine.EventProtocolKind>(
   kind: Kind,
@@ -1392,6 +1346,22 @@ export const events = <const Inputs extends ReadonlyArray<Machine.EventProtocolI
     "public",
     flattenEventProtocolInputs("public", inputs)
   ) as Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
+
+const eventFieldSchemas = (
+  cases: Readonly<Record<string, Schema.Struct.Fields>>
+): ReadonlyArray<Machine.TaggedSchema> => {
+  for (const [tag, fields] of Object.entries(cases)) {
+    if (Object.hasOwn(fields, "_tag")) throw new Error(`Machine event "${tag}" fields cannot declare _tag`)
+  }
+  return Object.keys(cases).length === 0 ? [] : [Schema.TaggedUnion(cases)]
+}
+
+export const eventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
+  Protocol.makeEventProtocol("public", eventFieldSchemas(cases))
+export const internalEventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
+  Protocol.makeEventProtocol("internal", eventFieldSchemas(cases))
+export const emittedEventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
+  Protocol.makeEventProtocol("emitted", eventFieldSchemas(cases))
 
 const makeParent = <
   const Mode extends ParentMode,
@@ -1543,7 +1513,7 @@ export const planInitial: <
     readonly initialEntryPaths: ReadonlyArray<Machine.StateIdentifier<States>>
     readonly state: Machine.Snapshot<States>
     readonly commands: ReadonlyArray<Command>
-    readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+    readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
     readonly microsteps: ReadonlyArray<{
       readonly next: Machine.Snapshot<States>
       readonly event: Machine.EventOf<Events> | InitialEventModel
@@ -1556,7 +1526,7 @@ export const planInitial: <
       >
       readonly commands: ReadonlyArray<Command>
       readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
-      readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+      readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
       readonly exitPaths: ReadonlyArray<string>
       readonly entryPaths: ReadonlyArray<string>
       readonly changed: boolean
@@ -1721,7 +1691,7 @@ export const plan: <
   & {
     readonly next: Machine.Snapshot<States>
     readonly commands: ReadonlyArray<Command>
-    readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+    readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
     readonly microsteps: ReadonlyArray<{
       readonly next: Machine.Snapshot<States>
       readonly event: Machine.EventOf<Events> | InitialEventModel
@@ -1734,7 +1704,7 @@ export const plan: <
       >
       readonly commands: ReadonlyArray<Command>
       readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
-      readonly emittedEvents: ReadonlyArray<Machine.EmitOf<Emits>>
+      readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
       readonly exitPaths: ReadonlyArray<string>
       readonly entryPaths: ReadonlyArray<string>
       readonly changed: boolean
@@ -1955,7 +1925,7 @@ export const start: <
   ExcludeCompatibleRuntime<
     ExecutionServices<InitialR | R>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >
 > = internalProcess.start as any
 
@@ -2008,6 +1978,6 @@ export const resume: <
   ExcludeCompatibleRuntime<
     ExecutionServices<R>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >
 > = internalProcess.resume as any

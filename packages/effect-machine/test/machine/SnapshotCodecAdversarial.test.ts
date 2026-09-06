@@ -17,32 +17,35 @@ class RightWorking extends Schema.TaggedClass<RightWorking>("CodecRightWorking")
 }) {}
 class RightDone extends Schema.TaggedClass<RightDone>("CodecRightDone")("CodecRightDone", {}) {}
 
-const TopologyStates = Machine.states({
-  Root: {
-    schema: Root,
-    type: "parallel",
-    states: {
-      left: {
-        schema: Left,
-        initial: "working",
-        states: {
-          working: LeftWorking,
-          done: {
-            schema: LeftDone,
-            type: "final",
-            output: Schema.NumberFromString
+const TopologyStates = Machine.state({
+  initial: "Root",
+  states: {
+    Root: {
+      schema: Root,
+      type: "parallel",
+      states: {
+        left: {
+          schema: Left,
+          initial: "working",
+          states: {
+            working: LeftWorking,
+            done: {
+              schema: LeftDone,
+              type: "final",
+              output: Schema.NumberFromString
+            }
           }
-        }
-      },
-      right: {
-        schema: Right,
-        initial: "working",
-        states: {
-          working: RightWorking,
-          done: {
-            schema: RightDone,
-            type: "final",
-            output: Schema.Boolean
+        },
+        right: {
+          schema: Right,
+          initial: "working",
+          states: {
+            working: RightWorking,
+            done: {
+              schema: RightDone,
+              type: "final",
+              output: Schema.Boolean
+            }
           }
         }
       }
@@ -52,49 +55,57 @@ const TopologyStates = Machine.states({
 
 const topologyMachine = Machine.make({
   id: "codec-topology",
-  states: TopologyStates.states,
-  events: Machine.events(),
-  initial: (to) => to.Root.initial.resolve(() => topologyActive())
+  root: TopologyStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (to) => to.resolve(() => topologyActive())
 })
 
 const topologyActive = () => ({
-  path: "Root" as const,
-  value: new Root({ id: "root-1" }),
-  states: {
-    left: {
-      path: "Root.left" as const,
-      value: new Left({}),
-      state: { path: "Root.left.working" as const, value: new LeftWorking({ task: "left-1" }) }
-    },
-    right: {
-      path: "Root.right" as const,
-      value: new Right({}),
-      state: { path: "Root.right.working" as const, value: new RightWorking({ enabled: true }) }
-    }
-  }
-})
-
-const topologyFinal = () =>
-  ({
+  path: "" as const,
+  value: undefined,
+  state: {
     path: "Root" as const,
     value: new Root({ id: "root-1" }),
     states: {
       left: {
         path: "Root.left" as const,
         value: new Left({}),
-        state: { path: "Root.left.done" as const, value: new LeftDone({}) }
+        state: { path: "Root.left.working" as const, value: new LeftWorking({ task: "left-1" }) }
       },
       right: {
         path: "Root.right" as const,
         value: new Right({}),
-        state: { path: "Root.right.done" as const, value: new RightDone({}) }
+        state: { path: "Root.right.working" as const, value: new RightWorking({ enabled: true }) }
+      }
+    }
+  }
+})
+
+const topologyFinal = () =>
+  ({
+    path: "" as const,
+    value: undefined,
+    state: {
+      path: "Root" as const,
+      value: new Root({ id: "root-1" }),
+      states: {
+        left: {
+          path: "Root.left" as const,
+          value: new Left({}),
+          state: { path: "Root.left.done" as const, value: new LeftDone({}) }
+        },
+        right: {
+          path: "Root.right" as const,
+          value: new Right({}),
+          state: { path: "Root.right.done" as const, value: new RightDone({}) }
+        }
       }
     },
     completed: [
       { path: "Root.left.done" as const, output: 7 },
       { path: "Root.right.done" as const, output: true }
     ]
-  }) as Machine.Machine.Snapshot<typeof TopologyStates.states>
+  }) as Machine.Snapshot<typeof TopologyStates>
 
 class Workspace extends Schema.TaggedClass<Workspace>("CodecWorkspace")("CodecWorkspace", {
   revision: Schema.Number
@@ -111,36 +122,39 @@ class Preview extends Schema.TaggedClass<Preview>("CodecPreview")("CodecPreview"
 }) {}
 class Outside extends Schema.TaggedClass<Outside>("CodecOutside")("CodecOutside", {}) {}
 
-const HistoryStates = Machine.states({
-  Workspace: {
-    schema: Workspace,
-    initial: "Editor",
-    states: {
-      Editor: {
-        schema: Editor,
-        initial: "editing",
-        states: {
-          editing: Editing,
-          preview: Preview
-        }
-      },
-      recent: { type: "history" },
-      exact: { type: "history", history: "deep" }
-    }
-  },
-  Outside
+const HistoryStates = Machine.state({
+  initial: "Outside",
+  states: {
+    Workspace: {
+      schema: Workspace,
+      initial: "Editor",
+      states: {
+        Editor: {
+          schema: Editor,
+          initial: "editing",
+          states: {
+            editing: Editing,
+            preview: Preview
+          }
+        },
+        recent: { type: "history" },
+        exact: { type: "history", history: "deep" }
+      }
+    },
+    Outside
+  }
 })
 
 const historyMachine = Machine.make({
   id: "codec-history",
-  states: HistoryStates.states,
-  events: Machine.events(),
-  initial: (to) => to.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+  root: HistoryStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Outside.decoded(new Outside({}))))
 })
 
 const historySnapshot = () =>
   ({
-    ...{ path: "Outside" as const, value: new Outside({}) },
+    ...{ path: "" as const, value: undefined, state: { path: "Outside" as const, value: new Outside({}) } },
     history: {
       "Workspace.recent": {
         mode: "shallow" as const,
@@ -160,7 +174,7 @@ const historySnapshot = () =>
         }
       }
     }
-  }) as Machine.Machine.Snapshot<typeof HistoryStates.states>
+  }) as Machine.Snapshot<typeof HistoryStates>
 
 class RichState extends Schema.TaggedClass<RichState>("CodecRichState")("CodecRichState", {
   createdAt: Schema.Date,
@@ -168,15 +182,17 @@ class RichState extends Schema.TaggedClass<RichState>("CodecRichState")("CodecRi
   missing: Schema.Undefined
 }) {}
 
-const RichStates = Machine.states({ RichState })
+const RichStates = Machine.state({ initial: "RichState", states: { RichState } })
 const richMachine = Machine.make({
   id: "codec-rich",
-  states: RichStates.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.RichState().resolve(({ target }) =>
-      target.decoded(
-        new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
+  root: RichStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) =>
+        to.RichState.decoded(
+          new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
+        )
       )
     )
 })
@@ -191,29 +207,36 @@ const OpaqueState = Schema.declare<OpaqueState>((input): input is OpaqueState =>
   "resource" in input && typeof input.resource === "object" && input.resource !== null
 )
 
-const OpaqueStates = Machine.states({ OpaqueState })
+const OpaqueStates = Machine.state({ initial: "OpaqueState", states: { OpaqueState } })
 const opaqueMachine = Machine.make({
   id: "codec-opaque",
-  states: OpaqueStates.states,
-  events: Machine.events(),
-  initial: (to) => to.OpaqueState().resolve(({ target }) => target.decoded({ _tag: "CodecOpaqueState", resource: {} }))
+  root: OpaqueStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) => to.OpaqueState.decoded({ _tag: "CodecOpaqueState", resource: {} }))
+    )
 })
 
 class OutputDone extends Schema.TaggedClass<OutputDone>("CodecOutputDone")("CodecOutputDone", {}) {}
-const OutputStates = Machine.states({
-  OutputDone: { schema: OutputDone, type: "final", output: Schema.Any }
+const OutputStates = Machine.state({
+  initial: "OutputDone",
+  states: {
+    OutputDone: { schema: OutputDone, type: "final", output: Schema.Any }
+  }
 })
 const outputMachine = Machine.make({
   id: "codec-output",
-  states: OutputStates.states,
-  events: Machine.events(),
-  initial: (to) => to.OutputDone().resolve(({ target }) => target.decoded(new OutputDone({})))
+  root: OutputStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.OutputDone.decoded(new OutputDone({}))))
 })
 
 const expectEncodeFailure = Effect.fnUntraced(function*(snapshot: unknown, boundary?: string) {
   const error = yield* Machine.encodeSnapshot(
     topologyMachine,
-    snapshot as Machine.Machine.Snapshot<typeof TopologyStates.states>
+    snapshot as Machine.Snapshot<typeof TopologyStates>
   ).pipe(Effect.flip)
   assert.instanceOf(error, Machine.MachineSchemaEncodeError)
   if (boundary !== undefined) assert.strictEqual(error.boundary, boundary)
@@ -270,16 +293,20 @@ describe("snapshot codec adversarial boundaries", () => {
   it.effect("uses canonical JSON codecs for supported rich state values", () =>
     Effect.gen(function*() {
       const snapshot = {
-        path: "RichState" as const,
-        value: new RichState({
-          createdAt: new Date("2026-08-19T12:00:00.000Z"),
-          sequence: 42n,
-          missing: undefined
-        })
+        path: "" as const,
+        value: undefined,
+        state: {
+          path: "RichState" as const,
+          value: new RichState({
+            createdAt: new Date("2026-08-19T12:00:00.000Z"),
+            sequence: 42n,
+            missing: undefined
+          })
+        }
       }
       const encoded = yield* Machine.encodeSnapshot(richMachine, snapshot)
 
-      assert.deepStrictEqual(encoded.active, [{
+      assert.deepStrictEqual(encoded.active, [{ path: "" }, {
         path: "RichState",
         value: {
           _tag: "CodecRichState",
@@ -291,10 +318,10 @@ describe("snapshot codec adversarial boundaries", () => {
       assert.doesNotThrow(() => JSON.stringify(encoded))
 
       const decoded = yield* Machine.decodeSnapshot(richMachine, JSON.parse(JSON.stringify(encoded)))
-      assert.instanceOf(decoded.value, RichState)
-      assert.instanceOf(decoded.value.createdAt, Date)
-      assert.strictEqual(decoded.value.sequence, 42n)
-      assert.strictEqual(decoded.value.missing, undefined)
+      assert.instanceOf(decoded.state.value, RichState)
+      assert.instanceOf(decoded.state.value.createdAt, Date)
+      assert.strictEqual(decoded.state.value.sequence, 42n)
+      assert.strictEqual(decoded.state.value.missing, undefined)
     }))
 
   it.effect("rejects cyclic state, completion, and history values with typed boundary failures", () =>
@@ -313,15 +340,23 @@ describe("snapshot codec adversarial boundaries", () => {
 
       assertFailure(
         yield* Effect.exit(Machine.encodeSnapshot(opaqueMachine, {
-          path: "OpaqueState",
-          value: { _tag: "CodecOpaqueState", resource: cyclic }
+          path: "" as const,
+          value: undefined,
+          state: {
+            path: "OpaqueState",
+            value: { _tag: "CodecOpaqueState", resource: cyclic }
+          }
         })),
         "state"
       )
       assertFailure(
         yield* Effect.exit(Machine.encodeSnapshot(outputMachine, {
-          path: "OutputDone",
-          value: new OutputDone({}),
+          path: "" as const,
+          value: undefined,
+          state: {
+            path: "OutputDone",
+            value: new OutputDone({})
+          },
           completed: [{ path: "OutputDone", output: cyclic }]
         })),
         "output"
@@ -329,8 +364,12 @@ describe("snapshot codec adversarial boundaries", () => {
       for (const output of [undefined, Symbol("local"), () => undefined]) {
         assertFailure(
           yield* Effect.exit(Machine.encodeSnapshot(outputMachine, {
-            path: "OutputDone",
-            value: new OutputDone({}),
+            path: "" as const,
+            value: undefined,
+            state: {
+              path: "OutputDone",
+              value: new OutputDone({})
+            },
             completed: [{ path: "OutputDone", output }]
           })),
           "output"
@@ -371,47 +410,53 @@ describe("snapshot codec adversarial boundaries", () => {
       class Before extends Schema.TaggedClass<Before>("CodecAutomaticBefore")("CodecAutomaticBefore", {}) {}
       class Boundary extends Schema.TaggedClass<Boundary>("CodecAutomaticBoundary")("CodecAutomaticBoundary", {}) {}
       class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {}
-      const states = Machine.states({ Before, Boundary, After })
+      const states = Machine.state({ initial: "Before", states: { Before, Boundary, After } })
       const original = Machine.make({
         id: "codec-automatic-original",
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Before().resolve(({ target }) => target.decoded(new Before({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Before.decoded(new Before({}))))
       }).handle({
-        Before: {
-          always: (to) => to.full.Boundary().resolve(({ target }) => target.decoded(new Boundary({})))
-        },
-        Boundary: {},
-        After: {}
+        states: {
+          Before: {
+            always: (to) => to.branch.Boundary().resolve(({ target }) => target.decoded(new Boundary({})))
+          },
+          Boundary: {},
+          After: {}
+        }
       })
       const changed = Machine.make({
         id: "codec-automatic-changed",
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Before().resolve(({ target }) => target.decoded(new Before({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Before.decoded(new Before({}))))
       }).handle({
-        Before: {},
-        Boundary: {
-          always: (to) => to.full.After().resolve(({ target }) => target.decoded(new After({})))
-        },
-        After: {}
+        states: {
+          Before: {},
+          Boundary: {
+            always: (to) => to.branch.After().resolve(({ target }) => target.decoded(new After({})))
+          },
+          After: {}
+        }
       })
 
       const stable = (yield* Machine.planInitial(original)).state
-      assert.strictEqual(stable.path, "Boundary")
+      assert.strictEqual(stable.state.path, "Boundary")
       const transported = JSON.parse(JSON.stringify(yield* Machine.encodeSnapshot(original, stable)))
       const decoded = yield* Machine.decodeSnapshot(changed, transported)
       const resumed = yield* Machine.resume(changed, decoded)
 
-      assert.strictEqual((yield* resumed.state).path, "Boundary")
+      assert.strictEqual((yield* resumed.state).state.path, "Boundary")
       yield* Effect.yieldNow
-      assert.strictEqual((yield* resumed.state).path, "Boundary")
+      assert.strictEqual((yield* resumed.state).state.path, "Boundary")
       yield* resumed.stop
     }))
 
   it.effect("rejects malformed logical topology before encoding", () =>
     Effect.gen(function*() {
-      const valid = topologyActive()
+      const valid = topologyActive().state
       const malformed: ReadonlyArray<unknown> = [
         { path: "Missing" as const, value: {} },
         { ...valid, states: { left: valid.states.left } },
@@ -433,7 +478,7 @@ describe("snapshot codec adversarial boundaries", () => {
       ]
 
       for (const snapshot of malformed) {
-        yield* expectEncodeFailure(snapshot)
+        yield* expectEncodeFailure({ path: "", value: undefined, state: snapshot })
       }
     }))
 
@@ -509,13 +554,13 @@ describe("snapshot codec adversarial boundaries", () => {
       ]
 
       for (const snapshot of malformed) {
-        yield* expectEncodeFailure(snapshot)
+        yield* expectEncodeFailure({ path: "", value: undefined, state: snapshot })
       }
     }))
 
   it.effect("rejects schema failures on both sides of the codec", () =>
     Effect.gen(function*() {
-      const logical = topologyActive()
+      const logical = topologyActive().state
       const invalidLogical = {
         ...logical,
         states: {
@@ -529,9 +574,9 @@ describe("snapshot codec adversarial boundaries", () => {
           }
         }
       }
-      yield* expectEncodeFailure(invalidLogical, "state")
+      yield* expectEncodeFailure({ path: "", value: undefined, state: invalidLogical }, "state")
 
-      const encoded = yield* Machine.encodeSnapshot(topologyMachine, logical)
+      const encoded = yield* Machine.encodeSnapshot(topologyMachine, { path: "", value: undefined, state: logical })
       const invalidEncoded = structuredClone(encoded) as any
       invalidEncoded.active.find((entry: any) => entry.path === "Root.left.working").value.task = ""
       yield* expectDecodeFailure(Machine.decodeSnapshot(topologyMachine, invalidEncoded), "state")

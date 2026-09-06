@@ -18,7 +18,7 @@ export type AllowedStateNodeProperty<Kind extends StateNodeKind> = (typeof State
 
 export type AllowedPseudoStateAnnotationProperty = (typeof PseudoStateAnnotationProperties)[number]
 
-export type StateDefinitionBoundary = "Machine.state" | "Machine.states" | "Machine.make"
+export type StateDefinitionBoundary = "Machine.state" | "Machine.make"
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key)
 
@@ -192,13 +192,14 @@ const validateStateTree = (
   boundary: StateDefinitionBoundary,
   states: unknown,
   parent: string,
-  allowPseudoStates: boolean
+  allowPseudoStates: boolean,
+  root = false
 ): void => {
   const treePath = parent === "" ? "<root>" : parent
   assertPlainRecord(boundary, treePath, states, "state trees")
 
   for (const key of Reflect.ownKeys(states)) {
-    const path = validateStateKey(boundary, parent, key)
+    const path = root && key === "" ? "" : validateStateKey(boundary, parent, key)
     const node = states[key]
 
     // Effect schemas have their own runtime properties. They are complete
@@ -358,3 +359,35 @@ const captureStateTree = (states: Readonly<Record<string, unknown>>): Readonly<R
 /** Captures caller-owned structural containers while preserving schema identity. */
 export const captureStateDefinitions = <States>(states: States): States =>
   captureStateTree(states as Readonly<Record<string, unknown>>) as States
+
+/** Root capture keeps descriptor helpers out of the compiled topology. */
+export const captureRoot = (input: unknown, tag = ""): unknown => {
+  if (Schema.isSchema(input)) return input
+  if (typeof input !== "object" || input === null) return input
+  if (
+    "~effect/Machine/State" in input && input["~effect/Machine/State"] === "~effect/Machine/State" && "node" in input
+  ) {
+    return input.node
+  }
+  const config = input as Readonly<Record<string, unknown>>
+  const copy: Record<string, unknown> = { ...config }
+  if (hasOwn(config, "fields")) {
+    if (hasOwn(config, "schema")) fail("Machine.state", tag, "declare fields or schema, not both")
+    assertPlainRecord("Machine.state", tag, config.fields, "state fields")
+    if (hasOwn(config.fields, "_tag")) fail("Machine.state", tag, "state fields cannot declare _tag")
+    copy.schema = Schema.TaggedStruct(tag, config.fields as Schema.Struct.Fields)
+    delete copy.fields
+  }
+  if (hasOwn(config, "states")) {
+    assertPlainRecord("Machine.state", tag, config.states, "child states")
+    const children: Record<string, unknown> = Object.create(null)
+    for (const key of Reflect.ownKeys(config.states)) {
+      validateStateKey("Machine.state", tag, key)
+      children[key as string] = captureRoot(config.states[key], key as string)
+    }
+    copy.states = children
+  }
+  if (tag !== "") return copy
+  validateStateTree("Machine.state", { "": copy }, "", false, true)
+  return captureStateDefinitions({ "": copy })[""]
+}

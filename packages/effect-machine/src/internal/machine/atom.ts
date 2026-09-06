@@ -383,7 +383,6 @@ const makeChildFromRefAtom = <Child extends Machine.ChildMachine.Any, StartError
   return {
     ref,
     snapshot,
-    state: Atom.mapResult(snapshot, Option.map((snapshot) => snapshot.state)),
     result: makeChildRuntimeResultAtom(snapshot),
     send,
     stop,
@@ -496,7 +495,6 @@ const makeFromRefAtom = <State, Event, Error, Output, StartError, Emitted>(
   const result = {
     ref,
     snapshot,
-    state: Atom.mapResult(snapshot, (snapshot) => snapshot.state),
     result: makeRuntimeResultAtom(snapshot),
     send,
     stop,
@@ -767,7 +765,7 @@ export const can = (event: unknown) => {
 type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
   Machine.Machine.Services<M>,
   Machine.Machine.Event<M>,
-  Machine.Machine.Emit<M>
+  Machine.Machine.EmittedEvent<M>
 >
 
 type EnsureMachineExecutable<M extends Machine.Machine.Any> = IsAny<Machine.Machine.States<M>> extends true ? {
@@ -827,7 +825,7 @@ export const make: {
           InitialR,
           R,
           Machine.Machine.EventOf<Events>,
-          Machine.Machine.EmitOf<Emits>
+          Machine.Machine.EmittedEventOf<Emits>
         >
       >
       & EnsureExecutable<States, UnhandledStates, OutputStates>

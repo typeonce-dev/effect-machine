@@ -44,92 +44,103 @@ class Editor extends Schema.TaggedClass<Editor>("Editor")("Editor", {}) {}
 class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {}) {}
 class Sidebar extends Schema.TaggedClass<Sidebar>("Sidebar")("Sidebar", {}) {}
 
-const States = Machine.states({
-  checkout: {
-    schema: Checkout,
-    initial: "shipping",
-    states: {
-      shipping: Shipping,
-      payment: {
-        schema: Payment,
-        initial: "cardEntry",
-        states: {
-          cardEntry: CardEntry,
-          verifying: Verifying
+const States = Machine.state({
+  initial: "support",
+  states: {
+    checkout: {
+      schema: Checkout,
+      initial: "shipping",
+      states: {
+        shipping: Shipping,
+        payment: {
+          schema: Payment,
+          initial: "cardEntry",
+          states: {
+            cardEntry: CardEntry,
+            verifying: Verifying
+          }
+        },
+        recent: {
+          type: "history"
+        },
+        exact: {
+          type: "history",
+          history: "deep"
         }
-      },
-      recent: {
-        type: "history"
-      },
-      exact: {
-        type: "history",
-        history: "deep"
       }
-    }
-  },
-  support: Support
+    },
+    support: Support
+  }
 })
 
-const NestedStates = Machine.states({
-  App: {
-    schema: App,
-    initial: "Workspace",
-    states: {
-      Workspace: {
-        schema: Workspace,
-        type: "parallel",
-        states: {
-          Editor: {
-            schema: Editor,
-            initial: "Editing",
-            states: {
-              Editing
+const NestedStates = Machine.state({
+  initial: "Closed",
+  states: {
+    App: {
+      schema: App,
+      initial: "Workspace",
+      states: {
+        Workspace: {
+          schema: Workspace,
+          type: "parallel",
+          states: {
+            Editor: {
+              schema: Editor,
+              initial: "Editing",
+              states: {
+                Editing
+              }
+            },
+            Sidebar,
+            resume: {
+              type: "history",
+              history: "deep"
             }
-          },
-          Sidebar,
-          resume: {
-            type: "history",
-            history: "deep"
           }
-        }
-      },
-      Settings
-    }
-  },
-  Closed
+        },
+        Settings
+      }
+    },
+    Closed
+  }
 })
 
 const completeNestedFallback = (
-  target: Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
+  target: Machine.Machine.HistoryDefaultTargetBuilder<{ readonly "": typeof NestedStates.node }, "App.Workspace">
 ) =>
-  target.App.decoded(
-    new App({ session: "fallback" }),
-    (app) => {
-      expect(app).type.not.toHaveProperty("Settings")
-      return app.Workspace.decoded(
-        new Workspace({}),
-        (workspace) =>
-          workspace
-            .Editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
-            .Sidebar.decoded(new Sidebar({}))
-      )
-    }
+  target.from((tree) =>
+    tree.App.decoded(
+      new App({ session: "fallback" }),
+      (app) => {
+        expect(app).type.not.toHaveProperty("Settings")
+        return app.Workspace.decoded(
+          new Workspace({}),
+          (workspace) =>
+            workspace
+              .Editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
+              .Sidebar.decoded(new Sidebar({}))
+        )
+      }
+    )
   )
 
 const constructedNestedFallback = (
-  target: Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">,
+  target: Machine.Machine.HistoryDefaultTargetBuilder<{ readonly "": typeof NestedStates.node }, "App.Workspace">,
   session: string
 ) =>
-  target.App.from({ session }, (app) =>
-    app.Workspace.from((workspace) =>
-      workspace
-        .Editor.from((editor) => editor.Editing.from())
-        .Sidebar.from()
-    ))
+  target.from((tree) =>
+    tree.App.from({ session }, (app) =>
+      app.Workspace.from((workspace) =>
+        workspace
+          .Editor.from((editor) => editor.Editing.from())
+          .Sidebar.from()
+      ))
+  )
 
 describe("Machine history states", () => {
   it("separates active and history identifiers", () => {
-    expect<Machine.Machine.StateIdentifier<typeof States.states>>().type.toBe<
+    expect<Machine.Machine.StateIdentifier<{ readonly "": typeof States.node }>>().type.toBe<
+      | ""
       | "checkout"
       | "checkout.shipping"
       | "checkout.payment"
@@ -137,24 +148,26 @@ describe("Machine history states", () => {
       | "checkout.payment.verifying"
       | "support"
     >()
-    expect<Machine.Machine.HistoryIdentifier<typeof States.states>>().type.toBe<
+    expect<Machine.Machine.HistoryIdentifier<{ readonly "": typeof States.node }>>().type.toBe<
       "checkout.recent" | "checkout.exact"
     >()
   })
 
   it("excludes history pseudo-states from snapshots and initial selectors", () => {
-    type Snapshot = Machine.Machine.Snapshot<typeof States.states>
+    type Snapshot = Machine.Snapshot<typeof States>
     expect<"checkout.recent">().type.not.toBeAssignableTo<Snapshot["path"]>()
     Machine.make({
-      states: States.states,
-      events: Machine.events(),
-      initial: (to) => {
+      root: States,
+      events: Machine.eventsFromSchemas(),
+      initialConfiguration: (to) => {
         expect(to).type.not.toHaveProperty("recent")
         expect(to).type.not.toHaveProperty("exact")
-        return to.checkout.initial.resolve(({ target }) =>
-          target.decoded(
-            new Checkout({ orderId: "order-1" }),
-            (checkout) => checkout.shipping.decoded(new Shipping({ address: "Main Street" }))
+        return to.resolve(({ target }) =>
+          target.from((to) =>
+            to.checkout.decoded(
+              new Checkout({ orderId: "order-1" }),
+              (checkout) => checkout.shipping.decoded(new Shipping({ address: "Main Street" }))
+            )
           )
         )
       }
@@ -167,23 +180,26 @@ describe("Machine history states", () => {
 
   it("exposes zero-argument history targets without value overrides", () => {
     const definition = Machine.make({
-      states: States.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
     })
     const incomplete = definition.handle({
-      support: {
-        on: {
-          Resume: (to) => {
-            expect(to.history.checkout.recent).type.not.toBeAssignableTo<() => unknown>()
-            expect(to.history.checkout.recent).type.toHaveProperty("resolve")
-            expect(to.full.checkout).type.not.toHaveProperty("recent")
-            expect(to.local).type.not.toHaveProperty("recent")
-            expect(to.branch).type.not.toHaveProperty("recent")
-            return to.history.checkout.exact.resolve(({ target }) => {
-              expect(target).type.toBeCallableWith()
-              return target()
-            })
+      states: {
+        support: {
+          on: {
+            Resume: (to) => {
+              expect(to.history.checkout.recent).type.not.toBeAssignableTo<() => unknown>()
+              expect(to.history.checkout.recent).type.toHaveProperty("resolve")
+              expect(to.branch.checkout).type.not.toHaveProperty("recent")
+              expect(to.local).type.not.toHaveProperty("recent")
+              expect(to.branch).type.not.toHaveProperty("recent")
+              return to.history.checkout.exact.resolve(({ target }) => {
+                expect(target).type.toBeCallableWith()
+                return target()
+              })
+            }
           }
         }
       }
@@ -193,17 +209,22 @@ describe("Machine history states", () => {
   })
 
   it("requires typed defaults and only the shallow-dependent initializer", () => {
-    expect<Machine.Machine.RequiredHistoryInitializers<typeof States.states>>().type.toBe<"checkout.payment">()
+    expect<Machine.Machine.RequiredHistoryInitializers<{ readonly "": typeof States.node }>>().type.toBe<
+      "checkout.payment"
+    >()
 
     const definition = Machine.make({
-      states: States.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
     })
     const incomplete = definition.handle({
-      support: {
-        on: {
-          Resume: (to) => to.history.checkout.recent.resolve(({ target }) => target())
+      states: {
+        support: {
+          on: {
+            Resume: (to) => to.history.checkout.recent.resolve(({ target }) => target())
+          }
         }
       }
     })
@@ -211,35 +232,41 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(incomplete)
 
     const complete = definition.handle({
-      checkout: {
-        history: {
-          recent: {
-            default: ({ owner, target }) => {
-              expect(owner).type.toBe<"checkout">()
-              expect(target).type.toBe<
-                Machine.Machine.HistoryDefaultTargetBuilder<typeof States.states, "checkout">
-              >()
-              return target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
+      states: {
+        checkout: {
+          history: {
+            recent: {
+              default: ({ owner, target }) => {
+                expect(owner).type.toBe<"checkout">()
+                expect(target).type.toBe<
+                  Machine.Machine.HistoryDefaultTargetBuilder<{ readonly "": typeof States.node }, "checkout">
+                >()
+                return target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+              }
+            },
+            exact: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
             }
           },
-          exact: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
-          }
-        },
-        states: {
-          payment: {
-            initialize: ({ state, containingState, ancestors, builder }) => {
-              expect(state).type.toBe<Payment>()
-              expect(containingState).type.toBe<Checkout>()
-              expect(ancestors).type.toBe<{ readonly checkout: Checkout }>()
-              return builder.decoded(new CardEntry({ cardNumber: `attempt-${state.attempt}` }))
+          states: {
+            payment: {
+              initialize: ({ state, containingState, ancestors, builder }) => {
+                expect(state).type.toBe<Payment>()
+                expect(containingState).type.toBe<Checkout>()
+                expect(ancestors).type.toBe<{ readonly checkout: Checkout }>()
+                return builder.decoded(new CardEntry({ cardNumber: `attempt-${state.attempt}` }))
+              }
             }
           }
         }
@@ -251,41 +278,50 @@ describe("Machine history states", () => {
 
   it("rejects defaults outside the history parent and wrong initial child values", () => {
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
     })
 
     machine.handle({
-      checkout: {
-        history: {
-          recent: {
-            default: ({ target }) => {
-              expect(target).type.not.toHaveProperty("support")
-              return target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
+      states: {
+        checkout: {
+          history: {
+            recent: {
+              default: ({ target }) => {
+                expect(target).type.not.toHaveProperty("support")
+                return target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+              }
+            },
+            exact: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
             }
-          },
-          exact: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
           }
         }
       }
     })
 
     machine.handle({
-      checkout: {
-        states: {
-          payment: {
-            initialize: ({ builder }) => {
-              expect(builder.decoded).type.not.toBeCallableWith(new Verifying({ challengeId: "wrong-child" }))
-              return builder.decoded(new CardEntry({ cardNumber: "" }))
+      states: {
+        checkout: {
+          states: {
+            payment: {
+              initialize: ({ builder }) => {
+                expect(builder.decoded).type.not.toBeCallableWith(new Verifying({ challengeId: "wrong-child" }))
+                return builder.decoded(new CardEntry({ cardNumber: "" }))
+              }
             }
           }
         }
@@ -293,38 +329,48 @@ describe("Machine history states", () => {
     })
 
     expect(machine.handle).type.not.toBeCallableWith({
-      checkout: {
-        states: {
-          recent: {}
+      states: {
+        checkout: {
+          states: {
+            recent: {}
+          }
         }
       }
     })
   })
 
   it("accepts only complete root configurations containing a nested history owner", () => {
-    expect<Machine.Machine.CompleteSnapshotContaining<typeof NestedStates.states, "App.Workspace">>().type.toBe<
-      ReturnType<typeof completeNestedFallback>
+    expect<Machine.Machine.CompleteSnapshotContaining<{ readonly "": typeof NestedStates.node }, "App.Workspace">>()
+      .type.toBe<
+      ReturnType<typeof completeNestedFallback> extends Machine.Machine.StateConstruction<infer Snapshot> ? Snapshot
+        : never
     >()
 
     const machine = Machine.make({
-      states: NestedStates.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.Closed().resolve(({ target }) => (target.decoded(new Closed({}))))
+      root: NestedStates,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Closed.decoded(new Closed({})))))
     })
 
     const complete = machine.handle({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: ({ owner, target }) => {
-                  expect(owner).type.toBe<"App.Workspace">()
-                  expect(target).type.toBe<
-                    Machine.Machine.HistoryDefaultTargetBuilder<typeof NestedStates.states, "App.Workspace">
-                  >()
-                  expect(target).type.not.toHaveProperty("Closed")
-                  return completeNestedFallback(target)
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: ({ owner, target }) => {
+                    expect(owner).type.toBe<"App.Workspace">()
+                    expect(target).type.toBe<
+                      Machine.Machine.HistoryDefaultTargetBuilder<
+                        { readonly "": typeof NestedStates.node },
+                        "App.Workspace"
+                      >
+                    >()
+                    expect(target).type.not.toHaveProperty("Closed")
+                    return completeNestedFallback(target)
+                  }
                 }
               }
             }
@@ -335,15 +381,17 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
 
     expect(machine.handle).type.not.toBeCallableWith({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: () => ({
-                  path: "Closed" as const,
-                  value: new Closed({})
-                })
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: () => ({
+                    path: "Closed" as const,
+                    value: new Closed({})
+                  })
+                }
               }
             }
           }
@@ -352,50 +400,21 @@ describe("Machine history states", () => {
     })
 
     expect(machine.handle).type.not.toBeCallableWith({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: () => ({
-                  path: "App" as const,
-                  value: new App({ session: "sibling" }),
-                  state: {
-                    path: "App.Settings" as const,
-                    value: new Settings({})
-                  }
-                })
-              }
-            }
-          }
-        }
-      }
-    })
-
-    expect(machine.handle).type.not.toBeCallableWith({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: () => ({
-                  path: "App.Workspace" as const,
-                  value: new Workspace({}),
-                  states: {
-                    Editor: {
-                      path: "App.Workspace.Editor" as const,
-                      value: new Editor({}),
-                      state: {
-                        path: "App.Workspace.Editor.Editing" as const,
-                        value: new Editing({})
-                      }
-                    },
-                    Sidebar: {
-                      path: "App.Workspace.Sidebar" as const,
-                      value: new Sidebar({})
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: () => ({
+                    path: "App" as const,
+                    value: new App({ session: "sibling" }),
+                    state: {
+                      path: "App.Settings" as const,
+                      value: new Settings({})
                     }
-                  }
-                })
+                  })
+                }
               }
             }
           }
@@ -404,25 +423,60 @@ describe("Machine history states", () => {
     })
 
     expect(machine.handle).type.not.toBeCallableWith({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: () => ({
-                  path: "App" as const,
-                  value: new App({ session: "missing-region" }),
-                  state: {
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: () => ({
                     path: "App.Workspace" as const,
                     value: new Workspace({}),
                     states: {
+                      Editor: {
+                        path: "App.Workspace.Editor" as const,
+                        value: new Editor({}),
+                        state: {
+                          path: "App.Workspace.Editor.Editing" as const,
+                          value: new Editing({})
+                        }
+                      },
                       Sidebar: {
                         path: "App.Workspace.Sidebar" as const,
                         value: new Sidebar({})
                       }
                     }
-                  }
-                })
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: () => ({
+                    path: "App" as const,
+                    value: new App({ session: "missing-region" }),
+                    state: {
+                      path: "App.Workspace" as const,
+                      value: new Workspace({}),
+                      states: {
+                        Sidebar: {
+                          path: "App.Workspace.Sidebar" as const,
+                          value: new Sidebar({})
+                        }
+                      }
+                    }
+                  })
+                }
               }
             }
           }
@@ -433,17 +487,20 @@ describe("Machine history states", () => {
 
   it("rejects Effects returned by nested history defaults", () => {
     const machine = Machine.make({
-      states: NestedStates.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.Closed().resolve(({ target }) => (target.decoded(new Closed({}))))
+      root: NestedStates,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Closed.decoded(new Closed({})))))
     })
     expect(machine.handle).type.not.toBeCallableWith({
-      App: {
-        states: {
-          Workspace: {
-            history: {
-              resume: {
-                default: () => Effect.succeed(null)
+      states: {
+        App: {
+          states: {
+            Workspace: {
+              history: {
+                resume: {
+                  default: () => Effect.succeed(null)
+                }
               }
             }
           }
@@ -454,26 +511,33 @@ describe("Machine history states", () => {
 
   it("requires defaults and shallow initializers in one handler tree", () => {
     const definition = Machine.make({
-      states: States.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
     })
     const afterDefaults = definition.handle({
-      checkout: {
-        history: {
-          recent: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
-          },
-          exact: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
+      states: {
+        checkout: {
+          history: {
+            recent: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+            },
+            exact: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+            }
           }
         }
       }
@@ -481,26 +545,32 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(afterDefaults)
 
     const complete = definition.handle({
-      checkout: {
-        history: {
-          recent: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
+      states: {
+        checkout: {
+          history: {
+            recent: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+            },
+            exact: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.checkout.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
+                  )
+                )
+            }
           },
-          exact: {
-            default: ({ target }) =>
-              target.checkout.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-              )
-          }
-        },
-        states: {
-          payment: {
-            initialize: ({ state, builder }) => builder.decoded(new CardEntry({ cardNumber: String(state.attempt) }))
+          states: {
+            payment: {
+              initialize: ({ state, builder }) => builder.decoded(new CardEntry({ cardNumber: String(state.attempt) }))
+            }
           }
         }
       }
@@ -512,49 +582,61 @@ describe("Machine history states", () => {
   })
 
   it("does not require nested initializers for deep-only history", () => {
-    const DeepOnlyStates = Machine.states({
-      checkout: {
-        schema: Checkout,
-        initial: "payment",
-        states: {
-          payment: {
-            schema: Payment,
-            initial: "cardEntry",
-            states: {
-              cardEntry: CardEntry,
-              verifying: Verifying
+    const DeepOnlyStates = Machine.state({
+      initial: "support",
+      states: {
+        checkout: {
+          schema: Checkout,
+          initial: "payment",
+          states: {
+            payment: {
+              schema: Payment,
+              initial: "cardEntry",
+              states: {
+                cardEntry: CardEntry,
+                verifying: Verifying
+              }
+            },
+            exact: {
+              type: "history",
+              history: "deep"
             }
-          },
-          exact: {
-            type: "history",
-            history: "deep"
           }
-        }
-      },
-      support: Support
+        },
+        support: Support
+      }
     })
-    expect<Machine.Machine.RequiredHistoryInitializers<typeof DeepOnlyStates.states>>().type.toBe<never>()
+    expect<Machine.Machine.RequiredHistoryInitializers<{ readonly "": typeof DeepOnlyStates.node }>>().type.toBe<
+      never
+    >()
 
     const machine = Machine.make({
-      states: DeepOnlyStates.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
+      root: DeepOnlyStates,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
     }).handle({
-      checkout: {
-        history: {
-          exact: {
-            default: () => ({
-              path: "checkout",
-              value: new Checkout({ orderId: "fallback" }),
-              state: {
-                path: "checkout.payment",
-                value: new Payment({ attempt: 1 }),
+      states: {
+        checkout: {
+          history: {
+            exact: {
+              default: () => ({
+                path: "",
+                value: undefined,
                 state: {
-                  path: "checkout.payment.cardEntry",
-                  value: new CardEntry({ cardNumber: "" })
+                  path: "checkout",
+                  value: new Checkout({ orderId: "fallback" }),
+                  state: {
+                    path: "checkout.payment",
+                    value: new Payment({ attempt: 1 }),
+                    state: {
+                      path: "checkout.payment.cardEntry",
+                      value: new CardEntry({ cardNumber: "" })
+                    }
+                  }
                 }
-              }
-            })
+              })
+            }
           }
         }
       }
@@ -564,58 +646,68 @@ describe("Machine history states", () => {
   })
 
   it("requires an exact region-value map when shallow restoration descends through a parallel state", () => {
-    const ParallelStates = Machine.states({
-      outer: {
-        schema: Checkout,
-        initial: "all",
-        states: {
-          all: {
-            schema: Payment,
-            type: "parallel",
-            states: {
-              shipping: Shipping,
-              card: CardEntry
+    const ParallelStates = Machine.state({
+      initial: "support",
+      states: {
+        outer: {
+          schema: Checkout,
+          initial: "all",
+          states: {
+            all: {
+              schema: Payment,
+              type: "parallel",
+              states: {
+                shipping: Shipping,
+                card: CardEntry
+              }
+            },
+            recent: {
+              type: "history"
             }
-          },
-          recent: {
-            type: "history"
-          }
-        }
-      },
-      support: Support
-    })
-    expect<Machine.Machine.RequiredHistoryInitializers<typeof ParallelStates.states>>().type.toBe<"outer.all">()
-
-    const machine = Machine.make({
-      states: ParallelStates.states,
-      events: Machine.events(Resume),
-      initial: (to) => to.support().resolve(({ target }) => (target.decoded(new Support({}))))
-    })
-    const complete = machine.handle({
-      outer: {
-        history: {
-          recent: {
-            default: ({ target }) =>
-              target.outer.decoded(
-                new Checkout({ orderId: "fallback" }),
-                (outer) =>
-                  outer.all.decoded(
-                    new Payment({ attempt: 1 }),
-                    (all) =>
-                      all
-                        .shipping.decoded(new Shipping({ address: "" }))
-                        .card.decoded(new CardEntry({ cardNumber: "" }))
-                  )
-              )
           }
         },
-        states: {
-          all: {
-            initialize: ({ state, builder }) => {
-              expect(state).type.toBe<Payment>()
-              return builder
-                .shipping.decoded(new Shipping({ address: `attempt-${state.attempt}` }))
-                .card.decoded(new CardEntry({ cardNumber: "" }))
+        support: Support
+      }
+    })
+    expect<Machine.Machine.RequiredHistoryInitializers<{ readonly "": typeof ParallelStates.node }>>().type.toBe<
+      "outer.all"
+    >()
+
+    const machine = Machine.make({
+      root: ParallelStates,
+      events: Machine.eventsFromSchemas(Resume),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.support.decoded(new Support({})))))
+    })
+    const complete = machine.handle({
+      states: {
+        outer: {
+          history: {
+            recent: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.outer.decoded(
+                    new Checkout({ orderId: "fallback" }),
+                    (outer) =>
+                      outer.all.decoded(
+                        new Payment({ attempt: 1 }),
+                        (all) =>
+                          all
+                            .shipping.decoded(new Shipping({ address: "" }))
+                            .card.decoded(new CardEntry({ cardNumber: "" }))
+                      )
+                  )
+                )
+            }
+          },
+          states: {
+            all: {
+              initialize: ({ state, builder }) => {
+                expect(state).type.toBe<Payment>()
+                return builder
+                  .shipping.decoded(new Shipping({ address: `attempt-${state.attempt}` }))
+                  .card.decoded(new CardEntry({ cardNumber: "" }))
+              }
             }
           }
         }
@@ -624,15 +716,17 @@ describe("Machine history states", () => {
     expect(Machine.planInitial).type.toBeCallableWith(complete)
 
     expect(machine.handle).type.not.toBeCallableWith({
-      outer: {
-        states: {
-          all: {
-            initialize: ({ builder }: Machine.Machine.StateInitializeContext<
-              typeof ParallelStates.states,
-              readonly [typeof Resume],
-              readonly [],
-              "outer.all"
-            >) => builder.shipping.decoded(new Shipping({ address: "missing-card" }))
+      states: {
+        outer: {
+          states: {
+            all: {
+              initialize: ({ builder }: Machine.Machine.StateInitializeContext<
+                { readonly "": typeof ParallelStates.node },
+                readonly [typeof Resume],
+                readonly [],
+                "outer.all"
+              >) => builder.shipping.decoded(new Shipping({ address: "missing-card" }))
+            }
           }
         }
       }
@@ -640,60 +734,75 @@ describe("Machine history states", () => {
   })
 
   it("rejects root history nodes and active-state properties on history nodes", () => {
-    expect(Machine.states).type.not.toBeCallableWith({
-      rootHistory: {
-        type: "history"
-      }
-    })
-    expect(Machine.states).type.not.toBeCallableWith({
-      checkout: {
-        schema: Checkout,
-        initial: "shipping",
-        states: {
-          shipping: Shipping,
-          history: {
-            type: "history",
-            schema: Support
-          }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "rootHistory",
+      states: {
+        rootHistory: {
+          type: "history"
         }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      checkout: {
-        schema: Checkout,
-        initial: "shipping",
-        states: {
-          shipping: Shipping,
-          history: {
-            type: "history",
-            states: {
-              child: Support
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "checkout",
+      states: {
+        checkout: {
+          schema: Checkout,
+          initial: "shipping",
+          states: {
+            shipping: Shipping,
+            history: {
+              type: "history",
+              schema: Support
             }
           }
         }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      checkout: {
-        schema: Checkout,
-        initial: "history",
-        states: {
-          shipping: Shipping,
-          history: {
-            type: "history"
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "checkout",
+      states: {
+        checkout: {
+          schema: Checkout,
+          initial: "shipping",
+          states: {
+            shipping: Shipping,
+            history: {
+              type: "history",
+              states: {
+                child: Support
+              }
+            }
           }
         }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      checkout: {
-        schema: Checkout,
-        initial: "shipping",
-        states: {
-          shipping: Shipping,
-          history: {
-            type: "history",
-            history: "stack"
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "checkout",
+      states: {
+        checkout: {
+          schema: Checkout,
+          initial: "history",
+          states: {
+            shipping: Shipping,
+            history: {
+              type: "history"
+            }
+          }
+        }
+      }
+    })
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "checkout",
+      states: {
+        checkout: {
+          schema: Checkout,
+          initial: "shipping",
+          states: {
+            shipping: Shipping,
+            history: {
+              type: "history",
+              history: "stack"
+            }
           }
         }
       }

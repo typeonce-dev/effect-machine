@@ -10,18 +10,20 @@ describe("MachineTest coverage and observed graph", () => {
   class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
   class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 
-  const States = Machine.states({ idle: Idle, done: Done })
+  const States = Machine.state({ initial: "idle", states: { idle: Idle, done: Done } })
   const machine = Machine.make({
-    states: States.states,
-    events: Machine.events(Start),
-    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+    root: States,
+    events: Machine.eventsFromSchemas(Start),
+    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
   }).handle({
-    idle: {
-      on: {
-        Start: (to) => to.full.done().resolve(({ target }) => target.decoded(new Done({})))
-      }
-    },
-    done: {}
+    states: {
+      idle: {
+        on: {
+          Start: (to) => to.branch.done().resolve(({ target }) => target.decoded(new Done({})))
+        }
+      },
+      done: {}
+    }
   })
   const trace = {} as MachineTest.Trace<typeof machine>
 
@@ -30,15 +32,15 @@ describe("MachineTest coverage and observed graph", () => {
 
     expect(result).type.toBe<MachineTest.Coverage<typeof machine>>()
     if (result.events.available) expect(result.events.hits[0]!.tag).type.toBe<"Start">()
-    expect(result.states.activation.hits[0]!.path).type.toBe<"idle" | "done">()
-    expect(result.transitions.definitions.hits[0]!.source).type.toBe<"idle" | "done">()
+    expect(result.states.activation.hits[0]!.path).type.toBe<"" | "idle" | "done">()
+    expect(result.transitions.definitions.hits[0]!.source).type.toBe<"" | "idle" | "done">()
     expect(result.transitions.definitions.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
     expect(result.transitions.definitions.hits[0]!.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
-    expect(result.transitions.branches.hits[0]!.source).type.toBe<"idle" | "done">()
+    expect(result.transitions.branches.hits[0]!.source).type.toBe<"" | "idle" | "done">()
     expect(result.transitions.branches.hits[0]!.trigger).type.toBe<Machine.Machine.TransitionTrigger<"Start">>()
     expect(result.transitions.branches.hits[0]!.acceptance).type.toBe<Machine.Machine.TransitionAcceptance>()
     expect(result.transitions.branches.hits[0]!.branch).type.toBe<
-      Machine.Machine.TransitionBranch<"idle" | "done">
+      Machine.Machine.TransitionBranch<"" | "idle" | "done">
     >()
   })
 
@@ -57,7 +59,7 @@ describe("MachineTest coverage and observed graph", () => {
 
     type Node = MachineTest.ObservedGraphNode<typeof machine>
     type Edge = MachineTest.ObservedGraphEdge<typeof machine>
-    expect<Node["configuration"][number]>().type.toBe<"idle" | "done">()
+    expect<Node["configuration"][number]>().type.toBe<"" | "idle" | "done">()
     expect<Node["encoded"]>().type.toBe<Machine.Machine.EncodedSnapshot | undefined>()
     expect<Extract<Edge, { readonly _tag: "Event" }>["event"]>().type.toBe<Start>()
   })

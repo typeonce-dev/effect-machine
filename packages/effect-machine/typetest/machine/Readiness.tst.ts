@@ -11,61 +11,70 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", { value: Schema.String }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-const choiceStates = Machine.states({
-  Ready,
-  Flow: {
-    schema: Flow,
-    initial: "Route",
-    states: {
-      Route: { type: "choice" },
-      Idle
+const choiceStates = Machine.state({
+  initial: "Ready",
+  states: {
+    Ready,
+    Flow: {
+      schema: Flow,
+      initial: "Route",
+      states: {
+        Route: { type: "choice" },
+        Idle
+      }
     }
   }
 })
 
 const choiceIncomplete = Machine.make({
-  states: choiceStates.states,
-  events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
+  root: choiceStates,
+  events: Machine.eventsFromSchemas(Tick),
+  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
 })
-const choiceSnapshot = { path: "Ready" as const, value: new Ready({}) }
+const choiceSnapshot = { path: "" as const, value: undefined, state: { path: "Ready" as const, value: new Ready({}) } }
 
-const historyStates = Machine.states({
-  Ready,
-  Flow: {
-    schema: Flow,
-    initial: "Idle",
-    states: {
-      Idle,
-      recent: { type: "history", history: "deep" }
+const historyStates = Machine.state({
+  initial: "Ready",
+  states: {
+    Ready,
+    Flow: {
+      schema: Flow,
+      initial: "Idle",
+      states: {
+        Idle,
+        recent: { type: "history", history: "deep" }
+      }
     }
   }
 })
 
 const historyIncomplete = Machine.make({
-  states: historyStates.states,
-  events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
+  root: historyStates,
+  events: Machine.eventsFromSchemas(Tick),
+  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
 })
-const historySnapshot = { path: "Ready" as const, value: new Ready({}) }
+const historySnapshot = { path: "" as const, value: undefined, state: { path: "Ready" as const, value: new Ready({}) } }
 
-const outputStates = Machine.states({
-  Ready,
-  Done: {
-    schema: Done,
-    type: "final",
-    output: Schema.String
+const outputStates = Machine.state({
+  initial: "Ready",
+  states: {
+    Ready,
+    Done: {
+      schema: Done,
+      type: "final",
+      output: Schema.String
+    }
   }
 })
 
 const outputIncomplete = Machine.make({
-  states: outputStates.states,
-  events: Machine.events(Tick),
-  initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
+  root: outputStates,
+  events: Machine.eventsFromSchemas(Tick),
+  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
 })
 const outputSnapshot = { path: "Ready" as const, value: new Ready({}) }
 type InvokeSelector = Machine.Machine.InvokeSelector<
-  typeof outputStates.states,
+  { readonly "": typeof outputStates.node },
   readonly [typeof Tick],
   readonly [],
   "Ready"
@@ -130,49 +139,61 @@ describe("executable machine readiness", () => {
   })
 
   it("accepts a complete machine and preserves its exact channels through every adapter", () => {
-    const completeStates = Machine.states({
-      Ready,
-      Flow: {
-        schema: Flow,
-        initial: "Route",
-        states: {
-          Route: { type: "choice" },
-          Idle,
-          recent: { type: "history", history: "deep" },
-          Done: {
-            schema: Done,
-            type: "final",
-            output: Schema.String
+    const completeStates = Machine.state({
+      initial: "Ready",
+      states: {
+        Ready,
+        Flow: {
+          schema: Flow,
+          initial: "Route",
+          states: {
+            Route: { type: "choice" },
+            Idle,
+            recent: { type: "history", history: "deep" },
+            Done: {
+              schema: Done,
+              type: "final",
+              output: Schema.String
+            }
           }
         }
       }
     })
     const complete = Machine.make({
-      states: completeStates.states,
-      events: Machine.events(Tick),
-      initial: (to) => to.Ready().resolve(({ target }) => (target.decoded(new Ready({}))))
+      root: completeStates,
+      events: Machine.eventsFromSchemas(Tick),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
     }).handle({
-      Flow: {
-        history: {
-          recent: {
-            default: ({ target }) =>
-              target.Flow.decoded(
-                new Flow({}),
-                (flow) => flow.Idle.decoded(new Idle({}))
-              )
-          }
-        },
-        states: {
-          Route: {
-            choice: (to) => to.local.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      states: {
+        Flow: {
+          history: {
+            recent: {
+              default: ({ target }) =>
+                target.from((tree) =>
+                  tree.Flow.decoded(
+                    new Flow({}),
+                    (flow) => flow.Idle.decoded(new Idle({}))
+                  )
+                )
+            }
           },
-          Done: {
-            output: ({ state }) => state.value
+          states: {
+            Route: {
+              choice: (to) => to.local.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+            },
+            Done: {
+              output: ({ state }) => state.value
+            }
           }
         }
       }
     })
-    const completeSnapshot = { path: "Ready" as const, value: new Ready({}) }
+    const completeSnapshot = {
+      path: "" as const,
+      value: undefined,
+      state: { path: "Ready" as const, value: new Ready({}) }
+    }
 
     const plannedInitial = Machine.planInitial(complete)
     const planned = Machine.plan(complete, completeSnapshot, new Tick({}))
@@ -197,14 +218,14 @@ describe("executable machine readiness", () => {
     expect<Machine.Machine.Output<typeof complete>>().type.toBe<string>()
     expect<Machine.Machine.InputEvent<typeof complete>>().type.toBe<Tick>()
     expect<Effect.Success<typeof plannedInitial>["state"]>().type.toBe<
-      Machine.Machine.Snapshot<typeof completeStates.states>
+      Machine.Snapshot<typeof completeStates>
     >()
     expect<Effect.Success<typeof can>>().type.toBe<boolean>()
     expect(canComplete).type.toBeCallableWith(completeSnapshot, new Tick({}))
     expect(makeAtom).type.toBeCallableWith()
     expect(makeBoundAtom).type.toBeCallableWith()
     expect<Effect.Success<typeof planned>["next"]>().type.toBe<
-      Machine.Machine.Snapshot<typeof completeStates.states>
+      Machine.Snapshot<typeof completeStates>
     >()
     expect<Effect.Success<typeof started>["send"]>().type.toBe<
       (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
@@ -215,28 +236,28 @@ describe("executable machine readiness", () => {
     expect<Effect.Success<typeof trace>>().type.toBe<MachineTest.Trace<typeof complete>>()
     expect<AtomChannels<typeof atom>>().type.toBe<
       readonly [
-        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Snapshot<typeof completeStates>,
         Machine.Machine.EventInput<Tick>,
         string
       ]
     >()
     expect<AtomChannels<typeof resumedAtom>>().type.toBe<
       readonly [
-        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Snapshot<typeof completeStates>,
         Machine.Machine.EventInput<Tick>,
         string
       ]
     >()
     expect<AtomChannels<typeof boundAtom>>().type.toBe<
       readonly [
-        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Snapshot<typeof completeStates>,
         Machine.Machine.EventInput<Tick>,
         string
       ]
     >()
     expect<AtomChannels<typeof boundResumedAtom>>().type.toBe<
       readonly [
-        Machine.Machine.Snapshot<typeof completeStates.states>,
+        Machine.Snapshot<typeof completeStates>,
         Machine.Machine.EventInput<Tick>,
         string
       ]

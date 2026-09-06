@@ -292,7 +292,8 @@ const pathToRootCache = new WeakMap<Machine.StateNodes, Map<string, ReadonlyArra
 
 export const hasOwn = (u: object, key: string): boolean => Object.prototype.hasOwnProperty.call(u, key)
 
-export const isDescendantOf = (path: string, ancestor: string): boolean => path.startsWith(`${ancestor}.`)
+export const isDescendantOf = (path: string, ancestor: string): boolean =>
+  path !== ancestor && (ancestor === "" || path.startsWith(`${ancestor}.`))
 
 export const isPathInSubtree = (path: string, ancestor: string): boolean =>
   path === ancestor || isDescendantOf(path, ancestor)
@@ -1168,7 +1169,10 @@ export const isActiveFinalNode = (
   const node = getNode(machine, path)
   if (node.type === "compound") {
     const child = getActiveChildPath(machine, configuration, path)
-    return child !== undefined && isDirectFinalPath(machine, child)
+    return child !== undefined &&
+      (path === ""
+        ? !hasCompletionHandler(machine, child) && isActiveFinalNode(machine, configuration, child)
+        : isDirectFinalPath(machine, child))
   }
   if (node.type === "parallel") {
     for (const child of node.children) {
@@ -1269,7 +1273,9 @@ export const completeActiveFinalNodeEffect: <
   const node = getNode(machine, path)
   if (node.type === "compound") {
     const child = getActiveChildPath(machine, configuration, path)
-    if (child === undefined || !isDirectFinalPath(machine, child)) {
+    if (
+      child === undefined || (path === "" ? hasCompletionHandler(machine, child) : !isDirectFinalPath(machine, child))
+    ) {
       return undefined
     }
     const childCompletion = yield* completeActiveFinalNodeEffect(
@@ -1403,7 +1409,9 @@ const completeActiveFinalNodeSync = <const Events extends ReadonlyArray<Machine.
   const node = getNode(machine, path)
   if (node.type === "compound") {
     const child = getActiveChildPath(machine, configuration, path)
-    if (child === undefined || !isDirectFinalPath(machine, child)) return undefined
+    if (
+      child === undefined || (path === "" ? hasCompletionHandler(machine, child) : !isDirectFinalPath(machine, child))
+    ) return undefined
     const childCompletion = completeActiveFinalNodeSync(machine, configuration, child, event, outputs, completions)
     if (childCompletion === undefined) return undefined
     const completion = setCompletedOutput(outputs, path, childCompletion.output)

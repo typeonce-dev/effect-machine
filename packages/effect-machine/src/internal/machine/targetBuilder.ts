@@ -235,7 +235,10 @@ const getTargetBuilderDefinition = (
   let children = states
   let path = ""
   let definition: Machine.TaggedSchema | Machine.StateNodeConfig | undefined
-  for (const key of targetPath.split(".")) {
+  const segments = Object.hasOwn(states, "") && targetPath !== ""
+    ? ["", ...targetPath.split(".")]
+    : targetPath.split(".")
+  for (const key of segments) {
     if (!hasProperty(children, key)) {
       throw new Error(`Machine expected state path "${targetPath}" to exist`)
     }
@@ -310,7 +313,7 @@ const makeLocalTargetChildBuilder = (
           return makeTargetWithValues(child.path, value, values)
         }
         if (child.type === "parallel") {
-          if (source !== child.path && !source.startsWith(`${child.path}.`)) {
+          if (source !== child.path && !(child.path === "" || source.startsWith(`${child.path}.`))) {
             return makeParallelTarget(states, child, value, selector, values)
           }
           if (selector === undefined) {
@@ -412,7 +415,7 @@ const makeBranchTargetNodeBuilder = (
   const builder = withFrom(
     (value: unknown, selector?: (builder: unknown) => unknown) => {
       if (node.type === "parallel") {
-        if (source !== node.path && !source.startsWith(`${node.path}.`)) {
+        if (source !== node.path && !(node.path === "" || source.startsWith(`${node.path}.`))) {
           return makeParallelTarget(states, node, value, selector, values)
         }
         if (selector === undefined) {
@@ -447,7 +450,7 @@ const makeBranchTargetNodeBuilder = (
     node.schema !== undefined
   ) as unknown as Record<string, unknown>
   withInitial(builder, node.path, node.schema !== undefined, values)
-  if (node.type !== "parallel" || source === node.path || source.startsWith(`${node.path}.`)) {
+  if (node.type !== "parallel" || source === node.path || node.path === "" || source.startsWith(`${node.path}.`)) {
     addBranchTargetChildren(builder, states, stateNodes, node.path, values, source)
   }
   return builder
@@ -458,7 +461,7 @@ const makeBranchTargetBuilder = (
   stateNodes: Machine.StateNodes,
   source: string
 ): unknown => {
-  const rootPath = source.split(".")[0]!
+  const rootPath = stateNodes.roots[0]!
   const root = getTargetBuilderNode(stateNodes, rootPath)
   return {
     [root.key]: makeBranchTargetNodeBuilder(states, stateNodes, root.path, undefined, source)
@@ -488,7 +491,7 @@ const makeHistoryTargetBuilder = (
 const getParentPathRuntime = (path: string): string => {
   const separator = path.lastIndexOf(".")
   if (separator < 0) {
-    throw new Error(`Machine expected history state "${path}" to have an active parent`)
+    return ""
   }
   return path.slice(0, separator)
 }

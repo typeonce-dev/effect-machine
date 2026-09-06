@@ -16,27 +16,31 @@ const burstSize = 512
 describe("machine scheduling", () => {
   it.effect("drains a large synchronous raised-event burst without growing the stack", () =>
     Effect.gen(function*() {
-      const states = Machine.states({ SchedulingActive })
+      const states = Machine.state({ initial: "SchedulingActive", states: { SchedulingActive } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(StartBurst),
-        internalEvents: Machine.internalEvents(Burst),
-        initial: (to) =>
-          to.SchedulingActive().resolve(({ target }) => target.decoded(new SchedulingActive({ count: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(StartBurst),
+        internalEvents: Machine.internalEventsFromSchemas(Burst),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.SchedulingActive.decoded(new SchedulingActive({ count: 0 })))
+          )
       }).handle({
-        SchedulingActive: {
-          on: {
-            StartBurst: (to) =>
-              to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
-                enqueue.raise(new Burst({}))
-                return target.decoded(state)
-              }),
-            Burst: (to) =>
-              to.full.SchedulingActive().resolve(({ state, target }, enqueue) => {
-                const count = state.count + 1
-                if (count < burstSize) enqueue.raise(new Burst({}))
-                return target.decoded(new SchedulingActive({ count }))
-              })
+        states: {
+          SchedulingActive: {
+            on: {
+              StartBurst: (to) =>
+                to.branch.SchedulingActive().resolve(({ state, target }, enqueue) => {
+                  enqueue.raise(new Burst({}))
+                  return target.decoded(state)
+                }),
+              Burst: (to) =>
+                to.branch.SchedulingActive().resolve(({ state, target }, enqueue) => {
+                  const count = state.count + 1
+                  if (count < burstSize) enqueue.raise(new Burst({}))
+                  return target.decoded(new SchedulingActive({ count }))
+                })
+            }
           }
         }
       })
@@ -45,6 +49,6 @@ describe("machine scheduling", () => {
       yield* actor.send(new StartBurst({}))
       yield* Effect.yieldNow
 
-      assert.strictEqual((yield* actor.state).value.count, burstSize)
+      assert.strictEqual((yield* actor.state).state.value.count, burstSize)
     }))
 })

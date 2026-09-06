@@ -48,79 +48,90 @@ describe("Machine.resume", () => {
           initial: () => Ref.update(starts, (labels) => [...labels, label]).pipe(Effect.as(label)),
           run: () => Effect.never
         })
-      const states = Machine.states({
-        Root: {
-          schema: Root,
-          type: "parallel",
-          states: {
-            left: {
-              schema: Left,
-              initial: "On",
-              states: { On: LeftOn, Off: Inactive }
-            },
-            right: {
-              schema: Right,
-              initial: "On",
-              states: { On: RightOn, Off: Inactive }
+      const states = Machine.state({
+        initial: "Root",
+        states: {
+          Root: {
+            schema: Root,
+            type: "parallel",
+            states: {
+              left: {
+                schema: Left,
+                initial: "On",
+                states: { On: LeftOn, Off: Inactive }
+              },
+              right: {
+                schema: Right,
+                initial: "On",
+                states: { On: RightOn, Off: Inactive }
+              }
             }
-          }
-        },
-        Inactive
+          },
+          Inactive
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Inactive().resolve(({ target }) => target.decoded(new Inactive({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Inactive.decoded(new Inactive({}))))
       }).handle({
-        Root: {
-          invoke: (from) => from.logic("root", { address: Machine.childAddress("root"), logic: restoredLogic("root") }),
-          states: {
-            left: {
-              invoke: (from) =>
-                from.logic("left", { address: Machine.childAddress("left"), logic: restoredLogic("left") }),
-              states: {
-                On: {
-                  invoke: (from) =>
-                    from.logic("left-leaf", {
-                      address: Machine.childAddress("left-leaf"),
-                      logic: restoredLogic("left-leaf")
-                    })
+        states: {
+          Root: {
+            invoke: (from) =>
+              from.logic("root", { address: Machine.childAddress("root"), logic: restoredLogic("root") }),
+            states: {
+              left: {
+                invoke: (from) =>
+                  from.logic("left", { address: Machine.childAddress("left"), logic: restoredLogic("left") }),
+                states: {
+                  On: {
+                    invoke: (from) =>
+                      from.logic("left-leaf", {
+                        address: Machine.childAddress("left-leaf"),
+                        logic: restoredLogic("left-leaf")
+                      })
+                  }
                 }
-              }
-            },
-            right: {
-              invoke: (from) =>
-                from.logic("right", { address: Machine.childAddress("right"), logic: restoredLogic("right") }),
-              states: {
-                On: {
-                  invoke: (from) =>
-                    from.logic("right-leaf", {
-                      address: Machine.childAddress("right-leaf"),
-                      logic: restoredLogic("right-leaf")
-                    })
+              },
+              right: {
+                invoke: (from) =>
+                  from.logic("right", { address: Machine.childAddress("right"), logic: restoredLogic("right") }),
+                states: {
+                  On: {
+                    invoke: (from) =>
+                      from.logic("right-leaf", {
+                        address: Machine.childAddress("right-leaf"),
+                        logic: restoredLogic("right-leaf")
+                      })
+                  }
                 }
               }
             }
+          },
+          Inactive: {
+            invoke: (from) =>
+              from.logic("inactive", { address: Machine.childAddress("inactive"), logic: restoredLogic("inactive") })
           }
-        },
-        Inactive: {
-          invoke: (from) =>
-            from.logic("inactive", { address: Machine.childAddress("inactive"), logic: restoredLogic("inactive") })
         }
       })
       const snapshot = {
-        path: "Root" as const,
-        value: new Root({}),
-        states: {
-          left: {
-            path: "Root.left" as const,
-            value: new Left({}),
-            state: { path: "Root.left.On" as const, value: new LeftOn({}) }
-          },
-          right: {
-            path: "Root.right" as const,
-            value: new Right({}),
-            state: { path: "Root.right.On" as const, value: new RightOn({}) }
+        path: "" as const,
+        value: undefined,
+        state: {
+          path: "Root" as const,
+          value: new Root({}),
+          states: {
+            left: {
+              path: "Root.left" as const,
+              value: new Left({}),
+              state: { path: "Root.left.On" as const, value: new LeftOn({}) }
+            },
+            right: {
+              path: "Root.right" as const,
+              value: new Right({}),
+              state: { path: "Root.right.On" as const, value: new RightOn({}) }
+            }
           }
         }
       }
@@ -142,54 +153,63 @@ describe("Machine.resume", () => {
       class RightA extends Schema.TaggedClass<RightA>("RightA")("RightA", {}) {}
       class RightB extends Schema.TaggedClass<RightB>("RightB")("RightB", {}) {}
       class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", {}) {}
-      const states = Machine.states({
-        Root: {
-          schema: Root,
-          type: "parallel",
-          states: {
-            left: { schema: Left, initial: "A", states: { A: LeftA, B: LeftB } },
-            right: { schema: Right, initial: "A", states: { A: RightA, B: RightB } }
+      const states = Machine.state({
+        initial: "Root",
+        states: {
+          Root: {
+            schema: Root,
+            type: "parallel",
+            states: {
+              left: { schema: Left, initial: "A", states: { A: LeftA, B: LeftB } },
+              right: { schema: Right, initial: "A", states: { A: RightA, B: RightB } }
+            }
           }
         }
       })
       const initial = {
-        path: "Root" as const,
-        value: new Root({}),
-        states: {
-          left: {
-            path: "Root.left" as const,
-            value: new Left({}),
-            state: { path: "Root.left.A" as const, value: new LeftA({}) }
-          },
-          right: {
-            path: "Root.right" as const,
-            value: new Right({}),
-            state: { path: "Root.right.A" as const, value: new RightA({}) }
+        path: "" as const,
+        value: undefined,
+        state: {
+          path: "Root" as const,
+          value: new Root({}),
+          states: {
+            left: {
+              path: "Root.left" as const,
+              value: new Left({}),
+              state: { path: "Root.left.A" as const, value: new LeftA({}) }
+            },
+            right: {
+              path: "Root.right" as const,
+              value: new Right({}),
+              state: { path: "Root.right.A" as const, value: new RightA({}) }
+            }
           }
         }
       }
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Advance),
-        initial: (to) => to.Root.initial.resolve(() => initial)
+        root: states,
+        events: Machine.eventsFromSchemas(Advance),
+        initialConfiguration: (to) => to.resolve(() => initial)
       })
         .handle({
-          Root: {
-            states: {
-              left: {
-                states: {
-                  A: {
-                    on: {
-                      Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new LeftB({})))
+          states: {
+            Root: {
+              states: {
+                left: {
+                  states: {
+                    A: {
+                      on: {
+                        Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new LeftB({})))
+                      }
                     }
                   }
-                }
-              },
-              right: {
-                states: {
-                  A: {
-                    on: {
-                      Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new RightB({})))
+                },
+                right: {
+                  states: {
+                    A: {
+                      on: {
+                        Advance: (to) => to.local.B().resolve(({ target }) => target.decoded(new RightB({})))
+                      }
                     }
                   }
                 }
@@ -202,11 +222,11 @@ describe("Machine.resume", () => {
         ref,
         new Advance({}),
         (snapshot) =>
-          snapshot.state.path === "Root" &&
-          snapshot.state.states.left.state.path === "Root.left.B" &&
-          snapshot.state.states.right.state.path === "Root.right.B"
+          snapshot.state.state.path === "Root" &&
+          snapshot.state.state.states.left.state.path === "Root.left.B" &&
+          snapshot.state.state.states.right.state.path === "Root.right.B"
       )
-      assert.deepStrictEqual(yield* ref.state, {
+      assert.deepStrictEqual((yield* ref.state).state, {
         path: "Root" as const,
         value: new Root({}),
         states: {
@@ -227,24 +247,33 @@ describe("Machine.resume", () => {
 
   it.effect("resumes terminal snapshots as completed refs with current output", () =>
     Effect.gen(function*() {
-      const states = Machine.states({
-        Count,
-        Done: { schema: Done, type: "final", output: Schema.Number }
+      const states = Machine.state({
+        initial: "Count",
+        states: {
+          Count,
+          Done: { schema: Done, type: "final", output: Schema.Number }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Finish),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(Finish),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          on: {
-            Finish: (to) => to.full.Done().resolve(({ target }) => target.decoded(new Done({ value: 9 })))
-          }
-        },
-        Done: { output: ({ state }) => state.value }
+        states: {
+          Count: {
+            on: {
+              Finish: (to) => to.branch.Done().resolve(({ target }) => target.decoded(new Done({ value: 9 })))
+            }
+          },
+          Done: { output: ({ state }) => state.value }
+        }
       })
       const logical = { path: "Done" as const, value: new Done({ value: 9 }) }
-      const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
+      const decoded = yield* Machine.decodeSnapshot(
+        machine,
+        yield* Machine.encodeSnapshot(machine, { path: "" as const, value: undefined, state: logical })
+      )
       const ref = yield* Machine.resume(machine, decoded)
 
       assert.strictEqual(yield* ref.join, 9)
@@ -257,33 +286,42 @@ describe("Machine.resume", () => {
       class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
       class Finished extends Schema.TaggedClass<Finished>("Finished")("Finished", {}) {}
       class Next extends Schema.TaggedClass<Next>("Next")("Next", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Finished",
-          states: { Finished: { schema: Finished, type: "final" } }
-        },
-        Next
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Finished",
+            states: { Finished: { schema: Finished, type: "final" } }
+          },
+          Next
+        }
       })
-      const logical: Machine.Machine.Snapshot<typeof states.states> = {
-        path: "Flow" as const,
-        value: new Flow({}),
-        state: { path: "Flow.Finished" as const, value: new Finished({}) },
+      const logical: Machine.Snapshot<typeof states> = {
+        path: "" as const,
+        value: undefined,
+        state: {
+          path: "Flow" as const,
+          value: new Flow({}),
+          state: { path: "Flow.Finished" as const, value: new Finished({}) }
+        },
         completed: [
           { path: "Flow.Finished" as const, output: undefined },
           { path: "Flow" as const, output: undefined }
         ]
       }
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Ping),
-        initial: (to) => to.Flow.initial.resolve(() => logical)
+        root: states,
+        events: Machine.eventsFromSchemas(Ping),
+        initialConfiguration: (to) => to.resolve(() => logical)
       })
         .handle({
-          Flow: {
-            onDone: (to) => to.full.Next().resolve(({ target }) => target.decoded(new Next({})))
-          },
-          Next: {}
+          states: {
+            Flow: {
+              onDone: (to) => to.branch.Next().resolve(({ target }) => target.decoded(new Next({})))
+            },
+            Next: {}
+          }
         })
       const decoded = yield* Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, logical))
       const ref = yield* Machine.resume(machine, decoded)
@@ -299,23 +337,29 @@ describe("Machine.resume", () => {
     Effect.gen(function*() {
       class A extends Schema.TaggedClass<A>("A")("A", {}) {}
       class B extends Schema.TaggedClass<B>("B")("B", {}) {}
-      const states = Machine.states({ A, B })
+      const states = Machine.state({ initial: "A", states: { A, B } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Ping),
-        initial: (to) => to.A().resolve(({ target }) => target.decoded(new A({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Ping),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.A.decoded(new A({}))))
       }).handle({
-        A: {
-          always: (to) => to.full.B().resolve(({ target }) => target.decoded(new B({})))
-        },
-        B: {}
+        states: {
+          A: {
+            always: (to) => to.branch.B().resolve(({ target }) => target.decoded(new B({})))
+          },
+          B: {}
+        }
       })
 
-      const ref = yield* Machine.resume(machine, { path: "A" as const, value: new A({}) })
-      assert.strictEqual((yield* ref.state).path, "A")
+      const ref = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "A" as const, value: new A({}) }
+      })
+      assert.strictEqual((yield* ref.state).state.path, "A")
       yield* ref.send(new Ping({}))
       yield* Effect.yieldNow
-      assert.strictEqual((yield* ref.state).path, "A")
+      assert.strictEqual((yield* ref.state).state.path, "A")
       yield* ref.stop
     }))
 
@@ -324,37 +368,48 @@ describe("Machine.resume", () => {
       class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
       class Cancelled extends Schema.TaggedClass<Cancelled>("Cancelled")("Cancelled", {}) {}
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
-      const states = Machine.states({ Waiting, Cancelled, TimedOut })
+      const states = Machine.state({ initial: "Waiting", states: { Waiting, Cancelled, TimedOut } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Cancel),
-        internalEvents: Machine.internalEvents(Timeout),
-        initial: (to) => to.Cancelled().resolve(({ target }) => target.decoded(new Cancelled({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Cancel),
+        internalEvents: Machine.internalEventsFromSchemas(Timeout),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Cancelled.decoded(new Cancelled({}))))
       }).handle({
-        Waiting: {
-          invoke: (from) =>
-            from.timer("timeout", "1 second").onDone((to) =>
-              to.full.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
-            ),
-          on: {
-            Cancel: (to) => to.full.Cancelled().resolve(({ target }) => target.decoded(new Cancelled({})))
-          }
-        },
-        Cancelled: {},
-        TimedOut: {}
+        states: {
+          Waiting: {
+            invoke: (from) =>
+              from.timer("timeout", "1 second").onDone((to) =>
+                to.branch.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
+              ),
+            on: {
+              Cancel: (to) => to.branch.Cancelled().resolve(({ target }) => target.decoded(new Cancelled({})))
+            }
+          },
+          Cancelled: {},
+          TimedOut: {}
+        }
       })
 
-      const first = yield* Machine.resume(machine, { path: "Waiting" as const, value: new Waiting({}) })
+      const first = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Waiting" as const, value: new Waiting({}) }
+      })
       yield* TestClock.adjust("999 millis")
-      assert.strictEqual((yield* first.state).path, "Waiting")
+      assert.strictEqual((yield* first.state).state.path, "Waiting")
       yield* TestClock.adjust("1 millis")
-      yield* waitFor(first, (snapshot) => snapshot.state.path === "TimedOut")
+      yield* waitFor(first, (snapshot) => snapshot.state.state.path === "TimedOut")
       yield* first.stop
 
-      const second = yield* Machine.resume(machine, { path: "Waiting" as const, value: new Waiting({}) })
-      yield* sendAndWait(second, new Cancel({}), (snapshot) => snapshot.state.path === "Cancelled")
+      const second = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Waiting" as const, value: new Waiting({}) }
+      })
+      yield* sendAndWait(second, new Cancel({}), (snapshot) => snapshot.state.state.path === "Cancelled")
       yield* TestClock.adjust("1 second")
-      assert.strictEqual((yield* second.state).path, "Cancelled")
+      assert.strictEqual((yield* second.state).state.path, "Cancelled")
       yield* second.stop
     }))
 
@@ -366,26 +421,36 @@ describe("Machine.resume", () => {
         value: Schema.String
       }) {}
       const runs = yield* Ref.make(0)
-      const states = Machine.states({ Loading, Loaded })
+      const states = Machine.state({ initial: "Loading", states: { Loading, Loaded } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        internalEvents: Machine.internalEvents(LoadedEvent),
-        initial: (to) => to.Loaded().resolve(({ target }) => target.decoded(new Loaded({ value: "initial" })))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        internalEvents: Machine.internalEventsFromSchemas(LoadedEvent),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Loaded.decoded(new Loaded({ value: "initial" }))))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh"))).onDone((to) =>
-              to.full.Loaded().resolve(({ output, target }) => target.decoded(new Loaded({ value: output })))
-            )
-        },
-        Loaded: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Ref.updateAndGet(runs, (n) => n + 1).pipe(Effect.as("fresh"))).onDone((to) =>
+                to.branch.Loaded().resolve(({ output, target }) => target.decoded(new Loaded({ value: output })))
+              )
+          },
+          Loaded: {}
+        }
       })
 
-      const ref = yield* Machine.resume(machine, { path: "Loading" as const, value: new Loading({}) })
-      yield* waitFor(ref, (snapshot) => snapshot.state.path === "Loaded")
+      const ref = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Loading" as const, value: new Loading({}) }
+      })
+      yield* waitFor(ref, (snapshot) => snapshot.state.state.path === "Loaded")
       assert.strictEqual(yield* Ref.get(runs), 1)
-      assert.deepStrictEqual(yield* ref.state, { path: "Loaded" as const, value: new Loaded({ value: "fresh" }) })
+      assert.deepStrictEqual((yield* ref.state).state, {
+        path: "Loaded" as const,
+        value: new Loaded({ value: "fresh" })
+      })
       yield* ref.stop
     }))
 
@@ -400,29 +465,41 @@ describe("Machine.resume", () => {
         message: Schema.String
       }) {}
       const runs = yield* Ref.make(0)
-      const states = Machine.states({ Loading, Failed })
+      const states = Machine.state({ initial: "Loading", states: { Loading, Failed } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        internalEvents: Machine.internalEvents(FailedEvent),
-        initial: (to) => to.Failed().resolve(({ target }) => target.decoded(new Failed({ message: "initial" })))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        internalEvents: Machine.internalEventsFromSchemas(FailedEvent),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Failed.decoded(new Failed({ message: "initial" }))))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () =>
-              Ref.update(runs, (n) => n + 1).pipe(
-                Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
-              )).onFailure((to) =>
-                to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ message: error.message })))
-              )
-        },
-        Failed: {}
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () =>
+                Ref.update(runs, (n) => n + 1).pipe(
+                  Effect.andThen(Effect.fail(new LoadFailure({ message: "offline" })))
+                )).onFailure((to) =>
+                  to.branch.Failed().resolve(({ error, target }) =>
+                    target.decoded(new Failed({ message: error.message }))
+                  )
+                )
+          },
+          Failed: {}
+        }
       })
 
-      const ref = yield* Machine.resume(machine, { path: "Loading" as const, value: new Loading({}) })
-      yield* waitFor(ref, (snapshot) => snapshot.state.path === "Failed")
+      const ref = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Loading" as const, value: new Loading({}) }
+      })
+      yield* waitFor(ref, (snapshot) => snapshot.state.state.path === "Failed")
       assert.strictEqual(yield* Ref.get(runs), 1)
-      assert.deepStrictEqual(yield* ref.state, { path: "Failed" as const, value: new Failed({ message: "offline" }) })
+      assert.deepStrictEqual((yield* ref.state).state, {
+        path: "Failed" as const,
+        value: new Failed({ message: "offline" })
+      })
       yield* ref.stop
     }))
 
@@ -435,52 +512,73 @@ describe("Machine.resume", () => {
       class ChildOutput extends Schema.TaggedClass<ChildOutput>("ChildOutput")("ChildOutput", {
         value: Schema.Number
       }) {}
-      const childStates = Machine.states({
-        ChildIdle,
-        ChildDone: { schema: ChildDone, type: "final", output: Schema.Number }
+      const childStates = Machine.state({
+        initial: "ChildIdle",
+        states: {
+          ChildIdle,
+          ChildDone: { schema: ChildDone, type: "final", output: Schema.Number }
+        }
       })
       const child = Machine.make({
-        states: childStates.states,
-        events: Machine.events(ChildFinish),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({ value: 1 })))
+        root: childStates,
+        events: Machine.eventsFromSchemas(ChildFinish),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({ value: 1 }))))
       }).handle({
-        ChildIdle: {
-          on: {
-            ChildFinish: (to) =>
-              to.full.ChildDone().resolve(({ state, target }) =>
-                target.decoded(new ChildDone({ value: state.value + 1 }))
-              )
-          }
-        },
-        ChildDone: { output: ({ state }) => state.value }
+        states: {
+          ChildIdle: {
+            on: {
+              ChildFinish: (to) =>
+                to.branch.ChildDone().resolve(({ state, target }) =>
+                  target.decoded(new ChildDone({ value: state.value + 1 }))
+                )
+            }
+          },
+          ChildDone: { output: ({ state }) => state.value }
+        }
       })
       const Child = Machine.child("child", child)
-      const states = Machine.states({ Parent, ChildOutput })
+      const states = Machine.state({ initial: "Parent", states: { Parent, ChildOutput } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(ChildOutput),
-        initial: (to) => to.ChildOutput().resolve(({ target }) => target.decoded(new ChildOutput({ value: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(ChildOutput),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildOutput.decoded(new ChildOutput({ value: 0 }))))
       }).handle({
-        Parent: {
-          invoke: (from) =>
-            from.child(Child).onDone((to) =>
-              to.full.ChildOutput().resolve(({ output, target }) => target.decoded(new ChildOutput({ value: output })))
-            )
-        },
-        ChildOutput: {}
+        states: {
+          Parent: {
+            invoke: (from) =>
+              from.child(Child).onDone((to) =>
+                to.branch.ChildOutput().resolve(({ output, target }) =>
+                  target.decoded(new ChildOutput({ value: output }))
+                )
+              )
+          },
+          ChildOutput: {}
+        }
       })
 
-      const ref = yield* Machine.resume(machine, { path: "Parent" as const, value: new Parent({}) })
+      const ref = yield* Machine.resume(machine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Parent" as const, value: new Parent({}) }
+      })
       const active = yield* ref.childChanges(Child).pipe(
         Stream.filter(Option.isSome),
         Stream.take(1),
         Stream.runCollect,
         Effect.map((values) => values[0]!.value)
       )
-      assert.deepStrictEqual(yield* active.state, { path: "ChildIdle" as const, value: new ChildIdle({ value: 1 }) })
+      assert.deepStrictEqual((yield* active.state).state, {
+        path: "ChildIdle" as const,
+        value: new ChildIdle({ value: 1 })
+      })
       yield* active.send(new ChildFinish({}))
-      yield* waitFor(ref, (snapshot) => snapshot.state.path === "ChildOutput")
-      assert.deepStrictEqual(yield* ref.state, { path: "ChildOutput" as const, value: new ChildOutput({ value: 2 }) })
+      yield* waitFor(ref, (snapshot) => snapshot.state.state.path === "ChildOutput")
+      assert.deepStrictEqual((yield* ref.state).state, {
+        path: "ChildOutput" as const,
+        value: new ChildOutput({ value: 2 })
+      })
       assert(Option.isNone(yield* ref.child(Child)))
       yield* ref.stop
     }))
@@ -490,52 +588,62 @@ describe("Machine.resume", () => {
       class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
       class Region extends Schema.TaggedClass<Region>("Region")("Region", {}) {}
       class Leaf extends Schema.TaggedClass<Leaf>("Leaf")("Leaf", { value: Schema.Number }) {}
-      const states = Machine.states({
-        Root: {
-          schema: Root,
-          type: "parallel",
-          states: {
-            left: { schema: Region, initial: "Leaf", states: { Leaf } },
-            right: { schema: Region, initial: "Leaf", states: { Leaf } }
+      const states = Machine.state({
+        initial: "Root",
+        states: {
+          Root: {
+            schema: Root,
+            type: "parallel",
+            states: {
+              left: { schema: Region, initial: "Leaf", states: { Leaf } },
+              right: { schema: Region, initial: "Leaf", states: { Leaf } }
+            }
           }
         }
       })
       const valid = {
-        path: "Root" as const,
-        value: new Root({}),
-        states: {
-          left: {
-            path: "Root.left" as const,
-            value: new Region({}),
-            state: { path: "Root.left.Leaf" as const, value: new Leaf({ value: 1 }) }
-          },
-          right: {
-            path: "Root.right" as const,
-            value: new Region({}),
-            state: { path: "Root.right.Leaf" as const, value: new Leaf({ value: 2 }) }
+        path: "" as const,
+        value: undefined,
+        state: {
+          path: "Root" as const,
+          value: new Root({}),
+          states: {
+            left: {
+              path: "Root.left" as const,
+              value: new Region({}),
+              state: { path: "Root.left.Leaf" as const, value: new Leaf({ value: 1 }) }
+            },
+            right: {
+              path: "Root.right" as const,
+              value: new Region({}),
+              state: { path: "Root.right.Leaf" as const, value: new Leaf({ value: 2 }) }
+            }
           }
         }
       }
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Root.initial.resolve(() => valid)
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (to) => to.resolve(() => valid)
       })
       const forged: ReadonlyArray<unknown> = [
         { path: "Missing" as const, value: {} },
-        { path: "Root" as const, value: new Root({}), states: { left: valid.states.left } },
+        { path: "Root" as const, value: new Root({}), states: { left: valid.state.states.left } },
         {
           ...valid,
           states: {
-            ...valid.states,
+            ...valid.state.states,
             left: { path: "Root.left" as const, value: new Region({}) }
           }
         },
         {
           ...valid,
           states: {
-            ...valid.states,
-            left: { ...valid.states.left, state: { ...valid.states.left.state, value: { _tag: "Leaf", value: "x" } } }
+            ...valid.state.states,
+            left: {
+              ...valid.state.states.left,
+              state: { ...valid.state.states.left.state, value: { _tag: "Leaf", value: "x" } }
+            }
           }
         },
         { ...valid, completed: [{ path: "Root.left.Leaf" as const, output: undefined }] },
@@ -544,7 +652,9 @@ describe("Machine.resume", () => {
       ]
 
       for (const snapshot of forged) {
-        const exit = yield* Effect.exit(Machine.resume(machine, snapshot as typeof valid))
+        const exit = yield* Effect.exit(
+          Machine.resume(machine, { path: "" as const, value: undefined, state: snapshot as typeof valid.state })
+        )
         assert(exit._tag === "Failure")
         const error = Cause.findErrorOption(exit.cause)
         assert(Option.isSome(error))
@@ -554,18 +664,21 @@ describe("Machine.resume", () => {
 
   it.effect("obeys bounded encode/decode continuation equivalence", () =>
     Effect.gen(function*() {
-      const states = Machine.states({ Count })
+      const states = Machine.state({ initial: "Count", states: { Count } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Add),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(Add),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          on: {
-            Add: (to) =>
-              to.full.Count().resolve(({ event, state, target }) =>
-                target.decoded(new Count({ value: state.value + event.value }))
-              )
+        states: {
+          Count: {
+            on: {
+              Add: (to) =>
+                to.branch.Count().resolve(({ event, state, target }) =>
+                  target.decoded(new Count({ value: state.value + event.value }))
+                )
+            }
           }
         }
       })
@@ -578,7 +691,7 @@ describe("Machine.resume", () => {
 
       for (const suffix of suffixes) {
         const uninterrupted = yield* Machine.start(machine)
-        yield* sendAndWait(uninterrupted, new Add({ value: 5 }), (snapshot) => snapshot.state.value.value === 5)
+        yield* sendAndWait(uninterrupted, new Add({ value: 5 }), (snapshot) => snapshot.state.state.value.value === 5)
         const boundary = yield* uninterrupted.state
 
         for (let index = 0; index < suffix.length; index++) {
@@ -586,7 +699,7 @@ describe("Machine.resume", () => {
           yield* sendAndWait(
             uninterrupted,
             new Add({ value: suffix[index]! }),
-            (snapshot) => snapshot.state.value.value === expected
+            (snapshot) => snapshot.state.state.value.value === expected
           )
         }
         const expected = yield* uninterrupted.state
@@ -599,7 +712,7 @@ describe("Machine.resume", () => {
           yield* sendAndWait(
             resumed,
             new Add({ value: suffix[index]! }),
-            (snapshot) => snapshot.state.value.value === next
+            (snapshot) => snapshot.state.state.value.value === next
           )
         }
         assert.deepStrictEqual(yield* resumed.state, expected)

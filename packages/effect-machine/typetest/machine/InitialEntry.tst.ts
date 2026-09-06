@@ -8,76 +8,87 @@ class Idle extends Schema.TaggedClass<Idle>("InitialTypeIdle")("Idle", { count: 
 class Loading extends Schema.TaggedClass<Loading>("InitialTypeLoading")("Loading", {}) {}
 class Open extends Schema.TaggedClass<Open>("InitialTypeOpen")("Open", {}) {}
 
-const States = Machine.states({
-  closed: Closed,
-  opened: {
-    schema: Opened,
-    initial: "idle",
-    states: { idle: Idle, loading: Loading }
+const States = Machine.state({
+  initial: "closed",
+  states: {
+    closed: Closed,
+    opened: {
+      schema: Opened,
+      initial: "idle",
+      states: { idle: Idle, loading: Loading }
+    }
   }
 })
 
 const base = Machine.make({
-  states: States.states,
-  events: Machine.events(Open),
-  initial: (to) => to.closed().resolve(({ target }) => (target.decoded(new Closed({}))))
+  root: States,
+  events: Machine.eventsFromSchemas(Open),
+  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.closed.decoded(new Closed({})))))
 })
 
 describe("declared initial entry types", () => {
   it("requires initialize at the handle call that returns an initial target", () => {
     base.handle({
-      closed: {
-        on: {
-          Open: (to) => to.full.opened.initial.resolve(({ target }) => target.decoded(new Opened({ id: "team-1" })))
-        }
-      },
-      // @ts-expect-error!
-      opened: {}
-    })
-
-    base.handle({
-      closed: {
-        on: {
-          Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "team-1" }))
-        }
-      },
-      opened: {
-        initialize: ({ builder }) => builder.from({ count: 0 })
+      states: {
+        closed: {
+          on: {
+            Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.decoded(new Opened({ id: "team-1" })))
+          }
+        },
+        // @ts-expect-error!
+        opened: {}
       }
     })
 
     base.handle({
-      closed: {
-        on: {
-          Open: (to) =>
-            to.full.opened().resolve(({ target }) =>
-              target.decoded(
-                new Opened({ id: "team-1" }),
-                (opened) => opened.loading.decoded(new Loading({}))
-              )
-            )
+      states: {
+        closed: {
+          on: {
+            Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "team-1" }))
+          }
+        },
+        opened: {
+          initialize: ({ builder }) => builder.from({ count: 0 })
         }
-      },
-      opened: {}
+      }
+    })
+
+    base.handle({
+      states: {
+        closed: {
+          on: {
+            Open: (to) =>
+              to.branch.opened().resolve(({ target }) =>
+                target.decoded(
+                  new Opened({ id: "team-1" }),
+                  (opened) => opened.loading.decoded(new Loading({}))
+                )
+              )
+          }
+        },
+        opened: {}
+      }
     })
   })
 
   it("only exposes initial on compound and parallel state builders", () => {
     base.handle({
-      closed: {
-        on: {
-          Open: (to) =>
-            to.full.opened().resolve(({ target }) => {
-              expect(to.full.opened.initial).type.not.toBeAssignableTo<() => unknown>()
-              expect(target).type.toHaveProperty("initial")
-              expect(target.initial.decoded).type.not.toBeCallableWith()
-              expect(target.initial.decoded).type.toBeCallableWith(new Opened({ id: "team-1" }))
-              expect(target.initial.from).type.toBeCallableWith({ id: "team-1" })
-              return target.decoded(
-                new Opened({ id: "team-1" }),
-                (opened) => opened.loading.decoded(new Loading({}))
-              )
-            })
+      states: {
+        closed: {
+          on: {
+            Open: (to) =>
+              to.branch.opened().resolve(({ target }) => {
+                expect(to.branch.opened.initial).type.not.toBeAssignableTo<() => unknown>()
+                expect(target).type.toHaveProperty("initial")
+                expect(target.initial.decoded).type.not.toBeCallableWith()
+                expect(target.initial.decoded).type.toBeCallableWith(new Opened({ id: "team-1" }))
+                expect(target.initial.from).type.toBeCallableWith({ id: "team-1" })
+                return target.decoded(
+                  new Opened({ id: "team-1" }),
+                  (opened) => opened.loading.decoded(new Loading({}))
+                )
+              })
+          }
         }
       }
     })

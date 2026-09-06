@@ -25,134 +25,160 @@ class EnterFlow extends Schema.TaggedClass<EnterFlow>("InitialEntryEnterFlow")("
 class OpenLocal extends Schema.TaggedClass<OpenLocal>("InitialEntryOpenLocal")("OpenLocal", {}) {}
 class OpenBranch extends Schema.TaggedClass<OpenBranch>("InitialEntryOpenBranch")("OpenBranch", {}) {}
 
-const States = Machine.states({
-  closed: Closed,
-  opened: {
-    schema: Opened,
-    initial: "idle",
-    states: {
-      idle: Idle,
-      loading: Loading
+const States = Machine.state({
+  initial: "closed",
+  states: {
+    closed: Closed,
+    opened: {
+      schema: Opened,
+      initial: "idle",
+      states: {
+        idle: Idle,
+        loading: Loading
+      }
     }
   }
 })
 
 const makeMachine = () =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Open, OpenInvalid),
-    initial: (to) => to.closed().resolve(({ target }) => target.decoded(new Closed({})))
+    root: States,
+    events: Machine.eventsFromSchemas(Open, OpenInvalid),
+    initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.closed.decoded(new Closed({}))))
   }).handle({
-    closed: {
-      on: {
-        Open: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "team-1" })),
-        OpenInvalid: (to) => to.full.opened.initial.resolve(({ target }) => target.from({ id: "" }))
+    states: {
+      closed: {
+        on: {
+          Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "team-1" })),
+          OpenInvalid: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "" }))
+        }
+      },
+      opened: {
+        initialize: ({ builder }) => builder.from({ count: 1 })
       }
-    },
-    opened: {
-      initialize: ({ builder }) => builder.from({ count: 1 })
     }
   })
 
-const ParallelStates = Machine.states({
-  outside: Outside,
-  dashboard: {
-    schema: Dashboard,
-    type: "parallel",
-    states: {
-      filters: {
-        schema: Filters,
-        initial: "ready",
-        states: { ready: Ready }
-      },
-      results: Results
+const ParallelStates = Machine.state({
+  initial: "outside",
+  states: {
+    outside: Outside,
+    dashboard: {
+      schema: Dashboard,
+      type: "parallel",
+      states: {
+        filters: {
+          schema: Filters,
+          initial: "ready",
+          states: { ready: Ready }
+        },
+        results: Results
+      }
     }
   }
 })
 
 const makeParallelMachine = () =>
   Machine.make({
-    states: ParallelStates.states,
-    events: Machine.events(EnterDashboard),
-    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
+    root: ParallelStates,
+    events: Machine.eventsFromSchemas(EnterDashboard),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.outside.decoded(new Outside({}))))
   }).handle({
-    outside: {
-      on: {
-        EnterDashboard: (to) => to.full.dashboard.initial.resolve(({ target }) => target.decoded(new Dashboard({})))
-      }
-    },
-    dashboard: {
-      initialize: ({ builder }) => builder.filters.from({ id: "all" }).results.from({ count: 2 }),
-      states: {
-        filters: {
-          initialize: ({ builder }) => builder.from({ enabled: true })
+    states: {
+      outside: {
+        on: {
+          EnterDashboard: (to) => to.branch.dashboard.initial.resolve(({ target }) => target.decoded(new Dashboard({})))
+        }
+      },
+      dashboard: {
+        initialize: ({ builder }) => builder.filters.from({ id: "all" }).results.from({ count: 2 }),
+        states: {
+          filters: {
+            initialize: ({ builder }) => builder.from({ enabled: true })
+          }
         }
       }
     }
   })
 
-const ChoiceStates = Machine.states({
-  outside: Outside,
-  flow: {
-    schema: Flow,
-    initial: "routing",
-    states: {
-      routing: { type: "choice" },
-      approved: Approved
+const ChoiceStates = Machine.state({
+  initial: "outside",
+  states: {
+    outside: Outside,
+    flow: {
+      schema: Flow,
+      initial: "routing",
+      states: {
+        routing: { type: "choice" },
+        approved: Approved
+      }
     }
   }
 })
 
 const makeChoiceMachine = () =>
   Machine.make({
-    states: ChoiceStates.states,
-    events: Machine.events(EnterFlow),
-    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
+    root: ChoiceStates,
+    events: Machine.eventsFromSchemas(EnterFlow),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.outside.decoded(new Outside({}))))
   }).handle({
-    outside: {
-      on: {
-        EnterFlow: (to) => to.full.flow.initial.resolve(({ target }) => target.decoded(new Flow({})))
-      }
-    },
-    flow: {
-      states: {
-        routing: {
-          choice: (to) => to.local.approved().resolve(({ target }) => target.decoded(new Approved({})))
+    states: {
+      outside: {
+        on: {
+          EnterFlow: (to) => to.branch.flow.initial.resolve(({ target }) => target.decoded(new Flow({})))
+        }
+      },
+      flow: {
+        states: {
+          routing: {
+            choice: (to) => to.local.approved().resolve(({ target }) => target.decoded(new Approved({})))
+          }
         }
       }
     }
   })
 
-const StructuralStates = Machine.states({
-  outside: Outside,
-  group: {
-    initial: "idle",
-    states: { idle: {} }
+const StructuralStates = Machine.state({
+  initial: "outside",
+  states: {
+    outside: Outside,
+    group: {
+      initial: "idle",
+      states: { idle: {} }
+    }
   }
 })
 
 const makeStructuralMachine = () =>
   Machine.make({
-    states: StructuralStates.states,
-    events: Machine.events(EnterFlow),
-    initial: (to) => to.outside().resolve(({ target }) => target.decoded(new Outside({})))
+    root: StructuralStates,
+    events: Machine.eventsFromSchemas(EnterFlow),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.outside.decoded(new Outside({}))))
   }).handle({
-    outside: {
-      on: {
-        EnterFlow: (to) => to.full.group.initial.resolve(({ target }) => target.from())
+    states: {
+      outside: {
+        on: {
+          EnterFlow: (to) => to.branch.group.initial.resolve(({ target }) => target.from())
+        }
       }
     }
   })
 
-const NestedStates = Machine.states({
-  root: {
-    initial: "closed",
-    states: {
-      closed: Closed,
-      opened: {
-        schema: Opened,
-        initial: "idle",
-        states: { idle: Idle, loading: Loading }
+const NestedStates = Machine.state({
+  initial: "root",
+  states: {
+    root: {
+      initial: "closed",
+      states: {
+        closed: Closed,
+        opened: {
+          schema: Opened,
+          initial: "idle",
+          states: { idle: Idle, loading: Loading }
+        }
       }
     }
   }
@@ -160,20 +186,23 @@ const NestedStates = Machine.states({
 
 const makeNestedMachine = () =>
   Machine.make({
-    states: NestedStates.states,
-    events: Machine.events(OpenLocal, OpenBranch),
-    initial: (to) => to.root.initial.resolve(({ target }) => target.from((root) => root.closed.decoded(new Closed({}))))
+    root: NestedStates,
+    events: Machine.eventsFromSchemas(OpenLocal, OpenBranch),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.root.from((root) => root.closed.decoded(new Closed({})))))
   }).handle({
-    root: {
-      states: {
-        closed: {
-          on: {
-            OpenLocal: (to) => to.local.opened.initial.resolve(({ target }) => target.from({ id: "local" })),
-            OpenBranch: (to) => to.branch.root.opened.initial.resolve(({ target }) => target.from({ id: "branch" }))
+    states: {
+      root: {
+        states: {
+          closed: {
+            on: {
+              OpenLocal: (to) => to.local.opened.initial.resolve(({ target }) => target.from({ id: "local" })),
+              OpenBranch: (to) => to.branch.root.opened.initial.resolve(({ target }) => target.from({ id: "branch" }))
+            }
+          },
+          opened: {
+            initialize: ({ builder }) => builder.from({ count: 3 })
           }
-        },
-        opened: {
-          initialize: ({ builder }) => builder.from({ count: 3 })
         }
       }
     }
@@ -185,13 +214,13 @@ describe("declared initial entry", () => {
       let captures = 0
       let resolves = 0
       const definition = Machine.make({
-        states: { closed: Closed },
-        events: Machine.events(),
-        initial: (to) => {
+        root: Machine.state({ initial: "closed", states: { closed: Closed } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (to) => {
           captures++
-          return to.closed().resolve(({ target }) => {
+          return to.resolve(({ target }) => {
             resolves++
-            return target.from()
+            return target.from((to) => to.closed.from())
           })
         }
       })
@@ -199,11 +228,11 @@ describe("declared initial entry", () => {
       assert.strictEqual(captures, 1)
       assert.strictEqual(resolves, 0)
 
-      const machine = definition.handle({ closed: {} })
+      const machine = definition.handle({ states: { closed: {} } })
       const first = yield* Machine.planInitial(machine)
       const second = yield* Machine.planInitial(machine)
 
-      assert.deepStrictEqual(first.state, { path: "closed", value: new Closed({}) })
+      assert.deepStrictEqual(first.state.state, { path: "closed", value: new Closed({}) })
       assert.deepStrictEqual(second.state, first.state)
       assert.strictEqual(captures, 1)
       assert.strictEqual(resolves, 2)
@@ -212,13 +241,13 @@ describe("declared initial entry", () => {
   it.effect("default-constructs a bare initial destination", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
-        states: { closed: Closed },
-        events: Machine.events(),
-        initial: (to) => to.closed()
-      }).handle({ closed: {} })
+        root: Machine.state({ initial: "closed", states: { closed: Closed } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.closed.from()))
+      }).handle({ states: { closed: {} } })
 
       const initial = yield* Machine.planInitial(machine)
-      assert.deepStrictEqual(initial.state, { path: "closed", value: new Closed({}) })
+      assert.deepStrictEqual(initial.state.state, { path: "closed", value: new Closed({}) })
     }))
 
   it.effect("enters a compound state's declared initial child and decodes builder inputs", () =>
@@ -228,7 +257,7 @@ describe("declared initial entry", () => {
       const planned = yield* Machine.plan(machine, initial.state, new Open({}))
 
       assert.deepStrictEqual(
-        planned.next,
+        planned.next.state,
         {
           path: "opened" as const,
           value: new Opened({ id: "team-1" }),
@@ -255,7 +284,7 @@ describe("declared initial entry", () => {
       const planned = yield* Machine.plan(machine, initial.state, new EnterDashboard({}))
 
       assert.deepStrictEqual(
-        planned.next,
+        planned.next.state,
         {
           path: "dashboard" as const,
           value: new Dashboard({}),
@@ -278,7 +307,7 @@ describe("declared initial entry", () => {
       const planned = yield* Machine.plan(machine, initial.state, new EnterFlow({}))
 
       assert.deepStrictEqual(
-        planned.next,
+        planned.next.state,
         {
           path: "flow" as const,
           value: new Flow({}),
@@ -312,7 +341,7 @@ describe("declared initial entry", () => {
       const initial = yield* Machine.planInitial(machine)
       const planned = yield* Machine.plan(machine, initial.state, new EnterFlow({}))
 
-      assert.deepStrictEqual(planned.next, {
+      assert.deepStrictEqual(planned.next.state, {
         path: "group" as const,
         value: undefined,
         state: { path: "group.idle" as const, value: undefined }
@@ -327,7 +356,7 @@ describe("declared initial entry", () => {
       const branch = yield* Machine.plan(machine, initial.state, new OpenBranch({}))
 
       for (const [planned, id] of [[local, "local"], [branch, "branch"]] as const) {
-        assert.deepStrictEqual(planned.next, {
+        assert.deepStrictEqual(planned.next.state, {
           path: "root" as const,
           value: undefined,
           state: {

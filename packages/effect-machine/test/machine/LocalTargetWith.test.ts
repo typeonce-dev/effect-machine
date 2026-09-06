@@ -14,35 +14,42 @@ describe("local compound target selection", () => {
         UpdateQuery: { query: Schema.String },
         Reset: {}
       })
-      const states = Machine.states({
-        search: {
-          schema: State.cases.Search,
-          initial: "Idle",
-          states: {
-            Idle: {},
-            Updated: {}
+      const states = Machine.state({
+        initial: "search",
+        states: {
+          search: {
+            schema: State.cases.Search,
+            initial: "Idle",
+            states: {
+              Idle: {},
+              Updated: {}
+            }
           }
         }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Events),
-        initial: (to) =>
-          to.search.initial.resolve(({ target }) => target.from({ query: "" }, (search) => search.Idle.from()))
+        root: states,
+        events: Machine.eventsFromSchemas(Events),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.search.from({ query: "" }, (search) => search.Idle.from()))
+          )
       }).handle({
-        search: {
-          on: {
-            UpdateQuery: (to) =>
-              to.local.with.resolve(
-                ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
-                { reenter: true }
-              )
-          },
-          states: {
-            Idle: {},
-            Updated: {
-              on: {
-                Reset: (to) => to.local.Idle().resolve(({ target }) => target.from())
+        states: {
+          search: {
+            on: {
+              UpdateQuery: (to) =>
+                to.local.with.resolve(
+                  ({ event, target }) => target.from({ query: event.query }, (search) => search.Updated.from()),
+                  { reenter: true }
+                )
+            },
+            states: {
+              Idle: {},
+              Updated: {
+                on: {
+                  Reset: (to) => to.local.Idle().resolve(({ target }) => target.from())
+                }
               }
             }
           }
@@ -76,7 +83,7 @@ describe("local compound target selection", () => {
       const initial = yield* Machine.planInitial(machine)
       const updated = yield* Machine.plan(machine, initial.state, Events.cases.UpdateQuery.make({ query: "next" }))
 
-      assert.deepStrictEqual(updated.next, {
+      assert.deepStrictEqual(updated.next.state, {
         path: "search",
         value: State.cases.Search.make({ query: "next" }),
         state: {
@@ -86,7 +93,7 @@ describe("local compound target selection", () => {
       })
 
       const reset = yield* Machine.plan(machine, updated.next, Events.cases.Reset.make({}))
-      assert.deepStrictEqual(reset.next, {
+      assert.deepStrictEqual(reset.next.state, {
         path: "search",
         value: State.cases.Search.make({ query: "next" }),
         state: {
@@ -103,35 +110,40 @@ describe("local compound target selection", () => {
         Searching: {},
         Updated: {}
       })
-      const states = Machine.states({
-        search: {
-          schema: State.cases.Search,
-          initial: "Searching",
-          states: {
-            Searching: {},
-            Updated: {}
+      const states = Machine.state({
+        initial: "search",
+        states: {
+          search: {
+            schema: State.cases.Search,
+            initial: "Searching",
+            states: {
+              Searching: {},
+              Updated: {}
+            }
           }
         }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.search.initial.resolve(({ target }) =>
-            target.from({ query: "pending" }, (search) => search.Searching.from())
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.search.from({ query: "pending" }, (search) => search.Searching.from()))
           )
       }).handle({
-        search: {
-          states: {
-            Searching: {
-              invoke: (from) =>
-                from.effect("search", () => Effect.succeed("resolved")).onDone((to) =>
-                  to.local.with.resolve(({ output, target }) =>
-                    target.from({ query: output }, (search) => search.Updated.from())
+        states: {
+          search: {
+            states: {
+              Searching: {
+                invoke: (from) =>
+                  from.effect("search", () => Effect.succeed("resolved")).onDone((to) =>
+                    to.local.with.resolve(({ output, target }) =>
+                      target.from({ query: output }, (search) => search.Updated.from())
+                    )
                   )
-                )
-            },
-            Updated: {}
+              },
+              Updated: {}
+            }
           }
         }
       })
@@ -152,7 +164,7 @@ describe("local compound target selection", () => {
       const ref = yield* Machine.start(machine)
       for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
 
-      assert.deepStrictEqual(yield* ref.state, {
+      assert.deepStrictEqual((yield* ref.state).state, {
         path: "search",
         value: State.cases.Search.make({ query: "resolved" }),
         state: {
@@ -164,32 +176,38 @@ describe("local compound target selection", () => {
 
   it("does not install local.with for a schema-less compound scope", () => {
     const Event = Schema.TaggedUnion({ Advance: {} })
-    const states = Machine.states({
-      flow: {
-        initial: "Idle",
-        states: {
-          Idle: {},
-          Updated: {}
+    const states = Machine.state({
+      initial: "flow",
+      states: {
+        flow: {
+          initial: "Idle",
+          states: {
+            Idle: {},
+            Updated: {}
+          }
         }
       }
     })
 
     Machine.make({
-      states: states.states,
-      events: Machine.events(Event),
-      initial: (to) => to.flow.initial.resolve(({ target }) => target.from((flow) => flow.Idle.from()))
+      root: states,
+      events: Machine.eventsFromSchemas(Event),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.flow.from((flow) => flow.Idle.from())))
     }).handle({
-      flow: {
-        states: {
-          Idle: {
-            on: {
-              Advance: (to) => {
-                assert.notProperty(to.local, "with")
-                return to.local.Updated().resolve(({ target }) => target.from())
+      states: {
+        flow: {
+          states: {
+            Idle: {
+              on: {
+                Advance: (to) => {
+                  assert.notProperty(to.local, "with")
+                  return to.local.Updated().resolve(({ target }) => target.from())
+                }
               }
-            }
-          },
-          Updated: {}
+            },
+            Updated: {}
+          }
         }
       }
     })

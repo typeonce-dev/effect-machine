@@ -1352,7 +1352,7 @@ const selectDefinitionTarget = (
   const sourceRoot = byPath.get(source)!.root
   if (selected.root !== sourceRoot) {
     const root = target.split(".")[0]!
-    return selector.full[root]()
+    return selector.branch[root]()
   }
   const selectable = selectableDefinitionTarget(source, target, byPath)
   let current = selector.branch
@@ -1452,17 +1452,18 @@ const makeHandlers = (
       ? Object.fromEntries(node.states.flatMap((child) => {
         if (child._tag !== "History") return []
         return [[child.key, {
-          default: ({ target }: { readonly target: Record<string, any> }) => {
-            const fallback = byPath.get(child.fallback)!
-            const parts = child.fallback.split(".")
-            const completeRoot = selectSnapshot(target, fallback.root, byPath, parts, 0)
-            if (findSnapshot(completeRoot, path) === undefined) {
-              throw new Error(
-                `MachineTest.compileModel could not construct history fallback for "${path}.${child.key}"`
-              )
-            }
-            return completeRoot
-          }
+          default: ({ target: root }: { readonly target: any }) =>
+            root.from((target: Record<string, any>) => {
+              const fallback = byPath.get(child.fallback)!
+              const parts = child.fallback.split(".")
+              const completeRoot = selectSnapshot(target, fallback.root, byPath, parts, 0)
+              if (findSnapshot(completeRoot, path) === undefined) {
+                throw new Error(
+                  `MachineTest.compileModel could not construct history fallback for "${path}.${child.key}"`
+                )
+              }
+              return completeRoot
+            })
         }]]
       }))
       : {}
@@ -1511,23 +1512,21 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const flattened = validateModel(model)
   const byPath = new Map(flattened.map((state) => [state.path, state]))
   const stateTree = makeStateTree(model.roots, undefined)
-  const defined = Machine.states(stateTree as any)
+  const defined = Machine.state({ initial: model.initial, states: stateTree } as any)
   const eventSchemas = model.events.map((event) => Schema.TaggedStruct(event, {}))
   const initial = byPath.get(model.initial)!
   const machine = Machine.make({
-    states: defined.states as any,
-    events: Machine.events(...eventSchemas) as any,
-    initial: (to: Record<string, any>) => {
-      const selected = to[initial.path]
-      const selection = typeof selected === "function" ? selected() : selected.initial
-      return selection.resolve(({ target }: { readonly target: any }) =>
-        selectSnapshot({ [initial.path]: target }, initial.path, byPath, [initial.path], 0) as any
-      )
-    }
+    root: defined,
+    events: Machine.eventsFromSchemas(...eventSchemas) as any
   } as any)
   const transitions = new Map(model.transitions.map((transition) => [
     `${transition.source}\u0000${triggerKey(transition.trigger)}`,
     transition
   ]))
-  return machine.handle(makeHandlers(model.roots, undefined, byPath, transitions) as any) as Machine.Machine.Any
+  return machine.handle(
+    {
+      initialize: ({ builder }: any) => builder.decoded(stateValue(initial)),
+      states: makeHandlers(model.roots, undefined, byPath, transitions)
+    } as any
+  ) as Machine.Machine.Any
 }

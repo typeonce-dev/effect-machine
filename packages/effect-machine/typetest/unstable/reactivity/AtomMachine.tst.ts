@@ -64,68 +64,78 @@ interface RuntimeFailure {
   readonly _tag: "RuntimeFailure"
 }
 
-const States = Machine.states({ Idle })
-const Emissions = Machine.emittedEvents(Published)
+const States = Machine.state({ initial: "Idle", states: { Idle } })
+const Emissions = Machine.emittedEventsFromSchemas(Published)
 
-const NestedStates = Machine.states({
-  Dormant,
-  Ready: {
-    schema: Ready,
-    type: "parallel",
-    states: {
-      editor: {
-        schema: Editor,
-        initial: "Editing",
-        states: {
-          Editing,
-          Saving
-        }
-      },
-      network: {
-        schema: Network,
-        initial: "Online",
-        states: {
-          Online,
-          Offline
+const NestedStates = Machine.state({
+  initial: "Dormant",
+  states: {
+    Dormant,
+    Ready: {
+      schema: Ready,
+      type: "parallel",
+      states: {
+        editor: {
+          schema: Editor,
+          initial: "Editing",
+          states: {
+            Editing,
+            Saving
+          }
+        },
+        network: {
+          schema: Network,
+          initial: "Online",
+          states: {
+            Online,
+            Offline
+          }
         }
       }
     }
   }
 })
 
-const StructuralNestedStates = Machine.states({
-  Ready: {
-    type: "parallel",
-    states: {
-      editor: {
-        initial: "Idle",
-        states: {
-          Idle: {},
-          Saving
-        }
-      },
-      network: {}
+const StructuralNestedStates = Machine.state({
+  initial: "Ready",
+  states: {
+    Ready: {
+      type: "parallel",
+      states: {
+        editor: {
+          initial: "Idle",
+          states: {
+            Idle: {},
+            Saving
+          }
+        },
+        network: {}
+      }
     }
   }
 })
 
 const makeMachine = () =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Tick),
-    initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+    root: States,
+    events: Machine.eventsFromSchemas(Tick),
+    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
   }).handle({
-    Idle: {}
+    states: {
+      Idle: {}
+    }
   })
 
 const makeEmittingMachine = () =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Tick),
+    root: States,
+    events: Machine.eventsFromSchemas(Tick),
     emittedEvents: Emissions,
-    initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+    initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
   }).handle({
-    Idle: {}
+    states: {
+      Idle: {}
+    }
   })
 
 describe("AtomMachine", () => {
@@ -133,12 +143,14 @@ describe("AtomMachine", () => {
     const childMachine = makeMachine()
     const Child = Machine.child("child", childMachine)
     const parentMachine = Machine.make({
-      states: States.states,
-      events: Machine.events(),
-      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     }).handle({
-      Idle: {
-        invoke: (from) => from.child(Child)
+      states: {
+        Idle: {
+          invoke: (from) => from.child(Child)
+        }
       }
     })
     const child = AtomMachine.make(parentMachine).child(Child)
@@ -162,12 +174,12 @@ describe("AtomMachine", () => {
 
     expect<Atom.Success<typeof directSelected>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<typeof directSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<Atom.Success<typeof directMatched>>().type.toBe<boolean>()
     expect<Atom.Success<typeof boundSelected>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<typeof boundSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<Atom.Success<typeof boundMatched>>().type.toBe<boolean>()
     expect(AtomMachine.select).type.not.toBeCallableWith(direct, "Missing")
@@ -176,13 +188,15 @@ describe("AtomMachine", () => {
 
     const Child = Machine.child("emitting-child", machine)
     const parentMachine = Machine.make({
-      states: States.states,
-      events: Machine.events(),
+      root: States,
+      events: Machine.eventsFromSchemas(),
       emittedEvents: Emissions,
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
     }).handle({
-      Idle: {
-        invoke: (from) => from.child(Child)
+      states: {
+        Idle: {
+          invoke: (from) => from.child(Child)
+        }
       }
     })
     const parent = AtomMachine.make(parentMachine)
@@ -196,7 +210,7 @@ describe("AtomMachine", () => {
     expect<typeof derivedChild>().type.toBe<typeof child>()
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<typeof childSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect<Stream.Success<typeof childEmissions>>().type.toBe<Published>()
@@ -208,7 +222,7 @@ describe("AtomMachine", () => {
   it("derives fail-aware results, selectors, and child bridge types", () => {
     const childMachine = makeMachine()
     const Child = Machine.child("child", childMachine)
-    type Snapshot = Machine.Machine.Snapshot<typeof States.states>
+    type Snapshot = Machine.Snapshot<typeof States>
     type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
     const parent = null as unknown as Parent
     const child = null as unknown as AtomMachine.ChildOf<Parent, typeof Child>
@@ -226,14 +240,14 @@ describe("AtomMachine", () => {
       Atom.Atom<AsyncResult.AsyncResult<Option.Option<Idle>, StartFailure | RuntimeFailure>>
     >()
     expect<Atom.Success<typeof selectedSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<typeof matched>().type.toBe<
       Atom.Atom<AsyncResult.AsyncResult<boolean, StartFailure | RuntimeFailure>>
     >()
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect<Atom.Failure<typeof childSelected>>().type.toBe<Atom.Failure<typeof child.result>>()
@@ -256,7 +270,7 @@ describe("AtomMachine", () => {
   })
 
   it("infers exact compound and parallel paths from bridge snapshots", () => {
-    type Snapshot = Machine.Machine.Snapshot<typeof NestedStates.states>
+    type Snapshot = Machine.Snapshot<typeof NestedStates>
     type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
     const parent = null as unknown as Parent
     const root = AtomMachine.select(parent, "Ready")
@@ -274,11 +288,13 @@ describe("AtomMachine", () => {
     expect<Atom.Success<typeof root>>().type.toBe<Option.Option<Ready>>()
     expect<Atom.Success<typeof region>>().type.toBe<Option.Option<Editor>>()
     expect<Atom.Success<typeof regionSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof NestedStates.node }, "Ready.editor">>
     >()
     expect<Atom.Success<typeof leaf>>().type.toBe<Option.Option<Editing>>()
     expect<Atom.Success<typeof leafSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor.Editing">>
+      Option.Option<
+        Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof NestedStates.node }, "Ready.editor.Editing">
+      >
     >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
     expect<Atom.Success<typeof boundLeaf>>().type.toBe<Option.Option<Editing>>()
@@ -288,7 +304,7 @@ describe("AtomMachine", () => {
     expect(AtomMachine.matches).type.not.toBeCallableWith(parent, "Ready.network.Missing")
     expect(AtomMachine.select).type.not.toBeCallableWith(parent, widenedPath)
 
-    type NestedMachine = Machine.Machine<typeof NestedStates.states, readonly [typeof Tick]>
+    type NestedMachine = Machine.Machine<{ readonly "": typeof NestedStates.node }, readonly [typeof Tick]>
     const NestedChild = Machine.child("nested", null as unknown as NestedMachine)
     const child = null as unknown as AtomMachine.ChildOf<Parent, typeof NestedChild>
     const childSelected = AtomMachine.selectChild(child, "Ready.editor.Saving")
@@ -297,7 +313,9 @@ describe("AtomMachine", () => {
 
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Saving>>()
     expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor.Saving">>
+      Option.Option<
+        Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof NestedStates.node }, "Ready.editor.Saving">
+      >
     >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect<Atom.Failure<typeof childSelected>>().type.toBe<Atom.Failure<typeof child.result>>()
@@ -307,7 +325,7 @@ describe("AtomMachine", () => {
   })
 
   it("selects values only from schema-backed paths while structural paths remain queryable", () => {
-    type Snapshot = Machine.Machine.Snapshot<typeof StructuralNestedStates.states>
+    type Snapshot = Machine.Snapshot<typeof StructuralNestedStates>
     type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
     const parent = null as unknown as Parent
 
@@ -317,10 +335,12 @@ describe("AtomMachine", () => {
     const saving = AtomMachine.select(parent, "Ready.editor.Saving")
 
     expect<Atom.Success<typeof readySnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof StructuralNestedStates.states, "Ready">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof StructuralNestedStates.node }, "Ready">>
     >()
     expect<Atom.Success<typeof editorSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof StructuralNestedStates.states, "Ready.editor">>
+      Option.Option<
+        Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof StructuralNestedStates.node }, "Ready.editor">
+      >
     >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
     expect<Atom.Success<typeof saving>>().type.toBe<Option.Option<Saving>>()
@@ -331,7 +351,7 @@ describe("AtomMachine", () => {
   })
 
   it("supports data-last root and child selectors", () => {
-    type Snapshot = Machine.Machine.Snapshot<typeof NestedStates.states>
+    type Snapshot = Machine.Snapshot<typeof NestedStates>
     type Parent = AtomMachine.MachineAtom<Snapshot, Tick, RuntimeFailure, never, StartFailure>
     const parent = null as unknown as Parent
     const selected = AtomMachine.select("Ready.editor.Editing")(parent)
@@ -341,7 +361,7 @@ describe("AtomMachine", () => {
 
     const Child = Machine.child(
       "nested",
-      null as unknown as Machine.Machine<typeof NestedStates.states, readonly [typeof Tick]>
+      null as unknown as Machine.Machine<{ readonly "": typeof NestedStates.node }, readonly [typeof Tick]>
     )
     const child = null as unknown as AtomMachine.ChildOf<Parent, typeof Child>
     const childSelected = AtomMachine.selectChild("Ready.editor.Saving")(child)
@@ -351,20 +371,20 @@ describe("AtomMachine", () => {
 
     expect<Atom.Success<typeof selected>>().type.toBe<Option.Option<Editing>>()
     expect<Atom.Success<typeof selectedSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof NestedStates.node }, "Ready.editor">>
     >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
     expect(invalid).type.not.toBeCallableWith(parent)
     expect<Atom.Success<typeof childSelected>>().type.toBe<Option.Option<Saving>>()
     expect<Atom.Success<typeof childSelectedSnapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof NestedStates.states, "Ready.editor">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof NestedStates.node }, "Ready.editor">>
     >()
     expect<Atom.Success<typeof childMatched>>().type.toBe<boolean>()
     expect(invalidChild).type.not.toBeCallableWith(child)
   })
 
   it("infers static and reactive event acceptance projections", () => {
-    type Snapshot = Machine.Machine.Snapshot<typeof States.states>
+    type Snapshot = Machine.Snapshot<typeof States>
     type Parent = AtomMachine.MachineAtom<
       Snapshot,
       Machine.Machine.EventInput<Tick>,
@@ -373,7 +393,7 @@ describe("AtomMachine", () => {
       StartFailure
     >
     const parent = null as unknown as Parent
-    const Events = Machine.events(Tick)
+    const Events = Machine.eventsFromSchemas(Tick)
     const staticProjection = AtomMachine.can(Events.Tick())
     const reactiveProjection = AtomMachine.can(Atom.make(Events.Tick()))
     const staticCan = staticProjection(parent)
@@ -389,14 +409,16 @@ describe("AtomMachine", () => {
   })
 
   it("infers keyed root family inputs and exact projected atoms", () => {
-    const Events = Machine.events(Tick)
+    const Events = Machine.eventsFromSchemas(Tick)
     const machine = Machine.make({
-      states: States.states,
+      root: States,
       events: Events,
       input: Schema.String,
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
     }).handle({
-      Idle: {}
+      states: {
+        Idle: {}
+      }
     })
     const atoms = AtomMachine.family(machine, {
       atoms: {
@@ -404,7 +426,7 @@ describe("AtomMachine", () => {
         selected: AtomMachine.select("Idle"),
         snapshot: AtomMachine.selectSnapshot("Idle"),
         matched: AtomMachine.matches("Idle"),
-        state: (machine) => machine.state,
+        state: (machine) => machine.result,
         send: (machine) => machine.send
       }
     })
@@ -419,30 +441,33 @@ describe("AtomMachine", () => {
     expect<Atom.Success<typeof selected>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<typeof canTick>>().type.toBe<boolean>()
     expect<Atom.Success<typeof snapshot>>().type.toBe<
-      Option.Option<Machine.Machine.SnapshotByIdentifier<typeof States.states, "Idle">>
+      Option.Option<Machine.Machine.SnapshotByIdentifier<{ readonly "": typeof States.node }, "Idle">>
     >()
     expect<Atom.Success<typeof matched>>().type.toBe<boolean>()
-    expect<Atom.Success<typeof state>>().type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+    expect<Atom.Success<typeof state>>().type.toBe<Machine.Snapshot<typeof States>>()
     expect<typeof send extends Atom.Writable<any, infer Event> ? Event : never>().type.toBe<
       Machine.Machine.EventInput<Tick>
     >()
     expect(atoms.selected).type.not.toBeCallableWith(1)
     expect(AtomMachine.family).type.not.toBeCallableWith(makeMachine(), {
       atoms: {
-        state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.state
+        state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.result
       }
     })
   })
 
   it("preserves bound runtime errors and child protocols through families", () => {
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(Tick),
+      root: States,
+      events: Machine.eventsFromSchemas(Tick),
       input: Schema.String,
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
     }).handle({
-      Idle: {
-        invoke: (from) => from.effect("read-multiplier", () => Effect.as(Multiplier, undefined)).onDone((to) => to.none)
+      states: {
+        Idle: {
+          invoke: (from) =>
+            from.effect("read-multiplier", () => Effect.as(Multiplier, undefined)).onDone((to) => to.none)
+        }
       }
     })
     const runtime = Atom.runtime(
@@ -466,10 +491,10 @@ describe("AtomMachine", () => {
     const Child = Machine.childFamily(childMachine)
     const parent = AtomMachine.make(
       Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
-      }).handle({ Idle: {} })
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+      }).handle({ states: { Idle: {} } })
     )
     const children = AtomMachine.familyChild(parent, {
       child: (id: string) => Child(id),
@@ -485,7 +510,7 @@ describe("AtomMachine", () => {
     expect(AtomMachine.factory).type.not.toBeCallableWith(machine)
     expect<unknown extends FamilyFailure ? true : false>().type.toBe<false>()
     expect(AtomMachine.family).type.not.toBeCallableWith(machine, {
-      atoms: { state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.state }
+      atoms: { state: (machine: AtomMachine.MachineAtom<any, any, any, any, any, any>) => machine.result }
     })
     expect<Atom.Success<ReturnType<typeof children.selected>>>().type.toBe<Option.Option<Idle>>()
     expect<Atom.Success<ReturnType<typeof children.matched>>>().type.toBe<boolean>()
@@ -507,14 +532,14 @@ describe("AtomMachine", () => {
     expect(makeBridge).type.toBeCallableWith()
     expect(makeBridge).type.not.toBeCallableWith("input")
     expect<typeof bridge>().type.toBe<Bridge>()
-    expect<Atom.Success<typeof bridge.state>>().type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
+    expect<Atom.Success<typeof bridge.result>>().type.toBe<Machine.Snapshot<typeof States>>()
 
     const inputMachine = Machine.make({
-      states: States.states,
-      events: Machine.events(Tick),
+      root: States,
+      events: Machine.eventsFromSchemas(Tick),
       input: Schema.String,
-      initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
-    }).handle({ Idle: {} })
+      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+    }).handle({ states: { Idle: {} } })
     const makeInputBridge = AtomMachine.factory(inputMachine)
     expect(makeInputBridge).type.toBeCallableWith("input")
     expect(makeInputBridge).type.not.toBeCallableWith()
@@ -545,15 +570,17 @@ describe("AtomMachine", () => {
 
   it("only exposes public input events through atom send boundaries", () => {
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(Tick),
-      internalEvents: Machine.internalEvents(InternalTick),
-      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(Tick),
+      internalEvents: Machine.internalEventsFromSchemas(InternalTick),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     }).handle({
-      Idle: {
-        on: {
-          Tick: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
-          InternalTick: (to) => to.full.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+      states: {
+        Idle: {
+          on: {
+            Tick: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
+            InternalTick: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+          }
         }
       }
     })
@@ -565,18 +592,21 @@ describe("AtomMachine", () => {
   })
 
   it("requires output implementations and preserves exact terminal output", () => {
-    const OutputStates = Machine.states({
-      Idle,
-      Done: {
-        schema: Done,
-        type: "final",
-        output: Schema.String
+    const OutputStates = Machine.state({
+      initial: "Idle",
+      states: {
+        Idle,
+        Done: {
+          schema: Done,
+          type: "final",
+          output: Schema.String
+        }
       }
     })
     const incomplete = Machine.make({
-      states: OutputStates.states,
-      events: Machine.events(Tick),
-      initial: (to) => to.Idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+      root: OutputStates,
+      events: Machine.eventsFromSchemas(Tick),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     })
     const runtime = Atom.runtime(Layer.empty)
     const bound = AtomMachine.bind(runtime)
@@ -588,8 +618,10 @@ describe("AtomMachine", () => {
     expect(bound.factory).type.not.toBeCallableWith(incomplete)
 
     const complete = incomplete.handle({
-      Done: {
-        output: ({ state }) => state.value
+      states: {
+        Done: {
+          output: ({ state }) => state.value
+        }
       }
     })
     const bridge = AtomMachine.make(complete)

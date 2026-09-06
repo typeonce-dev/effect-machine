@@ -11,84 +11,91 @@ class SignedIn extends Schema.TaggedClass<SignedIn>("SignedIn")("SignedIn", {}) 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-const States = Machine.states({
-  root: {
-    schema: Root,
-    initial: "work",
-    states: {
-      work: {
-        schema: Work,
-        type: "parallel",
-        states: {
-          auth: {
-            schema: Auth,
-            initial: "signedOut",
-            states: { signedOut: SignedOut, signedIn: { schema: SignedIn, type: "final" } }
-          },
-          sync: {
-            schema: Sync,
-            initial: "idle",
-            states: { idle: Idle }
+const States = Machine.state({
+  initial: "structural",
+  states: {
+    root: {
+      schema: Root,
+      initial: "work",
+      states: {
+        work: {
+          schema: Work,
+          type: "parallel",
+          states: {
+            auth: {
+              schema: Auth,
+              initial: "signedOut",
+              states: { signedOut: SignedOut, signedIn: { schema: SignedIn, type: "final" } }
+            },
+            sync: {
+              schema: Sync,
+              initial: "idle",
+              states: { idle: Idle }
+            }
           }
-        }
-      },
-      routing: { type: "choice" }
+        },
+        routing: { type: "choice" }
+      }
+    },
+    structural: {
+      initial: "idle",
+      states: { idle: Idle }
     }
-  },
-  structural: {
-    initial: "idle",
-    states: { idle: Idle }
   }
 })
 
 describe("Machine state-value updates", () => {
   it("exposes updates only for the valued active ancestor chain", () => {
     const machine = Machine.make({
-      states: States.states,
-      events: Machine.events(Tick),
-      initial: (to) =>
-        to.root.initial.resolve(({ target }) =>
-          target.decoded(new Root({ revision: 0 }), (root) =>
-            root.work.decoded(
-              new Work({ revision: 0 }),
-              (work) =>
-                work.auth.decoded(
-                  new Auth({ user: "" }),
-                  (auth) => auth.signedOut.decoded(new SignedOut({}))
-                )
-                  .sync.decoded(new Sync({ cursor: 0 }), (sync) => sync.idle.decoded(new Idle({})))
-            ))
+      root: States,
+      events: Machine.eventsFromSchemas(Tick),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) =>
+          target.from((to) =>
+            to.root.decoded(new Root({ revision: 0 }), (root) =>
+              root.work.decoded(
+                new Work({ revision: 0 }),
+                (work) =>
+                  work.auth.decoded(
+                    new Auth({ user: "" }),
+                    (auth) => auth.signedOut.decoded(new SignedOut({}))
+                  )
+                    .sync.decoded(new Sync({ cursor: 0 }), (sync) => sync.idle.decoded(new Idle({})))
+              ))
+          )
         )
     })
 
     machine.handle({
-      root: {
-        states: {
-          work: {
-            states: {
-              auth: {
-                states: {
-                  signedOut: {
-                    on: {
-                      Tick: (to) => {
-                        expect(to.local).type.toHaveProperty("update")
-                        expect(to.local.update).type.not.toHaveProperty("resolve")
-                        expect(to.branch.root).type.toHaveProperty("update")
-                        expect(to.branch.root.work).type.toHaveProperty("update")
-                        expect(to.branch.root.work.auth).type.toHaveProperty("update")
-                        expect(to.branch.root.work.auth.signedOut).type.not.toHaveProperty("update")
-                        expect(to.branch.root.work.sync).type.not.toHaveProperty("update")
-                        expect(to.full).type.not.toHaveProperty("update")
-                        expect(to.history).type.not.toHaveProperty("update")
-                        expect(to.none).type.not.toHaveProperty("update")
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: (to) => {
+                          expect(to.local).type.toHaveProperty("update")
+                          expect(to.local.update).type.toHaveProperty("resolve")
+                          expect(to.branch.root).type.toHaveProperty("update")
+                          expect(to.branch.root.work).type.toHaveProperty("update")
+                          expect(to.branch.root.work.auth).type.toHaveProperty("update")
+                          expect(to.branch.root.work.auth.signedOut).type.toHaveProperty("update")
+                          expect(to.branch.root.work.sync).type.not.toHaveProperty("update")
+                          expect(to.full).type.not.toHaveProperty("update")
+                          expect(to.history).type.not.toHaveProperty("update")
+                          expect(to.none).type.not.toHaveProperty("update")
 
-                        return to.local.update(({ current, owner, state }) => {
-                          expect(state).type.toBe<SignedOut>()
-                          expect(current).type.toBe<Auth>()
-                          expect(owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
-                          expect(owner.from).type.toBeCallableWith({ user: "next" })
-                          return owner.decoded(new Auth({ user: "next" }))
-                        }, { reenter: true })
+                          return to.local.update.resolve(({ current, owner, state }) => {
+                            expect(state).type.toBe<SignedOut>()
+                            expect(current).type.toBe<Auth>()
+                            expect(owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
+                            expect(owner.from).type.toBeCallableWith({ user: "next" })
+                            return owner.decoded(new Auth({ user: "next" }))
+                          }, { reenter: true })
+                        }
                       }
                     }
                   }
@@ -103,12 +110,12 @@ describe("Machine state-value updates", () => {
 
   it("requires a declared retained owner to be replaced by the combined resolver", () => {
     const transition = null as unknown as Machine.Machine.TransitionSelector<
-      typeof States.states,
+      { readonly "": typeof States.node },
       readonly [typeof Tick],
       readonly [],
       "root.work.auth.signedOut",
       Machine.Machine.HandlerContext<
-        typeof States.states,
+        { readonly "": typeof States.node },
         readonly [typeof Tick],
         readonly [],
         "root.work.auth.signedOut",
@@ -138,7 +145,7 @@ describe("Machine state-value updates", () => {
     transition.local.signedIn()
       .updating(transition.branch.root.work.auth)
       .resolve(
-        // @ts-expect-error! Declaring `.updating(...)` requires the resolver to finish with `.update(...)`.
+        // @ts-expect-error! Declaring `.updating(...)` requires the resolver to finish with `.update.resolve(...)`.
         ({ target }) => target.decoded(new SignedIn({}))
       )
 
@@ -153,17 +160,17 @@ describe("Machine state-value updates", () => {
       }
     })
 
-    expect(transition.full.structural()).type.not.toHaveProperty("updating")
+    expect(transition.branch.structural()).type.not.toHaveProperty("updating")
   })
 
   it("supports named update branches and rejects missing update evidence", () => {
     const update = null as unknown as Machine.Machine.TransitionSelector<
-      typeof States.states,
+      { readonly "": typeof States.node },
       readonly [typeof Tick],
       readonly [],
       "root.work.auth.signedOut",
       Machine.Machine.HandlerContext<
-        typeof States.states,
+        { readonly "": typeof States.node },
         readonly [typeof Tick],
         readonly [],
         "root.work.auth.signedOut",
@@ -180,14 +187,14 @@ describe("Machine state-value updates", () => {
       unchanged: { target: update.none }
     }).resolve(({ select }) => select.changed.from({ revision: 1 }))
 
-    update.local.update(({ owner }) => owner.from({ user: "next" }), { declinable: true })
-    update.local.update(({ decline }) => decline(), { declinable: true })
+    update.local.update.resolve(({ owner }) => owner.from({ user: "next" }), { declinable: true })
+    update.local.update.resolve(({ decline }) => decline(), { declinable: true })
 
-    update.local.update(
+    update.local.update.resolve(
       // @ts-expect-error!
       () => new Auth({ user: "next" })
     )
-    update.local.update(
+    update.local.update.resolve(
       // @ts-expect-error!
       () => undefined
     )
@@ -195,12 +202,12 @@ describe("Machine state-value updates", () => {
 
   it("omits updates from structural scopes and choice resolvers", () => {
     type StructuralSelector = Machine.Machine.TransitionSelector<
-      typeof States.states,
+      { readonly "": typeof States.node },
       readonly [typeof Tick],
       readonly [],
       "structural.idle",
       Machine.Machine.HandlerContext<
-        typeof States.states,
+        { readonly "": typeof States.node },
         readonly [typeof Tick],
         readonly [],
         "structural.idle",
@@ -216,11 +223,16 @@ describe("Machine state-value updates", () => {
     expect(structural.branch.structural).type.not.toHaveProperty("update")
 
     type ChoiceSelector = Machine.Machine.TransitionSelector<
-      typeof States.states,
+      { readonly "": typeof States.node },
       readonly [typeof Tick],
       readonly [],
       "root.routing",
-      Machine.Machine.ChoiceContext<typeof States.states, readonly [typeof Tick], readonly [], "root.routing">,
+      Machine.Machine.ChoiceContext<
+        { readonly "": typeof States.node },
+        readonly [typeof Tick],
+        readonly [],
+        "root.routing"
+      >,
       false,
       "required"
     >
@@ -229,12 +241,12 @@ describe("Machine state-value updates", () => {
     expect(choice.branch.root).type.not.toHaveProperty("update")
 
     type FinalSelector = Machine.Machine.TransitionSelector<
-      typeof States.states,
+      { readonly "": typeof States.node },
       readonly [typeof Tick],
       readonly [],
       "root.work.auth.signedIn",
       Machine.Machine.HandlerContext<
-        typeof States.states,
+        { readonly "": typeof States.node },
         readonly [typeof Tick],
         readonly [],
         "root.work.auth.signedIn",

@@ -8,14 +8,17 @@ class Approved extends Schema.TaggedClass<Approved>("Approved")("Approved", {}) 
 class Rejected extends Schema.TaggedClass<Rejected>("Rejected")("Rejected", {}) {}
 class Recheck extends Schema.TaggedClass<Recheck>("Recheck")("Recheck", { score: Schema.Number }) {}
 
-const States = Machine.states({
-  Flow: {
-    schema: Flow,
-    initial: "Routing",
-    states: {
-      Routing: { type: "choice" },
-      Approved,
-      Rejected
+const States = Machine.state({
+  initial: "Flow",
+  states: {
+    Flow: {
+      schema: Flow,
+      initial: "Routing",
+      states: {
+        Routing: { type: "choice" },
+        Approved,
+        Rejected
+      }
     }
   }
 })
@@ -23,40 +26,44 @@ const States = Machine.states({
 let branchFactoryCalls = 0
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Recheck),
-  initial: (to) =>
-    to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.Routing()))
+  root: States,
+  events: Machine.eventsFromSchemas(Recheck),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) => to.Flow.decoded(new Flow({ score: 80 }), (flow) => flow.Routing()))
+    )
 }).handle({
-  Flow: {
-    states: {
-      Routing: {
-        choice: (to) => {
-          branchFactoryCalls += 1
-          return to.branches({
-            perfect: { title: "Score is perfect", target: to.local.Approved() },
-            negative: { title: "Score is negative", target: to.local.Rejected() },
-            zero: { title: "Score is zero", target: to.local.Rejected() },
-            passing: { title: "Score is at least 70", target: to.local.Approved() },
-            failing: { target: to.local.Rejected() }
-          }).resolve(({ containingState, select }) => {
-            const score = containingState.score
-            return score === 100
-              ? select.perfect.decoded(new Approved({}))
-              : score < 0
-              ? select.negative.decoded(new Rejected({}))
-              : score === 0
-              ? select.zero.decoded(new Rejected({}))
-              : score >= 70
-              ? select.passing.decoded(new Approved({}))
-              : select.failing.decoded(new Rejected({}))
-          })
-        }
-      },
-      Approved: {
-        on: {
-          Recheck: (to) =>
-            to.branch.Flow.initial.resolve(({ event, target }) => target.decoded(new Flow({ score: event.score })))
+  states: {
+    Flow: {
+      states: {
+        Routing: {
+          choice: (to) => {
+            branchFactoryCalls += 1
+            return to.branches({
+              perfect: { title: "Score is perfect", target: to.local.Approved() },
+              negative: { title: "Score is negative", target: to.local.Rejected() },
+              zero: { title: "Score is zero", target: to.local.Rejected() },
+              passing: { title: "Score is at least 70", target: to.local.Approved() },
+              failing: { target: to.local.Rejected() }
+            }).resolve(({ containingState, select }) => {
+              const score = containingState.score
+              return score === 100
+                ? select.perfect.decoded(new Approved({}))
+                : score < 0
+                ? select.negative.decoded(new Rejected({}))
+                : score === 0
+                ? select.zero.decoded(new Rejected({}))
+                : score >= 70
+                ? select.passing.decoded(new Approved({}))
+                : select.failing.decoded(new Rejected({}))
+            })
+          }
+        },
+        Approved: {
+          on: {
+            Recheck: (to) =>
+              to.branch.Flow.initial.resolve(({ event, target }) => target.decoded(new Flow({ score: event.score })))
+          }
         }
       }
     }
@@ -67,9 +74,10 @@ describe("Machine choice pseudo-states", () => {
   it.effect("settles an initial choice without exposing it in the snapshot", () =>
     Effect.gen(function*() {
       const plan = yield* Machine.planInitial(machine)
-      assert.strictEqual(plan.state.path, "Flow")
-      assert.strictEqual(plan.state.state.path, "Flow.Approved")
+      assert.strictEqual(plan.state.state.path, "Flow")
+      assert.strictEqual(plan.state.state.state.path, "Flow.Approved")
       assert.deepStrictEqual(Machine.configuration(machine, plan.state).map((node) => node.path), [
+        "",
         "Flow",
         "Flow.Approved"
       ])
@@ -122,6 +130,7 @@ describe("Machine choice pseudo-states", () => {
         }
       ])
       assert.deepStrictEqual(Machine.stateNodes(machine).map(({ path, type }) => ({ path, type })), [
+        { path: "" as const, type: "compound" },
         { path: "Flow" as const, type: "compound" },
         { path: "Flow.Routing" as const, type: "choice" },
         { path: "Flow.Approved" as const, type: "atomic" },
@@ -137,18 +146,21 @@ describe("Machine choice pseudo-states", () => {
       class NestedFlow extends Schema.TaggedClass<NestedFlow>("ChoiceInputFlow")("ChoiceInputFlow", {
         score: Schema.Number
       }) {}
-      const states = Machine.states({
-        Root: {
-          schema: Root,
-          initial: "Flow",
-          states: {
-            Flow: {
-              schema: NestedFlow,
-              initial: "Routing",
-              states: {
-                Routing: { type: "choice" },
-                Approved,
-                Rejected
+      const states = Machine.state({
+        initial: "Root",
+        states: {
+          Root: {
+            schema: Root,
+            initial: "Flow",
+            states: {
+              Flow: {
+                schema: NestedFlow,
+                initial: "Routing",
+                states: {
+                  Routing: { type: "choice" },
+                  Approved,
+                  Rejected
+                }
               }
             }
           }
@@ -156,33 +168,37 @@ describe("Machine choice pseudo-states", () => {
       })
       let observedContext: { readonly enabled: boolean; readonly score: number } | undefined
       const inputChoice = Machine.make({
-        states: states.states,
-        events: Machine.events(),
+        root: states,
+        events: Machine.eventsFromSchemas(),
         input: Schema.Struct({ enabled: Schema.Boolean, score: Schema.Number }),
-        initial: (to) =>
-          to.Root.initial.resolve(({ input, target }) =>
-            target.from({ enabled: input.enabled }, (root) =>
-              root.Flow.from({ score: input.score }, (flow) => flow.Routing()))
+        initialConfiguration: (root) =>
+          root.resolve(({ input, target }) =>
+            target.from((to) =>
+              to.Root.from({ enabled: input.enabled }, (root) =>
+                root.Flow.from({ score: input.score }, (flow) => flow.Routing()))
+            )
           )
       }).handle({
-        Root: {
-          states: {
-            Flow: {
-              states: {
-                Routing: {
-                  choice: (to) =>
-                    to.branches({
-                      approved: { target: to.local.Approved() },
-                      rejected: { target: to.local.Rejected() }
-                    }).resolve(({ ancestors, containingState, select }) => {
-                      observedContext = {
-                        enabled: ancestors.Root.enabled,
-                        score: containingState.score
-                      }
-                      return ancestors.Root.enabled && containingState.score >= 70
-                        ? select.approved.decoded(new Approved({}))
-                        : select.rejected.decoded(new Rejected({}))
-                    })
+        states: {
+          Root: {
+            states: {
+              Flow: {
+                states: {
+                  Routing: {
+                    choice: (to) =>
+                      to.branches({
+                        approved: { target: to.local.Approved() },
+                        rejected: { target: to.local.Rejected() }
+                      }).resolve(({ ancestors, containingState, select }) => {
+                        observedContext = {
+                          enabled: ancestors.Root.enabled,
+                          score: containingState.score
+                        }
+                        return ancestors.Root.enabled && containingState.score >= 70
+                          ? select.approved.decoded(new Approved({}))
+                          : select.rejected.decoded(new Rejected({}))
+                      })
+                  }
                 }
               }
             }
@@ -192,7 +208,7 @@ describe("Machine choice pseudo-states", () => {
 
       const plan = yield* Machine.planInitial(inputChoice, { enabled: true, score: 80 })
       assert.deepStrictEqual(observedContext, { enabled: true, score: 80 })
-      assert.strictEqual(plan.state.state.state.path, "Root.Flow.Approved")
+      assert.strictEqual(plan.state.state.state.state.path, "Root.Flow.Approved")
       assert.strictEqual(plan.microsteps[0]?.transitions[0]?.branchKey, "approved")
     }))
 
@@ -200,7 +216,7 @@ describe("Machine choice pseudo-states", () => {
     Effect.gen(function*() {
       const initial = yield* Machine.planInitial(machine)
       const plan = yield* Machine.plan(machine, initial.state, new Recheck({ score: 10 }))
-      assert.strictEqual(plan.next.state.path, "Flow.Rejected")
+      assert.strictEqual(plan.next.state.state.path, "Flow.Rejected")
       assert.strictEqual(plan.microsteps[0]?.event._tag, "Recheck")
       assert.deepStrictEqual(plan.microsteps[0]?.transitions.map(({ source, trigger }) => ({ source, trigger })), [
         { source: "Flow.Approved", trigger: { type: "event", event: "Recheck" } },
@@ -210,37 +226,44 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("stabilizes chained choices and attributes every resolver microstep", () =>
     Effect.gen(function*() {
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "First",
-          states: {
-            First: { type: "choice" },
-            Second: { type: "choice" },
-            Approved
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "First",
+            states: {
+              First: { type: "choice" },
+              Second: { type: "choice" },
+              Approved
+            }
           }
         }
       })
       const chained = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.Flow.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
+          )
       }).handle({
-        Flow: {
-          states: {
-            First: {
-              choice: (to) => to.local.Second().resolve(({ target }) => target())
-            },
-            Second: {
-              choice: (to) => to.local.Approved().resolve(({ target }) => target.decoded(new Approved({})))
+        states: {
+          Flow: {
+            states: {
+              First: {
+                choice: (to) => to.local.Second().resolve(({ target }) => target())
+              },
+              Second: {
+                choice: (to) => to.local.Approved().resolve(({ target }) => target.decoded(new Approved({})))
+              }
             }
           }
         }
       })
 
       const plan = yield* Machine.planInitial(chained)
-      assert.strictEqual(plan.state.state.path, "Flow.Approved")
+      assert.strictEqual(plan.state.state.state.path, "Flow.Approved")
       assert.deepStrictEqual(
         plan.microsteps[0]?.transitions.map(({ source, resolvedTarget }) => ({
           source,
@@ -257,31 +280,38 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("uses the existing infinite-transition protection for choice loops", () =>
     Effect.gen(function*() {
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "First",
-          states: {
-            First: { type: "choice" },
-            Second: { type: "choice" },
-            Approved
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "First",
+            states: {
+              First: { type: "choice" },
+              Second: { type: "choice" },
+              Approved
+            }
           }
         }
       })
       const looping = Machine.make({
         id: "ChoiceLoopMachine",
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.Flow.decoded(new Flow({ score: 80 }), (flow) => flow.First()))
+          )
       }).handle({
-        Flow: {
-          states: {
-            First: {
-              choice: (to) => to.local.Second().resolve(({ target }) => target())
-            },
-            Second: {
-              choice: (to) => to.local.First().resolve(({ target }) => target())
+        states: {
+          Flow: {
+            states: {
+              First: {
+                choice: (to) => to.local.Second().resolve(({ target }) => target())
+              },
+              Second: {
+                choice: (to) => to.local.First().resolve(({ target }) => target())
+              }
             }
           }
         }
@@ -295,42 +325,46 @@ describe("Machine choice pseudo-states", () => {
 
   it.effect("enters a choice from an always transition", () =>
     Effect.gen(function*() {
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Approved",
-          states: {
-            Approved,
-            Routing: { type: "choice" },
-            Rejected
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Approved",
+            states: {
+              Approved,
+              Routing: { type: "choice" },
+              Rejected
+            }
           }
         }
       })
       const alwaysMachine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) =>
-            target.decoded(
-              new Flow({ score: 10 }),
-              (flow) => flow.Approved.decoded(new Approved({}))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.Flow.decoded(new Flow({ score: 10 }), (flow) => flow.Approved.decoded(new Approved({})))
             )
           )
       }).handle({
-        Flow: {
-          states: {
-            Approved: {
-              always: (to) => to.local.Routing().resolve(({ target }) => target())
-            },
-            Routing: {
-              choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
+        states: {
+          Flow: {
+            states: {
+              Approved: {
+                always: (to) => to.local.Routing().resolve(({ target }) => target())
+              },
+              Routing: {
+                choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
+              }
             }
           }
         }
       })
 
       const plan = yield* Machine.planInitial(alwaysMachine)
-      assert.strictEqual(plan.state.state.path, "Flow.Rejected")
+      assert.strictEqual(plan.state.state.state.path, "Flow.Rejected")
       assert.deepStrictEqual(
         plan.microsteps.flatMap(({ transitions }) => transitions.map(({ trigger }) => trigger.type)),
         [
@@ -352,38 +386,43 @@ describe("Machine choice pseudo-states", () => {
   it.effect("enters a choice from a completion transition", () =>
     Effect.gen(function*() {
       class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Done",
-          states: {
-            Done: { schema: Done, type: "final" },
-            Routing: { type: "choice" },
-            Rejected
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Done",
+            states: {
+              Done: { schema: Done, type: "final" },
+              Routing: { type: "choice" },
+              Rejected
+            }
           }
         }
       })
       const completion = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) =>
-            target.decoded(new Flow({ score: 0 }), (flow) => flow.Done.decoded(new Done({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.Flow.decoded(new Flow({ score: 0 }), (flow) => flow.Done.decoded(new Done({}))))
           )
       }).handle({
-        Flow: {
-          onDone: (to) =>
-            to.full.Flow().resolve(({ state, target }) => target.decoded(state, (flow) => flow.Routing())),
-          states: {
-            Routing: {
-              choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
+        states: {
+          Flow: {
+            onDone: (to) =>
+              to.branch.Flow().resolve(({ state, target }) => target.decoded(state, (flow) => flow.Routing())),
+            states: {
+              Routing: {
+                choice: (to) => to.local.Rejected().resolve(({ target }) => target.decoded(new Rejected({})))
+              }
             }
           }
         }
       })
 
       const plan = yield* Machine.planInitial(completion)
-      assert.strictEqual(plan.state.state.path, "Flow.Rejected")
+      assert.strictEqual(plan.state.state.state.path, "Flow.Rejected")
       assert.deepStrictEqual(
         plan.microsteps.flatMap(({ transitions }) => transitions.map(({ trigger }) => trigger.type)),
         [
@@ -400,57 +439,61 @@ describe("Machine choice pseudo-states", () => {
       class Ready extends Schema.TaggedClass<Ready>("Ready")("Ready", {}) {}
       class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
       class RightReady extends Schema.TaggedClass<RightReady>("RightReady")("RightReady", {}) {}
-      const states = Machine.states({
-        Board: {
-          schema: Board,
-          type: "parallel",
-          states: {
-            Left: {
-              schema: Left,
-              initial: "Routing",
-              states: {
-                Routing: { type: "choice" },
-                Ready
-              }
-            },
-            Right: {
-              schema: Right,
-              initial: "Routing",
-              states: {
-                Routing: { type: "choice" },
-                Ready: RightReady
+      const states = Machine.state({
+        initial: "Board",
+        states: {
+          Board: {
+            schema: Board,
+            type: "parallel",
+            states: {
+              Left: {
+                schema: Left,
+                initial: "Routing",
+                states: {
+                  Routing: { type: "choice" },
+                  Ready
+                }
+              },
+              Right: {
+                schema: Right,
+                initial: "Routing",
+                states: {
+                  Routing: { type: "choice" },
+                  Ready: RightReady
+                }
               }
             }
           }
         }
       })
       const parallel = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Board.initial.resolve(({ target }) =>
-            target.decoded(
-              new Board({}),
-              (board) =>
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.Board.decoded(new Board({}), (board) =>
                 board
                   .Left.decoded(new Left({}), (left) => left.Routing())
-                  .Right.decoded(new Right({}), (right) => right.Routing())
+                  .Right.decoded(new Right({}), (right) => right.Routing()))
             )
           )
       }).handle({
-        Board: {
-          states: {
-            Left: {
-              states: {
-                Routing: {
-                  choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new Ready({})))
+        states: {
+          Board: {
+            states: {
+              Left: {
+                states: {
+                  Routing: {
+                    choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new Ready({})))
+                  }
                 }
-              }
-            },
-            Right: {
-              states: {
-                Routing: {
-                  choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new RightReady({})))
+              },
+              Right: {
+                states: {
+                  Routing: {
+                    choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new RightReady({})))
+                  }
                 }
               }
             }
@@ -460,6 +503,7 @@ describe("Machine choice pseudo-states", () => {
 
       const plan = yield* Machine.planInitial(parallel)
       assert.deepStrictEqual(Machine.configuration(parallel, plan.state).map(({ path }) => path), [
+        "",
         "Board",
         "Board.Left",
         "Board.Left.Ready",
@@ -474,48 +518,57 @@ describe("Machine choice pseudo-states", () => {
       class Outside extends Schema.TaggedClass<Outside>("Outside")("Outside", {}) {}
       class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
       class Resume extends Schema.TaggedClass<Resume>("Resume")("Resume", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Active",
-          states: {
-            Active,
-            Routing: { type: "choice" },
-            Recent: { type: "history" }
-          }
-        },
-        Outside
-      })
-      const history = Machine.make({
-        states: states.states,
-        events: Machine.events(Leave, Resume),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) =>
-            target.decoded(new Flow({ score: 1 }), (flow) => flow.Active.decoded(new Active({})))
-          )
-      }).handle({
-        Flow: {
-          history: {
-            Recent: {
-              default: ({ target }) =>
-                target.Flow.decoded(new Flow({ score: 0 }), (flow) => flow.Active.decoded(new Active({})))
+      const states = Machine.state({
+        initial: "Outside",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Active",
+            states: {
+              Active,
+              Routing: { type: "choice" },
+              Recent: { type: "history" }
             }
           },
-          states: {
-            Active: {
-              on: {
-                Leave: (to) => to.full.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+          Outside
+        }
+      })
+      const history = Machine.make({
+        root: states,
+        events: Machine.eventsFromSchemas(Leave, Resume),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Active.decoded(new Active({}))))
+          )
+      }).handle({
+        states: {
+          Flow: {
+            history: {
+              Recent: {
+                default: ({ target }) =>
+                  target.from((to) =>
+                    to.Flow.decoded(new Flow({ score: 0 }), (flow) => flow.Active.decoded(new Active({})))
+                  )
               }
             },
-            Routing: {
-              choice: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+            states: {
+              Active: {
+                on: {
+                  Leave: (to) => to.branch.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+                }
+              },
+              Routing: {
+                choice: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+              }
             }
-          }
-        },
-        Outside: {
-          on: {
-            Resume: (to) =>
-              to.full.Flow().resolve(({ target }) => target.decoded(new Flow({ score: 2 }), (flow) => flow.Routing()))
+          },
+          Outside: {
+            on: {
+              Resume: (to) =>
+                to.branch.Flow().resolve(({ target }) =>
+                  target.decoded(new Flow({ score: 2 }), (flow) => flow.Routing())
+                )
+            }
           }
         }
       })
@@ -523,8 +576,8 @@ describe("Machine choice pseudo-states", () => {
       const initial = yield* Machine.planInitial(history)
       const outside = yield* Machine.plan(history, initial.state, new Leave({}))
       const resumed = yield* Machine.plan(history, outside.next, new Resume({}))
-      assert.strictEqual(resumed.next.path, "Flow")
-      if (resumed.next.path === "Flow") assert.strictEqual(resumed.next.state.path, "Flow.Active")
+      assert.strictEqual(resumed.next.state.path, "Flow")
+      if (resumed.next.state.path === "Flow") assert.strictEqual(resumed.next.state.state.path, "Flow.Active")
       assert.deepStrictEqual(resumed.microsteps[0]?.transitions.map(({ trigger }) => trigger.type), ["event", "choice"])
       const trace = yield* MachineTest.run(history, { events: [new Leave({}), new Resume({})] })
       yield* MachineTest.verify(history, trace, { laws: ["definitions"] })
@@ -533,43 +586,54 @@ describe("Machine choice pseudo-states", () => {
   it.effect("uses a history default when an initial choice targets history", () =>
     Effect.gen(function*() {
       class Active extends Schema.TaggedClass<Active>("InitialHistoryActive")("InitialHistoryActive", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Routing",
-          states: {
-            Active,
-            Routing: { type: "choice" },
-            Recent: { type: "history" }
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Routing",
+            states: {
+              Active,
+              Routing: { type: "choice" },
+              Recent: { type: "history" }
+            }
           }
         }
       })
       const initialHistory = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.Flow.initial.resolve(({ target }) => target.decoded(new Flow({ score: 1 }), (flow) => flow.Routing()))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) => to.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Routing()))
+          )
       }).handle({
-        Flow: {
-          history: {
-            Recent: {
-              default: () => ({
-                path: "Flow" as const,
-                value: new Flow({ score: 0 }),
-                state: { path: "Flow.Active" as const, value: new Active({}) }
-              })
-            }
-          },
-          states: {
-            Routing: {
-              choice: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+        states: {
+          Flow: {
+            history: {
+              Recent: {
+                default: () => ({
+                  path: "" as const,
+                  value: undefined,
+                  state: {
+                    path: "Flow" as const,
+                    value: new Flow({ score: 0 }),
+                    state: { path: "Flow.Active" as const, value: new Active({}) }
+                  }
+                })
+              }
+            },
+            states: {
+              Routing: {
+                choice: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+              }
             }
           }
         }
       })
 
       const plan = yield* Machine.planInitial(initialHistory)
-      assert.strictEqual(plan.state.state.path, "Flow.Active")
+      assert.strictEqual(plan.state.state.state.path, "Flow.Active")
       const trace = yield* MachineTest.run(initialHistory, { events: [] })
       yield* MachineTest.verify(initialHistory, trace, { laws: ["definitions"] })
     }))
@@ -579,46 +643,53 @@ describe("Machine choice pseudo-states", () => {
       class Active extends Schema.TaggedClass<Active>("FallbackChoiceActive")("FallbackChoiceActive", {}) {}
       class Outside extends Schema.TaggedClass<Outside>("FallbackChoiceOutside")("FallbackChoiceOutside", {}) {}
       class Resume extends Schema.TaggedClass<Resume>("FallbackChoiceResume")("FallbackChoiceResume", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Active",
-          states: {
-            Active,
-            Routing: { type: "choice" },
-            Recent: { type: "history" }
-          }
-        },
-        Outside
-      })
-      const historyChoice = Machine.make({
-        states: states.states,
-        events: Machine.events(Resume),
-        initial: (to) => to.Outside().resolve(({ target }) => target.decoded(new Outside({})))
-      }).handle({
-        Flow: {
-          history: {
-            Recent: {
-              default: ({ target }) => target.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Routing())
+      const states = Machine.state({
+        initial: "Outside",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Active",
+            states: {
+              Active,
+              Routing: { type: "choice" },
+              Recent: { type: "history" }
             }
           },
-          states: {
-            Routing: {
-              choice: (to) => to.local.Active().resolve(({ target }) => target.decoded(new Active({})))
+          Outside
+        }
+      })
+      const historyChoice = Machine.make({
+        root: states,
+        events: Machine.eventsFromSchemas(Resume),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Outside.decoded(new Outside({}))))
+      }).handle({
+        states: {
+          Flow: {
+            history: {
+              Recent: {
+                default: ({ target }) =>
+                  target.from((to) => to.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Routing()))
+              }
+            },
+            states: {
+              Routing: {
+                choice: (to) => to.local.Active().resolve(({ target }) => target.decoded(new Active({})))
+              }
             }
-          }
-        },
-        Outside: {
-          on: {
-            FallbackChoiceResume: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+          },
+          Outside: {
+            on: {
+              FallbackChoiceResume: (to) => to.history.Flow.Recent.resolve(({ target }) => target())
+            }
           }
         }
       })
 
       const initial = yield* Machine.planInitial(historyChoice)
       const resumed = yield* Machine.plan(historyChoice, initial.state, new Resume({}))
-      assert.strictEqual(resumed.next.path, "Flow")
-      if (resumed.next.path === "Flow") assert.strictEqual(resumed.next.state.path, "Flow.Active")
+      assert.strictEqual(resumed.next.state.path, "Flow")
+      if (resumed.next.state.path === "Flow") assert.strictEqual(resumed.next.state.state.path, "Flow.Active")
       assert.deepStrictEqual(
         resumed.microsteps[0]?.transitions.map(({ source, trigger }) => ({ source, trigger: trigger.type })),
         [

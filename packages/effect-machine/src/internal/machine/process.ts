@@ -41,6 +41,7 @@ const runSequentialDiscard = <E, R>(
 
 const acknowledgedPlan = (
   planned: {
+    readonly event: unknown
     readonly next: unknown
     readonly commands: ReadonlyArray<unknown>
     readonly emittedEvents: ReadonlyArray<unknown>
@@ -60,6 +61,7 @@ const acknowledgedPlan = (
   },
   snapshot: (state: unknown) => unknown
 ): unknown => ({
+  event: planned.event,
   next: snapshot(planned.next),
   commands: planned.commands,
   emittedEvents: planned.emittedEvents,
@@ -388,7 +390,7 @@ const makeProcessLogic: <
   ExcludeCompatibleRuntime<
     Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >,
   Output,
   | InitialE
@@ -460,7 +462,7 @@ const makeProcessLogic: <
               ? undefined
               : CommandRuntime.runEmittedEvents(
                 planned.emittedEvents,
-                CommandRuntime.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmitOf<Emits>>(machine, scope)
+                CommandRuntime.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>>(machine, scope)
               )
             const result = Effect.succeed({
               state: planned.state,
@@ -522,7 +524,7 @@ const makeProcessLogic: <
             // so the Effect scheduler remains responsible for cooperative yield.
             let configuration: Configuration.ActiveConfiguration | undefined
             let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
-            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
+            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
             while (terminal === undefined) {
               const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
               pendingMessage = Option.none()
@@ -554,7 +556,7 @@ const makeProcessLogic: <
                 current = next
                 if (planned.emittedEvents.length > 0) {
                   yield* CommandRuntime.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                    planned.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
                     liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
@@ -630,7 +632,7 @@ const makeProcessLogic: <
             // worker can continue draining an already queued batch.
             configuration = undefined
             let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
-            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmitOf<Emits>> | undefined
+            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
 
             // Match the compact non-invoke loop while retaining state-scoped
             // child lifecycle work at the same ordered Effect boundaries.
@@ -678,7 +680,7 @@ const makeProcessLogic: <
                 current = next
                 if (planned.emittedEvents.length > 0) {
                   yield* CommandRuntime.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmitOf<Emits>>,
+                    planned.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
                     liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
@@ -732,7 +734,7 @@ const makeProcessLogic: <
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
       Machine.EventOf<Events>,
-      Machine.EmitOf<Emits>
+      Machine.EmittedEventOf<Emits>
     >,
     Output,
     | InitialE
@@ -772,7 +774,7 @@ export const toProcessLogic: <
   ExcludeCompatibleRuntime<
     Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >,
   Output,
   | InitialE
@@ -878,7 +880,7 @@ export const start: <
   ExcludeCompatibleRuntime<
     Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >
 > = (machine, ...args) =>
   internalRuntime.startProcess(
@@ -922,7 +924,7 @@ export const prepare: <
     ExcludeCompatibleRuntime<
       Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
       Machine.EventOf<Events>,
-      Machine.EmitOf<Emits>
+      Machine.EmittedEventOf<Emits>
     >
   >
 > = (machine, ...args) =>
@@ -957,7 +959,7 @@ export const resume: <
   ExcludeCompatibleRuntime<
     Exclude<ExecutionServices<R>, internalRuntime.MachineRuntime>,
     Machine.EventOf<Events>,
-    Machine.EmitOf<Emits>
+    Machine.EmittedEventOf<Emits>
   >
 > = (machine, snapshot) =>
   internalRuntime.startProcess(

@@ -12,18 +12,20 @@ describe("MachineTest", () => {
   }) {}
   class InternalEvent extends Schema.TaggedClass<InternalEvent>("InternalEvent")("InternalEvent", {}) {}
 
-  const States = Machine.states({ idle: Idle })
+  const States = Machine.state({ initial: "idle", states: { idle: Idle } })
   const machine = Machine.make({
-    states: States.states,
-    events: Machine.events(PublicEvent),
-    internalEvents: Machine.internalEvents(InternalEvent),
+    root: States,
+    events: Machine.eventsFromSchemas(PublicEvent),
+    internalEvents: Machine.internalEventsFromSchemas(InternalEvent),
     input: Input,
-    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
   }).handle({
-    idle: {
-      on: {
-        PublicEvent: (to) => to.none,
-        InternalEvent: (to) => to.none
+    states: {
+      idle: {
+        on: {
+          PublicEvent: (to) => to.none,
+          InternalEvent: (to) => to.none
+        }
       }
     }
   })
@@ -34,7 +36,7 @@ describe("MachineTest", () => {
 
     type Scenario = MachineTest.Scenario<typeof machine>
     expect<Scenario["input"]>().type.toBe<Input>()
-    expect<Scenario["events"][number]>().type.toBe<PublicEvent>()
+    expect<Scenario["events"][number]>().type.toBe<Machine.Machine.EventInput<PublicEvent>>()
     expect<InternalEvent>().type.not.toBeAssignableTo<Scenario["events"][number]>()
   })
 
@@ -49,10 +51,10 @@ describe("MachineTest", () => {
 
   it("omits input for machines without an input schema", () => {
     const noInput = Machine.make({
-      states: States.states,
-      events: Machine.events(PublicEvent),
-      initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
-    }).handle({ idle: {} })
+      root: States,
+      events: Machine.eventsFromSchemas(PublicEvent),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
+    }).handle({ states: { idle: {} } })
     type Scenario = MachineTest.Scenario<typeof noInput>
     type Options = MachineTest.ScenarioOptions<typeof noInput>
 
@@ -72,21 +74,21 @@ describe("MachineTest", () => {
       MachineTest.RunFailure<MachineTest.RunError<typeof machine>, typeof machine>
     >()
 
-    expect<Effect.Success<typeof executed>["initial"]["startingConfiguration"][number]>().type.toBe<"idle">()
-    expect<Effect.Success<typeof executed>["initial"]["initialEntryPaths"][number]>().type.toBe<"idle">()
+    expect<Effect.Success<typeof executed>["initial"]["startingConfiguration"][number]>().type.toBe<"" | "idle">()
+    expect<Effect.Success<typeof executed>["initial"]["initialEntryPaths"][number]>().type.toBe<"" | "idle">()
 
     type InitialMicrostep = MachineTest.Trace<typeof machine>["initial"]["plan"]["microsteps"][number]
     type EventMicrostep = MachineTest.Trace<typeof machine>["steps"][number]["plan"]["microsteps"][number]
-    expect<InitialMicrostep["transitions"][number]["source"]>().type.toBe<"idle">()
+    expect<InitialMicrostep["transitions"][number]["source"]>().type.toBe<"" | "idle">()
     expect<EventMicrostep["transitions"][number]["trigger"]>().type.toBe<
       Machine.Machine.TransitionTrigger<"PublicEvent" | "InternalEvent">
     >()
-    expect<EventMicrostep["transitions"][number]["target"]>().type.toBe<"idle" | undefined>()
-    expect<EventMicrostep["transitions"][number]["resolvedTarget"]>().type.toBe<"idle" | undefined>()
+    expect<EventMicrostep["transitions"][number]["target"]>().type.toBe<"" | "idle" | undefined>()
+    expect<EventMicrostep["transitions"][number]["resolvedTarget"]>().type.toBe<"" | "idle" | undefined>()
 
     const startup = Machine.planInitial(machine, new Input({ id: "test" }))
     type StartupMicrostep = Effect.Success<typeof startup>["microsteps"][number]
-    expect<StartupMicrostep["transitions"][number]["source"]>().type.toBe<"idle">()
+    expect<StartupMicrostep["transitions"][number]["source"]>().type.toBe<"" | "idle">()
     expect<StartupMicrostep["transitions"][number]["trigger"]>().type.toBe<
       Machine.Machine.TransitionTrigger<"PublicEvent" | "InternalEvent">
     >()
@@ -95,16 +97,18 @@ describe("MachineTest", () => {
   it("does not require invoke services while planning scenarios", () => {
     class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {}
     const invokedMachine = Machine.make({
-      states: States.states,
-      events: Machine.events(PublicEvent),
-      initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
+      root: States,
+      events: Machine.eventsFromSchemas(PublicEvent),
+      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
     }).handle({
-      idle: {
-        invoke: (from) =>
-          from.effect("service-backed-invoke", () =>
-            Effect.gen(function*() {
-              yield* InvokeRequirement
-            })).onDone((to) => to.none)
+      states: {
+        idle: {
+          invoke: (from) =>
+            from.effect("service-backed-invoke", () =>
+              Effect.gen(function*() {
+                yield* InvokeRequirement
+              })).onDone((to) => to.none)
+        }
       }
     })
 

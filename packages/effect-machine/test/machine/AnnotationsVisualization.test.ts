@@ -11,42 +11,45 @@ class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
 const AnnotatedWorkflow = Workflow.annotate({ title: "Document workflow" })
 const AnnotatedIdle = Idle.annotate({ title: "Waiting for edits" })
 
-const States = Machine.states({
-  Workflow: {
-    schema: AnnotatedWorkflow,
-    initial: "Idle",
-    states: {
-      Idle: AnnotatedIdle,
-      Routing: {
-        type: "choice",
-        annotations: { title: "Select persistence route" }
-      },
-      Recent: {
-        type: "history",
-        history: "deep",
-        annotations: { title: "Previous workflow state" }
-      },
-      Done
+const States = Machine.state({
+  initial: "Workflow",
+  states: {
+    Workflow: {
+      schema: AnnotatedWorkflow,
+      initial: "Idle",
+      states: {
+        Idle: AnnotatedIdle,
+        Routing: {
+          type: "choice",
+          annotations: { title: "Select persistence route" }
+        },
+        Recent: {
+          type: "history",
+          history: "deep",
+          annotations: { title: "Previous workflow state" }
+        },
+        Done
+      }
     }
   }
 })
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.Workflow.initial.resolve(({ target }) =>
-      target.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) => to.Workflow.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({}))))
     )
 })
 
 const renderMachine = makeTextRenderer<
   typeof machine,
-  Machine.Machine.Snapshot<typeof States.states>
+  Machine.Snapshot<typeof States>
 >(Machine)
 const renderMermaid = makeMermaidRenderer<
   typeof machine,
-  Machine.Machine.Snapshot<typeof States.states>
+  Machine.Snapshot<typeof States>
 >(Machine)
 
 describe("Machine annotation visualization", () => {
@@ -57,11 +60,12 @@ describe("Machine annotation visualization", () => {
         "Machine",
         "● active  ○ inactive  ◇ transition  ┄ branch → target",
         "",
-        "└─ ○ Document workflow (Workflow) [compound, initial: Idle]",
-        "   ├─ ○ Waiting for edits (Idle)",
-        "   ├─ ○ Select persistence route (Routing) [choice]",
-        "   ├─ ○ Previous workflow state (Recent) [history, deep]",
-        "   └─ ○ Done"
+        "└─ ○ (root) [compound, initial: Workflow]",
+        "   └─ ○ Document workflow (Workflow) [compound, initial: Idle]",
+        "      ├─ ○ Waiting for edits (Idle)",
+        "      ├─ ○ Select persistence route (Routing) [choice]",
+        "      ├─ ○ Previous workflow state (Recent) [history, deep]",
+        "      └─ ○ Done"
       ].join("\n")
     )
   })
@@ -69,10 +73,10 @@ describe("Machine annotation visualization", () => {
   it("renders titled choice, history, and final states as Mermaid", () => {
     const rendered = renderMermaid(machine)
 
-    assert.include(rendered, "state \"○ Document workflow (Workflow)\" as state_0")
-    assert.include(rendered, "state \"○ Select persistence route (Routing)\" as state_2")
-    assert.include(rendered, "state state_2 <<choice>>")
-    assert.include(rendered, "state \"○ Previous workflow state (Recent) [history: deep]\" as state_3")
-    assert.include(rendered, "state \"○ Done\" as state_4")
+    assert.include(rendered, "state \"○ Document workflow (Workflow)\" as state_1")
+    assert.include(rendered, "state \"○ Select persistence route (Routing)\" as state_3")
+    assert.include(rendered, "state state_3 <<choice>>")
+    assert.include(rendered, "state \"○ Previous workflow state (Recent) [history: deep]\" as state_4")
+    assert.include(rendered, "state \"○ Done\" as state_5")
   })
 })

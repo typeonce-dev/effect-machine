@@ -496,16 +496,16 @@ export const decodeEventSync = <const Events extends ReadonlyArray<Machine.Tagge
 export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchema>>(
   machine: Machine.Any,
   event: unknown
-): Effect.Effect<Machine.EmitOf<Emits>, MachineSchemaDecodeError> => {
+): Effect.Effect<Machine.EmittedEventOf<Emits>, MachineSchemaDecodeError> => {
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
     return decodeEventConstruction(machine, protocol, event, "emission") as Effect.Effect<
-      Machine.EmitOf<Emits>,
+      Machine.EmittedEventOf<Emits>,
       MachineSchemaDecodeError
     >
   }
   const eventName = getEventName(event)
-  return decodeBoundary<Machine.EmitOf<Emits>>(
+  return decodeBoundary<Machine.EmittedEventOf<Emits>>(
     machine,
     protocol.emit,
     event,
@@ -516,13 +516,13 @@ export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchem
 export const decodeEmitSync = <const Emits extends ReadonlyArray<Machine.TaggedSchema>>(
   machine: Machine.Any,
   event: unknown
-): Machine.EmitOf<Emits> => {
+): Machine.EmittedEventOf<Emits> => {
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
-    return decodeEventConstructionSync(machine, protocol, event, "emission") as Machine.EmitOf<Emits>
+    return decodeEventConstructionSync(machine, protocol, event, "emission") as Machine.EmittedEventOf<Emits>
   }
   const eventName = getEventName(event)
-  return decodeBoundarySync<Machine.EmitOf<Emits>>(
+  return decodeBoundarySync<Machine.EmittedEventOf<Emits>>(
     machine,
     protocol.emit,
     event,

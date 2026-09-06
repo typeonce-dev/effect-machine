@@ -10,23 +10,26 @@ class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
 class RightIdle extends Schema.TaggedClass<RightIdle>("RightIdle")("RightIdle", {}) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", {}) {}
 
-const States = Machine.states({
-  Root: {
-    schema: Root,
-    type: "parallel",
-    states: {
-      Left: {
-        schema: Left,
-        initial: "LeftIdle",
-        states: {
-          LeftIdle,
-          LeftDone: { schema: LeftDone, type: "final" }
+const States = Machine.state({
+  initial: "Root",
+  states: {
+    Root: {
+      schema: Root,
+      type: "parallel",
+      states: {
+        Left: {
+          schema: Left,
+          initial: "LeftIdle",
+          states: {
+            LeftIdle,
+            LeftDone: { schema: LeftDone, type: "final" }
+          }
+        },
+        Right: {
+          schema: Right,
+          initial: "RightIdle",
+          states: { RightIdle }
         }
-      },
-      Right: {
-        schema: Right,
-        initial: "RightIdle",
-        states: { RightIdle }
       }
     }
   }
@@ -35,42 +38,43 @@ const States = Machine.states({
 describe("Machine transition snapshot context", () => {
   it("infers the complete machine snapshot for event, always, and onDone handlers", () => {
     Machine.make({
-      states: States.states,
-      events: Machine.events(Advance),
-      initial: (to) =>
-        to.Root.initial.resolve(({ target }) => (target.decoded(
-          new Root({}),
-          (root) =>
+      root: States,
+      events: Machine.eventsFromSchemas(Advance),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) =>
+          to.Root.decoded(new Root({}), (root) =>
             root
               .Left.decoded(new Left({}), (left) => left.LeftIdle.decoded(new LeftIdle({})))
-              .Right.decoded(new Right({}), (right) => right.RightIdle.decoded(new RightIdle({})))
+              .Right.decoded(new Right({}), (right) => right.RightIdle.decoded(new RightIdle({}))))
         )))
     }).handle({
-      Root: {
-        states: {
-          Left: {
-            onDone: (to) =>
-              to.local.LeftIdle().resolve(({ snapshot, target }) => {
-                expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                return target.decoded(new LeftIdle({}))
-              }),
-            states: {
-              LeftIdle: {
-                always: (to) =>
-                  to.none.resolve(({ snapshot }) => {
-                    expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                    return undefined
-                  }),
-                on: {
-                  Advance: (to) =>
-                    to.local.LeftDone().resolve(({ snapshot, target }) => {
-                      expect(snapshot).type.toBe<Machine.Machine.Snapshot<typeof States.states>>()
-                      expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
-                      return target.decoded(new LeftDone({}))
-                    })
+      states: {
+        Root: {
+          states: {
+            Left: {
+              onDone: (to) =>
+                to.local.LeftIdle().resolve(({ snapshot, target }) => {
+                  expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
+                  expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                  expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                  expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
+                  return target.decoded(new LeftIdle({}))
+                }),
+              states: {
+                LeftIdle: {
+                  always: (to) =>
+                    to.none.resolve(({ snapshot }) => {
+                      expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
+                      return undefined
+                    }),
+                  on: {
+                    Advance: (to) =>
+                      to.local.LeftDone().resolve(({ snapshot, target }) => {
+                        expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
+                        expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
+                        return target.decoded(new LeftDone({}))
+                      })
+                  }
                 }
               }
             }
@@ -83,32 +87,38 @@ describe("Machine transition snapshot context", () => {
   it("does not expose a fabricated snapshot to choices or state actions", () => {
     class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
     class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {}
-    const choiceStates = Machine.states({
-      Flow: {
-        schema: Flow,
-        initial: "Routing",
-        states: {
-          Routing: { type: "choice" },
-          Active
+    const choiceStates = Machine.state({
+      initial: "Flow",
+      states: {
+        Flow: {
+          schema: Flow,
+          initial: "Routing",
+          states: {
+            Routing: { type: "choice" },
+            Active
+          }
         }
       }
     })
     Machine.make({
-      states: choiceStates.states,
-      events: Machine.events(),
-      initial: (to) => to.Flow.initial.resolve(({ target }) => (target.decoded(new Flow({}), (flow) => flow.Routing())))
+      root: choiceStates,
+      events: Machine.eventsFromSchemas(),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Flow.decoded(new Flow({}), (flow) => flow.Routing()))))
     }).handle({
-      Flow: {
-        entry: (context) => {
-          expect(context).type.not.toHaveProperty("snapshot")
-        },
-        states: {
-          Routing: {
-            choice: (to) =>
-              to.local.Active().resolve((context) => {
-                expect(context).type.not.toHaveProperty("snapshot")
-                return context.target.decoded(new Active({}))
-              })
+      states: {
+        Flow: {
+          entry: (context) => {
+            expect(context).type.not.toHaveProperty("snapshot")
+          },
+          states: {
+            Routing: {
+              choice: (to) =>
+                to.local.Active().resolve((context) => {
+                  expect(context).type.not.toHaveProperty("snapshot")
+                  return context.target.decoded(new Active({}))
+                })
+            }
           }
         }
       }

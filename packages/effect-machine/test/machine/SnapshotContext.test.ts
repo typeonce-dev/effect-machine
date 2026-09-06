@@ -12,70 +12,79 @@ class Offline extends Schema.TaggedClass<Offline>("Offline")("Offline", {}) {}
 class BufferReady extends Schema.TaggedClass<BufferReady>("BufferReady")("BufferReady", {}) {}
 class Disconnect extends Schema.TaggedClass<Disconnect>("Disconnect")("Disconnect", {}) {}
 
-const States = Machine.states({
-  System: {
-    schema: System,
-    type: "parallel",
-    states: {
-      Playback: {
-        schema: Playback,
-        initial: "Buffering",
-        states: { Buffering, Playing }
-      },
-      Network: {
-        schema: Network,
-        initial: "Online",
-        states: { Online, Offline }
+const States = Machine.state({
+  initial: "System",
+  states: {
+    System: {
+      schema: System,
+      type: "parallel",
+      states: {
+        Playback: {
+          schema: Playback,
+          initial: "Buffering",
+          states: { Buffering, Playing }
+        },
+        Network: {
+          schema: Network,
+          initial: "Online",
+          states: { Online, Offline }
+        }
       }
     }
   }
 })
 
 const initial = {
-  path: "System" as const,
-  value: new System({}),
-  states: {
-    Playback: {
-      path: "System.Playback" as const,
-      value: new Playback({}),
-      state: { path: "System.Playback.Buffering" as const, value: new Buffering({}) }
-    },
-    Network: {
-      path: "System.Network" as const,
-      value: new Network({}),
-      state: { path: "System.Network.Online" as const, value: new Online({}) }
+  path: "" as const,
+  value: undefined,
+  state: {
+    path: "System" as const,
+    value: new System({}),
+    states: {
+      Playback: {
+        path: "System.Playback" as const,
+        value: new Playback({}),
+        state: { path: "System.Playback.Buffering" as const, value: new Buffering({}) }
+      },
+      Network: {
+        path: "System.Network" as const,
+        value: new Network({}),
+        state: { path: "System.Network.Online" as const, value: new Online({}) }
+      }
     }
   }
 }
 
-const initialDefinition = (to: Machine.Machine.InitialSelector<typeof States.states>) =>
-  to.System.initial.resolve(() => initial)
+const initialDefinition: Machine.Machine.RootConfigurationBuilderInput<typeof States.node, void> = (root) =>
+  root.resolve(() => initial)
 
 describe("Machine transition snapshot context", () => {
   it.effect("lets an effectful event handler inspect a sibling region", () =>
     Effect.gen(function*() {
-      let captured: Machine.Machine.Snapshot<typeof States.states> | undefined
+      let captured: Machine.Snapshot<typeof States> | undefined
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(BufferReady),
-        initial: initialDefinition
+        root: States,
+        events: Machine.eventsFromSchemas(BufferReady),
+        initialConfiguration: initialDefinition
       }).handle({
-        System: {
-          states: {
-            Playback: {
-              states: {
-                Buffering: {
-                  on: {
-                    BufferReady: (to) =>
-                      to.branches({
-                        online: { title: "Network is online", target: to.local.Playing() },
-                        unchanged: { target: to.none }
-                      }).resolve(({ snapshot, select }) => {
-                        captured = snapshot
-                        return States.matches(snapshot, "System.Network.Online")
-                          ? select.online.decoded(new Playing({}))
-                          : select.unchanged()
-                      })
+        states: {
+          System: {
+            states: {
+              Playback: {
+                states: {
+                  Buffering: {
+                    on: {
+                      BufferReady: (to) =>
+                        to.branches({
+                          online: { title: "Network is online", target: to.local.Playing() },
+                          unchanged: { target: to.none }
+                        }).resolve(({ snapshot, select }) => {
+                          captured = snapshot
+                          return States.matches(snapshot, "System.Network.Online")
+                            ? select.online.decoded(new Playing({}))
+                            : select.unchanged()
+                        })
+                    }
                   }
                 }
               }
@@ -97,36 +106,38 @@ describe("Machine transition snapshot context", () => {
 
   it.effect("shares one beginning-of-microstep snapshot across parallel transitions", () =>
     Effect.gen(function*() {
-      const captured: Array<Machine.Machine.Snapshot<typeof States.states>> = []
+      const captured: Array<Machine.Snapshot<typeof States>> = []
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(Disconnect),
-        initial: initialDefinition
+        root: States,
+        events: Machine.eventsFromSchemas(Disconnect),
+        initialConfiguration: initialDefinition
       }).handle({
-        System: {
-          states: {
-            Playback: {
-              states: {
-                Buffering: {
-                  on: {
-                    Disconnect: (to) =>
-                      to.local.Playing().resolve(({ snapshot, target }) => {
-                        captured.push(snapshot)
-                        return target.decoded(new Playing({}))
-                      })
+        states: {
+          System: {
+            states: {
+              Playback: {
+                states: {
+                  Buffering: {
+                    on: {
+                      Disconnect: (to) =>
+                        to.local.Playing().resolve(({ snapshot, target }) => {
+                          captured.push(snapshot)
+                          return target.decoded(new Playing({}))
+                        })
+                    }
                   }
                 }
-              }
-            },
-            Network: {
-              states: {
-                Online: {
-                  on: {
-                    Disconnect: (to) =>
-                      to.local.Offline().resolve(({ snapshot, target }) => {
-                        captured.push(snapshot)
-                        return target.decoded(new Offline({}))
-                      })
+              },
+              Network: {
+                states: {
+                  Online: {
+                    on: {
+                      Disconnect: (to) =>
+                        to.local.Offline().resolve(({ snapshot, target }) => {
+                          captured.push(snapshot)
+                          return target.decoded(new Offline({}))
+                        })
+                    }
                   }
                 }
               }
@@ -148,27 +159,29 @@ describe("Machine transition snapshot context", () => {
 
   it.effect("captures the complete configuration for an eventless transition", () =>
     Effect.gen(function*() {
-      let captured: Machine.Machine.Snapshot<typeof States.states> | undefined
+      let captured: Machine.Snapshot<typeof States> | undefined
       const machine = Machine.make({
-        states: States.states,
-        events: Machine.events(),
-        initial: initialDefinition
+        root: States,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: initialDefinition
       }).handle({
-        System: {
-          states: {
-            Playback: {
-              states: {
-                Buffering: {
-                  always: (to) =>
-                    to.branches({
-                      online: { title: "Network is online", target: to.local.Playing() },
-                      unchanged: { target: to.none }
-                    }).resolve(({ snapshot, select }) => {
-                      captured = snapshot
-                      return States.matches(snapshot, "System.Network.Online")
-                        ? select.online.decoded(new Playing({}))
-                        : select.unchanged()
-                    })
+        states: {
+          System: {
+            states: {
+              Playback: {
+                states: {
+                  Buffering: {
+                    always: (to) =>
+                      to.branches({
+                        online: { title: "Network is online", target: to.local.Playing() },
+                        unchanged: { target: to.none }
+                      }).resolve(({ snapshot, select }) => {
+                        captured = snapshot
+                        return States.matches(snapshot, "System.Network.Online")
+                          ? select.online.decoded(new Playing({}))
+                          : select.unchanged()
+                      })
+                  }
                 }
               }
             }
@@ -190,50 +203,54 @@ describe("Machine transition snapshot context", () => {
       class Restarted extends Schema.TaggedClass<Restarted>("Restarted")("Restarted", {}) {}
       class Monitor extends Schema.TaggedClass<Monitor>("Monitor")("Monitor", {}) {}
       class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {}
-      const completionStates = Machine.states({
-        System: {
-          schema: System,
-          type: "parallel",
-          states: {
-            Work: {
-              schema: Work,
-              initial: "Finished",
-              states: {
-                Finished: { schema: Finished, type: "final" },
-                Restarted
+      const completionStates = Machine.state({
+        initial: "System",
+        states: {
+          System: {
+            schema: System,
+            type: "parallel",
+            states: {
+              Work: {
+                schema: Work,
+                initial: "Finished",
+                states: {
+                  Finished: { schema: Finished, type: "final" },
+                  Restarted
+                }
+              },
+              Monitor: {
+                schema: Monitor,
+                initial: "Active",
+                states: { Active }
               }
-            },
-            Monitor: {
-              schema: Monitor,
-              initial: "Active",
-              states: { Active }
             }
           }
         }
       })
-      let captured: Machine.Machine.Snapshot<typeof completionStates.states> | undefined
+      let captured: Machine.Snapshot<typeof completionStates> | undefined
       const machine = Machine.make({
-        states: completionStates.states,
-        events: Machine.events(),
-        initial: (to) =>
-          to.System.initial.resolve(({ target }) =>
-            target.decoded(
-              new System({}),
-              (system) =>
+        root: completionStates,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.System.decoded(new System({}), (system) =>
                 system
                   .Work.decoded(new Work({}), (work) => work.Finished.decoded(new Finished({})))
-                  .Monitor.decoded(new Monitor({}), (monitor) => monitor.Active.decoded(new Active({})))
+                  .Monitor.decoded(new Monitor({}), (monitor) => monitor.Active.decoded(new Active({}))))
             )
           )
       }).handle({
-        System: {
-          states: {
-            Work: {
-              onDone: (to) =>
-                to.local.Restarted().resolve(({ snapshot, target }) => {
-                  captured = snapshot
-                  return target.decoded(new Restarted({}))
-                })
+        states: {
+          System: {
+            states: {
+              Work: {
+                onDone: (to) =>
+                  to.local.Restarted().resolve(({ snapshot, target }) => {
+                    captured = snapshot
+                    return target.decoded(new Restarted({}))
+                  })
+              }
             }
           }
         }

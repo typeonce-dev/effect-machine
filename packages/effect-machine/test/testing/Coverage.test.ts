@@ -15,59 +15,66 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
 }) {}
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 
-const CounterStates = Machine.states({ count: Count, done: Done })
+const CounterStates = Machine.state({ initial: "count", states: { count: Count, done: Done } })
 
 const counterMachine = Machine.make({
-  states: CounterStates.states,
-  events: Machine.events(Add, Finish),
-  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+  root: CounterStates,
+  events: Machine.eventsFromSchemas(Add, Finish),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
 }).handle({
-  count: {
-    on: {
-      Add: (to) =>
-        to.full.count().resolve(
-          ({ event, state, target }) => target.decoded(new Count({ value: state.value + event.amount })),
-          { reenter: true, declinable: true }
-        ),
-      Finish: (to) => to.full.done().resolve(({ target }) => target.decoded(new Done({})))
-    }
-  },
-  done: {}
+  states: {
+    count: {
+      on: {
+        Add: (to) =>
+          to.branch.count().resolve(
+            ({ event, state, target }) => target.decoded(new Count({ value: state.value + event.amount })),
+            { reenter: true, declinable: true }
+          ),
+        Finish: (to) => to.branch.done().resolve(({ target }) => target.decoded(new Done({})))
+      }
+    },
+    done: {}
+  }
 })
 
 class Opaque extends Schema.TaggedClass<Opaque>("Opaque")("Opaque", {
   payload: Schema.Any
 }) {}
 
-const OpaqueStates = Machine.states({ opaque: Opaque })
+const OpaqueStates = Machine.state({ initial: "opaque", states: { opaque: Opaque } })
 const opaqueMachine = Machine.make({
-  states: OpaqueStates.states,
-  events: Machine.events(),
+  root: OpaqueStates,
+  events: Machine.eventsFromSchemas(),
   input: Schema.Any,
-  initial: (to) => to.opaque().resolve(({ input: payload, target }) => target.decoded(new Opaque({ payload })))
+  initialConfiguration: (root) =>
+    root.resolve(({ input: payload, target }) => target.from((to) => to.opaque.decoded(new Opaque({ payload }))))
 })
 
-const StartupStates = Machine.states({ count: Count })
+const StartupStates = Machine.state({ initial: "count", states: { count: Count } })
 const startupMachine = Machine.make({
-  states: StartupStates.states,
-  events: Machine.events(Add),
-  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+  root: StartupStates,
+  events: Machine.eventsFromSchemas(Add),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
 }).handle({
-  count: {
-    always: (to) =>
-      to.branches({
-        zero: { title: "Count is zero", target: to.full.count() },
-        unchanged: { target: to.none }
-      }).resolve(({ state, select }) =>
-        state.value === 0
-          ? select.zero.decoded(new Count({ value: 1 }))
-          : select.unchanged()
-      ),
-    on: {
-      Add: (to) =>
-        to.full.count().resolve(({ event, state, target }) =>
-          target.decoded(new Count({ value: state.value + event.amount }))
-        )
+  states: {
+    count: {
+      always: (to) =>
+        to.branches({
+          zero: { title: "Count is zero", target: to.branch.count() },
+          unchanged: { target: to.none }
+        }).resolve(({ state, select }) =>
+          state.value === 0
+            ? select.zero.decoded(new Count({ value: 1 }))
+            : select.unchanged()
+        ),
+      on: {
+        Add: (to) =>
+          to.branch.count().resolve(({ event, state, target }) =>
+            target.decoded(new Count({ value: state.value + event.amount }))
+          )
+      }
     }
   }
 })
@@ -77,24 +84,27 @@ class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
 }) {}
 
 const branchMachine = Machine.make({
-  states: StartupStates.states,
-  events: Machine.events(Select),
-  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+  root: StartupStates,
+  events: Machine.eventsFromSchemas(Select),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
 }).handle({
-  count: {
-    on: {
-      Select: (to) =>
-        to.branches({
-          negative: { target: to.none },
-          zero: { target: to.none },
-          positive: { target: to.none }
-        }).resolve(({ event, select }) =>
-          event.value < 0
-            ? select.negative()
-            : event.value === 0
-            ? select.zero()
-            : select.positive()
-        )
+  states: {
+    count: {
+      on: {
+        Select: (to) =>
+          to.branches({
+            negative: { target: to.none },
+            zero: { target: to.none },
+            positive: { target: to.none }
+          }).resolve(({ event, select }) =>
+            event.value < 0
+              ? select.negative()
+              : event.value === 0
+              ? select.zero()
+              : select.positive()
+          )
+      }
     }
   }
 })
@@ -105,25 +115,29 @@ const ChoiceEvent = Schema.Struct({
   _tag: Schema.Union([Schema.Literal("Alpha"), Schema.Literal("Beta")])
 })
 const OpenEvent = Schema.Struct({ _tag: Schema.String })
-const EventStates = Machine.states({ count: Count })
+const EventStates = Machine.state({ initial: "count", states: { count: Count } })
 const finiteEventMachine = Machine.make({
-  states: EventStates.states,
-  events: Machine.events(TickEvent, ChoiceEvent),
-  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+  root: EventStates,
+  events: Machine.eventsFromSchemas(TickEvent, ChoiceEvent),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
 }).handle({
-  count: {
-    on: {
-      [Tick]: (to) => to.none,
-      Alpha: (to) => to.none,
-      Beta: (to) => to.none
+  states: {
+    count: {
+      on: {
+        [Tick]: (to) => to.none,
+        Alpha: (to) => to.none,
+        Beta: (to) => to.none
+      }
     }
   }
 })
 const openEventMachine = Machine.make({
-  states: EventStates.states,
-  events: Machine.events(OpenEvent),
-  initial: (to) => to.count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
-}).handle({ count: {} })
+  root: EventStates,
+  events: Machine.eventsFromSchemas(OpenEvent),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
+}).handle({ states: { count: {} } })
 
 const event = (_tag: string): { readonly _tag: string } => ({ _tag })
 
@@ -340,8 +354,8 @@ describe("MachineTest observed graph", () => {
       )
 
       const nodes = Array.from(observed.graph)
-      const zero = nodes.find(([, node]) => (node.snapshot.value as Count).value === 0)!
-      const one = nodes.find(([, node]) => (node.snapshot.value as Count).value === 1)!
+      const zero = nodes.find(([, node]) => (node.snapshot.state.value as Count).value === 0)!
+      const one = nodes.find(([, node]) => (node.snapshot.state.value as Count).value === 1)!
       assert.notStrictEqual(zero[1].id, one[1].id)
       const shortest = Graph.dijkstra(observed.graph, {
         source: zero[0],
@@ -395,7 +409,7 @@ describe("MachineTest observed graph", () => {
       })
       const observed = yield* MachineTest.observedGraph(machine, [rememberedA, rememberedB])
       const outside = Array.from(observed.graph, ([, node]) => node).filter(
-        ({ configuration }) => configuration.length === 1 && configuration[0] === "outside"
+        ({ configuration }) => configuration.length === 2 && configuration[0] === "" && configuration[1] === "outside"
       )
 
       assert.strictEqual(outside.length, 2)

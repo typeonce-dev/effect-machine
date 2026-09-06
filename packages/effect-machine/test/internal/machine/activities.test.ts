@@ -13,61 +13,64 @@ class WorkSucceeded extends Schema.TaggedClass<WorkSucceeded>("WorkSucceeded")("
 class WorkFailed extends Schema.TaggedClass<WorkFailed>("WorkFailed")("WorkFailed", {}) {}
 class LoadTimedOut extends Schema.TaggedClass<LoadTimedOut>("LoadTimedOut")("LoadTimedOut", {}) {}
 
-const childStates = Machine.states({ ChildIdle })
+const childStates = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
 const childMachine = Machine.make({
   id: "document-worker",
-  states: childStates.states,
-  events: Machine.events(),
-  initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
+  root: childStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
 })
 const child = Machine.child("child", childMachine)
 
 let dynamicFactoryEvaluations = 0
 const timerDuration = "10 seconds"
-const activityStates = Machine.states({ Loading, Dynamic })
+const activityStates = Machine.state({ initial: "Loading", states: { Loading, Dynamic } })
 const activityMachine = Machine.make({
   id: "activity-inspection",
-  states: activityStates.states,
-  events: Machine.events(WorkSucceeded, WorkFailed, LoadTimedOut),
-  initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+  root: activityStates,
+  events: Machine.eventsFromSchemas(WorkSucceeded, WorkFailed, LoadTimedOut),
+  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Loading.decoded(new Loading({}))))
 }).handle({
-  Loading: {
-    invoke: (
-      from
-    ) => [
-      from.logic("poll-server", {
-        address: Machine.childAddress("poll-server"),
-        logic: Machine.logic({
-          initial: undefined,
-          run: () => Effect.never
+  states: {
+    Loading: {
+      invoke: (
+        from
+      ) => [
+        from.logic("poll-server", {
+          address: Machine.childAddress("poll-server"),
+          logic: Machine.logic({
+            initial: undefined,
+            run: () => Effect.never
+          })
+        }),
+        from.effect("load-document", () => Effect.fail("unavailable").pipe(Effect.as(1))).onDone((to) => to.none)
+          .onFailure((to) => to.none),
+        from.timer("load-timeout", timerDuration).onDone((to) => to.none),
+        from.stream("updates", () => Stream.empty).onDone((to) => to.none),
+        from.child(child)
+      ]
+    },
+    Dynamic: {
+      invoke: (from) =>
+        from.logic("context-owned", {
+          address: Machine.childAddress("context-owned"),
+          logic: () => {
+            dynamicFactoryEvaluations++
+            return Machine.logic({ initial: undefined, run: () => Effect.never })
+          }
         })
-      }),
-      from.effect("load-document", () => Effect.fail("unavailable").pipe(Effect.as(1))).onDone((to) => to.none)
-        .onFailure((to) => to.none),
-      from.timer("load-timeout", timerDuration).onDone((to) => to.none),
-      from.stream("updates", () => Stream.empty).onDone((to) => to.none),
-      from.child(child)
-    ]
-  },
-  Dynamic: {
-    invoke: (from) =>
-      from.logic("context-owned", {
-        address: Machine.childAddress("context-owned"),
-        logic: () => {
-          dynamicFactoryEvaluations++
-          return Machine.logic({ initial: undefined, run: () => Effect.never })
-        }
-      })
+    }
   }
 })
 
 const renderActivityMachine = makeTextRenderer<
   typeof activityMachine,
-  Machine.Machine.Snapshot<typeof activityStates.states>
+  Machine.Snapshot<typeof activityStates>
 >(Machine)
 const renderMermaidActivityMachine = makeMermaidRenderer<
   typeof activityMachine,
-  Machine.Machine.Snapshot<typeof activityStates.states>
+  Machine.Snapshot<typeof activityStates>
 >(Machine)
 
 const machine = {
@@ -105,7 +108,7 @@ const machine = {
 describe("machine activity metadata", () => {
   it("inspects all public helper descriptors without retaining runtime values", () => {
     const expected: ReadonlyArray<
-      Machine.Machine.ActivityDefinition<Machine.Machine.StateIdentifier<typeof activityStates.states>>
+      Machine.Machine.ActivityDefinition<Machine.Machine.StateIdentifier<{ readonly "": typeof activityStates.node }>>
     > = [
       {
         source: "Loading",
@@ -166,12 +169,15 @@ describe("machine activity metadata", () => {
       Effect.sync(() => {
         const id = `generated-timer-${idSuffix}`
         const generated = Machine.make({
-          states: activityStates.states,
-          events: Machine.events(LoadTimedOut),
-          initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+          root: activityStates,
+          events: Machine.eventsFromSchemas(LoadTimedOut),
+          initialConfiguration: (root) =>
+            root.resolve(({ target }) => target.from((to) => to.Loading.decoded(new Loading({}))))
         }).handle({
-          Loading: {
-            invoke: (from) => from.timer(id, durationMillis).onDone((to) => to.none)
+          states: {
+            Loading: {
+              invoke: (from) => from.timer(id, durationMillis).onDone((to) => to.none)
+            }
           }
         })
         const definition = Machine.activityDefinitions(generated)[0]
@@ -263,19 +269,24 @@ describe("machine activity metadata", () => {
 
   it("renders activities beneath their owning state", () => {
     assert.strictEqual(
-      renderActivityMachine(activityMachine, { path: "Loading" as const, value: new Loading({}) }),
+      renderActivityMachine(activityMachine, {
+        path: "" as const,
+        value: undefined,
+        state: { path: "Loading" as const, value: new Loading({}) }
+      }),
       [
         "activity-inspection",
         "● active  ○ inactive  ◇ transition  ┄ branch → target  ◆ activity",
         "",
-        "├─ ● Loading",
-        "│  ├─ ◆ process: poll-server",
-        "│  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
-        "│  ├─ ◆ timer: load-timeout [10s]",
-        "│  ├─ ◆ stream: updates",
-        "│  └─ ◆ machine: child → document-worker",
-        "└─ ○ Dynamic",
-        "   └─ ◆ process: context-owned",
+        "└─ ● (root) [compound, initial: Loading]",
+        "   ├─ ● Loading",
+        "   │  ├─ ◆ process: poll-server",
+        "   │  ├─ ◆ effect: load-document [success: dynamic, failure: dynamic]",
+        "   │  ├─ ◆ timer: load-timeout [10s]",
+        "   │  ├─ ◆ stream: updates",
+        "   │  └─ ◆ machine: child → document-worker",
+        "   └─ ○ Dynamic",
+        "      └─ ◆ process: context-owned",
         "",
         "Candidate events: none"
       ].join("\n")
@@ -284,13 +295,17 @@ describe("machine activity metadata", () => {
 
   it("renders state-owned activities inside their Mermaid state", () => {
     const rendered = renderMermaidActivityMachine(activityMachine, {
-      path: "Loading" as const,
-      value: new Loading({})
+      path: "" as const,
+      value: undefined,
+      state: {
+        path: "Loading" as const,
+        value: new Loading({})
+      }
     })
 
     assert.include(
       rendered,
-      "state_0: process / poll-server · effect / load-document · timer / load-timeout (10s) · stream / updates · machine / child → document-worker"
+      "state_1: process / poll-server · effect / load-document · timer / load-timeout (10s) · stream / updates · machine / child → document-worker"
     )
     assert.notInclude(rendered, "success: dynamic")
     assert.notInclude(rendered, "note right of")

@@ -106,17 +106,6 @@ export interface MachineAtom<State, Event, Error = never, Output = never, StartE
   >
 
   /**
-   * Atom containing the state value from the latest runtime snapshot.
-   *
-   * This preserves the historical behavior of exposing a state even when the
-   * runtime snapshot reports a terminal error. Use `result` when runtime
-   * failures must be represented in the atom failure channel.
-   *
-   * @since 0.4.0
-   */
-  readonly state: Atom.Atom<AsyncResult.AsyncResult<State, StartError>>
-
-  /**
    * Atom containing the current state, with startup and runtime failures in
    * one typed failure channel.
    *
@@ -246,17 +235,7 @@ export interface ChildMachineAtom<Child extends Machine.ChildMachine.Any, StartE
       StartError
     >
   >
-  /**
-   * Atom containing the current child state when active.
-   *
-   * Runtime failures retain the last successful state. Use `result` when they
-   * must be represented in the atom failure channel.
-   *
-   * @since 0.4.0
-   */
-  readonly state: Atom.Atom<
-    AsyncResult.AsyncResult<Option.Option<RefState<Machine.ChildMachine.Ref<Child>>>, StartError>
-  >
+
   /**
    * Atom containing the current child state when active, with startup and
    * runtime failures in one typed failure channel.
@@ -319,16 +298,8 @@ export type ChildOf<
   Child extends Machine.ChildMachine.Any
 > = ChildMachineAtom<Child, BridgeStartError<Parent>>
 
-type SnapshotNode<State> = State extends Machine.Machine.AtomicSnapshot<string, unknown> ?
-    | State
-    | (State extends { readonly state: infer Child } ? SnapshotNode<Child>
-      : State extends { readonly states: infer Regions } ? SnapshotNode<Regions[keyof Regions]>
-      : never)
-  : never
-
-type SnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
-  Node extends { readonly path: infer Path extends string } ? Path : never
-  : never
+type SnapshotNode<State> = Machine.Snapshot.Node<State>
+type SnapshotIdentifier<State> = Machine.Snapshot.Path<State>
 
 type ValuedSnapshotIdentifier<State> = SnapshotNode<State> extends infer Node ?
   Node extends { readonly path: infer Path extends string; readonly value: infer Value } ?
@@ -345,7 +316,7 @@ type SnapshotByIdentifier<State, Path extends SnapshotIdentifier<State>> = Snaps
   Node extends { readonly path: Path } ? Node : never
   : never
 
-type ChildState<Child extends Machine.ChildMachine.Any> = RefState<Machine.ChildMachine.Ref<Child>>
+type ChildState<Child extends Machine.ChildMachine.Any> = ChildSnapshot<Child>
 
 type ChildSnapshot<Child extends Machine.ChildMachine.Any> = Machine.Machine.Snapshot<
   Machine.Machine.States<Child["machine"]>
@@ -420,15 +391,12 @@ type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [Valu
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
  * }) {}
- * const States = Machine.states({ Count })
+ * const States = Machine.state({ initial: "Count", states: { Count } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
- *   }
- * }).handle({ Count: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
+ * }).handle({ states: { Count: {} } })
  * const machineAtom = AtomMachine.make(machine)
  *
  * const countAtom = AtomMachine.select(machineAtom, "Count")
@@ -553,15 +521,18 @@ export const selectSnapshot: {
  * @since 0.4.0
  */
 export const selectChild: {
-  <
-    Child extends Machine.ChildMachine.Any = never,
-    StartError = never,
-    const Path extends ValuedSnapshotIdentifier<ChildState<Child>> = ValuedSnapshotIdentifier<ChildState<Child>>
-  >(path: Path):
+  <const Path extends string = never>(path: NoInfer<Path>):
     & SelectorProjection<"selectChild", Path>
-    & ((self: ChildMachineAtom<Child, StartError>) => Atom.Atom<
+    & (<
+      Child extends Machine.ChildMachine.Any,
+      StartError
+    >(
+      self: ChildMachineAtom<Child, StartError> & EnsureValuedSelectorPath<ChildState<Child>, Path>
+    ) => Atom.Atom<
       AsyncResult.AsyncResult<
-        Option.Option<SnapshotValueByIdentifier<ChildState<Child>, Path>>,
+        Option.Option<
+          SnapshotValueByIdentifier<ChildState<Child>, Extract<Path, ValuedSnapshotIdentifier<ChildState<Child>>>>
+        >,
         StartError | RefError<Machine.ChildMachine.Ref<Child>>
       >
     >)
@@ -658,15 +629,12 @@ export const selectSnapshotChild: {
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  * const machineAtom = AtomMachine.make(machine)
  *
  * const isIdleAtom = AtomMachine.matches(machineAtom, "Idle")
@@ -791,7 +759,7 @@ type MachineRequirementsOf<M extends Machine.Machine.Any> = MachineRequirements<
   Machine.Machine.InitialServices<M>,
   Machine.Machine.Services<M>,
   Machine.Machine.Event<M>,
-  Machine.Machine.Emit<M>
+  Machine.Machine.EmittedEvent<M>
 >
 
 type MissingBoundRequirements<Services, M extends Machine.Machine.Any> = Exclude<
@@ -810,7 +778,7 @@ type EnsureBoundRequirements<Services, M extends Machine.Machine.Any> = IsAny<Ma
 type MachineResumeRequirementsOf<M extends Machine.Machine.Any> = MachineResumeRequirements<
   Machine.Machine.Services<M>,
   Machine.Machine.Event<M>,
-  Machine.Machine.Emit<M>
+  Machine.Machine.EmittedEvent<M>
 >
 
 type MissingBoundResumeRequirements<Services, M extends Machine.Machine.Any> = Exclude<
@@ -1051,7 +1019,7 @@ export interface Bound<Services, RuntimeError = never> {
  * const processAtoms = AtomMachine.family(processMachine, {
  *   atoms: {
  *     ready: AtomMachine.matches("Ready"),
- *     state: (machine) => machine.state,
+ *     state: (machine) => machine.result,
  *     send: (machine) => machine.send
  *   }
  * })
@@ -1099,7 +1067,7 @@ export const family: <
  *   child: (plantId: string) => Plant(plantId),
  *   atoms: {
  *     broken: AtomMachine.matchesChild("Broken"),
- *     state: (child) => child.state,
+ *     state: (child) => child.result,
  *     send: (child) => child.send
  *   }
  * })
@@ -1112,7 +1080,10 @@ export const familyChild: <
   Key,
   Parent extends MachineAtom<any, never, any, any, any, any> | ChildMachineAtom<any, any>,
   Child extends Machine.ChildMachine.Any,
-  const Projections extends FamilyProjectionRecord<ChildOf<Parent, Child>, ChildFamilySelectorProjection<Child>>
+  const Projections extends FamilyProjectionRecord<
+    ChildOf<Parent, NoInfer<Child>>,
+    ChildFamilySelectorProjection<NoInfer<Child>>
+  >
 >(
   parent: Parent,
   options: {
@@ -1136,15 +1107,12 @@ export const familyChild: <
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const machineAtom = AtomMachine.make(machine)
  * ```
@@ -1191,7 +1159,7 @@ export const make: {
           InitialR,
           R,
           Machine.Machine.EventOf<Events>,
-          Machine.Machine.EmitOf<Emits>
+          Machine.Machine.EmittedEventOf<Emits>
         >
       >
       & EnsureExecutable<States, UnhandledStates, OutputStates>

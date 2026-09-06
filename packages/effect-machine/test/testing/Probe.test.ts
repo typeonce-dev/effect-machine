@@ -18,33 +18,36 @@ class Burst extends Schema.TaggedClass<Burst>("ProbeBurst")("Burst", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {}) {}
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
 
-const states = Machine.states({ Counter })
+const states = Machine.state({ initial: "Counter", states: { Counter } })
 
 const machine = Machine.make({
-  states: states.states,
-  events: Machine.events(Increment, Noop, Ignored, Decline, Burst, Reenter),
-  internalEvents: Machine.internalEvents(RaisedIncrement),
-  initial: (to) => to.Counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
+  root: states,
+  events: Machine.eventsFromSchemas(Increment, Noop, Ignored, Decline, Burst, Reenter),
+  internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
 }).handle({
-  Counter: {
-    on: {
-      Increment: (to) =>
-        to.full.Counter().resolve(({ event, state, target }) =>
-          target.decoded(new Counter({ count: state.count + event.amount }))
-        ),
-      Noop: (to) => to.none,
-      Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
-      Reenter: (to) =>
-        to.full.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count })), {
-          reenter: true
-        }),
-      Burst: (to) =>
-        to.full.Counter().resolve(({ state, target }, enqueue) => {
-          enqueue.raise(new RaisedIncrement({}))
-          return target.decoded(new Counter({ count: state.count + 1 }))
-        }),
-      RaisedIncrement: (to) =>
-        to.full.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 10 })))
+  states: {
+    Counter: {
+      on: {
+        Increment: (to) =>
+          to.branch.Counter().resolve(({ event, state, target }) =>
+            target.decoded(new Counter({ count: state.count + event.amount }))
+          ),
+        Noop: (to) => to.none,
+        Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
+        Reenter: (to) =>
+          to.branch.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count })), {
+            reenter: true
+          }),
+        Burst: (to) =>
+          to.branch.Counter().resolve(({ state, target }, enqueue) => {
+            enqueue.raise(new RaisedIncrement({}))
+            return target.decoded(new Counter({ count: state.count + 1 }))
+          }),
+        RaisedIncrement: (to) =>
+          to.branch.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 10 })))
+      }
     }
   }
 })
@@ -81,8 +84,8 @@ describe("MachineTest probe", () => {
       assert.strictEqual(ignored.handled, false)
       assert.strictEqual(ignored.configurationChanged, false)
       assert.strictEqual(ignored.plan.microsteps.length, 0)
-      assert.strictEqual(ignored.before.value.count, 0)
-      assert.strictEqual(ignored.after.value.count, 0)
+      assert.strictEqual(ignored.before.state.value.count, 0)
+      assert.strictEqual(ignored.after.state.value.count, 0)
 
       const declined = yield* probe.sendAndAwait(new Decline({}))
       assert.strictEqual(declined.handled, false)
@@ -93,27 +96,27 @@ describe("MachineTest probe", () => {
       assert.strictEqual(targetless.handled, true)
       assert.strictEqual(targetless.configurationChanged, false)
       assert.strictEqual(targetless.plan.microsteps.length, 1)
-      assert.strictEqual(targetless.after.value.count, 0)
+      assert.strictEqual(targetless.after.state.value.count, 0)
 
       const changed = yield* probe.sendAndAwait(new Increment({ amount: 2 }))
       assert.strictEqual(changed.handled, true)
       assert.strictEqual(changed.configurationChanged, false)
-      assert.strictEqual(changed.before.value.count, 0)
-      assert.strictEqual(changed.after.value.count, 2)
+      assert.strictEqual(changed.before.state.value.count, 0)
+      assert.strictEqual(changed.after.state.value.count, 2)
 
       const reentered = yield* probe.sendAndAwait(new Reenter({}))
       assert.strictEqual(reentered.configurationChanged, true)
-      assert.strictEqual(reentered.before.value.count, 2)
-      assert.strictEqual(reentered.after.value.count, 2)
+      assert.strictEqual(reentered.before.state.value.count, 2)
+      assert.strictEqual(reentered.after.state.value.count, 2)
 
       const burst = yield* probe.sendAndAwait(new Burst({}))
       assert.deepStrictEqual(burst.plan.microsteps.map(({ event }) => event._tag), ["Burst", "RaisedIncrement"])
-      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.value.count), [3, 13])
-      assert.strictEqual(burst.before.value.count, 2)
-      assert.strictEqual(burst.after.value.count, 13)
+      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.state.value.count), [3, 13])
+      assert.strictEqual(burst.before.state.value.count, 2)
+      assert.strictEqual(burst.after.state.value.count, 13)
 
       yield* probe.sendAndAwait(new Increment({ amount: 5 }))
-      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.value.count), [3, 13])
+      assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.state.value.count), [3, 13])
 
       yield* ref.stop
     }))
@@ -138,8 +141,8 @@ describe("MachineTest probe", () => {
 
       yield* Fiber.interrupt(sending)
       const fence = yield* probe.sendAndAwait(new Ignored({}))
-      assert.strictEqual(fence.before.value.count, 3)
-      assert.strictEqual(fence.after.value.count, 3)
+      assert.strictEqual(fence.before.state.value.count, 3)
+      assert.strictEqual(fence.after.state.value.count, 3)
 
       yield* ref.stop
     }))
@@ -149,31 +152,33 @@ describe("MachineTest probe", () => {
       class Idle extends Schema.TaggedClass<Idle>("ProbeInvokeIdle")("Idle", {}) {}
       class Loading extends Schema.TaggedClass<Loading>("ProbeInvokeLoading")("Loading", {}) {}
       class Load extends Schema.TaggedClass<Load>("ProbeInvokeLoad")("Load", {}) {}
-      const invokeStates = Machine.states({ Idle, Loading })
+      const invokeStates = Machine.state({ initial: "Idle", states: { Idle, Loading } })
       let starts = 0
       const invokeMachine = Machine.make({
-        states: invokeStates.states,
-        events: Machine.events(Load),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: invokeStates,
+        events: Machine.eventsFromSchemas(Load),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          on: {
-            Load: (to) => to.full.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+        states: {
+          Idle: {
+            on: {
+              Load: (to) => to.branch.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+            }
+          },
+          Loading: {
+            invoke: (from) =>
+              from.effect("loader", () => {
+                starts += 1
+                return Effect.never
+              })
           }
-        },
-        Loading: {
-          invoke: (from) =>
-            from.effect("loader", () => {
-              starts += 1
-              return Effect.never
-            })
         }
       })
       const ref = yield* Machine.start(invokeMachine)
       const probe = yield* MachineTest.probe(invokeMachine, ref)
 
       const loaded = yield* probe.sendAndAwait(new Load({}))
-      assert.strictEqual(loaded.after.path, "Loading")
+      assert.strictEqual(loaded.after.state.path, "Loading")
       assert.strictEqual(starts, 1)
 
       yield* ref.stop

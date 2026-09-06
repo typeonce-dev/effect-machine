@@ -16,24 +16,27 @@ class Deposit extends Schema.TaggedClass<Deposit>("Deposit")("Deposit", {
   amount: Schema.Int
 }) {}
 
-const States = Machine.states({ account: Account })
+const States = Machine.state({ initial: "account", states: { account: Account } })
 
 const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Withdraw, Deposit),
-    initial: (to) => to.account().resolve(({ target }) => target.decoded(new Account({ balance: 10 })))
+    root: States,
+    events: Machine.eventsFromSchemas(Withdraw, Deposit),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.account.decoded(new Account({ balance: 10 }))))
   }).handle({
-    account: {
-      on: {
-        Withdraw: (to) =>
-          to.full.account().resolve(({ event, state, target }) =>
-            target.decoded(new Account({ balance: withdraw(state.balance, event.amount) }))
-          ),
-        Deposit: (to) =>
-          to.full.account().resolve(({ event, state, target }) =>
-            target.decoded(new Account({ balance: state.balance + event.amount }))
-          )
+    states: {
+      account: {
+        on: {
+          Withdraw: (to) =>
+            to.branch.account().resolve(({ event, state, target }) =>
+              target.decoded(new Account({ balance: withdraw(state.balance, event.amount) }))
+            ),
+          Deposit: (to) =>
+            to.branch.account().resolve(({ event, state, target }) =>
+              target.decoded(new Account({ balance: state.balance + event.amount }))
+            )
+        }
       }
     }
   })
@@ -45,7 +48,7 @@ describe("MachineTest invariants", () => {
       const define = MachineTest.invariants(machine)
       const nonNegative = define.state(
         "balance is never negative",
-        ({ snapshot }) => snapshot.value.balance >= 0 || `negative balance: ${snapshot.value.balance}`
+        ({ snapshot }) => snapshot.state.value.balance >= 0 || `negative balance: ${snapshot.state.value.balance}`
       )
       const trace = yield* MachineTest.run(machine, {
         events: [new Withdraw({ amount: 6 }), new Withdraw({ amount: 1 })]
@@ -70,7 +73,7 @@ describe("MachineTest invariants", () => {
           observationIndex: 1,
           eventIndex: 0,
           phase: "event",
-          configuration: ["account"],
+          configuration: ["", "account"],
           event: new Withdraw({ amount: 6 }),
           message: "negative balance: -2"
         },
@@ -81,7 +84,7 @@ describe("MachineTest invariants", () => {
           observationIndex: 2,
           eventIndex: 1,
           phase: "event",
-          configuration: ["account"],
+          configuration: ["", "account"],
           event: new Withdraw({ amount: 1 }),
           message: "negative balance: -4"
         }
@@ -96,7 +99,7 @@ describe("MachineTest invariants", () => {
         "withdrawal removes exactly its amount",
         ({ after, before, event }) =>
           event._tag !== "Withdraw" ||
-          after.value.balance === before.value.balance - event.amount ||
+          after.state.value.balance === before.state.value.balance - event.amount ||
           "withdrawal arithmetic changed"
       )
       const preservesEventCount = define.trace(
@@ -133,7 +136,7 @@ describe("MachineTest invariants", () => {
       const define = MachineTest.invariants(machine)
       const trace = yield* MachineTest.run(machine, { events: [] })
       const optional = define.state("only after overdraft", () => true, {
-        when: ({ snapshot }) => snapshot.value.balance < 0
+        when: ({ snapshot }) => snapshot.state.value.balance < 0
       })
       const required = define.step("a withdrawal is exercised", () => true, {
         when: ({ event }) => event._tag === "Withdraw",
@@ -170,7 +173,7 @@ describe("MachineTest invariants", () => {
         "microstep balance remains finite",
         ({ phase, snapshot }) => {
           phases.push(phase)
-          return Number.isFinite(snapshot.value.balance)
+          return Number.isFinite(snapshot.state.value.balance)
         },
         { observe: "microsteps" }
       )
@@ -187,7 +190,7 @@ describe("MachineTest invariants", () => {
   const safeMachine = makeAccountMachine((balance, amount) => balance - amount)
   const safe = MachineTest.invariants(safeMachine).state(
     "non-negative generated balances",
-    ({ snapshot }) => snapshot.value.balance >= 0
+    ({ snapshot }) => snapshot.state.value.balance >= 0
   )
   const safeScenarios = MachineTest.scenarios(safeMachine, {
     eventsArbitrary: FastCheck.array(

@@ -15,45 +15,51 @@ class Select extends Schema.TaggedClass<Select>("ExplorationSelect")("Select", {
 }) {}
 class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 
-const States = Machine.states({ counter: Counter })
+const States = Machine.state({ initial: "counter", states: { counter: Counter } })
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Increment, Reset, Corrupt),
-  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
+  root: States,
+  events: Machine.eventsFromSchemas(Increment, Reset, Corrupt),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.counter.decoded(new Counter({ count: 0 }))))
 }).handle({
-  counter: {
-    on: {
-      Increment: (to) =>
-        to.full.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
-      Reset: (to) => to.full.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 }))),
-      Corrupt: (to) => to.full.counter().resolve(({ target }) => target.decoded(new Counter({ count: -1 })))
+  states: {
+    counter: {
+      on: {
+        Increment: (to) =>
+          to.branch.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
+        Reset: (to) => to.branch.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 }))),
+        Corrupt: (to) => to.branch.counter().resolve(({ target }) => target.decoded(new Counter({ count: -1 })))
+      }
     }
   }
 })
 
 const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof machine>) =>
-  snapshot.value.count < 2 ? [new Increment({})] : [new Reset({})]
+  snapshot.state.value.count < 2 ? [new Increment({})] : [new Reset({})]
 
 const branchMachine = Machine.make({
-  states: States.states,
-  events: Machine.events(Select),
-  initial: (to) => to.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 })))
+  root: States,
+  events: Machine.eventsFromSchemas(Select),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.counter.decoded(new Counter({ count: 0 }))))
 }).handle({
-  counter: {
-    on: {
-      Select: (to) =>
-        to.branches({
-          negative: { target: to.none },
-          zero: { target: to.none },
-          positive: { target: to.none }
-        }).resolve(({ event, select }) =>
-          event.value < 0
-            ? select.negative()
-            : event.value === 0
-            ? select.zero()
-            : select.positive()
-        )
+  states: {
+    counter: {
+      on: {
+        Select: (to) =>
+          to.branches({
+            negative: { target: to.none },
+            zero: { target: to.none },
+            positive: { target: to.none }
+          }).resolve(({ event, select }) =>
+            event.value < 0
+              ? select.negative()
+              : event.value === 0
+              ? select.zero()
+              : select.positive()
+          )
+      }
     }
   }
 })
@@ -63,7 +69,7 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const explored = yield* MachineTest.explore(machine, {
         events: finiteEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count
+        stateKey: ({ snapshot }) => snapshot.state.value.count
       })
 
       assert.deepStrictEqual(explored.nodes.map(({ key, depth }) => ({ key, depth })), [
@@ -88,7 +94,7 @@ describe("MachineTest bounded exploration", () => {
       const reached = yield* MachineTest.assertReachable(
         explored,
         "counter two",
-        ({ snapshot }) => snapshot.value.count === 2
+        ({ snapshot }) => snapshot.state.value.count === 2
       )
       assert.deepStrictEqual(reached.trace.scenario.events, [new Increment({}), new Increment({})])
       assert.strictEqual(reached.depth, 2)
@@ -100,7 +106,7 @@ describe("MachineTest bounded exploration", () => {
       yield* MachineTest.assertUnreachable(
         explored,
         "counter three",
-        ({ snapshot }) => snapshot.value.count === 3
+        ({ snapshot }) => snapshot.state.value.count === 3
       )
     }))
 
@@ -108,7 +114,7 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const explored = yield* MachineTest.explore(branchMachine, {
         events: () => [new Select({ value: -1 }), new Select({ value: 0 }), new Select({ value: 1 })],
-        stateKey: ({ snapshot }) => snapshot.value.count
+        stateKey: ({ snapshot }) => snapshot.state.value.count
       })
 
       assert.strictEqual(explored.nodes.length, 1)
@@ -221,11 +227,11 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const nonNegative = MachineTest.invariants(machine).state(
         "counter remains non-negative",
-        ({ snapshot }) => snapshot.value.count >= 0 || `negative counter: ${snapshot.value.count}`
+        ({ snapshot }) => snapshot.state.value.count >= 0 || `negative counter: ${snapshot.state.value.count}`
       )
       const failure = yield* MachineTest.explore(machine, {
-        events: ({ snapshot }) => snapshot.value.count < 2 ? [new Increment({})] : [new Corrupt({})],
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        events: ({ snapshot }) => snapshot.state.value.count < 2 ? [new Increment({})] : [new Corrupt({})],
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         invariants: [nonNegative]
       }).pipe(Effect.flip)
 
@@ -246,7 +252,7 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const explored = yield* MachineTest.explore(machine, {
         events: finiteEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxDepth: 1 }
       })
 
@@ -262,7 +268,7 @@ describe("MachineTest bounded exploration", () => {
       const error = yield* MachineTest.assertUnreachable(
         explored,
         "counter two",
-        ({ snapshot }) => snapshot.value.count === 2
+        ({ snapshot }) => snapshot.state.value.count === 2
       ).pipe(Effect.flip)
       assert.strictEqual(error.reason, "Inconclusive")
       assert.strictEqual(error.expectation, "unreachable")
@@ -272,7 +278,7 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const stateLimited = yield* MachineTest.explore(machine, {
         events: finiteEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxStates: 2 }
       })
       assert.strictEqual(stateLimited.completeness._tag, "Truncated")
@@ -289,7 +295,7 @@ describe("MachineTest bounded exploration", () => {
 
       const transitionLimited = yield* MachineTest.explore(machine, {
         events: finiteEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxTransitions: 1 }
       })
       assert.strictEqual(transitionLimited.completeness._tag, "Truncated")
@@ -302,7 +308,7 @@ describe("MachineTest bounded exploration", () => {
   it.effect("counts only limit-boundary events that were concretely planned", () =>
     Effect.gen(function*() {
       const boundaryEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof machine>) =>
-        snapshot.value.count === 0 ? [new Increment({})] : [new Corrupt({})]
+        snapshot.state.value.count === 0 ? [new Increment({})] : [new Corrupt({})]
       const eventHits = (explored: MachineTest.Exploration<typeof machine, number>) =>
         explored.transitionCoverage.definitions.hits.flatMap(({ trigger }) =>
           trigger.type === "event" ? [trigger.event] : []
@@ -310,7 +316,7 @@ describe("MachineTest bounded exploration", () => {
 
       const stateLimited = yield* MachineTest.explore(machine, {
         events: boundaryEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxStates: 2 }
       })
       assert.deepStrictEqual(eventHits(stateLimited), ["Increment", "Corrupt"])
@@ -323,7 +329,7 @@ describe("MachineTest bounded exploration", () => {
 
       const depthLimited = yield* MachineTest.explore(machine, {
         events: boundaryEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxDepth: 1 }
       })
       assert.deepStrictEqual(eventHits(depthLimited), ["Increment"])
@@ -331,7 +337,7 @@ describe("MachineTest bounded exploration", () => {
 
       const transitionLimited = yield* MachineTest.explore(machine, {
         events: boundaryEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count,
+        stateKey: ({ snapshot }) => snapshot.state.value.count,
         limits: { maxTransitions: 1 }
       })
       assert.deepStrictEqual(eventHits(transitionLimited), ["Increment"])
@@ -342,13 +348,13 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const explored = yield* MachineTest.explore(machine, {
         events: () => [new Increment({})],
-        stateKey: ({ snapshot }) => Math.min(snapshot.value.count, 1)
+        stateKey: ({ snapshot }) => Math.min(snapshot.state.value.count, 1)
       })
 
       assert.deepStrictEqual(
         explored.nodes.map(({ key, snapshot }) => ({
           key,
-          count: snapshot.value.count
+          count: snapshot.state.value.count
         })),
         [
           { key: 0, count: 0 },
@@ -368,12 +374,12 @@ describe("MachineTest bounded exploration", () => {
     Effect.gen(function*() {
       const explored = yield* MachineTest.explore(machine, {
         events: finiteEvents,
-        stateKey: ({ snapshot }) => snapshot.value.count
+        stateKey: ({ snapshot }) => snapshot.state.value.count
       })
       const error = yield* MachineTest.assertUnreachable(
         explored,
         "counter one",
-        ({ snapshot }) => snapshot.value.count === 1
+        ({ snapshot }) => snapshot.state.value.count === 1
       ).pipe(Effect.flip)
 
       assert.strictEqual(error.reason, "UnexpectedMatch")
@@ -384,19 +390,21 @@ describe("MachineTest bounded exploration", () => {
   it.effect("uses typed machine input for the explored startup state", () =>
     Effect.gen(function*() {
       const inputMachine = Machine.make({
-        states: States.states,
-        events: Machine.events(Increment),
+        root: States,
+        events: Machine.eventsFromSchemas(Increment),
         input: Seed,
-        initial: (to) =>
-          to.counter().resolve(({ input, target }) => target.decoded(new Counter({ count: input.count })))
-      }).handle({ counter: {} })
+        initialConfiguration: (root) =>
+          root.resolve(({ input, target }) =>
+            target.from((to) => to.counter.decoded(new Counter({ count: input.count })))
+          )
+      }).handle({ states: { counter: {} } })
       const explored = yield* MachineTest.explore(inputMachine, {
         input: new Seed({ count: 7 }),
         events: () => [],
-        stateKey: ({ snapshot }) => snapshot.value.count
+        stateKey: ({ snapshot }) => snapshot.state.value.count
       })
 
-      assert.strictEqual(explored.nodes[0]?.snapshot.value.count, 7)
+      assert.strictEqual(explored.nodes[0]?.snapshot.state.value.count, 7)
       assert.deepStrictEqual(explored.nodes[0]?.trace.scenario, {
         input: new Seed({ count: 7 }),
         events: []
@@ -409,7 +417,7 @@ describe("MachineTest bounded exploration", () => {
       () =>
         MachineTest.explore(machine, {
           events: finiteEvents,
-          stateKey: ({ snapshot }) => snapshot.value.count,
+          stateKey: ({ snapshot }) => snapshot.state.value.count,
           limits: { maxStates: 0 }
         }),
       /maxStates to be a safe integer greater than or equal to 1/

@@ -46,30 +46,36 @@ describe("pure planning and managed runtime differential", () => {
       class Ignore extends Schema.TaggedClass<Ignore>("FlatDifferentialIgnore")("Ignore", {}) {}
       class Finish extends Schema.TaggedClass<Finish>("FlatDifferentialFinish")("Finish", {}) {}
 
-      const states = Machine.states({
-        Count,
-        Done: { schema: Done, type: "final", output: Schema.Number }
+      const states = Machine.state({
+        initial: "Count",
+        states: {
+          Count,
+          Done: { schema: Done, type: "final", output: Schema.Number }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Cascade, Ignore, Finish),
-        internalEvents: Machine.internalEvents(Increment),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(Cascade, Ignore, Finish),
+        internalEvents: Machine.internalEventsFromSchemas(Increment),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
-        Count: {
-          on: {
-            Cascade: (to) =>
-              to.none.resolve((_, enqueue) => {
-                enqueue.raise(new Increment({}))
-                return undefined
-              }),
-            Increment: (to) =>
-              to.full.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
-            Finish: (to) =>
-              to.full.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
-          }
-        },
-        Done: { output: ({ state }) => state.value }
+        states: {
+          Count: {
+            on: {
+              Cascade: (to) =>
+                to.none.resolve((_, enqueue) => {
+                  enqueue.raise(new Increment({}))
+                  return undefined
+                }),
+              Increment: (to) =>
+                to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
+              Finish: (to) =>
+                to.branch.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
+            }
+          },
+          Done: { output: ({ state }) => state.value }
+        }
       })
 
       const initial = yield* Machine.planInitial(machine) as Effect.Effect<any, unknown, never>
@@ -124,13 +130,16 @@ describe("pure planning and managed runtime differential", () => {
       class Finish extends Schema.TaggedClass<Finish>("HierarchicalDifferentialFinish")("Finish", {}) {}
       class Bump extends Schema.TaggedClass<Bump>("HierarchicalDifferentialBump")("Bump", {}) {}
 
-      const states = Machine.states({
-        Running: {
-          schema: Running,
-          type: "parallel",
-          states: { Left, Right }
-        },
-        Done: { schema: Done, type: "final", output: Schema.Number }
+      const states = Machine.state({
+        initial: "Running",
+        states: {
+          Running: {
+            schema: Running,
+            type: "parallel",
+            states: { Left, Right }
+          },
+          Done: { schema: Done, type: "final", output: Schema.Number }
+        }
       })
       const observations: Array<{
         readonly state: number
@@ -140,84 +149,88 @@ describe("pure planning and managed runtime differential", () => {
         readonly right: number
       }> = []
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Advance, Inspect, Finish),
-        internalEvents: Machine.internalEvents(Bump),
-        initial: (to) =>
-          to.Running.initial.resolve(({ target }) =>
-            target.decoded(
-              new Running({}),
-              (running) => running.Left.decoded(new Left({ value: 0 })).Right.decoded(new Right({ value: 0 }))
+        root: states,
+        events: Machine.eventsFromSchemas(Advance, Inspect, Finish),
+        internalEvents: Machine.internalEventsFromSchemas(Bump),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.Running.decoded(
+                new Running({}),
+                (running) => running.Left.decoded(new Left({ value: 0 })).Right.decoded(new Right({ value: 0 }))
+              )
             )
           )
       }).handle({
-        Running: {
-          on: {
-            Finish: (to) =>
-              to.full.Done().resolve(({ snapshot, target }) => {
-                if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
-                return target.decoded(
-                  new Done({
-                    value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
-                  })
-                )
-              })
-          },
-          states: {
-            Left: {
-              on: {
-                Advance: (to) =>
-                  to.branch.Running.Left().resolve(({ state, target }, enqueue) => {
-                    enqueue.raise(new Bump({}))
-                    return target.decoded(new Left({ value: state.value + 1 }))
-                  })
-              }
-            },
-            Right: {
-              on: {
-                Advance: (to) =>
-                  to.branch.Running.Right().resolve(({ state, target }) =>
-                    target.decoded(new Right({ value: state.value + 10 }))
-                  ),
-                Bump: (to) =>
-                  to.branch.Running.Right().resolve(({ state, target }) =>
-                    target.decoded(new Right({ value: state.value + 100 }))
-                  ),
-                Inspect: (to) =>
-                  to.none.resolve((context) => {
-                    const { state, containingState, ancestors, snapshot } = context
-                    if (snapshot.path !== "Running") throw new Error("expected Running snapshot")
-                    const expectedKeys = [
-                      "self",
-                      "state",
-                      "containingState",
-                      "ancestors",
-                      "event",
-                      "snapshot"
-                    ]
-                    const spread = { ...context }
-                    assert.deepStrictEqual(Object.keys(context), expectedKeys)
-                    assert.deepStrictEqual(Object.keys(spread), expectedKeys)
-                    assert.strictEqual(spread.self, context.self)
-                    assert.strictEqual(spread.state, state)
-                    assert.strictEqual(spread.containingState, containingState)
-                    assert.strictEqual(spread.ancestors, ancestors)
-                    assert.strictEqual(spread.event, context.event)
-                    assert.strictEqual(spread.snapshot, snapshot)
-                    observations.push({
-                      state: state.value,
-                      parent: containingState._tag,
-                      parents: ancestors.Running._tag,
-                      left: snapshot.states.Left.value.value,
-                      right: snapshot.states.Right.value.value
+        states: {
+          Running: {
+            on: {
+              Finish: (to) =>
+                to.branch.Done().resolve(({ snapshot, target }) => {
+                  if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
+                  return target.decoded(
+                    new Done({
+                      value: snapshot.state.states.Left.value.value + snapshot.state.states.Right.value.value
                     })
-                    return undefined
-                  })
+                  )
+                })
+            },
+            states: {
+              Left: {
+                on: {
+                  Advance: (to) =>
+                    to.branch.Running.Left().resolve(({ state, target }, enqueue) => {
+                      enqueue.raise(new Bump({}))
+                      return target.decoded(new Left({ value: state.value + 1 }))
+                    })
+                }
+              },
+              Right: {
+                on: {
+                  Advance: (to) =>
+                    to.branch.Running.Right().resolve(({ state, target }) =>
+                      target.decoded(new Right({ value: state.value + 10 }))
+                    ),
+                  Bump: (to) =>
+                    to.branch.Running.Right().resolve(({ state, target }) =>
+                      target.decoded(new Right({ value: state.value + 100 }))
+                    ),
+                  Inspect: (to) =>
+                    to.none.resolve((context) => {
+                      const { state, containingState, ancestors, snapshot } = context
+                      if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
+                      const expectedKeys = [
+                        "self",
+                        "state",
+                        "containingState",
+                        "ancestors",
+                        "event",
+                        "snapshot"
+                      ]
+                      const spread = { ...context }
+                      assert.deepStrictEqual(Object.keys(context), expectedKeys)
+                      assert.deepStrictEqual(Object.keys(spread), expectedKeys)
+                      assert.strictEqual(spread.self, context.self)
+                      assert.strictEqual(spread.state, state)
+                      assert.strictEqual(spread.containingState, containingState)
+                      assert.strictEqual(spread.ancestors, ancestors)
+                      assert.strictEqual(spread.event, context.event)
+                      assert.strictEqual(spread.snapshot, snapshot)
+                      observations.push({
+                        state: state.value,
+                        parent: containingState._tag,
+                        parents: ancestors.Running._tag,
+                        left: snapshot.state.states.Left.value.value,
+                        right: snapshot.state.states.Right.value.value
+                      })
+                      return undefined
+                    })
+                }
               }
             }
-          }
-        },
-        Done: { output: ({ state }) => state.value }
+          },
+          Done: { output: ({ state }) => state.value }
+        }
       })
 
       const initial = yield* Machine.planInitial(machine)
@@ -402,8 +415,8 @@ describe("pure planning and managed runtime differential", () => {
         ["always", "done"]
       )
       assert.strictEqual(trace.initial.plan.done, false)
-      assert.strictEqual(trace.initial.plan.state.path, "flow")
-      assert.strictEqual((trace.initial.plan.state as any).state.path, "flow.ready")
+      assert.strictEqual((trace.initial.plan.state as any).state.path, "flow")
+      assert.strictEqual((trace.initial.plan.state as any).state.state.path, "flow.ready")
       assert.strictEqual(trace.steps[0]?.plan.done, true)
       assert.strictEqual(trace.steps[0]?.plan.output, "machine:done")
 
@@ -439,60 +452,65 @@ describe("pure planning and managed runtime differential", () => {
       const record = (label: string) => {
         actions.push(label)
       }
-      const states = Machine.states({
-        Idle,
-        Working,
-        Finished: { schema: Finished, type: "final", output: Schema.String }
+      const states = Machine.state({
+        initial: "Idle",
+        states: {
+          Idle,
+          Working,
+          Finished: { schema: Finished, type: "final", output: Schema.String }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Begin),
-        internalEvents: Machine.internalEvents(RaisedOne, RaisedTwo),
-        emittedEvents: Machine.emittedEvents(Notice),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Begin),
+        internalEvents: Machine.internalEventsFromSchemas(RaisedOne, RaisedTwo),
+        emittedEvents: Machine.emittedEventsFromSchemas(Notice),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          entry: (_, enqueue) => {
-            record("entry:idle")
-            enqueue.emit(new Notice({ label: "initial" }))
+        states: {
+          Idle: {
+            entry: (_, enqueue) => {
+              record("entry:idle")
+              enqueue.emit(new Notice({ label: "initial" }))
+            },
+            on: {
+              Begin: (to) =>
+                to.branch.Working().resolve(({ target }, enqueue) => {
+                  record("transition:begin")
+                  enqueue.emit(new Notice({ label: "transition" }))
+                  enqueue.raise(new RaisedOne({}))
+                  return target.decoded(new Working({}))
+                })
+            }
           },
-          on: {
-            Begin: (to) =>
-              to.full.Working().resolve(({ target }, enqueue) => {
-                record("transition:begin")
-                enqueue.emit(new Notice({ label: "transition" }))
-                enqueue.raise(new RaisedOne({}))
-                return target.decoded(new Working({}))
-              })
+          Working: {
+            entry: (_, enqueue) => {
+              record("entry:working")
+              enqueue.emit(new Notice({ label: "entry" }))
+              enqueue.raise(new RaisedTwo({}))
+            },
+            on: {
+              RaisedOne: (to) =>
+                to.none.resolve((_, enqueue) => {
+                  record("raised:one")
+                  enqueue.emit(new Notice({ label: "raised-one" }))
+                  return undefined
+                }),
+              RaisedTwo: (to) =>
+                to.branch.Finished().resolve(({ target }, enqueue) => {
+                  record("raised:two")
+                  enqueue.emit(new Notice({ label: "raised-two" }))
+                  return target.decoded(new Finished({}))
+                })
+            }
+          },
+          Finished: {
+            entry: (_, enqueue) => {
+              record("entry:finished")
+              enqueue.emit(new Notice({ label: "finished" }))
+            },
+            output: () => "complete"
           }
-        },
-        Working: {
-          entry: (_, enqueue) => {
-            record("entry:working")
-            enqueue.emit(new Notice({ label: "entry" }))
-            enqueue.raise(new RaisedTwo({}))
-          },
-          on: {
-            RaisedOne: (to) =>
-              to.none.resolve((_, enqueue) => {
-                record("raised:one")
-                enqueue.emit(new Notice({ label: "raised-one" }))
-                return undefined
-              }),
-            RaisedTwo: (to) =>
-              to.full.Finished().resolve(({ target }, enqueue) => {
-                record("raised:two")
-                enqueue.emit(new Notice({ label: "raised-two" }))
-                return target.decoded(new Finished({}))
-              })
-          }
-        },
-        Finished: {
-          entry: (_, enqueue) => {
-            record("entry:finished")
-            enqueue.emit(new Notice({ label: "finished" }))
-          },
-          output: () => "complete"
         }
       })
 
@@ -558,18 +576,20 @@ describe("pure planning and managed runtime differential", () => {
       class Active extends Schema.TaggedClass<Active>("DifferentialNoopActive")("Active", {}) {}
       class Ignore extends Schema.TaggedClass<Ignore>("DifferentialIgnore")("Ignore", {}) {}
       class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {}
-      const states = Machine.states({ Idle, Active })
+      const states = Machine.state({ initial: "Idle", states: { Idle, Active } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Ignore, Go),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Ignore, Go),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          on: {
-            Go: (to) => to.full.Active().resolve(({ target }) => target.decoded(new Active({})))
-          }
-        },
-        Active: {}
+        states: {
+          Idle: {
+            on: {
+              Go: (to) => to.branch.Active().resolve(({ target }) => target.decoded(new Active({})))
+            }
+          },
+          Active: {}
+        }
       })
       const initial = yield* Machine.planInitial(machine)
       const ignored = yield* Machine.plan(machine, initial.state, new Ignore({}))
@@ -582,7 +602,7 @@ describe("pure planning and managed runtime differential", () => {
         Effect.forkChild({ startImmediately: true })
       )
       const active = yield* actor.changes.pipe(
-        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.path === "Active"),
+        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === "Active"),
         Stream.take(1),
         Stream.runDrain,
         Effect.forkChild({ startImmediately: true })

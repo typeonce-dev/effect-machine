@@ -7,12 +7,12 @@ describe("MachineTest.verify", () => {
   class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
   class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-  const States = Machine.states({ idle: Idle })
+  const States = Machine.state({ initial: "idle", states: { idle: Idle } })
   const machine = Machine.make({
-    states: States.states,
-    events: Machine.events(Tick),
-    initial: (to) => to.idle().resolve(({ target }) => (target.decoded(new Idle({}))))
-  }).handle({ idle: {} })
+    root: States,
+    events: Machine.eventsFromSchemas(Tick),
+    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
+  }).handle({ states: { idle: {} } })
 
   const trace = {} as MachineTest.Trace<typeof machine>
   const verified = MachineTest.verify(machine, trace)

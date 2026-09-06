@@ -250,21 +250,27 @@ describe("machine operation totality", () => {
       const Value = Schema.TaggedStruct("Value", { amount: Schema.NumberFromString })
       const Done = Schema.TaggedStruct("Done", {})
       const Finish = Schema.TaggedStruct("Finish", {})
-      const states = Machine.states({
-        Value,
-        Done: { schema: Done, type: "final", output: Schema.NumberFromString }
+      const states = Machine.state({
+        initial: "Value",
+        states: {
+          Value,
+          Done: { schema: Done, type: "final", output: Schema.NumberFromString }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Finish),
-        initial: (to) => to.Value().resolve(({ target }) => target.decoded({ _tag: "Value", amount: 42 }))
+        root: states,
+        events: Machine.eventsFromSchemas(Finish),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Value.decoded({ _tag: "Value", amount: 42 })))
       }).handle({
-        Value: {
-          on: {
-            Finish: (to) => to.full.Done().resolve(({ target }) => target.decoded({ _tag: "Done" }))
-          }
-        },
-        Done: { output: () => 42 }
+        states: {
+          Value: {
+            on: {
+              Finish: (to) => to.branch.Done().resolve(({ target }) => target.decoded({ _tag: "Done" }))
+            }
+          },
+          Done: { output: () => 42 }
+        }
       })
       const plan = yield* Machine.planInitial(machine)
       const done = yield* Machine.plan(machine, plan.state, { _tag: "Finish" })

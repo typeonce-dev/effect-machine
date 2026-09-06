@@ -28,7 +28,9 @@ const escapeText = (value: string): string =>
 
 const stateLabel = (node: StateNode, active: ReadonlySet<string>): string => {
   const status = active.has(node.path) ? "●" : "○"
-  const title = node.annotations?.title === undefined ? node.key : `${node.annotations.title} (${node.key})`
+  const title = node.annotations?.title === undefined
+    ? (node.path === "" ? "(root)" : node.key)
+    : `${node.annotations.title} (${node.key})`
   const details = node.type === "final" ?
     " [final]" :
     node.type === "history" ?

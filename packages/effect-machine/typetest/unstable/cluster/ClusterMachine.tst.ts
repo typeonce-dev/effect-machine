@@ -64,21 +64,24 @@ describe("ClusterMachine", () => {
     "test/ClusterMachine/SnapshotEncoding"
   ) {}
 
-  const states = Machine.states({ Count })
+  const states = Machine.state({ initial: "Count", states: { Count } })
 
   const machine = Machine.make({
     id: "Counter",
-    states: states.states,
-    events: Machine.events(Increment, Reset),
-    initial: (to) => to.Count().resolve(({ target }) => (target.decoded(new Count({ value: 0 }))))
+    root: states,
+    events: Machine.eventsFromSchemas(Increment, Reset),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => (target.from((to) => to.Count.decoded(new Count({ value: 0 })))))
   }).handle({
-    Count: {
-      on: {
-        Increment: (to) =>
-          to.full.Count().resolve(({ event, state, target }) =>
-            target.decoded(new Count({ value: state.value + event.by }))
-          ),
-        Reset: (to) => to.full.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+    states: {
+      Count: {
+        on: {
+          Increment: (to) =>
+            to.branch.Count().resolve(({ event, state, target }) =>
+              target.decoded(new Count({ value: state.value + event.by }))
+            ),
+          Reset: (to) => to.branch.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        }
       }
     }
   })
@@ -91,10 +94,11 @@ describe("ClusterMachine", () => {
     expect<Rpc.Success<Rpcs>>().type.toBe<ClusterMachine.Accepted | ClusterMachine.Rejected>()
 
     const internalMachine = Machine.make({
-      states: states.states,
-      events: Machine.events(Increment),
-      internalEvents: Machine.internalEvents(Reset),
-      initial: (to) => to.Count().resolve(({ target }) => (target.decoded(new Count({ value: 0 }))))
+      root: states,
+      events: Machine.eventsFromSchemas(Increment),
+      internalEvents: Machine.internalEventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Count.decoded(new Count({ value: 0 })))))
     })
     const internalBridge = ClusterMachine.make("InternalCounterEntity", internalMachine, {
       version: "1"
@@ -113,11 +117,13 @@ describe("ClusterMachine", () => {
   it("captures non-void machine input", () => {
     const inputMachine = Machine.make({
       id: "InputCounter",
-      states: states.states,
-      events: Machine.events(Reset),
+      root: states,
+      events: Machine.eventsFromSchemas(Reset),
       input: Input,
-      initial: (to) =>
-        to.Count().resolve(({ input: input, target }) => (target.decoded(new Count({ value: input.value }))))
+      initialConfiguration: (root) =>
+        root.resolve((
+          { input: input, target }
+        ) => (target.from((to) => to.Count.decoded(new Count({ value: input.value })))))
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -143,12 +149,14 @@ describe("ClusterMachine", () => {
   })
 
   it("requires JSON-encoded state, output, and public input schemas", () => {
-    const resourceStates = Machine.states({ ResourceState })
+    const resourceStates = Machine.state({ initial: "ResourceState", states: { ResourceState } })
     const resourceMachine = Machine.make({
-      states: resourceStates.states,
-      events: Machine.events(ResourceEvent),
-      initial: (to) =>
-        to.ResourceState().resolve(({ target }) => target.decoded(new ResourceState({ resource: { close() {} } })))
+      root: resourceStates,
+      events: Machine.eventsFromSchemas(ResourceEvent),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) =>
+          target.from((to) => to.ResourceState.decoded(new ResourceState({ resource: { close() {} } })))
+        )
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -158,9 +166,10 @@ describe("ClusterMachine", () => {
     )
 
     const unknownEventMachine = Machine.make({
-      states: states.states,
-      events: Machine.events(UnknownEvent),
-      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      root: states,
+      events: Machine.eventsFromSchemas(UnknownEvent),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -169,15 +178,21 @@ describe("ClusterMachine", () => {
       { version: "1" }
     )
 
-    const anyOutputStates = Machine.states({
-      Done: { schema: Done, type: "final", output: Schema.Any }
+    const anyOutputStates = Machine.state({
+      initial: "Done",
+      states: {
+        Done: { schema: Done, type: "final", output: Schema.Any }
+      }
     })
     const anyOutputMachine = Machine.make({
-      states: anyOutputStates.states,
-      events: Machine.events(Reset),
-      initial: (to) => to.Done().resolve(({ target }) => target.decoded(new Done({ value: "done" })))
+      root: anyOutputStates,
+      events: Machine.eventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Done.decoded(new Done({ value: "done" }))))
     }).handle({
-      Done: { output: () => null }
+      states: {
+        Done: { output: () => null }
+      }
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -186,17 +201,23 @@ describe("ClusterMachine", () => {
       { version: "1" }
     )
 
-    const neverOutputStates = Machine.states({
-      Done: { schema: Done, type: "final", output: Schema.Never }
+    const neverOutputStates = Machine.state({
+      initial: "Done",
+      states: {
+        Done: { schema: Done, type: "final", output: Schema.Never }
+      }
     })
     const neverOutputMachine = Machine.make({
-      states: neverOutputStates.states,
-      events: Machine.events(Reset),
-      initial: (to) => to.Done().resolve(({ target }) => target.decoded(new Done({ value: "done" })))
+      root: neverOutputStates,
+      events: Machine.eventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Done.decoded(new Done({ value: "done" }))))
     }).handle({
-      Done: {
-        output: () => {
-          throw new Error("unreachable")
+      states: {
+        Done: {
+          output: () => {
+            throw new Error("unreachable")
+          }
         }
       }
     })
@@ -207,12 +228,17 @@ describe("ClusterMachine", () => {
       { version: "1" }
     )
 
-    const scheduledStates = Machine.states({ Scheduled: Schema.toCodecJson(Scheduled) })
+    const scheduledStates = Machine.state({
+      initial: "Scheduled",
+      states: { Scheduled: Schema.toCodecJson(Scheduled) }
+    })
     const scheduledMachine = Machine.make({
-      states: scheduledStates.states,
-      events: Machine.events(Reset),
-      initial: (to) =>
-        to.Scheduled().resolve(({ target }) => target.decoded(new Scheduled({ at: new Date("2026-08-19") })))
+      root: scheduledStates,
+      events: Machine.eventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) =>
+          target.from((to) => to.Scheduled.decoded(new Scheduled({ at: new Date("2026-08-19") })))
+        )
     })
 
     expect(ClusterMachine.make).type.toBeCallableWith(
@@ -222,10 +248,11 @@ describe("ClusterMachine", () => {
     )
 
     const internalResourceMachine = Machine.make({
-      states: states.states,
-      events: Machine.events(Reset),
-      internalEvents: Machine.internalEvents(ResourceEvent),
-      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      root: states,
+      events: Machine.eventsFromSchemas(Reset),
+      internalEvents: Machine.internalEventsFromSchemas(ResourceEvent),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
     })
 
     expect(ClusterMachine.make).type.toBeCallableWith(
@@ -236,17 +263,21 @@ describe("ClusterMachine", () => {
   })
 
   it("requires declared output implementations", () => {
-    const outputStates = Machine.states({
-      Done: {
-        schema: Done,
-        type: "final",
-        output: Schema.String
+    const outputStates = Machine.state({
+      initial: "Done",
+      states: {
+        Done: {
+          schema: Done,
+          type: "final",
+          output: Schema.String
+        }
       }
     })
     const incomplete = Machine.make({
-      states: outputStates.states,
-      events: Machine.events(Reset),
-      initial: (to) => to.Done().resolve(({ target }) => (target.decoded(new Done({ value: "done" }))))
+      root: outputStates,
+      events: Machine.eventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => (target.from((to) => to.Done.decoded(new Done({ value: "done" })))))
     })
 
     expect(ClusterMachine.make).type.not.toBeCallableWith(
@@ -256,8 +287,10 @@ describe("ClusterMachine", () => {
     )
 
     const complete = incomplete.handle({
-      Done: {
-        output: ({ state }) => state.value
+      states: {
+        Done: {
+          output: ({ state }) => state.value
+        }
       }
     })
     expect(ClusterMachine.make).type.toBeCallableWith(
@@ -281,11 +314,14 @@ describe("ClusterMachine", () => {
     class ContextualCount extends Schema.TaggedClass<ContextualCount>("ContextualCount")("ContextualCount", {
       value: ContextualNumber
     }) {}
-    const contextualStates = Machine.states({ ContextualCount })
+    const contextualStates = Machine.state({ initial: "ContextualCount", states: { ContextualCount } })
     const contextualMachine = Machine.make({
-      states: contextualStates.states,
-      events: Machine.events(Reset),
-      initial: (to) => to.ContextualCount().resolve(({ target }) => (target.decoded(new ContextualCount({ value: 0 }))))
+      root: contextualStates,
+      events: Machine.eventsFromSchemas(Reset),
+      initialConfiguration: (root) =>
+        root.resolve((
+          { target }
+        ) => (target.from((to) => to.ContextualCount.decoded(new ContextualCount({ value: 0 })))))
     })
     const layer = ClusterMachine.make("ContextualCounter", contextualMachine, { version: "1" }).toLayer()
 

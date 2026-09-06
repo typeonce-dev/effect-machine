@@ -65,148 +65,167 @@ class ResumeWorkspaceDeep extends Schema.TaggedClass<ResumeWorkspaceDeep>("Resum
 class RestoreEditor extends Schema.TaggedClass<RestoreEditor>("RestoreEditor")("RestoreEditor", {}) {}
 class DefaultEditor extends Schema.TaggedClass<DefaultEditor>("DefaultEditor")("DefaultEditor", {}) {}
 
-const CheckoutStates = Machine.states({
-  checkout: {
-    schema: Checkout,
-    initial: "shipping",
-    states: {
-      shipping: Shipping,
-      payment: {
-        schema: Payment,
-        initial: "cardEntry",
-        states: {
-          cardEntry: CardEntry,
-          verifying: Verifying
+const CheckoutStates = Machine.state({
+  initial: "support",
+  states: {
+    checkout: {
+      schema: Checkout,
+      initial: "shipping",
+      states: {
+        shipping: Shipping,
+        payment: {
+          schema: Payment,
+          initial: "cardEntry",
+          states: {
+            cardEntry: CardEntry,
+            verifying: Verifying
+          }
+        },
+        recent: {
+          type: "history"
+        },
+        exact: {
+          type: "history",
+          history: "deep"
         }
-      },
-      recent: {
-        type: "history"
-      },
-      exact: {
-        type: "history",
-        history: "deep"
       }
-    }
-  },
-  support: Support
+    },
+    support: Support
+  }
 })
 
 const checkoutPaymentVerifying = (
   orderId: string,
   attempt: number,
   challengeId: string
-): Machine.Machine.Snapshot<typeof CheckoutStates.states> => ({
-  path: "checkout" as const,
-  value: new Checkout({ orderId }),
+): Machine.Snapshot<typeof CheckoutStates> => ({
+  path: "" as const,
+  value: undefined,
   state: {
-    path: "checkout.payment" as const,
-    value: new Payment({ attempt }),
+    path: "checkout" as const,
+    value: new Checkout({ orderId }),
     state: {
-      path: "checkout.payment.verifying" as const,
-      value: new Verifying({ challengeId })
+      path: "checkout.payment" as const,
+      value: new Payment({ attempt }),
+      state: {
+        path: "checkout.payment.verifying" as const,
+        value: new Verifying({ challengeId })
+      }
     }
   }
 })
 
-const checkoutShipping = (orderId: string, address: string) => ({
-  path: "checkout" as const,
-  value: new Checkout({ orderId }),
-  state: { path: "checkout.shipping" as const, value: new Shipping({ address }) }
+const checkoutShipping = (
+  orderId: string,
+  address: string
+): Machine.Machine.CompleteSnapshotContaining<{ readonly "": typeof CheckoutStates.node }, "checkout"> => ({
+  path: "" as const,
+  value: undefined,
+  state: {
+    path: "checkout" as const,
+    value: new Checkout({ orderId }),
+    state: { path: "checkout.shipping" as const, value: new Shipping({ address }) }
+  }
 })
 
 const makeCheckoutMachine = (
-  initial: Machine.Machine.Snapshot<typeof CheckoutStates.states>,
+  initial: Machine.Snapshot<typeof CheckoutStates>,
   onInitialize?: () => void,
   lifecycle?: Array<string>,
   onDefault?: () => void,
   exactDefault?: () => ReturnType<typeof checkoutShipping>
 ) =>
   Machine.make({
-    states: CheckoutStates.states,
-    events: Machine.events(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory),
-    initial: ((to: any) =>
-      initial.path === "checkout"
-        ? to.checkout.initial.resolve(({ target }: any) =>
-          target.decoded(
-            new Checkout({ orderId: "initial" }),
-            (checkout: any) => checkout.shipping.decoded(new Shipping({ address: "initial" }))
+    root: CheckoutStates,
+    events: Machine.eventsFromSchemas(Leave, ResumeShallow, ResumeDeep, GoShipping, EnterVerifying, ReenterHistory),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) =>
+        initial.state.path === "checkout"
+          ? target.from((to) =>
+            to.checkout.decoded(new Checkout({ orderId: "initial" }), (checkout) =>
+              checkout.shipping.decoded(new Shipping({ address: "initial" })))
           )
-        )
-        : to.support().resolve(() => initial)) as any
+          : initial
+      )
   }).handle({
-    checkout: {
-      entry: () => {
-        lifecycle?.push("entry:checkout")
-      },
-      exit: () => {
-        lifecycle?.push("exit:checkout")
-      },
-      history: {
-        recent: {
-          default: () => {
-            onDefault?.()
-            return checkoutShipping("fallback-order", "fallback-address")
+    states: {
+      checkout: {
+        entry: () => {
+          lifecycle?.push("entry:checkout")
+        },
+        exit: () => {
+          lifecycle?.push("exit:checkout")
+        },
+        history: {
+          recent: {
+            default: () => {
+              onDefault?.()
+              return checkoutShipping("fallback-order", "fallback-address")
+            }
+          },
+          exact: {
+            default: exactDefault ?? (() => {
+              onDefault?.()
+              return checkoutShipping("fallback-order", "fallback-address")
+            })
           }
         },
-        exact: {
-          default: exactDefault ?? (() => {
-            onDefault?.()
-            return checkoutShipping("fallback-order", "fallback-address")
-          })
-        }
-      },
-      on: {
-        Leave: (to) => to.full.support().resolve(({ target }) => target.decoded(new Support({ ticket: "ticket-1" }))),
-        GoShipping: (to) =>
-          to.local.shipping().resolve(({ event, target }) => target.decoded(new Shipping({ address: event.address }))),
-        ReenterHistory: (to) => to.history.checkout.exact.resolve(({ target }) => target(), { reenter: true })
-      },
-      states: {
-        shipping: {
-          on: {
-            EnterVerifying: (to) =>
-              to.local.payment().resolve(({ target }) =>
-                target.decoded(
-                  new Payment({ attempt: 2 }),
-                  (payment) => payment.verifying.decoded(new Verifying({ challengeId: "challenge-7" }))
+        on: {
+          Leave: (to) =>
+            to.branch.support().resolve(({ target }) => target.decoded(new Support({ ticket: "ticket-1" }))),
+          GoShipping: (to) =>
+            to.local.shipping().resolve(({ event, target }) =>
+              target.decoded(new Shipping({ address: event.address }))
+            ),
+          ReenterHistory: (to) => to.history.checkout.exact.resolve(({ target }) => target(), { reenter: true })
+        },
+        states: {
+          shipping: {
+            on: {
+              EnterVerifying: (to) =>
+                to.local.payment().resolve(({ target }) =>
+                  target.decoded(
+                    new Payment({ attempt: 2 }),
+                    (payment) => payment.verifying.decoded(new Verifying({ challengeId: "challenge-7" }))
+                  )
                 )
-              )
-          }
-        },
-        payment: {
-          entry: () => {
-            lifecycle?.push("entry:payment")
+            }
           },
-          exit: () => {
-            lifecycle?.push("exit:payment")
-          },
-          initialize: ({ state, builder }) => {
-            onInitialize?.()
-            return builder.decoded(new CardEntry({ cardNumber: `fresh-${state.attempt}` }))
-          },
-          states: {
-            verifying: {
-              entry: () => {
-                lifecycle?.push("entry:verifying")
-              },
-              exit: () => {
-                lifecycle?.push("exit:verifying")
+          payment: {
+            entry: () => {
+              lifecycle?.push("entry:payment")
+            },
+            exit: () => {
+              lifecycle?.push("exit:payment")
+            },
+            initialize: ({ state, builder }) => {
+              onInitialize?.()
+              return builder.decoded(new CardEntry({ cardNumber: `fresh-${state.attempt}` }))
+            },
+            states: {
+              verifying: {
+                entry: () => {
+                  lifecycle?.push("entry:verifying")
+                },
+                exit: () => {
+                  lifecycle?.push("exit:verifying")
+                }
               }
             }
           }
         }
-      }
-    },
-    support: {
-      entry: () => {
-        lifecycle?.push("entry:support")
       },
-      exit: () => {
-        lifecycle?.push("exit:support")
-      },
-      on: {
-        ResumeShallow: (to) => to.history.checkout.recent.resolve(({ target }) => target()),
-        ResumeDeep: (to) => to.history.checkout.exact.resolve(({ target }) => target())
+      support: {
+        entry: () => {
+          lifecycle?.push("entry:support")
+        },
+        exit: () => {
+          lifecycle?.push("exit:support")
+        },
+        on: {
+          ResumeShallow: (to) => to.history.checkout.recent.resolve(({ target }) => target()),
+          ResumeDeep: (to) => to.history.checkout.exact.resolve(({ target }) => target())
+        }
       }
     }
   })
@@ -241,57 +260,64 @@ const sendAndWaitForPath = <State, Event, Error, Output>(
     return yield* Fiber.join(observer)
   })
 
-const WorkspaceStates = Machine.states({
-  workspace: {
-    schema: Workspace,
-    type: "parallel",
+const WorkspaceStates = Machine.state({
+  initial: "away",
+  states: {
+    workspace: {
+      schema: Workspace,
+      type: "parallel",
+      states: {
+        editor: {
+          schema: Editor,
+          initial: "writing",
+          states: {
+            writing: Writing,
+            preview: Preview
+          }
+        },
+        sidebar: {
+          schema: Sidebar,
+          initial: "files",
+          states: {
+            files: Files,
+            search: Search
+          }
+        },
+        recent: {
+          type: "history"
+        },
+        exact: {
+          type: "history",
+          history: "deep"
+        }
+      }
+    },
+    away: Away
+  }
+})
+
+const activeWorkspace: Machine.Snapshot<typeof WorkspaceStates> = {
+  path: "" as const,
+  value: undefined,
+  state: {
+    path: "workspace" as const,
+    value: new Workspace({ id: "workspace-1" }),
     states: {
       editor: {
-        schema: Editor,
-        initial: "writing",
-        states: {
-          writing: Writing,
-          preview: Preview
+        path: "workspace.editor" as const,
+        value: new Editor({ documentId: "document-1" }),
+        state: {
+          path: "workspace.editor.preview" as const,
+          value: new Preview({ page: 4 })
         }
       },
       sidebar: {
-        schema: Sidebar,
-        initial: "files",
-        states: {
-          files: Files,
-          search: Search
+        path: "workspace.sidebar" as const,
+        value: new Sidebar({ width: 320 }),
+        state: {
+          path: "workspace.sidebar.search" as const,
+          value: new Search({ query: "history" })
         }
-      },
-      recent: {
-        type: "history"
-      },
-      exact: {
-        type: "history",
-        history: "deep"
-      }
-    }
-  },
-  away: Away
-})
-
-const activeWorkspace: Machine.Machine.Snapshot<typeof WorkspaceStates.states> = {
-  path: "workspace" as const,
-  value: new Workspace({ id: "workspace-1" }),
-  states: {
-    editor: {
-      path: "workspace.editor" as const,
-      value: new Editor({ documentId: "document-1" }),
-      state: {
-        path: "workspace.editor.preview" as const,
-        value: new Preview({ page: 4 })
-      }
-    },
-    sidebar: {
-      path: "workspace.sidebar" as const,
-      value: new Sidebar({ width: 320 }),
-      state: {
-        path: "workspace.sidebar.search" as const,
-        value: new Search({ query: "history" })
       }
     }
   }
@@ -299,170 +325,179 @@ const activeWorkspace: Machine.Machine.Snapshot<typeof WorkspaceStates.states> =
 
 const makeWorkspaceMachine = (initialized: Array<string>) =>
   Machine.make({
-    states: WorkspaceStates.states,
-    events: Machine.events(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
-    initial: (to) =>
-      to.workspace.initial.resolve(({ target }) =>
-        target.decoded(new Workspace({ id: "initial" }), (workspace) =>
-          workspace
-            .editor.decoded(
-              new Editor({ documentId: "initial" }),
-              (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-            )
-            .sidebar.decoded(
-              new Sidebar({ width: 0 }),
-              (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
-            ))
+    root: WorkspaceStates,
+    events: Machine.eventsFromSchemas(LeaveWorkspace, ResumeWorkspaceShallow, ResumeWorkspaceDeep),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) =>
+        target.from((to) =>
+          to.workspace.decoded(new Workspace({ id: "initial" }), (workspace) =>
+            workspace
+              .editor.decoded(
+                new Editor({ documentId: "initial" }),
+                (editor) => editor.writing.decoded(new Writing({ draft: "" }))
+              )
+              .sidebar.decoded(
+                new Sidebar({ width: 0 }),
+                (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
+              ))
+        )
       )
   }).handle({
-    workspace: {
-      history: {
-        recent: {
-          default: ({ target }) =>
-            target.workspace.decoded(
-              new Workspace({ id: "fallback" }),
-              (workspace) =>
-                workspace
-                  .editor.decoded(
-                    new Editor({ documentId: "fallback" }),
-                    (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-                  )
-                  .sidebar.decoded(
-                    new Sidebar({ width: 200 }),
-                    (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
-                  )
-            )
-        },
-        exact: {
-          default: ({ target }) =>
-            target.workspace.decoded(
-              new Workspace({ id: "fallback" }),
-              (workspace) =>
-                workspace
-                  .editor.decoded(
-                    new Editor({ documentId: "fallback" }),
-                    (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-                  )
-                  .sidebar.decoded(
-                    new Sidebar({ width: 200 }),
-                    (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
-                  )
-            )
-        }
-      },
-      on: {
-        LeaveWorkspace: (to) => to.full.away().resolve(({ target }) => target.decoded(new Away({})))
-      },
-      states: {
-        editor: {
-          initialize: ({ state, builder }) => {
-            initialized.push("editor")
-            return builder.decoded(new Writing({ draft: `fresh:${state.documentId}` }))
-          }
-        },
-        sidebar: {
-          initialize: ({ state, builder }) => {
-            initialized.push("sidebar")
-            return builder.decoded(new Files({ directory: `/fresh/${state.width}` }))
-          }
-        }
-      }
-    },
-    away: {
-      on: {
-        ResumeWorkspaceShallow: (to) => to.history.workspace.recent.resolve(({ target }) => target()),
-        ResumeWorkspaceDeep: (to) => to.history.workspace.exact.resolve(({ target }) => target())
-      }
-    }
-  })
-
-const NestedHistoryStates = Machine.states({
-  workspace: {
-    schema: Workspace,
-    type: "parallel",
     states: {
-      editor: {
-        schema: Editor,
-        initial: "writing",
-        states: {
-          writing: Writing,
-          preview: Preview,
-          exact: {
-            type: "history",
-            history: "deep"
-          }
-        }
-      },
-      sidebar: Search
-    }
-  }
-})
-
-const nestedParallelSnapshot: Machine.Machine.Snapshot<typeof NestedHistoryStates.states> = {
-  path: "workspace" as const,
-  value: new Workspace({ id: "workspace-1" }),
-  states: {
-    editor: {
-      path: "workspace.editor" as const,
-      value: new Editor({ documentId: "document-1" }),
-      state: {
-        path: "workspace.editor.preview" as const,
-        value: new Preview({ page: 4 })
-      }
-    },
-    sidebar: {
-      path: "workspace.sidebar" as const,
-      value: new Search({ query: "untouched" })
-    }
-  }
-}
-
-const nestedHistoryMachine = Machine.make({
-  states: NestedHistoryStates.states,
-  events: Machine.events(RestoreEditor, DefaultEditor),
-  initial: (to) =>
-    to.workspace.initial.resolve(({ target }) =>
-      target.decoded(
-        new Workspace({ id: "workspace-1" }),
-        (workspace) =>
-          workspace
-            .editor.decoded(
-              new Editor({ documentId: "document-1" }),
-              (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-            )
-            .sidebar.decoded(new Search({ query: "untouched" }))
-      )
-    )
-}).handle({
-  workspace: {
-    states: {
-      editor: {
+      workspace: {
         history: {
-          exact: {
+          recent: {
             default: ({ target }) =>
-              target.workspace.decoded(
-                new Workspace({ id: "fallback-workspace" }),
-                (workspace) =>
+              target.from((to) =>
+                to.workspace.decoded(new Workspace({ id: "fallback" }), (workspace) =>
                   workspace
                     .editor.decoded(
                       new Editor({ documentId: "fallback" }),
                       (editor) => editor.writing.decoded(new Writing({ draft: "" }))
                     )
-                    .sidebar.decoded(new Search({ query: "fallback" }))
+                    .sidebar.decoded(
+                      new Sidebar({ width: 200 }),
+                      (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
+                    ))
+              )
+          },
+          exact: {
+            default: ({ target }) =>
+              target.from((to) =>
+                to.workspace.decoded(new Workspace({ id: "fallback" }), (workspace) =>
+                  workspace
+                    .editor.decoded(
+                      new Editor({ documentId: "fallback" }),
+                      (editor) => editor.writing.decoded(new Writing({ draft: "" }))
+                    )
+                    .sidebar.decoded(
+                      new Sidebar({ width: 200 }),
+                      (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
+                    ))
               )
           }
         },
+        on: {
+          LeaveWorkspace: (to) => to.branch.away().resolve(({ target }) => target.decoded(new Away({})))
+        },
         states: {
-          preview: {
-            on: {
-              RestoreEditor: (to) =>
-                to.history.workspace.editor.exact.resolve(({ target }) => target(), { reenter: true }),
-              DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
+          editor: {
+            initialize: ({ state, builder }) => {
+              initialized.push("editor")
+              return builder.decoded(new Writing({ draft: `fresh:${state.documentId}` }))
             }
           },
-          writing: {
-            on: {
-              DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
+          sidebar: {
+            initialize: ({ state, builder }) => {
+              initialized.push("sidebar")
+              return builder.decoded(new Files({ directory: `/fresh/${state.width}` }))
+            }
+          }
+        }
+      },
+      away: {
+        on: {
+          ResumeWorkspaceShallow: (to) => to.history.workspace.recent.resolve(({ target }) => target()),
+          ResumeWorkspaceDeep: (to) => to.history.workspace.exact.resolve(({ target }) => target())
+        }
+      }
+    }
+  })
+
+const NestedHistoryStates = Machine.state({
+  initial: "workspace",
+  states: {
+    workspace: {
+      schema: Workspace,
+      type: "parallel",
+      states: {
+        editor: {
+          schema: Editor,
+          initial: "writing",
+          states: {
+            writing: Writing,
+            preview: Preview,
+            exact: {
+              type: "history",
+              history: "deep"
+            }
+          }
+        },
+        sidebar: Search
+      }
+    }
+  }
+})
+
+const nestedParallelSnapshot: Machine.Snapshot<typeof NestedHistoryStates> = {
+  path: "" as const,
+  value: undefined,
+  state: {
+    path: "workspace" as const,
+    value: new Workspace({ id: "workspace-1" }),
+    states: {
+      editor: {
+        path: "workspace.editor" as const,
+        value: new Editor({ documentId: "document-1" }),
+        state: {
+          path: "workspace.editor.preview" as const,
+          value: new Preview({ page: 4 })
+        }
+      },
+      sidebar: {
+        path: "workspace.sidebar" as const,
+        value: new Search({ query: "untouched" })
+      }
+    }
+  }
+}
+
+const nestedHistoryMachine = Machine.make({
+  root: NestedHistoryStates,
+  events: Machine.eventsFromSchemas(RestoreEditor, DefaultEditor),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) =>
+        to.workspace.decoded(new Workspace({ id: "workspace-1" }), (workspace) =>
+          workspace
+            .editor.decoded(
+              new Editor({ documentId: "document-1" }),
+              (editor) => editor.writing.decoded(new Writing({ draft: "" }))
+            )
+            .sidebar.decoded(new Search({ query: "untouched" })))
+      )
+    )
+}).handle({
+  states: {
+    workspace: {
+      states: {
+        editor: {
+          history: {
+            exact: {
+              default: ({ target }) =>
+                target.from((to) =>
+                  to.workspace.decoded(new Workspace({ id: "fallback-workspace" }), (workspace) =>
+                    workspace
+                      .editor.decoded(
+                        new Editor({ documentId: "fallback" }),
+                        (editor) => editor.writing.decoded(new Writing({ draft: "" }))
+                      )
+                      .sidebar.decoded(new Search({ query: "fallback" })))
+                )
+            }
+          },
+          states: {
+            preview: {
+              on: {
+                RestoreEditor: (to) =>
+                  to.history.workspace.editor.exact.resolve(({ target }) => target(), { reenter: true }),
+                DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
+              }
+            },
+            writing: {
+              on: {
+                DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
+              }
             }
           }
         }
@@ -476,7 +511,11 @@ describe("Machine history states", () => {
     Effect.gen(function*() {
       let initialized = 0
       const machine = makeCheckoutMachine(
-        { path: "support" as const, value: new Support({ ticket: "new" }) },
+        {
+          path: "" as const,
+          value: undefined,
+          state: { path: "support" as const, value: new Support({ ticket: "new" }) }
+        },
         () => initialized++
       )
 
@@ -505,21 +544,21 @@ describe("Machine history states", () => {
       assert.strictEqual(exact.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(exact.next.path, original.path)
       assert.deepStrictEqual(exact.next.value, original.value)
-      assert.deepStrictEqual((exact.next as any).state, (original as any).state)
+      assert.deepStrictEqual((exact.next as any).state.state, (original as any).state.state)
       assert.deepStrictEqual(exact.next.history, firstLeave.next.history)
 
       const shipping = yield* Machine.plan(machine, exact.next, new GoShipping({ address: "Second Street" }))
       const secondLeave = yield* Machine.plan(machine, shipping.next, new Leave({}))
       const resumedOnce = yield* Machine.plan(machine, secondLeave.next, new ResumeDeep({}))
-      assert.strictEqual(resumedOnce.next.path, "checkout")
-      assert.deepStrictEqual((resumedOnce.next as any).state, {
+      assert.strictEqual(resumedOnce.next.state.path, "checkout")
+      assert.deepStrictEqual((resumedOnce.next as any).state.state, {
         path: "checkout.shipping" as const,
         value: new Shipping({ address: "Second Street" })
       })
 
       const thirdLeave = yield* Machine.plan(machine, resumedOnce.next, new Leave({}))
       const resumedTwice = yield* Machine.plan(machine, thirdLeave.next, new ResumeDeep({}))
-      assert.deepStrictEqual((resumedTwice.next as any).state, (resumedOnce.next as any).state)
+      assert.deepStrictEqual((resumedTwice.next as any).state.state, (resumedOnce.next as any).state.state)
     }))
 
   it.effect("shallow history retains parent and direct-child values and freshly initializes descendants", () =>
@@ -534,9 +573,9 @@ describe("Machine history states", () => {
       assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.target, "checkout.recent")
       assert.strictEqual(resumed.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(initialized, 1)
-      assert.deepStrictEqual(resumed.next.value, new Checkout({ orderId: "order-1" }))
-      assert.deepStrictEqual((resumed.next as any).state.value, new Payment({ attempt: 3 }))
-      assert.deepStrictEqual((resumed.next as any).state.state, {
+      assert.deepStrictEqual(resumed.next.state.value, new Checkout({ orderId: "order-1" }))
+      assert.deepStrictEqual((resumed.next as any).state.state.value, new Payment({ attempt: 3 }))
+      assert.deepStrictEqual((resumed.next as any).state.state.state, {
         path: "checkout.payment.cardEntry" as const,
         value: new CardEntry({ cardNumber: "fresh-3" })
       })
@@ -544,7 +583,10 @@ describe("Machine history states", () => {
       const leftAgain = yield* Machine.plan(machine, resumed.next, new Leave({}))
       const resumedAgain = yield* Machine.plan(machine, leftAgain.next, new ResumeShallow({}))
       assert.strictEqual(initialized, 2)
-      assert.deepStrictEqual((resumedAgain.next as any).state.state.value, new CardEntry({ cardNumber: "fresh-3" }))
+      assert.deepStrictEqual(
+        (resumedAgain.next as any).state.state.state.value,
+        new CardEntry({ cardNumber: "fresh-3" })
+      )
     }))
 
   it.effect("round-trips history and rejects corrupted remembered paths and values", () =>
@@ -601,10 +643,11 @@ describe("Machine history states", () => {
       assert.strictEqual(reentered.microsteps[0]?.transitions[0]?.target, "checkout.exact")
       assert.strictEqual(reentered.microsteps[0]?.transitions[0]?.resolvedTarget, "checkout")
       assert.strictEqual(defaults, 0)
-      assert.strictEqual(reentered.next.path, "checkout")
+      assert.strictEqual(reentered.next.state.path, "checkout")
       assert.deepStrictEqual(reentered.next.value, original.value)
-      assert.deepStrictEqual((reentered.next as any).state, (original as any).state)
+      assert.deepStrictEqual((reentered.next as any).state.state, (original as any).state.state)
       assert.deepStrictEqual(reentered.next.history?.["checkout.exact"]?.active, [
+        "",
         "checkout",
         "checkout.payment",
         "checkout.payment.verifying"
@@ -618,11 +661,13 @@ describe("Machine history states", () => {
       const left = yield* Machine.plan(machine, activeWorkspace, new LeaveWorkspace({}))
 
       assert.deepStrictEqual(left.next.history?.["workspace.recent"]?.active, [
+        "",
         "workspace",
         "workspace.editor",
         "workspace.sidebar"
       ])
       assert.deepStrictEqual(left.next.history?.["workspace.exact"]?.active, [
+        "",
         "workspace",
         "workspace.editor",
         "workspace.editor.preview",
@@ -631,13 +676,13 @@ describe("Machine history states", () => {
       ])
 
       const deep = yield* Machine.plan(machine, left.next, new ResumeWorkspaceDeep({}))
-      assert.deepStrictEqual((deep.next as any).states, (activeWorkspace as any).states)
+      assert.deepStrictEqual((deep.next as any).state.states, (activeWorkspace as any).state.states)
       assert.deepStrictEqual(initialized, [])
 
       const leftAgain = yield* Machine.plan(machine, deep.next, new LeaveWorkspace({}))
       const shallow = yield* Machine.plan(machine, leftAgain.next, new ResumeWorkspaceShallow({}))
       assert.deepStrictEqual(initialized, ["editor", "sidebar"])
-      assert.deepStrictEqual((shallow.next as any).states.editor, {
+      assert.deepStrictEqual((shallow.next as any).state.states.editor, {
         path: "workspace.editor" as const,
         value: new Editor({ documentId: "document-1" }),
         state: {
@@ -645,7 +690,7 @@ describe("Machine history states", () => {
           value: new Writing({ draft: "fresh:document-1" })
         }
       })
-      assert.deepStrictEqual((shallow.next as any).states.sidebar, {
+      assert.deepStrictEqual((shallow.next as any).state.states.sidebar, {
         path: "workspace.sidebar" as const,
         value: new Sidebar({ width: 320 }),
         state: {
@@ -663,12 +708,16 @@ describe("Machine history states", () => {
         new RestoreEditor({})
       )
 
-      assert.deepStrictEqual((restored.next as any).states.editor, (nestedParallelSnapshot as any).states.editor)
-      assert.deepStrictEqual((restored.next as any).states.sidebar, {
+      assert.deepStrictEqual(
+        (restored.next as any).state.states.editor,
+        (nestedParallelSnapshot as any).state.states.editor
+      )
+      assert.deepStrictEqual((restored.next as any).state.states.sidebar, {
         path: "workspace.sidebar" as const,
         value: new Search({ query: "untouched" })
       })
       assert.deepStrictEqual(restored.next.history?.["workspace.editor.exact"]?.active, [
+        "",
         "workspace",
         "workspace.editor",
         "workspace.editor.preview"
@@ -683,7 +732,7 @@ describe("Machine history states", () => {
         new DefaultEditor({})
       )
 
-      assert.deepStrictEqual((restored.next as any).states.editor, {
+      assert.deepStrictEqual((restored.next as any).state.states.editor, {
         path: "workspace.editor" as const,
         value: new Editor({ documentId: "fallback" }),
         state: {
@@ -691,7 +740,7 @@ describe("Machine history states", () => {
           value: new Writing({ draft: "" })
         }
       })
-      assert.deepStrictEqual((restored.next as any).states.sidebar, {
+      assert.deepStrictEqual((restored.next as any).state.states.sidebar, {
         path: "workspace.sidebar" as const,
         value: new Search({ query: "untouched" })
       })
@@ -710,15 +759,15 @@ describe("Machine history states", () => {
       const firstUseRef = yield* Machine.resume(nestedHistoryMachine, decodedFirstUse)
       yield* sendAndWaitForPath(firstUseRef, new DefaultEditor({}), "workspace.editor.writing")
       const firstUseState = yield* firstUseRef.state
-      assert.deepStrictEqual((firstUseState as any).states.editor.value, new Editor({ documentId: "fallback" }))
-      assert.deepStrictEqual((firstUseState as any).states.sidebar, nestedParallelSnapshot.states.sidebar)
+      assert.deepStrictEqual((firstUseState as any).state.states.editor.value, new Editor({ documentId: "fallback" }))
+      assert.deepStrictEqual((firstUseState as any).state.states.sidebar, nestedParallelSnapshot.state.states.sidebar)
       yield* firstUseRef.stop
 
       const recorded = yield* Machine.plan(nestedHistoryMachine, nestedParallelSnapshot, new RestoreEditor({}))
       const current = {
         ...(yield* Machine.plan(nestedHistoryMachine, nestedParallelSnapshot, new DefaultEditor({}))).next,
         history: recorded.next.history
-      } as Machine.Machine.Snapshot<typeof NestedHistoryStates.states>
+      } as Machine.Snapshot<typeof NestedHistoryStates>
       const encodedRecorded = yield* Machine.encodeSnapshot(nestedHistoryMachine, current)
       const decodedRecorded = yield* Machine.decodeSnapshot(
         nestedHistoryMachine,
@@ -727,15 +776,19 @@ describe("Machine history states", () => {
       const recordedRef = yield* Machine.resume(nestedHistoryMachine, decodedRecorded)
       yield* sendAndWaitForPath(recordedRef, new DefaultEditor({}), "workspace.editor.preview")
       const restored = yield* recordedRef.state
-      assert.deepStrictEqual((restored as any).states.editor, nestedParallelSnapshot.states.editor)
-      assert.deepStrictEqual((restored as any).states.sidebar, nestedParallelSnapshot.states.sidebar)
+      assert.deepStrictEqual((restored as any).state.states.editor, nestedParallelSnapshot.state.states.editor)
+      assert.deepStrictEqual((restored as any).state.states.sidebar, nestedParallelSnapshot.state.states.sidebar)
       yield* recordedRef.stop
     }))
 
   it.effect("rejects a forged fallback that omits its declared owner with a precise diagnostic", () =>
     Effect.gen(function*() {
       const unsafe = makeCheckoutMachine(
-        { path: "support" as const, value: new Support({ ticket: "new" }) },
+        {
+          path: "" as const,
+          value: undefined,
+          state: { path: "support" as const, value: new Support({ ticket: "new" }) }
+        },
         undefined,
         undefined,
         undefined,

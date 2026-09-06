@@ -8,3 +8,4 @@ export type EnsureExecutable<
 > =
   & Machine.Machine.EnsureOutputImplementations<States, OutputStates>
   & Machine.Machine.EnsureHistoryImplementations<States, UnhandledStates>
+  & Machine.Machine.EnsureInitialImplementations<States, UnhandledStates>

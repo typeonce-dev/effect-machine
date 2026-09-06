@@ -7,23 +7,31 @@ import { AtomMachine } from "../../src/unstable/reactivity/index.js"
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", { value: Schema.Number }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 
-const States = Machine.states({ Idle })
-type Snapshot = Machine.Machine.Snapshot<typeof States.states>
+const States = Machine.state({ initial: "Idle", states: { Idle } })
+type Snapshot = Machine.Snapshot<typeof States>
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Tick),
+  root: States,
+  events: Machine.eventsFromSchemas(Tick),
   input: Schema.Struct({ seed: Schema.Number }),
-  initial: (to) => to.Idle().resolve(({ input: input, target }) => (target.decoded(new Idle({ value: input.seed }))))
+  initialConfiguration: (root) =>
+    root.resolve(({ input: input, target }) => (target.from((to) => to.Idle.decoded(new Idle({ value: input.seed })))))
 }).handle({
-  Idle: {
-    on: {
-      Tick: (to) => to.full.Idle().resolve(({ state, target }) => target.decoded(new Idle({ value: state.value + 1 })))
+  states: {
+    Idle: {
+      on: {
+        Tick: (to) =>
+          to.branch.Idle().resolve(({ state, target }) => target.decoded(new Idle({ value: state.value + 1 })))
+      }
     }
   }
 })
 
-const snapshot: Snapshot = { path: "Idle", value: new Idle({ value: 3 }) }
+const snapshot: Snapshot = {
+  path: "" as const,
+  value: undefined,
+  state: { path: "Idle", value: new Idle({ value: 3 }) }
+}
 
 describe("Machine logical resumption", () => {
   it("excludes input while preserving synchronous runtime inference", () => {
@@ -40,8 +48,9 @@ describe("Machine logical resumption", () => {
     expect<Effect.Success<Ref["state"]>>().type.toBe<Snapshot>()
     expect(Machine.resume).type.not.toBeCallableWith(machine, snapshot, { seed: 1 })
     expect(Machine.resume).type.not.toBeCallableWith(machine, {
+      version: 2,
       _tag: "MachineSnapshot",
-      active: [{ path: "Idle", value: { _tag: "Idle", value: 3 } }]
+      active: [{ path: "" }, { path: "Idle", value: { _tag: "Idle", value: 3 } }]
     })
   })
 
@@ -53,6 +62,6 @@ describe("Machine logical resumption", () => {
     expect(AtomMachine.resume).type.toBeCallableWith(machine, snapshot)
     expect<RefFailure>().type.toBe<Machine.MachineSchemaDecodeError>()
     expect<Extract<ResultFailure, Machine.InfiniteTransitionError>>().type.toBe<Machine.InfiniteTransitionError>()
-    expect<Atom.Success<typeof bridge.state>>().type.toBe<Snapshot>()
+    expect<Atom.Success<typeof bridge.result>>().type.toBe<Snapshot>()
   })
 })

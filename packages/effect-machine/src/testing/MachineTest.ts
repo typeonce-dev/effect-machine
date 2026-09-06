@@ -159,11 +159,11 @@ type RootReadyMachine<M extends AnyMachine> =
  * @since 0.4.0
  */
 export type Scenario<M extends AnyMachine> = Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
-    readonly events: ReadonlyArray<Machine.Machine.InputEvent<M>>
+    readonly events: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
   }
   : {
     readonly input: InputValue<M>
-    readonly events: ReadonlyArray<Machine.Machine.InputEvent<M>>
+    readonly events: ReadonlyArray<Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>>
   }
 
 /**
@@ -238,22 +238,19 @@ export interface Scenarios<M extends AnyMachine> {
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
  * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(Reset),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(Reset),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: {
  *   Idle: {
  *     on: {
  *       Reset: (to) =>
- *         to.full.Idle().resolve(({ target }) => target.from())
+ *         to.branch.Idle().resolve(({ target }) => target.from())
  *     }
  *   }
- * })
+ * } })
  *
  * const generated = MachineTest.scenarios(machine, { maxEvents: 5 })
  * ```
@@ -301,7 +298,7 @@ export interface Microstep<
   >
   readonly commands: ReadonlyArray<Machine.Command>
   readonly raisedEvents: ReadonlyArray<Machine.Machine.Event<M>>
-  readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+  readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
   readonly exitPaths: ReadonlyArray<string>
   readonly entryPaths: ReadonlyArray<string>
   readonly changed: boolean
@@ -319,7 +316,7 @@ export type InitialPlan<M extends AnyMachine> =
     readonly initialEntryPaths: ReadonlyArray<StatePath<M>>
     readonly state: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly commands: ReadonlyArray<Machine.Command>
-    readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+    readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
     readonly microsteps: ReadonlyArray<
       Microstep<M, Machine.Machine.InitialServices<M> | Machine.Machine.Services<M>>
     >
@@ -334,9 +331,10 @@ export type InitialPlan<M extends AnyMachine> =
  */
 export type EventPlan<M extends AnyMachine> =
   & {
+    readonly event: Machine.Machine.InputEvent<M>
     readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly commands: ReadonlyArray<Machine.Command>
-    readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+    readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
     readonly microsteps: ReadonlyArray<Microstep<M>>
   }
   & PlanCompletion<M>
@@ -405,9 +403,10 @@ export type ProbeMicrostep<M extends AnyMachine> = Omit<Microstep<M>, "transitio
  */
 export type ProbePlan<M extends AnyMachine> =
   & {
+    readonly event: Machine.Machine.InputEvent<M>
     readonly next: Machine.Machine.Snapshot<Machine.Machine.States<M>>
     readonly commands: ReadonlyArray<Machine.Command>
-    readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+    readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
     readonly microsteps: ReadonlyArray<ProbeMicrostep<M>>
   }
   & PlanCompletion<M>
@@ -447,13 +446,13 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
   readonly machine: M
   readonly ref: Machine.MachineRef<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-    Machine.Machine.InputEvent<M>,
+    Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
     Error,
     Output
   >
   readonly sendAndAwait: (
-    event: Machine.Machine.InputEvent<M>
-  ) => Effect.Effect<ProbeStep<M>, Error | Machine.StoppedError>
+    event: Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>
+  ) => Effect.Effect<ProbeStep<M>, Error | Machine.MachineSchemaDecodeError | Machine.StoppedError>
   /** Constructors for asynchronous observation after a causal command. */
   readonly await: {
     readonly none: RuntimeTest.RuntimeAwait<
@@ -497,15 +496,12 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const program = Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
@@ -520,7 +516,7 @@ export const probe: <M extends AnyMachine, Error, Output>(
   machine: ReadyMachine<M>,
   ref: Machine.MachineRef<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
-    Machine.Machine.InputEvent<M>,
+    Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>,
     Error,
     Output
   >
@@ -1111,15 +1107,12 @@ export const Invariant: {
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
  * }) {}
- * const States = Machine.states({ Count })
+ * const States = Machine.state({ initial: "Count", states: { Count } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
- *   }
- * }).handle({ Count: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
+ * }).handle({ states: { Count: {} } })
  *
  * const nonNegative = MachineTest.invariants(machine).state(
  *   "count is non-negative",
@@ -1446,23 +1439,20 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  *   value: Schema.Number
  * }) {}
  * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
- * const States = Machine.states({ Count })
+ * const States = Machine.state({ initial: "Count", states: { Count } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(Increment),
- *   initial: {
- *     target: (to) => to.Count(),
- *     resolve: ({ target }) => target.decoded(new Count({ value: 0 }))
- *   }
- * }).handle({
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(Increment),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
+ * }).handle({ states: {
  *   Count: {
  *     on: {
  *       Increment: (to) =>
- *         to.full.Count().resolve(({ state, target }) =>
+ *         to.branch.Count().resolve(({ state, target }) =>
  *           target.decoded(new Count({ value: state.value + 1 })))
  *     }
  *   }
- * })
+ * } })
  *
  * const explored = MachineTest.explore(machine, {
  *   events: ({ snapshot }) => snapshot.value.value < 2 ? [new Increment({})] : [],
@@ -1589,7 +1579,7 @@ export type RunFailure<Cause, M extends AnyMachine = AnyMachine> =
     readonly scenario: Scenario<M>
     readonly phase: "event"
     readonly eventIndex: number
-    readonly event: Machine.Machine.InputEvent<M>
+    readonly event: Machine.Machine.EventInput<Machine.Machine.InputEvent<M>>
     readonly initial: InitialTrace<M>
     readonly steps: ReadonlyArray<TraceStep<M>>
     readonly cause: Cause
@@ -1638,15 +1628,12 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const trace = MachineTest.run(machine, { events: [] })
  * ```
@@ -1907,15 +1894,12 @@ export interface Coverage<M extends AnyMachine> {
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const report = Effect.map(
  *   MachineTest.run(machine, { events: [] }),
@@ -1970,7 +1954,7 @@ export interface ObservedGraphMicrostep<M extends AnyMachine> {
   readonly event: Machine.Machine.Event<M> | Machine.InitialEvent
   readonly transitions: Microstep<M, any>["transitions"]
   readonly raisedEvents: ReadonlyArray<Machine.Machine.Event<M>>
-  readonly emittedEvents: ReadonlyArray<Machine.Machine.Emit<M>>
+  readonly emittedEvents: ReadonlyArray<Machine.Machine.EmittedEvent<M>>
   readonly exitPaths: ReadonlyArray<StatePath<M>>
   readonly entryPaths: ReadonlyArray<StatePath<M>>
   readonly changed: boolean
@@ -2136,15 +2120,12 @@ export interface VerifyOptions {
  * import { MachineTest } from "@typeonce/effect-machine/testing"
  *
  * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.states({ Idle })
+ * const States = Machine.state({ initial: "Idle", states: { Idle } })
  * const machine = Machine.make({
- *   states: States.states,
- *   events: Machine.events(),
- *   initial: {
- *     target: (to) => to.Idle(),
- *     resolve: ({ target }) => target.from()
- *   }
- * }).handle({ Idle: {} })
+ *   root: States,
+ *   events: Machine.eventsFromSchemas(),
+ *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
+ * }).handle({ states: { Idle: {} } })
  *
  * const checked = Effect.gen(function*() {
  *   const trace = yield* MachineTest.run(machine, { events: [] })

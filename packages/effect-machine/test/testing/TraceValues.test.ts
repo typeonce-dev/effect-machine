@@ -7,10 +7,11 @@ const State = Schema.TaggedStruct("State", { data: Schema.Unknown })
 const Ping = Schema.TaggedStruct("Ping", {})
 const make = (data: unknown) =>
   Machine.make({
-    states: { State },
-    events: Machine.events(Ping),
-    initial: (to) => to.State().resolve(({ target }) => target.decoded({ _tag: "State", data }))
-  }).handle({ State: { on: { Ping: (to) => to.none } } })
+    root: Machine.state({ initial: "State", states: { State } }),
+    events: Machine.eventsFromSchemas(Ping),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State", data })))
+  }).handle({ states: { State: { on: { Ping: (to) => to.none } } } })
 
 describe("trace value verification", () => {
   const different: ReadonlyArray<readonly [string, unknown, unknown]> = [
@@ -30,7 +31,10 @@ describe("trace value verification", () => {
       Effect.gen(function*() {
         const machine = make(before)
         const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Ping" }] })
-        const corrupted = { ...trace, final: { ...trace.final, value: { ...trace.final.value, data: after } } }
+        const corrupted = {
+          ...trace,
+          final: { ...trace.final, state: { ...trace.final.state, value: { ...trace.final.state.value, data: after } } }
+        }
         const exit = yield* Effect.exit(MachineTest.verify(machine, corrupted))
         assert.isTrue(Exit.isFailure(exit))
       }))
@@ -40,7 +44,13 @@ describe("trace value verification", () => {
     Effect.gen(function*() {
       const machine = make(new Date(NaN))
       const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Ping" }] })
-      const equivalent = { ...trace, final: { ...trace.final, value: { ...trace.final.value, data: new Date(NaN) } } }
+      const equivalent = {
+        ...trace,
+        final: {
+          ...trace.final,
+          state: { ...trace.final.state, value: { ...trace.final.state.value, data: new Date(NaN) } }
+        }
+      }
       yield* MachineTest.verify(machine, equivalent)
       assert.include(MachineTest.formatTrace(equivalent), "Invalid Date")
     }))
@@ -73,7 +83,10 @@ describe("trace value verification", () => {
       const trace = yield* MachineTest.run(machine, { events: [] })
       const equivalent = {
         ...trace,
-        final: { ...trace.final, value: { ...trace.final.value, data: { first: cyclic, second: copy } } }
+        final: {
+          ...trace.final,
+          state: { ...trace.final.state, value: { ...trace.final.state.value, data: { first: cyclic, second: copy } } }
+        }
       }
       yield* MachineTest.verify(machine, equivalent)
       copy.value = 2

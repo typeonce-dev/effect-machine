@@ -28,25 +28,32 @@ class Select extends Schema.TaggedClass<Select>("StrategySelect")("Select", {
 }) {}
 
 const makeFlatMachine = () => {
-  const states = Machine.states({
-    Count,
-    Done: { schema: Done, type: "final", output: Schema.Number }
+  const states = Machine.state({
+    initial: "Count",
+    states: {
+      Count,
+      Done: { schema: Done, type: "final", output: Schema.Number }
+    }
   })
   return Machine.make({
-    states: states.states,
-    events: Machine.events(Noop, Increment, Reenter, Finish),
-    initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+    root: states,
+    events: Machine.eventsFromSchemas(Noop, Increment, Reenter, Finish),
+    initialConfiguration: (root) =>
+      root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
   }).handle({
-    Count: {
-      on: {
-        Noop: (to) => to.none,
-        Increment: (to) =>
-          to.full.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
-        Reenter: (to) => to.none.resolve(() => undefined, { reenter: true }),
-        Finish: (to) => to.full.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
-      }
-    },
-    Done: { output: ({ state }) => state.value }
+    states: {
+      Count: {
+        on: {
+          Noop: (to) => to.none,
+          Increment: (to) =>
+            to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
+          Reenter: (to) => to.none.resolve(() => undefined, { reenter: true }),
+          Finish: (to) =>
+            to.branch.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
+        }
+      },
+      Done: { output: ({ state }) => state.value }
+    }
   })
 }
 
@@ -60,26 +67,29 @@ describe("machine planner and runtime strategies", () => {
     }))
 
   it.effect("retains the selected named branch across generic and indexed-flat planning", () => {
-    const states = Machine.states({ Count })
+    const states = Machine.state({ initial: "Count", states: { Count } })
     const machine = Machine.make({
-      states: states.states,
-      events: Machine.events(Select),
-      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      root: states,
+      events: Machine.eventsFromSchemas(Select),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
     }).handle({
-      Count: {
-        on: {
-          Select: (to) =>
-            to.branches({
-              negative: { target: to.none },
-              zero: { target: to.none },
-              positive: { target: to.none }
-            }).resolve(({ event, select }) =>
-              event.value < 0
-                ? select.negative()
-                : event.value === 0
-                ? select.zero()
-                : select.positive()
-            )
+      states: {
+        Count: {
+          on: {
+            Select: (to) =>
+              to.branches({
+                negative: { target: to.none },
+                zero: { target: to.none },
+                positive: { target: to.none }
+              }).resolve(({ event, select }) =>
+                event.value < 0
+                  ? select.negative()
+                  : event.value === 0
+                  ? select.zero()
+                  : select.positive()
+              )
+          }
         }
       }
     })
@@ -102,19 +112,22 @@ describe("machine planner and runtime strategies", () => {
   })
 
   it.effect("fails closed to generic planning for declinable transitions", () => {
-    const states = Machine.states({ Count })
+    const states = Machine.state({ initial: "Count", states: { Count } })
     const machine = Machine.make({
-      states: states.states,
-      events: Machine.events(Select),
-      initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+      root: states,
+      events: Machine.eventsFromSchemas(Select),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
     }).handle({
-      Count: {
-        on: {
-          Select: (to) =>
-            to.full.Count().resolve(({ event, state, target, decline }) =>
-              event.value < 0
-                ? decline()
-                : target.decoded(new Count({ value: state.value + event.value })), { declinable: true })
+      states: {
+        Count: {
+          on: {
+            Select: (to) =>
+              to.branch.Count().resolve(({ event, state, target, decline }) =>
+                event.value < 0
+                  ? decline()
+                  : target.decoded(new Count({ value: state.value + event.value })), { declinable: true })
+          }
         }
       }
     })
@@ -149,74 +162,88 @@ describe("machine planner and runtime strategies", () => {
     class Compete extends Schema.TaggedClass<Compete>("StrategyUpdateCompete")("Compete", {}) {}
     class ExitRoot extends Schema.TaggedClass<ExitRoot>("StrategyUpdateExitRoot")("ExitRoot", {}) {}
     class ReenterUpdate extends Schema.TaggedClass<ReenterUpdate>("StrategyUpdateReenter")("ReenterUpdate", {}) {}
-    const states = Machine.states({
-      Root: {
-        schema: Root,
-        initial: "Work",
-        states: {
-          Work: {
-            schema: Work,
-            type: "parallel",
-            states: {
-              Left: {
-                schema: Left,
-                initial: "Leaf",
-                states: { Leaf }
-              },
-              Right: {
-                schema: Right,
-                initial: "Leaf",
-                states: { Leaf }
+    const states = Machine.state({
+      initial: "Root",
+      states: {
+        Root: {
+          schema: Root,
+          initial: "Work",
+          states: {
+            Work: {
+              schema: Work,
+              type: "parallel",
+              states: {
+                Left: {
+                  schema: Left,
+                  initial: "Leaf",
+                  states: { Leaf }
+                },
+                Right: {
+                  schema: Right,
+                  initial: "Leaf",
+                  states: { Leaf }
+                }
               }
             }
           }
-        }
-      },
-      Outside
+        },
+        Outside
+      }
     })
     const machine = Machine.make({
-      states: states.states,
-      events: Machine.events(UpdateRegions, Compete, ExitRoot, ReenterUpdate),
-      initial: (to) =>
-        to.Root.initial.resolve(({ target }) =>
-          target.decoded(
-            new Root({ revision: 0 }),
-            (root) =>
-              root.Work.decoded(new Work({}), (work) =>
-                work.Left.decoded(new Left({ value: 0 }), (left) => left.Leaf.decoded(new Leaf({})))
-                  .Right.decoded(new Right({ value: 0 }), (right) => right.Leaf.decoded(new Leaf({}))))
+      root: states,
+      events: Machine.eventsFromSchemas(UpdateRegions, Compete, ExitRoot, ReenterUpdate),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) =>
+          target.from((to) =>
+            to.Root.decoded(
+              new Root({ revision: 0 }),
+              (root) =>
+                root.Work.decoded(new Work({}), (work) =>
+                  work.Left.decoded(new Left({ value: 0 }), (left) => left.Leaf.decoded(new Leaf({})))
+                    .Right.decoded(new Right({ value: 0 }), (right) => right.Leaf.decoded(new Leaf({}))))
+            )
           )
         )
     }).handle({
-      Root: {
-        states: {
-          Work: {
-            states: {
-              Left: {
-                states: {
-                  Leaf: {
-                    on: {
-                      UpdateRegions: (to) =>
-                        to.local.update(({ current, owner }) => owner.decoded(new Left({ value: current.value + 1 }))),
-                      Compete: (to) => to.branch.Root.update(({ owner }) => owner.decoded(new Root({ revision: 1 }))),
-                      ExitRoot: (to) => to.branch.Root.update(({ owner }) => owner.decoded(new Root({ revision: 3 }))),
-                      ReenterUpdate: (to) =>
-                        to.local.update(
-                          ({ current, owner }) => owner.decoded(new Left({ value: current.value + 1 })),
-                          { reenter: true }
-                        )
+      states: {
+        Root: {
+          states: {
+            Work: {
+              states: {
+                Left: {
+                  states: {
+                    Leaf: {
+                      on: {
+                        UpdateRegions: (to) =>
+                          to.local.update.resolve(({ current, owner }) =>
+                            owner.decoded(new Left({ value: current.value + 1 }))
+                          ),
+                        Compete: (to) =>
+                          to.branch.Root.update.resolve(({ owner }) => owner.decoded(new Root({ revision: 1 }))),
+                        ExitRoot: (to) =>
+                          to.branch.Root.update.resolve(({ owner }) => owner.decoded(new Root({ revision: 3 }))),
+                        ReenterUpdate: (to) =>
+                          to.local.update.resolve(
+                            ({ current, owner }) => owner.decoded(new Left({ value: current.value + 1 })),
+                            { reenter: true }
+                          )
+                      }
                     }
                   }
-                }
-              },
-              Right: {
-                states: {
-                  Leaf: {
-                    on: {
-                      UpdateRegions: (to) =>
-                        to.local.update(({ current, owner }) => owner.decoded(new Right({ value: current.value + 2 }))),
-                      Compete: (to) => to.branch.Root.update(({ owner }) => owner.decoded(new Root({ revision: 2 }))),
-                      ExitRoot: (to) => to.full.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+                },
+                Right: {
+                  states: {
+                    Leaf: {
+                      on: {
+                        UpdateRegions: (to) =>
+                          to.local.update.resolve(({ current, owner }) =>
+                            owner.decoded(new Right({ value: current.value + 2 }))
+                          ),
+                        Compete: (to) =>
+                          to.branch.Root.update.resolve(({ owner }) => owner.decoded(new Root({ revision: 2 }))),
+                        ExitRoot: (to) => to.branch.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+                      }
                     }
                   }
                 }
@@ -237,20 +264,20 @@ describe("machine planner and runtime strategies", () => {
 
       const initial = yield* Machine.planInitial(machine)
       const updated = yield* Machine.plan(machine, initial.state, new UpdateRegions({}))
-      if (updated.next.path !== "Root") throw new Error("expected Root")
-      assert.strictEqual(updated.next.state.states.Left.value.value, 1)
-      assert.strictEqual(updated.next.state.states.Right.value.value, 2)
+      if (updated.next.state.path !== "Root") throw new Error("expected Root")
+      assert.strictEqual(updated.next.state.state.states.Left.value.value, 1)
+      assert.strictEqual(updated.next.state.state.states.Right.value.value, 2)
 
       const reentered = yield* Machine.plan(machine, updated.next, new ReenterUpdate({}))
       assert.deepStrictEqual(reentered.microsteps[0]?.exitPaths, ["Root.Work.Left.Leaf"])
       assert.deepStrictEqual(reentered.microsteps[0]?.entryPaths, ["Root.Work.Left.Leaf"])
 
       const competed = yield* Machine.plan(machine, reentered.next, new Compete({}))
-      if (competed.next.path !== "Root") throw new Error("expected Root")
-      assert.strictEqual(competed.next.value.revision, 1)
+      if (competed.next.state.path !== "Root") throw new Error("expected Root")
+      assert.strictEqual(competed.next.state.value.revision, 1)
 
       const exited = yield* Machine.plan(machine, competed.next, new ExitRoot({}))
-      assert.strictEqual(exited.next.path, "Outside")
+      assert.strictEqual(exited.next.state.path, "Outside")
     })
   })
 
@@ -265,36 +292,41 @@ describe("machine planner and runtime strategies", () => {
     class Save extends Schema.TaggedClass<Save>("StrategyCombinedSave")("Save", {
       request: Schema.String
     }) {}
-    const states = Machine.states({
-      Ready: {
-        schema: Ready,
-        initial: "Idle",
-        states: { Idle, Saving }
+    const states = Machine.state({
+      initial: "Ready",
+      states: {
+        Ready: {
+          schema: Ready,
+          initial: "Idle",
+          states: { Idle, Saving }
+        }
       }
     })
     const machine = Machine.make({
-      states: states.states,
-      events: Machine.events(Save),
-      initial: (to) =>
-        to.Ready.initial.resolve(({ target }) =>
-          target.decoded(new Ready({ revision: 0 }), (ready) => ready.Idle.decoded(new Idle({})))
+      root: states,
+      events: Machine.eventsFromSchemas(Save),
+      initialConfiguration: (root) =>
+        root.resolve(({ target }) =>
+          target.from((to) => to.Ready.decoded(new Ready({ revision: 0 }), (ready) => ready.Idle.decoded(new Idle({}))))
         )
     }).handle({
-      Ready: {
-        states: {
-          Idle: {
-            on: {
-              Save: (to) =>
-                to.local.Saving()
-                  .updating(to.branch.Ready)
-                  .resolve(({ current, event, owner, target }) =>
-                    target.decoded(new Saving({ request: event.request })).update(
-                      owner.decoded(new Ready({ revision: current.revision + 1 }))
+      states: {
+        Ready: {
+          states: {
+            Idle: {
+              on: {
+                Save: (to) =>
+                  to.local.Saving()
+                    .updating(to.branch.Ready)
+                    .resolve(({ current, event, owner, target }) =>
+                      target.decoded(new Saving({ request: event.request })).update(
+                        owner.decoded(new Ready({ revision: current.revision + 1 }))
+                      )
                     )
-                  )
-            }
-          },
-          Saving: {}
+              }
+            },
+            Saving: {}
+          }
         }
       }
     })
@@ -312,7 +344,10 @@ describe("machine planner and runtime strategies", () => {
       const machine = makeFlatMachine()
       const initial = yield* Machine.planInitial(machine)
       const selected = ExecutionPlan.selectExecutionPlanForTesting(machine, "indexed-flat").plan
-      const active = Configuration.normalizeConfigurationSync(machine, initial.state)
+      const active = Configuration.normalizeConfigurationSync<Machine.Machine.States<typeof machine>>(
+        machine,
+        initial.state
+      )
       const planned = selected.plan(selected.fromConfiguration(active), new Noop({}))
       const step: ExecutionPlan.ExecutionMicrostep = planned.microsteps[0]!
 
@@ -332,40 +367,47 @@ describe("machine planner and runtime strategies", () => {
       class Left extends Schema.TaggedClass<Left>("StrategyLeft")("Left", { value: Schema.Number }) {}
       class Right extends Schema.TaggedClass<Right>("StrategyRight")("Right", { value: Schema.Number }) {}
       class Advance extends Schema.TaggedClass<Advance>("StrategyAdvance")("Advance", {}) {}
-      const states = Machine.states({
-        Root: {
-          schema: Root,
-          type: "parallel",
-          states: { Left, Right }
+      const states = Machine.state({
+        initial: "Root",
+        states: {
+          Root: {
+            schema: Root,
+            type: "parallel",
+            states: { Left, Right }
+          }
         }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Advance),
-        initial: (to) =>
-          to.Root.initial.resolve(({ target }) =>
-            target.decoded(
-              new Root({}),
-              (root) => root.Left.decoded(new Left({ value: 0 })).Right.decoded(new Right({ value: 0 }))
+        root: states,
+        events: Machine.eventsFromSchemas(Advance),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) =>
+            target.from((to) =>
+              to.Root.decoded(
+                new Root({}),
+                (root) => root.Left.decoded(new Left({ value: 0 })).Right.decoded(new Right({ value: 0 }))
+              )
             )
           )
       }).handle({
-        Root: {
-          states: {
-            Left: {
-              on: {
-                Advance: (to) =>
-                  to.branch.Root.Left().resolve(({ state, target }) =>
-                    target.decoded(new Left({ value: state.value + 1 }))
-                  )
-              }
-            },
-            Right: {
-              on: {
-                Advance: (to) =>
-                  to.branch.Root.Right().resolve(({ state, target }) =>
-                    target.decoded(new Right({ value: state.value + 10 }))
-                  )
+        states: {
+          Root: {
+            states: {
+              Left: {
+                on: {
+                  Advance: (to) =>
+                    to.branch.Root.Left().resolve(({ state, target }) =>
+                      target.decoded(new Left({ value: state.value + 1 }))
+                    )
+                }
+              },
+              Right: {
+                on: {
+                  Advance: (to) =>
+                    to.branch.Root.Right().resolve(({ state, target }) =>
+                      target.decoded(new Right({ value: state.value + 10 }))
+                    )
+                }
               }
             }
           }
@@ -386,26 +428,32 @@ describe("machine planner and runtime strategies", () => {
       class Opened extends Schema.TaggedClass<Opened>("StrategyInitialOpened")("Opened", {}) {}
       class Idle extends Schema.TaggedClass<Idle>("StrategyInitialIdle")("Idle", { value: Schema.Number }) {}
       class Enter extends Schema.TaggedClass<Enter>("StrategyInitialEnter")("Enter", {}) {}
-      const states = Machine.states({
-        Outside,
-        Opened: {
-          schema: Opened,
-          initial: "Idle",
-          states: { Idle }
+      const states = Machine.state({
+        initial: "Outside",
+        states: {
+          Outside,
+          Opened: {
+            schema: Opened,
+            initial: "Idle",
+            states: { Idle }
+          }
         }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Enter),
-        initial: (to) => to.Outside().resolve(({ target }) => target.decoded(new Outside({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Enter),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Outside.decoded(new Outside({}))))
       }).handle({
-        Outside: {
-          on: {
-            Enter: (to) => to.full.Opened.initial.resolve(({ target }) => target.decoded(new Opened({})))
+        states: {
+          Outside: {
+            on: {
+              Enter: (to) => to.branch.Opened.initial.resolve(({ target }) => target.decoded(new Opened({})))
+            }
+          },
+          Opened: {
+            initialize: ({ builder }) => builder.from({ value: 1 })
           }
-        },
-        Opened: {
-          initialize: ({ builder }) => builder.from({ value: 1 })
         }
       })
 
@@ -473,16 +521,18 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("StrategyFallbackIdle")("Idle", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("StrategyFallbackReady")("Ready", {}) {}
-      const states = Machine.states({ Idle, Ready })
+      const states = Machine.state({ initial: "Idle", states: { Idle, Ready } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          always: (to) => to.full.Ready().resolve(({ target }) => target.decoded(new Ready({})))
-        },
-        Ready: {}
+        states: {
+          Idle: {
+            always: (to) => to.branch.Ready().resolve(({ target }) => target.decoded(new Ready({})))
+          },
+          Ready: {}
+        }
       })
 
       assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
@@ -494,21 +544,21 @@ describe("machine planner and runtime strategies", () => {
       })
     }))
 
-  it.effect("fails closed to the generic planner for schema-less active states", () =>
+  it.effect("compares structural startup with the generic planner", () =>
     Effect.gen(function*() {
-      const states = Machine.states({ Idle: {} })
+      const states = Machine.state({ initial: "Idle", states: { Idle: {} } })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Idle().resolve(({ target }) => target.from())
-      }).handle({ Idle: {} })
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
+      }).handle({ states: { Idle: {} } })
 
-      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "generic")
+      assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
       yield* verifyPlannerStrategies({
         machine,
         events: [],
-        expected: "generic",
-        label: "schema-less fallback"
+        expected: "indexed-flat",
+        label: "structural startup"
       })
     }))
 
@@ -526,17 +576,24 @@ describe("machine planner and runtime strategies", () => {
       class Complete extends Schema.TaggedClass<Complete>("StrategyComplete")("Complete", {
         value: Schema.Number
       }) {}
-      const states = Machine.states({
-        Complete: { schema: Complete, type: "final", output: Schema.Number }
+      const states = Machine.state({
+        initial: "Complete",
+        states: {
+          Complete: { schema: Complete, type: "final", output: Schema.Number }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
+        root: states,
+        events: Machine.eventsFromSchemas(),
         input: Input,
-        initial: (to) =>
-          to.Complete().resolve(({ input: input, target }) => target.decoded(new Complete({ value: input.value })))
+        initialConfiguration: (root) =>
+          root.resolve(({ input: input, target }) =>
+            target.from((to) => to.Complete.decoded(new Complete({ value: input.value })))
+          )
       }).handle({
-        Complete: { output: ({ state }) => state.value }
+        states: {
+          Complete: { output: ({ state }) => state.value }
+        }
       })
 
       yield* verifyPlannerStrategies({
@@ -584,28 +641,33 @@ describe("machine planner and runtime strategies", () => {
       class StreamDone extends Schema.TaggedClass<StreamDone>("StrategyStreamDone")("StreamDone", {
         values: Schema.Array(Schema.Number)
       }) {}
-      const states = Machine.states({
-        Streaming,
-        StreamDone: { schema: StreamDone, type: "final", output: Schema.Array(Schema.Number) }
+      const states = Machine.state({
+        initial: "Streaming",
+        states: {
+          Streaming,
+          StreamDone: { schema: StreamDone, type: "final", output: Schema.Array(Schema.Number) }
+        }
       })
       const seen: Array<number> = []
       const definition = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Streaming().resolve(({ target }) => target.from())
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Streaming.from()))
       })
       const machine = definition.handle({
-        Streaming: {
-          invoke: (from) =>
-            from.stream("values", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
-              to.none.resolve(({ element }) => {
-                seen.push(element)
-              })
-            ).onDone((to) =>
-              to.full.StreamDone().resolve(({ target }) => target.decoded(new StreamDone({ values: [...seen] })))
-            )
-        },
-        StreamDone: { output: ({ state }) => state.values }
+        states: {
+          Streaming: {
+            invoke: (from) =>
+              from.stream("values", () => Stream.fromIterable([1, 2, 3])).onElement((to) =>
+                to.none.resolve(({ element }) => {
+                  seen.push(element)
+                })
+              ).onDone((to) =>
+                to.branch.StreamDone().resolve(({ target }) => target.decoded(new StreamDone({ values: [...seen] })))
+              )
+          },
+          StreamDone: { output: ({ state }) => state.values }
+        }
       })
 
       for (const strategy of ["generic", "compiled"] as const) {
@@ -619,18 +681,23 @@ describe("machine planner and runtime strategies", () => {
   it.effect("decodes deferred event constructions in generic and compiled managed runtimes", () =>
     Effect.gen(function*() {
       const Event = Schema.TaggedUnion({ Set: { value: Schema.NonEmptyString } })
-      const states = Machine.states({ Count })
+      const states = Machine.state({ initial: "Count", states: { Count } })
       const definition = Machine.make({
-        states: states.states,
-        events: Machine.events(Event),
-        initial: (to) => to.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+        root: states,
+        events: Machine.eventsFromSchemas(Event),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       })
       const events = definition.events
       const machine = definition.handle({
-        Count: {
-          on: {
-            Set: (to) =>
-              to.full.Count().resolve(({ event, target }) => target.decoded(new Count({ value: event.value.length })))
+        states: {
+          Count: {
+            on: {
+              Set: (to) =>
+                to.branch.Count().resolve(({ event, target }) =>
+                  target.decoded(new Count({ value: event.value.length }))
+                )
+            }
           }
         }
       })
@@ -638,7 +705,7 @@ describe("machine planner and runtime strategies", () => {
       for (const strategy of ["generic", "compiled"] as const) {
         const ref = yield* openWithRuntimeStrategy(machine, strategy)
         const updated = yield* ref.changes.pipe(
-          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.value.value === 2),
+          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.value.value === 2),
           Stream.take(1),
           Stream.runDrain,
           Effect.forkChild({ startImmediately: true })
@@ -647,7 +714,7 @@ describe("machine planner and runtime strategies", () => {
         yield* Fiber.join(updated)
         const snapshot = yield* ref.snapshot
         assert.strictEqual(snapshot.status, "active")
-        assert.strictEqual(snapshot.state.value.value, 2, `${strategy} decoded the construction`)
+        assert.strictEqual(snapshot.state.state.value.value, 2, `${strategy} decoded the construction`)
         yield* ref.stop
 
         const invalidRef = yield* openWithRuntimeStrategy(machine, strategy)
@@ -666,24 +733,26 @@ describe("machine planner and runtime strategies", () => {
       class Published extends Schema.TaggedClass<Published>("StrategyEmissionPublished")("Published", {
         value: Schema.Number
       }) {}
-      const states = Machine.states({ Idle })
-      const Events = Machine.events(Publish)
-      const Emissions = Machine.emittedEvents(Published)
+      const states = Machine.state({ initial: "Idle", states: { Idle } })
+      const Events = Machine.eventsFromSchemas(Publish)
+      const Emissions = Machine.emittedEventsFromSchemas(Published)
       let value: unknown = 1
       const machine = Machine.make({
-        states: states.states,
+        root: states,
         events: Events,
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          on: {
-            Publish: (to) =>
-              to.none.resolve(({ self }, enqueue) => {
-                assert.ok(self.sessionId.startsWith("machine:"))
-                enqueue.emit(Emissions.Published({ value } as never))
-                return undefined
-              })
+        states: {
+          Idle: {
+            on: {
+              Publish: (to) =>
+                to.none.resolve(({ self }, enqueue) => {
+                  assert.ok(self.sessionId.startsWith("machine:"))
+                  enqueue.emit(Emissions.Published({ value } as never))
+                  return undefined
+                })
+            }
           }
         }
       })
@@ -714,18 +783,20 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       class Idle extends Schema.TaggedClass<Idle>("StrategyPreparedIdle")("Idle", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("StrategyPreparedReady")("Ready", {}) {}
-      const states = Machine.states({ Idle })
-      const Emissions = Machine.emittedEvents(Ready)
+      const states = Machine.state({ initial: "Idle", states: { Idle } })
+      const Emissions = Machine.emittedEventsFromSchemas(Ready)
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
+        root: states,
+        events: Machine.eventsFromSchemas(),
         emittedEvents: Emissions,
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          entry: (_, enqueue) => {
-            enqueue.emit(Emissions.Ready())
-            return undefined
+        states: {
+          Idle: {
+            entry: (_, enqueue) => {
+              enqueue.emit(Emissions.Ready())
+              return undefined
+            }
           }
         }
       })
@@ -784,14 +855,14 @@ describe("machine planner and runtime strategies", () => {
           output,
           steps: steps.map((step) => ({
             event: step.event._tag,
-            before: step.before.value.value,
-            after: step.after.value.value,
+            before: step.before.state.value.value,
+            after: step.after.state.value.value,
             handled: step.handled,
             configurationChanged: step.configurationChanged,
             done: step.plan.done,
             microsteps: step.plan.microsteps.map((microstep) => ({
               event: microstep.event._tag,
-              next: microstep.next.value.value,
+              next: microstep.next.state.value.value,
               changed: microstep.changed,
               exitPaths: microstep.exitPaths,
               entryPaths: microstep.entryPaths
@@ -812,7 +883,7 @@ describe("machine planner and runtime strategies", () => {
         const retainedEncoding = yield* Machine.encodeSnapshot(machine, retained.state)
         const updated = yield* ref.changes.pipe(
           Stream.drop(1),
-          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.value.value === 1),
+          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.value.value === 1),
           Stream.take(1),
           Stream.runDrain,
           Effect.forkChild({ startImmediately: true })
@@ -822,7 +893,7 @@ describe("machine planner and runtime strategies", () => {
 
         assert.deepStrictEqual(yield* Machine.encodeSnapshot(machine, retained.state), retainedEncoding)
         assert.strictEqual(retained.status, "active")
-        assert.strictEqual(retained.state.value.value, 0)
+        assert.strictEqual(retained.state.state.value.value, 0)
         yield* ref.stop
       }
     }))
@@ -838,28 +909,35 @@ describe("machine planner and runtime strategies", () => {
       class Loaded extends Schema.TaggedClass<Loaded>("StrategyInvokeLoaded")("Loaded", {
         value: Schema.String
       }) {}
-      const states = Machine.states({
-        Idle,
-        Loading,
-        Success: { schema: Success, type: "final", output: Schema.String }
+      const states = Machine.state({
+        initial: "Idle",
+        states: {
+          Idle,
+          Loading,
+          Success: { schema: Success, type: "final", output: Schema.String }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(Load, Loaded),
-        initial: (to) => to.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+        root: states,
+        events: Machine.eventsFromSchemas(Load, Loaded),
+        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
       }).handle({
-        Idle: {
-          on: {
-            Load: (to) => to.full.Loading().resolve(({ target }) => target.decoded(new Loading({})))
-          }
-        },
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Effect.succeed(new Loaded({ value: "complete" }))).onDone((to) =>
-              to.full.Success().resolve(({ output, target }) => target.decoded(new Success({ value: output.value })))
-            )
-        },
-        Success: { output: ({ state }) => state.value }
+        states: {
+          Idle: {
+            on: {
+              Load: (to) => to.branch.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+            }
+          },
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Effect.succeed(new Loaded({ value: "complete" }))).onDone((to) =>
+                to.branch.Success().resolve(({ output, target }) =>
+                  target.decoded(new Success({ value: output.value }))
+                )
+              )
+          },
+          Success: { output: ({ state }) => state.value }
+        }
       })
 
       assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
@@ -885,23 +963,26 @@ describe("machine planner and runtime strategies", () => {
         authenticated: Schema.Boolean
       }) {}
       class Retry extends Schema.TaggedClass<Retry>("StrategyChoiceRetry")("StrategyChoiceRetry", {}) {}
-      const states = Machine.states({
-        Flow: {
-          schema: Flow,
-          initial: "Routing",
-          states: {
-            Routing: { type: "choice" },
-            Checking: {},
-            Failed: {},
-            Plans: {},
-            MemberNavigating: {}
+      const states = Machine.state({
+        initial: "Flow",
+        states: {
+          Flow: {
+            schema: Flow,
+            initial: "Routing",
+            states: {
+              Routing: { type: "choice" },
+              Checking: {},
+              Failed: {},
+              Plans: {},
+              MemberNavigating: {}
+            }
           }
         }
       })
       const waitForPath = (ref: Machine.MachineRef<any, any, any, any>, path: string) =>
         Effect.gen(function*() {
           for (let index = 0; index < 100; index += 1) {
-            if ((yield* ref.state).state.path === path) return
+            if ((yield* ref.state).state.state.path === path) return
             yield* Effect.yieldNow
           }
           return assert.fail(`machine did not reach ${path}`)
@@ -912,41 +993,44 @@ describe("machine planner and runtime strategies", () => {
         let membershipAttempts = 0
         let navigationRuns = 0
         const machine = Machine.make({
-          states: states.states,
-          events: Machine.events(Retry),
+          root: states,
+          events: Machine.eventsFromSchemas(Retry),
           input: Schema.Struct({ authenticated: Schema.Boolean }),
-          initial: (to) => to.Flow.initial.resolve(({ input, target }) => target.from(input, (flow) => flow.Routing()))
+          initialConfiguration: (root) =>
+            root.resolve(({ input, target }) => target.from((to) => to.Flow.from(input, (flow) => flow.Routing())))
         }).handle({
-          Flow: {
-            states: {
-              Routing: {
-                choice: (to) =>
-                  to.branches({
-                    authenticated: { target: to.local.Checking() },
-                    anonymous: { target: to.local.Plans() }
-                  }).resolve(({ containingState, select }) =>
-                    containingState.authenticated ? select.authenticated.from() : select.anonymous.from()
-                  )
-              },
-              Checking: {
-                invoke: (from) =>
-                  from.effect("membership", () =>
-                    Effect.suspend(() => {
-                      membershipAttempts += 1
-                      return membershipAttempts === 1 ? Effect.fail("offline") : Effect.succeed("active")
-                    })).onDone((to) => to.local.MemberNavigating()).onFailure((to) => to.local.Failed())
-              },
-              Failed: {
-                on: {
-                  StrategyChoiceRetry: (to) => to.local.Checking()
+          states: {
+            Flow: {
+              states: {
+                Routing: {
+                  choice: (to) =>
+                    to.branches({
+                      authenticated: { target: to.local.Checking() },
+                      anonymous: { target: to.local.Plans() }
+                    }).resolve(({ containingState, select }) =>
+                      containingState.authenticated ? select.authenticated.from() : select.anonymous.from()
+                    )
+                },
+                Checking: {
+                  invoke: (from) =>
+                    from.effect("membership", () =>
+                      Effect.suspend(() => {
+                        membershipAttempts += 1
+                        return membershipAttempts === 1 ? Effect.fail("offline") : Effect.succeed("active")
+                      })).onDone((to) => to.local.MemberNavigating()).onFailure((to) => to.local.Failed())
+                },
+                Failed: {
+                  on: {
+                    StrategyChoiceRetry: (to) => to.local.Checking()
+                  }
+                },
+                MemberNavigating: {
+                  invoke: (from) =>
+                    from.effect("navigate", () =>
+                      Effect.sync(() => {
+                        navigationRuns += 1
+                      }).pipe(Effect.andThen(Effect.never)))
                 }
-              },
-              MemberNavigating: {
-                invoke: (from) =>
-                  from.effect("navigate", () =>
-                    Effect.sync(() => {
-                      navigationRuns += 1
-                    }).pipe(Effect.andThen(Effect.never)))
               }
             }
           }
@@ -961,7 +1045,7 @@ describe("machine planner and runtime strategies", () => {
         results.push({
           membershipAttempts,
           navigationRuns,
-          path: (yield* ref.state).state.path
+          path: (yield* ref.state).state.state.path
         })
         yield* ref.stop
       }
@@ -978,22 +1062,28 @@ describe("machine planner and runtime strategies", () => {
       class Failed extends Schema.TaggedClass<Failed>("StrategyInvokeFailureFailed")("Failed", {
         error: Schema.String
       }) {}
-      const states = Machine.states({
-        Loading,
-        Failed: { schema: Failed, type: "final", output: Schema.String }
+      const states = Machine.state({
+        initial: "Loading",
+        states: {
+          Loading,
+          Failed: { schema: Failed, type: "final", output: Schema.String }
+        }
       })
       const machine = Machine.make({
-        states: states.states,
-        events: Machine.events(),
-        initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+        root: states,
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Loading.decoded(new Loading({}))))
       }).handle({
-        Loading: {
-          invoke: (from) =>
-            from.effect("load", () => Effect.fail("unavailable")).onFailure((to) =>
-              to.full.Failed().resolve(({ error, target }) => target.decoded(new Failed({ error })))
-            )
-        },
-        Failed: { output: ({ state }) => state.error }
+        states: {
+          Loading: {
+            invoke: (from) =>
+              from.effect("load", () => Effect.fail("unavailable")).onFailure((to) =>
+                to.branch.Failed().resolve(({ error, target }) => target.decoded(new Failed({ error })))
+              )
+          },
+          Failed: { output: ({ state }) => state.error }
+        }
       })
 
       assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
@@ -1019,37 +1109,48 @@ describe("machine planner and runtime strategies", () => {
       class ParentDone extends Schema.TaggedClass<ParentDone>("StrategyRequiredParentDone")("ParentDone", {}) {}
       class ChildReady extends Schema.TaggedClass<ChildReady>("StrategyRequiredParentReady")("ChildReady", {}) {}
 
-      const ParentEvents = Machine.events(ChildReady)
-      const childStates = Machine.states({ ChildIdle })
+      const ParentEvents = Machine.eventsFromSchemas(ChildReady)
+      const childStates = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
       const childMachine = Machine.make({
-        states: childStates.states,
-        events: Machine.events(),
+        root: childStates,
+        events: Machine.eventsFromSchemas(),
         parent: Machine.parent(ParentEvents),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
       }).handle({
-        ChildIdle: {
-          invoke: (from) =>
-            from.effect("notify-parent", ({ parent }) => parent.send(ParentEvents.ChildReady())).onDone((to) => to.none)
-              .onFailure((to) => to.none)
+        states: {
+          ChildIdle: {
+            invoke: (from) =>
+              from.effect("notify-parent", ({ parent }) => parent.send(ParentEvents.ChildReady())).onDone((to) =>
+                to.none
+              )
+                .onFailure((to) => to.none)
+          }
         }
       })
       const Child = Machine.child("required-parent-child", childMachine)
-      const parentStates = Machine.states({
-        ParentWaiting,
-        ParentDone: { schema: ParentDone, type: "final", output: Schema.String }
+      const parentStates = Machine.state({
+        initial: "ParentWaiting",
+        states: {
+          ParentWaiting,
+          ParentDone: { schema: ParentDone, type: "final", output: Schema.String }
+        }
       })
       const parentMachine = Machine.make({
-        states: parentStates.states,
+        root: parentStates,
         events: ParentEvents,
-        initial: (to) => to.ParentWaiting().resolve(({ target }) => target.decoded(new ParentWaiting({})))
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ParentWaiting.decoded(new ParentWaiting({}))))
       }).handle({
-        ParentWaiting: {
-          invoke: (from) => from.child(Child).onFailure((to) => to.none),
-          on: {
-            ChildReady: (to) => to.full.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
-          }
-        },
-        ParentDone: { output: () => "received" }
+        states: {
+          ParentWaiting: {
+            invoke: (from) => from.child(Child).onFailure((to) => to.none),
+            on: {
+              ChildReady: (to) => to.branch.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
+            }
+          },
+          ParentDone: { output: () => "received" }
+        }
       })
 
       const outputs: Array<string> = []
@@ -1072,57 +1173,60 @@ describe("machine planner and runtime strategies", () => {
       for (const strategy of ["generic", "compiled"] as const) {
         const firstStarted = yield* Deferred.make<void>()
         let generation = 0
-        const states = Machine.states({ Loading, Failed })
+        const states = Machine.state({ initial: "Loading", states: { Loading, Failed } })
         const definition = Machine.make({
-          states: states.states,
-          events: Machine.events(Reenter, Stale),
-          initial: (to) => to.Loading().resolve(({ target }) => target.decoded(new Loading({ epoch: 0 })))
+          root: states,
+          events: Machine.eventsFromSchemas(Reenter, Stale),
+          initialConfiguration: (root) =>
+            root.resolve(({ target }) => target.from((to) => to.Loading.decoded(new Loading({ epoch: 0 }))))
         })
         const machine = definition.handle({
-          Loading: {
-            invoke: (from) =>
-              from.logic("worker", {
-                address: Machine.childAddress("worker"),
-                logic: () => {
-                  generation += 1
-                  const current = generation
-                  return Machine.logic({
-                    initial: "active",
-                    run: ({ parent, sendTo, setState }) =>
-                      parent === undefined ?
-                        Effect.die("worker expected an owning machine") :
-                        (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
-                          Effect.andThen(Effect.never),
-                          Effect.onInterrupt(() =>
-                            setState("stale").pipe(
-                              Effect.andThen(sendTo(parent, new Stale({})))
+          states: {
+            Loading: {
+              invoke: (from) =>
+                from.logic("worker", {
+                  address: Machine.childAddress("worker"),
+                  logic: () => {
+                    generation += 1
+                    const current = generation
+                    return Machine.logic({
+                      initial: "active",
+                      run: ({ parent, sendTo, setState }) =>
+                        parent === undefined ?
+                          Effect.die("worker expected an owning machine") :
+                          (current === 1 ? Deferred.succeed(firstStarted, undefined) : Effect.void).pipe(
+                            Effect.andThen(Effect.never),
+                            Effect.onInterrupt(() =>
+                              setState("stale").pipe(
+                                Effect.andThen(sendTo(parent, new Stale({})))
+                              )
                             )
                           )
-                        )
-                  })
-                }
-              }).onFailure((to) => to.none).onSnapshot((to) =>
-                to.branches({
-                  stale: { title: "Worker is stale", target: to.full.Failed() },
-                  unchanged: { target: to.none }
-                }).resolve(({ snapshot, select }) =>
-                  snapshot.state === "stale"
-                    ? select.stale.decoded(new Failed({}))
-                    : select.unchanged()
-                )
-              ),
-            on: {
-              Reenter: (to) =>
-                to.full.Loading().resolve(
-                  ({ state, target }) => target.decoded(new Loading({ epoch: state.epoch + 1 })),
-                  {
-                    reenter: true
+                    })
                   }
+                }).onFailure((to) => to.none).onSnapshot((to) =>
+                  to.branches({
+                    stale: { title: "Worker is stale", target: to.branch.Failed() },
+                    unchanged: { target: to.none }
+                  }).resolve(({ snapshot, select }) =>
+                    snapshot.state === "stale"
+                      ? select.stale.decoded(new Failed({}))
+                      : select.unchanged()
+                  )
                 ),
-              Stale: (to) => to.full.Failed().resolve(({ target }) => target.decoded(new Failed({})))
-            }
-          },
-          Failed: {}
+              on: {
+                Reenter: (to) =>
+                  to.branch.Loading().resolve(
+                    ({ state, target }) => target.decoded(new Loading({ epoch: state.epoch + 1 })),
+                    {
+                      reenter: true
+                    }
+                  ),
+                Stale: (to) => to.branch.Failed().resolve(({ target }) => target.decoded(new Failed({})))
+              }
+            },
+            Failed: {}
+          }
         })
 
         const ref = yield* openWithRuntimeStrategy(machine, strategy)
@@ -1130,8 +1234,8 @@ describe("machine planner and runtime strategies", () => {
         const reentered = yield* ref.changes.pipe(
           Stream.filter((snapshot) =>
             snapshot.status === "active" &&
-            snapshot.state.path === "Loading" &&
-            snapshot.state.value.epoch === 1
+            snapshot.state.state.path === "Loading" &&
+            snapshot.state.state.value.epoch === 1
           ),
           Stream.take(1),
           Stream.runDrain,
@@ -1143,8 +1247,8 @@ describe("machine planner and runtime strategies", () => {
 
         const snapshot = yield* ref.snapshot
         assert.strictEqual(snapshot.status, "active", `${strategy} accepted a stale invoke callback`)
-        assert.strictEqual(snapshot.state.path, "Loading")
-        assert.strictEqual(snapshot.state.value.epoch, 1)
+        assert.strictEqual(snapshot.state.state.path, "Loading")
+        assert.strictEqual(snapshot.state.state.value.epoch, 1)
         assert.strictEqual(generation, 2)
         yield* ref.stop
       }
@@ -1154,10 +1258,11 @@ describe("machine planner and runtime strategies", () => {
     Effect.gen(function*() {
       class ChildIdle extends Schema.TaggedClass<ChildIdle>("StrategyDynamicChildIdle")("ChildIdle", {}) {}
       const childMachine = Machine.make({
-        states: { ChildIdle },
-        events: Machine.events(),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
-      }).handle({ ChildIdle: {} })
+        root: Machine.state({ initial: "ChildIdle", states: { ChildIdle } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
+      }).handle({ states: { ChildIdle: {} } })
       const Child = Machine.childFamily(childMachine)
       class Commissioning extends Schema.TaggedClass<Commissioning>("StrategyDynamicCommissioning")(
         "Commissioning",
@@ -1165,17 +1270,20 @@ describe("machine planner and runtime strategies", () => {
       ) {}
       class Operating extends Schema.TaggedClass<Operating>("StrategyDynamicOperating")("Operating", {}) {}
       const machine = Machine.make({
-        states: { Commissioning, Operating },
-        events: Machine.events(),
-        initial: (to) => to.Commissioning().resolve(({ target }) => target.decoded(new Commissioning({})))
+        root: Machine.state({ initial: "Commissioning", states: { Commissioning, Operating } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Commissioning.decoded(new Commissioning({}))))
       }).handle({
-        Commissioning: {
-          invoke: (from) =>
-            from.effect("commission", ({ children }) => children.spawn(Child("runtime"))).onDone((to) =>
-              to.full.Operating()
-            ).onFailure((to) => to.none)
-        },
-        Operating: {}
+        states: {
+          Commissioning: {
+            invoke: (from) =>
+              from.effect("commission", ({ children }) => children.spawn(Child("runtime"))).onDone((to) =>
+                to.branch.Operating()
+              ).onFailure((to) => to.none)
+          },
+          Operating: {}
+        }
       })
 
       assert.strictEqual(ExecutionPlan.selectExecutionPlanForTesting(machine, "auto").strategy, "indexed-flat")
@@ -1184,7 +1292,7 @@ describe("machine planner and runtime strategies", () => {
       for (const strategy of ["generic", "compiled"] as const) {
         const ref = yield* openWithRuntimeStrategy(machine, strategy)
         yield* ref.changes.pipe(
-          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.path === "Operating"),
+          Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === "Operating"),
           Stream.take(1),
           Stream.runDrain
         )

@@ -29,6 +29,7 @@ import { getNode, getStateNodeSchema } from "./topology.js"
 
 const EncodedSnapshotSchema = Schema.Struct({
   _tag: Schema.Literal("MachineSnapshot"),
+  version: Schema.Literal(2),
   active: Schema.Array(Schema.Struct({
     path: Schema.String,
     value: Schema.optionalKey(Schema.Json)
@@ -412,6 +413,7 @@ export const encodeSnapshot = (
 
     const encoded: Machine.EncodedSnapshot = {
       _tag: "MachineSnapshot" as const,
+      version: 2,
       active,
       ...(completed.length === 0 ? {} : { completed }),
       ...(Object.keys(history).length === 0 ? {} : { history })

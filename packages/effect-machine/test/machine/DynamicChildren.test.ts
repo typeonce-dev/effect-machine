@@ -2,12 +2,17 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Option, Schema, Stream } from "effect"
 import { Machine } from "../../src/index.js"
 
-const waitForPath = <State extends Machine.Machine.AtomicSnapshot<string, unknown>, Event, Error, Output>(
+const waitForPath = <
+  State extends Machine.Machine.CompoundSnapshot<string, unknown, Machine.Machine.AtomicSnapshot<string, unknown>>,
+  Event,
+  Error,
+  Output
+>(
   ref: Machine.MachineRef<State, Event, Error, Output>,
-  path: State["path"]
+  path: State["state"]["path"]
 ) =>
   ref.changes.pipe(
-    Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.path === path),
+    Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === path),
     Stream.take(1),
     Stream.runDrain
   )
@@ -28,28 +33,30 @@ describe("dynamic child machines", () => {
         produced: Schema.Number
       }) {}
       const PlantInput = Schema.Struct({ id: Schema.String, production: Schema.Number })
-      const PlantOwnerEvents = Machine.events(PlantReported)
-      const plantStates = Machine.states({ PlantActive })
+      const PlantOwnerEvents = Machine.eventsFromSchemas(PlantReported)
+      const plantStates = Machine.state({ initial: "PlantActive", states: { PlantActive } })
       const plantMachine = Machine.make({
-        states: plantStates.states,
-        events: Machine.events(Produce, Report),
+        root: plantStates,
+        events: Machine.eventsFromSchemas(Produce, Report),
         input: PlantInput,
         parent: Machine.parent(PlantOwnerEvents),
-        initial: (to) =>
-          to.PlantActive().resolve(({ input, target }) =>
-            target.decoded(new PlantActive({ id: input.id, produced: input.production }))
+        initialConfiguration: (root) =>
+          root.resolve(({ input, target }) =>
+            target.from((to) => to.PlantActive.decoded(new PlantActive({ id: input.id, produced: input.production })))
           )
       }).handle({
-        PlantActive: {
-          on: {
-            Produce: (to) =>
-              to.full.PlantActive().resolve(({ event, state, target }) =>
-                target.decoded(new PlantActive({ ...state, produced: state.produced + event.amount }))
-              ),
-            Report: (to) =>
-              to.none.resolve(({ parent, state }, enqueue) => {
-                enqueue.sendTo(parent, PlantOwnerEvents.PlantReported({ id: state.id, produced: state.produced }))
-              })
+        states: {
+          PlantActive: {
+            on: {
+              Produce: (to) =>
+                to.branch.PlantActive().resolve(({ event, state, target }) =>
+                  target.decoded(new PlantActive({ ...state, produced: state.produced + event.amount }))
+                ),
+              Report: (to) =>
+                to.none.resolve(({ parent, state }, enqueue) => {
+                  enqueue.sendTo(parent, PlantOwnerEvents.PlantReported({ id: state.id, produced: state.produced }))
+                })
+            }
           }
         }
       })
@@ -68,40 +75,44 @@ describe("dynamic child machines", () => {
       class Decommission extends Schema.TaggedClass<Decommission>("DynamicDecommission")("Decommission", {
         id: Schema.String
       }) {}
-      const parentStates = Machine.states({ Commissioning, Operating })
+      const parentStates = Machine.state({ initial: "Commissioning", states: { Commissioning, Operating } })
       const parentMachine = Machine.make({
-        states: parentStates.states,
-        events: Machine.events(PlantOwnerEvents, Grow, Decommission),
+        root: parentStates,
+        events: Machine.eventsFromSchemas(PlantOwnerEvents, Grow, Decommission),
         input: Schema.Array(PlantInput),
-        initial: (to) =>
-          to.Commissioning().resolve(({ input, target }) => target.decoded(new Commissioning({ plants: input })))
+        initialConfiguration: (root) =>
+          root.resolve(({ input, target }) =>
+            target.from((to) => to.Commissioning.decoded(new Commissioning({ plants: input })))
+          )
       }).handle({
-        Commissioning: {
-          invoke: (from) =>
-            from.effect("commission-wave", ({ children, state }) =>
-              Effect.forEach(
-                state.plants,
-                (input) => children.spawn(Plant(input.id), { input }),
-                { discard: true }
-              )).onDone((to) =>
-                to.full.Operating().resolve(({ target }) => target.decoded(new Operating({ reports: 0 })))
-              )
-              .onFailure((to) => to.none)
-        },
-        Operating: {
-          on: {
-            PlantReported: (to) =>
-              to.full.Operating().resolve(({ state, target }) =>
-                target.decoded(new Operating({ reports: state.reports + 1 }))
-              ),
-            Grow: (to) =>
-              to.full.Commissioning().resolve(({ event, target }) =>
-                target.decoded(new Commissioning({ plants: event.plants }))
-              ),
-            Decommission: (to) =>
-              to.none.resolve(({ event }, enqueue) => {
-                enqueue.stop(Plant(event.id))
-              })
+        states: {
+          Commissioning: {
+            invoke: (from) =>
+              from.effect("commission-wave", ({ children, state }) =>
+                Effect.forEach(
+                  state.plants,
+                  (input) => children.spawn(Plant(input.id), { input }),
+                  { discard: true }
+                )).onDone((to) =>
+                  to.branch.Operating().resolve(({ target }) => target.decoded(new Operating({ reports: 0 })))
+                )
+                .onFailure((to) => to.none)
+          },
+          Operating: {
+            on: {
+              PlantReported: (to) =>
+                to.branch.Operating().resolve(({ state, target }) =>
+                  target.decoded(new Operating({ reports: state.reports + 1 }))
+                ),
+              Grow: (to) =>
+                to.branch.Commissioning().resolve(({ event, target }) =>
+                  target.decoded(new Commissioning({ plants: event.plants }))
+                ),
+              Decommission: (to) =>
+                to.none.resolve(({ event }, enqueue) => {
+                  enqueue.stop(Plant(event.id))
+                })
+            }
           }
         }
       })
@@ -121,7 +132,7 @@ describe("dynamic child machines", () => {
       assert.strictEqual(reconstructedFirst.value, first.value)
 
       const produced = yield* first.value.changes.pipe(
-        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.value.produced === 15),
+        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.value.produced === 15),
         Stream.take(1),
         Stream.runDrain,
         Effect.forkChild
@@ -150,14 +161,15 @@ describe("dynamic child machines", () => {
       assert(Option.isSome(firstAfterTransitions))
       assert.strictEqual(firstAfterTransitions.value, first.value)
       assert(Option.isSome(yield* parent.child(Plant("p-3"))))
-      assert.deepStrictEqual(yield* firstAfterTransitions.value.state, {
+      assert.deepStrictEqual((yield* firstAfterTransitions.value.state).state, {
         path: "PlantActive",
         value: new PlantActive({ id: "p-1", produced: 15 })
       })
 
       const reported = yield* parent.changes.pipe(
         Stream.filter((snapshot) =>
-          snapshot.status === "active" && snapshot.state.path === "Operating" && snapshot.state.value.reports === 1
+          snapshot.status === "active" && snapshot.state.state.path === "Operating" &&
+          snapshot.state.state.value.reports === 1
         ),
         Stream.take(1),
         Stream.runDrain,
@@ -188,7 +200,7 @@ describe("dynamic child machines", () => {
       const replacement = yield* Fiber.join(recommissioned)
       assert(Option.isSome(replacement))
       assert.notStrictEqual(replacement.value, first.value)
-      assert.deepStrictEqual(yield* replacement.value.state, {
+      assert.deepStrictEqual((yield* replacement.value.state).state, {
         path: "PlantActive",
         value: new PlantActive({ id: "p-1", produced: 50 })
       })
@@ -201,10 +213,11 @@ describe("dynamic child machines", () => {
     Effect.gen(function*() {
       class ChildIdle extends Schema.TaggedClass<ChildIdle>("DynamicDuplicateChildIdle")("ChildIdle", {}) {}
       const childMachine = Machine.make({
-        states: { ChildIdle },
-        events: Machine.events(),
-        initial: (to) => to.ChildIdle().resolve(({ target }) => target.decoded(new ChildIdle({})))
-      }).handle({ ChildIdle: {} })
+        root: Machine.state({ initial: "ChildIdle", states: { ChildIdle } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
+      }).handle({ states: { ChildIdle: {} } })
       const Child = Machine.childFamily(childMachine)
       class Starting extends Schema.TaggedClass<Starting>("DynamicDuplicateStarting")("Starting", {}) {}
       class DuplicateRejected extends Schema.TaggedClass<DuplicateRejected>("DynamicDuplicateRejected")(
@@ -212,18 +225,21 @@ describe("dynamic child machines", () => {
         {}
       ) {}
       const parentMachine = Machine.make({
-        states: { Starting, DuplicateRejected },
-        events: Machine.events(),
-        initial: (to) => to.Starting().resolve(({ target }) => target.decoded(new Starting({})))
+        root: Machine.state({ initial: "Starting", states: { Starting, DuplicateRejected } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Starting.decoded(new Starting({}))))
       }).handle({
-        Starting: {
-          invoke: (from) =>
-            from.effect("spawn-duplicate", ({ children }) =>
-              children.spawn(Child("same")).pipe(
-                Effect.andThen(children.spawn(Child("same")))
-              )).onDone((to) => to.none).onFailure((to) => to.full.DuplicateRejected())
-        },
-        DuplicateRejected: {}
+        states: {
+          Starting: {
+            invoke: (from) =>
+              from.effect("spawn-duplicate", ({ children }) =>
+                children.spawn(Child("same")).pipe(
+                  Effect.andThen(children.spawn(Child("same")))
+                )).onDone((to) => to.none).onFailure((to) => to.branch.DuplicateRejected())
+          },
+          DuplicateRejected: {}
+        }
       })
 
       const parent = yield* Machine.start(parentMachine)
@@ -240,12 +256,14 @@ describe("dynamic child machines", () => {
       }) {}
       const Input = Schema.Struct({ id: Schema.String })
       const workerMachine = Machine.make({
-        states: { WorkerIdle },
-        events: Machine.events(),
+        root: Machine.state({ initial: "WorkerIdle", states: { WorkerIdle } }),
+        events: Machine.eventsFromSchemas(),
         input: Input,
-        initial: (to) =>
-          to.WorkerIdle().resolve(({ input, target }) => target.decoded(new WorkerIdle({ id: input.id })))
-      }).handle({ WorkerIdle: {} })
+        initialConfiguration: (root) =>
+          root.resolve(({ input, target }) =>
+            target.from((to) => to.WorkerIdle.decoded(new WorkerIdle({ id: input.id })))
+          )
+      }).handle({ states: { WorkerIdle: {} } })
       const Worker = Machine.childFamily(workerMachine)
       let scoped: Machine.ChildMachine.Ref<ReturnType<typeof Worker>> | undefined
       let second: Machine.ChildMachine.Ref<ReturnType<typeof Worker>> | undefined
@@ -268,23 +286,26 @@ describe("dynamic child machines", () => {
       const Supervisor = Machine.childAddress("supervisor")
       class Running extends Schema.TaggedClass<Running>("DynamicLogicRunning")("Running", {}) {}
       const parentMachine = Machine.make({
-        states: { Running },
-        events: Machine.events(),
-        initial: (to) => to.Running().resolve(({ target }) => target.decoded(new Running({})))
+        root: Machine.state({ initial: "Running", states: { Running } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Running.decoded(new Running({}))))
       }).handle({
-        Running: {
-          invoke: (from) => from.logic("supervisor", { address: Supervisor, logic: supervisorLogic })
+        states: {
+          Running: {
+            invoke: (from) => from.logic("supervisor", { address: Supervisor, logic: supervisorLogic })
+          }
         }
       })
 
       const parent = yield* Machine.start(parentMachine)
       assert(scoped !== undefined)
       assert(second !== undefined)
-      assert.deepStrictEqual(yield* scoped.state, {
+      assert.deepStrictEqual((yield* scoped.state).state, {
         path: "WorkerIdle",
         value: new WorkerIdle({ id: "scoped" })
       })
-      assert.deepStrictEqual(yield* second.state, {
+      assert.deepStrictEqual((yield* second.state).state, {
         path: "WorkerIdle",
         value: new WorkerIdle({ id: "second" })
       })
@@ -301,16 +322,19 @@ describe("dynamic child machines", () => {
       }) {}
       class Increment extends Schema.TaggedClass<Increment>("DynamicControlIncrement")("Increment", {}) {}
       const unitMachine = Machine.make({
-        states: { UnitActive },
-        events: Machine.events(Increment),
-        initial: (to) => to.UnitActive().resolve(({ target }) => target.decoded(new UnitActive({ count: 0 })))
+        root: Machine.state({ initial: "UnitActive", states: { UnitActive } }),
+        events: Machine.eventsFromSchemas(Increment),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.UnitActive.decoded(new UnitActive({ count: 0 }))))
       }).handle({
-        UnitActive: {
-          on: {
-            Increment: (to) =>
-              to.full.UnitActive().resolve(({ state, target }) =>
-                target.decoded(new UnitActive({ count: state.count + 1 }))
-              )
+        states: {
+          UnitActive: {
+            on: {
+              Increment: (to) =>
+                to.branch.UnitActive().resolve(({ state, target }) =>
+                  target.decoded(new UnitActive({ count: state.count + 1 }))
+                )
+            }
           }
         }
       })
@@ -318,21 +342,24 @@ describe("dynamic child machines", () => {
       class Managing extends Schema.TaggedClass<Managing>("DynamicControlManaging")("Managing", {}) {}
       class Ready extends Schema.TaggedClass<Ready>("DynamicControlReady")("Ready", {}) {}
       const parentMachine = Machine.make({
-        states: { Managing, Ready },
-        events: Machine.events(),
-        initial: (to) => to.Managing().resolve(({ target }) => target.decoded(new Managing({})))
+        root: Machine.state({ initial: "Managing", states: { Managing, Ready } }),
+        events: Machine.eventsFromSchemas(),
+        initialConfiguration: (root) =>
+          root.resolve(({ target }) => target.from((to) => to.Managing.decoded(new Managing({}))))
       }).handle({
-        Managing: {
-          invoke: (from) =>
-            from.effect("control-units", ({ children }) =>
-              Effect.gen(function*() {
-                yield* children.spawn(Unit("kept"))
-                yield* children.spawn(Unit("stopped"))
-                yield* children.sendTo(Unit("kept"), new Increment({}))
-                yield* children.stop(Unit("stopped"))
-              })).onDone((to) => to.full.Ready()).onFailure((to) => to.none)
-        },
-        Ready: {}
+        states: {
+          Managing: {
+            invoke: (from) =>
+              from.effect("control-units", ({ children }) =>
+                Effect.gen(function*() {
+                  yield* children.spawn(Unit("kept"))
+                  yield* children.spawn(Unit("stopped"))
+                  yield* children.sendTo(Unit("kept"), new Increment({}))
+                  yield* children.stop(Unit("stopped"))
+                })).onDone((to) => to.branch.Ready()).onFailure((to) => to.none)
+          },
+          Ready: {}
+        }
       })
 
       const parent = yield* Machine.start(parentMachine)
@@ -340,7 +367,7 @@ describe("dynamic child machines", () => {
       const kept = yield* parent.child(Unit("kept"))
       assert(Option.isSome(kept))
       yield* kept.value.changes.pipe(
-        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.value.count === 1),
+        Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.value.count === 1),
         Stream.take(1),
         Stream.runDrain,
         Effect.timeout("1 second")

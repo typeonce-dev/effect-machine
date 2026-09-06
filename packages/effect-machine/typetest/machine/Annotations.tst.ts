@@ -12,24 +12,27 @@ const AnnotatedWorkflow = Workflow.annotate({
   designOwner: "editor-platform"
 })
 
-const States = Machine.states({
-  Workflow: {
-    schema: AnnotatedWorkflow,
-    initial: "Idle",
-    states: {
-      Idle,
-      Routing: {
-        type: "choice",
-        annotations: {
-          title: "Select persistence route",
-          description: "Routes according to the current document"
-        }
-      },
-      Recent: {
-        type: "history",
-        annotations: {
-          title: "Previous workflow state",
-          documentation: "https://example.test/docs/history"
+const States = Machine.state({
+  initial: "Workflow",
+  states: {
+    Workflow: {
+      schema: AnnotatedWorkflow,
+      initial: "Idle",
+      states: {
+        Idle,
+        Routing: {
+          type: "choice",
+          annotations: {
+            title: "Select persistence route",
+            description: "Routes according to the current document"
+          }
+        },
+        Recent: {
+          type: "history",
+          annotations: {
+            title: "Previous workflow state",
+            documentation: "https://example.test/docs/history"
+          }
         }
       }
     }
@@ -37,12 +40,14 @@ const States = Machine.states({
 })
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.Workflow.initial.resolve((
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve((
       { target }
-    ) => (target.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))))
+    ) => (target.from((to) =>
+      to.Workflow.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))
+    )))
 })
 
 describe("Machine state annotations", () => {
@@ -56,53 +61,65 @@ describe("Machine state annotations", () => {
   })
 
   it("limits pseudo-state annotations to descriptive metadata", () => {
-    expect(Machine.states).type.not.toBeCallableWith({
-      Workflow: {
-        schema: Workflow,
-        initial: "Idle",
-        states: {
-          Idle,
-          Invalid: { type: "choice", annotations: { arbitrary: () => 1 } }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Workflow",
+      states: {
+        Workflow: {
+          schema: Workflow,
+          initial: "Idle",
+          states: {
+            Idle,
+            Invalid: { type: "choice", annotations: { arbitrary: () => 1 } }
+          }
         }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Workflow: {
-        schema: Workflow,
-        initial: "Idle",
-        states: {
-          Idle,
-          Invalid: { type: "history", annotations: { title: () => "Executable" } }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Workflow",
+      states: {
+        Workflow: {
+          schema: Workflow,
+          initial: "Idle",
+          states: {
+            Idle,
+            Invalid: { type: "history", annotations: { title: () => "Executable" } }
+          }
         }
       }
     })
   })
 
   it("keeps schema-backed APIs unavailable to annotated pseudo-states", () => {
-    expect(Machine.states).type.not.toBeCallableWith({
-      Workflow: {
-        schema: Workflow,
-        initial: "Idle",
-        states: {
-          Idle,
-          Invalid: {
-            type: "choice",
-            schema: Idle,
-            annotations: { title: "Still a pseudo-state" }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Workflow",
+      states: {
+        Workflow: {
+          schema: Workflow,
+          initial: "Idle",
+          states: {
+            Idle,
+            Invalid: {
+              type: "choice",
+              schema: Idle,
+              annotations: { title: "Still a pseudo-state" }
+            }
           }
         }
       }
     })
-    expect(Machine.states).type.not.toBeCallableWith({
-      Workflow: {
-        schema: Workflow,
-        initial: "Idle",
-        states: {
-          Idle,
-          Invalid: {
-            type: "history",
-            states: { Idle },
-            annotations: { title: "Still a pseudo-state" }
+    expect(Machine.state).type.not.toBeCallableWith({
+      initial: "Workflow",
+      states: {
+        Workflow: {
+          schema: Workflow,
+          initial: "Idle",
+          states: {
+            Idle,
+            Invalid: {
+              type: "history",
+              states: { Idle },
+              annotations: { title: "Still a pseudo-state" }
+            }
           }
         }
       }

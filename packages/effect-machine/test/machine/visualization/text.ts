@@ -2,10 +2,12 @@ import type { ActivityDefinition, InspectionApi, MachineValue, StateNode, Transi
 
 const nodeLabel = (node: StateNode, active: ReadonlySet<string>): string => {
   const status = active.has(node.path) ? "●" : "○"
-  const label = node.annotations?.title === undefined ? node.key : `${node.annotations.title} (${node.key})`
+  const label = node.annotations?.title === undefined
+    ? (node.path === "" ? "(root)" : node.key)
+    : `${node.annotations.title} (${node.key})`
   const details: Array<string> = node.type === "atomic" ? [] : [node.type]
   if (node.initial !== undefined) {
-    details.push(`initial: ${node.initial.slice(node.path.length + 1)}`)
+    details.push(`initial: ${node.initial.slice(node.path === "" ? 0 : node.path.length + 1)}`)
   }
   if (node.history !== undefined) {
     details.push(node.history)
