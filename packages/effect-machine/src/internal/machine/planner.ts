@@ -40,6 +40,7 @@ import {
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
+import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import { decodeEventSync, decodeInputSync, decodeStateValueSync } from "./protocol.js"
 import { InitialEventTypeId } from "./symbols.js"
@@ -59,6 +60,11 @@ import {
   makeTarget,
   TargetSnapshotTypeId
 } from "./topology.js"
+import type {
+  EventTransition,
+  TransitionEvaluator,
+  TransitionHandler as CapturedTransitionHandler
+} from "./transition.js"
 
 export type MicrostepPlan<State, Event, E, R> = {
   readonly next: State
@@ -104,21 +110,12 @@ export type MacrostepPlan<State, Event, E, R, Output> =
     }
   )
 
-export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = (
-  context: Context,
-  enqueue: Enqueue<any, any>
-) => Machine.HandlerResult<States, E, R> | Machine.Declined
-
-type TransitionEvaluation<States extends Machine.StateSchemas, E, R> = {
-  readonly result: Machine.HandlerResult<States, E, R> | Machine.Declined
-  readonly branchIndex: number
-  readonly branchKey: string | undefined
-}
-
-type TransitionEvaluator<States extends Machine.StateSchemas, E, R, Context> = (
-  context: Context,
-  enqueue: Enqueue<any, any>
-) => TransitionEvaluation<States, E, R>
+export type TransitionHandler<States extends Machine.StateSchemas, E, R, Context> = CapturedTransitionHandler<
+  States,
+  E,
+  R,
+  Context
+>
 
 type PlanningMachineReferences = {
   readonly self: MachineTarget<any>
@@ -169,16 +166,6 @@ const resolveMachineReferences = (
   rootMachineReferences.set(machine, root)
   return root
 }
-
-type EventTransition<States extends Machine.StateSchemas, E, R, Context> =
-  | TransitionHandler<States, E, R, Context>
-  | {
-    readonly reenter?: boolean
-    readonly declinable?: boolean
-    readonly targets?: ReadonlyArray<string>
-    readonly transition: TransitionHandler<States, E, R, Context>
-    readonly evaluate?: TransitionEvaluator<States, E, R, Context>
-  }
 
 export type MicrostepTransition<States extends Machine.StateSchemas, E, R, Context> = {
   readonly reenter: boolean
@@ -1024,7 +1011,7 @@ const selectInvocationTransition = <
 ): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
   if (!configuration.active.has(event.path)) return []
   const config = machine.handlers[event.path] as Machine.AnyStateConfig | undefined
-  const invoke = InvocationEvent.definitions(config?.invoke).find((definition) => {
+  const invoke = InvocationDefinition.definitions(config?.invoke).find((definition) => {
     const id = "child" in definition ? definition.child?.id : definition.id
     return String(id) === event.id
   })

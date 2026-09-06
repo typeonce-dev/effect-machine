@@ -15,20 +15,17 @@ import type {
   Coverage,
   CoverageSummary,
   EventCoverageItem,
-  InitialTrace,
   Microstep,
   ObservedGraph,
   ObservedGraphEdge,
   ObservedGraphNode,
   PlanCompletion,
-  RunFailure,
   Scenario,
   ScenarioOptions,
   Scenarios,
   SchemaArbitraryDiagnostic,
   StateCoverageItem,
   Trace,
-  TraceStep,
   VerificationLaw,
   VerificationLawGroup,
   VerificationViolation,
@@ -38,117 +35,9 @@ import * as Protocol from "../../machine/protocol.js"
 import { toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
-import { rawConfigurationPaths, run } from "./trace.js"
+import { rawConfigurationPaths } from "./trace.js"
 import { makeTransitionCoverageCollector, sameTransitionTrigger } from "./transitionCoverage.js"
-
-export {
-  advanceCommand,
-  type CausalRuntimeAssertionContext,
-  type CausalRuntimeCommandActual,
-  CausalRuntimeCommandFailure,
-  type CausalRuntimeCommandRecord,
-  type CausalRuntimeCommandResult,
-  type CausalRuntimeInspectionContext,
-  type CausalRuntimeModelOptions,
-  type CausalRuntimeModelStep,
-  type CausalRuntimeTranscript,
-  type CausalVerificationAwaitContext,
-  type CausalVerificationOptions,
-  type CausalVerificationTranscript,
-  checkpointCommand,
-  type EnqueuedRuntimeAssertionContext,
-  type EnqueuedRuntimeCommandActual,
-  type EnqueuedRuntimeCommandRecord,
-  type EnqueuedRuntimeInspectionContext,
-  type EnqueuedRuntimeModelOptions,
-  type EnqueuedRuntimeModelStep,
-  type EnqueuedRuntimeTranscript,
-  formatCausalTranscript,
-  formatEnqueuedTranscript,
-  formatRuntimeTranscript,
-  runCausalCommands,
-  runEnqueuedCommands,
-  runRuntimeCommands,
-  type RuntimeAssertionContext,
-  type RuntimeAwait,
-  type RuntimeCommand,
-  type RuntimeCommandActual,
-  RuntimeCommandFailure,
-  type RuntimeCommandRecord,
-  type RuntimeCommandResult,
-  type RuntimeCommands,
-  runtimeCommands,
-  type RuntimeCommandsDiagnostics,
-  type RuntimeCommandsOptions,
-  type RuntimeInspectionContext,
-  type RuntimeModelOptions,
-  type RuntimeModelStep,
-  RuntimeObservationError,
-  RuntimeSynchronization,
-  type RuntimeTranscript,
-  sendCommand,
-  stopCommand,
-  verifyCausalCommands
-} from "./runtime.js"
-
-export type { SchemaArbitraryOpaqueFilterWarning, SchemaArbitraryReport, SchemaArbitraryWarning } from "./arbitrary.js"
-
-export {
-  compileModel,
-  type FiniteAtomicState,
-  type FiniteAutomaticTransition,
-  type FiniteCompoundState,
-  type FiniteEventTransition,
-  type FiniteFinalState,
-  type FiniteHistoryMutation,
-  type FiniteHistoryScenario,
-  type FiniteHistoryState,
-  type FiniteHistoryTransfer,
-  type FiniteModel,
-  type FiniteModelDiagnostics,
-  type FiniteModelOptions,
-  type FiniteModels,
-  finiteModels,
-  type FiniteParallelState,
-  type FiniteState,
-  type FiniteTransition,
-  type FiniteTransitionTrigger
-} from "./finiteModel.js"
-
-export {
-  ModelVerificationError,
-  type ModelVerificationField,
-  type ModelVerificationLocation,
-  type ModelVerificationMismatch,
-  type ReferenceCompletion,
-  type ReferenceHistoryRecord,
-  type ReferenceInitialStep,
-  type ReferenceMicrostep,
-  type ReferenceState,
-  type ReferenceStateValue,
-  type ReferenceStep,
-  type ReferenceTrace,
-  type ReferenceTransition
-} from "./referenceModel.js"
-
-export { assertInvariants, checkInvariants, Invariant, InvariantError, invariants } from "./invariant.js"
-
-export {
-  assertPlannerRuntimeAgreement,
-  assertRuntimeInvariants,
-  checkRuntimeInvariants,
-  PlannerRuntimeAgreementError,
-  RuntimeInvariantError,
-  runtimeInvariants
-} from "./runtimeInvariant.js"
-
-export { assertReachable, assertUnreachable, explore, findShortest, ReachabilityError } from "./exploration.js"
-
-export { probe, ProbeUnavailableError } from "./probe.js"
-
-export { run }
-
-export const interpretModel = ReferenceModel.interpretModel
+import { sameValue } from "./value.js"
 
 type AnyMachine = Machine.Machine.Any
 
@@ -255,52 +144,6 @@ export const verifyModel = <M extends AnyMachine>(
   model: FiniteModel,
   actualTrace: Trace<M>
 ): Effect.Effect<void, ReferenceModel.ModelVerificationError> => ReferenceModel.verifyModelTrace(model, actualTrace)
-
-const canonicalize = (value: unknown, active: WeakSet<object>): unknown => {
-  if (value === undefined) return { $undefined: true }
-  if (typeof value === "bigint") return { $bigint: String(value) }
-  if (typeof value === "symbol") return { $symbol: String(value) }
-  if (typeof value === "function") return { $function: value.name || "anonymous" }
-  if (typeof value !== "object" || value === null) return value
-  if (active.has(value)) return { $circular: true }
-  active.add(value)
-  let result: unknown
-  if (value instanceof Error) {
-    result = {
-      $error: value.name,
-      message: value.message,
-      ...Object.fromEntries(
-        Object.keys(value).sort().map((
-          key
-        ) => [key, canonicalize((value as unknown as Record<string, unknown>)[key], active)])
-      )
-    }
-  } else if (Array.isArray(value)) {
-    result = value.map((item) => canonicalize(item, active))
-  } else if (value instanceof Date) {
-    result = { $date: value.toISOString() }
-  } else if (value instanceof Map) {
-    result = {
-      $map: Array.from(value, ([key, item]) => [canonicalize(key, active), canonicalize(item, active)]).sort((a, b) =>
-        JSON.stringify(a).localeCompare(JSON.stringify(b))
-      )
-    }
-  } else if (value instanceof Set) {
-    result = {
-      $set: Array.from(value, (item) => canonicalize(item, active)).sort((a, b) =>
-        JSON.stringify(a).localeCompare(JSON.stringify(b))
-      )
-    }
-  } else {
-    result = Object.fromEntries(
-      Object.keys(value).sort().map((key) => [key, canonicalize((value as Record<string, unknown>)[key], active)])
-    )
-  }
-  active.delete(value)
-  return result
-}
-
-const formatValue = (value: unknown): string => JSON.stringify(canonicalize(value, new WeakSet()))
 
 const structuralFingerprint = (value: unknown): string => {
   const references = new WeakMap<object, number>()
@@ -949,8 +792,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const hasOwn = (value: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, key)
 
-const sameValue = (left: unknown, right: unknown): boolean => formatValue(left) === formatValue(right)
-
 const samePaths = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
   left.length === right.length && left.every((path, index) => path === right[index])
 
@@ -995,1103 +836,1039 @@ export const verify = <M extends AnyMachine>(
   machine: M,
   trace: Trace<M>,
   options: VerifyOptions = {}
-): Effect.Effect<void, VerificationError> => {
-  const selected = new Set<VerificationLawGroup>(
-    options.laws ?? ["configuration", "microsteps", "completion", "history", "definitions"]
-  )
-  const nodes = Machine.stateNodes(machine) as ReadonlyArray<PublicStateNode>
-  const initialDefinition = Machine.initialDefinition(machine)
-  const definitions = Machine.transitionDefinitions(machine)
-  const { ancestors, byPath, depth, isDescendantOrSelf } = makeNodeUtilities(nodes)
-  const violations: Array<VerificationViolation> = []
+): Effect.Effect<void, VerificationError> =>
+  Effect.suspend(() => {
+    const selected = new Set<VerificationLawGroup>(
+      options.laws ?? ["configuration", "microsteps", "completion", "history", "definitions"]
+    )
+    const nodes = Machine.stateNodes(machine) as ReadonlyArray<PublicStateNode>
+    const initialDefinition = Machine.initialDefinition(machine)
+    const definitions = Machine.transitionDefinitions(machine)
+    const { ancestors, byPath, depth, isDescendantOrSelf } = makeNodeUtilities(nodes)
+    const violations: Array<VerificationViolation> = []
 
-  const add = (
-    law: VerificationLaw,
-    location: VerificationLocation,
-    message: string,
-    path?: string
-  ): void => {
-    violations.push({
-      law,
-      eventIndex: location.eventIndex,
-      ...(location.microstepIndex === undefined ? {} : { microstepIndex: location.microstepIndex }),
-      ...(path === undefined ? {} : { path }),
-      message
-    })
-  }
-
-  const schemaMatches = (schema: Schema.Top | undefined, value: unknown): boolean => {
-    if (schema === undefined) return false
-    try {
-      return Schema.is(schema)(value)
-    } catch {
-      return false
+    const add = (
+      law: VerificationLaw,
+      location: VerificationLocation,
+      message: string,
+      path?: string
+    ): void => {
+      violations.push({
+        law,
+        eventIndex: location.eventIndex,
+        ...(location.microstepIndex === undefined ? {} : { microstepIndex: location.microstepIndex }),
+        ...(path === undefined ? {} : { path }),
+        message
+      })
     }
-  }
 
-  const inspectSnapshot = (
-    snapshot: unknown,
-    location: VerificationLocation,
-    label: string
-  ): SnapshotInspection => {
-    const active = new Set<string>()
-    const paths: Array<string> = []
-    const values = new Map<string, unknown>()
-    const reportConfiguration = selected.has("configuration")
-    const root = isRecord(snapshot) ? snapshot : undefined
+    const schemaMatches = (schema: Schema.Top | undefined, value: unknown): boolean => {
+      if (schema === undefined) return false
+      try {
+        return Schema.is(schema)(value)
+      } catch {
+        return false
+      }
+    }
 
-    const visit = (current: unknown, expectedParent: string | undefined, expectedPath?: string): void => {
-      if (!isRecord(current)) {
-        if (reportConfiguration) {
-          add("configuration.shape", location, `${label} must contain an object snapshot`)
-        }
-        return
-      }
-      if (typeof current.path !== "string") {
-        if (reportConfiguration) {
-          add("configuration.path", location, `${label} contains a snapshot without a string path`)
-        }
-        return
-      }
-      const path = current.path
-      if (active.has(path)) {
-        if (reportConfiguration) {
-          add("configuration.duplicate", location, `${label} activates state "${path}" more than once`, path)
-        }
-        return
-      }
-      active.add(path)
-      paths.push(path)
-      values.set(path, current.value)
+    const inspectSnapshot = (
+      snapshot: unknown,
+      location: VerificationLocation,
+      label: string
+    ): SnapshotInspection => {
+      const active = new Set<string>()
+      const paths: Array<string> = []
+      const values = new Map<string, unknown>()
+      const reportConfiguration = selected.has("configuration")
+      const root = isRecord(snapshot) ? snapshot : undefined
 
-      const node = byPath.get(path)
-      if (node === undefined) {
-        if (reportConfiguration) {
-          add("configuration.path", location, `${label} activates unknown state "${path}"`, path)
-        }
-        if (isRecord(current.state)) visit(current.state, path)
-        if (isRecord(current.states)) {
-          for (const child of Object.values(current.states)) visit(child, path)
-        }
-        return
-      }
-      if (expectedPath !== undefined && path !== expectedPath && reportConfiguration) {
-        add(
-          "configuration.hierarchy",
-          location,
-          `${label} expected region "${expectedPath}" but found "${path}"`,
-          path
-        )
-      }
-      if (node.parent !== expectedParent && reportConfiguration) {
-        add(
-          "configuration.hierarchy",
-          location,
-          expectedParent === undefined
-            ? `${label} root state "${path}" is not a machine root`
-            : `${label} state "${path}" is not a direct child of "${expectedParent}"`,
-          path
-        )
-      }
-      if (node.type === "history" || node.type === "choice") {
-        if (reportConfiguration) {
-          add("configuration.path", location, `${label} activates ${node.type} pseudo-state "${path}"`, path)
-        }
-        return
-      }
-      if (reportConfiguration && node.schema === undefined && current.value !== undefined) {
-        add("configuration.schema", location, `${label} structural state "${path}" contains a value`, path)
-      } else if (reportConfiguration && node.schema !== undefined && !schemaMatches(node.schema, current.value)) {
-        add("configuration.schema", location, `${label} value for "${path}" does not match its schema`, path)
-      }
-
-      if (node.type === "compound") {
-        if (!isRecord(current.state)) {
+      const visit = (current: unknown, expectedParent: string | undefined, expectedPath?: string): void => {
+        if (!isRecord(current)) {
           if (reportConfiguration) {
-            add(
-              "configuration.compound",
-              location,
-              `${label} compound state "${path}" must have exactly one child`,
-              path
-            )
-          }
-        } else {
-          visit(current.state, path)
-        }
-        if (hasOwn(current, "states") && reportConfiguration) {
-          add("configuration.compound", location, `${label} compound state "${path}" contains parallel regions`, path)
-        }
-        return
-      }
-
-      if (node.type === "parallel") {
-        if (!isRecord(current.states)) {
-          if (reportConfiguration) {
-            add("configuration.parallel", location, `${label} parallel state "${path}" has no region map`, path)
+            add("configuration.shape", location, `${label} must contain an object snapshot`)
           }
           return
         }
-        const expectedKeys = new Set<string>()
-        for (const childPath of node.children) {
-          const child = byPath.get(childPath)
-          if (child === undefined) continue
-          expectedKeys.add(child.key)
-          if (!hasOwn(current.states, child.key)) {
+        if (typeof current.path !== "string") {
+          if (reportConfiguration) {
+            add("configuration.path", location, `${label} contains a snapshot without a string path`)
+          }
+          return
+        }
+        const path = current.path
+        if (active.has(path)) {
+          if (reportConfiguration) {
+            add("configuration.duplicate", location, `${label} activates state "${path}" more than once`, path)
+          }
+          return
+        }
+        active.add(path)
+        paths.push(path)
+        values.set(path, current.value)
+
+        const node = byPath.get(path)
+        if (node === undefined) {
+          if (reportConfiguration) {
+            add("configuration.path", location, `${label} activates unknown state "${path}"`, path)
+          }
+          if (isRecord(current.state)) visit(current.state, path)
+          if (isRecord(current.states)) {
+            for (const child of Object.values(current.states)) visit(child, path)
+          }
+          return
+        }
+        if (expectedPath !== undefined && path !== expectedPath && reportConfiguration) {
+          add(
+            "configuration.hierarchy",
+            location,
+            `${label} expected region "${expectedPath}" but found "${path}"`,
+            path
+          )
+        }
+        if (node.parent !== expectedParent && reportConfiguration) {
+          add(
+            "configuration.hierarchy",
+            location,
+            expectedParent === undefined
+              ? `${label} root state "${path}" is not a machine root`
+              : `${label} state "${path}" is not a direct child of "${expectedParent}"`,
+            path
+          )
+        }
+        if (node.type === "history" || node.type === "choice") {
+          if (reportConfiguration) {
+            add("configuration.path", location, `${label} activates ${node.type} pseudo-state "${path}"`, path)
+          }
+          return
+        }
+        if (reportConfiguration && node.schema === undefined && current.value !== undefined) {
+          add("configuration.schema", location, `${label} structural state "${path}" contains a value`, path)
+        } else if (reportConfiguration && node.schema !== undefined && !schemaMatches(node.schema, current.value)) {
+          add("configuration.schema", location, `${label} value for "${path}" does not match its schema`, path)
+        }
+
+        if (node.type === "compound") {
+          if (!isRecord(current.state)) {
             if (reportConfiguration) {
               add(
-                "configuration.parallel",
+                "configuration.compound",
                 location,
-                `${label} parallel state "${path}" omits region "${child.key}"`,
-                childPath
+                `${label} compound state "${path}" must have exactly one child`,
+                path
               )
             }
           } else {
-            visit(current.states[child.key], path, child.path)
+            visit(current.state, path)
           }
+          if (hasOwn(current, "states") && reportConfiguration) {
+            add("configuration.compound", location, `${label} compound state "${path}" contains parallel regions`, path)
+          }
+          return
         }
-        for (const key of Object.keys(current.states)) {
-          if (!expectedKeys.has(key)) {
+
+        if (node.type === "parallel") {
+          if (!isRecord(current.states)) {
             if (reportConfiguration) {
-              add(
-                "configuration.parallel",
-                location,
-                `${label} parallel state "${path}" contains extra region "${key}"`,
-                path
-              )
+              add("configuration.parallel", location, `${label} parallel state "${path}" has no region map`, path)
             }
-            visit(current.states[key], path)
+            return
           }
+          const expectedKeys = new Set<string>()
+          for (const childPath of node.children) {
+            const child = byPath.get(childPath)
+            if (child === undefined) continue
+            expectedKeys.add(child.key)
+            if (!hasOwn(current.states, child.key)) {
+              if (reportConfiguration) {
+                add(
+                  "configuration.parallel",
+                  location,
+                  `${label} parallel state "${path}" omits region "${child.key}"`,
+                  childPath
+                )
+              }
+            } else {
+              visit(current.states[child.key], path, child.path)
+            }
+          }
+          for (const key of Object.keys(current.states)) {
+            if (!expectedKeys.has(key)) {
+              if (reportConfiguration) {
+                add(
+                  "configuration.parallel",
+                  location,
+                  `${label} parallel state "${path}" contains extra region "${key}"`,
+                  path
+                )
+              }
+              visit(current.states[key], path)
+            }
+          }
+          if (hasOwn(current, "state") && reportConfiguration) {
+            add("configuration.parallel", location, `${label} parallel state "${path}" contains a compound child`, path)
+          }
+          return
         }
-        if (hasOwn(current, "state") && reportConfiguration) {
-          add("configuration.parallel", location, `${label} parallel state "${path}" contains a compound child`, path)
+
+        if ((hasOwn(current, "state") || hasOwn(current, "states")) && reportConfiguration) {
+          add("configuration.shape", location, `${label} leaf state "${path}" contains active children`, path)
         }
+      }
+
+      visit(snapshot, undefined)
+      return { active, paths, values, root }
+    }
+
+    const validateTraceConfiguration = (
+      expected: SnapshotInspection,
+      actual: ReadonlyArray<string>,
+      location: VerificationLocation,
+      label: string
+    ): void => {
+      if (selected.has("configuration") && !samePaths(expected.paths, actual)) {
+        add(
+          "configuration.trace",
+          location,
+          `${label} configuration [${actual.join(", ")}] does not match snapshot [${expected.paths.join(", ")}]`
+        )
+      }
+    }
+
+    const validateHistory = (
+      snapshot: SnapshotInspection,
+      location: VerificationLocation,
+      label: string
+    ): void => {
+      if (!selected.has("history") || snapshot.root === undefined || !hasOwn(snapshot.root, "history")) return
+      const history = snapshot.root.history
+      if (!isRecord(history)) {
+        add("history.record", location, `${label} history metadata must be a record`)
         return
       }
-
-      if ((hasOwn(current, "state") || hasOwn(current, "states")) && reportConfiguration) {
-        add("configuration.shape", location, `${label} leaf state "${path}" contains active children`, path)
-      }
-    }
-
-    visit(snapshot, undefined)
-    return { active, paths, values, root }
-  }
-
-  const validateTraceConfiguration = (
-    expected: SnapshotInspection,
-    actual: ReadonlyArray<string>,
-    location: VerificationLocation,
-    label: string
-  ): void => {
-    if (selected.has("configuration") && !samePaths(expected.paths, actual)) {
-      add(
-        "configuration.trace",
-        location,
-        `${label} configuration [${actual.join(", ")}] does not match snapshot [${expected.paths.join(", ")}]`
-      )
-    }
-  }
-
-  const validateHistory = (
-    snapshot: SnapshotInspection,
-    location: VerificationLocation,
-    label: string
-  ): void => {
-    if (!selected.has("history") || snapshot.root === undefined || !hasOwn(snapshot.root, "history")) return
-    const history = snapshot.root.history
-    if (!isRecord(history)) {
-      add("history.record", location, `${label} history metadata must be a record`)
-      return
-    }
-    for (const [historyPath, unknownEntry] of Object.entries(history)) {
-      const historyNode = byPath.get(historyPath)
-      if (historyNode === undefined || historyNode.type !== "history" || historyNode.parent === undefined) {
-        add("history.path", location, `${label} contains unknown history record "${historyPath}"`, historyPath)
-        continue
-      }
-      if (!isRecord(unknownEntry)) {
-        add("history.record", location, `${label} history record "${historyPath}" must be an object`, historyPath)
-        continue
-      }
-      const entry = unknownEntry
-      if (entry.mode !== historyNode.history) {
-        add(
-          "history.mode",
-          location,
-          `${label} history record "${historyPath}" has mode "${
-            String(entry.mode)
-          }", expected "${historyNode.history}"`,
-          historyPath
-        )
-      }
-      if (!Array.isArray(entry.active) || !entry.active.every((path) => typeof path === "string")) {
-        add(
-          "history.record",
-          location,
-          `${label} history record "${historyPath}" must contain string paths`,
-          historyPath
-        )
-        continue
-      }
-      if (!isRecord(entry.values)) {
-        add(
-          "history.record",
-          location,
-          `${label} history record "${historyPath}" must contain a values record`,
-          historyPath
-        )
-        continue
-      }
-
-      const rememberedPaths = entry.active as ReadonlyArray<string>
-      const remembered = new Set<string>()
-      for (const path of rememberedPaths) {
-        if (remembered.has(path)) {
-          add("history.path", location, `${label} history record "${historyPath}" repeats "${path}"`, path)
+      for (const [historyPath, unknownEntry] of Object.entries(history)) {
+        const historyNode = byPath.get(historyPath)
+        if (historyNode === undefined || historyNode.type !== "history" || historyNode.parent === undefined) {
+          add("history.path", location, `${label} contains unknown history record "${historyPath}"`, historyPath)
           continue
         }
-        remembered.add(path)
-        const node = byPath.get(path)
-        if (node === undefined || node.type === "history" || node.type === "choice") {
+        if (!isRecord(unknownEntry)) {
+          add("history.record", location, `${label} history record "${historyPath}" must be an object`, historyPath)
+          continue
+        }
+        const entry = unknownEntry
+        if (entry.mode !== historyNode.history) {
           add(
-            "history.path",
+            "history.mode",
             location,
-            `${label} history record "${historyPath}" contains invalid state "${path}"`,
-            path
+            `${label} history record "${historyPath}" has mode "${
+              String(entry.mode)
+            }", expected "${historyNode.history}"`,
+            historyPath
+          )
+        }
+        if (!Array.isArray(entry.active) || !entry.active.every((path) => typeof path === "string")) {
+          add(
+            "history.record",
+            location,
+            `${label} history record "${historyPath}" must contain string paths`,
+            historyPath
           )
           continue
         }
-        const inOwnerSubtree = isDescendantOrSelf(path, historyNode.parent)
-        const inOwnerAncestry = ancestors(historyNode.parent).includes(path)
-        if (!inOwnerSubtree && !inOwnerAncestry) {
+        if (!isRecord(entry.values)) {
           add(
-            "history.path",
+            "history.record",
             location,
-            `${label} history record "${historyPath}" contains state "${path}" outside its owner`,
-            path
+            `${label} history record "${historyPath}" must contain a values record`,
+            historyPath
           )
+          continue
         }
-        const hasValue = hasOwn(entry.values, path)
-        if (node.schema === undefined && hasValue) {
-          add(
-            "history.value",
-            location,
-            `${label} history record "${historyPath}" values structural state "${path}"`,
-            path
-          )
-        } else if (node.schema !== undefined && !hasValue) {
-          add("history.value", location, `${label} history record "${historyPath}" omits value for "${path}"`, path)
-        } else if (node.schema !== undefined && !schemaMatches(node.schema, entry.values[path])) {
-          add(
-            "history.value",
-            location,
-            `${label} history value for "${path}" does not match its state schema`,
-            path
-          )
-        }
-        if (
-          entry.mode === "shallow" && isDescendantOrSelf(path, historyNode.parent) && path !== historyNode.parent &&
-          node.parent !== historyNode.parent
-        ) {
-          add(
-            "history.shallow",
-            location,
-            `${label} shallow history record "${historyPath}" contains deep descendant "${path}"`,
-            path
-          )
-        }
-      }
-      for (const path of Object.keys(entry.values)) {
-        if (!remembered.has(path)) {
-          add("history.value", location, `${label} history record "${historyPath}" has extra value "${path}"`, path)
-        }
-      }
-      if (entry.mode === "deep") {
-        for (const path of remembered) {
-          if (!isDescendantOrSelf(path, historyNode.parent) || path === historyNode.parent) continue
-          let parent: string | undefined = byPath.get(path)?.parent
-          while (parent !== undefined && isDescendantOrSelf(parent, historyNode.parent)) {
-            if (!remembered.has(parent)) {
-              add(
-                "history.deep",
-                location,
-                `${label} deep history record "${historyPath}" remembers "${path}" without ancestor "${parent}"`,
-                path
-              )
-            }
-            if (parent === historyNode.parent) break
-            parent = byPath.get(parent)?.parent
+
+        const rememberedPaths = entry.active as ReadonlyArray<string>
+        const remembered = new Set<string>()
+        for (const path of rememberedPaths) {
+          if (remembered.has(path)) {
+            add("history.path", location, `${label} history record "${historyPath}" repeats "${path}"`, path)
+            continue
           }
-        }
-      }
-      for (const ancestor of ancestors(historyNode.parent)) {
-        if (!remembered.has(ancestor)) {
-          add(
-            "history.path",
-            location,
-            `${label} history record "${historyPath}" omits owner ancestry state "${ancestor}"`,
-            ancestor
-          )
-        }
-      }
-
-      const validateRememberedControl = (path: string, recurse: boolean): void => {
-        const node = byPath.get(path)
-        if (node === undefined) return
-        const activeChildren = node.children.filter((child) => remembered.has(child))
-        if (node.type === "compound") {
-          if (activeChildren.length !== 1) {
+          remembered.add(path)
+          const node = byPath.get(path)
+          if (node === undefined || node.type === "history" || node.type === "choice") {
             add(
-              entry.mode === "deep" ? "history.deep" : "history.shallow",
+              "history.path",
               location,
-              `${label} history record "${historyPath}" must remember one child of compound state "${path}"`,
+              `${label} history record "${historyPath}" contains invalid state "${path}"`,
               path
             )
-          } else if (recurse) {
-            validateRememberedControl(activeChildren[0]!, true)
+            continue
           }
-        } else if (node.type === "parallel") {
-          for (const child of node.children) {
-            if (!remembered.has(child)) {
+          const inOwnerSubtree = isDescendantOrSelf(path, historyNode.parent)
+          const inOwnerAncestry = ancestors(historyNode.parent).includes(path)
+          if (!inOwnerSubtree && !inOwnerAncestry) {
+            add(
+              "history.path",
+              location,
+              `${label} history record "${historyPath}" contains state "${path}" outside its owner`,
+              path
+            )
+          }
+          const hasValue = hasOwn(entry.values, path)
+          if (node.schema === undefined && hasValue) {
+            add(
+              "history.value",
+              location,
+              `${label} history record "${historyPath}" values structural state "${path}"`,
+              path
+            )
+          } else if (node.schema !== undefined && !hasValue) {
+            add("history.value", location, `${label} history record "${historyPath}" omits value for "${path}"`, path)
+          } else if (node.schema !== undefined && !schemaMatches(node.schema, entry.values[path])) {
+            add(
+              "history.value",
+              location,
+              `${label} history value for "${path}" does not match its state schema`,
+              path
+            )
+          }
+          if (
+            entry.mode === "shallow" && isDescendantOrSelf(path, historyNode.parent) && path !== historyNode.parent &&
+            node.parent !== historyNode.parent
+          ) {
+            add(
+              "history.shallow",
+              location,
+              `${label} shallow history record "${historyPath}" contains deep descendant "${path}"`,
+              path
+            )
+          }
+        }
+        for (const path of Object.keys(entry.values)) {
+          if (!remembered.has(path)) {
+            add("history.value", location, `${label} history record "${historyPath}" has extra value "${path}"`, path)
+          }
+        }
+        if (entry.mode === "deep") {
+          for (const path of remembered) {
+            if (!isDescendantOrSelf(path, historyNode.parent) || path === historyNode.parent) continue
+            let parent: string | undefined = byPath.get(path)?.parent
+            while (parent !== undefined && isDescendantOrSelf(parent, historyNode.parent)) {
+              if (!remembered.has(parent)) {
+                add(
+                  "history.deep",
+                  location,
+                  `${label} deep history record "${historyPath}" remembers "${path}" without ancestor "${parent}"`,
+                  path
+                )
+              }
+              if (parent === historyNode.parent) break
+              parent = byPath.get(parent)?.parent
+            }
+          }
+        }
+        for (const ancestor of ancestors(historyNode.parent)) {
+          if (!remembered.has(ancestor)) {
+            add(
+              "history.path",
+              location,
+              `${label} history record "${historyPath}" omits owner ancestry state "${ancestor}"`,
+              ancestor
+            )
+          }
+        }
+
+        const validateRememberedControl = (path: string, recurse: boolean): void => {
+          const node = byPath.get(path)
+          if (node === undefined) return
+          const activeChildren = node.children.filter((child) => remembered.has(child))
+          if (node.type === "compound") {
+            if (activeChildren.length !== 1) {
               add(
                 entry.mode === "deep" ? "history.deep" : "history.shallow",
                 location,
-                `${label} history record "${historyPath}" omits parallel region "${child}"`,
-                child
+                `${label} history record "${historyPath}" must remember one child of compound state "${path}"`,
+                path
               )
             } else if (recurse) {
-              validateRememberedControl(child, true)
+              validateRememberedControl(activeChildren[0]!, true)
+            }
+          } else if (node.type === "parallel") {
+            for (const child of node.children) {
+              if (!remembered.has(child)) {
+                add(
+                  entry.mode === "deep" ? "history.deep" : "history.shallow",
+                  location,
+                  `${label} history record "${historyPath}" omits parallel region "${child}"`,
+                  child
+                )
+              } else if (recurse) {
+                validateRememberedControl(child, true)
+              }
+            }
+          }
+        }
+        validateRememberedControl(historyNode.parent, entry.mode === "deep")
+      }
+    }
+
+    const isCompletedControl = (path: string, active: ReadonlySet<string>): boolean => {
+      if (!active.has(path)) return false
+      const node = byPath.get(path)
+      if (node === undefined) return false
+      if (node.type === "final") return true
+      if (node.type === "compound") {
+        const child = node.children.find((candidate) => active.has(candidate))
+        return child !== undefined && byPath.get(child)?.type === "final"
+      }
+      if (node.type === "parallel") {
+        return node.children.length > 0 && node.children.every((child) => isCompletedControl(child, active))
+      }
+      return false
+    }
+
+    const completionSchema = (path: string, active: ReadonlySet<string>): Schema.Top | undefined => {
+      const node = byPath.get(path)
+      if (node === undefined) return undefined
+      if (node.type === "compound") {
+        const child = node.children.find((candidate) => active.has(candidate))
+        return child === undefined ? undefined : completionSchema(child, active)
+      }
+      return node.output ?? Schema.Void
+    }
+
+    const validateCompletions = (
+      snapshot: SnapshotInspection,
+      location: VerificationLocation,
+      label: string,
+      settled: boolean
+    ): ReadonlyMap<string, unknown> => {
+      const result = new Map<string, unknown>()
+      if (!selected.has("completion") || snapshot.root === undefined) {
+        return result
+      }
+      if (hasOwn(snapshot.root, "completed")) {
+        const completed = snapshot.root.completed
+        if (!Array.isArray(completed)) {
+          add("completion.record", location, `${label} completed metadata must be an array`)
+        } else {
+          for (const unknownEntry of completed) {
+            if (!isRecord(unknownEntry) || typeof unknownEntry.path !== "string") {
+              add("completion.record", location, `${label} contains an invalid completion record`)
+              continue
+            }
+            const path = unknownEntry.path
+            if (result.has(path)) {
+              add("completion.record", location, `${label} repeats completion "${path}"`, path)
+              continue
+            }
+            result.set(path, unknownEntry.output)
+            if (!snapshot.active.has(path) || !isCompletedControl(path, snapshot.active)) {
+              add("completion.record", location, `${label} completion "${path}" is not actively complete`, path)
+              continue
+            }
+            const schema = completionSchema(path, snapshot.active)
+            if (!schemaMatches(schema, unknownEntry.output)) {
+              add(
+                "completion.output",
+                location,
+                `${label} completion output for "${path}" does not match its schema`,
+                path
+              )
             }
           }
         }
       }
-      validateRememberedControl(historyNode.parent, entry.mode === "deep")
-    }
-  }
-
-  const isCompletedControl = (path: string, active: ReadonlySet<string>): boolean => {
-    if (!active.has(path)) return false
-    const node = byPath.get(path)
-    if (node === undefined) return false
-    if (node.type === "final") return true
-    if (node.type === "compound") {
-      const child = node.children.find((candidate) => active.has(candidate))
-      return child !== undefined && byPath.get(child)?.type === "final"
-    }
-    if (node.type === "parallel") {
-      return node.children.length > 0 && node.children.every((child) => isCompletedControl(child, active))
-    }
-    return false
-  }
-
-  const completionSchema = (path: string, active: ReadonlySet<string>): Schema.Top | undefined => {
-    const node = byPath.get(path)
-    if (node === undefined) return undefined
-    if (node.type === "compound") {
-      const child = node.children.find((candidate) => active.has(candidate))
-      return child === undefined ? undefined : completionSchema(child, active)
-    }
-    return node.output ?? Schema.Void
-  }
-
-  const validateCompletions = (
-    snapshot: SnapshotInspection,
-    location: VerificationLocation,
-    label: string,
-    settled: boolean
-  ): ReadonlyMap<string, unknown> => {
-    const result = new Map<string, unknown>()
-    if (!selected.has("completion") || snapshot.root === undefined) {
+      if (settled) {
+        for (const path of snapshot.paths) {
+          if (isCompletedControl(path, snapshot.active) && !result.has(path)) {
+            add("completion.record", location, `${label} omits settled completion "${path}"`, path)
+          }
+        }
+      }
       return result
     }
-    if (hasOwn(snapshot.root, "completed")) {
-      const completed = snapshot.root.completed
-      if (!Array.isArray(completed)) {
-        add("completion.record", location, `${label} completed metadata must be an array`)
-      } else {
-        for (const unknownEntry of completed) {
-          if (!isRecord(unknownEntry) || typeof unknownEntry.path !== "string") {
-            add("completion.record", location, `${label} contains an invalid completion record`)
-            continue
-          }
-          const path = unknownEntry.path
-          if (result.has(path)) {
-            add("completion.record", location, `${label} repeats completion "${path}"`, path)
-            continue
-          }
-          result.set(path, unknownEntry.output)
-          if (!snapshot.active.has(path) || !isCompletedControl(path, snapshot.active)) {
-            add("completion.record", location, `${label} completion "${path}" is not actively complete`, path)
-            continue
-          }
-          const schema = completionSchema(path, snapshot.active)
-          if (!schemaMatches(schema, unknownEntry.output)) {
-            add(
-              "completion.output",
-              location,
-              `${label} completion output for "${path}" does not match its schema`,
-              path
-            )
-          }
-        }
+
+    const validateSnapshotMetadata = (
+      snapshot: SnapshotInspection,
+      location: VerificationLocation,
+      label: string,
+      settled = false
+    ): ReadonlyMap<string, unknown> => {
+      validateHistory(snapshot, location, label)
+      return validateCompletions(snapshot, location, label, settled)
+    }
+
+    const sameControl = (left: SnapshotInspection, right: SnapshotInspection): boolean => {
+      if (!samePaths(left.paths, right.paths)) return false
+      for (const path of left.paths) {
+        if (!sameValue(left.values.get(path), right.values.get(path))) return false
       }
+      return sameValue(left.root?.history, right.root?.history)
     }
-    if (settled) {
-      for (const path of snapshot.paths) {
-        if (isCompletedControl(path, snapshot.active) && !result.has(path)) {
-          add("completion.record", location, `${label} omits settled completion "${path}"`, path)
-        }
+
+    const sameActivePaths = (left: SnapshotInspection, right: SnapshotInspection): boolean =>
+      left.active.size === right.active.size && Array.from(left.active).every((path) => right.active.has(path))
+
+    const sortedPaths = (paths: ReadonlyArray<string>, direction: "entry" | "exit"): ReadonlyArray<string> =>
+      [...new Set(paths)].sort((left, right) => {
+        const depthDifference = direction === "entry" ? depth(left) - depth(right) : depth(right) - depth(left)
+        if (depthDifference !== 0) return depthDifference
+        const leftOrder = byPath.get(left)?.order ?? Number.MAX_SAFE_INTEGER
+        const rightOrder = byPath.get(right)?.order ?? Number.MAX_SAFE_INTEGER
+        return direction === "entry" ? leftOrder - rightOrder : rightOrder - leftOrder
+      })
+
+    const transitionBranch = (
+      transition: Microstep<M>["transitions"][number]
+    ): Machine.Machine.TransitionBranch | undefined => {
+      const definition = definitions.find((candidate) =>
+        candidate.source === transition.source && candidate.reenter === transition.reenter &&
+        sameTransitionTrigger(candidate.trigger, transition.trigger)
+      )
+      return definition === undefined || !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
+          transition.branchIndex >= definition.branches.length
+        ? undefined
+        : definition.branches[transition.branchIndex]
+    }
+
+    const validateTransitionDefinition = (
+      transition: Microstep<M>["transitions"][number],
+      location: VerificationLocation
+    ): Machine.Machine.TransitionBranch | undefined => {
+      if (!selected.has("definitions")) return undefined
+      const definition = definitions.find((candidate) =>
+        candidate.source === transition.source && candidate.reenter === transition.reenter &&
+        sameTransitionTrigger(candidate.trigger, transition.trigger)
+      )
+      if (definition === undefined) {
+        add(
+          "definitions.transition",
+          location,
+          `retained transition from "${transition.source}" has no public definition`,
+          transition.source
+        )
+        return undefined
       }
-    }
-    return result
-  }
-
-  const validateSnapshotMetadata = (
-    snapshot: SnapshotInspection,
-    location: VerificationLocation,
-    label: string,
-    settled = false
-  ): ReadonlyMap<string, unknown> => {
-    validateHistory(snapshot, location, label)
-    return validateCompletions(snapshot, location, label, settled)
-  }
-
-  const sameControl = (left: SnapshotInspection, right: SnapshotInspection): boolean => {
-    if (!samePaths(left.paths, right.paths)) return false
-    for (const path of left.paths) {
-      if (!sameValue(left.values.get(path), right.values.get(path))) return false
-    }
-    return sameValue(left.root?.history, right.root?.history)
-  }
-
-  const sameActivePaths = (left: SnapshotInspection, right: SnapshotInspection): boolean =>
-    left.active.size === right.active.size && Array.from(left.active).every((path) => right.active.has(path))
-
-  const sortedPaths = (paths: ReadonlyArray<string>, direction: "entry" | "exit"): ReadonlyArray<string> =>
-    [...new Set(paths)].sort((left, right) => {
-      const depthDifference = direction === "entry" ? depth(left) - depth(right) : depth(right) - depth(left)
-      if (depthDifference !== 0) return depthDifference
-      const leftOrder = byPath.get(left)?.order ?? Number.MAX_SAFE_INTEGER
-      const rightOrder = byPath.get(right)?.order ?? Number.MAX_SAFE_INTEGER
-      return direction === "entry" ? leftOrder - rightOrder : rightOrder - leftOrder
-    })
-
-  const transitionBranch = (
-    transition: Microstep<M>["transitions"][number]
-  ): Machine.Machine.TransitionBranch | undefined => {
-    const definition = definitions.find((candidate) =>
-      candidate.source === transition.source && candidate.reenter === transition.reenter &&
-      sameTransitionTrigger(candidate.trigger, transition.trigger)
-    )
-    return definition === undefined || !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
+      if (
+        !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
         transition.branchIndex >= definition.branches.length
-      ? undefined
-      : definition.branches[transition.branchIndex]
-  }
+      ) {
+        add(
+          "definitions.branchIndex",
+          location,
+          `retained transition from "${transition.source}" selected invalid branch index ${transition.branchIndex}`,
+          transition.source
+        )
+        return undefined
+      }
+      const branch = definition.branches[transition.branchIndex]!
+      const expectedBranchKey = branch.type === "branch" ? branch.key : undefined
+      if (transition.branchKey !== expectedBranchKey) {
+        add(
+          "definitions.branchKey",
+          location,
+          `retained transition from "${transition.source}" selected branch key ` +
+            `"${String(transition.branchKey)}" instead of "${String(expectedBranchKey)}"`,
+          transition.source
+        )
+        return undefined
+      }
+      if (!targetWithinSelection(transition.target, branch, byPath)) {
+        const expected = branch.selection.kind === "none"
+          ? "an explicitly targetless result"
+          : `selection ${branch.selection.kind}:${branch.selection.scope}:${String(branch.selection.path)}`
+        add(
+          "definitions.selection",
+          location,
+          `transition branch ${transition.branchIndex} from "${transition.source}" returned ` +
+            `target "${String(transition.target)}" outside ${expected}`,
+          transition.target === undefined ? transition.source : String(transition.target)
+        )
+      }
+      if (
+        transition.updates.length !== branch.updates.length ||
+        transition.updates.some((path, index) => path !== branch.updates[index])
+      ) {
+        add(
+          "definitions.selection",
+          location,
+          `transition branch ${transition.branchIndex} from "${transition.source}" reported retained owner updates ` +
+            `${JSON.stringify(transition.updates)} instead of ${JSON.stringify(branch.updates)}`,
+          transition.source
+        )
+      }
+      return branch
+    }
 
-  const validateTransitionDefinition = (
-    transition: Microstep<M>["transitions"][number],
-    location: VerificationLocation
-  ): Machine.Machine.TransitionBranch | undefined => {
-    if (!selected.has("definitions")) return undefined
-    const definition = definitions.find((candidate) =>
-      candidate.source === transition.source && candidate.reenter === transition.reenter &&
-      sameTransitionTrigger(candidate.trigger, transition.trigger)
-    )
-    if (definition === undefined) {
-      add(
-        "definitions.transition",
-        location,
-        `retained transition from "${transition.source}" has no public definition`,
-        transition.source
-      )
-      return undefined
-    }
-    if (
-      !Number.isSafeInteger(transition.branchIndex) || transition.branchIndex < 0 ||
-      transition.branchIndex >= definition.branches.length
-    ) {
-      add(
-        "definitions.branchIndex",
-        location,
-        `retained transition from "${transition.source}" selected invalid branch index ${transition.branchIndex}`,
-        transition.source
-      )
-      return undefined
-    }
-    const branch = definition.branches[transition.branchIndex]!
-    const expectedBranchKey = branch.type === "branch" ? branch.key : undefined
-    if (transition.branchKey !== expectedBranchKey) {
-      add(
-        "definitions.branchKey",
-        location,
-        `retained transition from "${transition.source}" selected branch key ` +
-          `"${String(transition.branchKey)}" instead of "${String(expectedBranchKey)}"`,
-        transition.source
-      )
-      return undefined
-    }
-    if (!targetWithinSelection(transition.target, branch, byPath)) {
-      const expected = branch.selection.kind === "none"
-        ? "an explicitly targetless result"
-        : `selection ${branch.selection.kind}:${branch.selection.scope}:${String(branch.selection.path)}`
-      add(
-        "definitions.selection",
-        location,
-        `transition branch ${transition.branchIndex} from "${transition.source}" returned ` +
-          `target "${String(transition.target)}" outside ${expected}`,
-        transition.target === undefined ? transition.source : String(transition.target)
-      )
-    }
-    if (
-      transition.updates.length !== branch.updates.length ||
-      transition.updates.some((path, index) => path !== branch.updates[index])
-    ) {
-      add(
-        "definitions.selection",
-        location,
-        `transition branch ${transition.branchIndex} from "${transition.source}" reported retained owner updates ` +
-          `${JSON.stringify(transition.updates)} instead of ${JSON.stringify(branch.updates)}`,
-        transition.source
-      )
-    }
-    return branch
-  }
+    const validateTransitionResolutions = (
+      transitions: Microstep<M>["transitions"],
+      branches: ReadonlyArray<Machine.Machine.TransitionBranch | undefined>,
+      location: VerificationLocation
+    ): void => {
+      if (!selected.has("definitions")) return
 
-  const validateTransitionResolutions = (
-    transitions: Microstep<M>["transitions"],
-    branches: ReadonlyArray<Machine.Machine.TransitionBranch | undefined>,
-    location: VerificationLocation
-  ): void => {
-    if (!selected.has("definitions")) return
-
-    const choiceResolution = (
-      start: string,
-      afterIndex: number,
-      nested: boolean
-    ): { readonly found: boolean; readonly target: string | undefined } => {
-      const seen = new Set<string>()
-      let choice = start
-      let cursor = afterIndex + 1
-      let first = true
-      while (!seen.has(choice)) {
-        seen.add(choice)
-        let choiceIndex = -1
-        for (let index = cursor; index < transitions.length; index++) {
-          const candidate = transitions[index]!
-          if (
-            candidate.trigger.type === "choice" &&
-            (candidate.source === choice || first && nested && isDescendantOrSelf(String(candidate.source), choice))
-          ) {
-            choiceIndex = index
-            break
+      const choiceResolution = (
+        start: string,
+        afterIndex: number,
+        nested: boolean
+      ): { readonly found: boolean; readonly target: string | undefined } => {
+        const seen = new Set<string>()
+        let choice = start
+        let cursor = afterIndex + 1
+        let first = true
+        while (!seen.has(choice)) {
+          seen.add(choice)
+          let choiceIndex = -1
+          for (let index = cursor; index < transitions.length; index++) {
+            const candidate = transitions[index]!
+            if (
+              candidate.trigger.type === "choice" &&
+              (candidate.source === choice || first && nested && isDescendantOrSelf(String(candidate.source), choice))
+            ) {
+              choiceIndex = index
+              break
+            }
+          }
+          if (choiceIndex === -1) return { found: false, target: undefined }
+          const transition = transitions[choiceIndex]!
+          if (branches[choiceIndex] === undefined) return { found: false, target: undefined }
+          const target = transition.target === undefined ? undefined : String(transition.target)
+          if (target === undefined) return { found: true, target: undefined }
+          const targetNode = byPath.get(target)
+          if (targetNode?.type === "choice") {
+            choice = target
+            cursor = choiceIndex + 1
+            first = false
+            continue
+          }
+          return {
+            found: true,
+            target: targetNode?.type === "history" ? targetNode.parent : target
           }
         }
-        if (choiceIndex === -1) return { found: false, target: undefined }
-        const transition = transitions[choiceIndex]!
-        if (branches[choiceIndex] === undefined) return { found: false, target: undefined }
-        const target = transition.target === undefined ? undefined : String(transition.target)
-        if (target === undefined) return { found: true, target: undefined }
-        const targetNode = byPath.get(target)
-        if (targetNode?.type === "choice") {
-          choice = target
-          cursor = choiceIndex + 1
-          first = false
-          continue
-        }
-        return {
-          found: true,
-          target: targetNode?.type === "history" ? targetNode.parent : target
-        }
+        return { found: false, target: undefined }
       }
-      return { found: false, target: undefined }
-    }
 
-    transitions.forEach((transition, index) => {
-      if (branches[index] === undefined) return
-      const target = transition.target === undefined ? undefined : String(transition.target)
-      const resolvedTarget = transition.resolvedTarget === undefined ? undefined : String(transition.resolvedTarget)
-      const targetNode = target === undefined ? undefined : byPath.get(target)
-      let expected = target
-      let explanation = transition.updates.length > 0
-        ? target === undefined
-          ? `update owner "${transition.updates.join("\", \"")}"`
-          : `target "${target}" and update owner "${transition.updates.join("\", \"")}"`
-        : target === undefined
-        ? "an unresolved targetless transition"
-        : `target "${target}"`
+      transitions.forEach((transition, index) => {
+        if (branches[index] === undefined) return
+        const target = transition.target === undefined ? undefined : String(transition.target)
+        const resolvedTarget = transition.resolvedTarget === undefined ? undefined : String(transition.resolvedTarget)
+        const targetNode = target === undefined ? undefined : byPath.get(target)
+        let expected = target
+        let explanation = transition.updates.length > 0
+          ? target === undefined
+            ? `update owner "${transition.updates.join("\", \"")}"`
+            : `target "${target}" and update owner "${transition.updates.join("\", \"")}"`
+          : target === undefined
+          ? "an unresolved targetless transition"
+          : `target "${target}"`
 
-      if (transition.trigger.type === "choice") {
-        explanation = target === undefined ? "a targetless choice edge" : `choice edge target "${target}"`
-      } else if (targetNode?.type === "history") {
-        expected = targetNode.parent
-        explanation = `history owner "${String(targetNode.parent)}"`
-      } else if (targetNode?.type === "choice") {
-        const resolution = choiceResolution(targetNode.path, index, false)
-        if (!resolution.found) {
+        if (transition.trigger.type === "choice") {
+          explanation = target === undefined ? "a targetless choice edge" : `choice edge target "${target}"`
+        } else if (targetNode?.type === "history") {
+          expected = targetNode.parent
+          explanation = `history owner "${String(targetNode.parent)}"`
+        } else if (targetNode?.type === "choice") {
+          const resolution = choiceResolution(targetNode.path, index, false)
+          if (!resolution.found) {
+            add(
+              "definitions.resolution",
+              location,
+              `transition from "${transition.source}" targets choice "${target}" without an exact retained route`,
+              target
+            )
+            return
+          }
+          expected = resolution.target
+          explanation = expected === undefined ?
+            `targetless route from choice "${target}"` :
+            `choice route from "${target}" to "${expected}"`
+        } else if (
+          resolvedTarget !== target &&
+          (targetNode?.type === "compound" || targetNode?.type === "parallel")
+        ) {
+          const resolution = choiceResolution(targetNode.path, index, true)
+          if (resolution.found) {
+            expected = resolution.target
+            explanation = expected === undefined ?
+              `targetless nested choice route from "${target}"` :
+              `nested choice route from "${target}" to "${expected}"`
+          }
+        }
+
+        if (resolvedTarget !== expected) {
           add(
             "definitions.resolution",
             location,
-            `transition from "${transition.source}" targets choice "${target}" without an exact retained route`,
-            target
+            `transition branch ${transition.branchIndex} from "${transition.source}" resolved to ` +
+              `"${String(transition.resolvedTarget)}" instead of ${explanation}`,
+            resolvedTarget ?? target ?? String(transition.source)
           )
-          return
         }
-        expected = resolution.target
-        explanation = expected === undefined ?
-          `targetless route from choice "${target}"` :
-          `choice route from "${target}" to "${expected}"`
-      } else if (
-        resolvedTarget !== target &&
-        (targetNode?.type === "compound" || targetNode?.type === "parallel")
-      ) {
-        const resolution = choiceResolution(targetNode.path, index, true)
-        if (resolution.found) {
-          expected = resolution.target
-          explanation = expected === undefined ?
-            `targetless nested choice route from "${target}"` :
-            `nested choice route from "${target}" to "${expected}"`
-        }
-      }
-
-      if (resolvedTarget !== expected) {
-        add(
-          "definitions.resolution",
-          location,
-          `transition branch ${transition.branchIndex} from "${transition.source}" resolved to ` +
-            `"${String(transition.resolvedTarget)}" instead of ${explanation}`,
-          resolvedTarget ?? target ?? String(transition.source)
-        )
-      }
-    })
-  }
-
-  const initialChoiceRouteRoot = (): string | undefined => {
-    const routing = trace.initial.plan.microsteps[0]
-    if (
-      routing === undefined || routing.changed ||
-      routing.transitions.length === 0 ||
-      !routing.transitions.every((transition) => transition.trigger.type === "choice")
-    ) {
-      return undefined
+      })
     }
 
-    const reachableScopes: Array<string> = [initialDefinition.target]
-    let terminalRoot: string | undefined
-    for (const transition of routing.transitions) {
-      const source = String(transition.source)
-      const branch = transitionBranch(transition)
+    const initialChoiceRouteRoot = (): string | undefined => {
+      const routing = trace.initial.plan.microsteps[0]
       if (
-        branch === undefined || !targetWithinSelection(transition.target, branch, byPath) ||
-        !reachableScopes.some((scope) => isDescendantOrSelf(source, scope))
+        routing === undefined || routing.changed ||
+        routing.transitions.length === 0 ||
+        !routing.transitions.every((transition) => transition.trigger.type === "choice")
       ) {
         return undefined
       }
-      const target = transition.target === undefined ? undefined : String(transition.target)
-      if (target === undefined) return undefined
-      const targetNode = byPath.get(target)
-      const scope = targetNode?.type === "history" ? targetNode.parent : target
-      if (scope === undefined) return undefined
-      reachableScopes.push(scope)
-      terminalRoot = ancestors(scope)[0]
-    }
-    return terminalRoot
-  }
 
-  const validateMicrostep = (
-    microstep: Microstep<M, any>,
-    before: SnapshotInspection,
-    after: SnapshotInspection,
-    location: VerificationLocation
-  ): void => {
-    if (selected.has("microsteps")) {
-      const uniqueExit = new Set(microstep.exitPaths)
-      const uniqueEntry = new Set(microstep.entryPaths)
-      const reentering = microstep.transitions.filter((transition) => transition.reenter)
-      const inReentryScope = (
-        path: string,
-        transition: Microstep<M>["transitions"][number]
-      ): boolean => {
-        const target = transition.target === undefined ? undefined : byPath.get(String(transition.target))
-        if (target?.type === "history" && target.parent !== undefined && before.active.has(target.parent)) {
-          return isDescendantOrSelf(path, target.parent)
+      const reachableScopes: Array<string> = [initialDefinition.target]
+      let terminalRoot: string | undefined
+      for (const transition of routing.transitions) {
+        const source = String(transition.source)
+        const branch = transitionBranch(transition)
+        if (
+          branch === undefined || !targetWithinSelection(transition.target, branch, byPath) ||
+          !reachableScopes.some((scope) => isDescendantOrSelf(source, scope))
+        ) {
+          return undefined
         }
-        const parent = byPath.get(String(transition.source))?.parent
-        return parent === undefined || path !== parent && isDescendantOrSelf(path, parent)
+        const target = transition.target === undefined ? undefined : String(transition.target)
+        if (target === undefined) return undefined
+        const targetNode = byPath.get(target)
+        const scope = targetNode?.type === "history" ? targetNode.parent : target
+        if (scope === undefined) return undefined
+        reachableScopes.push(scope)
+        terminalRoot = ancestors(scope)[0]
       }
-      const commonLifecycleExplained = (path: string): boolean =>
-        microstep.transitions.some((transition) => {
-          if (transition.reenter) {
-            const target = transition.target === undefined ? undefined : byPath.get(String(transition.target))
-            if (target?.type === "history" && target.parent !== undefined && before.active.has(target.parent)) {
-              // Reentry into an active history owner has a dedicated boundary:
-              // only the owner subtree is exited and entered, regardless of
-              // the ordinary source/resolved-target LCA.
-              return isDescendantOrSelf(path, target.parent)
+      return terminalRoot
+    }
+
+    const validateMicrostep = (
+      microstep: Microstep<M, any>,
+      before: SnapshotInspection,
+      after: SnapshotInspection,
+      location: VerificationLocation
+    ): void => {
+      if (selected.has("microsteps")) {
+        const uniqueExit = new Set(microstep.exitPaths)
+        const uniqueEntry = new Set(microstep.entryPaths)
+        const reentering = microstep.transitions.filter((transition) => transition.reenter)
+        const inReentryScope = (
+          path: string,
+          transition: Microstep<M>["transitions"][number]
+        ): boolean => {
+          const target = transition.target === undefined ? undefined : byPath.get(String(transition.target))
+          if (target?.type === "history" && target.parent !== undefined && before.active.has(target.parent)) {
+            return isDescendantOrSelf(path, target.parent)
+          }
+          const parent = byPath.get(String(transition.source))?.parent
+          return parent === undefined || path !== parent && isDescendantOrSelf(path, parent)
+        }
+        const commonLifecycleExplained = (path: string): boolean =>
+          microstep.transitions.some((transition) => {
+            if (transition.reenter) {
+              const target = transition.target === undefined ? undefined : byPath.get(String(transition.target))
+              if (target?.type === "history" && target.parent !== undefined && before.active.has(target.parent)) {
+                // Reentry into an active history owner has a dedicated boundary:
+                // only the owner subtree is exited and entered, regardless of
+                // the ordinary source/resolved-target LCA.
+                return isDescendantOrSelf(path, target.parent)
+              }
+              if (inReentryScope(path, transition)) return true
             }
-            if (inReentryScope(path, transition)) return true
+            if (transition.resolvedTarget === undefined) return false
+            const sourceAncestors = ancestors(String(transition.source))
+            const targetAncestors = ancestors(String(transition.resolvedTarget))
+            let boundary: string | undefined
+            for (let index = 0; index < Math.min(sourceAncestors.length, targetAncestors.length); index++) {
+              if (sourceAncestors[index] !== targetAncestors[index]) break
+              boundary = sourceAncestors[index]
+            }
+            return boundary === undefined || path !== boundary && isDescendantOrSelf(path, boundary)
+          })
+        if (uniqueExit.size !== microstep.exitPaths.length) {
+          add("microsteps.unique", location, "microstep exit paths contain duplicates")
+        }
+        if (uniqueEntry.size !== microstep.entryPaths.length) {
+          add("microsteps.unique", location, "microstep entry paths contain duplicates")
+        }
+        if (!samePaths(microstep.exitPaths, sortedPaths(microstep.exitPaths, "exit"))) {
+          add("microsteps.order", location, "microstep exit paths are not deepest-first in reverse document order")
+        }
+        if (!samePaths(microstep.entryPaths, sortedPaths(microstep.entryPaths, "entry"))) {
+          add("microsteps.order", location, "microstep entry paths are not parent-first in document order")
+        }
+        for (const path of microstep.exitPaths) {
+          if (!before.active.has(path)) {
+            add("microsteps.activeBefore", location, `microstep exits inactive state "${path}"`, path)
           }
-          if (transition.resolvedTarget === undefined) return false
-          const sourceAncestors = ancestors(String(transition.source))
-          const targetAncestors = ancestors(String(transition.resolvedTarget))
-          let boundary: string | undefined
-          for (let index = 0; index < Math.min(sourceAncestors.length, targetAncestors.length); index++) {
-            if (sourceAncestors[index] !== targetAncestors[index]) break
-            boundary = sourceAncestors[index]
+        }
+        for (const path of microstep.entryPaths) {
+          if (!after.active.has(path)) {
+            add("microsteps.activeAfter", location, `microstep enters state "${path}" absent from its next state`, path)
           }
-          return boundary === undefined || path !== boundary && isDescendantOrSelf(path, boundary)
-        })
-      if (uniqueExit.size !== microstep.exitPaths.length) {
-        add("microsteps.unique", location, "microstep exit paths contain duplicates")
-      }
-      if (uniqueEntry.size !== microstep.entryPaths.length) {
-        add("microsteps.unique", location, "microstep entry paths contain duplicates")
-      }
-      if (!samePaths(microstep.exitPaths, sortedPaths(microstep.exitPaths, "exit"))) {
-        add("microsteps.order", location, "microstep exit paths are not deepest-first in reverse document order")
-      }
-      if (!samePaths(microstep.entryPaths, sortedPaths(microstep.entryPaths, "entry"))) {
-        add("microsteps.order", location, "microstep entry paths are not parent-first in document order")
-      }
-      for (const path of microstep.exitPaths) {
-        if (!before.active.has(path)) {
-          add("microsteps.activeBefore", location, `microstep exits inactive state "${path}"`, path)
         }
-      }
-      for (const path of microstep.entryPaths) {
-        if (!after.active.has(path)) {
-          add("microsteps.activeAfter", location, `microstep enters state "${path}" absent from its next state`, path)
-        }
-      }
-      for (const path of before.paths) {
-        if (!after.active.has(path) && !uniqueExit.has(path)) {
-          add("microsteps.activeBefore", location, `removed state "${path}" is missing from exit paths`, path)
-        }
-      }
-      for (const path of after.paths) {
-        if (!before.active.has(path) && !uniqueEntry.has(path)) {
-          add("microsteps.activeAfter", location, `added state "${path}" is missing from entry paths`, path)
-        }
-      }
-      for (const transition of reentering) {
         for (const path of before.paths) {
-          if (inReentryScope(path, transition) && !uniqueExit.has(path)) {
-            add(
-              "microsteps.reentry",
-              location,
-              `reentering transition from "${String(transition.source)}" omits exit lifecycle for "${path}"`,
-              path
-            )
+          if (!after.active.has(path) && !uniqueExit.has(path)) {
+            add("microsteps.activeBefore", location, `removed state "${path}" is missing from exit paths`, path)
           }
         }
         for (const path of after.paths) {
-          if (inReentryScope(path, transition) && !uniqueEntry.has(path)) {
+          if (!before.active.has(path) && !uniqueEntry.has(path)) {
+            add("microsteps.activeAfter", location, `added state "${path}" is missing from entry paths`, path)
+          }
+        }
+        for (const transition of reentering) {
+          for (const path of before.paths) {
+            if (inReentryScope(path, transition) && !uniqueExit.has(path)) {
+              add(
+                "microsteps.reentry",
+                location,
+                `reentering transition from "${String(transition.source)}" omits exit lifecycle for "${path}"`,
+                path
+              )
+            }
+          }
+          for (const path of after.paths) {
+            if (inReentryScope(path, transition) && !uniqueEntry.has(path)) {
+              add(
+                "microsteps.reentry",
+                location,
+                `reentering transition from "${String(transition.source)}" omits entry lifecycle for "${path}"`,
+                path
+              )
+            }
+          }
+        }
+        for (const path of before.paths) {
+          if (!after.active.has(path) || !uniqueExit.has(path) && !uniqueEntry.has(path)) continue
+          if (!commonLifecycleExplained(path)) {
             add(
               "microsteps.reentry",
               location,
-              `reentering transition from "${String(transition.source)}" omits entry lifecycle for "${path}"`,
+              `common state "${path}" has lifecycle without a reentering transition`,
+              path
+            )
+          } else if (!uniqueExit.has(path) || !uniqueEntry.has(path)) {
+            add(
+              "microsteps.reentry",
+              location,
+              `reentered common state "${path}" must have both exit and entry lifecycle`,
               path
             )
           }
         }
-      }
-      for (const path of before.paths) {
-        if (!after.active.has(path) || !uniqueExit.has(path) && !uniqueEntry.has(path)) continue
-        if (!commonLifecycleExplained(path)) {
-          add(
-            "microsteps.reentry",
-            location,
-            `common state "${path}" has lifecycle without a reentering transition`,
-            path
-          )
-        } else if (!uniqueExit.has(path) || !uniqueEntry.has(path)) {
-          add(
-            "microsteps.reentry",
-            location,
-            `reentered common state "${path}" must have both exit and entry lifecycle`,
-            path
-          )
+        if (!microstep.changed) {
+          if (microstep.exitPaths.length > 0 || microstep.entryPaths.length > 0) {
+            add("microsteps.changed", location, "unchanged microstep contains entry or exit paths")
+          }
+          if (!sameActivePaths(before, after)) {
+            add("microsteps.changed", location, "unchanged microstep changes its active state paths")
+          }
+        } else if (
+          microstep.exitPaths.length === 0 && microstep.entryPaths.length === 0 && sameActivePaths(before, after)
+        ) {
+          add("microsteps.changed", location, "changed microstep has no control-state change or reentry evidence")
+        }
+        for (const transition of microstep.transitions) {
+          if (
+            !before.active.has(String(transition.source)) &&
+            byPath.get(String(transition.source))?.type !== "choice"
+          ) {
+            add(
+              "microsteps.activeBefore",
+              location,
+              `transition source "${String(transition.source)}" is inactive before the microstep`,
+              String(transition.source)
+            )
+          }
+          if (
+            transition.resolvedTarget !== undefined && !after.active.has(String(transition.resolvedTarget)) &&
+            microstep.transitions.length === 1
+          ) {
+            add(
+              "microsteps.activeAfter",
+              location,
+              `resolved target "${String(transition.resolvedTarget)}" is inactive after the microstep`,
+              String(transition.resolvedTarget)
+            )
+          }
         }
       }
-      if (!microstep.changed) {
-        if (microstep.exitPaths.length > 0 || microstep.entryPaths.length > 0) {
-          add("microsteps.changed", location, "unchanged microstep contains entry or exit paths")
+      const branches = microstep.transitions.map((transition) => validateTransitionDefinition(transition, location))
+      validateTransitionResolutions(microstep.transitions, branches, location)
+    }
+
+    const validatePlanCompletion = (
+      plan: PlanCompletion<M>,
+      snapshot: SnapshotInspection,
+      completions: ReadonlyMap<string, unknown>,
+      location: VerificationLocation,
+      label: string
+    ): void => {
+      if (!selected.has("completion")) return
+      const rootPath = snapshot.paths.find((path) => byPath.get(path)?.parent === undefined)
+      const hasRootDoneTransition = rootPath !== undefined &&
+        definitions.some((definition) => definition.source === rootPath && definition.trigger.type === "done")
+      const terminal = rootPath !== undefined && isCompletedControl(rootPath, snapshot.active) && !hasRootDoneTransition
+      if (plan.done !== terminal) {
+        add(
+          "completion.done",
+          location,
+          `${label} reports done=${String(plan.done)} for terminal=${String(terminal)}`,
+          rootPath
+        )
+      }
+      if (plan.done) {
+        if (rootPath === undefined || !completions.has(rootPath)) {
+          add("completion.output", location, `${label} done plan has no root completion output`, rootPath)
+        } else if (!sameValue(plan.output, completions.get(rootPath))) {
+          add("completion.output", location, `${label} output differs from its root completion`, rootPath)
         }
-        if (!sameActivePaths(before, after)) {
-          add("microsteps.changed", location, "unchanged microstep changes its active state paths")
-        }
-      } else if (
-        microstep.exitPaths.length === 0 && microstep.entryPaths.length === 0 && sameActivePaths(before, after)
+      } else if (plan.output !== undefined) {
+        add("completion.output", location, `${label} non-done plan exposes an output`, rootPath)
+      }
+    }
+
+    const initialLocation: VerificationLocation = { eventIndex: undefined }
+    const starting = inspectSnapshot(trace.initial.startingState, initialLocation, "initial starting state")
+    if (selected.has("definitions")) {
+      const startingRoots = starting.paths.filter((path) => byPath.get(path)?.parent === undefined)
+      const routedRoot = startingRoots.length === 1 && startingRoots[0] !== initialDefinition.target
+        ? initialChoiceRouteRoot()
+        : undefined
+      if (
+        startingRoots.length !== 1 ||
+        startingRoots[0] !== initialDefinition.target && startingRoots[0] !== routedRoot
       ) {
-        add("microsteps.changed", location, "changed microstep has no control-state change or reentry evidence")
-      }
-      for (const transition of microstep.transitions) {
-        if (
-          !before.active.has(String(transition.source)) &&
-          byPath.get(String(transition.source))?.type !== "choice"
-        ) {
-          add(
-            "microsteps.activeBefore",
-            location,
-            `transition source "${String(transition.source)}" is inactive before the microstep`,
-            String(transition.source)
-          )
-        }
-        if (
-          transition.resolvedTarget !== undefined && !after.active.has(String(transition.resolvedTarget)) &&
-          microstep.transitions.length === 1
-        ) {
-          add(
-            "microsteps.activeAfter",
-            location,
-            `resolved target "${String(transition.resolvedTarget)}" is inactive after the microstep`,
-            String(transition.resolvedTarget)
-          )
-        }
+        add(
+          "definitions.initial",
+          initialLocation,
+          `initial starting state selected roots [${startingRoots.join(", ")}] without an exact route from ` +
+            `declared root "${initialDefinition.target}"`,
+          startingRoots[0] ?? initialDefinition.target
+        )
       }
     }
-    const branches = microstep.transitions.map((transition) => validateTransitionDefinition(transition, location))
-    validateTransitionResolutions(microstep.transitions, branches, location)
-  }
-
-  const validatePlanCompletion = (
-    plan: PlanCompletion<M>,
-    snapshot: SnapshotInspection,
-    completions: ReadonlyMap<string, unknown>,
-    location: VerificationLocation,
-    label: string
-  ): void => {
-    if (!selected.has("completion")) return
-    const rootPath = snapshot.paths.find((path) => byPath.get(path)?.parent === undefined)
-    const hasRootDoneTransition = rootPath !== undefined &&
-      definitions.some((definition) => definition.source === rootPath && definition.trigger.type === "done")
-    const terminal = rootPath !== undefined && isCompletedControl(rootPath, snapshot.active) && !hasRootDoneTransition
-    if (plan.done !== terminal) {
-      add(
-        "completion.done",
-        location,
-        `${label} reports done=${String(plan.done)} for terminal=${String(terminal)}`,
-        rootPath
-      )
-    }
-    if (plan.done) {
-      if (rootPath === undefined || !completions.has(rootPath)) {
-        add("completion.output", location, `${label} done plan has no root completion output`, rootPath)
-      } else if (!sameValue(plan.output, completions.get(rootPath))) {
-        add("completion.output", location, `${label} output differs from its root completion`, rootPath)
-      }
-    } else if (plan.output !== undefined) {
-      add("completion.output", location, `${label} non-done plan exposes an output`, rootPath)
-    }
-  }
-
-  const initialLocation: VerificationLocation = { eventIndex: undefined }
-  const starting = inspectSnapshot(trace.initial.startingState, initialLocation, "initial starting state")
-  if (selected.has("definitions")) {
-    const startingRoots = starting.paths.filter((path) => byPath.get(path)?.parent === undefined)
-    const routedRoot = startingRoots.length === 1 && startingRoots[0] !== initialDefinition.target
-      ? initialChoiceRouteRoot()
-      : undefined
-    if (
-      startingRoots.length !== 1 ||
-      startingRoots[0] !== initialDefinition.target && startingRoots[0] !== routedRoot
-    ) {
-      add(
-        "definitions.initial",
-        initialLocation,
-        `initial starting state selected roots [${startingRoots.join(", ")}] without an exact route from ` +
-          `declared root "${initialDefinition.target}"`,
-        startingRoots[0] ?? initialDefinition.target
-      )
-    }
-  }
-  validateSnapshotMetadata(starting, initialLocation, "initial starting state")
-  validateTraceConfiguration(
-    starting,
-    trace.initial.startingConfiguration as ReadonlyArray<string>,
-    initialLocation,
-    "initial starting"
-  )
-  if (selected.has("microsteps")) {
-    if (new Set(trace.initial.initialEntryPaths).size !== trace.initial.initialEntryPaths.length) {
-      add("microsteps.unique", initialLocation, "initial entry paths contain duplicates")
-    }
-    if (!samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, starting.paths)) {
-      add(
-        "microsteps.order",
-        initialLocation,
-        "initial entry paths do not cover the starting configuration in definition order"
-      )
-    }
-  }
-
-  let current = starting
-  for (let index = 0; index < trace.initial.plan.microsteps.length; index++) {
-    const location: VerificationLocation = { eventIndex: undefined, microstepIndex: index }
-    const microstep = trace.initial.plan.microsteps[index]!
-    const next = inspectSnapshot(microstep.next, location, `initial microstep ${index} next state`)
-    validateSnapshotMetadata(next, location, `initial microstep ${index} next state`)
-    validateMicrostep(microstep, current, next, location)
-    current = next
-  }
-  const initialState = inspectSnapshot(trace.initial.plan.state, initialLocation, "initial plan state")
-  const initialCompletions = validateSnapshotMetadata(initialState, initialLocation, "initial plan state", true)
-  if (selected.has("microsteps") && !sameControl(current, initialState)) {
-    add("microsteps.continuity", initialLocation, "initial plan state does not continue from its final microstep")
-  }
-  validatePlanCompletion(trace.initial.plan, initialState, initialCompletions, initialLocation, "initial plan")
-  validateTraceConfiguration(
-    initialState,
-    trace.initial.configuration as ReadonlyArray<string>,
-    initialLocation,
-    "initial"
-  )
-  if (selected.has("microsteps") && !sameValue(trace.initial.startingState, trace.initial.plan.startingState)) {
-    add("microsteps.continuity", initialLocation, "initial trace starting state differs from its plan")
-  }
-  if (
-    selected.has("microsteps") &&
-    !samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, trace.initial.plan.initialEntryPaths)
-  ) {
-    add("microsteps.continuity", initialLocation, "initial trace entry paths differ from its plan")
-  }
-
-  let previous = initialState
-  for (let eventIndex = 0; eventIndex < trace.steps.length; eventIndex++) {
-    const step = trace.steps[eventIndex]!
-    const location: VerificationLocation = { eventIndex }
-    const before = inspectSnapshot(step.before, location, `event ${eventIndex} before state`)
-    validateSnapshotMetadata(before, location, `event ${eventIndex} before state`, true)
+    validateSnapshotMetadata(starting, initialLocation, "initial starting state")
     validateTraceConfiguration(
-      before,
-      step.beforeConfiguration as ReadonlyArray<string>,
-      location,
-      `event ${eventIndex} before`
+      starting,
+      trace.initial.startingConfiguration as ReadonlyArray<string>,
+      initialLocation,
+      "initial starting"
     )
     if (selected.has("microsteps")) {
-      if (step.index !== eventIndex) {
-        add("microsteps.continuity", location, `trace step index ${step.index} does not equal ${eventIndex}`)
+      if (new Set(trace.initial.initialEntryPaths).size !== trace.initial.initialEntryPaths.length) {
+        add("microsteps.unique", initialLocation, "initial entry paths contain duplicates")
       }
-      if (!sameValue(previous.root, before.root)) {
-        add("microsteps.continuity", location, `event ${eventIndex} before state does not equal the previous state`)
-      }
-      if (!sameValue(step.event, trace.scenario.events[eventIndex])) {
-        add("microsteps.continuity", location, `event ${eventIndex} differs from its scenario event`)
+      if (!samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, starting.paths)) {
+        add(
+          "microsteps.order",
+          initialLocation,
+          "initial entry paths do not cover the starting configuration in definition order"
+        )
       }
     }
 
-    current = before
-    for (let microstepIndex = 0; microstepIndex < step.plan.microsteps.length; microstepIndex++) {
-      const microstepLocation: VerificationLocation = { eventIndex, microstepIndex }
-      const microstep = step.plan.microsteps[microstepIndex]!
-      const next = inspectSnapshot(
-        microstep.next,
-        microstepLocation,
-        `event ${eventIndex} microstep ${microstepIndex} next state`
-      )
-      validateSnapshotMetadata(next, microstepLocation, `event ${eventIndex} microstep ${microstepIndex} next state`)
-      validateMicrostep(microstep, current, next, microstepLocation)
+    let current = starting
+    for (let index = 0; index < trace.initial.plan.microsteps.length; index++) {
+      const location: VerificationLocation = { eventIndex: undefined, microstepIndex: index }
+      const microstep = trace.initial.plan.microsteps[index]!
+      const next = inspectSnapshot(microstep.next, location, `initial microstep ${index} next state`)
+      validateSnapshotMetadata(next, location, `initial microstep ${index} next state`)
+      validateMicrostep(microstep, current, next, location)
       current = next
     }
-
-    const plannedNext = inspectSnapshot(step.plan.next, location, `event ${eventIndex} plan next state`)
-    const completions = validateSnapshotMetadata(plannedNext, location, `event ${eventIndex} plan next state`, true)
-    if (selected.has("microsteps") && !sameControl(current, plannedNext)) {
-      add(
-        "microsteps.continuity",
-        location,
-        `event ${eventIndex} plan next state does not continue its final microstep`
-      )
+    const initialState = inspectSnapshot(trace.initial.plan.state, initialLocation, "initial plan state")
+    const initialCompletions = validateSnapshotMetadata(initialState, initialLocation, "initial plan state", true)
+    if (selected.has("microsteps") && !sameControl(current, initialState)) {
+      add("microsteps.continuity", initialLocation, "initial plan state does not continue from its final microstep")
     }
-    validatePlanCompletion(step.plan, plannedNext, completions, location, `event ${eventIndex} plan`)
-
-    const after = inspectSnapshot(step.after, location, `event ${eventIndex} after state`)
-    validateSnapshotMetadata(after, location, `event ${eventIndex} after state`, true)
+    validatePlanCompletion(trace.initial.plan, initialState, initialCompletions, initialLocation, "initial plan")
     validateTraceConfiguration(
-      after,
-      step.afterConfiguration as ReadonlyArray<string>,
-      location,
-      `event ${eventIndex} after`
+      initialState,
+      trace.initial.configuration as ReadonlyArray<string>,
+      initialLocation,
+      "initial"
     )
-    if (selected.has("microsteps") && !sameValue(step.plan.next, step.after)) {
-      add("microsteps.continuity", location, `event ${eventIndex} after state differs from its plan next state`)
+    if (selected.has("microsteps") && !sameValue(trace.initial.startingState, trace.initial.plan.startingState)) {
+      add("microsteps.continuity", initialLocation, "initial trace starting state differs from its plan")
     }
-    previous = after
-  }
+    if (
+      selected.has("microsteps") &&
+      !samePaths(trace.initial.initialEntryPaths as ReadonlyArray<string>, trace.initial.plan.initialEntryPaths)
+    ) {
+      add("microsteps.continuity", initialLocation, "initial trace entry paths differ from its plan")
+    }
 
-  const finalEventIndex = trace.steps.length === 0 ? undefined : trace.steps.length - 1
-  const finalLocation: VerificationLocation = { eventIndex: finalEventIndex }
-  const final = inspectSnapshot(trace.final, finalLocation, "trace final state")
-  validateSnapshotMetadata(final, finalLocation, "trace final state", true)
-  validateTraceConfiguration(final, trace.finalConfiguration as ReadonlyArray<string>, finalLocation, "final")
-  if (selected.has("microsteps") && !sameValue(previous.root, final.root)) {
-    add("microsteps.continuity", finalLocation, "trace final state differs from its final planned state")
-  }
-
-  return violations.length === 0 ? Effect.void : Effect.fail(new VerificationError({ violations }))
-}
-
-const formatConfiguration = (paths: ReadonlyArray<string>): string => `[${paths.join(", ")}]`
-
-const formatMicrosteps = <M extends AnyMachine>(microsteps: ReadonlyArray<Microstep<M, any>>): Array<string> =>
-  microsteps.map((microstep, index) => {
-    const transitions = microstep.transitions.map((transition) => ({
-      source: transition.source,
-      trigger: transition.trigger,
-      reenter: transition.reenter,
-      branchIndex: transition.branchIndex,
-      target: transition.target,
-      resolvedTarget: transition.resolvedTarget
-    }))
-    return `  microstep ${index}: event=${formatValue(microstep.event)} changed=${String(microstep.changed)} ` +
-      `transitions=${formatValue(transitions)} exit=${formatConfiguration(microstep.exitPaths)} ` +
-      `entry=${formatConfiguration(microstep.entryPaths)} commands=${microstep.commands.length} ` +
-      `raised=${formatValue(microstep.raisedEvents)} emitted=${formatValue(microstep.emittedEvents)} ` +
-      `next=${formatValue(microstep.next)}`
-  })
-
-const formatInitial = <M extends AnyMachine>(initial: InitialTrace<M>): Array<string> => [
-  `initial: startingConfiguration=${formatConfiguration(initial.startingConfiguration)} ` +
-  `startingState=${formatValue(initial.startingState)} initialEntry=${
-    formatConfiguration(initial.initialEntryPaths)
-  } ` +
-  `configuration=${formatConfiguration(initial.configuration)} state=${formatValue(initial.plan.state)} ` +
-  `done=${String(initial.plan.done)} output=${formatValue(initial.plan.output)} ` +
-  `commands=${initial.plan.commands.length} emitted=${formatValue(initial.plan.emittedEvents)}`,
-  ...formatMicrosteps(initial.plan.microsteps)
-]
-
-const formatStep = <M extends AnyMachine>(step: TraceStep<M>): Array<string> => [
-  `step ${step.index}: event=${formatValue(step.event)} before=${formatConfiguration(step.beforeConfiguration)} ` +
-  `after=${formatConfiguration(step.afterConfiguration)} state=${formatValue(step.after)} ` +
-  `done=${String(step.plan.done)} output=${formatValue(step.plan.output)} ` +
-  `commands=${step.plan.commands.length} emitted=${formatValue(step.plan.emittedEvents)}`,
-  ...formatMicrosteps(step.plan.microsteps)
-]
-
-const isRunFailure = <M extends AnyMachine, Cause>(
-  trace: Trace<M> | RunFailure<Cause, M>
-): trace is RunFailure<Cause, M> => "_tag" in trace && trace._tag === "MachineTestRunFailure"
-
-export const formatTrace = <M extends AnyMachine, Cause>(trace: Trace<M> | RunFailure<Cause, M>): string => {
-  const lines = [`scenario: ${formatValue(trace.scenario)}`]
-  if (isRunFailure(trace)) {
-    if (trace.initial !== undefined) {
-      lines.push(...formatInitial(trace.initial))
-      for (const step of trace.steps) {
-        lines.push(...formatStep(step))
+    let previous = initialState
+    for (let eventIndex = 0; eventIndex < trace.steps.length; eventIndex++) {
+      const step = trace.steps[eventIndex]!
+      const location: VerificationLocation = { eventIndex }
+      const before = inspectSnapshot(step.before, location, `event ${eventIndex} before state`)
+      validateSnapshotMetadata(before, location, `event ${eventIndex} before state`, true)
+      validateTraceConfiguration(
+        before,
+        step.beforeConfiguration as ReadonlyArray<string>,
+        location,
+        `event ${eventIndex} before`
+      )
+      if (selected.has("microsteps")) {
+        if (step.index !== eventIndex) {
+          add("microsteps.continuity", location, `trace step index ${step.index} does not equal ${eventIndex}`)
+        }
+        if (!sameValue(previous.root, before.root)) {
+          add("microsteps.continuity", location, `event ${eventIndex} before state does not equal the previous state`)
+        }
+        if (!sameValue(step.event, trace.scenario.events[eventIndex])) {
+          add("microsteps.continuity", location, `event ${eventIndex} differs from its scenario event`)
+        }
       }
+
+      current = before
+      for (let microstepIndex = 0; microstepIndex < step.plan.microsteps.length; microstepIndex++) {
+        const microstepLocation: VerificationLocation = { eventIndex, microstepIndex }
+        const microstep = step.plan.microsteps[microstepIndex]!
+        const next = inspectSnapshot(
+          microstep.next,
+          microstepLocation,
+          `event ${eventIndex} microstep ${microstepIndex} next state`
+        )
+        validateSnapshotMetadata(next, microstepLocation, `event ${eventIndex} microstep ${microstepIndex} next state`)
+        validateMicrostep(microstep, current, next, microstepLocation)
+        current = next
+      }
+
+      const plannedNext = inspectSnapshot(step.plan.next, location, `event ${eventIndex} plan next state`)
+      const completions = validateSnapshotMetadata(plannedNext, location, `event ${eventIndex} plan next state`, true)
+      if (selected.has("microsteps") && !sameControl(current, plannedNext)) {
+        add(
+          "microsteps.continuity",
+          location,
+          `event ${eventIndex} plan next state does not continue its final microstep`
+        )
+      }
+      validatePlanCompletion(step.plan, plannedNext, completions, location, `event ${eventIndex} plan`)
+
+      const after = inspectSnapshot(step.after, location, `event ${eventIndex} after state`)
+      validateSnapshotMetadata(after, location, `event ${eventIndex} after state`, true)
+      validateTraceConfiguration(
+        after,
+        step.afterConfiguration as ReadonlyArray<string>,
+        location,
+        `event ${eventIndex} after`
+      )
+      if (selected.has("microsteps") && !sameValue(step.plan.next, step.after)) {
+        add("microsteps.continuity", location, `event ${eventIndex} after state differs from its plan next state`)
+      }
+      previous = after
     }
-    lines.push(
-      `failure: phase=${trace.phase} eventIndex=${formatValue(trace.eventIndex)} ` +
-        `event=${formatValue(trace.event)} cause=${formatValue(trace.cause)}`
-    )
-    return lines.join("\n")
-  }
-  lines.push(...formatInitial(trace.initial))
-  for (const step of trace.steps) {
-    lines.push(...formatStep(step))
-  }
-  lines.push(`final: configuration=${formatConfiguration(trace.finalConfiguration)} state=${formatValue(trace.final)}`)
-  return lines.join("\n")
-}
+
+    const finalEventIndex = trace.steps.length === 0 ? undefined : trace.steps.length - 1
+    const finalLocation: VerificationLocation = { eventIndex: finalEventIndex }
+    const final = inspectSnapshot(trace.final, finalLocation, "trace final state")
+    validateSnapshotMetadata(final, finalLocation, "trace final state", true)
+    validateTraceConfiguration(final, trace.finalConfiguration as ReadonlyArray<string>, finalLocation, "final")
+    if (selected.has("microsteps") && !sameValue(previous.root, final.root)) {
+      add("microsteps.continuity", finalLocation, "trace final state differs from its final planned state")
+    }
+
+    return violations.length === 0 ? Effect.void : Effect.fail(new VerificationError({ violations }))
+  })

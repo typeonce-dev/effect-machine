@@ -19,7 +19,7 @@ export const noAsyncPlanningCallback: Rule = {
     }
   },
   create(context) {
-    const bindings = makeMachineBindings()
+    const bindings = makeMachineBindings(context)
     const inspect = (node: PlanningFunction): void => {
       if (
         hasMachineImport(bindings) &&

@@ -1,4 +1,5 @@
 import type { Context, ESTree, Rule, Variable } from "@oxlint/plugins"
+import { staticMemberName } from "../ast.js"
 import { resolvedVariable, unwrapExpression } from "../ast.js"
 import {
   hasMachineImport,
@@ -6,8 +7,7 @@ import {
   type MachineBindings,
   makeMachineBindings,
   recordMachineDefinition,
-  recordMachineImport,
-  staticMemberName
+  recordMachineImport
 } from "../imports.js"
 import { isInvokePlanningCallback, type PlanningFunction } from "../planning.js"
 
@@ -286,7 +286,7 @@ export const noConflictingInvocationIdentity: Rule = {
     }
   },
   create(context) {
-    const bindings = makeMachineBindings()
+    const bindings = makeMachineBindings(context)
     const inspect = (node: PlanningFunction): void => {
       if (!hasMachineImport(bindings) || !isInvokePlanningCallback(node, bindings)) return
       const parameter = node.params[0]

@@ -1,14 +1,18 @@
-import type { ESTree } from "@oxlint/plugins"
+import type { Context, ESTree } from "@oxlint/plugins"
+
+import { resolvedVariable, staticMemberName } from "./ast.js"
 
 const effectMachineModule = "@typeonce/effect-machine"
 
 export interface MachineBindings {
-  readonly definitions: Set<string>
-  readonly machine: Set<string>
-  readonly namespaces: Set<string>
+  readonly context: Context
+  readonly definitions: Set<ESTree.Node>
+  readonly machine: Set<ESTree.Node>
+  readonly namespaces: Set<ESTree.Node>
 }
 
-export const makeMachineBindings = (): MachineBindings => ({
+export const makeMachineBindings = (context: Context): MachineBindings => ({
+  context,
   definitions: new Set(),
   machine: new Set(),
   namespaces: new Set()
@@ -24,12 +28,12 @@ export const recordMachineImport = (
 
   for (const specifier of node.specifiers) {
     if (specifier.type === "ImportNamespaceSpecifier") {
-      bindings.namespaces.add(specifier.local.name)
+      bindings.namespaces.add(specifier.local)
     } else if (
       specifier.type === "ImportSpecifier" &&
       moduleExportName(specifier.imported) === "Machine"
     ) {
-      bindings.machine.add(specifier.local.name)
+      bindings.machine.add(specifier.local)
     }
   }
 }
@@ -37,16 +41,12 @@ export const recordMachineImport = (
 export const hasMachineImport = (bindings: MachineBindings): boolean =>
   bindings.machine.size > 0 || bindings.namespaces.size > 0
 
-export const staticMemberName = (node: ESTree.Node): string | undefined => {
-  if (node.type !== "MemberExpression") return undefined
-  return node.computed
-    ? node.property.type === "Literal" && typeof node.property.value === "string"
-      ? node.property.value
-      : undefined
-    : node.property.type === "Identifier"
-    ? node.property.name
-    : undefined
-}
+const matchesBinding = (
+  node: ESTree.IdentifierReference,
+  declarations: ReadonlySet<ESTree.Node>,
+  bindings: MachineBindings
+): boolean =>
+  resolvedVariable(bindings.context, node)?.identifiers.some((identifier) => declarations.has(identifier)) === true
 
 const isNamespaceMachine = (
   node: ESTree.Node,
@@ -55,16 +55,16 @@ const isNamespaceMachine = (
   node.type === "MemberExpression" &&
   !node.computed &&
   node.object.type === "Identifier" &&
-  bindings.namespaces.has(node.object.name) &&
+  matchesBinding(node.object, bindings.namespaces, bindings) &&
   node.property.type === "Identifier" &&
   node.property.name === "Machine"
 
 const isMachineReference = (
-  node: ESTree.Node,
+  node: ESTree.Expression,
   bindings: MachineBindings
 ): boolean =>
   node.type === "Identifier"
-    ? bindings.machine.has(node.name)
+    ? matchesBinding(node, bindings.machine, bindings)
     : isNamespaceMachine(node, bindings)
 
 export const isMachineMemberCall = (
@@ -97,7 +97,7 @@ export const recordMachineDefinition = (
     node.id.type === "Identifier" &&
     node.init?.type === "CallExpression" &&
     isMachineMakeCall(node.init, bindings)
-  ) bindings.definitions.add(node.id.name)
+  ) bindings.definitions.add(node.id)
 }
 
 export const isMachineHandleCall = (
@@ -112,7 +112,7 @@ export const isMachineHandleCall = (
   const receiver = node.callee.object
   return receiver.type === "CallExpression"
     ? isMachineMakeCall(receiver, bindings)
-    : receiver.type === "Identifier" && bindings.definitions.has(receiver.name)
+    : receiver.type === "Identifier" && matchesBinding(receiver, bindings.definitions, bindings)
 }
 
 export const isMemberCall = (

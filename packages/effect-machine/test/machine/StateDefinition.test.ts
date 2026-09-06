@@ -41,6 +41,22 @@ const makeFromUnknownStates = (states: unknown): unknown =>
   })
 
 describe("exact state-definition runtime validation", () => {
+  it("captures raw definitions before compiling topology and selectors", () => {
+    const raw = { Root: { initial: "Idle" as const, states: { Idle: {}, Done: {} } } }
+    const machine = Machine.make({
+      states: raw,
+      events: Machine.events(),
+      initial: (to) => to.Root.initial.resolve(({ target }) => target.from((child) => child.Idle.from()))
+    })
+    Object.assign(raw.Root, { initial: "Done" })
+    Object.assign(raw.Root.states, { Added: {} })
+    assert.notStrictEqual(machine.states, raw)
+    assert.strictEqual(machine.states.Root.initial, "Idle")
+    assert.deepStrictEqual(Object.keys(machine.states.Root.states), ["Idle", "Done"])
+    assert.isTrue(Object.isFrozen(machine.states.Root.states))
+    assert.throws(() => machine.handle({ Root: { states: { Added: {} } } } as never), /unknown state/)
+  })
+
   it("captures reusable state definitions independently at each mount", () => {
     const TradingSlot = Machine.state({
       initial: "Idle",

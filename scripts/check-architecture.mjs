@@ -215,10 +215,13 @@ export const checkArchitecture = ({
     "src/unstable/reactivity/index.ts"
   ])
   const implementationSeams = new Map([
-    ["src/Machine.ts", "src/internal/machine/machine.ts"],
-    ["src/testing/MachineTest.ts", "src/internal/testing/machine/verification.ts"],
-    ["src/unstable/reactivity/AtomMachine.ts", "src/internal/machine/atom.ts"],
-    ["src/unstable/cluster/ClusterMachine.ts", "src/internal/machine/cluster.ts"]
+    ["src/Machine.ts", new Set(["src/internal/machine/machine.ts"])],
+    ["src/testing/MachineTest.ts", new Set([
+      "verification", "runtime", "arbitrary", "finiteModel", "referenceModel", "invariant",
+      "runtimeInvariant", "exploration", "probe", "trace", "format"
+    ].map((name) => `src/internal/testing/machine/${name}.ts`))],
+    ["src/unstable/reactivity/AtomMachine.ts", new Set(["src/internal/machine/atom.ts"])],
+    ["src/unstable/cluster/ClusterMachine.ts", new Set(["src/internal/machine/cluster.ts"])]
   ])
   const forbiddenSemanticDependencies = new Map([
     ["src/internal/machine/topology.ts", new Set([
@@ -302,7 +305,7 @@ export const checkArchitecture = ({
       implementationSeam !== undefined &&
       !edge.typeOnly &&
       edge.target.includes("/internal/") &&
-      edge.target !== implementationSeam
+      !implementationSeam.has(edge.target)
     ) {
       diagnostics.push(diagnostic(
         "ARCH002",
@@ -412,12 +415,12 @@ export const checkArchitecture = ({
           statement.importClause === undefined ||
           statement.importClause.isTypeOnly ||
           !ts.isStringLiteral(statement.moduleSpecifier) ||
-          resolveProjectModule(
+          !implementationSeam.has(resolveProjectModule(
               statement.moduleSpecifier.text,
               sourceFile,
               program.getCompilerOptions(),
               root
-            ) !== implementationSeam
+            ))
         ) continue
         if (statement.importClause.name !== undefined) {
           implementationValues.add(statement.importClause.name.text)

@@ -16,6 +16,7 @@ import type { Checkpoint, ClusterMachine, LoadResult } from "../../unstable/clus
 import * as internalMachine from "./machine.js"
 import * as Protocol from "./protocol.js"
 import type { EnsureExecutable } from "./readiness.js"
+import type { ExcludeCompatibleRuntime } from "./requirements.js"
 
 type EntityAddress = EntityAddress.EntityAddress
 type PersistenceError = ClusterError.PersistenceError
@@ -98,16 +99,6 @@ type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.R
 type MachineEvents<M extends Machine.Machine.Any> = Machine.Machine.InputEvents<M>
 
 type MachineEmits<M extends Machine.Machine.Any> = Machine.Machine.Emits<M>
-
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Machine.Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 const hasInvokes = (machine: Machine.Machine.Any): boolean =>
   Reflect.ownKeys(machine.handlers).some((key) => machine.handlers[key as string]?.invoke !== undefined)

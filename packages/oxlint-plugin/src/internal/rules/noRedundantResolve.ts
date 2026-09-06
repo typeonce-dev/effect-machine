@@ -1,11 +1,6 @@
 import type { ESTree, Rule } from "@oxlint/plugins"
-import {
-  hasMachineImport,
-  makeMachineBindings,
-  recordMachineDefinition,
-  recordMachineImport,
-  staticMemberName
-} from "../imports.js"
+import { staticMemberName } from "../ast.js"
+import { hasMachineImport, makeMachineBindings, recordMachineDefinition, recordMachineImport } from "../imports.js"
 import { isPlanningCallback } from "../planning.js"
 
 const returnedExpression = (
@@ -86,7 +81,7 @@ export const noRedundantResolve: Rule = {
     }
   },
   create(context) {
-    const bindings = makeMachineBindings()
+    const bindings = makeMachineBindings(context)
     return {
       ImportDeclaration: (node) => recordMachineImport(bindings, node),
       CallExpression(node) {

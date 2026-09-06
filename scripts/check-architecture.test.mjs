@@ -61,6 +61,24 @@ test("rejects public implementation bypasses and inferred internal signatures", 
   assert.deepEqual(rules(root), ["ARCH002", "ARCH013"])
 })
 
+test("allows testing APIs to bind directly to their owning implementation modules", () => {
+  const root = makeProject({
+    "src/testing/MachineTest.ts": 'import * as Trace from "../internal/testing/machine/trace.js"\nimport * as Format from "../internal/testing/machine/format.js"\nexport const run: () => void = Trace.run\nexport const formatTrace: () => string = Format.formatTrace',
+    "src/internal/testing/machine/trace.ts": "export const run = () => {}",
+    "src/internal/testing/machine/format.ts": 'export const formatTrace = () => "trace"'
+  })
+  assert.deepEqual(rules(root), [])
+})
+
+test("keeps testing implementation signatures explicit and rejects unrelated internals", () => {
+  const root = makeProject({
+    "src/testing/MachineTest.ts": 'import * as Format from "../internal/testing/machine/format.js"\nimport { value } from "../internal/machine/runtime.js"\nexport const formatTrace = Format.formatTrace\nexport const unrelated: number = value',
+    "src/internal/testing/machine/format.ts": 'export const formatTrace = () => "trace"',
+    "src/internal/machine/runtime.ts": "export const value = 1"
+  })
+  assert.deepEqual(new Set(rules(root)), new Set(["ARCH002", "ARCH013"]))
+})
+
 test("rejects entrypoint leaks, black-box internal imports, barrels, and legacy filenames", () => {
   const root = makeProject({
     "src/index.ts": 'export { value } from "./internal/machine/model.js"',

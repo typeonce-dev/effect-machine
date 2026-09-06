@@ -89,28 +89,28 @@ const make = (api: PublicApi, options: MachineRegistry.Options) =>
       results: []
     })
 
-    const refresh = SubscriptionRef.get(state).pipe(
-      Effect.flatMap((current) =>
-        inspector.inspect({
-          ...options,
-          revision: current.revision + 1,
-          retainedCandidates: retainedCandidates(current.results)
-        }).pipe(
-          Effect.map((results): MachineRegistry.Snapshot => ({
+    const refresh = SubscriptionRef.modifyEffect(state, (current) =>
+      inspector.inspect({
+        ...options,
+        revision: current.revision + 1,
+        retainedCandidates: retainedCandidates(current.results)
+      }).pipe(
+        Effect.map((results) => {
+          const next: MachineRegistry.Snapshot = {
             protocolVersion: DevToolsProtocol.protocolVersion,
             revision: current.revision + 1,
             results: reconcile(current.results, results)
-          }))
-        )
-      ),
-      Effect.tap((next) => SubscriptionRef.set(state, next)),
-      Effect.mapError((cause) =>
-        new api.RegistryError({
-          message: `Could not inspect Effect Machine definitions under ${options.root}`,
-          cause
+          }
+          return [next, next] as const
         })
+      )).pipe(
+        Effect.mapError((cause) =>
+          new api.RegistryError({
+            message: `Could not inspect Effect Machine definitions under ${options.root}`,
+            cause
+          })
+        )
       )
-    )
 
     yield* refresh
 

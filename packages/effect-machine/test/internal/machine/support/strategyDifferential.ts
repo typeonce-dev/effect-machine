@@ -5,14 +5,6 @@ import * as Configuration from "../../../../src/internal/machine/configuration.j
 import * as ExecutionPlan from "../../../../src/internal/machine/executionPlan.js"
 import * as Process from "../../../../src/internal/machine/process.js"
 
-const eventTag = (event: unknown): PropertyKey | undefined =>
-  typeof event === "object" && event !== null && "_tag" in event
-    ? (event as { readonly _tag: PropertyKey })._tag
-    : undefined
-
-const commandTags = (commands: ReadonlyArray<{ readonly _tag: string }>): ReadonlyArray<string> =>
-  commands.map((command) => command._tag)
-
 const encodeState = (
   machine: Machine.Machine.Any,
   state: unknown
@@ -25,16 +17,17 @@ const canonicalMacrostep = Effect.fn(function*(
 ) {
   return {
     next: yield* encodeState(machine, executionPlan.snapshot(planned.next)),
-    commands: commandTags(planned.commands),
+    commands: planned.commands,
     emittedEvents: planned.emittedEvents,
     microsteps: yield* Effect.forEach(
       planned.microsteps,
       (step) =>
         Effect.map(encodeState(machine, executionPlan.snapshot(step.next)), (next) => ({
           next,
-          event: eventTag(step.event),
-          commands: commandTags(step.commands),
-          raisedEvents: step.raisedEvents.map(eventTag),
+          event: step.event,
+          transitions: step.transitions,
+          commands: step.commands,
+          raisedEvents: step.raisedEvents,
           emittedEvents: step.emittedEvents,
           exitPaths: step.exitPaths,
           entryPaths: step.entryPaths,
@@ -84,8 +77,8 @@ const verifyPlannerStrategiesEffect = Effect.fn(function*(options: {
     const event = options.events[index]!
     const retainedSelectedSnapshot = selected.plan.snapshot(selectedState)
     const retainedSelectedEncoding = yield* encodeState(options.machine, retainedSelectedSnapshot)
-    const genericPlan = generic.plan.plan(genericState, event)
-    const selectedPlan = selected.plan.plan(selectedState, event)
+    const genericPlan = generic.plan.plan(genericState, event, true)
+    const selectedPlan = selected.plan.plan(selectedState, event, true)
     assert.deepStrictEqual(
       yield* canonicalMacrostep(options.machine, selected.plan, selectedPlan),
       yield* canonicalMacrostep(options.machine, generic.plan, genericPlan),

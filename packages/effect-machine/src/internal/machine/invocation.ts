@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream"
 import type { ChildMachine, ChildOwner, Inspection, Logic, Machine } from "../../Machine.js"
 import * as Configuration from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from "./errors.js"
+import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
 import * as Runtime from "./runtime.js"
@@ -74,7 +75,7 @@ const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
 })
 
 const resolveOne = (
-  raw: Record<PropertyKey, any>,
+  raw: InvocationDefinition.InvocationDefinition,
   context: Machine.InvokeContext<any, any, any, any>,
   path: string
 ): AnyConfig => {
@@ -134,7 +135,7 @@ const resolveOne = (
     }
   }
   if ("child" in raw) {
-    const descriptor = raw.child as ChildMachine.Any
+    const descriptor = raw.child
     return {
       id: descriptor.id,
       address: descriptor.id,
@@ -148,7 +149,8 @@ const resolveOne = (
       onSnapshot: raw.onSnapshot
     }
   }
-  throw new Error("Machine invoke must define exactly one of effect, stream, after, logic, or child")
+  const unsupported: never = raw
+  throw new Error(`Unsupported captured machine invocation: ${String(unsupported)}`)
 }
 
 /** @internal */
@@ -266,12 +268,12 @@ const startStaticChild = (
   scope: Runtime.ProcessScope<any>,
   ownedChildren: Runtime.OwnedChildRuntime,
   path: string,
-  raw: Record<PropertyKey, any>
+  raw: Extract<InvocationDefinition.InvocationDefinition, { readonly child: ChildMachine.Any }>
 ): Effect.Effect<void, any, any> => {
   // A zero-input child has no entry-context dependency. Reuse the descriptor's
   // source function so each running parent does not retain a resolved config
   // object and an otherwise redundant source closure.
-  const descriptor = raw.child as ChildMachine.Any
+  const descriptor = raw.child
   return startResolved(
     scope,
     ownedChildren,
@@ -313,7 +315,9 @@ export const startAll = (
         ancestors: Configuration.getParentValues(machine, configuration, path),
         event
       }
-      return InvocationEvent.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).map((definition) =>
+      return InvocationDefinition.definitions(Configuration.getStateConfigByPath(machine, path)?.invoke).map((
+        definition
+      ) =>
         "child" in definition && !("input" in definition)
           ? startStaticChild(scope, ownedChildren, path, definition)
           : start(scope, ownedChildren, path, resolveOne(definition, context, path))

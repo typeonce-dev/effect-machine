@@ -48,7 +48,7 @@ export const preferInlineHandle: Rule = {
     }
   },
   create(context) {
-    const bindings = makeMachineBindings()
+    const bindings = makeMachineBindings(context)
     const candidates: Array<Candidate> = []
     return {
       ImportDeclaration: (node) => recordMachineImport(bindings, node),

@@ -18,6 +18,7 @@ import type * as Machine from "../../Machine.js"
 import type { Bound, ChildMachineAtom, MachineAtom } from "../../unstable/reactivity/AtomMachine.js"
 import * as internalMachine from "./machine.js"
 import type { EnsureExecutable } from "./readiness.js"
+import type { ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime, IsAny } from "./requirements.js"
 import * as Topology from "./topology.js"
 
 export class NotReadyError extends Data.TaggedError("NotReadyError") {}
@@ -35,15 +36,6 @@ const ExternalRequirementsTypeId = "~effect/reactivity/AtomMachine/ExternalRequi
 type EnsureNoExternalRequirements<Requirements> = [ExternalRequirements<Requirements>] extends [never] ? unknown : {
   readonly [ExternalRequirementsTypeId]: ExternalRequirements<Requirements>
 }
-
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleMachineRuntime<Requirements, Events, Emits> = Requirements extends
-  Machine.Runtime.Requirement<infer RequiredEvents, infer RequiredEmits> ?
-  IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineRuntime<
   Machine.ExecutionServices<InitialR | R>,

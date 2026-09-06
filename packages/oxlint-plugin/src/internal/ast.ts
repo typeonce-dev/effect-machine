@@ -1,5 +1,14 @@
 import type { Context, ESTree, Scope, Variable } from "@oxlint/plugins"
-import { staticMemberName } from "./imports.js"
+export const staticMemberName = (node: ESTree.Node): string | undefined => {
+  if (node.type !== "MemberExpression") return undefined
+  return node.computed
+    ? node.property.type === "Literal" && typeof node.property.value === "string"
+      ? node.property.value
+      : undefined
+    : node.property.type === "Identifier"
+    ? node.property.name
+    : undefined
+}
 
 export const unwrapExpression = (node: ESTree.Expression): ESTree.Expression => {
   let current = node
