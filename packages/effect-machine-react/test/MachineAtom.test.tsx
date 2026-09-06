@@ -16,23 +16,25 @@ class Active extends Schema.TaggedClass<Active>("Active")("Active", {
 }) {}
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
 
-const States = Machine.states({ Active })
+const States = Machine.state({ initial: "Active", states: { Active } })
 
 const trackedMachine = (onStart: () => void) =>
   Machine.make({
-    states: States.states,
-    events: Machine.events(Increment),
+    root: States,
+    events: Machine.eventsFromSchemas(Increment),
     input: Schema.Number,
-    initial: (to) =>
-      to.Active().resolve(({ input, target }) => {
+    initialConfiguration: (root) =>
+      root.resolve(({ input, target }) => {
         onStart()
-        return target.decoded(new Active({ value: input }))
+        return target.from((to) => to.Active.decoded(new Active({ value: input })))
       })
   }).handle({
-    Active: {
-      on: {
-        Increment: (to) =>
-          to.full.Active().resolve(({ state, target }) => target.decoded(new Active({ value: state.value + 1 })))
+    states: {
+      Active: {
+        on: {
+          Increment: (to) =>
+            to.branch.Active().resolve(({ state, target }) => target.decoded(new Active({ value: state.value + 1 })))
+        }
       }
     }
   })
@@ -114,7 +116,7 @@ describe("useMachineAtom", () => {
 
     await waitFor(() => assert.strictEqual(starts, 1))
     const first = current!
-    assert.deepStrictEqual(await Effect.runPromise(AtomRegistry.getResult(registry, first.result)), {
+    assert.deepStrictEqual((await Effect.runPromise(AtomRegistry.getResult(registry, first.result))).state, {
       path: "Active",
       value: new Active({ value: 1 })
     })
@@ -129,7 +131,7 @@ describe("useMachineAtom", () => {
 
     assert.strictEqual(current, first)
     assert.strictEqual(starts, 1)
-    assert.strictEqual((await Effect.runPromise(AtomRegistry.getResult(registry, first.result))).value.value, 1)
+    assert.strictEqual((await Effect.runPromise(AtomRegistry.getResult(registry, first.result))).state.value.value, 1)
 
     view.rerender(
       <RegistryContext.Provider value={registry}>
@@ -141,7 +143,10 @@ describe("useMachineAtom", () => {
 
     await waitFor(() => assert.strictEqual(starts, 2))
     assert.notStrictEqual(current, first)
-    assert.strictEqual((await Effect.runPromise(AtomRegistry.getResult(registry, current!.result))).value.value, 2)
+    assert.strictEqual(
+      (await Effect.runPromise(AtomRegistry.getResult(registry, current!.result))).state.value.value,
+      2
+    )
 
     view.unmount()
     registry.dispose()
