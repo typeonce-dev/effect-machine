@@ -1036,17 +1036,27 @@ const routeLabelCandidates = (
     const required = (horizontal ? width : height) + 24
     return length < required ? [] : [{ start, end, horizontal, length }]
   })
+  const adjacent: Array<ChartPoint> = []
   const ordered = [
     ...candidates.filter(({ horizontal }) => !horizontal).sort((left, right) => right.length - left.length),
     ...candidates.filter(({ horizontal }) => horizontal).sort((left, right) => right.length - left.length)
   ].flatMap(({ start, end, horizontal, length }) => {
     const clearance = (horizontal ? width : height) / 2 + 12
-    return [0.5, 2 / 3, 1 / 3].flatMap((ratio) => {
+    return [0.5, 2 / 3, 1 / 3, 0.2, 0.8, 0.1, 0.9].flatMap((ratio) => {
       const distance = length * ratio
       if (distance < clearance || length - distance < clearance) return []
       const onRoute = {
         x: start.x + (end.x - start.x) * ratio,
         y: start.y + (end.y - start.y) * ratio
+      }
+      // A root container can place two routes in the same corridor. Keep the
+      // label attached beside its own segment when no position on it is clear.
+      for (const direction of [-1, 1]) {
+        adjacent.push(
+          horizontal
+            ? { x: onRoute.x, y: onRoute.y + direction * (height / 2 + chartEdgeLabelSpacing) }
+            : { x: onRoute.x + direction * (width / 2 + chartEdgeLabelSpacing), y: onRoute.y }
+        )
       }
       if (horizontal || localDescendantTarget === undefined) return [onRoute]
       const targetCenter = localDescendantTarget.x + localDescendantTarget.width / 2
@@ -1057,7 +1067,7 @@ const routeLabelCandidates = (
       }, onRoute]
     })
   })
-  return [...ordered, fallback].filter((candidate, index, all) =>
+  return [...ordered, ...adjacent, fallback].filter((candidate, index, all) =>
     all.findIndex((other) => other.x === candidate.x && other.y === candidate.y) === index
   )
 }
@@ -1120,7 +1130,8 @@ const placeTransitionLabels = (
 const collectLayout = (
   model: ChartModel,
   graph: ElkNode,
-  unconnected: ReadonlyArray<UnconnectedRegion>
+  unconnected: ReadonlyArray<UnconnectedRegion>,
+  shortenRoutes = true
 ): LaidOutChart => {
   const chartNodes = new Map(model.nodes.map((node) => [node.path, node]))
   const chartRuntimeTargets = new Map(model.runtimeTargets.map((target) => [runtimeNodeId(target), target]))
@@ -1202,7 +1213,7 @@ const collectLayout = (
           chartEdge,
           avoidCompoundHeaders(
             chartEdge,
-            shortenTransitionRoute(
+            (shortenRoutes ? shortenTransitionRoute : (_edge: ChartEdge, route: ReadonlyArray<ChartPoint>) => route)(
               chartEdge,
               normalizeHierarchyRoute(chartEdge, elkPoints, nodesByPath, nodes, hierarchyLanes),
               nodesByPath,
@@ -1708,6 +1719,12 @@ export const layoutChartWith = (
             const validation = validate(model, candidate)
             if (validation.valid) return Effect.succeed(candidate)
             invalid.push({ profile: profile.id, layout: candidate, validation })
+            // Route shortening can crowd labels beside unrelated transitions.
+            // Keep the original ELK corridor as a checked alternative.
+            const originalRoutes = collectLayout(model, graph, regions, false)
+            const originalValidation = validate(model, originalRoutes)
+            if (originalValidation.valid) return Effect.succeed(originalRoutes)
+            invalid.push({ profile: profile.id, layout: originalRoutes, validation: originalValidation })
             return attempt(index + 1)
           }
         }

@@ -39,12 +39,12 @@ job is returning `target.from()`.
 // Redundant
 const handlers = {
   Start: (to) =>
-    to.full.Running().resolve(({ target }) => target.from())
+    to.branch.Running().resolve(({ target }) => target.from())
 }
 
 // Preferred
 const handlers = {
-  Start: (to) => to.full.Running()
+  Start: (to) => to.branch.Running()
 }
 ```
 
@@ -176,11 +176,11 @@ Model `Submit` as the component-facing event. Let a machine state own the work
 and its lifetime:
 
 ```ts
-machine.handle({
+machine.handle({ states: {
   Editing: {
     on: {
       Submit: (to) =>
-        to.full.Submitting().resolve(({ event, target }) =>
+        to.branch.Submitting().resolve(({ event, target }) =>
           target.from({ order: event.order })
         )
     }
@@ -190,17 +190,17 @@ machine.handle({
       from
         .effect("submit-order", ({ state }) => submitOrder(state.order))
         .onDone((to) =>
-          to.full.Complete().resolve(({ output, target }) =>
+          to.branch.Complete().resolve(({ output, target }) =>
             target.from({ order: output })
           )
         )
         .onFailure((to) =>
-          to.full.Failed().resolve(({ error, target }) =>
+          to.branch.Failed().resolve(({ error, target }) =>
             target.from({ message: String(error) })
           )
         )
   }
-})
+} })
 ```
 
 `submitOrder` can use Effect services for the API request and analytics. The

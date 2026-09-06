@@ -10,7 +10,10 @@ const directPlanningMethods = new Set([
   "onElement",
   "onFailure",
   "onSnapshot",
-  "resolve"
+  "resolve",
+  "from",
+  "decoded",
+  "guard"
 ])
 
 const statePlanningProperties = new Set([
@@ -53,12 +56,12 @@ const isStateConfig = (
   node: ESTree.ObjectExpression,
   bindings: MachineBindings
 ): boolean => {
+  if (isMachineHandleConfig(node, bindings)) return true
   if (node.parent.type !== "Property" || node.parent.parent.type !== "ObjectExpression") {
     return false
   }
 
   const stateCollection = node.parent.parent
-  if (isMachineHandleConfig(stateCollection, bindings)) return true
   if (
     stateCollection.parent.type !== "Property" ||
     propertyName(stateCollection.parent) !== "states" ||
@@ -111,7 +114,7 @@ const isPropertyPlanningCallback = (
   ) return false
 
   const name = propertyName(property)
-  return name === "initial"
+  return name === "initial" || name === "initialConfiguration"
     ? isMachineMakeConfig(property.parent, bindings)
     : (name !== undefined && statePlanningProperties.has(name) && isStateConfig(property.parent, bindings)) ||
       isEventHandlerProperty(property, bindings) ||

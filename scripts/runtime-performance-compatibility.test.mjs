@@ -199,3 +199,43 @@ test("fails closed when a legacy capability cannot preserve lifecycle semantics"
     /legacy child invocation API cannot handle failures/
   )
 })
+
+test("adapts root definitions while preserving benchmark startup and handler semantics", () => {
+  let captured
+  const schema = Symbol("schema")
+  const rootApi = {
+    state: (node) => ({ node }),
+    eventsFromSchemas: (...schemas) => schemas,
+    make: (config) => {
+      captured = config
+      return { handle: (handlers) => ({ config, handlers }) }
+    }
+  }
+  const api = makeEffectMachineBenchmarkApi(rootApi)
+  const states = api.states({ Ready: schema })
+  const definition = api.make({
+    states: states.states,
+    events: api.events(schema),
+    initial: api.initial({
+      target: (to) => to.Ready(),
+      resolve: ({ input, target }) => target.from({ count: input })
+    })
+  })
+  const handlers = { Ready: {} }
+  assert.deepEqual(definition.handle(handlers).handlers, { states: handlers })
+  assert.deepEqual(captured.root.node, { initial: "Ready", states: { Ready: schema } })
+  assert.deepEqual(captured.events, [schema])
+  const snapshot = captured.initialConfiguration({
+    resolve: (resolve) => resolve({
+      input: 3,
+      target: {
+        from: (construct) => ({
+          path: "",
+          value: undefined,
+          state: construct({ Ready: { from: (value) => ({ path: "Ready", value }) } })
+        })
+      }
+    })
+  })
+  assert.deepEqual(api.snapshot(snapshot), { path: "Ready", value: { count: 3 } })
+})

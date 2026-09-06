@@ -76,7 +76,9 @@ try {
     "--input-type=module",
     "--eval",
     `const module = await import("@typeonce/effect-machine-react");
-     if (typeof module.useMachineAtom !== "function") throw new Error("useMachineAtom is not exported");`
+     for (const name of ["useMachineAtom", "createMachineContext", "MachineState"]) {
+       if (typeof module[name] !== "function") throw new Error(name + " is not exported");
+     }`
   ], { cwd: consumer })
 
   console.log(`React package verification passed (${listing.length} files)`)

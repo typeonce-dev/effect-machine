@@ -21,7 +21,7 @@ function unrelated(M: any) { M.make({ initial: (to) => to.Ready().resolve(({ tar
 function unrelated(EM: any) { EM.Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) }) }`,
     `import { Machine } from "@typeonce/effect-machine"
 const definition = Machine.make({ initial: (to) => to.Ready() })
-function unrelated(definition: any) { definition.handle({ Ready: { on: { Reset: (to) => to.full.Ready().resolve(({ target }) => target.from()) } } }) }`,
+function unrelated(definition: any) { definition.handle({ states: { Ready: { on: { Reset: (to) => to.branch.Ready().resolve(({ target }) => target.from()) } } } }) }`,
 
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from({ id: "ready" })) })`,
@@ -31,7 +31,7 @@ Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()
 const other = { resolve: (_callback: unknown) => undefined }
 other.resolve(({ target }) => target.from())`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { invoke: (from) => from.effect("work", () => other.resolve(({ target }) => target.from())) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("work", () => other.resolve(({ target }) => target.from())) } } })`,
     `const other = { resolve: (_callback: unknown) => undefined }
 other.resolve(({ target }) => target.from())`
   ],
@@ -46,10 +46,10 @@ Machine.make({ initial: (to) => to.Ready() })`,
     {
       code: `import { Machine } from "@typeonce/effect-machine"
 const definition = Machine.make({ initial: (to) => to.Ready() })
-definition.handle({ Ready: { on: { Reset: (to) => to.full.Ready().resolve(({ target }) => target.from()) } } })`,
+definition.handle({ states: { Ready: { on: { Reset: (to) => to.branch.Ready().resolve(({ target }) => target.from()) } } } })`,
       output: `import { Machine } from "@typeonce/effect-machine"
 const definition = Machine.make({ initial: (to) => to.Ready() })
-definition.handle({ Ready: { on: { Reset: (to) => to.full.Ready() } } })`,
+definition.handle({ states: { Ready: { on: { Reset: (to) => to.branch.Ready() } } } })`,
       errors: [{ messageId: "redundantResolver" }]
     },
     {
@@ -67,27 +67,27 @@ EM.Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => /* preserv
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { on: {
-  Reset: (to) => to.full.Ready().resolve(({ target }) => target.from(), { reenter: true })
-} } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { on: {
+  Reset: (to) => to.branch.Ready().resolve(({ target }) => target.from(), { reenter: true })
+} } } })`,
       output: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { on: {
-  Reset: (to) => to.full.Ready().reenter()
-} } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { on: {
+  Reset: (to) => to.branch.Ready().reenter()
+} } } })`,
       errors: [{ messageId: "redundantReenterResolver" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.resolve(() => {}) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { always: (to) => to.none.resolve(() => {}) } } })`,
       output: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { always: (to) => to.none } } })`,
       errors: [{ messageId: "redundantTargetlessResolver" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.resolve(() => {}, { reenter: true }) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { always: (to) => to.none.resolve(() => {}, { reenter: true }) } } })`,
       output: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { always: (to) => to.none.reenter() } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { always: (to) => to.none.reenter() } } })`,
       errors: [{ messageId: "redundantReenterResolver" }]
     }
   ]

@@ -74,46 +74,53 @@ class Archive extends Schema.TaggedClass<Archive>("TransitionArchive")("Archive"
   reason: Schema.String
 }) {}
 
-const TransitionStates = Machine.states({
-  Workspace: {
-    schema: Workspace,
-    initial: "Routing",
-    states: {
-      Routing: { type: "choice" },
-      Draft,
-      AutoSaving,
-      Review: {
-        schema: Review,
-        initial: "Checking",
-        states: {
-          Checking,
-          ChangesRequested,
-          Approved: { schema: Approved, type: "final" }
-        }
-      },
-      Finished: { schema: WorkspaceFinished, type: "final" },
-      recent: { type: "history" },
-      exact: { type: "history", history: "deep" }
-    }
-  },
-  Paused,
-  Disabled,
-  Published: { schema: Published, type: "final", output: Schema.String }
+const TransitionStates = Machine.state({
+  initial: "Paused",
+  states: {
+    Workspace: {
+      schema: Workspace,
+      initial: "Routing",
+      states: {
+        Routing: { type: "choice" },
+        Draft,
+        AutoSaving,
+        Review: {
+          schema: Review,
+          initial: "Checking",
+          states: {
+            Checking,
+            ChangesRequested,
+            Approved: { schema: Approved, type: "final" }
+          }
+        },
+        Finished: { schema: WorkspaceFinished, type: "final" },
+        recent: { type: "history" },
+        exact: { type: "history", history: "deep" }
+      }
+    },
+    Paused,
+    Disabled,
+    Published: { schema: Published, type: "final", output: Schema.String }
+  }
 })
 
 const defaultWorkspaceSnapshot = () => ({
-  path: "Workspace" as const,
-  value: new Workspace({ revision: 0, preferredRoute: "draft" as const }),
+  path: "" as const,
+  value: undefined,
   state: {
-    path: "Workspace.Draft" as const,
-    value: new Draft({ text: "Recovered draft", autosaves: 0 })
+    path: "Workspace" as const,
+    value: new Workspace({ revision: 0, preferredRoute: "draft" as const }),
+    state: {
+      path: "Workspace.Draft" as const,
+      value: new Draft({ text: "Recovered draft", autosaves: 0 })
+    }
   }
 })
 
 export const transitionSemanticsMachine = Machine.make({
   id: "transition-semantics",
-  states: TransitionStates.states,
-  events: Machine.events(
+  root: TransitionStates,
+  events: Machine.eventsFromSchemas(
     Create,
     Edit,
     Save,
@@ -131,115 +138,120 @@ export const transitionSemanticsMachine = Machine.make({
     BumpWorkspace,
     Archive
   ),
-  initial: (to) => to.Paused().resolve(({ target }) => target.decoded(new Paused({ reason: "not started" })))
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Paused.decoded(new Paused({ reason: "not started" }))))
 }).handle({
-  Workspace: {
-    history: {
-      recent: { default: defaultWorkspaceSnapshot },
-      exact: { default: defaultWorkspaceSnapshot }
-    },
-    on: {
-      Pause: (to) =>
-        to.full.Paused().resolve(({ event, target }) => target.decoded(new Paused({ reason: event.reason }))),
-      BumpWorkspace: (to) =>
-        to.branch.Workspace.update(({ current, owner }) =>
-          owner.decoded(
-            new Workspace({
-              revision: current.revision + 1,
-              preferredRoute: current.preferredRoute
-            })
-          )
-        )
-    },
-    onDone: (to) =>
-      to.full.Published().resolve(({ target }) => target.decoded(new Published({ result: "workspace published" }))),
-    states: {
-      Routing: {
-        choice: (to) =>
-          to.branches({
-            draft: { title: "Preferred route is draft", target: to.local.Draft() },
-            review: { title: "Preferred route is review", target: to.local.Review.initial }
-          }).resolve(({ containingState, select }) =>
-            containingState.preferredRoute === "review"
-              ? select.review.decoded(new Review({ requestedBy: "initial route" }))
-              : select.draft.decoded(new Draft({ text: "", autosaves: 0 }))
+  states: {
+    Workspace: {
+      history: {
+        recent: { default: defaultWorkspaceSnapshot },
+        exact: { default: defaultWorkspaceSnapshot }
+      },
+      on: {
+        Pause: (to) =>
+          to.branch.Paused().resolve(({ event, target }) => target.decoded(new Paused({ reason: event.reason }))),
+        BumpWorkspace: (to) =>
+          to.branch.Workspace.update.resolve(({ current, owner }) =>
+            owner.decoded(
+              new Workspace({
+                revision: current.revision + 1,
+                preferredRoute: current.preferredRoute
+              })
+            )
           )
       },
-      Draft: {
-        on: {
-          Edit: (to) =>
-            to.local.Draft().resolve(({ event, state, target }) =>
-              target.decoded(new Draft({ text: event.text, autosaves: state.autosaves }))
-            ),
-          Save: (to) => to.local.AutoSaving().resolve(({ target }) => target.decoded(new AutoSaving({}))),
-          Submit: (to) =>
+      onDone: (to) =>
+        to.branch.Published().resolve(({ target }) => target.decoded(new Published({ result: "workspace published" }))),
+      states: {
+        Routing: {
+          choice: (to) =>
             to.branches({
-              review: { title: "Enter the review flow", target: to.local.Review.initial },
-              publish: { title: "Publish without review", target: to.local.Finished() }
-            }).resolve(({ event, select }) =>
-              event.mode === "publish"
-                ? select.publish.decoded(new WorkspaceFinished({ result: "published directly" }))
-                : select.review.decoded(new Review({ requestedBy: event.requestedBy }))
+              draft: { title: "Preferred route is draft", target: to.local.Draft() },
+              review: { title: "Preferred route is review", target: to.local.Review.initial }
+            }).resolve(({ containingState, select }) =>
+              containingState.preferredRoute === "review"
+                ? select.review.decoded(new Review({ requestedBy: "initial route" }))
+                : select.draft.decoded(new Draft({ text: "", autosaves: 0 }))
+            )
+        },
+        Draft: {
+          on: {
+            Edit: (to) =>
+              to.local.Draft().resolve(({ event, state, target }) =>
+                target.decoded(new Draft({ text: event.text, autosaves: state.autosaves }))
+              ),
+            Save: (to) => to.local.AutoSaving().resolve(({ target }) => target.decoded(new AutoSaving({}))),
+            Submit: (to) =>
+              to.branches({
+                review: { title: "Enter the review flow", target: to.local.Review.initial },
+                publish: { title: "Publish without review", target: to.local.Finished() }
+              }).resolve(({ event, select }) =>
+                event.mode === "publish"
+                  ? select.publish.decoded(new WorkspaceFinished({ result: "published directly" }))
+                  : select.review.decoded(new Review({ requestedBy: event.requestedBy }))
+              ),
+            Refresh: (to) => to.none.resolve(() => undefined, { reenter: true }),
+            Ignore: (to) => to.none,
+            MaybeHandle: (to) =>
+              to.none.resolve(({ decline, event }) => event.accept ? undefined : decline(), {
+                declinable: true
+              })
+          }
+        },
+        AutoSaving: {
+          always: (to) =>
+            to.local.Draft().resolve(({ target }) =>
+              target.decoded(new Draft({ text: "Autosaved draft", autosaves: 1 }))
+            )
+        },
+        Review: {
+          initialize: ({ builder }) => builder.decoded(new Checking({ checks: ["types", "tests"] })),
+          onDone: (to) =>
+            to.branch.Workspace.Finished().resolve(({ target }) =>
+              target.decoded(new WorkspaceFinished({ result: "approved review" }))
             ),
-          Refresh: (to) => to.none.resolve(() => undefined, { reenter: true }),
-          Ignore: (to) => to.none,
-          MaybeHandle: (to) =>
-            to.none.resolve(({ decline, event }) => event.accept ? undefined : decline(), {
-              declinable: true
-            })
-        }
-      },
-      AutoSaving: {
-        always: (to) =>
-          to.local.Draft().resolve(({ target }) => target.decoded(new Draft({ text: "Autosaved draft", autosaves: 1 })))
-      },
-      Review: {
-        initialize: ({ builder }) => builder.decoded(new Checking({ checks: ["types", "tests"] })),
-        onDone: (to) =>
-          to.branch.Workspace.Finished().resolve(({ target }) =>
-            target.decoded(new WorkspaceFinished({ result: "approved review" }))
-          ),
-        states: {
-          Checking: {
-            on: {
-              Approve: (to) =>
-                to.local.Approved().resolve(({ event, target }) =>
-                  target.decoded(new Approved({ reviewer: event.reviewer }))
-                ),
-              Reject: (to) =>
-                to.local.ChangesRequested().resolve(({ event, target }) =>
-                  target.decoded(new ChangesRequested({ reason: event.reason }))
-                )
-            }
-          },
-          ChangesRequested: {
-            on: {
-              Revise: (to) =>
-                to.branch.Workspace.Draft().resolve(({ target }) =>
-                  target.decoded(new Draft({ text: "Revised draft", autosaves: 0 }))
-                )
+          states: {
+            Checking: {
+              on: {
+                Approve: (to) =>
+                  to.local.Approved().resolve(({ event, target }) =>
+                    target.decoded(new Approved({ reviewer: event.reviewer }))
+                  ),
+                Reject: (to) =>
+                  to.local.ChangesRequested().resolve(({ event, target }) =>
+                    target.decoded(new ChangesRequested({ reason: event.reason }))
+                  )
+              }
+            },
+            ChangesRequested: {
+              on: {
+                Revise: (to) =>
+                  to.branch.Workspace.Draft().resolve(({ target }) =>
+                    target.decoded(new Draft({ text: "Revised draft", autosaves: 0 }))
+                  )
+              }
             }
           }
         }
       }
+    },
+    Paused: {
+      on: {
+        Create: (to) =>
+          to.branch.Workspace.initial.resolve(({ event, target }) =>
+            target.decoded(new Workspace({ revision: 0, preferredRoute: event.route }))
+          ),
+        ResumeShallow: (to) => to.history.Workspace.recent.resolve(({ target }) => target()),
+        ResumeDeep: (to) => to.history.Workspace.exact.resolve(({ target }) => target()),
+        Restart: (to) =>
+          to.branch.Workspace.initial.resolve(({ target }) =>
+            target.decoded(new Workspace({ revision: 0, preferredRoute: "draft" }))
+          )
+      }
+    },
+    Disabled: {},
+    Published: {
+      output: ({ state }) => state.result
     }
-  },
-  Paused: {
-    on: {
-      Create: (to) =>
-        to.full.Workspace.initial.resolve(({ event, target }) =>
-          target.decoded(new Workspace({ revision: 0, preferredRoute: event.route }))
-        ),
-      ResumeShallow: (to) => to.history.Workspace.recent.resolve(({ target }) => target()),
-      ResumeDeep: (to) => to.history.Workspace.exact.resolve(({ target }) => target()),
-      Restart: (to) =>
-        to.full.Workspace.initial.resolve(({ target }) =>
-          target.decoded(new Workspace({ revision: 0, preferredRoute: "draft" }))
-        )
-    }
-  },
-  Disabled: {},
-  Published: {
-    output: ({ state }) => state.result
   }
 })

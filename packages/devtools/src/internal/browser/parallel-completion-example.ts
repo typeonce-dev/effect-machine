@@ -62,40 +62,43 @@ class CancelOrder extends Schema.TaggedClass<CancelOrder>("ParallelCancelOrder")
 class RetryOrder extends Schema.TaggedClass<RetryOrder>("ParallelRetryOrder")("RetryOrder", {}) {}
 class AutoShip extends Schema.TaggedClass<AutoShip>("ParallelAutoShip")("AutoShip", {}) {}
 
-const ParallelInternalEvents = Machine.internalEvents(AutoShip)
-const ParallelStates = Machine.states({
-  Cart,
-  Order: {
-    schema: Order,
-    type: "parallel",
-    states: {
-      payment: {
-        schema: Payment,
-        initial: "AwaitingAuthorization",
-        states: {
-          AwaitingAuthorization,
-          Authorized: { schema: Authorized, type: "final" }
-        }
-      },
-      fulfillment: {
-        schema: Fulfillment,
-        initial: "WaitingForPayment",
-        states: {
-          WaitingForPayment,
-          Packing,
-          Shipped: { schema: Shipped, type: "final" }
+const ParallelInternalEvents = Machine.internalEventsFromSchemas(AutoShip)
+const ParallelStates = Machine.state({
+  initial: "Cart",
+  states: {
+    Cart,
+    Order: {
+      schema: Order,
+      type: "parallel",
+      states: {
+        payment: {
+          schema: Payment,
+          initial: "AwaitingAuthorization",
+          states: {
+            AwaitingAuthorization,
+            Authorized: { schema: Authorized, type: "final" }
+          }
+        },
+        fulfillment: {
+          schema: Fulfillment,
+          initial: "WaitingForPayment",
+          states: {
+            WaitingForPayment,
+            Packing,
+            Shipped: { schema: Shipped, type: "final" }
+          }
         }
       }
-    }
-  },
-  Complete: { schema: OrderComplete, type: "final", output: Schema.String },
-  Cancelled: OrderCancelled
+    },
+    Complete: { schema: OrderComplete, type: "final", output: Schema.String },
+    Cancelled: OrderCancelled
+  }
 })
 
 export const parallelCompletionMachine = Machine.make({
   id: "parallel-completion",
-  states: ParallelStates.states,
-  events: Machine.events(
+  root: ParallelStates,
+  events: Machine.eventsFromSchemas(
     Checkout,
     Authorize,
     DeclinePayment,
@@ -106,94 +109,101 @@ export const parallelCompletionMachine = Machine.make({
     RetryOrder
   ),
   internalEvents: ParallelInternalEvents,
-  initial: (to) => to.Cart().resolve(({ target }) => target.decoded(new Cart({ items: 2 })))
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Cart.decoded(new Cart({ items: 2 }))))
 }).handle({
-  Cart: {
-    on: {
-      Checkout: (to) =>
-        to.full.Order.initial.resolve(({ event, target }) =>
-          target.decoded(new Order({ orderId: event.orderId, total: event.total }))
-        )
-    }
-  },
-  Order: {
-    initialize: ({ builder }) => builder.payment.from({ attempts: 0 }).fulfillment.from({ warehouse: "north" }),
-    on: {
-      CancelOrder: (to) =>
-        to.full.Cancelled().resolve(({ event, target }) => target.decoded(new OrderCancelled({ reason: event.reason })))
+  states: {
+    Cart: {
+      on: {
+        Checkout: (to) =>
+          to.branch.Order.initial.resolve(({ event, target }) =>
+            target.decoded(new Order({ orderId: event.orderId, total: event.total }))
+          )
+      }
     },
-    onDone: (to) =>
-      to.full.Complete().resolve(({ target }) => target.decoded(new OrderComplete({ orderId: "completed-order" }))),
-    states: {
-      payment: {
-        initialize: ({ builder }) => builder.from(),
-        states: {
-          AwaitingAuthorization: {
-            on: {
-              Authorize: (to) =>
-                to.local.Authorized().resolve(({ event, target }) =>
-                  target.decoded(new Authorized({ authorizationId: event.authorizationId }))
-                ),
-              CompleteAll: (to) =>
-                to.local.Authorized().resolve(({ event, target }) =>
-                  target.decoded(new Authorized({ authorizationId: event.authorizationId }))
-                ),
-              DeclinePayment: (to) =>
-                to.full.Cancelled().resolve(({ event, target }) =>
-                  target.decoded(new OrderCancelled({ reason: event.reason }))
-                )
+    Order: {
+      initialize: ({ builder }) => builder.payment.from({ attempts: 0 }).fulfillment.from({ warehouse: "north" }),
+      on: {
+        CancelOrder: (to) =>
+          to.branch.Cancelled().resolve(({ event, target }) =>
+            target.decoded(new OrderCancelled({ reason: event.reason }))
+          )
+      },
+      onDone: (to) =>
+        to.branch.Complete().resolve(({ target }) => target.decoded(new OrderComplete({ orderId: "completed-order" }))),
+      states: {
+        payment: {
+          initialize: ({ builder }) => builder.from(),
+          states: {
+            AwaitingAuthorization: {
+              on: {
+                Authorize: (to) =>
+                  to.local.Authorized().resolve(({ event, target }) =>
+                    target.decoded(new Authorized({ authorizationId: event.authorizationId }))
+                  ),
+                CompleteAll: (to) =>
+                  to.local.Authorized().resolve(({ event, target }) =>
+                    target.decoded(new Authorized({ authorizationId: event.authorizationId }))
+                  ),
+                DeclinePayment: (to) =>
+                  to.branch.Cancelled().resolve(({ event, target }) =>
+                    target.decoded(new OrderCancelled({ reason: event.reason }))
+                  )
+              }
             }
           }
-        }
-      },
-      fulfillment: {
-        initialize: ({ builder }) => builder.from(),
-        states: {
-          WaitingForPayment: {
-            on: {
-              Authorize: (to) =>
-                to.local.Packing().resolve(({ target }) => target.decoded(new Packing({ packageCount: 1 }))),
-              Pack: (to) =>
-                to.local.Packing().resolve(({ event, target }) =>
-                  target.decoded(new Packing({ packageCount: event.packages }))
+        },
+        fulfillment: {
+          initialize: ({ builder }) => builder.from(),
+          states: {
+            WaitingForPayment: {
+              on: {
+                Authorize: (to) =>
+                  to.local.Packing().resolve(({ target }) => target.decoded(new Packing({ packageCount: 1 }))),
+                Pack: (to) =>
+                  to.local.Packing().resolve(({ event, target }) =>
+                    target.decoded(new Packing({ packageCount: event.packages }))
+                  ),
+                CompleteAll: (to) =>
+                  to.local.Shipped().resolve(({ event, target }) =>
+                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
+                  )
+              }
+            },
+            Packing: {
+              invoke: (from) =>
+                from.timer("packing-sla", "5 seconds").onDone((to) =>
+                  to.none.resolve((_, enqueue) => {
+                    enqueue.raise(ParallelInternalEvents.AutoShip())
+                  })
                 ),
-              CompleteAll: (to) =>
-                to.local.Shipped().resolve(({ event, target }) =>
-                  target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                )
-            }
-          },
-          Packing: {
-            invoke: (from) =>
-              from.timer("packing-sla", "5 seconds").onDone((to) =>
-                to.none.resolve((_, enqueue) => {
-                  enqueue.raise(ParallelInternalEvents.AutoShip())
-                })
-              ),
-            on: {
-              AutoShip: (to) =>
-                to.local.Shipped().resolve(({ target }) => target.decoded(new Shipped({ trackingCode: "automatic" }))),
-              Ship: (to) =>
-                to.local.Shipped().resolve(({ event, target }) =>
-                  target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                ),
-              CompleteAll: (to) =>
-                to.local.Shipped().resolve(({ event, target }) =>
-                  target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                )
+              on: {
+                AutoShip: (to) =>
+                  to.local.Shipped().resolve(({ target }) =>
+                    target.decoded(new Shipped({ trackingCode: "automatic" }))
+                  ),
+                Ship: (to) =>
+                  to.local.Shipped().resolve(({ event, target }) =>
+                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
+                  ),
+                CompleteAll: (to) =>
+                  to.local.Shipped().resolve(({ event, target }) =>
+                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
+                  )
+              }
             }
           }
         }
       }
-    }
-  },
-  Complete: {
-    output: ({ state }) => state.orderId
-  },
-  Cancelled: {
-    on: {
-      RetryOrder: (to) =>
-        to.full.Order.initial.resolve(({ target }) => target.decoded(new Order({ orderId: "retry", total: 0 })))
+    },
+    Complete: {
+      output: ({ state }) => state.orderId
+    },
+    Cancelled: {
+      on: {
+        RetryOrder: (to) =>
+          to.branch.Order.initial.resolve(({ target }) => target.decoded(new Order({ orderId: "retry", total: 0 })))
+      }
     }
   }
 })

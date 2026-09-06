@@ -14,15 +14,15 @@ const rule = plugin.rules["no-browser-api-in-planning"]
 tester.run("no-browser-api-in-planning", rule, {
   valid: [
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { invoke: (from) => from.effect("storage", () => localStorage.getItem("key")) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("storage", () => localStorage.getItem("key")) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: ({ document, navigator }) => document.read(navigator) } })`,
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ document, navigator }) => document.read(navigator) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: { entry: () => {
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: () => {
   const url = new URL("https://example.com")
   const params = new URLSearchParams(url.search)
   return structuredClone(params)
-} } })`,
+} } } })`,
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => {
   window.fetch("/api")
@@ -47,10 +47,10 @@ Machine.make({ initial: (to) => {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ Ready: {
+Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
   output: () => sessionStorage.length,
   history: { recent: { default: (to) => location.pathname ? to.none : to.none } }
-} })`,
+} } })`,
       errors: Array.from({ length: 2 }, () => ({ messageId: "browserApi" }))
     }
   ]

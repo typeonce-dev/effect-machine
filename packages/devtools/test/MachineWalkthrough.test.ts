@@ -169,6 +169,7 @@ describe("MachineWalkthrough", () => {
   it("starts from compound and parallel initial topology", () => {
     const session = MachineWalkthrough.start(MachineDocument.make(machine))
     assert.deepStrictEqual(MachineWalkthrough.current(session).after.activePaths, [
+      "",
       "application",
       "application.workflow",
       "application.workflow.idle",
@@ -187,6 +188,7 @@ describe("MachineWalkthrough", () => {
     const started = MachineWalkthrough.start(MachineDocument.make(machine))
     const advanced = takeEvent(started, "Start")
     assert.deepStrictEqual(MachineWalkthrough.current(advanced).after.activePaths, [
+      "",
       "application",
       "application.workflow",
       "application.workflow.running",
@@ -221,6 +223,7 @@ describe("MachineWalkthrough", () => {
     assert.isTrue(Result.isSuccess(crossed))
     if (Result.isFailure(crossed)) throw crossed.failure
     assert.deepStrictEqual(MachineWalkthrough.current(crossed.success).after.activePaths, [
+      "",
       "application",
       "application.workflow",
       "application.workflow.idle",

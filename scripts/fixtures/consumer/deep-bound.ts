@@ -36,171 +36,189 @@ const ChildState = Schema.TaggedUnion({
   Done: { value: Schema.String }
 })
 
-const ChildStates = Machine.states({
-  Done: {
-    schema: ChildState.cases.Done,
-    type: "final",
-    output: Schema.String
+const ChildStates = Machine.state({
+  initial: "Done",
+  states: {
+    Done: {
+      schema: ChildState.cases.Done,
+      type: "final",
+      output: Schema.String
+    }
   }
 })
-const ChildParentEvents = Machine.events(Internal.cases.ChildNotice)
+const ChildParentEvents = Machine.eventsFromSchemas(Internal.cases.ChildNotice)
 const childMachine = Machine.make({
-  states: ChildStates.states,
-  events: Machine.events(),
+  root: ChildStates,
+  events: Machine.eventsFromSchemas(),
   parent: Machine.parent(ChildParentEvents),
   input: Schema.Struct({ value: Schema.String }),
-  initial: (to) =>
-    to.Done().resolve(({ input, target }) => target.decoded(ChildState.cases.Done.make({ value: input.value })))
+  initialConfiguration: (root) =>
+    root.resolve(({ input, target }) =>
+      target.from((to) => to.Done.decoded(ChildState.cases.Done.make({ value: input.value })))
+    )
 }).handle({
-  Done: {
-    entry: ({ parent, state }, enqueue) => {
-      enqueue.sendTo(parent, ChildParentEvents.ChildNotice({ value: state.value }))
-    },
-    output: ({ state }) => state.value
+  states: {
+    Done: {
+      entry: ({ parent, state }, enqueue) => {
+        enqueue.sendTo(parent, ChildParentEvents.ChildNotice({ value: state.value }))
+      },
+      output: ({ state }) => state.value
+    }
   }
 })
 const Child = Machine.child("child", childMachine)
 
-const States = Machine.states({
-  Idle: State.cases.Idle,
-  Ready: {
-    schema: State.cases.Ready,
-    initial: "Editor",
-    states: {
-      Editor: {
-        schema: State.cases.Editor,
-        initial: "Editing",
-        states: {
-          Editing: State.cases.Editing,
-          Saving: State.cases.Saving
+const States = Machine.state({
+  initial: "Idle",
+  states: {
+    Idle: State.cases.Idle,
+    Ready: {
+      schema: State.cases.Ready,
+      initial: "Editor",
+      states: {
+        Editor: {
+          schema: State.cases.Editor,
+          initial: "Editing",
+          states: {
+            Editing: State.cases.Editing,
+            Saving: State.cases.Saving
+          }
         }
       }
+    },
+    Done: {
+      schema: State.cases.Done,
+      type: "final",
+      output: Schema.String
     }
-  },
-  Done: {
-    schema: State.cases.Done,
-    type: "final",
-    output: Schema.String
   }
 })
 
-const Emissions = Machine.emittedEvents(Emitted.cases.Notice)
+const Emissions = Machine.emittedEventsFromSchemas(Emitted.cases.Notice)
 const definition = Machine.make({
-  states: States.states,
-  events: Machine.events(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
-  internalEvents: Machine.internalEvents(Internal.cases.Loaded, Internal.cases.ChildCompleted),
+  root: States,
+  events: Machine.eventsFromSchemas(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
+  internalEvents: Machine.internalEventsFromSchemas(Internal.cases.Loaded, Internal.cases.ChildCompleted),
   emittedEvents: Emissions,
   input: Schema.Struct({ seed: Schema.String }),
-  initial: (to) => to.Idle().resolve(({ input: { seed: _seed }, target }) => target.decoded(State.cases.Idle.make({})))
+  initialConfiguration: (root) =>
+    root.resolve(({ input: { seed: _seed }, target }) =>
+      target.from((to) => to.Idle.decoded(State.cases.Idle.make({})))
+    )
 })
 const machine = definition.handle({
-  Idle: {
-    invoke: (from) => from.effect("deep-inline-invoke", () => Effect.asVoid(ExternalService)).onDone((to) => to.none),
-    on: {
-      Begin: (to) =>
-        to.full.Ready().resolve(({ target }) =>
-          target.decoded(
-            State.cases.Ready.make({}),
-            (ready) =>
-              ready.Editor.decoded(
-                State.cases.Editor.make({}),
-                (editor) => editor.Editing.decoded(State.cases.Editing.make({ value: "ready" }))
-              )
-          )
-        )
-    }
-  },
-  Ready: {
-    states: {
-      Editor: {
-        states: {
-          Editing: {
-            on: {
-              Save: (to) =>
-                to.local.Saving().resolve(({ event, target }) =>
-                  target.decoded(State.cases.Saving.make({ value: event.value }))
-                ),
-              Loaded: (to) => to.none
-            }
-          },
-          Saving: {
-            invoke: (from) =>
-              from.child(Child, { input: ({ state }) => ({ value: state.value }) }).onDone((to) => to.none),
-            on: {
-              ChildNotice: (to) =>
-                to.local.Saving().resolve(({ event, target }, enqueue) => {
-                  enqueue.emit(Emissions.Notice({ value: event.value }))
-                  return target.decoded(State.cases.Saving.make({ value: event.value }))
-                }),
-              ChildCompleted: (to) =>
-                to.full.Done().resolve(({ event, target }) =>
-                  target.decoded(State.cases.Done.make({ value: event.value }))
+  states: {
+    Idle: {
+      invoke: (from) => from.effect("deep-inline-invoke", () => Effect.asVoid(ExternalService)).onDone((to) => to.none),
+      on: {
+        Begin: (to) =>
+          to.branch.Ready().resolve(({ target }) =>
+            target.decoded(
+              State.cases.Ready.make({}),
+              (ready) =>
+                ready.Editor.decoded(
+                  State.cases.Editor.make({}),
+                  (editor) => editor.Editing.decoded(State.cases.Editing.make({ value: "ready" }))
                 )
+            )
+          )
+      }
+    },
+    Ready: {
+      states: {
+        Editor: {
+          states: {
+            Editing: {
+              on: {
+                Save: (to) =>
+                  to.local.Saving().resolve(({ event, target }) =>
+                    target.decoded(State.cases.Saving.make({ value: event.value }))
+                  ),
+                Loaded: (to) => to.none
+              }
+            },
+            Saving: {
+              invoke: (from) =>
+                from.child(Child, { input: ({ state }) => ({ value: state.value }) }).onDone((to) => to.none),
+              on: {
+                ChildNotice: (to) =>
+                  to.local.Saving().resolve(({ event, target }, enqueue) => {
+                    enqueue.emit(Emissions.Notice({ value: event.value }))
+                    return target.decoded(State.cases.Saving.make({ value: event.value }))
+                  }),
+                ChildCompleted: (to) =>
+                  to.branch.Done().resolve(({ event, target }) =>
+                    target.decoded(State.cases.Done.make({ value: event.value }))
+                  )
+              }
             }
           }
         }
       }
+    },
+    Done: {
+      output: ({ state }) => state.value
     }
-  },
-  Done: {
-    output: ({ state }) => state.value
   }
 })
 
 const PackagedDeepState = Schema.TaggedStruct("PackagedDeepState", {})
-const PackagedDeepStates = Machine.states({
-  n0: {
-    schema: PackagedDeepState,
-    initial: "n1",
-    states: {
-      n1: {
-        schema: PackagedDeepState,
-        initial: "n2",
-        states: {
-          n2: {
-            schema: PackagedDeepState,
-            initial: "n3",
-            states: {
-              n3: {
-                schema: PackagedDeepState,
-                initial: "n4",
-                states: {
-                  n4: {
-                    schema: PackagedDeepState,
-                    initial: "n5",
-                    states: {
-                      n5: {
-                        schema: PackagedDeepState,
-                        initial: "n6",
-                        states: {
-                          n6: {
-                            schema: PackagedDeepState,
-                            initial: "n7",
-                            states: {
-                              n7: {
-                                schema: PackagedDeepState,
-                                initial: "n8",
-                                states: {
-                                  n8: {
-                                    schema: PackagedDeepState,
-                                    initial: "n9",
-                                    states: {
-                                      n9: {
-                                        schema: PackagedDeepState,
-                                        initial: "n10",
-                                        states: {
-                                          n10: {
-                                            schema: PackagedDeepState,
-                                            initial: "n11",
-                                            states: {
-                                              n11: {
-                                                schema: PackagedDeepState,
-                                                initial: "n12",
-                                                states: {
-                                                  n12: {
-                                                    schema: PackagedDeepState,
-                                                    type: "final",
-                                                    output: Schema.String
+const PackagedDeepStates = Machine.state({
+  initial: "n0",
+  states: {
+    n0: {
+      schema: PackagedDeepState,
+      initial: "n1",
+      states: {
+        n1: {
+          schema: PackagedDeepState,
+          initial: "n2",
+          states: {
+            n2: {
+              schema: PackagedDeepState,
+              initial: "n3",
+              states: {
+                n3: {
+                  schema: PackagedDeepState,
+                  initial: "n4",
+                  states: {
+                    n4: {
+                      schema: PackagedDeepState,
+                      initial: "n5",
+                      states: {
+                        n5: {
+                          schema: PackagedDeepState,
+                          initial: "n6",
+                          states: {
+                            n6: {
+                              schema: PackagedDeepState,
+                              initial: "n7",
+                              states: {
+                                n7: {
+                                  schema: PackagedDeepState,
+                                  initial: "n8",
+                                  states: {
+                                    n8: {
+                                      schema: PackagedDeepState,
+                                      initial: "n9",
+                                      states: {
+                                        n9: {
+                                          schema: PackagedDeepState,
+                                          initial: "n10",
+                                          states: {
+                                            n10: {
+                                              schema: PackagedDeepState,
+                                              initial: "n11",
+                                              states: {
+                                                n11: {
+                                                  schema: PackagedDeepState,
+                                                  initial: "n12",
+                                                  states: {
+                                                    n12: {
+                                                      schema: PackagedDeepState,
+                                                      type: "final",
+                                                      output: Schema.String
+                                                    }
                                                   }
                                                 }
                                               }
@@ -228,40 +246,42 @@ const PackagedDeepStates = Machine.states({
   }
 })
 const packagedDeepMachine = Machine.make({
-  states: PackagedDeepStates.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.n0.initial.resolve((): never => {
+  root: PackagedDeepStates,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (to) =>
+    to.resolve((): never => {
       throw new Error("type-only packaged consumer fixture")
     })
 }).handle({
-  n0: {
-    states: {
-      n1: {
-        states: {
-          n2: {
-            states: {
-              n3: {
-                states: {
-                  n4: {
-                    states: {
-                      n5: {
-                        states: {
-                          n6: {
-                            states: {
-                              n7: {
-                                states: {
-                                  n8: {
-                                    states: {
-                                      n9: {
-                                        states: {
-                                          n10: {
-                                            states: {
-                                              n11: {
-                                                states: {
-                                                  n12: {
-                                                    entry: () => {},
-                                                    output: () => "packaged"
+  states: {
+    n0: {
+      states: {
+        n1: {
+          states: {
+            n2: {
+              states: {
+                n3: {
+                  states: {
+                    n4: {
+                      states: {
+                        n5: {
+                          states: {
+                            n6: {
+                              states: {
+                                n7: {
+                                  states: {
+                                    n8: {
+                                      states: {
+                                        n9: {
+                                          states: {
+                                            n10: {
+                                              states: {
+                                                n11: {
+                                                  states: {
+                                                    n12: {
+                                                      entry: () => {},
+                                                      output: () => "packaged"
+                                                    }
                                                   }
                                                 }
                                               }
@@ -304,8 +324,8 @@ const runtime = Atom.runtime(
 const Bound = AtomMachine.bind(runtime)
 const machineAtom = Bound.make(machine, { seed: "initial" })
 
-type Snapshot = Machine.Machine.Snapshot<typeof States.states>
-type StateSuccess = Atom.Success<typeof machineAtom.state>
+type Snapshot = Machine.Snapshot<typeof States>
+type StateSuccess = Atom.Success<typeof machineAtom.result>
 type SendEvent = typeof machineAtom.send extends Atom.Writable<any, infer InputEvent> ? InputEvent : never
 type Output = typeof machineAtom extends AtomMachine.MachineAtom<any, any, any, infer Value, any, any> ? Value : never
 type Failure = Atom.Failure<typeof machineAtom.result>

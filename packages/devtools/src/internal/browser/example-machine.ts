@@ -24,116 +24,125 @@ class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 class Disconnect extends Schema.TaggedClass<Disconnect>("Disconnect")("Disconnect", {}) {}
 class Refresh extends Schema.TaggedClass<Refresh>("Refresh")("Refresh", {}) {}
 
-const States = Machine.states({
-  application: {
-    schema: Application,
-    type: "parallel",
-    states: {
-      workflow: {
-        schema: Workflow,
-        initial: "idle",
-        states: {
-          idle: Idle,
-          running: {
-            schema: Running,
-            initial: "editing",
-            states: {
-              editing: Editing,
-              complete: {
-                schema: Complete,
-                type: "final"
+const States = Machine.state({
+  initial: "application",
+  states: {
+    application: {
+      schema: Application,
+      type: "parallel",
+      states: {
+        workflow: {
+          schema: Workflow,
+          initial: "idle",
+          states: {
+            idle: Idle,
+            running: {
+              schema: Running,
+              initial: "editing",
+              states: {
+                editing: Editing,
+                complete: {
+                  schema: Complete,
+                  type: "final"
+                }
               }
+            },
+            recent: {
+              type: "history"
             }
-          },
-          recent: {
-            type: "history"
+          }
+        },
+        connection: {
+          schema: Connection,
+          initial: "online",
+          states: {
+            online: Online,
+            offline: Offline
           }
         }
-      },
-      connection: {
-        schema: Connection,
-        initial: "online",
-        states: {
-          online: Online,
-          offline: Offline
-        }
       }
-    }
-  },
-  disabled: Disabled
+    },
+    disabled: Disabled
+  }
 })
 
 export const snapshot = {
-  path: "application" as const,
-  value: new Application({ workspace: "effect-machine", revision: 7 }),
-  states: {
-    workflow: {
-      path: "application.workflow" as const,
-      value: new Workflow({ document: "Machine.ts", unsavedChanges: 2 }),
-      state: { path: "application.workflow.idle" as const, value: new Idle({}) }
-    },
-    connection: {
-      path: "application.connection" as const,
-      value: new Connection({}),
-      state: { path: "application.connection.online" as const, value: new Online({}) }
+  path: "" as const,
+  value: undefined,
+  state: {
+    path: "application" as const,
+    value: new Application({ workspace: "effect-machine", revision: 7 }),
+    states: {
+      workflow: {
+        path: "application.workflow" as const,
+        value: new Workflow({ document: "Machine.ts", unsavedChanges: 2 }),
+        state: { path: "application.workflow.idle" as const, value: new Idle({}) }
+      },
+      connection: {
+        path: "application.connection" as const,
+        value: new Connection({}),
+        state: { path: "application.connection.online" as const, value: new Online({}) }
+      }
     }
   }
 }
 
 const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
-  typeof States.states,
+  { readonly "": typeof States.node },
   "application.workflow"
 > => snapshot
 
 export const machine = Machine.make({
   id: "inspection-example",
-  states: States.states,
-  events: Machine.events(Start, Finish, Disconnect, Refresh),
-  initial: (to) => to.application.initial.resolve(() => snapshot)
+  root: States,
+  events: Machine.eventsFromSchemas(Start, Finish, Disconnect, Refresh),
+  initialConfiguration: (to) => to.resolve(() => snapshot)
 }).handle({
-  application: {
-    states: {
-      workflow: {
-        history: {
-          recent: {
-            default: initialWorkflow
-          }
-        },
-        states: {
-          idle: {
-            on: {
-              Start: (to) =>
-                to.local.running()
-                  .updating(to.branch.application.workflow)
-                  .resolve(({ owner, target }) =>
-                    target.decoded(
-                      new Running({}),
-                      (running) => running.editing.decoded(new Editing({}))
-                    ).update(owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 })))
-                  ),
-              Refresh: (to) =>
-                to.local.update(({ owner }) =>
-                  owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
-                )
+  states: {
+    application: {
+      states: {
+        workflow: {
+          history: {
+            recent: {
+              default: initialWorkflow
             }
           },
-          running: {
-            initialize: ({ builder }) => builder.decoded(new Editing({})),
-            states: {
-              editing: {
-                on: {
-                  Finish: (to) => to.local.complete().resolve(({ target }) => target.decoded(new Complete({})))
+          states: {
+            idle: {
+              on: {
+                Start: (to) =>
+                  to.local.running()
+                    .updating(to.branch.application.workflow)
+                    .resolve(({ owner, target }) =>
+                      target.decoded(
+                        new Running({}),
+                        (running) => running.editing.decoded(new Editing({}))
+                      ).update(owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 })))
+                    ),
+                Refresh: (to) =>
+                  to.local.update.resolve(({ owner }) =>
+                    owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
+                  )
+              }
+            },
+            running: {
+              initialize: ({ builder }) => builder.decoded(new Editing({})),
+              states: {
+                editing: {
+                  on: {
+                    Finish: (to) => to.local.complete().resolve(({ target }) => target.decoded(new Complete({})))
+                  }
                 }
               }
             }
           }
-        }
-      },
-      connection: {
-        states: {
-          online: {
-            on: {
-              Disconnect: (to) => to.local.offline().resolve(({ target }) => target.decoded(new Offline({})))
+        },
+        connection: {
+          states: {
+            online: {
+              on: {
+                Disconnect: (to) => to.local.offline().resolve(({ target }) => target.decoded(new Offline({})))
+              }
             }
           }
         }

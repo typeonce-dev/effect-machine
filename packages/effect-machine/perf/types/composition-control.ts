@@ -15,65 +15,70 @@ export const WorkspaceOutput = Schema.Struct({
   Sync: Schema.Number
 })
 
-export const States = Machine.states({
-  App: {
-    schema: App,
-    initial: "Workspace",
-    states: {
-      Workspace: {
-        schema: Workspace,
-        type: "parallel",
-        output: WorkspaceOutput,
-        states: {
-          Editor: {
-            schema: Editor,
-            initial: "Editing",
-            states: {
-              Editing,
-              Done: {
-                schema: EditorDone,
-                type: "final",
-                output: Schema.String
+export const States = Machine.state({
+  initial: "App",
+  states: {
+    App: {
+      schema: App,
+      initial: "Workspace",
+      states: {
+        Workspace: {
+          schema: Workspace,
+          type: "parallel",
+          output: WorkspaceOutput,
+          states: {
+            Editor: {
+              schema: Editor,
+              initial: "Editing",
+              states: {
+                Editing,
+                Done: {
+                  schema: EditorDone,
+                  type: "final",
+                  output: Schema.String
+                }
               }
-            }
-          },
-          Sync: {
-            schema: Sync,
-            initial: "Idle",
-            states: {
-              Idle: SyncIdle,
-              Done: {
-                schema: SyncDone,
-                type: "final",
-                output: Schema.Number
+            },
+            Sync: {
+              schema: Sync,
+              initial: "Idle",
+              states: {
+                Idle: SyncIdle,
+                Done: {
+                  schema: SyncDone,
+                  type: "final",
+                  output: Schema.Number
+                }
               }
+            },
+            recent: {
+              type: "history",
+              history: "deep"
             }
-          },
-          recent: {
-            type: "history",
-            history: "deep"
           }
+        },
+        Route: {
+          type: "choice"
         }
-      },
-      Route: {
-        type: "choice"
       }
     }
   }
 })
 
 export const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) =>
-    to.App.initial.resolve(({ target }) =>
-      target.from(App.make({}), (app) =>
-        app.Workspace.from(
-          Workspace.make({}),
-          (workspace) =>
-            workspace
-              .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
-              .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
-        ))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) =>
+        to.App.from(App.make({}), (app) =>
+          app.Workspace.from(
+            Workspace.make({}),
+            (workspace) =>
+              workspace
+                .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
+                .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
+          ))
+      )
     )
 })

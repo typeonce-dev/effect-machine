@@ -7,12 +7,13 @@ export class LoadError {
 
 export const Loading = Schema.TaggedStruct("Loading", { userId: Schema.String })
 
-export const States = Machine.states({ Loading })
+export const States = Machine.state({ initial: "Loading", states: { Loading } })
 
 export const loadUser = (userId: string) => Effect.fail(new LoadError()).pipe(Effect.as({ id: userId, name: "Ada" }))
 
 export const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(),
-  initial: (to) => to.Loading().resolve(({ target }) => target.from(Loading.make({ userId: "user-1" })))
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Loading.from(Loading.make({ userId: "user-1" }))))
 })

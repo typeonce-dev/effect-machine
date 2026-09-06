@@ -8,10 +8,11 @@ export const State = Schema.TaggedUnion({
 })
 
 export const Route = Schema.TaggedStruct("Route", { value: Schema.String })
-export const States = Machine.states(State.cases)
+export const States = Machine.state({ initial: "Idle", states: State.cases })
 
 export const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Route),
-  initial: (to) => to.Idle().resolve(({ target }) => target.from(State.cases.Idle.make({})))
+  root: States,
+  events: Machine.eventsFromSchemas(Route),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Idle.from(State.cases.Idle.make({}))))
 })

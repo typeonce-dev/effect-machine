@@ -68,12 +68,12 @@ Removes a resolver whose only result is empty default construction:
 ```ts
 // Before
 const handlers = {
-  Start: (to) => to.full.Running().resolve(({ target }) => target.from())
+  Start: (to) => to.branch.Running().resolve(({ target }) => target.from())
 }
 
 // After `oxlint --fix`
 const handlers = {
-  Start: (to) => to.full.Running()
+  Start: (to) => to.branch.Running()
 }
 ```
 
@@ -103,7 +103,7 @@ no lifetime in which to own work started by a transition.
 const incorrect = {
   Submit: (to) => {
     fetch("/orders", { method: "POST" })
-    return to.full.Complete()
+    return to.branch.Complete()
   }
 }
 
@@ -112,8 +112,8 @@ const correct = {
   Submitting: {
     invoke: (from) =>
       from.effect("submit-order", () => submitOrder())
-        .onDone((to) => to.full.Complete())
-        .onFailure((to) => to.full.Failed())
+        .onDone((to) => to.branch.Complete())
+        .onFailure((to) => to.branch.Failed())
   }
 }
 ```
@@ -166,8 +166,8 @@ planning.
 const incorrect = {
   Restore: (to) =>
     localStorage.getItem("draft") === null
-      ? to.full.Empty()
-      : to.full.Editing()
+      ? to.branch.Empty()
+      : to.branch.Editing()
 }
 
 // Correct: state-owned work reads storage and reports an outcome.
@@ -175,8 +175,8 @@ const correct = {
   Restoring: {
     invoke: (from) =>
       from.effect("restore-draft", () => restoreDraft())
-        .onDone((to) => to.full.Editing())
-        .onFailure((to) => to.full.Empty())
+        .onDone((to) => to.branch.Editing())
+        .onFailure((to) => to.branch.Empty())
   }
 }
 ```
@@ -197,7 +197,7 @@ performance clocks, `Temporal.Now`, and process clocks.
 const incorrect = {
   Check: (to) =>
     Date.now() >= deadline
-      ? to.full.Expired()
+      ? to.branch.Expired()
       : to.none
 }
 
@@ -205,8 +205,8 @@ const incorrect = {
 const correct = {
   Check: (to) =>
     to.branches({
-      expired: { target: to.full.Expired() },
-      current: { target: to.full.Current() }
+      expired: { target: to.branch.Expired() },
+      current: { target: to.branch.Current() }
     }).resolve(({ event, select }) =>
       event.now >= event.deadline
         ? select.expired.from()
@@ -228,10 +228,10 @@ one `.handle(...)` call:
 ```ts
 // Before
 const definition = Machine.make({/* ... */})
-export const machine = definition.handle({/* ... */})
+export const machine = definition.handle({ states: {/* ... */} })
 
 // After
-export const machine = Machine.make({/* ... */}).handle({/* ... */})
+export const machine = Machine.make({/* ... */}).handle({ states: {/* ... */} })
 ```
 
 Definitions that are exported or reused remain valid.

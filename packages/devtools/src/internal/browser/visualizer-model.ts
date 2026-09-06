@@ -55,7 +55,7 @@ export interface VisualizerModel {
 }
 
 export const stateLabel = (state: VisualizationState): string =>
-  state.title === null ? state.key : `${state.title} (${state.key})`
+  state.title === null ? (state.path === "" ? "(root)" : state.key) : `${state.title} (${state.key})`
 
 export const triggerLabel = (transition: VisualizationTransition): string => {
   switch (transition.trigger.type) {
@@ -74,7 +74,7 @@ export const triggerLabel = (transition: VisualizationTransition): string => {
 
 const propertyAccess = (key: string): string => /^[$A-Z_a-z][$\w]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`
 
-const pathAccess = (path: string): string => path.split(".").map(propertyAccess).join("")
+const pathAccess = (path: string): string => path === "" ? "" : path.split(".").map(propertyAccess).join("")
 
 const nearestCompoundScope = (
   document: VisualizationDocument,
@@ -97,7 +97,7 @@ const localPathAccess = (
   const scope = nearestCompoundScope(document, source)
   if (scope === undefined) return undefined
   if (path === scope) return ""
-  const prefix = `${scope}.`
+  const prefix = scope === "" ? "" : `${scope}.`
   return path.startsWith(prefix) ? pathAccess(path.slice(prefix.length)) : undefined
 }
 
@@ -138,13 +138,13 @@ export const branchTargetApi = (
     switch (selection.kind) {
       case "state":
       case "choice":
-        api = `to.branch${pathAccess(path)}()`
+        api = path === "" ? "to.root()" : `to.branch${pathAccess(path)}()`
         break
       case "initial":
-        api = `to.branch${pathAccess(path)}.initial`
+        api = path === "" ? "to.root.initial" : `to.branch${pathAccess(path)}.initial`
         break
       case "update":
-        api = `to.branch${pathAccess(path)}.update`
+        api = path === "" ? "to.root.update" : `to.branch${pathAccess(path)}.update`
         break
       case "history":
         break
@@ -165,7 +165,7 @@ export const branchTargetApi = (
         break
     }
   } else if (selection.scope === "initial") {
-    if (selection.kind === "state") api = `to${pathAccess(path)}()`
+    if (selection.kind === "state") api = path === "" ? "to" : `to${pathAccess(path)}()`
     if (selection.kind === "initial") api = `to${pathAccess(path)}.initial`
   }
 

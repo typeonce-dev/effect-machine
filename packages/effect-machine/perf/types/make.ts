@@ -12,12 +12,11 @@ const Event = Schema.TaggedUnion({
   Finish: { value: Schema.String }
 })
 
-const States = Machine.states(State.cases)
+const States = Machine.state({ initial: "Idle", states: State.cases })
 
 const machine = Machine.make({
-  states: States.states,
-  events: Machine.events(Event.cases.Start, Event.cases.Finish),
-  initial: (to) => to.Idle().resolve(({ target }) => target.from(State.cases.Idle.make({})))
+  root: States,
+  events: Machine.eventsFromSchemas(Event)
 })
 
 void machine
