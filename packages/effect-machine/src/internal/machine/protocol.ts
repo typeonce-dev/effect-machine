@@ -24,9 +24,7 @@ interface MachineProtocolSchemas {
   readonly event: Schema.Top
   readonly emit: Schema.Top
   readonly eventConstructors: ReadonlySet<object>
-  readonly trustedEvents: WeakSet<object>
   readonly emissionConstructors: ReadonlySet<object>
-  readonly trustedEmissions: WeakSet<object>
 }
 
 interface EventProtocolDefinition {
@@ -171,9 +169,7 @@ export const setProtocol = (machine: Machine.Any): void => {
     event: Schema.Union(events),
     emit: Schema.Union(emittedEvents),
     eventConstructors: collectEventConstructors(events),
-    trustedEvents: new WeakSet(),
-    emissionConstructors: collectEventConstructors(emittedEvents),
-    trustedEmissions: new WeakSet()
+    emissionConstructors: collectEventConstructors(emittedEvents)
   })
 }
 
@@ -419,11 +415,6 @@ const decodeEventConstruction = (
           })
         )
       )
-    ),
-    Effect.tap((event) =>
-      Effect.sync(() =>
-        (boundary === "event" ? protocol.trustedEvents : protocol.trustedEmissions).add(event as object)
-      )
     )
   )
 }
@@ -453,12 +444,8 @@ const decodeEventConstructionSync = (
     boundary,
     event: String(construction._tag)
   })
-  ;(boundary === "event" ? protocol.trustedEvents : protocol.trustedEmissions).add(event as object)
   return event
 }
-
-const isTrustedEvent = (protocol: MachineProtocolSchemas, event: unknown): boolean =>
-  typeof event === "object" && event !== null && protocol.trustedEvents.has(event)
 
 export const decodeInput = <Input extends Schema.Top>(
   machine: Machine.Any,
@@ -478,10 +465,9 @@ export const decodeEvent = <const Events extends ReadonlyArray<Machine.TaggedSch
       MachineSchemaDecodeError
     >
   }
-  if (isTrustedEvent(protocol, event)) {
-    return Effect.succeed(event as Machine.EventOf<Events>)
-  }
   const eventName = getEventName(event)
+  // Decoded objects can escape to user code and be mutated. Validation is local
+  // to this delivery; object identity is never evidence of continued validity.
   return decodeBoundary<Machine.EventOf<Events>>(
     machine,
     protocol.event,
@@ -497,9 +483,6 @@ export const decodeEventSync = <const Events extends ReadonlyArray<Machine.Tagge
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
     return decodeEventConstructionSync(machine, protocol, event, "event") as Machine.EventOf<Events>
-  }
-  if (isTrustedEvent(protocol, event)) {
-    return event as Machine.EventOf<Events>
   }
   const eventName = getEventName(event)
   return decodeBoundarySync<Machine.EventOf<Events>>(
@@ -521,9 +504,6 @@ export const decodeEmit = <const Emits extends ReadonlyArray<Machine.TaggedSchem
       MachineSchemaDecodeError
     >
   }
-  if (typeof event === "object" && event !== null && protocol.trustedEmissions.has(event)) {
-    return Effect.succeed(event as Machine.EmitOf<Emits>)
-  }
   const eventName = getEventName(event)
   return decodeBoundary<Machine.EmitOf<Emits>>(
     machine,
@@ -540,9 +520,6 @@ export const decodeEmitSync = <const Emits extends ReadonlyArray<Machine.TaggedS
   const protocol = getProtocolSchemas(machine)
   if (isEventConstruction(event)) {
     return decodeEventConstructionSync(machine, protocol, event, "emission") as Machine.EmitOf<Emits>
-  }
-  if (typeof event === "object" && event !== null && protocol.trustedEmissions.has(event)) {
-    return event as Machine.EmitOf<Emits>
   }
   const eventName = getEventName(event)
   return decodeBoundarySync<Machine.EmitOf<Emits>>(

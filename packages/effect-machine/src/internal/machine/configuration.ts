@@ -642,6 +642,14 @@ export const normalizeConfigurationEffect = <const States extends Machine.StateS
 ): Effect.Effect<ActiveConfiguration, MachineSchemaDecodeError> =>
   configurationFromSnapshotEffect(machine, state).pipe(
     Effect.catchCause((cause) => {
+      if (Cause.hasInterrupts(cause)) {
+        return Effect.failCause(Cause.map(cause, (error) =>
+          error instanceof MachineSchemaDecodeError ? error : new MachineSchemaDecodeError({
+            machineId: machine.id,
+            boundary: "configuration",
+            cause: Cause.fail(error)
+          })))
+      }
       const error = Cause.findErrorOption(cause)
       return Option.isSome(error) && error.value instanceof MachineSchemaDecodeError
         ? Effect.fail(error.value)

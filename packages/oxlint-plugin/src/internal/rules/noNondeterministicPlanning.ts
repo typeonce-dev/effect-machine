@@ -17,7 +17,7 @@ export const noNondeterministicPlanning: Rule = {
     }
   },
   create(context) {
-    const bindings = makeMachineBindings()
+    const bindings = makeMachineBindings(context)
     const report = (
       node: ESTree.CallExpression | ESTree.MemberExpression | ESTree.NewExpression,
       operation: string | undefined

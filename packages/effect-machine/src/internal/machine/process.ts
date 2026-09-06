@@ -16,18 +16,9 @@ import type { StoppedError } from "./errors.js"
 import * as ExecutionPlan from "./executionPlan.js"
 import * as Invocation from "./invocation.js"
 import * as internalPlanner from "./planner.js"
+import type { ExcludeCompatibleRuntime } from "./requirements.js"
 import * as internalRuntime from "./runtime.js"
 import * as Serialization from "./serialization.js"
-
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 type ProcessEntry<States extends Machine.StateSchemas, Input extends Schema.Top> =
   | {

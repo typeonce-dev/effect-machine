@@ -787,14 +787,18 @@ describe("Machine", () => {
       DownInitial.decoded(new Down({})),
       new SignInCompleted({ userId: "user-1" })
     )
-    expect(Machine.can).type.not.toBeCallableWith(
+    expect(Machine.can).type.toBeCallableWith(
       machine,
+      DownInitial.decoded(new Down({})),
+      new SignInCompleted({ userId: "user-1" })
+    )
+    expect(Machine.can(machine)).type.toBeCallableWith(
       DownInitial.decoded(new Down({})),
       new SignInCompleted({ userId: "user-1" })
     )
     expect(Machine.can(machine)).type.not.toBeCallableWith(
       DownInitial.decoded(new Down({})),
-      new SignInCompleted({ userId: "user-1" })
+      { _tag: "Undeclared" }
     )
     const publicEvents = Machine.events(SignIn)
     const overlappingInternalEvents = Machine.internalEvents(SignIn)

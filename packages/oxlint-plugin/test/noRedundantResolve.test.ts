@@ -14,6 +14,16 @@ const rule = plugin.rules["no-redundant-resolve"]
 tester.run("no-redundant-resolve", rule, {
   valid: [
     `import { Machine } from "@typeonce/effect-machine"
+function unrelated(Machine: any) { Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) }) }`,
+    `import { Machine as M } from "@typeonce/effect-machine"
+function unrelated(M: any) { M.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) }) }`,
+    `import * as EM from "@typeonce/effect-machine"
+function unrelated(EM: any) { EM.Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) }) }`,
+    `import { Machine } from "@typeonce/effect-machine"
+const definition = Machine.make({ initial: (to) => to.Ready() })
+function unrelated(definition: any) { definition.handle({ Ready: { on: { Reset: (to) => to.full.Ready().resolve(({ target }) => target.from()) } } }) }`,
+
+    `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from({ id: "ready" })) })`,
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from(), { reenter: true, actions: [] }) })`,

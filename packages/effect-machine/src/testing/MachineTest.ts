@@ -10,8 +10,15 @@ import type * as Schema from "effect/Schema"
 import type { FastCheck } from "effect/testing"
 import type { EnsureExecutable } from "../internal/machine/readiness.js"
 import type { SchemaArbitraryReport } from "../internal/testing/machine/arbitrary.js"
+import * as ExplorationImpl from "../internal/testing/machine/exploration.js"
 import type { FiniteModel } from "../internal/testing/machine/finiteModel.js"
-import type * as ReferenceModel from "../internal/testing/machine/referenceModel.js"
+import * as Format from "../internal/testing/machine/format.js"
+import * as InvariantTest from "../internal/testing/machine/invariant.js"
+import * as ProbeTest from "../internal/testing/machine/probe.js"
+import * as ReferenceModel from "../internal/testing/machine/referenceModel.js"
+import type * as RuntimeTest from "../internal/testing/machine/runtime.js"
+import * as RuntimeInvariantTest from "../internal/testing/machine/runtimeInvariant.js"
+import * as TraceImpl from "../internal/testing/machine/trace.js"
 import * as internal from "../internal/testing/machine/verification.js"
 import type { VerificationError } from "../internal/testing/machine/verification.js"
 import type * as Machine from "../Machine.js"
@@ -64,13 +71,13 @@ export {
   sendCommand,
   stopCommand,
   verifyCausalCommands
-} from "../internal/testing/machine/verification.js"
+} from "../internal/testing/machine/runtime.js"
 
 export type {
   SchemaArbitraryOpaqueFilterWarning,
   SchemaArbitraryReport,
   SchemaArbitraryWarning
-} from "../internal/testing/machine/verification.js"
+} from "../internal/testing/machine/arbitrary.js"
 
 export {
   compileModel,
@@ -92,7 +99,7 @@ export {
   type FiniteState,
   type FiniteTransition,
   type FiniteTransitionTrigger
-} from "../internal/testing/machine/verification.js"
+} from "../internal/testing/machine/finiteModel.js"
 
 export {
   ModelVerificationError,
@@ -108,7 +115,7 @@ export {
   type ReferenceStep,
   type ReferenceTrace,
   type ReferenceTransition
-} from "../internal/testing/machine/verification.js"
+} from "../internal/testing/machine/referenceModel.js"
 
 /**
  * Purely interprets a finite hierarchical model without compiling a
@@ -118,7 +125,7 @@ export {
  * @since 0.4.0
  */
 export const interpretModel: (model: FiniteModel, events: ReadonlyArray<string>) => ReferenceModel.ReferenceTrace =
-  internal.interpretModel
+  ReferenceModel.interpretModel
 
 type AnyMachine = Machine.Machine.Any
 
@@ -449,7 +456,7 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
   ) => Effect.Effect<ProbeStep<M>, Error | Machine.StoppedError>
   /** Constructors for asynchronous observation after a causal command. */
   readonly await: {
-    readonly none: internal.RuntimeAwait<
+    readonly none: RuntimeTest.RuntimeAwait<
       Machine.Machine.Snapshot<Machine.Machine.States<M>>,
       Error,
       Output
@@ -462,7 +469,7 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
           Output
         >
       ) => boolean
-    ) => internal.RuntimeAwait<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
+    ) => RuntimeTest.RuntimeAwait<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
   }
 }
 
@@ -473,7 +480,7 @@ export interface Probe<M extends AnyMachine, Error = never, Output = never> {
  * @category errors
  * @since 0.4.0
  */
-export { ProbeUnavailableError } from "../internal/testing/machine/verification.js"
+export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
 
 /**
  * Attaches testing-only causal event delivery to a running statechart.
@@ -517,7 +524,7 @@ export const probe: <M extends AnyMachine, Error, Output>(
     Error,
     Output
   >
-) => Effect.Effect<Probe<M, Error, Output>, internal.ProbeUnavailableError> = internal.probe
+) => Effect.Effect<Probe<M, Error, Output>, ProbeTest.ProbeUnavailableError> = ProbeTest.probe
 
 /**
  * The runtime error channel exposed by a managed reference for a machine.
@@ -540,8 +547,8 @@ export type RuntimeInvariantErrorChannel<M extends AnyMachine> =
  */
 export interface CausalRuntimeEvidenceRecord<M extends AnyMachine, Error, Output> {
   readonly index: number
-  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
-  readonly actual: internal.CausalRuntimeCommandActual<M, Error, Output, unknown>
+  readonly command: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly actual: RuntimeTest.CausalRuntimeCommandActual<M, Error, Output, unknown>
 }
 
 /**
@@ -551,7 +558,7 @@ export interface CausalRuntimeEvidenceRecord<M extends AnyMachine, Error, Output
  * @since 0.4.0
  */
 export interface CausalRuntimeEvidence<M extends AnyMachine, Error, Output> {
-  readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
+  readonly commands: ReadonlyArray<RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>>
   readonly initial: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
   readonly records: ReadonlyArray<CausalRuntimeEvidenceRecord<M, Error, Output>>
   readonly final: Machine.RuntimeSnapshot<Machine.Machine.Snapshot<Machine.Machine.States<M>>, Error, Output>
@@ -581,8 +588,8 @@ export type RuntimeSnapshotObservation = "initial" | "command" | "awaited" | "fi
  */
 export interface RuntimeInvariantRecord<M extends AnyMachine> {
   readonly index: number
-  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
-  readonly result: internal.CausalRuntimeCommandResult<M>
+  readonly command: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly result: RuntimeTest.CausalRuntimeCommandResult<M>
   readonly snapshot: Machine.RuntimeSnapshot<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
     RuntimeInvariantErrorChannel<M>,
@@ -604,7 +611,7 @@ export interface RuntimeInvariantRecord<M extends AnyMachine> {
  * @since 0.4.0
  */
 export interface RuntimeInvariantTranscript<M extends AnyMachine> {
-  readonly commands: ReadonlyArray<internal.RuntimeCommand<Machine.Machine.InputEvent<M>>>
+  readonly commands: ReadonlyArray<RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>>
   readonly initial: Machine.RuntimeSnapshot<
     Machine.Machine.Snapshot<Machine.Machine.States<M>>,
     RuntimeInvariantErrorChannel<M>,
@@ -632,8 +639,8 @@ export interface RuntimeSnapshotInvariantContext<M extends AnyMachine> {
   readonly phase: RuntimeSnapshotObservation
   readonly commandIndex: number | undefined
   readonly awaitedIndex: number | undefined
-  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>> | undefined
-  readonly result: internal.CausalRuntimeCommandResult<M> | undefined
+  readonly command: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>> | undefined
+  readonly result: RuntimeTest.CausalRuntimeCommandResult<M> | undefined
 }
 
 /**
@@ -648,8 +655,8 @@ export interface RuntimeCommandInvariantContext<M extends AnyMachine> {
   readonly record: RuntimeInvariantRecord<M>
   readonly previous: RuntimeInvariantRecord<M> | undefined
   readonly index: number
-  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
-  readonly result: internal.CausalRuntimeCommandResult<M>
+  readonly command: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly result: RuntimeTest.CausalRuntimeCommandResult<M>
   readonly snapshot: RuntimeInvariantRecord<M>["snapshot"]
   readonly awaited: RuntimeInvariantRecord<M>["awaited"]
 }
@@ -762,7 +769,7 @@ export interface RuntimeInvariantBuilder<M extends AnyMachine> {
  * @since 0.4.0
  */
 export const runtimeInvariants: <M extends AnyMachine>(machine: M) => RuntimeInvariantBuilder<M> =
-  internal.runtimeInvariants
+  RuntimeInvariantTest.runtimeInvariants
 
 /**
  * Scope of a runtime invariant.
@@ -810,7 +817,7 @@ export interface RuntimeInvariantViolation<M extends AnyMachine = AnyMachine> {
   readonly commandIndex: number | undefined
   readonly awaitedIndex?: number
   readonly phase?: RuntimeSnapshotObservation
-  readonly command?: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly command?: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>
   readonly message: string
 }
 
@@ -820,7 +827,7 @@ export interface RuntimeInvariantViolation<M extends AnyMachine = AnyMachine> {
  * @category errors
  * @since 0.4.0
  */
-export { RuntimeInvariantError } from "../internal/testing/machine/verification.js"
+export { RuntimeInvariantError } from "../internal/testing/machine/runtimeInvariant.js"
 
 /**
  * Checks runtime invariants and returns their complete non-vacuity report.
@@ -832,7 +839,8 @@ export const checkRuntimeInvariants: <M extends AnyMachine, Error, Output>(
   machine: M,
   transcript: CausalRuntimeEvidence<M, Error, Output>,
   invariants: ReadonlyArray<RuntimeInvariant<M>>
-) => Effect.Effect<RuntimeInvariantReport, internal.RuntimeInvariantError<M>> = internal.checkRuntimeInvariants
+) => Effect.Effect<RuntimeInvariantReport, RuntimeInvariantTest.RuntimeInvariantError<M>> =
+  RuntimeInvariantTest.checkRuntimeInvariants
 
 /**
  * Asserts runtime invariants against an existing causal transcript.
@@ -844,7 +852,7 @@ export const assertRuntimeInvariants: <M extends AnyMachine, Error, Output>(
   machine: M,
   transcript: CausalRuntimeEvidence<M, Error, Output>,
   invariants: ReadonlyArray<RuntimeInvariant<M>>
-) => Effect.Effect<void, internal.RuntimeInvariantError<M>> = internal.assertRuntimeInvariants
+) => Effect.Effect<void, RuntimeInvariantTest.RuntimeInvariantError<M>> = RuntimeInvariantTest.assertRuntimeInvariants
 
 /**
  * One disagreement between pure planning and a causally processed send.
@@ -854,7 +862,7 @@ export const assertRuntimeInvariants: <M extends AnyMachine, Error, Output>(
  */
 export interface PlannerRuntimeAgreementViolation<M extends AnyMachine = AnyMachine> {
   readonly commandIndex: number
-  readonly command: internal.RuntimeCommand<Machine.Machine.InputEvent<M>>
+  readonly command: RuntimeTest.RuntimeCommand<Machine.Machine.InputEvent<M>>
   readonly field:
     | "planning"
     | "handled"
@@ -874,7 +882,7 @@ export interface PlannerRuntimeAgreementViolation<M extends AnyMachine = AnyMach
  * @category errors
  * @since 0.4.0
  */
-export { PlannerRuntimeAgreementError } from "../internal/testing/machine/verification.js"
+export { PlannerRuntimeAgreementError } from "../internal/testing/machine/runtimeInvariant.js"
 
 /**
  * Checks that every processed public send agrees with a fresh pure plan.
@@ -885,8 +893,8 @@ export { PlannerRuntimeAgreementError } from "../internal/testing/machine/verifi
 export const assertPlannerRuntimeAgreement: <M extends AnyMachine, Error, Output>(
   machine: RootReadyMachine<M>,
   transcript: CausalRuntimeEvidence<M, Error, Output>
-) => Effect.Effect<void, internal.PlannerRuntimeAgreementError<M>, RunServices<M>> =
-  internal.assertPlannerRuntimeAgreement
+) => Effect.Effect<void, RuntimeInvariantTest.PlannerRuntimeAgreementError<M>, RunServices<M>> =
+  RuntimeInvariantTest.assertPlannerRuntimeAgreement
 
 /**
  * The result of evaluating one semantic invariant.
@@ -1086,7 +1094,7 @@ export const Invariant: {
     check: (context: TraceInvariantContext<M>) => InvariantOutcome,
     options?: InvariantOptions<TraceInvariantContext<M>>
   ) => TraceInvariant<M>
-} = internal.Invariant
+} = InvariantTest.Invariant
 
 /**
  * Creates invariant constructors bound to a machine's exact state and event
@@ -1122,7 +1130,7 @@ export const Invariant: {
  * @category constructors
  * @since 0.4.0
  */
-export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<M> = internal.invariants
+export const invariants: <M extends AnyMachine>(machine: M) => InvariantBuilder<M> = InvariantTest.invariants
 
 /**
  * The scope of a semantic invariant.
@@ -1193,7 +1201,7 @@ export interface InvariantViolation<M extends AnyMachine = AnyMachine> {
  * @category errors
  * @since 0.4.0
  */
-export { InvariantError } from "../internal/testing/machine/verification.js"
+export { InvariantError } from "../internal/testing/machine/invariant.js"
 
 /**
  * Checks user-defined semantic invariants against an existing planner trace.
@@ -1209,7 +1217,7 @@ export const checkInvariants: <M extends AnyMachine>(
   machine: M,
   trace: Trace<M>,
   invariants: ReadonlyArray<Invariant<M>>
-) => Effect.Effect<InvariantReport, internal.InvariantError<M>> = internal.checkInvariants
+) => Effect.Effect<InvariantReport, InvariantTest.InvariantError<M>> = InvariantTest.checkInvariants
 
 /**
  * Asserts user-defined semantic invariants and discards the success report.
@@ -1225,7 +1233,7 @@ export const assertInvariants: <M extends AnyMachine>(
   machine: M,
   trace: Trace<M>,
   invariants: ReadonlyArray<Invariant<M>>
-) => Effect.Effect<void, internal.InvariantError<M>> = internal.assertInvariants
+) => Effect.Effect<void, InvariantTest.InvariantError<M>> = InvariantTest.assertInvariants
 
 /**
  * User-defined identity for a logical exploration state.
@@ -1470,9 +1478,9 @@ export const explore: <M extends AnyMachine, Key extends ExplorationKey>(
   options: ExploreOptions<M, Key>
 ) => Effect.Effect<
   Exploration<M, Key>,
-  RunFailure<RunError<M>, M> | internal.InvariantError<M>,
+  RunFailure<RunError<M>, M> | InvariantTest.InvariantError<M>,
   RunServices<M>
-> = internal.explore
+> = ExplorationImpl.explore
 
 /**
  * A predicate over one explored logical state.
@@ -1498,7 +1506,7 @@ export type ReachabilityFailure = "NotFound" | "UnexpectedMatch" | "Inconclusive
  * @category errors
  * @since 0.4.0
  */
-export { ReachabilityError } from "../internal/testing/machine/verification.js"
+export { ReachabilityError } from "../internal/testing/machine/exploration.js"
 
 /**
  * Finds the first, and therefore shortest, explored state matching a
@@ -1510,7 +1518,7 @@ export { ReachabilityError } from "../internal/testing/machine/verification.js"
 export const findShortest: <M extends AnyMachine, Key extends ExplorationKey>(
   exploration: Exploration<M, Key>,
   predicate: ExplorationPredicate<M, Key>
-) => ExplorationNode<M, Key> | undefined = internal.findShortest
+) => ExplorationNode<M, Key> | undefined = ExplorationImpl.findShortest
 
 /**
  * Requires a matching state and returns its shortest witness.
@@ -1525,7 +1533,7 @@ export const assertReachable: <M extends AnyMachine, Key extends ExplorationKey>
   exploration: Exploration<M, Key>,
   name: string,
   predicate: ExplorationPredicate<M, Key>
-) => Effect.Effect<ExplorationNode<M, Key>, internal.ReachabilityError<M, Key>> = internal.assertReachable
+) => Effect.Effect<ExplorationNode<M, Key>, ExplorationImpl.ReachabilityError<M, Key>> = ExplorationImpl.assertReachable
 
 /**
  * Requires that no explored state matches a predicate.
@@ -1540,7 +1548,7 @@ export const assertUnreachable: <M extends AnyMachine, Key extends ExplorationKe
   exploration: Exploration<M, Key>,
   name: string,
   predicate: ExplorationPredicate<M, Key>
-) => Effect.Effect<void, internal.ReachabilityError<M, Key>> = internal.assertUnreachable
+) => Effect.Effect<void, ExplorationImpl.ReachabilityError<M, Key>> = ExplorationImpl.assertUnreachable
 
 /**
  * Checks a real planner trace against the independent finite statechart model
@@ -1649,7 +1657,7 @@ export type RunServices<M extends AnyMachine> = IsAny<
 export const run: <M extends AnyMachine>(
   machine: RootReadyMachine<M>,
   scenario: Scenario<M>
-) => Effect.Effect<Trace<M>, RunFailure<RunError<M>, M>, RunServices<M>> = internal.run
+) => Effect.Effect<Trace<M>, RunFailure<RunError<M>, M>, RunServices<M>> = TraceImpl.run
 
 /**
  * A deterministic hit/miss summary for a finite set declared by a machine.
@@ -2164,4 +2172,4 @@ export const verify: <M extends AnyMachine>(
  * @since 0.4.0
  */
 export const formatTrace: <M extends AnyMachine, Cause>(trace: Trace<M> | RunFailure<Cause, M>) => string =
-  internal.formatTrace
+  Format.formatTrace

@@ -12,6 +12,7 @@ import type { Rpc } from "effect/unstable/rpc"
 import * as internal from "../../internal/machine/cluster.js"
 import { Accepted, Rejected, Storage } from "../../internal/machine/cluster.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
+import type { ExcludeCompatibleRuntime } from "../../internal/machine/requirements.js"
 import type * as Machine from "../../Machine.js"
 
 type Snowflake = Snowflake.Snowflake
@@ -291,14 +292,6 @@ type EnsureJsonEncoded<
       readonly inputEvents: NonJsonInputEvent<InputEvents>
     }
   }
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Machine.Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 /**
  * Creates an in-memory Cluster machine checkpoint store.

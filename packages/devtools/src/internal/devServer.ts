@@ -1,5 +1,6 @@
 import { type ChokidarOptions, type FSWatcher, watch } from "chokidar"
 import * as Effect from "effect/Effect"
+import type * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { isAbsolute, relative, resolve } from "node:path"
@@ -117,11 +118,12 @@ const acquire = (
       })
   })
 
-const acquireWatcher = (
+export const acquireWatcher = (
   options: DevServer.Options,
   registry: MachineRegistry.MachineRegistry["Service"]
-): Effect.Effect<FSWatcher> =>
-  Effect.sync(() => {
+): Effect.Effect<FSWatcher, never, Scope.Scope> =>
+  Effect.gen(function*() {
+    const scope = yield* Effect.scope
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const watcher = watch(options.root, watcherOptions(options))
     watcher.on("all", (_event, file) => {
@@ -130,16 +132,20 @@ const acquireWatcher = (
       refreshTimer = setTimeout(() => {
         Effect.runFork(
           registry.refresh.pipe(
-            Effect.catch((cause) => Effect.logWarning("Machine reload failed", cause))
+            Effect.catch((cause) => Effect.logWarning("Machine reload failed", cause)),
+            Effect.forkIn(scope)
           )
         )
       }, options.debounce ?? 150)
     })
-    watcher.on("close", () => {
-      if (refreshTimer !== undefined) clearTimeout(refreshTimer)
-    })
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        if (refreshTimer !== undefined) clearTimeout(refreshTimer)
+        await watcher.close()
+      })
+    )
     watcher.on("error", (cause) => {
-      Effect.runFork(Effect.logError("Machine file watcher failed", cause))
+      Effect.runFork(Effect.logError("Machine file watcher failed", cause).pipe(Effect.forkIn(scope)))
     })
     return watcher
   })
@@ -166,10 +172,7 @@ export const run = (
       acquire(ErrorType, options, registry),
       (server) => Effect.promise(() => server.close())
     )
-    yield* Effect.acquireRelease(
-      acquireWatcher(options, registry),
-      (watcher) => Effect.promise(() => watcher.close())
-    )
+    yield* acquireWatcher(options, registry)
     const address = server.resolvedUrls?.local[0] ?? `http://${options.host}:${options.port}/`
     yield* Effect.logInfo(`Effect Machine visualizer: ${address}`)
     return yield* Effect.never

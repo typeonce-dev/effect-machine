@@ -27,6 +27,7 @@ import type {
 import * as internal from "./internal/machine/machine.js"
 import { InitialEventTypeId } from "./internal/machine/machine.js"
 import type { EnsureExecutable } from "./internal/machine/readiness.js"
+import type { ExcludeCompatibleRuntime } from "./internal/machine/requirements.js"
 import type * as internalRuntime from "./internal/machine/runtime.js"
 import type * as StateDefinition from "./internal/machine/stateDefinition.js"
 import type * as Topology from "./internal/machine/topology.js"
@@ -630,14 +631,6 @@ export declare namespace Runtime {
     }
   }
 }
-
-type ExcludeCompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
-  infer RequiredEvents,
-  infer RequiredEmits
-> ? IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Runtime.Requirement<
   infer RequiredEvents,
@@ -5380,8 +5373,9 @@ export declare namespace Machine {
    *
    * Handlers return snapshots for complete state replacement, target builder
    * results for path-safe partial transitions, state-value updates, or
-   * `target.none()` for an explicitly targetless transition. Raw decoded state
-   * values and `void` are not accepted at transition boundaries.
+   * an explicit targetless result. In a machine definition, select `to.none`;
+   * its optional resolver returns `undefined`. Raw decoded state values are
+   * not accepted as transition targets.
    *
    * @category utility types
    * @since 0.4.0
@@ -9312,23 +9306,38 @@ export const enabled: <
  * they accept the event. Any commands, emissions, or raised events collected
  * during that check are discarded.
  *
- * Event input is decoded through the machine's public event protocol. Invalid
- * input fails with `MachineSchemaDecodeError`. Final snapshots and valid events
+ * Event input is decoded through the machine's public and internal event protocols.
+ * Invalid input fails with `MachineSchemaDecodeError`. Final snapshots and valid events
  * with no accepting handler return `false`.
  *
  * **Gotchas**
  *
  * This query does not execute transitions or stabilize the resulting machine.
  * It does not run entry, exit, always, completion, child lifecycle, or command
- * effects. A `true` result therefore describes event acceptance only.
+ * effects. A `true` result therefore describes event acceptance only, for this
+ * snapshot. It does not guarantee acceptance after the machine advances.
+ *
+ * This Effect can also be used by machine effects to query internal events.
+ * Synchronous transition resolvers cannot execute it. Querying an internal event
+ * does not make that event available to `MachineRef.send`.
  *
  * **Example**
  *
  * ```ts
- * const canCheckout = Machine.can(checkoutMachine)
+ * import { Machine } from "@typeonce/effect-machine"
+ * import { Effect, Schema } from "effect"
  *
- * const canSubmit = yield* canCheckout(snapshot, {
- *   _tag: "SubmitOrder"
+ * const internalEvents = Machine.internalEvents(Schema.TaggedStruct("Loaded", {}))
+ * const machine = Machine.make({
+ *   states: { Idle: {} },
+ *   events: Machine.events(),
+ *   internalEvents,
+ *   initial: (to) => to.Idle()
+ * }).handle({ Idle: { on: { Loaded: (to) => to.none } } })
+ *
+ * export const canLoad = Effect.gen(function*() {
+ *   const initial = yield* Machine.planInitial(machine)
+ *   return yield* Machine.can(machine, initial.state, internalEvents.Loaded())
  * })
  * ```
  *
@@ -9373,7 +9382,7 @@ export const can: {
       & Machine.RootCompatible<ParentEvents>
   ): (
     state: Machine.Snapshot<States>,
-    event: Machine.EventInputOf<InputEvents>
+    event: Machine.EventInputOf<Events>
   ) => Effect.Effect<boolean, MachineSchemaDecodeError>
   <
     const States extends Machine.StateSchemas,
@@ -9411,12 +9420,12 @@ export const can: {
       & EnsureExecutable<States, UnhandledStates, OutputStates>
       & Machine.RootCompatible<ParentEvents>,
     state: Machine.Snapshot<States>,
-    event: Machine.EventInputOf<InputEvents>
+    event: Machine.EventInputOf<Events>
   ): Effect.Effect<boolean, MachineSchemaDecodeError>
 } = internal.can as any
 
 /**
- * Plans the next state snapshot synchronously.
+ * Returns an Effect that plans the next state snapshot without running command effects.
  *
  * **Details**
  *

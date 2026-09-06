@@ -13,6 +13,10 @@ import type { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity
 import * as internal from "../../internal/machine/atom.js"
 import type { ChildNotActiveError, NotReadyError } from "../../internal/machine/atom.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
+import type {
+  ExcludeCompatibleRuntime as ExcludeCompatibleMachineRuntime,
+  IsAny
+} from "../../internal/machine/requirements.js"
 import type * as Machine from "../../Machine.js"
 
 /**
@@ -40,15 +44,6 @@ const ExternalRequirementsTypeId = "~effect/reactivity/AtomMachine/ExternalRequi
 type EnsureNoExternalRequirements<Requirements> = [ExternalRequirements<Requirements>] extends [never] ? unknown : {
   readonly [ExternalRequirementsTypeId]: ExternalRequirements<Requirements>
 }
-
-type IsAny<A> = 0 extends (1 & A) ? true : false
-
-type ExcludeCompatibleMachineRuntime<Requirements, Events, Emits> = Requirements extends
-  Machine.Runtime.Requirement<infer RequiredEvents, infer RequiredEmits> ?
-  IsAny<Requirements> extends true ? Requirements
-  : [RequiredEvents] extends [Events] ? [RequiredEmits] extends [Emits] ? never : Requirements
-  : Requirements
-  : Requirements
 
 type MachineRequirements<InitialR, R, Events, Emits> = ExcludeCompatibleMachineRuntime<
   Machine.ExecutionServices<InitialR | R>,

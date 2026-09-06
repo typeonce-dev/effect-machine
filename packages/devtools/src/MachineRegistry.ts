@@ -33,7 +33,7 @@ export interface Options extends ProjectInspector.InspectOptions {
 }
 
 /**
- * Failure while starting the initial project inspection.
+ * Failure while inspecting the project, during startup or an explicit refresh.
  *
  * @category errors
  * @since 0.23.0
@@ -60,8 +60,9 @@ export class MachineRegistry extends Context.Service<MachineRegistry, {
 }>()("@typeonce/effect-machine-devtools/MachineRegistry") {}
 
 /**
- * Builds a scoped registry that scans immediately and refreshes after relevant
- * source file changes.
+ * Builds a registry that scans immediately. Call `refresh` to inspect again.
+ * Concurrent refreshes run sequentially and publish increasing revisions.
+ * `DevServer.run` installs the file watcher that triggers automatic refreshes.
  *
  * @category layers
  * @since 0.23.0

@@ -1,6 +1,7 @@
 import type { ESTree } from "@oxlint/plugins"
+import { resolvedVariable, staticMemberName } from "./ast.js"
 import { unwrapExpression } from "./ast.js"
-import { isMachineHandleCall, isMachineMakeCall, type MachineBindings, staticMemberName } from "./imports.js"
+import { isMachineHandleCall, isMachineMakeCall, type MachineBindings } from "./imports.js"
 
 export type PlanningFunction = ESTree.ArrowFunctionExpression | ESTree.Function
 
@@ -129,7 +130,7 @@ export const enclosingFunction = (node: ESTree.Node): PlanningFunction | undefin
   return undefined
 }
 
-const selectorRoot = (node: ESTree.Expression): string | undefined => {
+const selectorRoot = (node: ESTree.Expression): ESTree.IdentifierReference | undefined => {
   let expression = unwrapExpression(node)
   while (expression.type === "CallExpression" || expression.type === "MemberExpression") {
     expression = unwrapExpression(
@@ -138,7 +139,7 @@ const selectorRoot = (node: ESTree.Expression): string | undefined => {
         : expression.object
     )
   }
-  return expression.type === "Identifier" ? expression.name : undefined
+  return expression.type === "Identifier" ? expression : undefined
 }
 
 export const enclosingPlanningCallback = (
@@ -176,9 +177,11 @@ export const isPlanningCallback = (
     if (method !== undefined && directPlanningMethods.has(method)) {
       const owner = enclosingFunction(parent)
       const selector = owner?.params[0]
+      const root = selectorRoot(parent.callee.object)
       return owner !== undefined &&
         selector?.type === "Identifier" &&
-        selectorRoot(parent.callee.object) === selector.name &&
+        root !== undefined &&
+        resolvedVariable(bindings.context, root)?.identifiers.includes(selector) === true &&
         isPlanningCallback(owner, bindings)
     }
   }

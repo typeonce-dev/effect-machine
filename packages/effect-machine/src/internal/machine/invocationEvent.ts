@@ -78,11 +78,3 @@ export const snapshot = (path: string, id: string, value: unknown): InvocationEv
 /** @internal */
 export const isInvocationEvent = (value: unknown): value is InvocationEvent =>
   typeof value === "object" && value !== null && InvocationEventTypeId in value
-
-/** @internal */
-export const definitions = (invoke: unknown): ReadonlyArray<Record<PropertyKey, any>> => {
-  if (invoke === undefined) return []
-  return Array.isArray(invoke)
-    ? invoke as ReadonlyArray<Record<PropertyKey, any>>
-    : [invoke as Record<PropertyKey, any>]
-}

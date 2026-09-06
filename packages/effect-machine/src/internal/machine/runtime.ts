@@ -18,36 +18,25 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 import type * as Take from "effect/Take"
+import type { RuntimeOutcome as PublicRuntimeOutcome, RuntimeSnapshot as PublicRuntimeSnapshot } from "../../Machine.js"
 import type { ChildMachine, Inspection, Machine as MachineDefinition, MachineTarget } from "../../Machine.js"
+import {
+  type ChildDescriptor,
+  type ChildEntry,
+  type ChildKey,
+  type ChildObserver,
+  type ChildRegistry,
+  type ChildSelector,
+  matchesChild,
+  offerChildObservation,
+  registerChild,
+  selectRegistryChild,
+  takeChildObservations,
+  unregisterChild
+} from "./childRegistry.js"
 import { ChildAlreadyExistsError, StoppedError } from "./errors.js"
 import * as InspectionRuntime from "./inspectionRuntime.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
-
-type ChildDescriptor = {
-  readonly id: string
-  readonly machine: object
-}
-
-type ChildEntry =
-  | {
-    readonly _tag: "Starting"
-    readonly token: symbol
-    readonly ownerKey?: string
-    readonly ownerPath?: string
-    ownerActive?: boolean
-  }
-  | {
-    readonly _tag: "Started"
-    readonly token: symbol
-    readonly descriptor: ChildDescriptor | undefined
-    readonly ref: MachineRef<any, any, any, any>
-    readonly ownerKey?: string
-    readonly ownerPath?: string
-    ownerActive?: boolean
-  }
-
-type ChildSelector = string | ChildDescriptor
-type ChildKey = string | symbol
 
 /** @internal */
 export const activeSnapshotObserver: unique symbol = Symbol.for("effect/Machine/activeSnapshotObserver")
@@ -131,134 +120,7 @@ type InspectedOffer<Event> = (
   deferred?: Deferred.Deferred<AcknowledgedDelivery<unknown>, unknown>
 ) => Effect.Effect<void, StoppedError>
 
-type ChildObservation = Option.Option<MachineRef<any, any, any, any>>
-type ChildObservationBatch = [ChildObservation, ...Array<ChildObservation>]
-
-interface ChildObserver {
-  readonly child: ChildSelector
-  readonly id: string
-  values: ChildObservationBatch | undefined
-  waiter: Deferred.Deferred<void> | undefined
-}
-
-const offerChildObservation = (
-  observer: ChildObserver,
-  value: ChildObservation
-): void => {
-  if (observer.values === undefined) {
-    observer.values = [value]
-  } else {
-    observer.values.push(value)
-  }
-  if (observer.waiter !== undefined) {
-    const waiter = observer.waiter
-    observer.waiter = undefined
-    Deferred.doneUnsafe(waiter, Effect.void)
-  }
-}
-
-const takeChildObservations = (
-  observer: ChildObserver
-): Effect.Effect<ChildObservationBatch> =>
-  Effect.suspend(() => {
-    if (observer.values !== undefined) {
-      const values = observer.values
-      observer.values = undefined
-      return Effect.succeed(values)
-    }
-    const waiter = Deferred.makeUnsafe<void>()
-    observer.waiter = waiter
-    return Deferred.await(waiter).pipe(Effect.andThen(takeChildObservations(observer)))
-  })
-
-interface ChildRegistry {
-  closed: boolean
-  readonly children: Map<ChildKey, ChildEntry>
-  observers: Set<ChildObserver> | undefined
-  scope: Scope.Closeable | undefined
-}
-
-const matchesChild = (
-  entry: ChildEntry,
-  child: ChildSelector
-): entry is Extract<ChildEntry, { readonly _tag: "Started" }> =>
-  entry._tag === "Started" && (typeof child === "string" || (
-    entry.descriptor !== undefined &&
-    entry.descriptor.id === child.id &&
-    entry.descriptor.machine === child.machine
-  ))
-
-const selectRegistryChild = (
-  registry: ChildRegistry,
-  id: string,
-  child: ChildSelector
-): ChildObservation => {
-  if (registry.closed) return Option.none()
-  const entry = registry.children.get(id)
-  return entry !== undefined && matchesChild(entry, child) ? Option.some(entry.ref) : Option.none()
-}
-
-const publishRegistryChange = (registry: ChildRegistry): void => {
-  if (registry.observers === undefined) return
-  for (const observer of registry.observers) {
-    offerChildObservation(observer, selectRegistryChild(registry, observer.id, observer.child))
-  }
-}
-
-const unregisterChild = (registry: ChildRegistry, key: ChildKey, token: symbol): void => {
-  const entry = registry.children.get(key)
-  if (entry === undefined || entry.token !== token) return
-  registry.children.delete(key)
-  if (typeof key === "string") publishRegistryChange(registry)
-}
-
-const registerChild = (
-  registry: ChildRegistry,
-  key: ChildKey,
-  token: symbol,
-  ref: MachineRef<any, any, any, any>,
-  descriptor: ChildDescriptor | undefined
-): boolean => {
-  const entry = registry.children.get(key)
-  if (registry.closed || entry === undefined || entry._tag !== "Starting" || entry.token !== token) {
-    return false
-  }
-  registry.children.delete(key)
-  const started: ChildEntry = entry.ownerKey === undefined
-    ? { _tag: "Started", token, descriptor, ref }
-    : {
-      _tag: "Started",
-      token,
-      descriptor,
-      ref,
-      ownerKey: entry.ownerKey,
-      ownerPath: entry.ownerPath!,
-      ownerActive: entry.ownerActive === true
-    }
-  registry.children.set(key, started)
-  if (typeof key === "string") publishRegistryChange(registry)
-  return true
-}
-
-export type RuntimeSnapshot<State, Error = never, Output = never> =
-  | {
-    readonly status: "active"
-    readonly state: State
-  }
-  | {
-    readonly status: "done"
-    readonly state: State
-    readonly output: Output
-  }
-  | {
-    readonly status: "error"
-    readonly state: State
-    readonly cause: Cause.Cause<Error>
-  }
-  | {
-    readonly status: "stopped"
-    readonly state: State
-  }
+export type RuntimeSnapshot<State, Error = never, Output = never> = PublicRuntimeSnapshot<State, Error, Output>
 
 interface VersionedSnapshot<State, Error, Output> {
   readonly revision: number
@@ -274,38 +136,7 @@ type VersionedSnapshotBatch<State, Error, Output> = [
   ...Array<VersionedSnapshot<State, Error, Output>>
 ]
 
-export type RuntimeOutcome<State, Error = never, Output = never> =
-  | {
-    readonly _tag: "Done"
-    readonly output: Output
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "done" }>
-  }
-  | {
-    readonly _tag: "Failure"
-    readonly error: Error
-    readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
-  }
-  | {
-    readonly _tag: "Defect"
-    readonly defect: unknown
-    readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
-  }
-  | {
-    readonly _tag: "Interrupted"
-    readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
-  }
-  | {
-    readonly _tag: "Cause"
-    readonly cause: Cause.Cause<Error>
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "error" }>
-  }
-  | {
-    readonly _tag: "Stopped"
-    readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "stopped" }>
-  }
+export type RuntimeOutcome<State, Error = never, Output = never> = PublicRuntimeOutcome<State, Error, Output>
 
 export interface MachineRef<out State, in Event, out Error = never, out Output = never, out Emitted = never> {
   readonly id: string

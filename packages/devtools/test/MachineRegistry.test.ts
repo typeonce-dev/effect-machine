@@ -1,10 +1,48 @@
 import { assert, describe, it } from "@effect/vitest"
+import { Deferred, Effect, Fiber } from "effect"
 import * as DevToolsProtocol from "../src/DevToolsProtocol.js"
 import { machine } from "../src/internal/browser/example-machine.js"
 import { reconcile } from "../src/internal/machineRegistry.js"
 import * as MachineDocument from "../src/MachineDocument.js"
+import * as Registry from "../src/MachineRegistry.js"
+import * as Inspector from "../src/ProjectInspector.js"
 
 describe("MachineRegistry", () => {
+  it.effect("serializes overlapping refreshes and increments each revision", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const revisions: Array<number | undefined> = []
+      const inspector = Inspector.ProjectInspector.of({
+        discover: () => Effect.succeed([]),
+        evaluate: () => Effect.succeed([]),
+        inspect: (options) =>
+          Effect.gen(function*() {
+            revisions.push(options.revision)
+            if (revisions.length === 2) {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+            }
+            return []
+          })
+      })
+      yield* Effect.gen(function*() {
+        const registry = yield* Registry.MachineRegistry
+        const first = yield* Effect.forkScoped(registry.refresh)
+        yield* Deferred.await(started)
+        const second = yield* Effect.forkScoped(registry.refresh, { startImmediately: true })
+        assert.deepStrictEqual(revisions, [1, 2])
+        yield* Deferred.succeed(release, undefined)
+        assert.strictEqual((yield* Fiber.join(first)).revision, 2)
+        assert.strictEqual((yield* Fiber.join(second)).revision, 3)
+        assert.strictEqual((yield* registry.get).revision, 3)
+      }).pipe(
+        Effect.provide(Registry.layer({ root: "." })),
+        Effect.provideService(Inspector.ProjectInspector, inspector),
+        Effect.scoped
+      )
+    }))
+
   it("keeps the last valid document when a reload fails", () => {
     const document = MachineDocument.make(machine, {
       source: { file: "src/workflow.ts", exportName: "workflow" }

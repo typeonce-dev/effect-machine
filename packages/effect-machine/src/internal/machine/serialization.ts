@@ -206,6 +206,16 @@ const failEncodeCause = (
   machine: Machine.Any,
   cause: Cause.Cause<unknown>
 ): Effect.Effect<never, MachineSchemaEncodeError> => {
+  if (Cause.hasInterrupts(cause)) {
+    return Effect.failCause(
+      Cause.map(cause, (error) =>
+        error instanceof MachineSchemaEncodeError ? error : new MachineSchemaEncodeError({
+          machineId: machine.id,
+          boundary: "configuration",
+          cause: Cause.fail(error)
+        }))
+    )
+  }
   const error = Cause.findErrorOption(cause)
   return Option.isSome(error) && error.value instanceof MachineSchemaEncodeError
     ? Effect.fail(error.value)
@@ -222,6 +232,16 @@ const failDecodeCause = (
   machine: Machine.Any,
   cause: Cause.Cause<unknown>
 ): Effect.Effect<never, MachineSchemaDecodeError> => {
+  if (Cause.hasInterrupts(cause)) {
+    return Effect.failCause(
+      Cause.map(cause, (error) =>
+        error instanceof MachineSchemaDecodeError ? error : new MachineSchemaDecodeError({
+          machineId: machine.id,
+          boundary: "configuration",
+          cause: Cause.fail(error)
+        }))
+    )
+  }
   const error = Cause.findErrorOption(cause)
   return Option.isSome(error) && error.value instanceof MachineSchemaDecodeError
     ? Effect.fail(error.value)
