@@ -140,7 +140,7 @@ type DirectTransitionDescriptor = {
   readonly type: "direct"
   readonly selection: Topology.TargetSelection
   readonly resolver?: (context: any, enqueue: unknown) => unknown
-  readonly reenter: boolean
+  readonly reenterSource: boolean
   readonly declinable: boolean
 }
 
@@ -149,7 +149,7 @@ type BranchesTransitionDescriptor = {
   readonly type: "branches"
   readonly declarations: unknown
   readonly resolve: (context: any, enqueue: unknown) => unknown
-  readonly reenter: boolean
+  readonly reenterSource: boolean
   readonly declinable: boolean
 }
 
@@ -168,25 +168,27 @@ const plainTargetSelection = (selection: Topology.TargetSelection): Topology.Tar
     ? Topology.noneTargetSelection
     : Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, selection.updatePath)
 
-const transitionOptions = (options: unknown): { readonly reenter: boolean; readonly declinable: boolean } => {
+const transitionOptions = (options: unknown): { readonly declinable: boolean } => {
   const configuration = typeof options === "object" && options !== null
-    ? options as { readonly reenter?: unknown; readonly declinable?: unknown }
+    ? options as { readonly declinable?: unknown }
     : {}
-  return {
-    reenter: configuration.reenter === true,
-    declinable: configuration.declinable === true
+  if (hasProperty(configuration, "reenter")) {
+    throw new Error("Use .reenter() before construction instead of the resolver reenter option")
   }
+  return { declinable: configuration.declinable === true }
 }
 
 const makeDirectTransitionDescriptor = (
   selection: Topology.TargetSelection,
   resolve: ((context: any, enqueue: unknown) => unknown) | undefined,
-  options: unknown
+  options: unknown,
+  reenterSource = false
 ): DirectTransitionDescriptor => {
   const shared: Omit<DirectTransitionDescriptor, "resolver"> = {
     [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
     type: "direct",
     selection: plainTargetSelection(selection),
+    reenterSource,
     ...transitionOptions(options)
   }
   return resolve === undefined
@@ -194,34 +196,67 @@ const makeDirectTransitionDescriptor = (
     : Object.freeze({ ...shared, resolver: resolve })
 }
 
-const guardedSelection = (selection: Topology.TargetSelection, predicate: (context: any) => boolean): object => {
+// The authored callback crosses an erased schema boundary here. Each builder
+// retains its construction mode, and planning validates both resulting values.
+const constructSelectionValue = (
+  selection: Topology.TargetSelection,
+  context: any,
+  method: "from" | "decoded",
+  value: unknown
+): unknown => {
+  if (selection.kind === "update") return context.owner[method](value)
+  if (selection.updatePath === undefined) return context.target[method](value)
+  const values = value as { readonly target: unknown; readonly update: unknown }
+  return context.target[method](values.target).update(context.owner[method](values.update))
+}
+
+const guardedSelection = (
+  selection: Topology.TargetSelection,
+  predicate: (context: any) => boolean,
+  reenterSource: boolean
+): object => {
   const wrap = (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
     makeDirectTransitionDescriptor(
       selection,
       (context, enqueue) => predicate(context) ? resolve(context, enqueue) : Topology.makeDeclined(),
-      { ...transitionOptions(options), declinable: true }
+      { ...transitionOptions(options), declinable: true },
+      reenterSource
     )
   return Object.freeze({
-    ...wrap((
-      context
-    ) => (selection.kind === "none" ? Topology.makeNoTarget() : constructSelectedTarget(context.target))),
-    from: (value: (context: any) => unknown) => wrap((context) => context.target.from(value(context))),
-    decoded: (value: (context: any) => unknown) => wrap((context) => context.target.decoded(value(context))),
+    ...wrap((context) => selection.kind === "none" ? undefined : constructSelectedTarget(context.target)),
+    from: (value: (context: any) => unknown) =>
+      wrap((context) => constructSelectionValue(selection, context, "from", value(context))),
+    decoded: (value: (context: any) => unknown) =>
+      wrap((context) => constructSelectionValue(selection, context, "decoded", value(context))),
     resolve: wrap
   })
 }
 
-const decorateTransitionSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
+const decorateTransitionSelection = (
+  selection: Topology.TargetSelection,
+  reenterSource = false
+): Topology.TargetSelection =>
   Object.freeze({
     ...selection,
-    guard: (predicate: (context: any) => boolean) => guardedSelection(selection, predicate),
+    ...(reenterSource ? makeDirectTransitionDescriptor(selection, undefined, undefined, true) : {}),
+    guard: (predicate: (context: any) => boolean) => guardedSelection(selection, predicate, reenterSource),
     from: (value: (context: any) => unknown) =>
-      makeDirectTransitionDescriptor(selection, (context) => context.target.from(value(context)), undefined),
+      makeDirectTransitionDescriptor(
+        selection,
+        (context) => constructSelectionValue(selection, context, "from", value(context)),
+        undefined,
+        reenterSource
+      ),
     decoded: (value: (context: any) => unknown) =>
-      makeDirectTransitionDescriptor(selection, (context) => context.target.decoded(value(context)), undefined),
+      makeDirectTransitionDescriptor(
+        selection,
+        (context) => constructSelectionValue(selection, context, "decoded", value(context)),
+        undefined,
+        reenterSource
+      ),
     resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
-      makeDirectTransitionDescriptor(selection, resolve, options),
-    reenter: () => makeDirectTransitionDescriptor(selection, undefined, { reenter: true }),
+      makeDirectTransitionDescriptor(selection, resolve, options, reenterSource),
+    reenter: () => decorateTransitionSelection(selection, true),
     updating: (owner: unknown) => {
       if (typeof owner !== "function") {
         throw new Error("Machine updating owner must be a state selector")
@@ -234,20 +269,10 @@ const decorateTransitionSelection = (selection: Topology.TargetSelection): Topol
         throw new Error("Machine updating owner must be addressed by one branch state selector")
       }
       return decorateTransitionSelection(
-        Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, ownerSelection.path)
+        Topology.makeTargetSelection(selection.kind, selection.path, selection.scope, ownerSelection.path),
+        reenterSource
       )
     }
-  })
-
-const decorateStateUpdateSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
-  Object.freeze({
-    ...selection,
-    from: (value: (context: any) => unknown) =>
-      makeDirectTransitionDescriptor(selection, (context) => context.owner.from(value(context)), undefined),
-    decoded: (value: (context: any) => unknown) =>
-      makeDirectTransitionDescriptor(selection, (context) => context.owner.decoded(value(context)), undefined),
-    resolve: (resolve: (context: any, enqueue: unknown) => unknown, options?: unknown) =>
-      makeDirectTransitionDescriptor(selection, resolve, options)
   })
 
 const noneTransitionSelection = decorateTransitionSelection(Topology.noneTargetSelection)
@@ -301,7 +326,6 @@ const decorateTransitionSelectorNode = (node: unknown): unknown => {
         initial: decorateTransitionSelection(node.initial as Topology.TargetSelection)
       })
     }
-    if (node.kind === "update") return decorateStateUpdateSelection(node)
     return node === Topology.noneTargetSelection ? noneTransitionSelection : decorateTransitionSelection(node)
   }
   if (typeof node === "function") {
@@ -323,29 +347,31 @@ const decorateTransitionSelectorNode = (node: unknown): unknown => {
   return node
 }
 
+const decorateBranches = (declarations: unknown, reenterSource = false): object =>
+  Object.freeze({
+    reenter: () => decorateBranches(declarations, true),
+    resolve: (
+      resolve: (context: any, enqueue: unknown) => unknown,
+      options?: unknown
+    ): BranchesTransitionDescriptor =>
+      Object.freeze({
+        [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
+        type: "branches",
+        declarations,
+        resolve,
+        reenterSource,
+        ...transitionOptions(options)
+      })
+  })
+
 const makeTransitionSelector = (
   stateNodes: Machine.StateNodes,
   source: string
-): unknown => {
-  const selector = {
-    ...decorateTransitionSelectorNode(makeTargetSelector(stateNodes, source)) as Record<string, unknown>
-  }
-  selector.branches = (declarations: unknown) =>
-    Object.freeze({
-      resolve: (
-        resolve: (context: any, enqueue: unknown) => unknown,
-        options?: unknown
-      ): BranchesTransitionDescriptor =>
-        Object.freeze({
-          [TransitionBuilderDescriptorTypeId]: TransitionBuilderDescriptorTypeId,
-          type: "branches",
-          declarations,
-          resolve,
-          ...transitionOptions(options)
-        })
-    })
-  return Object.freeze(selector)
-}
+): unknown =>
+  Object.freeze({
+    ...decorateTransitionSelectorNode(makeTargetSelector(stateNodes, source)) as Record<string, unknown>,
+    branches: (declarations: unknown) => decorateBranches(declarations)
+  })
 
 const normalizeTransitionBuilder = (
   transition: (selector: unknown) => unknown,
@@ -353,7 +379,7 @@ const normalizeTransitionBuilder = (
   path: string
 ): unknown => {
   const result = transition(makeTransitionSelector(stateNodes, path))
-  if (Topology.isTargetSelection(result)) {
+  if (Topology.isTargetSelection(result) && !hasProperty(result, TransitionBuilderDescriptorTypeId)) {
     const selection = plainTargetSelection(result)
     return { target: () => selection }
   }
@@ -363,14 +389,14 @@ const normalizeTransitionBuilder = (
     return {
       branches: () => descriptor.declarations,
       resolve: descriptor.resolve,
-      reenter: descriptor.reenter,
+      reenter: descriptor.reenterSource,
       declinable: descriptor.declinable
     }
   }
   return {
     target: () => descriptor.selection,
     resolve: descriptor.resolver,
-    reenter: descriptor.reenter,
+    reenter: descriptor.reenterSource,
     declinable: descriptor.declinable
   }
 }
@@ -752,6 +778,11 @@ const captureNamedBranches = (
     }
     if (target.updatePath !== undefined) {
       throw new Error(`Machine transition branch "${key}" cannot declare an updating target`)
+    }
+    if (hasProperty(target, TransitionBuilderDescriptorTypeId)) {
+      throw new Error(
+        `Machine transition branch "${key}" requires a topology selection; apply .reenter() to .branches(...)`
+      )
     }
     if (title !== undefined && (typeof title !== "string" || title.length === 0)) {
       throw new Error(`Machine transition branch "${key}" title must be a non-empty string`)

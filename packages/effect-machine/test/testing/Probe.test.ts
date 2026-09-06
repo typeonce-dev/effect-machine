@@ -37,9 +37,9 @@ const machine = Machine.make({
         Noop: (to) => to.none,
         Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
         Reenter: (to) =>
-          to.branch.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count })), {
-            reenter: true
-          }),
+          to.branch.Counter().reenter().resolve(({ state, target }) =>
+            target.decoded(new Counter({ count: state.count }))
+          ),
         Burst: (to) =>
           to.branch.Counter().resolve(({ state, target }, enqueue) => {
             enqueue.raise(new RaisedIncrement({}))

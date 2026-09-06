@@ -177,7 +177,7 @@ const makeCheckoutMachine = (
             to.local.shipping().resolve(({ event, target }) =>
               target.decoded(new Shipping({ address: event.address }))
             ),
-          ReenterHistory: (to) => to.history.checkout.exact.resolve(({ target }) => target(), { reenter: true })
+          ReenterHistory: (to) => to.history.checkout.exact.reenter().resolve(({ target }) => target())
         },
         states: {
           shipping: {
@@ -489,8 +489,7 @@ const nestedHistoryMachine = Machine.make({
           states: {
             preview: {
               on: {
-                RestoreEditor: (to) =>
-                  to.history.workspace.editor.exact.resolve(({ target }) => target(), { reenter: true }),
+                RestoreEditor: (to) => to.history.workspace.editor.exact.reenter().resolve(({ target }) => target()),
                 DefaultEditor: (to) => to.history.workspace.editor.exact.resolve(({ target }) => target())
               }
             },

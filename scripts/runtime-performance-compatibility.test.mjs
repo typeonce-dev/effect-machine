@@ -80,6 +80,16 @@ test("adapts benchmark definitions to value selectors and target-first initial e
   assert.equal(api.targetless({ none: selected }), selected)
 })
 
+test("uses chainable reentry without passing removed resolver options", () => {
+  const calls = []
+  const resolve = () => undefined
+  const reentered = { resolve: (...args) => { calls.push(args); return "resolved" } }
+  const selected = { reenter: () => reentered }
+  const api = makeEffectMachineBenchmarkApi({})
+  assert.equal(api.transition({ target: (to) => to.selected, resolve, reenter: true, declinable: true })({ selected }), "resolved")
+  assert.deepEqual(calls, [[resolve, { declinable: true }]])
+})
+
 test("uses the object child invocation compatibility capability when available", () => {
   const calls = []
   const noTarget = Symbol("no-target")

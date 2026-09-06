@@ -49,18 +49,9 @@ const isEmptyResolver = (
 ): boolean => node.body?.type === "BlockStatement" && node.body.body.length === 0
 
 const isTargetlessReceiver = (node: ESTree.Expression): boolean =>
-  node.type === "MemberExpression" && staticMemberName(node) === "none"
-
-const isReenterOnlyOptions = (node: ESTree.Expression | undefined): boolean => {
-  if (node?.type !== "ObjectExpression" || node.properties.length !== 1) return false
-  const property = node.properties[0]
-  return property?.type === "Property" &&
-    !property.computed &&
-    property.key.type === "Identifier" &&
-    property.key.name === "reenter" &&
-    property.value.type === "Literal" &&
-    property.value.value === true
-}
+  (node.type === "MemberExpression" && staticMemberName(node) === "none") ||
+  (node.type === "CallExpression" && node.arguments.length === 0 && node.callee.type === "MemberExpression" &&
+    staticMemberName(node.callee) === "reenter" && isTargetlessReceiver(node.callee.object))
 
 export const noRedundantResolve: Rule = {
   meta: {
@@ -74,10 +65,8 @@ export const noRedundantResolve: Rule = {
     messages: {
       redundantResolver:
         "Remove this resolver. The selected target already applies default construction, so use the target selector directly.",
-      redundantReenterResolver:
-        "Replace this resolver with .reenter(). It applies the same default construction while explicitly reentering the selected state.",
       redundantTargetlessResolver:
-        "Remove this empty resolver. A targetless transition performs the same work as to.none; use to.none directly."
+        "Remove this empty resolver. Use the targetless selector directly, preserving its modifiers."
     }
   },
   create(context) {
@@ -87,7 +76,7 @@ export const noRedundantResolve: Rule = {
       CallExpression(node) {
         if (
           !hasMachineImport(bindings) ||
-          (node.arguments.length !== 1 && node.arguments.length !== 2) ||
+          node.arguments.length !== 1 ||
           node.callee.type !== "MemberExpression" ||
           staticMemberName(node.callee) !== "resolve"
         ) return
@@ -107,17 +96,8 @@ export const noRedundantResolve: Rule = {
         const targetless = isTargetlessReceiver(receiver) && isEmptyResolver(callback)
         if (!defaultConstruction && !targetless) return
 
-        const options = node.arguments[1]
-        if (options?.type === "SpreadElement") return
-        const reenter = options === undefined ? false : isReenterOnlyOptions(options)
-        if (options !== undefined && !reenter) return
-
-        const messageId = reenter
-          ? "redundantReenterResolver"
-          : targetless
-          ? "redundantTargetlessResolver"
-          : "redundantResolver"
-        const replacement = `${context.sourceCode.getText(receiver)}${reenter ? ".reenter()" : ""}`
+        const messageId = targetless ? "redundantTargetlessResolver" : "redundantResolver"
+        const replacement = context.sourceCode.getText(receiver)
         context.report({
           node,
           messageId,

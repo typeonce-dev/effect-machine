@@ -1442,7 +1442,7 @@ const makeHandlers = (
           ? () => undefined
           : ({ target }: { readonly target: any }) =>
             resolveDefinitionTarget(target, path, transition.target!, byPath, transition.targetValue)
-        return selected.resolve(resolve, "reenter" in transition ? { reenter: transition.reenter } : undefined)
+        return ("reenter" in transition && transition.reenter ? selected.reenter() : selected).resolve(resolve)
       }
       if (transition.trigger.type === "event") on[transition.trigger.event] = config
       else if (transition.trigger.type === "always") always = config

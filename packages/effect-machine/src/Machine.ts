@@ -4729,7 +4729,7 @@ export declare namespace Machine {
    * do not directly control state re-entry. Exit and entry paths are derived
    * from the previous and next active paths. Shared active ancestors remain
    * entered even when a `full` target supplies their values again. Use an event
-   * transition with `reenter: true` when the source should explicitly exit and
+   * transition with `.reenter()` when the source should explicitly exit and
    * enter again.
    *
    * @category models
@@ -6015,25 +6015,17 @@ export declare namespace Machine {
     }
   }
 
-  type TransitionReenterOption<Reenter extends boolean> = [Reenter] extends [true] ? {
-      /** Forces the source state to exit and enter even when active paths remain unchanged. */
-      readonly reenter?: boolean
-    }
-    : { readonly reenter?: never }
+  type TransitionRequiredOptions = {
+    /** Keeps the transition required. The resolver cannot return `decline()`. */
+    readonly declinable?: false
+    readonly reenter?: never
+  }
 
-  type TransitionRequiredOptions<Reenter extends boolean> =
-    & TransitionReenterOption<Reenter>
-    & {
-      /** Keeps the transition required. The resolver cannot return `decline()`. */
-      readonly declinable?: false
-    }
-
-  type TransitionDeclinableOptions<Reenter extends boolean> =
-    & TransitionReenterOption<Reenter>
-    & {
-      /** Adds `decline()` to the resolver context and permits declining this candidate. */
-      readonly declinable: true
-    }
+  type TransitionDeclinableOptions = {
+    /** Adds `decline()` to the resolver context and permits declining this candidate. */
+    readonly declinable: true
+    readonly reenter?: never
+  }
 
   type BuiltTransition<
     States extends StateSchemas,
@@ -6059,7 +6051,7 @@ export declare namespace Machine {
   > {
     (
       resolve: TransitionResolver<Events, Emits, Context, Selection>,
-      options?: TransitionRequiredOptions<Reenter>
+      options?: TransitionRequiredOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6083,7 +6075,7 @@ export declare namespace Machine {
   > {
     (
       resolve: DeclinableTransitionResolver<Events, Emits, Context, Selection>,
-      options: TransitionDeclinableOptions<Reenter>
+      options: TransitionDeclinableOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6145,7 +6137,7 @@ export declare namespace Machine {
     & {
       readonly resolve: (
         resolve: TransitionResolver<Events, Emits, Context, Selection>,
-        options?: TransitionRequiredOptions<Reenter>
+        options?: TransitionRequiredOptions
       ) => BuiltTransition<
         States,
         Events,
@@ -6161,19 +6153,15 @@ export declare namespace Machine {
   /**
    * A selected transition target with target-specific resolver operations.
    *
-   * **Example** (Updating state while reentering)
+   * **Example** (Constructing state while reentering)
    *
    * ```ts
    * Reset: (to) =>
-   *   to.branch.Ready().resolve(
-   *     ({ target }) => target.from(),
-   *     { reenter: true }
-   *   )
+   *   to.branch.Ready().reenter().from(({ event }) => ({ count: event.count }))
    * ```
    *
    * @inlineType TransitionRequiredOptions
    * @inlineType TransitionDeclinableOptions
-   * @inlineType TransitionReenterOption
    */
   export type TransitionTarget<
     States extends StateSchemas,
@@ -6233,21 +6221,14 @@ export declare namespace Machine {
           >
           : {})
     }
-    & ([Reenter] extends [true] ? SelectionSupportsDefaultConstruction<Selection> extends true ? {
-          /** Reenters the source using the selected target's default construction. */
-          readonly reenter: () => BuiltTransition<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined,
-            "required"
-          >
-        }
-      : {}
-      : {})
+    & ([Reenter] extends [true] ? {
+        /** Forces source exit and entry, preserving subsequent construction and guards. */
+        readonly reenter: () => Omit<
+          TransitionTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection>,
+          typeof Topology.TargetSelectionTypeId
+        >
+      } :
+      {})
     & (SelectionKind<Selection> extends "state" ?
       SelectionScope<Selection> extends "local" | "branch" ?
         RetainedUpdateOwner<States, StateId, Selection> extends infer Owner extends ValuedStateIdentifier<States> ?
@@ -6272,7 +6253,91 @@ export declare namespace Machine {
       : {}
       : {})
 
-  /** A topology selection that requires one retained owner replacement. */
+  type UpdatingConstructionCallbacks<Context, Builder, OwnerBuilder, Result> = {
+    readonly [
+      Method in Extract<keyof Builder & keyof OwnerBuilder, "from" | "decoded"> as Builder[Method] extends
+        (...args: infer Args) => unknown ? Args extends readonly [unknown?] ? Method : never : never
+    ]: Builder[Method] extends (...args: infer Args) => unknown ?
+      OwnerBuilder[Method] extends (value: infer Update) => unknown ?
+        (construct: (context: Context) => { readonly target: Args[0]; readonly update: Update }) => Result
+      : never :
+      never
+  }
+
+  type UpdatingCallbacks<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, "state">,
+    Owner extends ValuedStateIdentifier<States>,
+    Acceptance extends TransitionAcceptance
+  > = UpdatingConstructionCallbacks<
+    Omit<UpdatingTransitionResolveContext<States, Context, Selection, Owner>, "owner" | "target">,
+    SelectionBuilder<Selection>,
+    StateUpdateBuilder<States, Owner>,
+    BuiltTransition<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      | CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>
+      | (Acceptance extends "declinable" ? Declined : never),
+      Acceptance
+    >
+  >
+
+  type GuardedUpdatingTransition<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, "state">,
+    Owner extends ValuedStateIdentifier<States>
+  > = UpdatingCallbacks<States, Events, Emits, StateId, Context, Reenter, Selection, Owner, "declinable"> & {
+    readonly resolve: (
+      resolve: (
+        context: UpdatingTransitionResolveContext<States, Context, Selection, Owner>,
+        enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
+      ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
+      options?: TransitionRequiredOptions
+    ) => BuiltTransition<
+      States,
+      Events,
+      Emits,
+      StateId,
+      Context,
+      Reenter,
+      CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
+      "declinable"
+    >
+  }
+
+  /**
+   * A topology selection that requires one retained owner replacement.
+   *
+   * `.from` constructs both values from schema inputs; `.decoded` accepts both
+   * decoded values. Both callbacks return `{ target, update }` and read the same
+   * pre-transition snapshot. Use `.resolve` for explicit child construction,
+   * mixed construction methods, or queued commands.
+   *
+   * **Example** (Guarding an atomic destination and owner update)
+   *
+   * ```ts
+   * Save: (to) => to.local.Saving().updating(to.root)
+   *   .guard(({ current }) => current.draft.length > 0)
+   *   .from(({ current }) => ({
+   *     target: { text: current.draft },
+   *     update: { ...current, attempts: current.attempts + 1 }
+   *   }))
+   * ```
+   */
   export type UpdatingTransitionTarget<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -6283,32 +6348,35 @@ export declare namespace Machine {
     Acceptance extends TransitionAcceptance,
     Selection extends TargetSelection<any, any, "state">,
     Owner extends ValuedStateIdentifier<States>
-  > = Selection & {
-    /** @internal */
-    readonly "~effect/Machine/UpdatingTransitionTarget": Owner
-    readonly resolve:
-      & ((
-        resolve: (
-          context: UpdatingTransitionResolveContext<States, Context, Selection, Owner>,
-          enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-        ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
-        options?: TransitionRequiredOptions<Reenter>
-      ) => BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
-        "required"
-      >)
-      & ("declinable" extends Acceptance ? (
+  > =
+    & Selection
+    & UpdatingCallbacks<States, Events, Emits, StateId, Context, Reenter, Selection, Owner, "required">
+    & ([Reenter] extends [true] ? {
+        readonly reenter: () => Omit<
+          UpdatingTransitionTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection, Owner>,
+          typeof Topology.TargetSelectionTypeId
+        >
+      } :
+      {})
+    & ("declinable" extends Acceptance ? {
+        /** Declines before either value is constructed or any commands are enqueued. */
+        readonly guard: (
+          predicate: (
+            context: Omit<UpdatingTransitionResolveContext<States, Context, Selection, Owner>, "owner" | "target">
+          ) => boolean
+        ) => GuardedUpdatingTransition<States, Events, Emits, StateId, Context, Reenter, Selection, Owner>
+      } :
+      {})
+    & {
+      /** @internal */
+      readonly "~effect/Machine/UpdatingTransitionTarget": Owner
+      readonly resolve:
+        & ((
           resolve: (
-            context: UpdatingTransitionResolveContext<States, Context, Selection, Owner> & DeclineCapability,
+            context: UpdatingTransitionResolveContext<States, Context, Selection, Owner>,
             enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-          ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
-          options: TransitionDeclinableOptions<Reenter>
+          ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
+          options?: TransitionRequiredOptions
         ) => BuiltTransition<
           States,
           Events,
@@ -6316,11 +6384,27 @@ export declare namespace Machine {
           StateId,
           Context,
           Reenter,
-          CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
-          "declinable"
-        >
-        : {})
-  }
+          CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
+          "required"
+        >)
+        & ("declinable" extends Acceptance ? (
+            resolve: (
+              context: UpdatingTransitionResolveContext<States, Context, Selection, Owner> & DeclineCapability,
+              enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
+            ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
+            options: TransitionDeclinableOptions
+          ) => BuiltTransition<
+            States,
+            Events,
+            Emits,
+            StateId,
+            Context,
+            Reenter,
+            CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
+            "declinable"
+          >
+          : {})
+    }
 
   /** @internal */
   interface StateUpdateTransitionRequired<
@@ -6340,7 +6424,7 @@ export declare namespace Machine {
         Context,
         Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
       >,
-      options?: TransitionRequiredOptions<Reenter>
+      options?: TransitionRequiredOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6371,7 +6455,7 @@ export declare namespace Machine {
         Context,
         Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
       >,
-      options: TransitionDeclinableOptions<Reenter>
+      options: TransitionDeclinableOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6383,6 +6467,54 @@ export declare namespace Machine {
       "declinable"
     >
   }
+
+  type GuardedStateUpdateTransition<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Selection extends TargetSelection<any, any, "update">
+  > =
+    & ConstructionCallbacks<
+      Omit<
+        StateUpdateResolveContext<States, Context, Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>>,
+        "owner"
+      >,
+      SelectionBuilder<Selection>,
+      BuiltTransition<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        SelectedTargetResult<Selection> | Declined,
+        "declinable"
+      >
+    >
+    & {
+      readonly resolve: (
+        resolve: StateUpdateResolver<
+          States,
+          Events,
+          Emits,
+          Context,
+          Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
+        >,
+        options?: TransitionRequiredOptions
+      ) => BuiltTransition<
+        States,
+        Events,
+        Emits,
+        StateId,
+        Context,
+        Reenter,
+        SelectedTargetResult<Selection> | Declined,
+        "declinable"
+      >
+    }
 
   /** @internal */
   type StateUpdateTransition<
@@ -6396,6 +6528,30 @@ export declare namespace Machine {
     Selection extends TargetSelection<any, any, "update">
   > =
     & Selection
+    & ([Reenter] extends [true] ? {
+        /** Reenters the source while updating its retained valued ancestor. */
+        readonly reenter: () => Omit<
+          StateUpdateTransition<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection>,
+          typeof Topology.TargetSelectionTypeId
+        >
+      } :
+      {})
+    & ("declinable" extends Acceptance ? {
+        /** Declines before replacing the selected owner value. */
+        readonly guard: (
+          predicate: (
+            context: Omit<
+              StateUpdateResolveContext<
+                States,
+                Context,
+                Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
+              >,
+              "owner"
+            >
+          ) => boolean
+        ) => GuardedStateUpdateTransition<States, Events, Emits, StateId, Context, Reenter, Selection>
+      } :
+      {})
     & ConstructionCallbacks<
       Omit<
         StateUpdateResolveContext<States, Context, Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>>,
@@ -6583,7 +6739,7 @@ export declare namespace Machine {
   > {
     (
       resolve: TransitionBranchesResolver<Events, Emits, Context, Branches>,
-      options?: TransitionRequiredOptions<Reenter>
+      options?: TransitionRequiredOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6607,7 +6763,7 @@ export declare namespace Machine {
   > {
     (
       resolve: DeclinableTransitionBranchesResolver<Events, Emits, Context, Branches>,
-      options: TransitionDeclinableOptions<Reenter>
+      options: TransitionDeclinableOptions
     ): BuiltTransition<
       States,
       Events,
@@ -6641,6 +6797,38 @@ export declare namespace Machine {
     >
   }
 
+  type TransitionBranchesTarget<
+    States extends StateSchemas,
+    Events extends ReadonlyArray<TaggedSchema>,
+    Emits extends ReadonlyArray<TaggedSchema>,
+    StateId extends StateNodeIdentifier<States>,
+    Context,
+    Reenter extends boolean,
+    Acceptance extends TransitionAcceptance,
+    Branches extends Readonly<Record<string, TransitionBranchInput>>
+  > =
+    & {
+      /** Resolves exactly one declared branch after this transition is selected. */
+      readonly resolve:
+        & TransitionBranchesResolveRequired<States, Events, Emits, StateId, Context, Reenter, Branches>
+        & ("declinable" extends Acceptance
+          ? TransitionBranchesResolveDeclinable<States, Events, Emits, StateId, Context, Reenter, Branches>
+          : {})
+    }
+    & ([Reenter] extends [true] ? {
+        readonly reenter: () => TransitionBranchesTarget<
+          States,
+          Events,
+          Emits,
+          StateId,
+          Context,
+          Reenter,
+          Acceptance,
+          Branches
+        >
+      } :
+      {})
+
   /** Selector supplied to inline transition declarations. */
   export interface TransitionSelector<
     in out States extends StateSchemas,
@@ -6654,21 +6842,7 @@ export declare namespace Machine {
     /** Declares a closed set of named destinations for one resolver. */
     readonly branches: <const Branches extends Readonly<Record<string, TransitionBranchInput>>>(
       branches: Branches & ValidateTransitionBranchRecord<NoInfer<Branches>>
-    ) => {
-      /** Resolves exactly one declared branch after this transition is selected. */
-      readonly resolve:
-        & TransitionBranchesResolveRequired<States, Events, Emits, StateId, Context, Reenter, Branches>
-        & ("declinable" extends Acceptance ? TransitionBranchesResolveDeclinable<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            Branches
-          >
-          : {})
-    }
+    ) => TransitionBranchesTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Branches>
   }
 
   /** Inline transition declaration accepted by state and invocation handlers. */

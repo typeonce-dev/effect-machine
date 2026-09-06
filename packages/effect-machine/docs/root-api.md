@@ -164,6 +164,51 @@ an event without changing topology; declining and accepting have different
 semantics. Named branches keep `{ target, title? }`: `target` identifies the
 checked destination and `title` supplies optional presentation metadata.
 
+Guards also apply to standalone owner updates and combined transitions:
+
+```ts
+Increment: (to) => to.self.update
+  .guard(({ current }) => current.count < 10)
+  .from(({ current }) => ({ ...current, count: current.count + 1 }))
+
+Save: (to) => to.local.Saving().updating(to.root)
+  .guard(({ current }) => current.draft.length > 0)
+  .from(({ current }) => ({
+    target: { requestId: current.draft },
+    update: { ...current, attempts: current.attempts + 1 }
+  }))
+```
+
+Combined `.from` returns constructor inputs for both the destination and the
+complete owner replacement. `.decoded` returns their decoded values instead.
+For a destination with no construction arguments, use `target: undefined`.
+Both values are validated before applying either change; destination entry
+observes the updated owner. Use `.resolve` for mixed construction methods,
+explicit child configurations, or commands.
+
+Reentry is a modifier before construction:
+
+```ts
+Retry: (to) => to.local.Saving().reenter()
+  .from(({ event }) => ({ requestId: event.requestId }))
+
+Refresh: (to) => to.none.reenter()
+
+Choose: (to) => to.branches({
+  saving: { target: to.local.Saving() },
+  idle: { target: to.local.Idle() }
+}).reenter().resolve(({ state, select }) =>
+  state.retry ? select.saving.from({ requestId: state.requestId }) : select.idle.from()
+)
+```
+
+`.reenter()` restarts the handler source. It composes with `.updating`, `.guard`,
+`.from`, `.decoded`, and `.resolve` wherever reentry is supported. Apply it to
+the whole named-branches builder, whose individual targets describe topology.
+Migrate `.resolve(callback, { reenter: true })` to `.reenter().resolve(callback)`;
+remove `{ reenter: false }`. `to.self.update` retains the source lifecycle and
+does not expose `.reenter()`.
+
 ## Completion and history
 
 A compound root returns its completed direct workflow's output when that child

@@ -265,10 +265,11 @@ describe("Machine", () => {
                   refresh: { title: "Refresh stable state", target: to.branch.Stable() }
                 }
                 declarations = captured
-                return to.branches(captured).resolve(({ event, select }) =>
+                return to.branches(captured).reenter().resolve(({ event, select }) =>
                   event.route
                     ? select.refresh.decoded(new Stable({}))
-                    : select.unchanged(), { reenter: true })
+                    : select.unchanged()
+                )
               }
             }
           }

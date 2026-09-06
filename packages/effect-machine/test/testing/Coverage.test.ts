@@ -27,9 +27,9 @@ const counterMachine = Machine.make({
     count: {
       on: {
         Add: (to) =>
-          to.branch.count().resolve(
+          to.branch.count().reenter().resolve(
             ({ event, state, target }) => target.decoded(new Count({ value: state.value + event.amount })),
-            { reenter: true, declinable: true }
+            { declinable: true }
           ),
         Finish: (to) => to.branch.done().resolve(({ target }) => target.decoded(new Done({})))
       }

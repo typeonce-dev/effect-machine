@@ -227,9 +227,9 @@ const reentryMachine = Machine.make({
     app: {
       on: {
         Restart: (to) =>
-          to.branch.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({}))), {
-            reenter: true
-          })
+          to.branch.app().reenter().resolve(({ target }) =>
+            target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+          )
       }
     }
   }

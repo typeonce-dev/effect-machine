@@ -411,8 +411,9 @@ selecting a destination. Concrete destinations stay narrowed inside their
 resolver, and `to.branches({...})` gives the resolver only the declared named
 `select` builders. Builders describe the
 next logical configuration. Shared states exit and enter only when paths
-change; call `.reenter()` for resolver-free reentry or pass `{ reenter: true }`
-to `.resolve(...)` when the source must restart. With `to.none`, reentry
+change; call `.reenter()` before `.from(...)`, `.decoded(...)`, or `.resolve(...)`
+when the source must restart. Default-constructible targets can finish at
+`.reenter()`. With `to.none`, reentry
 restarts the source while retaining its configuration.
 
 Topology-only definition instructions are values: `to.none`, declared
@@ -430,7 +431,7 @@ handler source:
 
 ```ts
 const handlers = {
-  Increment: (to) => to.branch.root.session.update(({ current, owner }) => owner.from({ count: current.count + 1 }))
+  Increment: (to) => to.branch.root.session.update.from(({ current }) => ({ count: current.count + 1 }))
 }
 ```
 
@@ -463,30 +464,28 @@ const handlers = {
   CreatePlan: (to) =>
     to.local.SavingPlan()
       .updating(to.branch.Ready)
-      .resolve(({ current, event, owner, target }) =>
-        target.from({
-          request: { _tag: "Create", input: event.input }
-        }).update(
-          owner.decoded(new Ready({ ...current, notice: null }))
-        )
-      )
+      .from(({ current, event }) => ({
+        target: { request: { _tag: "Create", input: event.input } },
+        update: { ...current, notice: null }
+      }))
 }
 ```
 
 `to.local.SavingPlan()` selects topology. `.updating(to.branch.Ready)` names
-the retained valued owner and makes its replacement mandatory: the resolver
-does not type-check unless destination construction finishes with
-`.update(...)`. `current` is that owner's decoded value from the
-pre-transition snapshot. `target` constructs the destination; `owner`
-constructs the complete replacement owner value.
+the retained valued owner and makes its replacement mandatory. `.from(...)`
+returns `{ target, update }` with constructor inputs for both values;
+`.decoded(...)` returns already decoded values for both. `current` is that
+owner's decoded value from the pre-transition snapshot. Use `.resolve(...)`
+when constructing explicit children, mixing construction methods, or queuing
+commands; its `target` and `owner` builders construct the two values.
 
 The topology change and owner replacement apply atomically in one microstep.
 The owner does not exit or reenter, its work is not restarted, and destination
 entry actions observe the new owner value. Eventless stabilization follows.
 Only one retained owner may be replaced by a combined target. A `full` target,
 or any target that exits the selected owner, does not expose `.updating`.
-Combined updates use a direct resolver in this release; named branches continue
-to support value-only updates.
+Named branches support value-only updates; a combined update declares its
+destination directly.
 
 For a schema-less destination, construction remains explicit:
 
@@ -511,11 +510,13 @@ before lifecycle actions run. Competing transitions that write the same owner
 conflict; document order and hierarchy select one writer rather than applying
 last-write-wins behavior.
 
-The resolver must return `target.decoded(value)` or `target.from(input)`. It
-may return `decline()` only with `{ declinable: true }`. Pass `{ reenter: true }`
-on event or invocation transitions when the handler source should exit and
-enter again. Reentry applies to that source, not to the ancestor whose value
-changed.
+Use `.guard(predicate)` before construction to decline an update without
+constructing values or queuing commands. It is available on standalone and
+combined updates. A false guard allows ancestor fallback. A resolver may also
+return `decline()` with `{ declinable: true }` for decisions during resolution.
+Call `.reenter()` before construction on event or invocation transitions when
+the handler source should exit and enter again. Reentry applies to that source,
+not to the retained ancestor whose value changed.
 
 The selector omits `update` for schema-less scopes, atomic and final states,
 inactive branches, parallel sibling regions, and choice resolvers. Updating a

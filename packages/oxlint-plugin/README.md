@@ -84,7 +84,7 @@ Resolver-only reentry uses `.reenter()`:
 
 ```ts
 // Before
-to.local.Ready().resolve(({ target }) => target.from(), { reenter: true })
+to.local.Ready().reenter().resolve(({ target }) => target.from())
 
 // After `oxlint --fix`
 to.local.Ready().reenter()
