@@ -202,6 +202,7 @@ test("fails closed when a legacy capability cannot preserve lifecycle semantics"
 
 test("adapts root definitions while preserving benchmark startup and handler semantics", () => {
   let captured
+  let selections = 0
   const schema = Symbol("schema")
   const rootApi = {
     state: (node) => ({ node }),
@@ -217,10 +218,11 @@ test("adapts root definitions while preserving benchmark startup and handler sem
     states: states.states,
     events: api.events(schema),
     initial: api.initial({
-      target: (to) => to.Ready(),
+      target: (to) => { selections++; return to.Ready() },
       resolve: ({ input, target }) => target.from({ count: input })
     })
   })
+  assert.equal(selections, 1)
   const handlers = { Ready: {} }
   assert.deepEqual(definition.handle(handlers).handlers, { states: handlers })
   assert.deepEqual(captured.root.node, { initial: "Ready", states: { Ready: schema } })
@@ -238,4 +240,5 @@ test("adapts root definitions while preserving benchmark startup and handler sem
     })
   })
   assert.deepEqual(api.snapshot(snapshot), { path: "Ready", value: { count: 3 } })
+  assert.equal(selections, 1)
 })

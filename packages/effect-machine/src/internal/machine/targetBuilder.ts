@@ -56,7 +56,7 @@ const withInitial = <Builder extends object>(
     valued
   )
   Object.defineProperty(builder, "initial", {
-    value: initial,
+    value: Object.freeze(initial),
     enumerable: false
   })
   return builder
@@ -75,21 +75,22 @@ export const makeSnapshotBuilder = (
     }
     const path = options.prefix === "" ? key : `${options.prefix}.${key}`
     if (pseudoType === "choice") {
-      builder[key] = () => Topology.makeChoiceTarget(path, getParentPathRuntime(path))
+      builder[key] = Object.freeze(() => Topology.makeChoiceTarget(path, getParentPathRuntime(path)))
       continue
     }
     const node = Topology.getStateNodeDefinition(path, definition)
     const method = withFrom(
-      (value: unknown, selector?: (builder: unknown) => unknown) =>
-        makeSnapshotForNode(definition, key, value, selector, options),
+      makeSnapshotFactory(definition, key, options),
       node.states === undefined ? "leaf" : "nested",
       node.schema !== undefined
     )
-    builder[key] = node.states === undefined || options.mode !== "full" || options.prefix !== ""
-      ? method
-      : withInitial(method, path, node.schema !== undefined)
+    builder[key] = Object.freeze(
+      node.states === undefined || options.mode !== "full" || options.prefix !== ""
+        ? method
+        : withInitial(method, path, node.schema !== undefined)
+    )
   }
-  return builder
+  return Object.freeze(builder)
 }
 
 const makeParallelSnapshotBuilder = (
@@ -153,38 +154,49 @@ const getParallelSnapshotBuilderRegions = (
   return regions
 }
 
+/**
+ * A factory owns its lazily compiled child builder. The builder captures only
+ * immutable topology; every call constructs fresh values and configurations.
+ * Parallel builders remain per-call because they accumulate selected regions.
+ */
+const makeSnapshotFactory = (
+  definition: Machine.TaggedSchema | Machine.StateNodeConfig,
+  key: string,
+  options: SnapshotBuilderOptions
+): (value: unknown, selector?: (builder: unknown) => unknown) => Record<string, unknown> => {
+  const path = options.prefix === "" ? key : `${options.prefix}.${key}`
+  const mode = options.mode
+  const node = Topology.getStateNodeDefinition(path, definition)
+  let childBuilder: unknown
+  return (value, selector) => {
+    const snapshot: Record<string, unknown> = { path, value }
+    if (node.states === undefined) return snapshot
+    if (selector === undefined) {
+      throw new Error(`Machine expected state "${path}" builder to provide active child states`)
+    }
+    if (node.type === "parallel") {
+      const builder = makeParallelSnapshotBuilder(node.states, { mode, prefix: path }, {})
+      snapshot.states = getParallelSnapshotBuilderRegions(path, node.states, selector(builder))
+      return snapshot
+    }
+    if (childBuilder === undefined) {
+      const childStates = mode === "initial" && node.initial !== undefined
+        ? { [node.initial]: node.states[node.initial]! }
+        : node.states
+      childBuilder = makeSnapshotBuilder(childStates, { mode, prefix: path })
+    }
+    snapshot.state = selector(childBuilder)
+    return snapshot
+  }
+}
+
 const makeSnapshotForNode = (
   definition: Machine.TaggedSchema | Machine.StateNodeConfig,
   key: string,
   value: unknown,
   selector: ((builder: unknown) => unknown) | undefined,
   options: SnapshotBuilderOptions
-): Record<string, unknown> => {
-  const path = options.prefix === "" ? key : `${options.prefix}.${key}`
-  const node = Topology.getStateNodeDefinition(path, definition)
-  const snapshot: Record<string, unknown> = {
-    path,
-    value
-  }
-  if (node.states === undefined) {
-    return snapshot
-  }
-  if (selector === undefined) {
-    throw new Error(`Machine expected state "${path}" builder to provide active child states`)
-  }
-  if (node.type === "parallel") {
-    const builder = makeParallelSnapshotBuilder(node.states, { ...options, prefix: path }, {})
-    const selected = selector(builder)
-    snapshot.states = getParallelSnapshotBuilderRegions(path, node.states, selected)
-    return snapshot
-  }
-  const childStates = options.mode === "initial" && node.initial !== undefined
-    ? { [node.initial]: node.states[node.initial]! }
-    : node.states
-  const selected = selector(makeSnapshotBuilder(childStates, { ...options, prefix: path }))
-  snapshot.state = selected
-  return snapshot
-}
+): Record<string, unknown> => makeSnapshotFactory(definition, key, options)(value, selector)
 
 export const getTargetBuilderNode = (
   stateNodes: Machine.StateNodes,

@@ -1,5 +1,5 @@
-import { it } from "@effect/vitest"
-import { Schema } from "effect"
+import { assert, it } from "@effect/vitest"
+import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
 import { verifyPlannerStrategies } from "./support/strategyDifferential.js"
 
@@ -104,3 +104,41 @@ it.effect("keeps root values and child transitions equal to generic planning", (
     ]
   })
 })
+
+it.effect("reuses only immutable startup builders and keeps input values independent", () =>
+  Effect.gen(function*() {
+    const machine = Machine.make({
+      root: Machine.state({ initial: "Idle", states: { Idle: { fields: { count: Schema.Number } }, Busy: {} } }),
+      input: Schema.Struct({ count: Schema.Number }),
+      events: Machine.events({ Noop: {} }),
+      initialConfiguration: (root) =>
+        root.resolve(({ input, target }) =>
+          target.from((tree) => {
+            // A retained builder cannot be changed to redirect another startup.
+            assert.strictEqual(Reflect.set(tree, "Idle", tree.Busy), false)
+            return tree.Idle.from({ count: input.count })
+          })
+        )
+    }).handle({})
+    const first = yield* Machine.planInitial(machine, { count: 1 })
+    const second = yield* Machine.planInitial(machine, { count: 2 })
+    assert.deepStrictEqual(first.state, {
+      path: "",
+      value: undefined,
+      state: { path: "Idle", value: { _tag: "Idle", count: 1 } }
+    })
+    assert.deepStrictEqual(second.state, {
+      path: "",
+      value: undefined,
+      state: { path: "Idle", value: { _tag: "Idle", count: 2 } }
+    })
+    for (const count of [3, 4]) {
+      yield* verifyPlannerStrategies({
+        machine,
+        expected: "indexed-flat",
+        label: `independent startup ${count}`,
+        initialArgs: [{ count }],
+        events: [{ _tag: "Noop" }]
+      })
+    }
+  }))

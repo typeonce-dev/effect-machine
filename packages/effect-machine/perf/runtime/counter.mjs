@@ -218,11 +218,11 @@ const parallelCounterMachine = benchmarkApi.make({
       Finish: benchmarkApi.transition({
         target: (to) => to.full.Complete(),
         resolve: ({ snapshot, target }) => target.from({
-          value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+          value: benchmarkApi.snapshot(snapshot).states.Left.value.value + benchmarkApi.snapshot(snapshot).states.Right.value.value
         })
       }, ({ snapshot, target }) =>
         target.full.Complete.from({
-          value: snapshot.states.Left.value.value + snapshot.states.Right.value.value
+          value: benchmarkApi.snapshot(snapshot).states.Left.value.value + benchmarkApi.snapshot(snapshot).states.Right.value.value
         }))
     },
     states: {

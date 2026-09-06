@@ -20,7 +20,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   const fluentTransition = (definition) => (to) => {
     const selection = selectInstruction(definition.target(hasRoot ? { ...to, full: to.branch } : to))
     if (definition.resolve !== undefined) {
-      return selection.resolve(hasRoot ? (context, enqueue) => definition.resolve({ ...context, snapshot: context.snapshot?.path === "" ? context.snapshot.state : context.snapshot }, enqueue) : definition.resolve, {
+      return selection.resolve(definition.resolve, {
         ...(definition.reenter === true ? { reenter: true } : {}),
         ...(definition.declinable === true ? { declinable: true } : {})
       })
@@ -49,14 +49,17 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       if (!hasRoot) return Machine.make(config)
       const { states: root, initial, ...rest } = config
       const definition = initial.benchmarkInitial
+      // Target selection belongs to definition time in both public APIs.
+      // Only the selected value constructor runs each time a machine starts.
+      const selectors = Object.fromEntries(Object.keys(root.node.states).map((key) => {
+        const selected = () => key
+        selected.initial = key
+        return [key, selected]
+      }))
+      const initialKey = selectInstruction(definition.target(selectors))
       const machine = Machine.make({ ...rest, root, initialConfiguration: (root) => root.resolve((context) =>
         context.target.from((tree) => {
-          const selectors = Object.fromEntries(Object.entries(tree).map(([key, builder]) => {
-            const selected = () => builder
-            selected.initial = builder
-            return [key, selected]
-          }))
-          const target = selectInstruction(definition.target(selectors))
+          const target = tree[initialKey]
           return definition.resolve === undefined ? target.from() : definition.resolve({ ...context, target })
         })) })
       return { handle: (states) => machine.handle({ states }) }
