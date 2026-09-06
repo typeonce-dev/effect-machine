@@ -8,6 +8,7 @@ import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import type { Machine } from "../../Machine.js"
+import { type CapturedStateConfig, toImpl } from "./implementation.js"
 
 export const TargetTypeId = "~effect/Machine/Target"
 
@@ -506,7 +507,7 @@ export const transitionDefinitions = (
 ): ReadonlyArray<Machine.TransitionDefinition> => {
   const definitions: Array<Machine.TransitionDefinition> = []
   for (const node of machine.stateNodes.byPath.values()) {
-    const config = machine.handlers[node.path] as Machine.AnyStateConfig | undefined
+    const config = toImpl(machine).handlers[node.path] as CapturedStateConfig | undefined
     if (config === undefined) {
       continue
     }

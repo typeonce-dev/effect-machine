@@ -8,7 +8,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as Machine from "../../../Machine.js"
 import type { Probe, ProbePlan } from "../../../testing/MachineTest.js"
-import * as Runtime from "../../machine/runtime.js"
+import * as Runtime from "../../machine/runtimeProtocol.js"
 
 type AnyMachine = Machine.Machine.Any
 

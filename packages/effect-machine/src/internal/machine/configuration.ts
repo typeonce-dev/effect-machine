@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import { hasProperty } from "effect/Predicate"
 import type { Machine, MachineTarget } from "../../Machine.js"
 import { MachineSchemaDecodeError } from "./errors.js"
+import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import {
   decodeBoundary,
   decodeOutputValue,
@@ -485,6 +486,51 @@ export const snapshotFromConfigurationAtPath = <const States extends Machine.Sta
   return snapshot
 }
 
+/** Shared structural checks preserve the same traversal and failure order for
+ * synchronous planning and effectful codecs. Decoding stays in each caller. */
+const compoundSnapshotChild = (
+  machine: Machine.Any,
+  node: Machine.StateNode,
+  current: Machine.AtomicSnapshot<string, unknown>
+): Machine.AtomicSnapshot<string, unknown> => {
+  if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
+    throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
+  }
+  const child = getNode(machine, String(current.state.path))
+  if (child.parent !== node.path) {
+    throw new Error(`Machine expected snapshot "${child.path}" to be a child of "${node.path}"`)
+  }
+  return current.state
+}
+
+const parallelSnapshotRegions = (
+  node: Machine.StateNode,
+  current: Machine.AtomicSnapshot<string, unknown>
+): Readonly<Record<string, unknown>> => {
+  if (!hasProperty(current, "states") || typeof current.states !== "object" || current.states === null) {
+    throw new Error(`Machine expected parallel snapshot "${node.path}" to include active child regions`)
+  }
+  return current.states as Readonly<Record<string, unknown>>
+}
+
+const parallelSnapshotChild = (
+  machine: Machine.Any,
+  node: Machine.StateNode,
+  childPath: string,
+  states: Readonly<Record<string, unknown>>
+): Machine.AtomicSnapshot<string, unknown> => {
+  const child = getNode(machine, childPath)
+  const childSnapshot = states[child.key]
+  if (!hasOwn(states, child.key) || !isSnapshot(childSnapshot)) {
+    throw new Error(`Machine expected parallel snapshot "${node.path}" to include region "${child.key}"`)
+  }
+  const snapshotChild = getNode(machine, String(childSnapshot.path))
+  if (snapshotChild.path !== child.path) {
+    throw new Error(`Machine expected snapshot "${snapshotChild.path}" to be region "${child.path}"`)
+  }
+  return childSnapshot
+}
+
 export const configurationFromSnapshot = (
   machine: Machine.Any,
   snapshot: Machine.AtomicSnapshot<string, unknown>
@@ -504,31 +550,12 @@ export const configurationFromSnapshot = (
       values.set(node.path, decodeStateValueSync(machine, node, current.value))
     }
     if (node.type === "compound") {
-      if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
-        throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
-      }
-      const child = getNode(machine, String(current.state.path))
-      if (child.parent !== node.path) {
-        throw new Error(`Machine expected snapshot "${child.path}" to be a child of "${node.path}"`)
-      }
-      visit(current.state)
+      visit(compoundSnapshotChild(machine, node, current))
     }
     if (node.type === "parallel") {
-      if (!hasProperty(current, "states") || typeof current.states !== "object" || current.states === null) {
-        throw new Error(`Machine expected parallel snapshot "${node.path}" to include active child regions`)
-      }
-      const states = current.states as Readonly<Record<string, unknown>>
+      const states = parallelSnapshotRegions(node, current)
       for (const childPath of node.children) {
-        const child = getNode(machine, childPath)
-        const childSnapshot = states[child.key]
-        if (!hasOwn(states, child.key) || !isSnapshot(childSnapshot)) {
-          throw new Error(`Machine expected parallel snapshot "${node.path}" to include region "${child.key}"`)
-        }
-        const snapshotChild = getNode(machine, String(childSnapshot.path))
-        if (snapshotChild.path !== child.path) {
-          throw new Error(`Machine expected snapshot "${snapshotChild.path}" to be region "${child.path}"`)
-        }
-        visit(childSnapshot)
+        visit(parallelSnapshotChild(machine, node, childPath, states))
       }
     }
   }
@@ -591,31 +618,12 @@ export const configurationFromSnapshotEffect = Effect.fnUntraced(function*(
       values.set(node.path, yield* decodeStateValue(machine, node, current.value))
     }
     if (node.type === "compound") {
-      if (!hasProperty(current, "state") || !isSnapshot(current.state)) {
-        throw new Error(`Machine expected compound snapshot "${node.path}" to include an active child state`)
-      }
-      const child = getNode(machine, String(current.state.path))
-      if (child.parent !== node.path) {
-        throw new Error(`Machine expected snapshot "${child.path}" to be a child of "${node.path}"`)
-      }
-      yield* visit(current.state)
+      yield* visit(compoundSnapshotChild(machine, node, current))
     }
     if (node.type === "parallel") {
-      if (!hasProperty(current, "states") || typeof current.states !== "object" || current.states === null) {
-        throw new Error(`Machine expected parallel snapshot "${node.path}" to include active child regions`)
-      }
-      const states = current.states as Readonly<Record<string, unknown>>
+      const states = parallelSnapshotRegions(node, current)
       for (const childPath of node.children) {
-        const child = getNode(machine, childPath)
-        const childSnapshot = states[child.key]
-        if (!hasOwn(states, child.key) || !isSnapshot(childSnapshot)) {
-          throw new Error(`Machine expected parallel snapshot "${node.path}" to include region "${child.key}"`)
-        }
-        const snapshotChild = getNode(machine, String(childSnapshot.path))
-        if (snapshotChild.path !== child.path) {
-          throw new Error(`Machine expected snapshot "${snapshotChild.path}" to be region "${child.path}"`)
-        }
-        yield* visit(childSnapshot)
+        yield* visit(parallelSnapshotChild(machine, node, childPath, states))
       }
     }
   })
@@ -1140,7 +1148,7 @@ export const normalizeTargetConfigurationSync = <const States extends Machine.St
 export const getStateConfigByPath = (
   machine: Machine.Any,
   path: string
-): Machine.AnyStateConfig | undefined => machine.handlers[path]
+): CapturedStateConfig | undefined => toImpl(machine).handlers[path]
 
 export const getActiveChildPath = (
   machine: Machine.Any,

@@ -42,6 +42,26 @@ and process layers. Testing implementations are isolated under
 `packages/effect-machine/src/internal/testing` and may only be consumed by the public testing module or
 other testing internals.
 
+`implementation.ts` owns the captured handler representation. Public handler
+callbacks author transitions through selectors; captured handlers contain the
+executable transitions. Semantic layers use `toImpl` to access that representation
+instead of treating the public erased handler fields as `any`. Existing public
+fields and type parameters remain available for compatibility.
+
+Runtime responsibilities are separated as follows:
+
+- `runtime.ts` allocates a root runtime and selects an execution strategy.
+- `runtimeProtocol.ts` owns shared process contracts, child ownership, mailboxes,
+  and observation. It receives startup functions from the coordinator so child
+  startup does not create a dependency back to either execution strategy.
+- `runtimeGeneric.ts` runs the general Effect worker and supervisor.
+- `runtimeCompiled.ts` runs compiled statecharts, including synchronous owned
+  child startup. It preserves the same lifecycle contract as the generic runtime.
+
+Consumers import directly from the module that owns a contract. Runtime modules
+must remain independent of planning and statechart semantics. The Cluster adapter
+similarly shares its checkpoint service and wire schemas through `clusterProtocol.ts`.
+
 `pnpm check:architecture` builds a TypeScript dependency graph using the
 project's NodeNext resolver. It distinguishes type-only and runtime edges,
 understands imports, re-exports, and dynamic imports, and enforces:

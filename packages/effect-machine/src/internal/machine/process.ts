@@ -14,10 +14,12 @@ import * as Configuration from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
 import type { StoppedError } from "./errors.js"
 import * as ExecutionPlan from "./executionPlan.js"
+import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as Invocation from "./invocation.js"
 import * as internalPlanner from "./planner.js"
 import type { ExcludeCompatibleRuntime } from "./requirements.js"
 import * as internalRuntime from "./runtime.js"
+import * as internalRuntimeProtocol from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 
 type ProcessEntry<States extends Machine.StateSchemas, Input extends Schema.Top> =
@@ -80,7 +82,7 @@ const hasInvokeCapability = (machine: Machine.Any): boolean => {
     return cached
   }
   const hasInvokes = Object.values(
-    machine.handlers as Record<string, Machine.AnyStateConfig>
+    toImpl(machine).handlers as Record<string, CapturedStateConfig>
   ).some((config) => config.invoke !== undefined)
   invokeCapabilityCache.set(machine, hasInvokes)
   return hasInvokes
@@ -90,7 +92,7 @@ const makeChildlessCompiledDrain = (
   machine: Machine.Any,
   checkInitialFinal: boolean
 ): (
-  context: internalRuntime.CompiledProcessContext<any, any>
+  context: internalRuntimeProtocol.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   return (context) => {
@@ -114,7 +116,7 @@ const makeChildlessCompiledDrain = (
       }
 
       const message = pending.value
-      const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+      const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
       const event = acknowledged ? message.event : message
       const before = current
 
@@ -180,7 +182,7 @@ const makeChildlessCompiledDrain = (
         beforeCommit.pipe(Effect.andThen(Effect.suspend(commitAndContinue)))
       )
     })
-    return internalRuntime.provideMachineRuntime(loop, context.scope)
+    return internalRuntimeProtocol.provideMachineRuntime(loop, context.scope)
   }
 }
 
@@ -207,7 +209,7 @@ const makeInvokingCompiledDrain = (
   machine: Machine.Any,
   checkInitialFinal: boolean
 ): (
-  context: internalRuntime.CompiledProcessContext<any, any>
+  context: internalRuntimeProtocol.CompiledProcessContext<any, any>
 ) => Effect.Effect<Option.Option<any>, any, any> => {
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   return (context) => {
@@ -238,7 +240,7 @@ const makeInvokingCompiledDrain = (
       }
 
       const message = pending.value
-      const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+      const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
       const event = acknowledged ? message.event : message
       const before = current
 
@@ -364,7 +366,7 @@ const makeInvokingCompiledDrain = (
       execution.initialized = true
       return starting === undefined ? loop : starting.pipe(Effect.andThen(loop))
     }
-    return internalRuntime.provideMachineRuntime(Effect.suspend(initialize), scope)
+    return internalRuntimeProtocol.provideMachineRuntime(Effect.suspend(initialize), scope)
   }
 }
 
@@ -383,12 +385,12 @@ const makeProcessLogic: <
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   entry: ProcessEntry<States, Input>
-) => internalRuntime.ProcessLogic<
+) => internalRuntimeProtocol.ProcessLogic<
   Machine.Snapshot<States>,
   Machine.EventOf<Events>,
   E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
   ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >,
@@ -421,7 +423,7 @@ const makeProcessLogic: <
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
   const makeCompiledInitial = compiledInitial === undefined ? undefined : (
-    scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
+    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<Events>>
   ) => {
     try {
       const planned = compiledInitial(initialArgs, scope)
@@ -448,10 +450,10 @@ const makeProcessLogic: <
     }
   }
   const makeInitial = (
-    scope: internalRuntime.ProcessScope<Machine.EventOf<Events>>
+    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<Events>>
   ) =>
     compiledInitial === undefined
-      ? internalRuntime.provideMachineRuntime(
+      ? internalRuntimeProtocol.provideMachineRuntime(
         internalPlanner.planInitial(internalPlanner.withMachineReferences(machine, scope), ...initialArgs).pipe(
           Effect.flatMap((planned) => {
             scope.inspectInitial(planned.initialEntryPaths, planned.microsteps)
@@ -495,10 +497,13 @@ const makeProcessLogic: <
     },
     initial: (scope) =>
       entry._tag === "Resume"
-        ? internalRuntime.provideMachineRuntime(Serialization.normalizeSnapshotEffect(machine, entry.snapshot), scope)
+        ? internalRuntimeProtocol.provideMachineRuntime(
+          Serialization.normalizeSnapshotEffect(machine, entry.snapshot),
+          scope
+        )
         : makeInitial(scope).pipe(Effect.map((initialized) => initialized.state)),
     run: (context) =>
-      internalRuntime.provideMachineRuntime(
+      internalRuntimeProtocol.provideMachineRuntime(
         Effect.gen(function*() {
           const { completeMessage, pollMessage, receiveMessage, state, setState } = context
           if (completeMessage === undefined || pollMessage === undefined || receiveMessage === undefined) {
@@ -523,12 +528,13 @@ const makeProcessLogic: <
             // per iteration; every iteration still crosses Effect boundaries,
             // so the Effect scheduler remains responsible for cooperative yield.
             let configuration: Configuration.ActiveConfiguration | undefined
-            let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
+            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<Events>>> = Option
+              .none()
             let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
             while (terminal === undefined) {
               const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
               pendingMessage = Option.none()
-              const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+              const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
               const event = acknowledged ? message.event : message
               const before = current
               let planned
@@ -631,7 +637,8 @@ const makeProcessLogic: <
             // As above, keep the normalized configuration only while this
             // worker can continue draining an already queued batch.
             configuration = undefined
-            let pendingMessage: Option.Option<internalRuntime.ProcessMessage<Machine.EventOf<Events>>> = Option.none()
+            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<Events>>> = Option
+              .none()
             let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
 
             // Match the compact non-invoke loop while retaining state-scoped
@@ -639,7 +646,7 @@ const makeProcessLogic: <
             while (terminal === undefined) {
               const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
               pendingMessage = Option.none()
-              const acknowledged = internalRuntime.isAcknowledgedMessage(message)
+              const acknowledged = internalRuntimeProtocol.isAcknowledgedMessage(message)
               const event = acknowledged ? message.event : message
               const before = current
               let planned
@@ -727,12 +734,12 @@ const makeProcessLogic: <
         }),
         context
       )
-  }) as internalRuntime.ProcessLogic<
+  }) as internalRuntimeProtocol.ProcessLogic<
     Machine.Snapshot<States>,
     Machine.EventOf<Events>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
     ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+      Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
       Machine.EventOf<Events>,
       Machine.EmittedEventOf<Emits>
     >,
@@ -749,7 +756,7 @@ const makeProcessLogic: <
 
 const initialProcessLogicCache = new WeakMap<
   Machine.Any,
-  internalRuntime.ProcessLogic<any, any, any, any, any, any>
+  internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any>
 >()
 
 export const toProcessLogic: <
@@ -767,12 +774,12 @@ export const toProcessLogic: <
 >(
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
-) => internalRuntime.ProcessLogic<
+) => internalRuntimeProtocol.ProcessLogic<
   Machine.Snapshot<States>,
   Machine.EventOf<Events>,
   E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
   ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >,
@@ -805,7 +812,7 @@ export const toProcessLogic: <
 const toResumedProcessLogic = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>
-): internalRuntime.ProcessLogic<any, any, any, any, any, any> =>
+): internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any> =>
   (makeProcessLogic as any)(machine, { _tag: "Resume", snapshot })
 
 /** @internal Test-only runtime strategy selection for a fresh machine. */
@@ -813,7 +820,7 @@ export const startWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
   strategy: internalRuntime.ProcessRuntimeStrategy,
   ...args: ReadonlyArray<unknown>
-): Effect.Effect<internalRuntime.MachineRef<any, any, any, any>, any, any> =>
+): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any>, any, any> =>
   internalRuntime.startProcessWithStrategyForTesting(
     (toProcessLogic as any)(machine, ...args),
     strategy,
@@ -825,7 +832,7 @@ export const prepareWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
   strategy: internalRuntime.ProcessRuntimeStrategy,
   ...args: ReadonlyArray<unknown>
-): Effect.Effect<internalRuntime.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
+): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
   internalRuntime.prepareProcessWithStrategyForTesting(
     (toProcessLogic as any)(machine, ...args),
     strategy,
@@ -837,7 +844,7 @@ export const resumeWithRuntimeStrategyForTesting = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>,
   strategy: internalRuntime.ProcessRuntimeStrategy
-): Effect.Effect<internalRuntime.MachineRef<any, any, any, any>, any, any> =>
+): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any>, any, any> =>
   internalRuntime.startProcessWithStrategyForTesting(
     toResumedProcessLogic(machine, snapshot),
     strategy,
@@ -860,7 +867,7 @@ export const start: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
-  internalRuntime.MachineRef<
+  internalRuntimeProtocol.MachineRef<
     Machine.Snapshot<States>,
     Machine.EventOf<Events>,
     | E
@@ -878,7 +885,7 @@ export const start: <
   | StartupError
   | StoppedError,
   ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >
@@ -904,7 +911,7 @@ export const prepare: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   ...args: [...Machine.InputArgs<Input>]
 ) => Effect.Effect<
-  internalRuntime.PreparedProcess<
+  internalRuntimeProtocol.PreparedProcess<
     Machine.Snapshot<States>,
     Machine.EventOf<Events>,
     | E
@@ -922,7 +929,7 @@ export const prepare: <
     | StartupError
     | StoppedError,
     ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntime.MachineRuntime>,
+      Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
       Machine.EventOf<Events>,
       Machine.EmittedEventOf<Emits>
     >
@@ -949,7 +956,7 @@ export const resume: <
   machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
   snapshot: Machine.Snapshot<States>
 ) => Effect.Effect<
-  internalRuntime.MachineRef<
+  internalRuntimeProtocol.MachineRef<
     Machine.Snapshot<States>,
     Machine.EventOf<Events>,
     E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
@@ -957,7 +964,7 @@ export const resume: <
   >,
   MachineSchemaDecodeError,
   ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<R>, internalRuntime.MachineRuntime>,
+    Exclude<ExecutionServices<R>, internalRuntimeProtocol.MachineRuntime>,
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >

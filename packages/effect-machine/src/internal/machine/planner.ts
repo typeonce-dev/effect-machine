@@ -39,6 +39,7 @@ import {
   validateInitialConfiguration
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
+import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
@@ -330,7 +331,7 @@ const completeHistoryConfiguration = (
         }
         active.add(child.path)
         if (child.schema !== undefined) {
-          const initializer = machine.handlers[path]?.initialize
+          const initializer = toImpl(machine).handlers[path]?.initialize
           if (initializer === undefined) {
             values.set(child.path, decodeStateValueSync(machine, child, makeStateInput({})))
             changed = true
@@ -363,7 +364,7 @@ const completeHistoryConfiguration = (
             history: configuration.history,
             machineReferences: configuration.machineReferences
           } as ActiveConfiguration
-          const initializer = valuedMissing.length === 0 ? undefined : machine.handlers[path]?.initialize
+          const initializer = valuedMissing.length === 0 ? undefined : toImpl(machine).handlers[path]?.initialize
           const initialized = initializer === undefined ? undefined : collectStateInitializer(machine, initializer, {
             ...resolveMachineReferences(machine, current),
             state: current.values.get(path),
@@ -472,7 +473,7 @@ function resolveHistoryTarget(
   }
 
   const key = node.key
-  const fallback = machine.handlers[target.parent]?.history?.[key]?.default
+  const fallback = toImpl(machine).handlers[target.parent]?.history?.[key]?.default
   if (fallback === undefined) {
     throw new Error(`Machine history state "${target.path}" requires a default implementation`)
   }
@@ -766,7 +767,7 @@ const collectStateActions = <
       R
     >(
       machine,
-      machine.handlers[path]?.[key],
+      toImpl(machine).handlers[path]?.[key],
       makeStateActionContext<States, Events, Emits, Machine.StateIdentifier<States>>(
         machine,
         configuration,
@@ -813,7 +814,7 @@ const selectAlwaysTransitions = <
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
-      const always = normalizeTransition(machine.handlers[path]?.always)
+      const always = normalizeTransition(toImpl(machine).handlers[path]?.always)
       if (always !== undefined) {
         let candidate = evaluatedSources.get(path)
         if (!evaluatedSources.has(path)) {
@@ -891,7 +892,7 @@ const selectDoneTransitions = <
   let snapshot: Machine.Snapshot<States> | undefined
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const completion of completions) {
-    const onDone = normalizeTransition(machine.handlers[completion.path]?.onDone)
+    const onDone = normalizeTransition(toImpl(machine).handlers[completion.path]?.onDone)
     if (onDone !== undefined && !selectedSources.has(completion.path)) {
       selectedSources.add(completion.path)
       const candidate = resolveDeclinableCandidate(machine, {
@@ -959,7 +960,7 @@ const selectEventTransitions = <
   const capturedSnapshot = () => snapshot ??= snapshotFromConfiguration<States>(machine, configuration)
   for (const leaf of getActiveLeafPaths(machine, configuration)) {
     for (const path of getLeafCandidatePaths(machine, leaf)) {
-      const transition = normalizeTransition(machine.handlers[path]?.on?.[event._tag])
+      const transition = normalizeTransition(toImpl(machine).handlers[path]?.on?.[event._tag])
       if (transition !== undefined) {
         let candidate = evaluatedSources.get(path)
         if (!evaluatedSources.has(path)) {
@@ -1015,7 +1016,7 @@ const selectInvocationTransition = <
   event: InvocationEvent.InvocationEvent
 ): ReadonlyArray<SelectedTransition<States, E, R, any>> => {
   if (!configuration.active.has(event.path)) return []
-  const config = machine.handlers[event.path] as Machine.AnyStateConfig | undefined
+  const config = toImpl(machine).handlers[event.path] as CapturedStateConfig | undefined
   const invoke = InvocationDefinition.definitions(config?.invoke).find((definition) => {
     const id = "child" in definition ? definition.child?.id : definition.id
     return String(id) === event.id
@@ -1265,7 +1266,7 @@ function resolveChoiceTarget(
       if (node.type !== "choice" || node.parent !== extracted.target.parent) {
         throw new Error(`Machine expected choice target "${extracted.target.path}" to resolve to its declared parent`)
       }
-      const choice = machine.handlers[node.path]?.choice
+      const choice = toImpl(machine).handlers[node.path]?.choice
       if (choice === undefined || typeof choice.transition !== "function") {
         throw new Error(`Machine choice state "${node.path}" requires an implementation`)
       }
@@ -1876,7 +1877,7 @@ export const enabled = <
   const tags: Array<Machine.TagOf<Events[number]>> = []
   const seen = new Set<PropertyKey>()
   for (const path of getCandidatePaths(machine, configuration)) {
-    for (const tag of Reflect.ownKeys(machine.handlers[path]?.on ?? {})) {
+    for (const tag of Reflect.ownKeys(toImpl(machine).handlers[path]?.on ?? {})) {
       if (!seen.has(tag)) {
         seen.add(tag)
         tags.push(tag as Machine.TagOf<Events[number]>)
@@ -2090,7 +2091,7 @@ const settle = <
     const completed = completeConfigurationSync(machine, currentState, currentEvent)
     currentState = completed.configuration
     pendingCompletions.push(
-      ...completed.completions.filter((completion) => machine.handlers[completion.path]?.onDone !== undefined)
+      ...completed.completions.filter((completion) => toImpl(machine).handlers[completion.path]?.onDone !== undefined)
     )
     while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0]!.path)) {
       pendingCompletions.shift()

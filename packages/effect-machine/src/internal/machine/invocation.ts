@@ -13,7 +13,7 @@ import { InfiniteTransitionError, MachineSchemaDecodeError, StoppedError } from 
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import * as Planner from "./planner.js"
-import * as Runtime from "./runtime.js"
+import * as Runtime from "./runtimeProtocol.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
 
 /** @internal */

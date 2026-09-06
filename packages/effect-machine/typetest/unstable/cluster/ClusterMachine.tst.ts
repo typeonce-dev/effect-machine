@@ -6,6 +6,24 @@ import { Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
 
 describe("ClusterMachine", () => {
+  it("preserves the public checkpoint and wire-schema contracts", () => {
+    expect(ClusterMachine.CommitResult.Committed()).type.toBe<ClusterMachine.CommitResult.Committed>()
+    expect(ClusterMachine.CommitResult.Duplicate()).type.toBe<ClusterMachine.CommitResult.Duplicate>()
+    expect<Schema.Schema.Type<typeof ClusterMachine.SendResult>>().type.toBe<
+      ClusterMachine.Accepted | ClusterMachine.Rejected
+    >()
+    expect<Schema.Schema.Type<typeof ClusterMachine.RejectionReason>>().type.toBe<
+      | "MachineIdMismatch"
+      | "VersionMismatch"
+      | "InvalidCheckpoint"
+      | "UnsupportedProcessLocal"
+      | "TransitionFailure"
+      | "SnapshotEncodeFailure"
+      | "PersistenceFailure"
+      | "EmissionFailure"
+    >()
+  })
+
   class Count extends Schema.TaggedClass<Count>("Count")("Count", {
     value: Schema.Number
   }) {}

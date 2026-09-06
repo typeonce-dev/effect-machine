@@ -110,6 +110,17 @@ test("rejects outward machine semantic dependencies", () => {
   assert.deepEqual(rules(root), ["ARCH005", "ARCH005"])
 })
 
+test("enforces semantic boundaries for each runtime strategy and shared protocol", () => {
+  for (const module of ["runtimeProtocol", "runtimeGeneric", "runtimeCompiled"]) {
+    const root = makeProject({
+      "src/internal/machine/planner.ts": `import { run } from "./${module}.js"\nexport const plan = run`,
+      [`src/internal/machine/${module}.ts`]: 'import type { value } from "./process.js"\nexport const run: typeof value = 1',
+      "src/internal/machine/process.ts": "export const value = 1"
+    })
+    assert.deepEqual(new Set(rules(root)), new Set(["ARCH004", "ARCH005", "ARCH006"]))
+  }
+})
+
 test("detects runtime cycles while permitting type-only cycles", () => {
   const cyclic = makeProject({
     "src/a.ts": 'import { b } from "./b.js"\nexport const a = b',

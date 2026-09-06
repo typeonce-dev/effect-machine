@@ -6,11 +6,12 @@
 import type * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import type * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
+import type * as Schema from "effect/Schema"
 import type { Entity, MessageStorage, Sharding, Snowflake } from "effect/unstable/cluster"
 import type { Rpc } from "effect/unstable/rpc"
 import * as internal from "../../internal/machine/cluster.js"
-import { Accepted, Rejected, Storage } from "../../internal/machine/cluster.js"
+import * as Protocol from "../../internal/machine/clusterProtocol.js"
+import { Accepted, Rejected, Storage } from "../../internal/machine/clusterProtocol.js"
 import type { EnsureExecutable } from "../../internal/machine/readiness.js"
 import type { ExcludeCompatibleRuntime } from "../../internal/machine/requirements.js"
 import type * as Machine from "../../Machine.js"
@@ -77,10 +78,10 @@ export type CommitResult = CommitResult.Committed | CommitResult.Duplicate
  * @category models
  * @since 0.4.0
  */
-export const CommitResult = {
-  Committed: (): CommitResult.Committed => ({ _tag: "Committed" }),
-  Duplicate: (): CommitResult.Duplicate => ({ _tag: "Duplicate" })
-}
+export const CommitResult: {
+  Committed: () => CommitResult.Committed
+  Duplicate: () => CommitResult.Duplicate
+} = Protocol.CommitResult
 
 /**
  * Types for Cluster machine commit results.
@@ -148,16 +149,7 @@ export { Accepted }
  * @category models
  * @since 0.4.0
  */
-export const RejectionReason = Schema.Literals([
-  "MachineIdMismatch",
-  "VersionMismatch",
-  "InvalidCheckpoint",
-  "UnsupportedProcessLocal",
-  "TransitionFailure",
-  "SnapshotEncodeFailure",
-  "PersistenceFailure",
-  "EmissionFailure"
-])
+export const RejectionReason: typeof Protocol.RejectionReason = Protocol.RejectionReason
 
 /**
  * Type of {@link RejectionReason}.
@@ -182,7 +174,7 @@ export { Rejected }
  * @category schemas
  * @since 0.4.0
  */
-export const SendResult = Schema.Union([Accepted, Rejected])
+export const SendResult: typeof Protocol.SendResult = Protocol.SendResult
 
 type SendRpc<Events extends ReadonlyArray<Machine.Machine.TaggedSchema>> = Rpc.Rpc<
   "send",
