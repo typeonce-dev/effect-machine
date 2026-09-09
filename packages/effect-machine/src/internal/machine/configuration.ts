@@ -672,26 +672,6 @@ export const normalizeConfigurationEffect = <const States extends Machine.StateS
     })
   )
 
-export const validateInitialConfiguration = (machine: Machine.Any, configuration: ActiveConfiguration): void => {
-  for (const path of configuration.active) {
-    const node = getNode(machine, path)
-    if (node.type === "compound") {
-      const child = node.children.find((child) => configuration.active.has(child))
-      const initialNode = node.initial === undefined ? undefined : getNode(machine, node.initial)
-      if (initialNode?.type === "choice" ? child === undefined : child !== node.initial) {
-        throw new Error(`Machine initial state "${node.path}" must enter initial child "${node.initial}"`)
-      }
-    }
-    if (node.type === "parallel") {
-      for (const child of node.children) {
-        if (!configuration.active.has(child)) {
-          throw new Error(`Machine initial state "${node.path}" must enter child region "${child}"`)
-        }
-      }
-    }
-  }
-}
-
 /** Capture every history register whose owning parent exits in this microstep.
  * The control record is deliberately independent from effects/actions: it is
  * part of the logical snapshot and is therefore preserved by pure planning. */

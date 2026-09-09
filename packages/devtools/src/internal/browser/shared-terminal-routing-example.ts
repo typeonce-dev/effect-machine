@@ -1,8 +1,6 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
-
 const ReplicationStates = Machine.state({
-  initial: "Connecting",
   states: {
     Connecting: {},
     IdentifyingSource: {},
@@ -19,17 +17,12 @@ const ReplicationStates = Machine.state({
     Failed: {}
   }
 })
-
-const ReplicationEvents = Machine.eventsFromSchemas(
-  Schema.TaggedUnion({
-    Retry: {},
-    SessionUnavailable: {},
-    StopRequested: {}
-  })
-)
-
+const ReplicationEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
+  Retry: {},
+  SessionUnavailable: {},
+  StopRequested: {}
+}))
 const operation: Effect.Effect<void, string> = Effect.succeed(undefined)
-
 const targets1 = Machine.targets(ReplicationStates)
 export const sharedTerminalRoutingMachine = Machine.make({
   effects: {
@@ -43,12 +36,13 @@ export const sharedTerminalRoutingMachine = Machine.make({
     source8: operation,
     source9: operation
   },
-
   id: "shared-terminal-routing",
   root: ReplicationStates,
-  events: ReplicationEvents,
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Connecting.from()))
+  events: ReplicationEvents
 }).handle({
+  initial: {
+    target: Machine.targets(ReplicationStates).root.Connecting
+  },
   states: {
     Connecting: {
       invoke: {

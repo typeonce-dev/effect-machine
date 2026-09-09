@@ -4,20 +4,16 @@ import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import { ClusterMachine } from "../../src/unstable/cluster/index.js"
 import { AtomMachine } from "../../src/unstable/reactivity/index.js"
-
 class Ready extends Schema.TaggedClass<Ready>("Ready")("Ready", {}) {}
 class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", { value: Schema.String }) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
-
 const choiceStates = Machine.state({
-  initial: "Ready",
   states: {
     Ready,
     Flow: {
       schema: Flow,
-      initial: "Route",
       states: {
         Route: { type: "choice" },
         Idle
@@ -25,21 +21,31 @@ const choiceStates = Machine.state({
     }
   }
 })
-
 const choiceIncomplete = Machine.make({
   root: choiceStates,
-  events: Machine.eventsFromSchemas(Tick),
-  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
+  events: Machine.eventsFromSchemas(Tick)
+}).handle({
+  initial: {
+    target: Machine.targets(choiceStates).root.Ready,
+    decoded: true,
+    data: new Ready({})
+  },
+  states: {
+    Ready: {},
+    Flow: {
+      initial: {
+        target: Machine.targets(choiceStates).root.Flow.Route
+      },
+      states: { Idle: {} }
+    }
+  }
 })
 const choiceSnapshot = { path: "" as const, value: undefined, state: { path: "Ready" as const, value: new Ready({}) } }
-
 const historyStates = Machine.state({
-  initial: "Ready",
   states: {
     Ready,
     Flow: {
       schema: Flow,
-      initial: "Idle",
       states: {
         Idle,
         recent: { type: "history", history: "deep" }
@@ -47,16 +53,30 @@ const historyStates = Machine.state({
     }
   }
 })
-
 const historyIncomplete = Machine.make({
   root: historyStates,
-  events: Machine.eventsFromSchemas(Tick),
-  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
+  events: Machine.eventsFromSchemas(Tick)
+}).handle({
+  initial: {
+    target: Machine.targets(historyStates).root.Ready,
+    decoded: true,
+    data: new Ready({})
+  },
+  states: {
+    Ready: {},
+    Flow: {
+      initial: {
+        target: Machine.targets(historyStates).root.Flow.Idle,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      },
+      states: { Idle: {} }
+    }
+  }
 })
 const historySnapshot = { path: "" as const, value: undefined, state: { path: "Ready" as const, value: new Ready({}) } }
-
 const outputStates = Machine.state({
-  initial: "Ready",
   states: {
     Ready,
     Done: {
@@ -66,11 +86,16 @@ const outputStates = Machine.state({
     }
   }
 })
-
 const outputIncomplete = Machine.make({
   root: outputStates,
-  events: Machine.eventsFromSchemas(Tick),
-  initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
+  events: Machine.eventsFromSchemas(Tick)
+}).handle({
+  initial: {
+    target: Machine.targets(outputStates).root.Ready,
+    decoded: true,
+    data: new Ready({})
+  },
+  states: { Ready: {} }
 })
 const outputSnapshot = { path: "Ready" as const, value: new Ready({}) }
 const parent = Machine.make({
@@ -83,7 +108,6 @@ const parent = Machine.make({
   }
 })
 const bound = null as unknown as AtomMachine.Bound<never>
-
 describe("executable machine readiness", () => {
   it("rejects an unimplemented choice at every planning and execution boundary", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(choiceIncomplete)
@@ -92,8 +116,22 @@ describe("executable machine readiness", () => {
     expect(Machine.can).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot, new Tick({}))
     expect(Machine.start).type.not.toBeCallableWith(choiceIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
+    expect(parent.handle).type.toBeCallableWith({
+      initial: {
+        target: Machine.targets(outputStates).root.Ready,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      }
+    })
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "choice", onDone: { none: true } } } }
+      states: { Ready: { invoke: { src: "choice", onDone: { none: true } } } },
+      initial: {
+        target: Machine.targets(outputStates).root.Ready,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      }
     })
     expect(MachineTest.run).type.not.toBeCallableWith(choiceIncomplete, { events: [] })
     expect(AtomMachine.make).type.not.toBeCallableWith(choiceIncomplete)
@@ -104,7 +142,6 @@ describe("executable machine readiness", () => {
     expect(bound.resume).type.not.toBeCallableWith(choiceIncomplete, choiceSnapshot)
     expect(ClusterMachine.make).type.not.toBeCallableWith("Choice", choiceIncomplete, { version: "1" })
   })
-
   it("rejects an unimplemented history default at every planning and execution boundary", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(historyIncomplete)
     expect(Machine.plan).type.not.toBeCallableWith(historyIncomplete, historySnapshot, new Tick({}))
@@ -113,7 +150,13 @@ describe("executable machine readiness", () => {
     expect(Machine.start).type.not.toBeCallableWith(historyIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "history", onDone: { none: true } } } }
+      states: { Ready: { invoke: { src: "history", onDone: { none: true } } } },
+      initial: {
+        target: Machine.targets(outputStates).root.Ready,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      }
     })
     expect(MachineTest.run).type.not.toBeCallableWith(historyIncomplete, { events: [] })
     expect(AtomMachine.make).type.not.toBeCallableWith(historyIncomplete)
@@ -124,7 +167,6 @@ describe("executable machine readiness", () => {
     expect(bound.resume).type.not.toBeCallableWith(historyIncomplete, historySnapshot)
     expect(ClusterMachine.make).type.not.toBeCallableWith("History", historyIncomplete, { version: "1" })
   })
-
   it("rejects an unimplemented output at every planning and execution boundary", () => {
     expect(Machine.planInitial).type.not.toBeCallableWith(outputIncomplete)
     expect(Machine.plan).type.not.toBeCallableWith(outputIncomplete, outputSnapshot, new Tick({}))
@@ -133,7 +175,13 @@ describe("executable machine readiness", () => {
     expect(Machine.start).type.not.toBeCallableWith(outputIncomplete)
     expect(Machine.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
     expect(parent.handle).type.not.toBeCallableWith({
-      states: { Ready: { invoke: { src: "output", onDone: { none: true } } } }
+      states: { Ready: { invoke: { src: "output", onDone: { none: true } } } },
+      initial: {
+        target: Machine.targets(outputStates).root.Ready,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      }
     })
     expect(MachineTest.run).type.not.toBeCallableWith(outputIncomplete, { events: [] })
     expect(AtomMachine.make).type.not.toBeCallableWith(outputIncomplete)
@@ -144,15 +192,12 @@ describe("executable machine readiness", () => {
     expect(bound.resume).type.not.toBeCallableWith(outputIncomplete, outputSnapshot)
     expect(ClusterMachine.make).type.not.toBeCallableWith("Output", outputIncomplete, { version: "1" })
   })
-
   it("accepts a complete machine and preserves its exact channels through every adapter", () => {
     const completeStates = Machine.state({
-      initial: "Ready",
       states: {
         Ready,
         Flow: {
           schema: Flow,
-          initial: "Route",
           states: {
             Route: { type: "choice" },
             Idle,
@@ -169,30 +214,29 @@ describe("executable machine readiness", () => {
     const targets1 = Machine.targets(completeStates)
     const complete = Machine.make({
       root: completeStates,
-      events: Machine.eventsFromSchemas(Tick),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => (target.from((to) => to.Ready.decoded(new Ready({})))))
+      events: Machine.eventsFromSchemas(Tick)
     }).handle({
+      initial: {
+        target: Machine.targets(completeStates).root.Ready,
+        decoded: true,
+        data: new Ready({})
+      },
       states: {
         Flow: {
+          initial: {
+            target: Machine.targets(completeStates).root.Flow.Route
+          },
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.Flow.decoded(
-                    new Flow({}),
-                    (flow) => flow.Idle.decoded(new Idle({}))
-                  )
-                )
+                target.from((tree) => tree.Flow.decoded(new Flow({}), (flow) => flow.Idle.decoded(new Idle({}))))
             }
           },
           states: {
             Route: {
-              choice: { target: targets1.root.Flow.Idle, decoded: () => (new Idle({})) }
+              choice: { target: targets1.root.Flow.Idle, decoded: true, data: () => (new Idle({})) }
             },
-            Done: {
-              output: ({ state }) => state.value
-            }
+            Done: { output: ({ state }) => state.value }
           }
         }
       }
@@ -202,7 +246,6 @@ describe("executable machine readiness", () => {
       value: undefined,
       state: { path: "Ready" as const, value: new Ready({}) }
     }
-
     const plannedInitial = Machine.planInitial(complete)
     const planned = Machine.plan(complete, completeSnapshot, new Tick({}))
     const can = Machine.can(complete, completeSnapshot, new Tick({}))
@@ -217,24 +260,22 @@ describe("executable machine readiness", () => {
     const makeBoundAtom = bound.factory(complete)
     const boundResumedAtom = bound.resume(complete, completeSnapshot)
     const cluster = ClusterMachine.make("Complete", complete, { version: "1" })
-
     type AtomChannels<A> = A extends AtomMachine.MachineAtom<infer State, infer Event, any, infer Output, any> ?
-      readonly [State, Event, Output]
-      : never
-
+      readonly [
+        State,
+        Event,
+        Output
+      ] :
+      never
     expect<Machine.Machine.UnhandledStates<typeof complete>>().type.toBe<"Ready" | "Flow.Idle">()
     expect<Machine.Machine.Output<typeof complete>>().type.toBe<string>()
     expect<Machine.Machine.InputEvent<typeof complete>>().type.toBe<Tick>()
-    expect<Effect.Success<typeof plannedInitial>["state"]>().type.toBe<
-      Machine.Snapshot<typeof completeStates>
-    >()
+    expect<Effect.Success<typeof plannedInitial>["state"]>().type.toBe<Machine.Snapshot<typeof completeStates>>()
     expect<Effect.Success<typeof can>>().type.toBe<boolean>()
     expect(canComplete).type.toBeCallableWith(completeSnapshot, new Tick({}))
     expect(makeAtom).type.toBeCallableWith()
     expect(makeBoundAtom).type.toBeCallableWith()
-    expect<Effect.Success<typeof planned>["next"]>().type.toBe<
-      Machine.Snapshot<typeof completeStates>
-    >()
+    expect<Effect.Success<typeof planned>["next"]>().type.toBe<Machine.Snapshot<typeof completeStates>>()
     expect<Effect.Success<typeof started>["send"]>().type.toBe<
       (event: Machine.Machine.EventInput<Tick>) => Effect.Effect<void, Machine.StoppedError>
     >()

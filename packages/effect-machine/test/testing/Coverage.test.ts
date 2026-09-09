@@ -5,7 +5,6 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {
   value: Schema.Int
 }) {}
@@ -14,18 +13,18 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
   amount: Schema.Int
 }) {}
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
-
-const CounterStates = Machine.state({ initial: "count", states: { count: Count, done: Done } })
-
+const CounterStates = Machine.state({ states: { count: Count, done: Done } })
 const targets1 = Machine.targets(CounterStates)
 const counterMachine = Machine.make({
   branches: { transition1: { destination: { target: targets1.root.count } } },
-
   root: CounterStates,
-  events: Machine.eventsFromSchemas(Add, Finish),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
+  events: Machine.eventsFromSchemas(Add, Finish)
 }).handle({
+  initial: {
+    target: Machine.targets(CounterStates).root.count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
   states: {
     count: {
       on: {
@@ -36,38 +35,50 @@ const counterMachine = Machine.make({
             target.decoded(new Count({ value: state.value + event.amount })),
           declinable: true
         },
-        Finish: { target: targets1.root.done, decoded: () => (new Done({})) }
+        Finish: { target: targets1.root.done, decoded: true, data: () => (new Done({})) }
       }
     },
     done: {}
   }
 })
-
 class Opaque extends Schema.TaggedClass<Opaque>("Opaque")("Opaque", {
   payload: Schema.Any
 }) {}
-
-const OpaqueStates = Machine.state({ initial: "opaque", states: { opaque: Opaque } })
+const OpaqueStates = Machine.state({
+  fields: {
+    input: Schema.toType(Schema.Any)
+  },
+  states: { opaque: Opaque }
+})
 const opaqueMachine = Machine.make({
   root: OpaqueStates,
   events: Machine.eventsFromSchemas(),
-  input: Schema.Any,
-  initialConfiguration: (root) =>
-    root.resolve(({ input: payload, target }) => target.from((to) => to.opaque.decoded(new Opaque({ payload }))))
+  input: Schema.Any
+}).handle({
+  initial: {
+    target: Machine.targets(OpaqueStates).root.opaque,
+    decoded: true,
+    data: ({ root: { input: payload } }) => new Opaque({ payload })
+  },
+  root: ({ input }) => ({ input }),
+  states: {
+    opaque: {}
+  }
 })
-
-const StartupStates = Machine.state({ initial: "count", states: { count: Count } })
+const StartupStates = Machine.state({ states: { count: Count } })
 const targets2 = Machine.targets(StartupStates)
 const startupMachine = Machine.make({
   branches: {
     transition1: { zero: { target: targets2.root.count, title: "Count is zero" }, unchanged: { none: true } }
   },
-
   root: StartupStates,
-  events: Machine.eventsFromSchemas(Add),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
+  events: Machine.eventsFromSchemas(Add)
 }).handle({
+  initial: {
+    target: Machine.targets(StartupStates).root.count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
   states: {
     count: {
       always: {
@@ -80,25 +91,26 @@ const startupMachine = Machine.make({
       on: {
         Add: {
           target: targets2.root.count,
-          decoded: ({ event, state }) => (new Count({ value: state.value + event.amount }))
+          decoded: true,
+          data: ({ event, state }) => (new Count({ value: state.value + event.amount }))
         }
       }
     }
   }
 })
-
 class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
   value: Schema.Int
 }) {}
-
 const branchMachine = Machine.make({
   branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
-
   root: StartupStates,
-  events: Machine.eventsFromSchemas(Select),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
+  events: Machine.eventsFromSchemas(Select)
 }).handle({
+  initial: {
+    target: Machine.targets(StartupStates).root.count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
   states: {
     count: {
       on: {
@@ -115,20 +127,22 @@ const branchMachine = Machine.make({
     }
   }
 })
-
 const Tick = Symbol.for("MachineTestCoverage/Tick")
 const TickEvent = Schema.Struct({ _tag: Schema.UniqueSymbol(Tick) })
 const ChoiceEvent = Schema.Struct({
   _tag: Schema.Union([Schema.Literal("Alpha"), Schema.Literal("Beta")])
 })
 const OpenEvent = Schema.Struct({ _tag: Schema.String })
-const EventStates = Machine.state({ initial: "count", states: { count: Count } })
+const EventStates = Machine.state({ states: { count: Count } })
 const finiteEventMachine = Machine.make({
   root: EventStates,
-  events: Machine.eventsFromSchemas(TickEvent, ChoiceEvent),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
+  events: Machine.eventsFromSchemas(TickEvent, ChoiceEvent)
 }).handle({
+  initial: {
+    target: Machine.targets(EventStates).root.count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
   states: {
     count: {
       on: {
@@ -141,13 +155,20 @@ const finiteEventMachine = Machine.make({
 })
 const openEventMachine = Machine.make({
   root: EventStates,
-  events: Machine.eventsFromSchemas(OpenEvent),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.count.decoded(new Count({ value: 0 }))))
-}).handle({ states: { count: {} } })
-
-const event = (_tag: string): { readonly _tag: string } => ({ _tag })
-
+  events: Machine.eventsFromSchemas(OpenEvent)
+}).handle({
+  initial: {
+    target: Machine.targets(EventStates).root.count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
+  states: {
+    count: {}
+  }
+})
+const event = (_tag: string): {
+  readonly _tag: string
+} => ({ _tag })
 const parallelModel: MachineTest.FiniteModel = {
   roots: [{
     _tag: "Parallel",
@@ -194,7 +215,6 @@ const parallelModel: MachineTest.FiniteModel = {
     }
   ]
 }
-
 const historyModel: MachineTest.FiniteModel = {
   roots: [
     {
@@ -219,7 +239,6 @@ const historyModel: MachineTest.FiniteModel = {
     { source: "outside", trigger: { type: "event", event: "Resume" }, target: "owner.exact", reenter: false }
   ]
 }
-
 describe("MachineTest trace coverage", () => {
   it.effect("turns definition-aware state, transition, and event misses into hits", () =>
     Effect.gen(function*() {
@@ -229,10 +248,11 @@ describe("MachineTest trace coverage", () => {
       const finishTrace = yield* MachineTest.run(counterMachine, {
         events: [new Finish({})]
       })
-
       const partial = MachineTest.coverage(counterMachine, addTrace)
       assert.strictEqual(partial.events.available, true)
-      if (!partial.events.available) return
+      if (!partial.events.available) {
+        return
+      }
       assert.strictEqual(partial.transitions.definitions.hits[0]?.acceptance, "declinable")
       assert.strictEqual(partial.transitions.branches.hits[0]?.acceptance, "declinable")
       assert.deepStrictEqual(partial.states.activation.misses.map(({ path }) => path), ["done"])
@@ -245,10 +265,11 @@ describe("MachineTest trace coverage", () => {
       )
       assert.deepStrictEqual(partial.events.misses, [{ tag: "Finish", count: 0 }])
       assert.strictEqual(partial.logicalConfigurations.hit, 2)
-
       const combined = MachineTest.coverage(counterMachine, [addTrace, finishTrace])
       assert.strictEqual(combined.events.available, true)
-      if (!combined.events.available) return
+      if (!combined.events.available) {
+        return
+      }
       assert.strictEqual(combined.states.activation.missing, 0)
       assert.strictEqual(combined.transitions.definitions.missing, 0)
       assert.strictEqual(combined.transitions.branches.missing, 0)
@@ -258,18 +279,15 @@ describe("MachineTest trace coverage", () => {
       assert.strictEqual(combined.scenarios.traces, 2)
       assert.strictEqual(combined.scenarios.events, 2)
     }))
-
   it.effect("attributes identical targetless results to their exact named branches", () =>
     Effect.gen(function*() {
       const negative = yield* MachineTest.run(branchMachine, { events: [new Select({ value: -1 })] })
       const zero = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 0 })] })
       const positive = yield* MachineTest.run(branchMachine, { events: [new Select({ value: 1 })] })
-
       const partial = MachineTest.coverage(branchMachine, negative)
       assert.strictEqual(partial.transitions.definitions.hit, 1)
       assert.deepStrictEqual(partial.transitions.branches.hits.map(({ branchIndex }) => branchIndex), [0])
       assert.deepStrictEqual(partial.transitions.branches.misses.map(({ branchIndex }) => branchIndex), [1, 2])
-
       const complete = MachineTest.coverage(branchMachine, [negative, zero, positive])
       assert.strictEqual(complete.transitions.definitions.missing, 0)
       assert.strictEqual(complete.transitions.branches.missing, 0)
@@ -287,7 +305,6 @@ describe("MachineTest trace coverage", () => {
         ]
       )
     }))
-
   it.effect("covers finite decoded symbol and union tags and diagnoses open tag spaces", () =>
     Effect.gen(function*() {
       const finiteTrace = yield* MachineTest.run(finiteEventMachine, {
@@ -300,7 +317,6 @@ describe("MachineTest trace coverage", () => {
         assert.deepStrictEqual(finite.events.hits.map(({ tag }) => tag), [Tick, "Alpha"])
         assert.deepStrictEqual(finite.events.misses, [{ tag: "Beta", count: 0 }])
       }
-
       const openTrace = yield* MachineTest.run(openEventMachine, { events: [{ _tag: "Dynamic" }] })
       const open = MachineTest.coverage(openEventMachine, openTrace)
       assert.strictEqual(open.events.available, false)
@@ -310,7 +326,6 @@ describe("MachineTest trace coverage", () => {
         assert.strictEqual(open.events.diagnostics.length, 1)
       }
     }))
-
   it.effect("reports parallel completion and history evidence without inferring unobserved behavior", () =>
     Effect.gen(function*() {
       const parallelMachine = MachineTest.compileModel(parallelModel)
@@ -323,7 +338,6 @@ describe("MachineTest trace coverage", () => {
       assert.ok(parallelCoverage.completion.paths.includes("workflow.left"))
       assert.strictEqual(parallelCoverage.microsteps.eventTriggered, 2)
       assert.strictEqual(parallelCoverage.transitions.branches.hit, 2)
-
       const historyMachine = MachineTest.compileModel(historyModel)
       const history = yield* MachineTest.run(historyMachine, {
         events: [event("Next"), event("Leave"), event("Resume")]
@@ -333,12 +347,9 @@ describe("MachineTest trace coverage", () => {
       assert.deepStrictEqual(historyCoverage.history.recorded, [{ path: "owner.exact" as const, modes: ["deep"] }])
       assert.strictEqual(historyCoverage.history.targets, 1)
       assert.strictEqual(historyCoverage.history.resolvedTargets, 1)
-      assert.ok(
-        historyCoverage.transitions.branches.hits.some(({ branch }) => branch.selection.kind === "history")
-      )
+      assert.ok(historyCoverage.transitions.branches.hits.some(({ branch }) => branch.selection.kind === "history"))
     }))
 })
-
 describe("MachineTest observed graph", () => {
   it.effect("deduplicates portable snapshots while preserving concrete startup and event edges", () =>
     Effect.gen(function*() {
@@ -349,17 +360,13 @@ describe("MachineTest observed graph", () => {
         events: [new Add({ amount: 1 })]
       })
       const observed = yield* MachineTest.observedGraph(counterMachine, [first, second])
-
       assert.strictEqual(Graph.nodeCount(observed.graph), 2)
       assert.strictEqual(Graph.edgeCount(observed.graph), 4)
       const edges = Array.from(Graph.edges(observed.graph), ([, edge]) => edge.data)
       assert.strictEqual(edges.filter(({ _tag }) => _tag === "Startup").length, 2)
       assert.strictEqual(edges.filter(({ _tag }) => _tag === "Event").length, 2)
       assert.ok(edges.filter(({ _tag }) => _tag === "Event").every((edge) => edge.microsteps.length === 1))
-      assert.ok(
-        edges.flatMap(({ microsteps }) => microsteps).every(({ next }) => observed.nodesById.has(next))
-      )
-
+      assert.ok(edges.flatMap(({ microsteps }) => microsteps).every(({ next }) => observed.nodesById.has(next)))
       const nodes = Array.from(observed.graph)
       const zero = nodes.find(([, node]) => (node.snapshot.state.value as Count).value === 0)!
       const one = nodes.find(([, node]) => (node.snapshot.state.value as Count).value === 1)!
@@ -370,14 +377,14 @@ describe("MachineTest observed graph", () => {
         cost: () => 1
       })
       assert.ok(Option.isSome(shortest))
-      if (Option.isSome(shortest)) assert.strictEqual(shortest.value.distance, 1)
+      if (Option.isSome(shortest)) {
+        assert.strictEqual(shortest.value.distance, 1)
+      }
     }))
-
   it.effect("separates pre-settled startup sources from post-startup path starts", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(startupMachine, { events: [] })
       const observed = yield* MachineTest.observedGraph(startupMachine, trace)
-
       assert.strictEqual(observed.startupSources.length, 1)
       assert.strictEqual(observed.starts.length, 1)
       assert.notStrictEqual(observed.startupSources[0], observed.starts[0])
@@ -385,7 +392,6 @@ describe("MachineTest observed graph", () => {
       assert.strictEqual(startup._tag, "Startup")
       assert.strictEqual(startup.microsteps.length, 1)
     }))
-
   it.effect("retains complete parallel configurations and completion on macrostep edges", () =>
     Effect.gen(function*() {
       const machine = MachineTest.compileModel(parallelModel)
@@ -394,19 +400,19 @@ describe("MachineTest observed graph", () => {
       })
       const observed = yield* MachineTest.observedGraph(machine, trace)
       const nodes = Array.from(observed.graph, ([, node]) => node)
-
       assert.ok(nodes.some(({ configuration }) =>
         configuration.includes("workflow.left.done") && configuration.includes("workflow.right.idle")
       ))
       const eventEdges = Array.from(Graph.edges(observed.graph), ([, edge]) =>
-        edge.data).filter(
-          (edge): edge is Extract<typeof edge, { readonly _tag: "Event" }> => edge._tag === "Event"
+        edge.data).filter((edge): edge is Extract<typeof edge, {
+          readonly _tag: "Event"
+        }> =>
+          edge._tag === "Event"
         )
       assert.strictEqual(eventEdges.length, 2)
       assert.strictEqual(eventEdges[0]!.completion.done, false)
       assert.strictEqual(eventEdges[1]!.completion.done, true)
     }))
-
   it.effect("keeps equal active paths with different history records as distinct logical nodes", () =>
     Effect.gen(function*() {
       const machine = MachineTest.compileModel(historyModel)
@@ -415,29 +421,22 @@ describe("MachineTest observed graph", () => {
         events: [event("Next"), event("Leave")]
       })
       const observed = yield* MachineTest.observedGraph(machine, [rememberedA, rememberedB])
-      const outside = Array.from(observed.graph, ([, node]) => node).filter(
-        ({ configuration }) => configuration.length === 2 && configuration[0] === "" && configuration[1] === "outside"
+      const outside = Array.from(observed.graph, ([, node]) => node).filter(({ configuration }) =>
+        configuration.length === 2 && configuration[0] === "" && configuration[1] === "outside"
       )
-
       assert.strictEqual(outside.length, 2)
-      assert.notStrictEqual(
-        JSON.stringify(outside[0]!.snapshot.history),
-        JSON.stringify(outside[1]!.snapshot.history)
-      )
+      assert.notStrictEqual(JSON.stringify(outside[0]!.snapshot.history), JSON.stringify(outside[1]!.snapshot.history))
       assert.notStrictEqual(outside[0]!.id, outside[1]!.id)
     }))
-
   it.effect("does not merge colliding non-JSON encoded values", () =>
     Effect.gen(function*() {
       const makePayload = () => function collision() {}
       const first = yield* MachineTest.run(opaqueMachine, { input: makePayload(), events: [] })
       const second = yield* MachineTest.run(opaqueMachine, { input: makePayload(), events: [] })
       const observed = yield* MachineTest.observedGraph(opaqueMachine, [first, second])
-
       assert.strictEqual(Graph.nodeCount(observed.graph), 2)
       assert.ok(Array.from(observed.graph, ([, node]) => node).every((node) => node.encoded === undefined))
       assert.strictEqual(MachineTest.coverage(opaqueMachine, [first, second]).logicalConfigurations.hit, 2)
-
       const firstBuffer = yield* MachineTest.run(opaqueMachine, {
         input: new Uint8Array([1]).buffer,
         events: []
@@ -448,9 +447,6 @@ describe("MachineTest observed graph", () => {
       })
       const buffers = yield* MachineTest.observedGraph(opaqueMachine, [firstBuffer, secondBuffer])
       assert.strictEqual(Graph.nodeCount(buffers.graph), 2)
-      assert.strictEqual(
-        MachineTest.coverage(opaqueMachine, [firstBuffer, secondBuffer]).logicalConfigurations.hit,
-        2
-      )
+      assert.strictEqual(MachineTest.coverage(opaqueMachine, [firstBuffer, secondBuffer]).logicalConfigurations.hit, 2)
     }))
 })

@@ -13,49 +13,44 @@ import {
 } from "effect/unstable/cluster"
 import { Machine } from "../../../src/index.js"
 import { ClusterMachine } from "../../../src/unstable/cluster/index.js"
-
 class Count extends Schema.TaggedClass<Count>("Count")("Count", {
   value: Schema.NumberFromString
 }) {}
-
 class Done extends Schema.TaggedClass<Done>("Done")("Done", {
   value: Schema.NumberFromString
 }) {}
-
 class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {
   by: Schema.Number,
   block: Schema.Boolean
 }) {}
-
 class Fail extends Schema.TaggedClass<Fail>("Fail")("Fail", {}) {}
 class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 class RaiseFromAction extends Schema.TaggedClass<RaiseFromAction>("RaiseFromAction")("RaiseFromAction", {}) {}
 class SpawnFromAction extends Schema.TaggedClass<SpawnFromAction>("SpawnFromAction")("SpawnFromAction", {}) {}
-
 class Changed extends Schema.TaggedClass<Changed>("Changed")("Changed", {
   value: Schema.Number
 }) {}
-
 const CounterStates = Machine.state({
-  initial: "Count",
   states: {
     Count,
     Done: { schema: Done, type: "final" }
   }
 })
-
+const InitialRoot1 = Machine.state({ states: { Count } })
 const UnsupportedChildMachine = Machine.make({
-  root: Machine.state({ initial: "Count", states: { Count } }),
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (to) =>
-    to.resolve(() => ({
-      path: "" as const,
-      value: undefined,
-      state: { path: "Count" as const, value: new Count({ value: 0 }) }
-    }))
+  root: InitialRoot1,
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(InitialRoot1).root.Count,
+    decoded: true,
+    data: new Count({ value: 0 })
+  },
+  states: {
+    Count: {}
+  }
 })
 const UnsupportedChild = Machine.child("unsupported", UnsupportedChildMachine)
-
 const makeCounter = (state: {
   readonly gate: Latch.Latch
   initialEntries: number
@@ -71,14 +66,16 @@ const makeCounter = (state: {
       transition4: { destination: { target: targets1.root.Count } },
       transition5: { destination: { target: targets1.root.Count } }
     },
-
     id: "Counter",
     root: CounterStates,
     events: Machine.eventsFromSchemas(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
-    emittedEvents: Machine.emittedEventsFromSchemas(Changed),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
+    emittedEvents: Machine.emittedEventsFromSchemas(Changed)
   }).handle({
+    initial: {
+      target: Machine.targets(CounterStates).root.Count,
+      decoded: true,
+      data: new Count({ value: 0 })
+    },
     states: {
       Count: {
         entry: () => {
@@ -104,7 +101,11 @@ const makeCounter = (state: {
               return target.decoded(current)
             }
           },
-          Finish: { target: targets1.root.Done, decoded: ({ state: current }) => (new Done({ value: current.value })) },
+          Finish: {
+            target: targets1.root.Done,
+            decoded: true,
+            data: ({ state: current }) => (new Done({ value: current.value }))
+          },
           RaiseFromAction: {
             branches: "transition4",
             resolve: ({ state: current, select: { destination: target } }, enqueue) => {
@@ -125,9 +126,7 @@ const makeCounter = (state: {
     }
   })
 }
-
 const storageKey = (entityType: string, entityId: string): string => `${entityType}\u0000${entityId}`
-
 const makeTestStorage = () => {
   const entries = new Map<string, ClusterMachine.Checkpoint>()
   const requests = new Map<string, Set<Snowflake.Snowflake>>()
@@ -135,7 +134,6 @@ const makeTestStorage = () => {
   let commits = 0
   let loads = 0
   let failNextCommit = false
-
   const service = ClusterMachine.Storage.of({
     load: (address, requestId) =>
       MessageStorage.MemoryTransaction.use((inTransaction) =>
@@ -173,7 +171,6 @@ const makeTestStorage = () => {
         }).pipe(ClusterError.PersistenceError.refail)
       )
   })
-
   return {
     service,
     entries,
@@ -198,9 +195,13 @@ const makeTestStorage = () => {
       readonly commits: number
     }) {
       entries.clear()
-      for (const [key, value] of snapshot.entries) entries.set(key, value)
+      for (const [key, value] of snapshot.entries) {
+        entries.set(key, value)
+      }
       requests.clear()
-      for (const [key, value] of snapshot.requests) requests.set(key, value)
+      for (const [key, value] of snapshot.requests) {
+        requests.set(key, value)
+      }
       commits = snapshot.commits
     },
     failNextCommit() {
@@ -208,7 +209,6 @@ const makeTestStorage = () => {
     }
   }
 }
-
 const config = (entityMaxIdleTime: Duration.Input = "10 minutes") =>
   ShardingConfig.layer({
     entityMailboxCapacity: 10,
@@ -218,7 +218,6 @@ const config = (entityMaxIdleTime: Duration.Input = "10 minutes") =>
     sendRetryInterval: 100,
     refreshAssignmentsInterval: 0
   })
-
 const makeLayer = (
   bridge: ClusterMachine.ClusterMachine<any, any, never>,
   storage: ClusterMachine.Storage["Service"],
@@ -236,7 +235,6 @@ const makeLayer = (
           withTransaction
         }))
     ).pipe(Layer.provideMerge(MessageStorage.MemoryDriver.layer))
-
   return bridge.toLayer(enqueue === undefined ? undefined : { enqueue }).pipe(
     Layer.provide(Layer.succeed(ClusterMachine.Storage, storage)),
     Layer.provideMerge(Sharding.layer),
@@ -247,11 +245,9 @@ const makeLayer = (
     Layer.provide(config(entityMaxIdleTime))
   )
 }
-
 const assertAccepted = (result: ClusterMachine.Accepted | ClusterMachine.Rejected) => {
   assert.instanceOf(result, ClusterMachine.Accepted)
 }
-
 const assertRejected = (
   result: ClusterMachine.Accepted | ClusterMachine.Rejected,
   reason: ClusterMachine.RejectionReason
@@ -259,7 +255,6 @@ const assertRejected = (
   assert.instanceOf(result, ClusterMachine.Rejected)
   assert.strictEqual(result.reason, reason)
 }
-
 describe("ClusterMachine", () => {
   it.effect("initializes, persists transformed state, and restores after passivation", () =>
     Effect.gen(function*() {
@@ -270,24 +265,17 @@ describe("ClusterMachine", () => {
       const storage = makeTestStorage()
       const emitted: Array<Changed> = []
       const emissionTransactions: Array<boolean> = []
-      const layer = makeLayer(
-        bridge,
-        storage.service,
-        (event) =>
-          MessageStorage.MemoryTransaction.use((inTransaction) =>
-            Effect.sync(() => {
-              emissionTransactions.push(inTransaction)
-              emitted.push(event)
-            })
-          ),
-        0
-      )
-
+      const layer = makeLayer(bridge, storage.service, (event) =>
+        MessageStorage.MemoryTransaction.use((inTransaction) =>
+          Effect.sync(() => {
+            emissionTransactions.push(inTransaction)
+            emitted.push(event)
+          })
+        ), 0)
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
         const client = makeClient("counter-1")
-
         assertAccepted(yield* client.send(new Increment({ by: 2, block: false })))
         assert.strictEqual(state.initialEntries, 1)
         assert.strictEqual(state.actions, 1)
@@ -297,11 +285,14 @@ describe("ClusterMachine", () => {
           _tag: "MachineSnapshot",
           active: [{ path: "" }, { path: "Count" as const, value: { _tag: "Count", value: "2" } }]
         })
-
         yield* TestClock.adjust(5000)
         yield* Effect.yieldNow
-        assert.strictEqual(yield* Sharding.Sharding.pipe(Effect.flatMap((sharding) => sharding.activeEntityCount)), 0)
-
+        assert.strictEqual(
+          yield* Sharding.Sharding.pipe(Effect.flatMap((sharding) =>
+            sharding.activeEntityCount
+          )),
+          0
+        )
         assertAccepted(yield* client.send(new Increment({ by: 3, block: false })))
         assert.strictEqual(state.initialEntries, 1)
         assert.strictEqual(state.actions, 2)
@@ -315,14 +306,12 @@ describe("ClusterMachine", () => {
         assert.isTrue(emissionTransactions.every(Boolean))
       }).pipe(Effect.provide(layer))
     }))
-
   it.effect("serializes events for one entity", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
       const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
       const bridge = ClusterMachine.make("SerializedCounter", makeCounter(state), { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
@@ -335,7 +324,6 @@ describe("ClusterMachine", () => {
           Effect.forkChild({ startImmediately: true })
         )
         yield* Effect.yieldNow
-
         assertAccepted(yield* Fiber.join(first))
         assertAccepted(yield* Fiber.join(second))
         assert.strictEqual(state.maxInFlight, 1)
@@ -348,7 +336,6 @@ describe("ClusterMachine", () => {
         }])
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
-
   it.effect("suppresses emissions when checkpoint persistence fails", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
@@ -357,78 +344,73 @@ describe("ClusterMachine", () => {
       const storage = makeTestStorage()
       const emitted: Array<Changed> = []
       storage.failNextCommit()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
         const client = makeClient("counter-1")
-
         assertRejected(yield* client.send(new Increment({ by: 1, block: false })), "PersistenceFailure")
         assert.strictEqual(storage.entries.size, 0)
         assert.strictEqual(storage.commits, 0)
         assert.deepStrictEqual(emitted, [])
-
         assertAccepted(yield* client.send(new Increment({ by: 1, block: false })))
         assert.strictEqual(storage.commits, 1)
         assert.deepStrictEqual(emitted, [new Changed({ value: 1 })])
-      }).pipe(Effect.provide(makeLayer(
-        bridge,
-        storage.service,
-        (event) => Effect.sync(() => emitted.push(event))
-      )))
+      }).pipe(Effect.provide(makeLayer(bridge, storage.service, (event) => Effect.sync(() => emitted.push(event)))))
     }))
-
   it.effect("rejects snapshot encoding failures before persistence", () =>
     Effect.gen(function*() {
       interface OpaqueState {
         readonly _tag: "OpaqueState"
         readonly resource: object
       }
-
-      const OpaqueState = Schema.toCodecJson(
-        Schema.declare<OpaqueState>((value): value is OpaqueState =>
-          typeof value === "object" && value !== null && "_tag" in value && value._tag === "OpaqueState"
-        )
-      )
-      const opaqueStates = Machine.state({ initial: "OpaqueState", states: { OpaqueState } })
-      const resource: { self?: unknown } = {}
+      const OpaqueState = Schema.toCodecJson(Schema.declare<OpaqueState>((value): value is OpaqueState =>
+        typeof value === "object" && value !== null && "_tag" in value && value._tag === "OpaqueState"
+      ))
+      const opaqueStates = Machine.state({ states: { OpaqueState } })
+      const resource: {
+        self?: unknown
+      } = {}
       resource.self = resource
       const targets2 = Machine.targets(opaqueStates)
       const opaqueMachine = Machine.make({
         root: opaqueStates,
-        events: Machine.eventsFromSchemas(Fail),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.OpaqueState.decoded({ _tag: "OpaqueState", resource })))
+        events: Machine.eventsFromSchemas(Fail)
       }).handle({
+        initial: {
+          target: Machine.targets(opaqueStates).root.OpaqueState,
+          decoded: true,
+          data: { _tag: "OpaqueState", resource }
+        },
         states: {
           OpaqueState: {
             on: {
-              Fail: { target: targets2.root.OpaqueState, decoded: ({ state: current }) => current }
+              Fail: {
+                target: targets2.root.OpaqueState,
+                decoded: true,
+                data: ({ state: current }) =>
+                  current
+              }
             }
           }
         }
       })
       const bridge = ClusterMachine.make("SnapshotEncodeFailureEntity", opaqueMachine, { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
         const result = yield* makeClient("opaque-1").send(new Fail({}))
-
         assertRejected(result, "SnapshotEncodeFailure")
         assert.strictEqual(storage.entries.size, 0)
         assert.strictEqual(storage.commits, 0)
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
-
   it.effect("does not apply a redelivered persisted request twice", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
       const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
       const bridge = ClusterMachine.make("DeduplicatedCounter", makeCounter(state), { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const sharding = yield* Sharding.Sharding
@@ -442,14 +424,10 @@ describe("ClusterMachine", () => {
           ...storage.entries.get(key)!,
           version: "previous-deployment"
         })
-
         assert.isTrue(yield* sharding.reset(requestId))
         yield* sharding.pollStorage
         yield* TestClock.adjust(1)
-        yield* Effect.yieldNow.pipe(
-          Effect.repeat({ until: () => storage.loads >= 2 })
-        )
-
+        yield* Effect.yieldNow.pipe(Effect.repeat({ until: () => storage.loads >= 2 }))
         assert.isAtLeast(storage.loads, 2)
         assert.strictEqual(state.actions, 1)
         assert.strictEqual(storage.commits, 1)
@@ -460,11 +438,12 @@ describe("ClusterMachine", () => {
         const reply = driver.requests.get(String(requestId))!.replies[0]!
         assert(
           reply._tag === "WithExit" && reply.exit._tag === "Success" &&
-            (reply.exit.value as { readonly _tag: string })._tag === "Accepted"
+            (reply.exit.value as {
+                readonly _tag: string
+              })._tag === "Accepted"
         )
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
-
   it.effect("rolls back a checkpoint and partial outbox when enqueue fails", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
@@ -475,23 +454,18 @@ describe("ClusterMachine", () => {
       const withTransaction: MessageStorage.MessageStorage["Service"]["withTransaction"] = (effect) => {
         const checkpoint = storage.snapshot()
         const emittedLength = emitted.length
-        return Effect.onExit(
-          Effect.provideService(effect, MessageStorage.MemoryTransaction, true),
-          (exit) =>
-            Exit.isFailure(exit)
-              ? Effect.sync(() => {
-                storage.restore(checkpoint)
-                emitted.length = emittedLength
-              })
-              : Effect.void
-        )
+        return Effect.onExit(Effect.provideService(effect, MessageStorage.MemoryTransaction, true), (exit) =>
+          Exit.isFailure(exit)
+            ? Effect.sync(() => {
+              storage.restore(checkpoint)
+              emitted.length = emittedLength
+            })
+            : Effect.void)
       }
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
         const result = yield* makeClient("counter-1").send(new Increment({ by: 1, block: false }))
-
         assertRejected(result, "EmissionFailure")
         assert.strictEqual(storage.entries.size, 0)
         assert.strictEqual(storage.commits, 0)
@@ -499,12 +473,14 @@ describe("ClusterMachine", () => {
       }).pipe(Effect.provide(makeLayer(
         bridge,
         storage.service,
-        (event) => Effect.sync(() => emitted.push(event)).pipe(Effect.andThen(Effect.fail("outbox unavailable"))),
+        (event) =>
+          Effect.sync(() =>
+            emitted.push(event)
+          ).pipe(Effect.andThen(Effect.fail("outbox unavailable"))),
         undefined,
         withTransaction
       )))
     }))
-
   it.effect("keeps historical request ids in the in-memory storage", () =>
     Effect.gen(function*() {
       const storage = yield* ClusterMachine.Storage
@@ -534,7 +510,6 @@ describe("ClusterMachine", () => {
           active: [{ path: "" }, { path: "Count" as const, value: { _tag: "Count", value: "2" } }]
         }
       }
-
       assert.deepStrictEqual(yield* storage.commit(address, first), ClusterMachine.CommitResult.Committed())
       assert.deepStrictEqual(yield* storage.commit(address, second), ClusterMachine.CommitResult.Committed())
       assert.deepStrictEqual(yield* storage.commit(address, first), ClusterMachine.CommitResult.Duplicate())
@@ -542,7 +517,6 @@ describe("ClusterMachine", () => {
       assert.isTrue(loaded.processed)
       assert.deepStrictEqual(Option.getOrThrow(loaded.checkpoint), second)
     }).pipe(Effect.provide(ClusterMachine.layerMemory)))
-
   it.effect("rejects incompatible and undecodable checkpoints without resetting", () =>
     Effect.gen(function*() {
       const cases: ReadonlyArray<{
@@ -586,7 +560,6 @@ describe("ClusterMachine", () => {
           reason: "InvalidCheckpoint"
         }
       ]
-
       for (const testCase of cases) {
         const gate = yield* Latch.make()
         const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
@@ -599,28 +572,22 @@ describe("ClusterMachine", () => {
           snapshot: testCase.snapshot
         }
         storage.entries.set(storageKey(testCase.entityType, "counter-1"), checkpoint)
-
         yield* Effect.gen(function*() {
           yield* TestClock.adjust(1)
           const makeClient = yield* bridge.entity.client
-          assertRejected(
-            yield* makeClient("counter-1").send(new Increment({ by: 1, block: false })),
-            testCase.reason
-          )
+          assertRejected(yield* makeClient("counter-1").send(new Increment({ by: 1, block: false })), testCase.reason)
           assert.strictEqual(storage.entries.get(storageKey(testCase.entityType, "counter-1")), checkpoint)
           assert.strictEqual(storage.commits, 0)
           assert.strictEqual(state.initialEntries, 0)
         }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
       }
     }))
-
   it.effect("persists final state and treats later events as no-ops", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
       const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
       const bridge = ClusterMachine.make("FinalCounter", makeCounter(state), { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
@@ -632,7 +599,6 @@ describe("ClusterMachine", () => {
           path: "Done" as const,
           value: { _tag: "Done", value: "0" }
         }])
-
         assertAccepted(yield* client.send(new Increment({ by: 10, block: false })))
         assert.strictEqual(state.actions, 0)
         assert.strictEqual(storage.commits, 2)
@@ -644,14 +610,12 @@ describe("ClusterMachine", () => {
         }])
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
-
   it.effect("rejects process-local machine commands", () =>
     Effect.gen(function*() {
       const gate = yield* Latch.make()
       const state = { gate, initialEntries: 0, actions: 0, inFlight: 0, maxInFlight: 0 }
       const bridge = ClusterMachine.make("UnsupportedCommand", makeCounter(state), { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client
@@ -659,19 +623,20 @@ describe("ClusterMachine", () => {
         assert.strictEqual(storage.commits, 0)
       }).pipe(Effect.provide(makeLayer(bridge, storage.service, () => Effect.void)))
     }))
-
   it.effect("rejects machines with invoke configurations", () =>
     Effect.gen(function*() {
-      const states = Machine.state({ initial: "Count", states: { Count } })
+      const states = Machine.state({ states: { Count } })
       const invoked = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.void) },
-
         id: "Invoked",
         root: states,
-        events: Machine.eventsFromSchemas(Increment),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
+        events: Machine.eventsFromSchemas(Increment)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Count,
+          decoded: true,
+          data: new Count({ value: 0 })
+        },
         states: {
           Count: {
             invoke: { src: "source1", id: "child", onDone: { none: true } }
@@ -680,7 +645,6 @@ describe("ClusterMachine", () => {
       })
       const bridge = ClusterMachine.make("InvokedCounter", invoked, { version: "1" })
       const storage = makeTestStorage()
-
       yield* Effect.gen(function*() {
         yield* TestClock.adjust(1)
         const makeClient = yield* bridge.entity.client

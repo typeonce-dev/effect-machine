@@ -1,7 +1,6 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", { revision: Schema.Number }) {}
 class Work extends Schema.TaggedClass<Work>("Work")("Work", { revision: Schema.Number }) {}
 class Auth extends Schema.TaggedClass<Auth>("Auth")("Auth", { user: Schema.String }) {}
@@ -10,13 +9,10 @@ class SignedOut extends Schema.TaggedClass<SignedOut>("SignedOut")("SignedOut", 
 class SignedIn extends Schema.TaggedClass<SignedIn>("SignedIn")("SignedIn", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
-
 const States = Machine.state({
-  initial: "structural",
   states: {
     root: {
       schema: Root,
-      initial: "work",
       states: {
         work: {
           schema: Work,
@@ -24,12 +20,10 @@ const States = Machine.state({
           states: {
             auth: {
               schema: Auth,
-              initial: "signedOut",
               states: { signedOut: SignedOut, signedIn: { schema: SignedIn, type: "final" } }
             },
             sync: {
               schema: Sync,
-              initial: "idle",
               states: { idle: Idle }
             }
           }
@@ -38,43 +32,41 @@ const States = Machine.state({
       }
     },
     structural: {
-      initial: "idle",
       states: { idle: Idle }
     }
   }
 })
-
 describe("Machine state-value updates", () => {
   it("exposes updates only for the valued active ancestor chain", () => {
     const targets1 = Machine.targets(States)
     const machine = Machine.make({
       branches: { auth: { owner: { update: targets1.root.root.work.auth } } },
       root: States,
-      events: Machine.eventsFromSchemas(Tick),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) =>
-          target.from((to) =>
-            to.root.decoded(new Root({ revision: 0 }), (root) =>
-              root.work.decoded(
-                new Work({ revision: 0 }),
-                (work) =>
-                  work.auth.decoded(
-                    new Auth({ user: "" }),
-                    (auth) => auth.signedOut.decoded(new SignedOut({}))
-                  )
-                    .sync.decoded(new Sync({ cursor: 0 }), (sync) => sync.idle.decoded(new Idle({})))
-              ))
-          )
-        )
+      events: Machine.eventsFromSchemas(Tick)
     })
-
     machine.handle({
+      initial: {
+        target: Machine.targets(States).root.root,
+        decoded: true,
+        data: new Root({ revision: 0 })
+      },
       states: {
         root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            decoded: true,
+            data: new Work({ revision: 0 })
+          },
           states: {
             work: {
               states: {
                 auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
                   states: {
                     signedOut: {
                       on: {
@@ -90,17 +82,42 @@ describe("Machine state-value updates", () => {
                           }
                         }
                       }
-                    }
+                    },
+                    signedIn: {}
                   }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    decoded: true,
+                    data: new Idle({})
+                  },
+                  states: { idle: {} }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
                 }
               }
             }
           }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { idle: {} }
         }
       }
     })
   })
-
   it("requires the declared retained owner replacement", () => {
     const targets = Machine.targets(States)
     const machine = Machine.make({
@@ -113,12 +130,27 @@ describe("Machine state-value updates", () => {
       }
     })
     machine.handle({
+      initial: {
+        target: Machine.targets(States).root.structural
+      },
       states: {
         root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
           states: {
             work: {
               states: {
                 auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
                   states: {
                     signedOut: {
                       on: {
@@ -135,22 +167,64 @@ describe("Machine state-value updates", () => {
                           }
                         }
                       }
-                    }
+                    },
+                    signedIn: {}
                   }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
+                  states: { idle: {} }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
                 }
               }
             }
           }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { idle: {} }
         }
       }
     })
     machine.handle({
+      initial: {
+        target: Machine.targets(States).root.structural
+      },
       states: {
         root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
           states: {
             work: {
               states: {
                 auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
                   states: {
                     signedOut: {
                       on: {
@@ -160,10 +234,93 @@ describe("Machine state-value updates", () => {
                           resolve: ({ select }) => select.signedIn.decoded(new SignedIn({}))
                         }
                       }
+                    },
+                    signedIn: {}
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
+                  states: { idle: {} }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              }
+            }
+          }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { idle: {} }
+        }
+      }
+    })
+    expect(machine.handle).type.toBeCallableWith({
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      },
+      states: {
+        root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: {
+            work: {
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: {
+                auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
                     }
                   }
                 }
               }
+            }
+          }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
@@ -185,21 +342,78 @@ describe("Machine state-value updates", () => {
                         }
                       }
                     }
+                  },
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
                   }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
                 }
               }
             }
+          },
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
           }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
         }
       }
     })
     machine.handle({
+      initial: {
+        target: Machine.targets(States).root.structural
+      },
       states: {
         root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
           states: {
             work: {
               states: {
                 auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
                   states: {
                     signedOut: {
                       on: {
@@ -210,12 +424,39 @@ describe("Machine state-value updates", () => {
                             ancestors.root.revision === 0 ? select.changed.from({ revision: 1 }) : decline()
                         }
                       }
-                    }
+                    },
+                    signedIn: {}
                   }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
+                  states: { idle: {} }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
                 }
               }
             }
           }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { idle: {} }
         }
       }
     })
@@ -235,25 +476,228 @@ describe("Machine state-value updates", () => {
                         }
                       }
                     }
+                  },
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              }
+            }
+          },
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      }
+    })
+  })
+  it("rejects updates to structural states, choice updates, and final-state transitions", () => {
+    const targets = Machine.targets(States)
+    const machine = Machine.make({ root: States, events: Machine.eventsFromSchemas(Tick) })
+    expect(machine.handle).type.toBeCallableWith({
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      },
+      states: {
+        root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: {
+            work: {
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: {
+                auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        structural: {
+          on: { Tick: { update: targets.root.structural, data: () => ({}) } },
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        },
+        root: {
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: {
+            work: {
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: {
+                auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
                   }
                 }
               }
             }
           }
         }
+      },
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
       }
-    })
-  })
-
-  it("rejects updates to structural states, choice updates, and final-state transitions", () => {
-    const targets = Machine.targets(States)
-    const machine = Machine.make({ root: States, events: Machine.eventsFromSchemas(Tick) })
-    expect(machine.handle).type.not.toBeCallableWith({
-      states: { structural: { on: { Tick: { update: targets.root.structural, from: () => ({}) } } } }
     })
     expect(machine.handle).type.not.toBeCallableWith({
       states: {
-        root: { states: { routing: { choice: { update: targets.root.root, from: () => ({ revision: 1 }) } } } }
+        root: {
+          states: {
+            routing: { choice: { update: targets.root.root, data: () => ({ revision: 1 }) } },
+            work: {
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
+              states: {
+                auth: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                }
+              }
+            }
+          },
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
       }
     })
     expect(machine.handle).type.not.toBeCallableWith({
@@ -264,12 +708,56 @@ describe("Machine state-value updates", () => {
               states: {
                 auth: {
                   states: {
-                    signedIn: { on: { Tick: { update: targets.root.root.work.auth, from: () => ({ user: "next" }) } } }
+                    signedIn: {
+                      on: { Tick: { update: targets.root.root.work.auth, data: () => ({ user: "next" }) } }
+                    }
+                  },
+                  initial: {
+                    target: Machine.targets(States).root.root.work.auth.signedOut,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
                   }
+                },
+                sync: {
+                  initial: {
+                    target: Machine.targets(States).root.root.work.sync.idle,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  }
+                }
+              },
+              initial: {
+                auth: () => {
+                  throw new Error("type-only constructor")
+                },
+                sync: () => {
+                  throw new Error("type-only constructor")
                 }
               }
             }
+          },
+          initial: {
+            target: Machine.targets(States).root.root.work,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
           }
+        },
+        structural: {
+          initial: {
+            target: Machine.targets(States).root.structural.idle,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      initial: {
+        target: Machine.targets(States).root.root,
+        data: () => {
+          throw new Error("type-only constructor")
         }
       }
     })

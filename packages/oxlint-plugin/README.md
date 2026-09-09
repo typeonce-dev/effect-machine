@@ -77,7 +77,7 @@ transitions with default construction use `{ target: targets.root.Ready }`.
 ### `effect-machine/no-async-planning-callback`
 
 Rejects asynchronous work in transition construction, guards, resolvers,
-lifecycle handlers, initializers, and invocation input mappers. Register lazy
+lifecycle handlers, root and initial data constructors, and invocation input mappers. Register lazy
 Effects and Streams in `make`, then let a state invoke them:
 
 ```ts
@@ -86,8 +86,8 @@ Submitting: {
   invoke: {
     src: "submitOrder",
     input: ({ state }) => state.order,
-    onDone: { target: targets.root.Complete, from: ({ output }) => ({ order: output }) },
-    onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+    onDone: { target: targets.root.Complete, data: ({ output }) => ({ order: output }) },
+    onFailure: { target: targets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
   }
 }
 ```

@@ -4,7 +4,7 @@ import * as SchemaAST from "effect/SchemaAST"
 export const StateNodePropertyPolicy = {
   atomic: ["schema", "type", "annotations"],
   final: ["schema", "type", "output", "annotations"],
-  compound: ["schema", "type", "initial", "states", "annotations"],
+  compound: ["schema", "type", "states", "annotations"],
   parallel: ["schema", "type", "output", "states", "annotations"],
   history: ["type", "history", "annotations"],
   choice: ["type", "annotations"]
@@ -266,9 +266,6 @@ const validateStateTree = (
       fail(boundary, `${path}.output`, "state output must be an Effect Schema")
     }
     if (kind === "compound") {
-      if (typeof node.initial !== "string") {
-        fail(boundary, `${path}.initial`, "compound states must declare an initial child key")
-      }
       validateTargetSelectorChildKey(
         boundary,
         path,
@@ -285,18 +282,7 @@ const validateStateTree = (
           "schema-backed compound child states cannot use the reserved local target selector key \"with\""
         )
       }
-      const initialKey = node.initial as string
       validateStateTree(boundary, node.states, path, true)
-      if (!hasOwn(node.states as object, initialKey)) {
-        fail(boundary, `${path}.initial`, `compound initial child "${initialKey}" does not exist`)
-      }
-      const initial = (node.states as Readonly<Record<PropertyKey, unknown>>)[initialKey]
-      if (
-        !Schema.isSchema(initial) && typeof initial === "object" && initial !== null &&
-        (initial as Readonly<Record<PropertyKey, unknown>>).type === "history"
-      ) {
-        fail(boundary, `${path}.initial`, "compound initial children cannot be history states")
-      }
       continue
     }
     if (kind === "parallel") {

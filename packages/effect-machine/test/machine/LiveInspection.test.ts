@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect"
 import { Machine } from "../../src/index.js"
-
 class Idle extends Schema.TaggedClass<Idle>("LiveInspectionIdle")("Idle", {}) {}
 class Increment extends Schema.TaggedClass<Increment>("LiveInspectionIncrement")("Increment", {
   by: Schema.Number
@@ -9,21 +8,22 @@ class Increment extends Schema.TaggedClass<Increment>("LiveInspectionIncrement")
 class Notice extends Schema.TaggedClass<Notice>("LiveInspectionNotice")("Notice", {
   value: Schema.Number
 }) {}
-
-const states = Machine.state({ initial: "Idle", states: { Idle } })
+const states = Machine.state({ states: { Idle } })
 const Events = Machine.eventsFromSchemas(Increment)
 const Emissions = Machine.emittedEventsFromSchemas(Notice)
-
 const targets1 = Machine.targets(states)
 const machine = Machine.make({
   branches: { transition1: { destination: { target: targets1.root.Idle } } },
-
   id: "counter",
   root: states,
   events: Events,
-  emittedEvents: Emissions,
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+  emittedEvents: Emissions
 }).handle({
+  initial: {
+    target: Machine.targets(states).root.Idle,
+    decoded: true,
+    data: new Idle({})
+  },
   states: {
     Idle: {
       on: {
@@ -38,7 +38,6 @@ const machine = Machine.make({
     }
   }
 })
-
 describe("Machine live inspection", () => {
   it.effect("observes a prepared root from creation through termination", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -48,12 +47,10 @@ describe("Machine live inspection", () => {
         Effect.forkScoped({ startImmediately: true })
       )
       yield* Effect.yieldNow
-
       const ref = yield* prepared.start
       yield* ref.send(Events.Increment({ by: 2 }))
       yield* Effect.yieldNow
       yield* ref.stop
-
       const records = Array.from(yield* Fiber.join(collected))
       assert.deepStrictEqual(records.map(({ _tag }) => _tag), [
         "Created",
@@ -65,7 +62,6 @@ describe("Machine live inspection", () => {
       ])
       assert.deepStrictEqual(records.map(({ sequence }) => sequence), [0, 1, 2, 3, 4, 5])
       assert.ok(records.every(({ rootSessionId }) => rootSessionId === prepared.sessionId))
-
       const created = records[0]
       assert.strictEqual(created?._tag, "Created")
       if (created?._tag === "Created") {
@@ -78,7 +74,6 @@ describe("Machine live inspection", () => {
         assert.strictEqual(created.parent, undefined)
         assert.strictEqual(created.definition, machine)
       }
-
       const processed = records.find((record) => record._tag === "EventProcessed")
       assert.ok(processed !== undefined && processed._tag === "EventProcessed")
       if (processed?._tag === "EventProcessed") {
@@ -96,7 +91,6 @@ describe("Machine live inspection", () => {
           updates: []
         }])
       }
-
       const emitted = records.find((record) => record._tag === "Emitted")
       assert.ok(emitted !== undefined && emitted._tag === "Emitted")
       if (emitted?._tag === "Emitted") {
@@ -104,17 +98,20 @@ describe("Machine live inspection", () => {
         assert.deepStrictEqual(emitted.causedBy, { _tag: "Macrostep", macrostepId: 0 })
       }
     })))
-
   it.effect("is hot, non-replayed, and completes when startup fails", () =>
     Effect.scoped(Effect.gen(function*() {
       const invalid = Machine.make({
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (to) =>
-          to.resolve(() => {
+        events: Machine.eventsFromSchemas()
+      }).handle({
+        initial: {
+          target: Machine.targets(states).root.Idle,
+          data: () => {
             throw new Error("boom")
-          })
-      }).handle({ states: { Idle: {} } })
+          }
+        },
+        states: { Idle: {} }
+      })
       const prepared = yield* Machine.prepare(invalid)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
@@ -122,24 +119,25 @@ describe("Machine live inspection", () => {
       )
       yield* Effect.yieldNow
       yield* Effect.exit(prepared.start)
-
       assert.deepStrictEqual(Array.from(yield* Fiber.join(collected)).map(({ _tag }) => _tag), [
         "Created",
         "StartFailed"
       ])
       assert.deepStrictEqual(Array.from(yield* Stream.runCollect(prepared.inspection)), [])
     })))
-
   it.effect("represents Effect invokes as owned activities rather than child machines", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         effects: { source1: Effect.suspend(() => Effect.never) },
-
         id: "activity-root",
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Idle,
+          decoded: true,
+          data: new Idle({})
+        },
         states: {
           Idle: {
             invoke: { src: "source1", id: "worker" }
@@ -155,7 +153,6 @@ describe("Machine live inspection", () => {
       const ref = yield* prepared.start
       yield* Effect.yieldNow
       yield* ref.stop
-
       const records = Array.from(yield* Fiber.join(collected))
       assert.deepStrictEqual(records.map(({ _tag }) => _tag), [
         "Created",
@@ -179,20 +176,24 @@ describe("Machine live inspection", () => {
       assert.ok(stopped !== undefined && stopped._tag === "ActivityStopped")
       if (stopped?._tag === "ActivityStopped") {
         assert.ok(Exit.isFailure(stopped.exit))
-        if (Exit.isFailure(stopped.exit)) assert.ok(Cause.hasInterruptsOnly(stopped.exit.cause))
+        if (Exit.isFailure(stopped.exit)) {
+          assert.ok(Cause.hasInterruptsOnly(stopped.exit.cause))
+        }
       }
     })))
-
   it.effect("represents Stream invokes as owned Stream activities", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
         streams: { source1: Stream.suspend(() => Stream.never) },
-
         id: "stream-activity-root",
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Idle,
+          decoded: true,
+          data: new Idle({})
+        },
         states: {
           Idle: {
             invoke: { src: "source1", id: "updates", onDone: { none: true } }
@@ -208,7 +209,6 @@ describe("Machine live inspection", () => {
       const ref = yield* prepared.start
       yield* Effect.yieldNow
       yield* ref.stop
-
       const records = Array.from(yield* Fiber.join(collected))
       const started = records.find((record) => record._tag === "ActivityStarted")
       assert.ok(started !== undefined && started._tag === "ActivityStarted")
@@ -218,26 +218,32 @@ describe("Machine live inspection", () => {
         assert.strictEqual(started.activity.ownerPath, "Idle")
       }
     })))
-
   it.effect("correlates an explicit child-to-parent send with both local subjects", () =>
     Effect.scoped(Effect.gen(function*() {
-      class ChildIdle extends Schema.TaggedClass<ChildIdle>("InspectionChildIdle")("ChildIdle", {}) {}
-      class Trigger extends Schema.TaggedClass<Trigger>("InspectionChildTrigger")("Trigger", {}) {}
-      class ChildReady extends Schema.TaggedClass<ChildReady>("InspectionChildReady")("ChildReady", {}) {}
-      class ParentIdle extends Schema.TaggedClass<ParentIdle>("InspectionParentIdle")("ParentIdle", {}) {}
-      class ParentDone extends Schema.TaggedClass<ParentDone>("InspectionParentDone")("ParentDone", {}) {}
-
+      class ChildIdle extends Schema.TaggedClass<ChildIdle>("InspectionChildIdle")("ChildIdle", {}) {
+      }
+      class Trigger extends Schema.TaggedClass<Trigger>("InspectionChildTrigger")("Trigger", {}) {
+      }
+      class ChildReady extends Schema.TaggedClass<ChildReady>("InspectionChildReady")("ChildReady", {}) {
+      }
+      class ParentIdle extends Schema.TaggedClass<ParentIdle>("InspectionParentIdle")("ParentIdle", {}) {
+      }
+      class ParentDone extends Schema.TaggedClass<ParentDone>("InspectionParentDone")("ParentDone", {}) {
+      }
       const ParentEvents = Machine.eventsFromSchemas(ChildReady)
       const ChildEvents = Machine.eventsFromSchemas(Trigger)
-      const childStates = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
+      const childStates = Machine.state({ states: { ChildIdle } })
       const childMachine = Machine.make({
         id: "child-machine",
         root: childStates,
         events: ChildEvents,
-        parent: Machine.parent(ParentEvents),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.ChildIdle.decoded(new ChildIdle({}))))
+        parent: Machine.parent(ParentEvents)
       }).handle({
+        initial: {
+          target: Machine.targets(childStates).root.ChildIdle,
+          decoded: true,
+          data: new ChildIdle({})
+        },
         states: {
           ChildIdle: {
             on: {
@@ -254,7 +260,6 @@ describe("Machine live inspection", () => {
       })
       const Child = Machine.child("child", childMachine)
       const parentStates = Machine.state({
-        initial: "ParentIdle",
         states: {
           ParentIdle,
           ParentDone: { schema: ParentDone, type: "final" }
@@ -263,24 +268,25 @@ describe("Machine live inspection", () => {
       const targets5 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
         children: { source1: Child },
-
         id: "parent-machine",
         root: parentStates,
-        events: Machine.eventsFromSchemas(ParentEvents),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.ParentIdle.decoded(new ParentIdle({}))))
+        events: Machine.eventsFromSchemas(ParentEvents)
       }).handle({
+        initial: {
+          target: Machine.targets(parentStates).root.ParentIdle,
+          decoded: true,
+          data: new ParentIdle({})
+        },
         states: {
           ParentIdle: {
             invoke: { src: "source1" },
             on: {
-              ChildReady: { target: targets5.root.ParentDone, decoded: () => (new ParentDone({})) }
+              ChildReady: { target: targets5.root.ParentDone, decoded: true, data: () => (new ParentDone({})) }
             }
           },
           ParentDone: {}
         }
       })
-
       const prepared = yield* Machine.prepare(parentMachine)
       const collected = yield* prepared.inspection.pipe(
         Stream.runCollect,
@@ -292,7 +298,6 @@ describe("Machine live inspection", () => {
       const child = Option.getOrThrow(yield* parent.child(Child))
       yield* child.send(ChildEvents.Trigger())
       yield* parent.join
-
       const sent = Array.from(yield* Fiber.join(collected)).filter((record) => record._tag === "EventSent")
       const toParent = sent.find((record) => record.subject.id === "parent-machine")
       assert.ok(toParent !== undefined && toParent._tag === "EventSent")

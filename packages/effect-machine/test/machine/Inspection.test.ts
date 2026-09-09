@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("InspectionRoot")("InspectionRoot", {}) {}
 class Flow extends Schema.TaggedClass<Flow>("InspectionFlow")("InspectionFlow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("InspectionIdle")("InspectionIdle", {}) {}
@@ -9,12 +8,9 @@ class Done extends Schema.TaggedClass<Done>("InspectionDone")("InspectionDone", 
 class Side extends Schema.TaggedClass<Side>("InspectionSide")("InspectionSide", {}) {}
 class ChoiceFlow extends Schema.TaggedClass<ChoiceFlow>("InspectionChoiceFlow")("InspectionChoiceFlow", {}) {}
 class Ready extends Schema.TaggedClass<Ready>("InspectionReady")("InspectionReady", {}) {}
-
 const RootOutput = Schema.String
 const DoneOutput = Schema.Number
-
 const States = Machine.state({
-  initial: "root",
   states: {
     root: {
       schema: Root,
@@ -23,7 +19,6 @@ const States = Machine.state({
       states: {
         flow: {
           schema: Flow,
-          initial: "idle",
           states: {
             idle: Idle,
             done: { schema: Done, type: "final", output: DoneOutput },
@@ -36,27 +31,41 @@ const States = Machine.state({
     }
   }
 })
-
 const machine = Machine.make({
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.root.decoded(new Root({}), (root) =>
-          root
-            .flow.decoded(new Flow({}), (flow) => flow.idle.decoded(new Idle({})))
-            .side.decoded(new Side({})))
-      )
-    )
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(States).root.root,
+    decoded: true,
+    data: new Root({})
+  },
+  states: {
+    root: {
+      output: () => "done",
+      initial: { flow: { decoded: true, data: new Flow({}) }, side: { decoded: true, data: new Side({}) } },
+      states: {
+        flow: {
+          initial: {
+            target: Machine.targets(States).root.root.flow.idle,
+            decoded: true,
+            data: new Idle({})
+          },
+          states: {
+            idle: {},
+            done: { output: () => 0 },
+            route: { choice: { target: Machine.targets(States).root.root.flow.done } }
+          }
+        },
+        side: {}
+      }
+    }
+  }
 })
-
 const ChoiceStates = Machine.state({
-  initial: "Flow",
   states: {
     Flow: {
       schema: ChoiceFlow,
-      initial: "Routing",
       states: {
         Routing: { type: "choice" },
         Ready
@@ -64,29 +73,33 @@ const ChoiceStates = Machine.state({
     }
   }
 })
-
 const targets1 = Machine.targets(ChoiceStates)
 const choiceMachine = Machine.make({
   root: ChoiceStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Flow.decoded(new ChoiceFlow({}), (flow) => flow.Routing())))
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(ChoiceStates).root.Flow,
+    decoded: true,
+    data: new ChoiceFlow({})
+  },
   states: {
     Flow: {
+      initial: {
+        target: Machine.targets(ChoiceStates).root.Flow.Routing
+      },
       states: {
         Routing: {
-          choice: { target: targets1.root.Flow.Ready, decoded: () => (new Ready({})) }
-        }
+          choice: { target: targets1.root.Flow.Ready, decoded: true, data: () => (new Ready({})) }
+        },
+        Ready: {}
       }
     }
   }
 })
-
 describe("Machine compiled state-node inspection", () => {
   it("exposes exact metadata for all six state-node kinds", () => {
     const nodes = new Map(Machine.stateNodes(machine).map((node) => [node.path, node]))
-
     const parallel = nodes.get("root")!
     assert.strictEqual(parallel.type, "parallel")
     assert.strictEqual(parallel.schema, Root)
@@ -94,7 +107,6 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(parallel.history, undefined)
     assert.strictEqual(parallel.initial, undefined)
     assert.deepStrictEqual(parallel.children, ["root.flow", "root.side"])
-
     const compound = nodes.get("root.flow")!
     assert.strictEqual(compound.type, "compound")
     assert.strictEqual(compound.schema, Flow)
@@ -102,7 +114,6 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(compound.history, undefined)
     assert.strictEqual(compound.initial, "root.flow.idle")
     assert.deepStrictEqual(compound.children, ["root.flow.idle", "root.flow.done"])
-
     const atomic = nodes.get("root.flow.idle")!
     assert.strictEqual(atomic.type, "atomic")
     assert.strictEqual(atomic.schema, Idle)
@@ -110,7 +121,6 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(atomic.history, undefined)
     assert.strictEqual(atomic.initial, undefined)
     assert.deepStrictEqual(atomic.children, [])
-
     const final = nodes.get("root.flow.done")!
     assert.strictEqual(final.type, "final")
     assert.strictEqual(final.schema, Done)
@@ -118,7 +128,6 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(final.history, undefined)
     assert.strictEqual(final.initial, undefined)
     assert.deepStrictEqual(final.children, [])
-
     const history = nodes.get("root.flow.recent")!
     assert.strictEqual(history.type, "history")
     assert.strictEqual(history.schema, undefined)
@@ -127,7 +136,6 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(history.parent, "root.flow")
     assert.strictEqual(history.initial, undefined)
     assert.deepStrictEqual(history.children, [])
-
     const choice = nodes.get("root.flow.route")!
     assert.strictEqual(choice.type, "choice")
     assert.strictEqual(choice.schema, undefined)
@@ -137,14 +145,12 @@ describe("Machine compiled state-node inspection", () => {
     assert.strictEqual(choice.initial, undefined)
     assert.deepStrictEqual(choice.children, [])
   })
-
   it.effect("retains a choice initial path while configurations expose only active nodes", () =>
     Effect.gen(function*() {
       const flow = Machine.stateNodes(choiceMachine).find((node) => node.path === "Flow")
       assert(flow !== undefined)
       assert.strictEqual(flow.type, "compound")
       assert.strictEqual(flow.initial, "Flow.Routing")
-
       const plan = yield* Machine.planInitial(choiceMachine)
       assert.strictEqual(plan.state.state.path, "Flow")
       assert.strictEqual(plan.state.state.state.path, "Flow.Ready")

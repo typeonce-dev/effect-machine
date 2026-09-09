@@ -19,7 +19,7 @@ describe("Interactive text visualization", () => {
 
     assert.deepStrictEqual(document.initial, {
       target: "",
-      selection: { path: "", kind: "state", scope: "initial" }
+      selection: { path: "", kind: "initial", scope: "initial" }
     })
     assert.deepStrictEqual(document.roots, [""])
     assert.deepStrictEqual(idle?.transitionIds, [

@@ -1,7 +1,7 @@
 import type { ESTree } from "@oxlint/plugins"
 import { resolvedVariable, staticMemberName } from "./ast.js"
 import { unwrapExpression } from "./ast.js"
-import { isMachineHandleCall, isMachineMakeCall, type MachineBindings } from "./imports.js"
+import { isMachineHandleCall, type MachineBindings } from "./imports.js"
 
 export type PlanningFunction = ESTree.ArrowFunctionExpression | ESTree.Function
 
@@ -21,7 +21,7 @@ const statePlanningProperties = new Set([
   "choice",
   "entry",
   "exit",
-  "initialize",
+  "root",
   "invoke",
   "onDone",
   "output"
@@ -41,11 +41,6 @@ const isCallArgument = (
   node.parent.type === "CallExpression" &&
   node.parent.arguments.includes(node) &&
   predicate(node.parent)
-
-const isMachineMakeConfig = (
-  node: ESTree.ObjectExpression,
-  bindings: MachineBindings
-): boolean => isCallArgument(node, (call) => isMachineMakeCall(call, bindings))
 
 const isMachineHandleConfig = (
   node: ESTree.ObjectExpression,
@@ -134,15 +129,25 @@ const isPropertyPlanningCallback = (
 
   const name = propertyName(property)
   if (
-    name !== undefined && ["resolve", "from", "decoded", "guard"].includes(name) &&
+    name !== undefined && ["resolve", "data", "guard"].includes(name) &&
     isTransitionConfig(property.parent, bindings)
   ) return true
   if (name === "input" && isInvocationConfig(property.parent, bindings)) return true
-  return name === "initial" || name === "initialConfiguration"
-    ? isMachineMakeConfig(property.parent, bindings)
-    : (name !== undefined && statePlanningProperties.has(name) && isStateConfig(property.parent, bindings)) ||
-      isEventHandlerProperty(property, bindings) ||
-      isHistoryDefaultProperty(property, bindings)
+  const owner = property.parent.parent
+  if (
+    owner.type === "Property" && propertyName(owner) === "initial" && owner.parent.type === "ObjectExpression" &&
+    isStateConfig(owner.parent, bindings)
+  ) return true
+  if (name === "data" && owner.type === "Property" && owner.parent.type === "ObjectExpression") {
+    if (propertyName(owner) === "root" && isMachineHandleConfig(owner.parent, bindings)) return true
+    const initial = owner.parent.parent
+    if (
+      initial.type === "Property" && propertyName(initial) === "initial" &&
+      initial.parent.type === "ObjectExpression" && isStateConfig(initial.parent, bindings)
+    ) return true
+  }
+  return (name !== undefined && statePlanningProperties.has(name) && isStateConfig(property.parent, bindings)) ||
+    isEventHandlerProperty(property, bindings) || isHistoryDefaultProperty(property, bindings)
 }
 
 export const enclosingFunction = (node: ESTree.Node): PlanningFunction | undefined => {

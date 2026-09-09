@@ -6,11 +6,9 @@ export class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: S
 
 export const States = Machine.state({
   schema: Root,
-  initial: "Idle",
   states: { Idle: {}, Saved: { schema: Saved } }
 })
 export const machine = Machine.make({
   root: States,
-  events: Machine.events({ Save: { text: Schema.String }, Retry: {}, Reset: {} }),
-  initial: (root) => root.from(() => ({ count: 0 }))
+  events: Machine.events({ Save: { text: Schema.String }, Retry: {}, Reset: {} })
 })

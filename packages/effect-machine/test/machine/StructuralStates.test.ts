@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Option, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 class Loading extends Schema.TaggedClass<Loading>("StructuralLoading")("Loading", {
   url: Schema.String
 }) {}
@@ -17,7 +16,6 @@ class Audible extends Schema.TaggedClass<Audible>("StructuralAudible")("Audible"
 class Muted extends Schema.TaggedClass<Muted>("StructuralMuted")("Muted", {
   volume: Schema.Number
 }) {}
-
 class SourceSelected extends Schema.TaggedClass<SourceSelected>("StructuralSourceSelected")("SourceSelected", {
   url: Schema.String
 }) {}
@@ -37,22 +35,18 @@ class ResumeDeep extends Schema.TaggedClass<ResumeDeep>("StructuralResumeDeep")(
 class Editing extends Schema.TaggedClass<Editing>("StructuralEditing")("Editing", {
   draft: Schema.String
 }) {}
-
 const States = Machine.state({
-  initial: "player",
   states: {
     player: {
       type: "parallel",
       annotations: { title: "Player" },
       states: {
         transport: {
-          initial: "Empty",
           states: {
             Empty: {},
             Loading,
             Ready: {
               schema: Ready,
-              initial: "Paused",
               states: {
                 Paused: {},
                 Playing
@@ -61,7 +55,6 @@ const States = Machine.state({
           }
         },
         settings: {
-          initial: "Audible",
           states: {
             Audible,
             Muted
@@ -71,7 +64,6 @@ const States = Machine.state({
     }
   }
 })
-
 const makeMachine = () => {
   const targets1 = Machine.targets(States)
   return Machine.make({
@@ -80,24 +72,19 @@ const makeMachine = () => {
       transition2: { destination: { target: targets1.root.player.transport.Ready } },
       transition3: { destination: { target: targets1.root.player.transport.Ready.Playing } }
     },
-
     root: States,
-    events: Machine.eventsFromSchemas(SourceSelected, Loaded, Play, Mute),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) =>
-        target.from((to) =>
-          to.player.from((player) =>
-            player
-              .transport.from((transport) => transport.Empty.from())
-              .settings.from((settings) => settings.Audible.from({ volume: 1 }))
-          )
-        )
-      )
+    events: Machine.eventsFromSchemas(SourceSelected, Loaded, Play, Mute)
   }).handle({
+    initial: {
+      target: Machine.targets(States).root.player
+    },
     states: {
       player: {
         states: {
           transport: {
+            initial: {
+              target: Machine.targets(States).root.player.transport.Empty
+            },
             states: {
               Empty: {
                 on: {
@@ -116,15 +103,15 @@ const makeMachine = () => {
                     branches: "transition2",
                     resolve: ({ event, state, select: { destination: target } }) => {
                       assert.strictEqual(state._tag, "Loading")
-                      return target.from(
-                        { duration: event.duration },
-                        (ready) => ready.Paused.from()
-                      )
+                      return target.from({ duration: event.duration }, (ready) => ready.Paused.from())
                     }
                   }
                 }
               },
               Ready: {
+                initial: {
+                  target: Machine.targets(States).root.player.transport.Ready.Paused
+                },
                 states: {
                   Paused: {
                     on: {
@@ -141,12 +128,22 @@ const makeMachine = () => {
                     on: {
                       Mute: {
                         target: targets1.root.player.settings.Muted,
-                        from: ({ event }) => ({ volume: event.volume })
+                        data: ({ event }) => ({ volume: event.volume })
                       }
                     }
                   }
                 }
               }
+            }
+          },
+          settings: {
+            initial: {
+              target: Machine.targets(States).root.player.settings.Audible,
+              data: { volume: 1 }
+            },
+            states: {
+              Audible: {},
+              Muted: {}
             }
           }
         }
@@ -154,15 +151,11 @@ const makeMachine = () => {
     }
   })
 }
-
 const HistoryStates = Machine.state({
-  initial: "away",
   states: {
     flow: {
-      initial: "section",
       states: {
         section: {
-          initial: "Idle",
           states: {
             Idle: {},
             Editing
@@ -175,7 +168,6 @@ const HistoryStates = Machine.state({
     away: {}
   }
 })
-
 const historyFallback = () => ({
   path: "" as const,
   value: undefined,
@@ -189,7 +181,6 @@ const historyFallback = () => ({
     }
   }
 })
-
 const targets2 = Machine.targets(HistoryStates)
 const historyMachine = Machine.make({
   branches: {
@@ -198,16 +189,17 @@ const historyMachine = Machine.make({
     transition3: { destination: { history: targets2.root.flow.recent } },
     transition4: { destination: { history: targets2.root.flow.exact } }
   },
-
   root: HistoryStates,
-  events: Machine.eventsFromSchemas(Edit, Leave, ResumeShallow, ResumeDeep),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.flow.from((flow) => flow.section.from((section) => section.Idle.from())))
-    )
+  events: Machine.eventsFromSchemas(Edit, Leave, ResumeShallow, ResumeDeep)
 }).handle({
+  initial: {
+    target: Machine.targets(HistoryStates).root.flow
+  },
   states: {
     flow: {
+      initial: {
+        target: Machine.targets(HistoryStates).root.flow.section
+      },
       history: {
         recent: { default: historyFallback },
         exact: { default: historyFallback }
@@ -217,12 +209,16 @@ const historyMachine = Machine.make({
       },
       states: {
         section: {
+          initial: {
+            target: Machine.targets(HistoryStates).root.flow.section.Idle
+          },
           states: {
             Idle: {
               on: {
-                Edit: { target: targets2.root.flow.section.Editing, from: ({ event }) => ({ draft: event.draft }) }
+                Edit: { target: targets2.root.flow.section.Editing, data: ({ event }) => ({ draft: event.draft }) }
               }
-            }
+            },
+            Editing: {}
           }
         }
       }
@@ -235,9 +231,7 @@ const historyMachine = Machine.make({
     }
   }
 })
-
 const FinalStates = Machine.state({
-  initial: "Done",
   states: {
     Done: {
       type: "final",
@@ -245,7 +239,6 @@ const FinalStates = Machine.state({
     }
   }
 })
-
 describe("structural active states", () => {
   it.effect("constructs structural atomic, compound, and parallel snapshots without values", () =>
     Effect.gen(function*() {
@@ -273,36 +266,28 @@ describe("structural active states", () => {
           }
         }
       })
-
       assert.isTrue(States.matches(snapshot, "player.transport"))
       assert.isTrue(States.matches(snapshot, "player.transport.Empty"))
-      assert.deepStrictEqual(
-        States.get(snapshot, "player.settings.Audible"),
-        Option.some(new Audible({ volume: 1 }))
-      )
+      assert.deepStrictEqual(States.get(snapshot, "player.settings.Audible"), Option.some(new Audible({ volume: 1 })))
       const transport = States.getSnapshot(snapshot, "player.transport")
       assert(Option.isSome(transport))
       assert.strictEqual(transport.value.value, undefined)
     }))
-
   it.effect("transitions structural to valued, valued to structural, and across parallel regions", () =>
     Effect.gen(function*() {
       const machine = makeMachine()
       const started = yield* Machine.planInitial(machine)
-
       const loading = yield* Machine.plan(machine, started.state, new SourceSelected({ url: "/song.mp3" }))
       assert.deepStrictEqual(
         States.get(loading.next, "player.transport.Loading"),
         Option.some(new Loading({ url: "/song.mp3" }))
       )
-
       const paused = yield* Machine.plan(machine, loading.next, new Loaded({ duration: 120 }))
       assert.isTrue(States.matches(paused.next, "player.transport.Ready.Paused"))
       assert.deepStrictEqual(
         States.getWithParents(paused.next, "player.transport.Ready"),
         Option.some({ value: new Ready({ duration: 120 }), parents: {} })
       )
-
       const playing = yield* Machine.plan(machine, paused.next, new Play({}))
       assert.deepStrictEqual(
         States.getWithParents(playing.next, "player.transport.Ready.Playing"),
@@ -311,21 +296,15 @@ describe("structural active states", () => {
           parents: { "player.transport.Ready": new Ready({ duration: 120 }) }
         })
       )
-
       const muted = yield* Machine.plan(machine, playing.next, new Mute({ volume: 0 }))
       assert.isTrue(States.matches(muted.next, "player.transport.Ready.Playing"))
-      assert.deepStrictEqual(
-        States.get(muted.next, "player.settings.Muted"),
-        Option.some(new Muted({ volume: 0 }))
-      )
+      assert.deepStrictEqual(States.get(muted.next, "player.settings.Muted"), Option.some(new Muted({ volume: 0 })))
     }))
-
   it.effect("encodes active structural paths without inventing values", () =>
     Effect.gen(function*() {
       const machine = makeMachine()
       const started = yield* Machine.planInitial(machine)
       const encoded = yield* Machine.encodeSnapshot(machine, started.state)
-
       assert.deepStrictEqual(encoded.active, [
         { path: "" as const },
         { path: "player" as const },
@@ -334,30 +313,24 @@ describe("structural active states", () => {
         { path: "player.settings" as const },
         { path: "player.settings.Audible" as const, value: { _tag: "Audible", volume: 1 } }
       ])
-
       const decoded = yield* Machine.decodeSnapshot(machine, encoded)
       assert.deepStrictEqual(decoded, started.state)
-
       const encodedWithStructuralValue = structuredClone(encoded) as any
       encodedWithStructuralValue.active[0].value = { _tag: "Invented" }
       const decodeError = yield* Machine.decodeSnapshot(machine, encodedWithStructuralValue).pipe(Effect.flip)
       assert.instanceOf(decodeError, Machine.MachineSchemaDecodeError)
-
       const snapshotWithStructuralValue = { ...started.state, value: { _tag: "Invented" } } as any
       const encodeError = yield* Machine.encodeSnapshot(machine, snapshotWithStructuralValue).pipe(Effect.flip)
       assert.instanceOf(encodeError, Machine.MachineSchemaEncodeError)
     }))
-
   it.effect("restores structural control through shallow and deep history", () =>
     Effect.gen(function*() {
       const started = yield* Machine.planInitial(historyMachine)
       const editing = yield* Machine.plan(historyMachine, started.state, new Edit({ draft: "saved" }))
       const away = yield* Machine.plan(historyMachine, editing.next, new Leave({}))
-
       const shallow = yield* Machine.plan(historyMachine, away.next, new ResumeShallow({}))
       assert.isTrue(HistoryStates.matches(shallow.next, "flow.section.Idle"))
       assert.isTrue(Option.isNone(HistoryStates.get(shallow.next, "flow.section.Editing")))
-
       const deep = yield* Machine.plan(historyMachine, away.next, new ResumeDeep({}))
       assert.deepStrictEqual(
         HistoryStates.get(deep.next, "flow.section.Editing"),
@@ -365,14 +338,15 @@ describe("structural active states", () => {
       )
       assert.deepStrictEqual(deep.next.history, away.next.history)
     }))
-
   it.effect("keeps final output independent from a state value schema", () =>
     Effect.gen(function*() {
       const machine = Machine.make({
         root: FinalStates,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Done.from()))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(FinalStates).root.Done
+        },
         states: {
           Done: {
             output: ({ state }) => {
@@ -382,7 +356,6 @@ describe("structural active states", () => {
           }
         }
       })
-
       const planned = yield* Machine.planInitial(machine)
       assert.isTrue(planned.done)
       assert.strictEqual(planned.output, "complete")

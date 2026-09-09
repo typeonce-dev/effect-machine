@@ -136,16 +136,12 @@
         {
           "owner": "make",
           "title": "Machine definition configuration",
-          "description": "Parameters accepted by `Machine.make` and its initial-state declaration.",
+          "description": "Protocols, root topology, registered sources, and named branches accepted by Machine.make.",
           "roots": [
             {
               "declaration": "make",
               "parameter": "config",
               "label": "Configuration"
-            },
-            {
-              "reflection": "Machine.InitialTransitionTarget",
-              "label": "Initial target resolution"
             }
           ]
         },

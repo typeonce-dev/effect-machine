@@ -82,13 +82,13 @@ import { Schema } from "effect"
 
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 
-const root = Machine.state({ initial: "Idle", states: { Idle } })
+const root = Machine.state({ states: { Idle } })
 
 export const machine = Machine.make({
   id: "packed-fixture",
   root,
   events: Machine.events({})
-}).handle({})
+}).handle({ initial: { target: Machine.targets(root).root.Idle },})
 `
 
 try {

@@ -1,23 +1,18 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
-
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
-
 const AnnotatedWorkflow = Workflow.annotate({
   title: "Document workflow",
   description: "Coordinates the document lifecycle",
   documentation: "https://example.test/docs/workflow",
   designOwner: "editor-platform"
 })
-
 const States = Machine.state({
-  initial: "Workflow",
   states: {
     Workflow: {
       schema: AnnotatedWorkflow,
-      initial: "Idle",
       states: {
         Idle,
         Routing: {
@@ -38,18 +33,26 @@ const States = Machine.state({
     }
   }
 })
-
 const machine = Machine.make({
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve((
-      { target }
-    ) => (target.from((to) =>
-      to.Workflow.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({})))
-    )))
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(States).root.Workflow,
+    decoded: true,
+    data: new Workflow({})
+  },
+  states: {
+    Workflow: {
+      initial: {
+        target: Machine.targets(States).root.Workflow.Idle,
+        decoded: true,
+        data: new Idle({})
+      },
+      states: { Idle: {} }
+    }
+  }
 })
-
 describe("Machine state annotations", () => {
   it("exposes typed resolved annotations on every state node", () => {
     const node = Machine.stateNodes(machine)[0]!
@@ -59,7 +62,6 @@ describe("Machine state annotations", () => {
     expect(node.annotations?.documentation).type.toBe<string | undefined>()
     expect(node.annotations?.designOwner).type.toBe<unknown>()
   })
-
   it("limits pseudo-state annotations to descriptive metadata", () => {
     expect(Machine.state).type.not.toBeCallableWith({
       initial: "Workflow",
@@ -88,7 +90,6 @@ describe("Machine state annotations", () => {
       }
     })
   })
-
   it("keeps schema-backed APIs unavailable to annotated pseudo-states", () => {
     expect(Machine.state).type.not.toBeCallableWith({
       initial: "Workflow",

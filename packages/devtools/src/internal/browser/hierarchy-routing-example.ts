@@ -1,21 +1,16 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
-
 const ReviewState = Schema.TaggedUnion({
   Review: { title: Schema.String },
   ReviewFailed: { message: Schema.String },
   Complete: { slug: Schema.String }
 })
-
 const ReviewStates = Machine.state({
-  initial: "Workflow",
   states: {
     Workflow: {
-      initial: "Review",
       states: {
         Review: {
           schema: ReviewState.cases.Review,
-          initial: "Form",
           states: {
             Form: {},
             Failed: ReviewState.cases.ReviewFailed
@@ -28,16 +23,11 @@ const ReviewStates = Machine.state({
     }
   }
 })
-
-const ReviewEvents = Machine.eventsFromSchemas(
-  Schema.TaggedUnion({
-    Submit: { route: Schema.Literals(["save", "invalid"]) }
-  })
-)
-
+const ReviewEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
+  Submit: { route: Schema.Literals(["save", "invalid"]) }
+}))
 const saveReview: Effect.Effect<string, string> = Effect.succeed("deterministic-chart")
 const publishReview = Effect.succeed("deterministic-chart")
-
 const targets1 = Machine.targets(ReviewStates)
 export const hierarchyRoutingMachine = Machine.make({
   branches: {
@@ -47,23 +37,24 @@ export const hierarchyRoutingMachine = Machine.make({
     }
   },
   effects: { source1: Effect.suspend(() => saveReview), source2: Effect.suspend(() => publishReview) },
-
   id: "hierarchy-routing",
   root: ReviewStates,
-  events: ReviewEvents,
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.Workflow.from((workflow) =>
-          workflow.Review.from({ title: "A deterministic chart" }, (review) => review.Form.from())
-        )
-      )
-    )
+  events: ReviewEvents
 }).handle({
+  initial: {
+    target: Machine.targets(ReviewStates).root.Workflow
+  },
   states: {
     Workflow: {
+      initial: {
+        target: Machine.targets(ReviewStates).root.Workflow.Review,
+        data: { title: "A deterministic chart" }
+      },
       states: {
         Review: {
+          initial: {
+            target: Machine.targets(ReviewStates).root.Workflow.Review.Form
+          },
           on: {
             Submit: {
               branches: "transition1",
@@ -85,7 +76,7 @@ export const hierarchyRoutingMachine = Machine.make({
             onDone: { target: targets1.root.Workflow.Publishing },
             onFailure: {
               target: targets1.root.Workflow.Review.Failed,
-              from: () => ({ message: "The review could not be saved." })
+              data: () => ({ message: "The review could not be saved." })
             }
           }
         },
@@ -93,7 +84,7 @@ export const hierarchyRoutingMachine = Machine.make({
           invoke: {
             src: "source2",
             id: "publish-review",
-            onDone: { target: targets1.root.Workflow.Complete, from: ({ output }) => ({ slug: output }) }
+            onDone: { target: targets1.root.Workflow.Complete, data: ({ output }) => ({ slug: output }) }
           }
         },
         Complete: {}

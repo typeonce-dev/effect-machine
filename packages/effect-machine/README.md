@@ -47,23 +47,21 @@ Declare the root once, derive its references, then add behavior with event maps:
 ```ts
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
-
 const Root = Machine.state({ fields: { count: Schema.Number } })
 const targets = Machine.targets(Root)
 const Events = Machine.events({ Increment: { by: Schema.Number } })
 const Counter = Machine.make({
   root: Root,
-  events: Events,
-  initial: (root) => root.from(() => ({ count: 0 }))
+  events: Events
 }).handle({
+  root: () => ({ count: 0 }),
   on: {
     Increment: {
       update: targets.root,
-      from: ({ root, event }) => ({ count: root.count + event.by })
+      data: ({ root, event }) => ({ count: root.count + event.by })
     }
   }
 })
-
 const program = Effect.scoped(Effect.gen(function*() {
   const ref = yield* Machine.start(Counter)
   yield* ref.send(Events.Increment({ by: 1 }))
@@ -86,11 +84,63 @@ input, sources, and named branch groups. `.handle` implements behavior in one
 nested object and returns an executable machine. One definition can create
 independent implementations by calling `.handle` more than once.
 
+### Declare startup data and initial edges
+
+The root descriptor contains schemas and hierarchy. `make` registers protocols
+and programs. `.handle` selects initial children and constructs their values:
+
+```ts
+const Root = Machine.state({
+  fields: { seed: Schema.Number },
+  states: {
+    Loading: { fields: { count: Schema.Number } },
+    Ready: {}
+  }
+})
+const targets = Machine.targets(Root)
+const machine = Machine.make({ root: Root, input: Schema.Number, events: Machine.events({}) }).handle({
+  root: ({ input }) => ({ seed: input }),
+  initial: { target: targets.root.Loading, data: ({ root }) => ({ count: root.seed }) }
+})
+```
+
+Only the root constructor receives startup input. Child constructors receive
+root data, their owning state's data, ancestors, and the lifecycle event.
+Each compound declares an initial edge targeting one direct child; that edge
+also supplies the child's required values. Nested compounds declare their own
+edges in their handlers. There is no separate `initialConfiguration` override.
+
+A parallel handler's `initial` is a map of region data. It enters all regions:
+
+```ts
+const Root = Machine.state({
+  type: "parallel",
+  states: {
+    Editor: { fields: { draft: Schema.String }, states: { Editing: {}, Saved: {} } },
+    Network: { fields: { online: Schema.Boolean } }
+  }
+})
+const targets = Machine.targets(Root)
+const machine = Machine.make({ root: Root, events: Machine.events({}) }).handle({
+  initial: { Editor: { draft: "" }, Network: { online: false } },
+  states: { Editor: { initial: { target: targets.root.Editor.Editing } } }
+})
+```
+
+Root and region data accept the short literal or callback form. For decoded
+values, use `{ decoded: true, data: valueOrCallback }`. This descriptor accepts
+only those two keys. If your domain data itself has `decoded: true` and `data`
+fields, return it from a callback: callback results are always ordinary schema
+input. Required data is checked at compile time; schema-less regions accept no data.
+
+Use root or state `entry`/`exit` for synchronous commands and `invoke` for
+asynchronous work. Constructors only produce values. An unhandled definition
+cannot be started, planned, or registered as a child machine.
+
 ### Construct state values
 
 ```ts
 const Root = Machine.state({
-  initial: "Idle",
   states: {
     Idle: {},
     Loading: { fields: { query: Schema.String } },
@@ -100,26 +150,34 @@ const Root = Machine.state({
 })
 const targets = Machine.targets(Root)
 const Events = Machine.events({ Search: { query: Schema.String }, Reset: {} })
-
-const Search = Machine.make({ root: Root, events: Events }).handle({
+const Search = Machine.make({
+  root: Root,
+  events: Events
+}).handle({
+  initial: {
+    target: targets.root.Idle
+  },
   states: {
     Idle: {
       on: {
         Search: {
           target: targets.root.Loading,
-          from: ({ event }) => ({ query: event.query })
+          data: ({ event }) => ({ query: event.query })
         }
       }
     },
-    Loading: { on: { Reset: { target: targets.root.Idle } } }
+    Loading: { on: { Reset: { target: targets.root.Idle } } },
+    Ready: {},
+    Failed: {}
   }
 })
 ```
 
-`from` accepts the schema's make input, including defaults and transformations.
-`decoded` accepts its decoded value, preserving class instances. The planner
-validates both boundaries and reports `MachineSchemaDecodeError`. Omit construction
-only when the selected builder supports empty default construction.
+`data` accepts a value or a synchronous callback returning the schema's make
+input, including constructor defaults and transformations. Add `decoded: true`
+when supplying the already-decoded type, including class instances. Both paths
+validate values and report `MachineSchemaDecodeError`. Omit data only when the
+selected state supports empty construction. Schema-less states do not accept data.
 
 A callback receives the specific event and source-state types, plus `root`,
 `containingState`, `ancestors`, and the appropriate machine references. A
@@ -143,6 +201,7 @@ const machine = Machine.make({
     }
   }
 }).handle({
+  initial: { target: targets.root.Idle },
   states: {
     Idle: {
       on: {
@@ -164,8 +223,8 @@ payload belonging to another branch. A single-target group works the same way;
 there is no second path declaration in the resolver. For a compound target,
 `select.checkout.from(parentValues, child => child.Review.from(childValues))`
 constructs the explicitly selected subtree. Parallel constructors require every
-entered region. Required initializers and final output implementations remain
-part of machine readiness checking.
+entered region. Every compound has an initial edge, including inactive branches. Final outputs,
+history defaults, and choices remain part of machine readiness checking.
 
 Use `guard: context => boolean` to decline before construction or commands.
 For a resolver that can decline, explicitly add `declinable: true`; only then may
@@ -179,11 +238,11 @@ All references come from the same root descriptor supplied to `make`:
 
 | Declaration                                           | Meaning                                                                   |
 | ----------------------------------------------------- | ------------------------------------------------------------------------- |
-| `{ target: targets.root.Checkout.Review, from: ... }` | Enter a declared destination with its value.                              |
-| `{ initial: targets.root.Checkout, from: ... }`       | Enter the declared initial configuration of a compound or parallel state. |
+| `{ target: targets.root.Checkout.Review, data: ... }` | Enter a declared destination with its value.                              |
+| `{ initial: targets.root.Checkout, data: ... }`       | Enter the declared initial configuration of a compound or parallel state. |
 | `{ history: targets.root.Checkout.recent }`           | Restore a declared history state.                                         |
-| `{ update: targets.root.Checkout, from: ... }`        | Replace a retained active owner's value.                                  |
-| `{ update: targets.root, from: ... }`                 | Replace root data and retain active descendants.                          |
+| `{ update: targets.root.Checkout, data: ... }`        | Replace a retained active owner's value.                                  |
+| `{ update: targets.root, data: ... }`                 | Replace root data and retain active descendants.                          |
 | `{ none: true }`                                      | Accept an event without changing the configuration.                       |
 
 An atomic transition can enter a destination and update one retained owner:
@@ -192,7 +251,7 @@ An atomic transition can enter a destination and update one retained owner:
 Save: {
   target: targets.root.Checkout.Saving,
   update: targets.root.Checkout,
-  from: ({ event, ancestors }) => ({
+  data: ({ event, ancestors }) => ({
     target: { request: event.request },
     update: { ...ancestors.Checkout, revision: event.revision }
   })
@@ -206,8 +265,8 @@ A retained owner must be active for that source and remain active through the
 transition. A sibling region's value cannot be updated through this operation.
 
 The runtime transition API does not replace arbitrary complete root
-configurations. `initialConfiguration` and history defaults retain complete
-configuration construction for startup and restoration.
+configurations. Startup follows the initial declarations in `.handle`; history
+defaults retain complete subtree construction for restoration.
 
 ### Protocols and ownership
 
@@ -232,7 +291,7 @@ adapter.
 
 The same root supports compound and parallel states, eventless `always`
 transitions, ordered named choices, final states, `onDone` completion,
-initializers, shallow and deep history, and retained snapshots. The topology
+initial declarations, shallow and deep history, and retained snapshots. The topology
 is captured directly from declarations; visualization and branch coverage do
 not execute user resolvers or depend on TypeScript source extraction.
 
@@ -257,15 +316,21 @@ const Search = Machine.make({
   logic: { worker: workerLogic },
   children: { validation: ValidationChild }
 }).handle({
+  initial: {
+    target: Machine.targets(Root).root.Idle
+  },
   states: {
+    Idle: {},
     Loading: {
       invoke: {
         src: "load",
         input: ({ state }) => state.query,
-        onDone: { target: targets.root.Ready, from: ({ output }) => ({ items: output }) },
-        onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: error.message }) }
+        onDone: { target: targets.root.Ready, data: ({ output }) => ({ items: output }) },
+        onFailure: { target: targets.root.Failed, data: ({ error }) => ({ message: error.message }) }
       }
-    }
+    },
+    Ready: {},
+    Failed: {}
   }
 })
 ```
@@ -290,8 +355,7 @@ and cancellation boundaries; a typed `onFailure` handles the source's declared
 runtime error channel.
 
 ```ts
-invoke: ;
-;[
+const invocations = [
   {
     src: "updates",
     onElement: {

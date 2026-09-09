@@ -104,7 +104,7 @@ try {
   const fixture = join(consumer, "machine.ts")
   await writeFile(
     fixture,
-    `import { Machine } from "@typeonce/effect-machine"\nMachine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) })\n`
+    `import { Machine } from "@typeonce/effect-machine"\nMachine.make({ root: Machine.state({}), events: Machine.events({ Ignore: {} }) }).handle({ on: { Ignore: { none: true, resolve: () => {} } } })\n`
   )
 
   run(process.execPath, [
@@ -137,7 +137,7 @@ try {
 
   run(oxlint, ["-c", ".oxlintrc.json", "--fix", "machine.ts"], { cwd: consumer })
   const fixed = await readFile(fixture, "utf8")
-  if (!fixed.includes("initial: (to) => to.Ready()") || fixed.includes(".resolve(")) {
+  if (!fixed.includes("Ignore: { none: true }") || fixed.includes("resolve:")) {
     throw new Error(`packed plugin did not apply its fixer\n${fixed}`)
   }
 

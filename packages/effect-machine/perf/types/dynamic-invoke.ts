@@ -1,21 +1,19 @@
 import { Machine } from "../../dist/index.js"
 import { LoadError, Loading, loadUser, States } from "./dynamic-invoke-control.js"
-
 interface User {
   readonly id: string
   readonly name: string
 }
-
 const machine = Machine.make({
   effects: { "load-user": loadUser },
-
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Loading.from(Loading.make({ userId: "user-1" }))))
+  events: Machine.eventsFromSchemas()
 })
-
 const invoked = machine.handle({
+  initial: {
+    target: Machine.targets(States).root.Loading,
+    data: Loading.make({ userId: "user-1" })
+  },
   states: {
     Loading: {
       invoke: {
@@ -41,5 +39,4 @@ const invoked = machine.handle({
     }
   }
 })
-
 void invoked

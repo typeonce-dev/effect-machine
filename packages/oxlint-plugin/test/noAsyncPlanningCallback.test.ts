@@ -16,33 +16,33 @@ tester.run("no-async-planning-callback", rule, {
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ effects: { work: input => Effect.sync(() => fetch("/api")) }, streams: { workStream: input => Stream.fromEffect(Effect.sync(() => Date.now())) } }).handle({})`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("load", async () => undefined) } } })`,
+Machine.make({}).handle({ states: { Ready: { invoke: (from) => from.effect("load", async () => undefined) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
 const other = { resolve: (_callback: unknown) => undefined }
 other.resolve(async () => undefined)`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready(), metadata: { initial: async () => undefined } })`,
+Machine.make({}).handle({ root: (to) => to.Ready(), metadata: { initial: async () => undefined } })`,
     `import { Machine } from "@typeonce/effect-machine"
 const other = { handle: (_config: unknown) => undefined }
 other.handle({ states: { Ready: { entry: async () => undefined } } })`,
     `const machine = { initial: async () => undefined }`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => [
+Machine.make({}).handle({ states: { Ready: { invoke: (from) => [
   from.effect("fetch", () => fetch("/api")),
   from.timer("delay", () => setTimeout(() => undefined, 1))
 ] } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ fetch, setTimeout }) => {
+Machine.make({}).handle({ states: { Ready: { entry: ({ fetch, setTimeout }) => {
   fetch()
   setTimeout()
 } } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: () => {
+Machine.make({}).handle({ states: { Ready: { entry: () => {
   const later = () => Promise.resolve()
   return later
 } } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: () =>
+Machine.make({}).handle({ states: { Ready: { entry: () =>
   other.resolve(async () => fetch("/helper"))
 } } })`
   ],
@@ -54,7 +54,7 @@ Machine.make({}).handle({ states: { Loading: { invoke: { src: "load", input: asy
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({}).handle({ on: { Save: { target: destination, from: async () => ({}) } } })`,
+Machine.make({}).handle({ on: { Save: { target: destination, data: async () => ({}) } } })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
@@ -69,38 +69,38 @@ Machine.make({ root: Machine.state({}) }).handle({ on: { Update: (to) => to.none
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ root: Machine.state({}), initialConfiguration: async (root) => root.resolve(() => undefined) })`,
+Machine.make({ root: Machine.state({}) }).handle({ root: async () => ({}) })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: async (to) => to.Ready() })`,
+Machine.make({}).handle({ root: async (to) => to.Ready() })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { on: { Start: async (to) => to.branch.Running() } } } })`,
+Machine.make({}).handle({ states: { Ready: { on: { Start: async (to) => to.branch.Running() } } } })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready().resolve(async ({ target }) => target.from()) })`,
+Machine.make({}).handle({ root: (to) => to.Ready().resolve(async ({ target }) => target.from()) })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import * as EM from "@typeonce/effect-machine"
-EM.Machine.make({ initial: (to) => to.Loading() }).handle({ states: { Loading: { invoke: (from) => from.effect("load", () => Promise.resolve()).onDone(async (to) => to.branch.Done()) } } })`,
+EM.Machine.make({}).handle({ states: { Loading: { invoke: (from) => from.effect("load", () => Promise.resolve()).onDone(async (to) => to.branch.Done()) } } })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-const definition = Machine.make({ initial: (to) => to.Parent() })
+const definition = Machine.make({})
 definition.handle({ states: { Parent: { states: { Child: { entry: async () => undefined } } } } })`,
       errors: [{ messageId: "asyncPlanning" }]
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
+Machine.make({}).handle({ states: { Ready: {
   entry: async () => undefined,
   exit: async () => undefined,
   always: async (to) => to.none,
@@ -111,7 +111,7 @@ Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => {
+Machine.make({}).handle({ root: (to) => {
   fetch("/initial")
   new Promise(() => undefined)
   Promise.all([])
@@ -124,11 +124,11 @@ Machine.make({ initial: (to) => {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
-  initialize: ({ builder }) => {
+Machine.make({}).handle({ states: { Ready: {
+  initial: { target: child, data: () => {
     globalThis["fetch"]("/initialize")
-    return builder.from()
-  },
+    return ({})
+  } },
   output: ({ state }) => {
     window.setInterval(() => undefined, 100)
     return state
@@ -146,7 +146,7 @@ Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: async (to) => {
+Machine.make({}).handle({ root: async (to) => {
   await fetch("/initial")
   return to.Ready()
 } })`,

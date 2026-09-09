@@ -9,18 +9,15 @@ import {
   lifecycleCommandSamples,
   makeActivityProbe
 } from "./support/activityLifecycleModel.js"
-
 class Idle extends Schema.TaggedClass<Idle>("ActivityIdle")("Idle", {}) {}
 class Active extends Schema.TaggedClass<Active>("ActivityActive")("Active", {}) {}
 class Done extends Schema.TaggedClass<Done>("ActivityDone")("Done", { epoch: Schema.Number }) {}
-
 class Enter extends Schema.TaggedClass<Enter>("ActivityEnter")("Enter", {}) {}
 class Leave extends Schema.TaggedClass<Leave>("ActivityLeave")("Leave", {}) {}
 class Restart extends Schema.TaggedClass<Restart>("ActivityRestart")("Restart", {}) {}
 class QueueBarrier extends Schema.TaggedClass<QueueBarrier>("ActivityQueueBarrier")("QueueBarrier", {}) {}
 class Completed extends Schema.TaggedClass<Completed>("ActivityCompleted")("Completed", { epoch: Schema.Number }) {}
 class TimerFired extends Schema.TaggedClass<TimerFired>("ActivityTimerFired")("TimerFired", {}) {}
-
 const sendAndWaitForActiveState = <State, Event, Error, Output>(
   actor: Machine.MachineRef<State, Event, Error, Output>,
   event: Event,
@@ -36,11 +33,13 @@ const sendAndWaitForActiveState = <State, Event, Error, Output>(
     yield* actor.send(event)
     yield* Fiber.join(observed)
   })
-
 const assertOneExitPerStart = (
   records: ReadonlyArray<
-    | { readonly _tag: "Started"; readonly owner: string; readonly epoch: number }
-    | {
+    {
+      readonly _tag: "Started"
+      readonly owner: string
+      readonly epoch: number
+    } | {
       readonly _tag: "Exited"
       readonly owner: string
       readonly epoch: number
@@ -59,92 +58,87 @@ const assertOneExitPerStart = (
     )
   }
 }
-
 describe("machine activity lifecycle model", () => {
   it.effect("matches exactly-once start and cancellation across generated lifecycle commands", () =>
     Effect.gen(function*() {
-      const samples = lifecycleCommandSamples({ numRuns: 40, maxCommands: 20, seed: 82_419 })
-      yield* Effect.forEach(
-        samples,
-        (commands) =>
-          Effect.gen(function*() {
-            const probe = yield* makeActivityProbe
-            const states = Machine.state({ initial: "Idle", states: { Idle, Active } })
-            const targets1 = Machine.targets(states)
-            const machine = Machine.make({
-              logic: { source1: probe.logic("active", { _tag: "Blocked" }) },
-
-              root: states,
-              events: Machine.eventsFromSchemas(Enter, Leave, Restart),
-              initialConfiguration: (root) =>
-                root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
-            }).handle({
-              states: {
-                Idle: {
-                  on: {
-                    Enter: { target: targets1.root.Active, decoded: () => (new Active({})) }
-                  }
+      const samples = lifecycleCommandSamples({ numRuns: 40, maxCommands: 20, seed: 82419 })
+      yield* Effect.forEach(samples, (commands) =>
+        Effect.gen(function*() {
+          const probe = yield* makeActivityProbe
+          const states = Machine.state({ states: { Idle, Active } })
+          const targets1 = Machine.targets(states)
+          const machine = Machine.make({
+            logic: { source1: probe.logic("active", { _tag: "Blocked" }) },
+            root: states,
+            events: Machine.eventsFromSchemas(Enter, Leave, Restart)
+          }).handle({
+            initial: {
+              target: Machine.targets(states).root.Idle,
+              decoded: true,
+              data: new Idle({})
+            },
+            states: {
+              Idle: {
+                on: {
+                  Enter: { target: targets1.root.Active, decoded: true, data: () => (new Active({})) }
+                }
+              },
+              Active: {
+                invoke: {
+                  src: "source1",
+                  id: "activity",
+                  address: Machine.childAddress("activity"),
+                  onDone: { none: true },
+                  onFailure: { none: true }
                 },
-                Active: {
-                  invoke: {
-                    src: "source1",
-                    id: "activity",
-                    address: Machine.childAddress("activity"),
-                    onDone: { none: true },
-                    onFailure: { none: true }
-                  },
-                  on: {
-                    Leave: { target: targets1.root.Idle, decoded: () => (new Idle({})) },
-                    Restart: { target: targets1.root.Active, reenter: true, decoded: () => (new Active({})) }
-                  }
+                on: {
+                  Leave: { target: targets1.root.Idle, decoded: true, data: () => (new Idle({})) },
+                  Restart: { target: targets1.root.Active, reenter: true, decoded: true, data: () => (new Active({})) }
                 }
               }
-            })
-            const actor = yield* Machine.start(machine)
-            let active = false
-
-            for (const command of commands) {
-              switch (command) {
-                case "enter":
-                  yield* actor.send(new Enter({}))
-                  if (!active) {
-                    yield* probe.takeStarted
-                    active = true
-                  }
-                  break
-                case "leave":
-                  if (active) {
-                    yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
-                    active = false
-                  } else {
-                    yield* actor.send(new Leave({}))
-                  }
-                  break
-                case "restart":
-                  yield* actor.send(new Restart({}))
-                  if (active) yield* probe.takeStarted
-                  break
-              }
             }
-            yield* actor.stop
-
-            const expected = expectedLifecycle(commands)
-            const records = yield* probe.records
-            assert.strictEqual(countRecords(records, "starts"), expected.starts)
-            assert.strictEqual(countRecords(records, "cancelled"), expected.cancellations)
-            assert.strictEqual(countRecords(records, "succeeded"), 0)
-            assert.strictEqual(countRecords(records, "failed"), 0)
-            assertOneExitPerStart(records)
-          }),
-        { discard: true }
-      )
+          })
+          const actor = yield* Machine.start(machine)
+          let active = false
+          for (const command of commands) {
+            switch (command) {
+              case "enter":
+                yield* actor.send(new Enter({}))
+                if (!active) {
+                  yield* probe.takeStarted
+                  active = true
+                }
+                break
+              case "leave":
+                if (active) {
+                  yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
+                  active = false
+                } else {
+                  yield* actor.send(new Leave({}))
+                }
+                break
+              case "restart":
+                yield* actor.send(new Restart({}))
+                if (active) {
+                  yield* probe.takeStarted
+                }
+                break
+            }
+          }
+          yield* actor.stop
+          const expected = expectedLifecycle(commands)
+          const records = yield* probe.records
+          assert.strictEqual(countRecords(records, "starts"), expected.starts)
+          assert.strictEqual(countRecords(records, "cancelled"), expected.cancellations)
+          assert.strictEqual(countRecords(records, "succeeded"), 0)
+          assert.strictEqual(countRecords(records, "failed"), 0)
+          assertOneExitPerStart(records)
+        }), { discard: true })
     }))
-
   it.effect("records immediate invoke completion and cleanup exactly once", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
       const states = Machine.state({
-        initial: "Active",
         states: {
           Active,
           Done: { schema: Done, type: "final", output: Schema.Number }
@@ -153,20 +147,26 @@ describe("machine activity lifecycle model", () => {
       const targets2 = Machine.targets(states)
       const machine = Machine.make({
         logic: { source1: probe.immediate("immediate", (epoch) => new Completed({ epoch })) },
-
         root: states,
         events: Machine.eventsFromSchemas(),
-        internalEvents: Machine.internalEventsFromSchemas(Completed),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
+        internalEvents: Machine.internalEventsFromSchemas(Completed)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Active,
+          decoded: true,
+          data: new Active({})
+        },
         states: {
           Active: {
             invoke: {
               src: "source1",
               id: "immediate",
               address: Machine.childAddress("immediate"),
-              onDone: { target: targets2.root.Done, decoded: ({ output }) => (new Done({ epoch: output.epoch })) },
+              onDone: {
+                target: targets2.root.Done,
+                decoded: true,
+                data: ({ output }) => (new Done({ epoch: output.epoch }))
+              },
               onFailure: { none: true }
             }
           },
@@ -175,23 +175,21 @@ describe("machine activity lifecycle model", () => {
           }
         }
       })
-
       const actor = yield* Machine.start(machine)
       assert.strictEqual(yield* actor.join, 1)
-
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "starts", "immediate"), 1)
       assert.strictEqual(countRecords(records, "succeeded", "immediate"), 1)
       assertOneExitPerStart(records)
     }))
-
   it.effect("rejects stale cancellation completion from a previous re-entry epoch", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
       class EpochActive extends Schema.TaggedClass<EpochActive>("ActivityEpochActive")("EpochActive", {
         acknowledged: Schema.Number
-      }) {}
-      const states = Machine.state({ initial: "Active", states: { Active: EpochActive, Done } })
+      }) {
+      }
+      const states = Machine.state({ states: { Active: EpochActive, Done } })
       const targets3 = Machine.targets(states)
       const machine = Machine.make({
         logic: {
@@ -200,13 +198,15 @@ describe("machine activity lifecycle model", () => {
             event: (epoch) => new Completed({ epoch })
           })
         },
-
         root: states,
         events: Machine.eventsFromSchemas(Restart, QueueBarrier),
-        internalEvents: Machine.internalEventsFromSchemas(Completed),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new EpochActive({ acknowledged: 0 }))))
+        internalEvents: Machine.internalEventsFromSchemas(Completed)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Active,
+          decoded: true,
+          data: new EpochActive({ acknowledged: 0 })
+        },
         states: {
           Active: {
             invoke: {
@@ -220,13 +220,19 @@ describe("machine activity lifecycle model", () => {
               Restart: {
                 target: targets3.root.Active,
                 reenter: true,
-                decoded: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged }))
+                decoded: true,
+                data: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged }))
               },
               QueueBarrier: {
                 target: targets3.root.Active,
-                decoded: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged + 1 }))
+                decoded: true,
+                data: ({ state }) => (new EpochActive({ acknowledged: state.acknowledged + 1 }))
               },
-              Completed: { target: targets3.root.Done, decoded: ({ event }) => (new Done({ epoch: event.epoch })) }
+              Completed: {
+                target: targets3.root.Done,
+                decoded: true,
+                data: ({ event }) => (new Done({ epoch: event.epoch }))
+              }
             }
           },
           Done: {}
@@ -234,22 +240,16 @@ describe("machine activity lifecycle model", () => {
       })
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
-
       yield* actor.send(new Restart({}))
       yield* probe.takeStarted
       yield* actor.send(new Restart({}))
       yield* probe.takeStarted
-
       // The invoke token should suppress the old completion before enqueue.
       // If it leaked, FIFO ordering would process it before this barrier and
       // transition to Done, so the acknowledged Active publication could not
       // occur.
-      yield* sendAndWaitForActiveState(
-        actor,
-        new QueueBarrier({}),
-        (state) => state.state.path === "Active" && state.state.value.acknowledged === 1
-      )
-
+      yield* sendAndWaitForActiveState(actor, new QueueBarrier({}), (state) =>
+        state.state.path === "Active" && state.state.value.acknowledged === 1)
       const active = yield* actor.snapshot
       assert.strictEqual(active.status, "active")
       if (active.status === "active") {
@@ -261,30 +261,35 @@ describe("machine activity lifecycle model", () => {
       }
       const beforeStop = yield* probe.records
       assert.deepStrictEqual(
-        beforeStop.filter((record) => record._tag === "Started").map((record) => record.epoch),
+        beforeStop.filter((record) =>
+          record._tag === "Started"
+        ).map((record) => record.epoch),
         [1, 2, 3]
       )
       assert.strictEqual(countRecords(beforeStop, "cancelled", "epoch"), 2)
-
       yield* actor.stop
-
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "cancelled", "epoch"), 3)
       assertOneExitPerStart(records)
     }))
-
   it.effect("cancels only the activity owned by an exited parallel region", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      class Root extends Schema.TaggedClass<Root>("ActivityRoot")("Root", {}) {}
-      class Left extends Schema.TaggedClass<Left>("ActivityLeft")("Left", {}) {}
-      class LeftActive extends Schema.TaggedClass<LeftActive>("ActivityLeftActive")("LeftActive", {}) {}
-      class LeftIdle extends Schema.TaggedClass<LeftIdle>("ActivityLeftIdle")("LeftIdle", {}) {}
-      class Right extends Schema.TaggedClass<Right>("ActivityRight")("Right", {}) {}
-      class RightActive extends Schema.TaggedClass<RightActive>("ActivityRightActive")("RightActive", {}) {}
-      class LeaveLeft extends Schema.TaggedClass<LeaveLeft>("ActivityLeaveLeft")("LeaveLeft", {}) {}
+      class Root extends Schema.TaggedClass<Root>("ActivityRoot")("Root", {}) {
+      }
+      class Left extends Schema.TaggedClass<Left>("ActivityLeft")("Left", {}) {
+      }
+      class LeftActive extends Schema.TaggedClass<LeftActive>("ActivityLeftActive")("LeftActive", {}) {
+      }
+      class LeftIdle extends Schema.TaggedClass<LeftIdle>("ActivityLeftIdle")("LeftIdle", {}) {
+      }
+      class Right extends Schema.TaggedClass<Right>("ActivityRight")("Right", {}) {
+      }
+      class RightActive extends Schema.TaggedClass<RightActive>("ActivityRightActive")("RightActive", {}) {
+      }
+      class LeaveLeft extends Schema.TaggedClass<LeaveLeft>("ActivityLeaveLeft")("LeaveLeft", {}) {
+      }
       const root4 = Machine.state({
-        initial: "Root",
         states: {
           Root: {
             schema: Root,
@@ -292,12 +297,10 @@ describe("machine activity lifecycle model", () => {
             states: {
               left: {
                 schema: Left,
-                initial: "active",
                 states: { active: LeftActive, idle: LeftIdle }
               },
               right: {
                 schema: Right,
-                initial: "active",
                 states: { active: RightActive }
               }
             }
@@ -310,35 +313,24 @@ describe("machine activity lifecycle model", () => {
           source1: probe.logic("left", { _tag: "Blocked" }),
           source2: probe.logic("right", { _tag: "Blocked" })
         },
-
         root: root4,
-        events: Machine.eventsFromSchemas(LeaveLeft),
-        initialConfiguration: (to) =>
-          to.resolve(() => ({
-            path: "" as const,
-            value: undefined,
-            state: {
-              path: "Root" as const,
-              value: new Root({}),
-              states: {
-                left: {
-                  path: "Root.left" as const,
-                  value: new Left({}),
-                  state: { path: "Root.left.active" as const, value: new LeftActive({}) }
-                },
-                right: {
-                  path: "Root.right" as const,
-                  value: new Right({}),
-                  state: { path: "Root.right.active" as const, value: new RightActive({}) }
-                }
-              }
-            }
-          }))
+        events: Machine.eventsFromSchemas(LeaveLeft)
       }).handle({
+        initial: {
+          target: Machine.targets(root4).root.Root,
+          decoded: true,
+          data: new Root({})
+        },
         states: {
           Root: {
+            initial: { left: { decoded: true, data: new Left({}) }, right: { decoded: true, data: new Right({}) } },
             states: {
               left: {
+                initial: {
+                  target: Machine.targets(root4).root.Root.left.active,
+                  decoded: true,
+                  data: new LeftActive({})
+                },
                 states: {
                   active: {
                     invoke: {
@@ -349,12 +341,18 @@ describe("machine activity lifecycle model", () => {
                       onFailure: { none: true }
                     },
                     on: {
-                      LeaveLeft: { target: targets4.root.Root.left.idle, decoded: () => (new LeftIdle({})) }
+                      LeaveLeft: { target: targets4.root.Root.left.idle, decoded: true, data: () => (new LeftIdle({})) }
                     }
-                  }
+                  },
+                  idle: {}
                 }
               },
               right: {
+                initial: {
+                  target: Machine.targets(root4).root.Root.right.active,
+                  decoded: true,
+                  data: new RightActive({})
+                },
                 states: {
                   active: {
                     invoke: {
@@ -374,42 +372,36 @@ describe("machine activity lifecycle model", () => {
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
       yield* probe.takeStarted
-
-      yield* sendAndWaitForActiveState(
-        actor,
-        new LeaveLeft({}),
-        (state) => state.state.states.left.state.path === "Root.left.idle"
-      )
-
+      yield* sendAndWaitForActiveState(actor, new LeaveLeft({}), (state) =>
+        state.state.states.left.state.path === "Root.left.idle")
       const afterLeftExit = yield* probe.records
       assert.strictEqual(countRecords(afterLeftExit, "starts", "left"), 1)
       assert.strictEqual(countRecords(afterLeftExit, "starts", "right"), 1)
       assert.strictEqual(countRecords(afterLeftExit, "cancelled", "left"), 1)
       assert.strictEqual(countRecords(afterLeftExit, "cancelled", "right"), 0)
-
       yield* actor.stop
-
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "cancelled", "left"), 1)
       assert.strictEqual(countRecords(records, "cancelled", "right"), 1)
       assertOneExitPerStart(records)
     }))
-
   it.effect("cancels a state-owned timer before virtual time advances", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.state({ initial: "Idle", states: { Idle, Active, Done } })
+      const states = Machine.state({ states: { Idle, Active, Done } })
       const targets5 = Machine.targets(states)
       const machine = Machine.make({
         timers: { source2: "1 hour" },
         logic: { source1: probe.logic("timed", { _tag: "Blocked" }) },
-
         root: states,
         events: Machine.eventsFromSchemas(Leave),
-        internalEvents: Machine.internalEventsFromSchemas(TimerFired),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
+        internalEvents: Machine.internalEventsFromSchemas(TimerFired)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Active,
+          decoded: true,
+          data: new Active({})
+        },
         states: {
           Idle: {},
           Active: {
@@ -422,10 +414,10 @@ describe("machine activity lifecycle model", () => {
             }, {
               src: "source2",
               id: "deadline",
-              onDone: { target: targets5.root.Done, decoded: () => (new Done({ epoch: -1 })) }
+              onDone: { target: targets5.root.Done, decoded: true, data: () => (new Done({ epoch: -1 })) }
             }],
             on: {
-              Leave: { target: targets5.root.Idle, decoded: () => (new Idle({})) }
+              Leave: { target: targets5.root.Idle, decoded: true, data: () => (new Idle({})) }
             }
           },
           Done: {}
@@ -433,34 +425,35 @@ describe("machine activity lifecycle model", () => {
       })
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
-
       yield* sendAndWaitForActiveState(actor, new Leave({}), (state) => state.state.path === "Idle")
       yield* TestClock.adjust("2 hours")
-
       const snapshot = yield* actor.snapshot
       assert.strictEqual(snapshot.status, "active")
-      if (snapshot.status === "active") assert.strictEqual(snapshot.state.state.path, "Idle")
+      if (snapshot.status === "active") {
+        assert.strictEqual(snapshot.state.state.path, "Idle")
+      }
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "cancelled", "timed"), 1)
       assertOneExitPerStart(records)
       yield* actor.stop
     }))
-
   it.effect("cleans sibling activities when an invoked child fails", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.state({ initial: "Active", states: { Active } })
+      const states = Machine.state({ states: { Active } })
       const machine = Machine.make({
         logic: {
           source1: probe.logic("failing", { _tag: "Failure" }),
           source2: probe.logic("sibling", { _tag: "Blocked" })
         },
-
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Active,
+          decoded: true,
+          data: new Active({})
+        },
         states: {
           Active: {
             invoke: [{
@@ -488,10 +481,8 @@ describe("machine activity lifecycle model", () => {
       const first = yield* probe.takeStarted
       const second = yield* probe.takeStarted
       const failing = first.owner === "failing" ? first : second
-
       yield* Deferred.succeed(failing.release, void 0)
       const failed = yield* Effect.exit(actor.join)
-
       assert(Exit.isFailure(failed))
       if (Exit.isFailure(failed)) {
         assert.instanceOf(failed.cause.reasons.find((reason) => reason._tag === "Die")?.defect, ActivityFailure)
@@ -501,22 +492,23 @@ describe("machine activity lifecycle model", () => {
       assert.strictEqual(countRecords(records, "cancelled", "sibling"), 1)
       assertOneExitPerStart(records)
     }))
-
   it.effect("waits for every activity cleanup before parent stop completes", () =>
     Effect.gen(function*() {
       const probe = yield* makeActivityProbe
-      const states = Machine.state({ initial: "Active", states: { Active } })
+      const states = Machine.state({ states: { Active } })
       const machine = Machine.make({
         logic: {
           source1: probe.logic("first", { _tag: "Blocked" }),
           source2: probe.logic("second", { _tag: "Blocked" })
         },
-
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Active.decoded(new Active({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Active,
+          decoded: true,
+          data: new Active({})
+        },
         states: {
           Active: {
             invoke: [{
@@ -538,15 +530,12 @@ describe("machine activity lifecycle model", () => {
       const actor = yield* Machine.start(machine)
       yield* probe.takeStarted
       yield* probe.takeStarted
-
       yield* actor.stop
-
       const records = yield* probe.records
       assert.strictEqual(countRecords(records, "cancelled", "first"), 1)
       assert.strictEqual(countRecords(records, "cancelled", "second"), 1)
       assertOneExitPerStart(records)
       assert.strictEqual((yield* actor.snapshot).status, "stopped")
-
       yield* actor.stop
       assert.deepStrictEqual(yield* probe.records, records)
     }))

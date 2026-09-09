@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-
 import { RegistryContext } from "@effect/atom-react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import { Schema } from "effect"
@@ -9,22 +8,26 @@ import { afterEach, expect, it } from "vitest"
 import { Machine } from "../../effect-machine/src/index.js"
 import { AtomMachine } from "../../effect-machine/src/unstable/reactivity/index.js"
 import { createMachineContext, MachineState } from "../src/index.js"
-
 const Events = Machine.events({ Increment: {}, Close: {} })
-const root1 = Machine.state({ fields: { count: Schema.Number }, initial: "Open", states: { Open: {}, Closed: {} } })
+const root1 = Machine.state({ fields: { count: Schema.Number }, states: { Open: {}, Closed: {} } })
 const targets1 = Machine.targets(root1)
 const counter = Machine.make({
   root: root1,
   events: Events,
-  input: Schema.Number,
-  initial: (root) => root.from(({ input }) => ({ count: input }))
+  input: Schema.Number
 }).handle({
-  on: { Increment: { update: targets1.root, from: ({ root: current }) => ({ count: current.count + 1 }) } },
-  states: { Open: { on: { Close: { target: targets1.root.Closed } } } }
+  initial: {
+    target: Machine.targets(root1).root.Open
+  },
+  root: ({ input }) => ({ count: input }),
+  on: { Increment: { update: targets1.root, data: ({ root: current }) => ({ count: current.count + 1 }) } },
+  states: {
+    Open: { on: { Close: { target: targets1.root.Closed } } },
+    Closed: {}
+  }
 })
 const Counter = createMachineContext(AtomMachine.factory(counter))
 afterEach(cleanup)
-
 it("keeps a provider's input and bridge stable until its React key changes", async () => {
   const registry = AtomRegistry.make({ defaultIdleTTL: 1 })
   let bridge: ReturnType<typeof Counter.useMachine> | undefined
@@ -75,11 +78,12 @@ it("keeps a provider's input and bridge stable until its React key changes", asy
   view.unmount()
   registry.dispose()
 })
-
 it("keeps independent providers isolated in the same registry", async () => {
   const registry = AtomRegistry.make()
   const bridges: Array<ReturnType<typeof Counter.useMachine>> = []
-  function Reader({ index }: { readonly index: number }) {
+  function Reader({ index }: {
+    readonly index: number
+  }) {
     const machine = Counter.useMachine()
     bridges[index] = machine
     return (
@@ -110,11 +114,12 @@ it("keeps independent providers isolated in the same registry", async () => {
   view.unmount()
   registry.dispose()
 })
-
 it("sends startup failures from a state renderer to an error boundary", async () => {
   const registry = AtomRegistry.make()
   let caught: unknown
-  class Boundary extends React.Component<React.PropsWithChildren, { failed: boolean }> {
+  class Boundary extends React.Component<React.PropsWithChildren, {
+    failed: boolean
+  }> {
     state = { failed: false }
     static getDerivedStateFromError(error: unknown) {
       caught = error

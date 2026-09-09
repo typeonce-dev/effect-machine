@@ -16,18 +16,18 @@ tester.run("no-nondeterministic-planning", rule, {
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ effects: { work: input => Effect.sync(() => fetch("/api")) }, streams: { workStream: input => Stream.fromEffect(Effect.sync(() => Date.now())) } }).handle({})`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ event }) => new Date(event.timestamp) } } })`,
+Machine.make({}).handle({ states: { Ready: { entry: ({ event }) => new Date(event.timestamp) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ Date, Math }) => [Date.now(), Math.random()] } } })`,
+Machine.make({}).handle({ states: { Ready: { entry: ({ Date, Math }) => [Date.now(), Math.random()] } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("random", () => crypto.randomUUID()) } } })`,
+Machine.make({}).handle({ states: { Ready: { invoke: (from) => from.effect("random", () => crypto.randomUUID()) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { output: ({ state }) => Date.parse(state.createdAt) } } })`
+Machine.make({}).handle({ states: { Ready: { output: ({ state }) => Date.parse(state.createdAt) } } })`
   ],
   invalid: [
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => {
+Machine.make({}).handle({ root: (to) => {
   Date()
   new Date()
   Date.now()
@@ -46,8 +46,8 @@ Machine.make({ initial: (to) => {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
-  initialize: ({ builder }) => globalThis.Date.now() ? builder.from() : builder.from(),
+Machine.make({}).handle({ states: { Ready: {
+  initial: { target: child, data: () => globalThis.Date.now() ? ({}) : ({}) },
   onDone: (to) => window.Math.random() ? to.none : to.none,
   history: { recent: { default: (to) => self.crypto.randomUUID() ? to.none : to.none } }
 } } })`,

@@ -1,36 +1,41 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", { count: Schema.Number }) {}
 class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: Schema.String }) {}
-
 const events = Machine.events({
   Save: { text: Schema.String, count: Schema.Number },
   Reset: {},
   Change: { allowed: Schema.Boolean }
 })
-const root1 = Machine.state({ schema: Root, initial: "Idle", states: { Idle: {}, Saved: { schema: Saved } } })
+const root1 = Machine.state({ schema: Root, states: { Idle: {}, Saved: { schema: Saved } } })
 const targets1 = Machine.targets(root1)
 const definition = Machine.make({
   branches: { rootUpdate: { updated: { update: targets1.root } } },
   root: root1,
-  events,
-  initial: (root) => root.from(() => ({ count: 0 }))
+  events
 })
-
 describe("transition construction", () => {
   it.effect("constructs destination and root values atomically before entry", () =>
     Effect.gen(function*() {
-      const observations: Array<readonly [number, string]> = []
+      const observations: Array<
+        readonly [
+          number,
+          string
+        ]
+      > = []
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         states: {
           Idle: {
             on: {
               Save: {
                 target: targets1.root.Saved,
                 update: targets1.root,
-                from: ({ event }) => ({
+                data: ({ event }) => ({
                   target: { text: event.text },
                   update: { count: event.count }
                 })
@@ -52,22 +57,27 @@ describe("transition construction", () => {
       assert.strictEqual(initial.state.value.count, 0)
       assert.strictEqual(initial.state.state.path, "Idle")
     }))
-
   it.effect("preserves decoded classes for both sides of an atomic transition", () =>
     Effect.gen(function*() {
       const targetValue = new Saved({ text: "decoded" })
       const rootValue = new Root({ count: 2 })
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         states: {
           Idle: {
             on: {
               Save: {
                 target: targets1.root.Saved,
                 update: targets1.root,
-                decoded: () => ({ target: targetValue, update: rootValue })
+                decoded: true,
+                data: () => ({ target: targetValue, update: rootValue })
               }
             }
-          }
+          },
+          Saved: {}
         }
       })
       const initial = yield* Machine.planInitial(machine)
@@ -77,18 +87,21 @@ describe("transition construction", () => {
       assert.strictEqual(plan.next.value, rootValue)
       assert.strictEqual(plan.next.state.value, targetValue)
     }))
-
   it.effect("constructs a structural destination with an explicit owner replacement", () =>
     Effect.gen(function*() {
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         states: {
-          Idle: { on: { Save: { target: targets1.root.Saved, from: ({ event }) => ({ text: event.text }) } } },
+          Idle: { on: { Save: { target: targets1.root.Saved, data: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             on: {
               Reset: {
                 target: targets1.root.Idle,
                 update: targets1.root,
-                from: () => ({ target: undefined, update: { count: 5 } })
+                data: () => ({ target: undefined, update: { count: 5 } })
               }
             }
           }
@@ -101,19 +114,22 @@ describe("transition construction", () => {
       assert.strictEqual(reset.next.value.count, 5)
       assert.strictEqual(saved.next.state.path, "Saved")
     }))
-
   it.effect("rejects invalid destination or owner values through typed failures before entry", () =>
     Effect.gen(function*() {
       for (const invalidOwner of [false, true]) {
         let entered = false
         const machine = definition.handle({
+          initial: {
+            target: Machine.targets(root1).root.Idle
+          },
+          root: () => ({ count: 0 }),
           states: {
             Idle: {
               on: {
                 Save: {
                   target: targets1.root.Saved,
                   update: targets1.root,
-                  from: () => ({
+                  data: () => ({
                     target: { text: invalidOwner ? "valid" : 42 as unknown as string },
                     update: { count: invalidOwner ? "invalid" as unknown as number : 1 }
                   })
@@ -136,13 +152,16 @@ describe("transition construction", () => {
         assert.strictEqual(initial.state.value.count, 0)
       }
     }))
-
   it.effect("declines guarded updates and combined transitions before construction and commands", () =>
     Effect.gen(function*() {
       for (const combined of [false, true]) {
         let constructed = 0
         const machine = definition.handle({
-          on: { Change: { update: targets1.root, from: ({ root: current }) => ({ count: current.count + 10 }) } },
+          initial: {
+            target: Machine.targets(root1).root.Idle
+          },
+          root: () => ({ count: 0 }),
+          on: { Change: { update: targets1.root, data: ({ root: current }) => ({ count: current.count + 10 }) } },
           states: {
             Idle: {
               on: {
@@ -151,7 +170,7 @@ describe("transition construction", () => {
                     target: targets1.root.Saved,
                     update: targets1.root,
                     guard: ({ root, event }) => root.count === 0 && event.allowed,
-                    from: () => {
+                    data: () => {
                       constructed++
                       return { target: { text: "saved" }, update: { count: 1 } }
                     }
@@ -166,7 +185,8 @@ describe("transition construction", () => {
                     }
                   }
               }
-            }
+            },
+            Saved: {}
           }
         })
         const initial = yield* Machine.planInitial(machine)
@@ -182,16 +202,19 @@ describe("transition construction", () => {
         assert.strictEqual(accepted.next.state.path, combined ? "Saved" : "Idle")
       }
     }))
-
   it.effect("reenters only the source and preserves reentry through atomic construction and guards", () =>
     Effect.gen(function*() {
       const lifecycle: Array<string> = []
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         entry: () => {
           lifecycle.push("root")
         },
         states: {
-          Idle: { on: { Save: { target: targets1.root.Saved, from: ({ event }) => ({ text: event.text }) } } },
+          Idle: { on: { Save: { target: targets1.root.Saved, data: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             entry: () => {
               lifecycle.push("enter")
@@ -205,7 +228,7 @@ describe("transition construction", () => {
                 update: targets1.root,
                 reenter: true,
                 guard: ({ event }) => event.allowed,
-                from: ({ root: current, state }) => ({
+                data: ({ root: current, state }) => ({
                   target: { text: state.text },
                   update: { count: current.count + 1 }
                 })
@@ -234,18 +257,22 @@ describe("transition construction", () => {
       yield* Machine.plan(machine, changed.next, events.Reset())
       assert.deepStrictEqual(lifecycle, ["exit", "enter"])
     }))
-
   it.effect("guards default targetless reentry without requiring a resolver", () =>
     Effect.gen(function*() {
       let entered = 0
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         states: {
           Idle: {
             entry: () => {
               entered++
             },
             on: { Change: { none: true, reenter: true, guard: ({ event }) => event.allowed } }
-          }
+          },
+          Saved: {}
         }
       })
       const initial = yield* Machine.planInitial(machine)
@@ -258,17 +285,21 @@ describe("transition construction", () => {
       assert.strictEqual(entered, 2)
       assert.strictEqual(accepted.next.state.path, "Idle")
     }))
-
   it("rejects conflicting construction methods", () => {
     assert.throws(() =>
       definition.handle({
+        initial: {
+          target: Machine.targets(root1).root.Idle
+        },
+        root: () => ({ count: 0 }),
         states: {
           Idle: {
             on: {
-              Reset: { none: true, resolve: () => undefined, from: () => undefined } as any
+              Reset: { none: true, resolve: () => undefined, data: () => undefined } as any
             }
-          }
+          },
+          Saved: {}
         }
-      }), /construction methods are mutually exclusive/)
+      }), /data and resolve are mutually exclusive/)
   })
 })

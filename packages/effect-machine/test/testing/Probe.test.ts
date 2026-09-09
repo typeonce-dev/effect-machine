@@ -2,47 +2,46 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 class Counter extends Schema.TaggedClass<Counter>("ProbeCounter")("Counter", {
   count: Schema.Number
 }) {}
-
 class Increment extends Schema.TaggedClass<Increment>("ProbeIncrement")("Increment", {
   amount: Schema.Number
 }) {}
-
 class Noop extends Schema.TaggedClass<Noop>("ProbeNoop")("Noop", {}) {}
 class Ignored extends Schema.TaggedClass<Ignored>("ProbeIgnored")("Ignored", {}) {}
 class Decline extends Schema.TaggedClass<Decline>("ProbeDecline")("Decline", {}) {}
 class Burst extends Schema.TaggedClass<Burst>("ProbeBurst")("Burst", {}) {}
 class Reenter extends Schema.TaggedClass<Reenter>("ProbeReenter")("Reenter", {}) {}
 class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIncrement")("RaisedIncrement", {}) {}
-
-const states = Machine.state({ initial: "Counter", states: { Counter } })
-
+const states = Machine.state({ states: { Counter } })
 const targets1 = Machine.targets(states)
 const machine = Machine.make({
   branches: { transition3: { destination: { target: targets1.root.Counter } } },
-
   root: states,
   events: Machine.eventsFromSchemas(Increment, Noop, Ignored, Decline, Burst, Reenter),
-  internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
+  internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement)
 }).handle({
+  initial: {
+    target: Machine.targets(states).root.Counter,
+    decoded: true,
+    data: new Counter({ count: 0 })
+  },
   states: {
     Counter: {
       on: {
         Increment: {
           target: targets1.root.Counter,
-          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+          decoded: true,
+          data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
         Noop: { none: true },
         Decline: { none: true, resolve: ({ decline }) => decline(), declinable: true },
         Reenter: {
           target: targets1.root.Counter,
           reenter: true,
-          decoded: ({ state }) => (new Counter({ count: state.count }))
+          decoded: true,
+          data: ({ state }) => (new Counter({ count: state.count }))
         },
         Burst: {
           branches: "transition3",
@@ -53,13 +52,13 @@ const machine = Machine.make({
         },
         RaisedIncrement: {
           target: targets1.root.Counter,
-          decoded: ({ state }) => (new Counter({ count: state.count + 10 }))
+          decoded: true,
+          data: ({ state }) => (new Counter({ count: state.count + 10 }))
         }
       }
     }
   }
 })
-
 describe("MachineTest probe", () => {
   it.effect("fails closed when a reference has no acknowledged statechart capability", () =>
     Effect.gen(function*() {
@@ -77,68 +76,55 @@ describe("MachineTest probe", () => {
         child: ref.child,
         childChanges: ref.childChanges
       }
-
       const error = yield* Effect.flip(MachineTest.probe(machine, publicOnlyRef))
       assert.instanceOf(error, MachineTest.ProbeUnavailableError)
       yield* ref.stop
     }))
-
   it.effect("acknowledges ignored, targetless, and changing macrosteps without sampling snapshots", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
-
       const ignored = yield* probe.sendAndAwait(new Ignored({}))
       assert.strictEqual(ignored.handled, false)
       assert.strictEqual(ignored.configurationChanged, false)
       assert.strictEqual(ignored.plan.microsteps.length, 0)
       assert.strictEqual(ignored.before.state.value.count, 0)
       assert.strictEqual(ignored.after.state.value.count, 0)
-
       const declined = yield* probe.sendAndAwait(new Decline({}))
       assert.strictEqual(declined.handled, false)
       assert.strictEqual(declined.configurationChanged, false)
       assert.strictEqual(declined.plan.microsteps.length, 0)
-
       const targetless = yield* probe.sendAndAwait(new Noop({}))
       assert.strictEqual(targetless.handled, true)
       assert.strictEqual(targetless.configurationChanged, false)
       assert.strictEqual(targetless.plan.microsteps.length, 1)
       assert.strictEqual(targetless.after.state.value.count, 0)
-
       const changed = yield* probe.sendAndAwait(new Increment({ amount: 2 }))
       assert.strictEqual(changed.handled, true)
       assert.strictEqual(changed.configurationChanged, false)
       assert.strictEqual(changed.before.state.value.count, 0)
       assert.strictEqual(changed.after.state.value.count, 2)
-
       const reentered = yield* probe.sendAndAwait(new Reenter({}))
       assert.strictEqual(reentered.configurationChanged, true)
       assert.strictEqual(reentered.before.state.value.count, 2)
       assert.strictEqual(reentered.after.state.value.count, 2)
-
       const burst = yield* probe.sendAndAwait(new Burst({}))
       assert.deepStrictEqual(burst.plan.microsteps.map(({ event }) => event._tag), ["Burst", "RaisedIncrement"])
       assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.state.value.count), [3, 13])
       assert.strictEqual(burst.before.state.value.count, 2)
       assert.strictEqual(burst.after.state.value.count, 13)
-
       yield* probe.sendAndAwait(new Increment({ amount: 5 }))
       assert.deepStrictEqual(burst.plan.microsteps.map(({ next }) => next.state.value.count), [3, 13])
-
       yield* ref.stop
     }))
-
   it.effect("fails acknowledged sends after termination instead of leaving a waiter suspended", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
       yield* ref.stop
-
       const error = yield* Effect.flip(probe.sendAndAwait(new Ignored({})))
       assert.instanceOf(error, Machine.StoppedError)
     }))
-
   it.effect("does not retract an accepted event when its waiting fiber is interrupted", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(machine)
@@ -146,21 +132,21 @@ describe("MachineTest probe", () => {
       const sending = yield* probe.sendAndAwait(new Increment({ amount: 3 })).pipe(
         Effect.forkChild({ startImmediately: true })
       )
-
       yield* Fiber.interrupt(sending)
       const fence = yield* probe.sendAndAwait(new Ignored({}))
       assert.strictEqual(fence.before.state.value.count, 3)
       assert.strictEqual(fence.after.state.value.count, 3)
-
       yield* ref.stop
     }))
-
   it.effect("waits through state-scoped invoke startup without waiting for invoke completion", () =>
     Effect.gen(function*() {
-      class Idle extends Schema.TaggedClass<Idle>("ProbeInvokeIdle")("Idle", {}) {}
-      class Loading extends Schema.TaggedClass<Loading>("ProbeInvokeLoading")("Loading", {}) {}
-      class Load extends Schema.TaggedClass<Load>("ProbeInvokeLoad")("Load", {}) {}
-      const invokeStates = Machine.state({ initial: "Idle", states: { Idle, Loading } })
+      class Idle extends Schema.TaggedClass<Idle>("ProbeInvokeIdle")("Idle", {}) {
+      }
+      class Loading extends Schema.TaggedClass<Loading>("ProbeInvokeLoading")("Loading", {}) {
+      }
+      class Load extends Schema.TaggedClass<Load>("ProbeInvokeLoad")("Load", {}) {
+      }
+      const invokeStates = Machine.state({ states: { Idle, Loading } })
       let starts = 0
       const targets2 = Machine.targets(invokeStates)
       const invokeMachine = Machine.make({
@@ -170,15 +156,18 @@ describe("MachineTest probe", () => {
             return Effect.never
           })
         },
-
         root: invokeStates,
-        events: Machine.eventsFromSchemas(Load),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+        events: Machine.eventsFromSchemas(Load)
       }).handle({
+        initial: {
+          target: Machine.targets(invokeStates).root.Idle,
+          decoded: true,
+          data: new Idle({})
+        },
         states: {
           Idle: {
             on: {
-              Load: { target: targets2.root.Loading, decoded: () => (new Loading({})) }
+              Load: { target: targets2.root.Loading, decoded: true, data: () => (new Loading({})) }
             }
           },
           Loading: {
@@ -188,24 +177,19 @@ describe("MachineTest probe", () => {
       })
       const ref = yield* Machine.start(invokeMachine)
       const probe = yield* MachineTest.probe(invokeMachine, ref)
-
       const loaded = yield* probe.sendAndAwait(new Load({}))
       assert.strictEqual(loaded.after.state.path, "Loading")
       assert.strictEqual(starts, 1)
-
       yield* ref.stop
     }))
-
   it.effect("reports a processing failure to the exact acknowledged send", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(machine)
       const probe = yield* MachineTest.probe(machine, ref)
-
       const error = yield* Effect.flip(
         probe.sendAndAwait({ _tag: "Increment", amount: "invalid" } as unknown as Increment)
       )
       assert.instanceOf(error, Machine.MachineSchemaDecodeError)
-
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "error")
     }))

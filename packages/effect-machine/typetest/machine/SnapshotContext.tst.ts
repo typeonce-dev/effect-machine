@@ -1,7 +1,6 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
 class Left extends Schema.TaggedClass<Left>("Left")("Left", {}) {}
 class LeftIdle extends Schema.TaggedClass<LeftIdle>("LeftIdle")("LeftIdle", {}) {}
@@ -9,9 +8,7 @@ class LeftDone extends Schema.TaggedClass<LeftDone>("LeftDone")("LeftDone", {}) 
 class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
 class RightIdle extends Schema.TaggedClass<RightIdle>("RightIdle")("RightIdle", {}) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", {}) {}
-
 const States = Machine.state({
-  initial: "Root",
   states: {
     Root: {
       schema: Root,
@@ -19,7 +16,6 @@ const States = Machine.state({
       states: {
         Left: {
           schema: Left,
-          initial: "LeftIdle",
           states: {
             LeftIdle,
             LeftDone: { schema: LeftDone, type: "final" }
@@ -27,14 +23,12 @@ const States = Machine.state({
         },
         Right: {
           schema: Right,
-          initial: "RightIdle",
           states: { RightIdle }
         }
       }
     }
   }
 })
-
 describe("Machine transition snapshot context", () => {
   it("infers the complete machine snapshot for event, always, and onDone handlers", () => {
     const targets1 = Machine.targets(States)
@@ -43,21 +37,24 @@ describe("Machine transition snapshot context", () => {
         transition1: { destination: { target: targets1.root.Root.Left.LeftIdle } },
         transition2: { destination: { target: targets1.root.Root.Left.LeftDone } }
       },
-
       root: States,
-      events: Machine.eventsFromSchemas(Advance),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => (target.from((to) =>
-          to.Root.decoded(new Root({}), (root) =>
-            root
-              .Left.decoded(new Left({}), (left) => left.LeftIdle.decoded(new LeftIdle({})))
-              .Right.decoded(new Right({}), (right) => right.RightIdle.decoded(new RightIdle({}))))
-        )))
+      events: Machine.eventsFromSchemas(Advance)
     }).handle({
+      initial: {
+        target: Machine.targets(States).root.Root,
+        decoded: true,
+        data: new Root({})
+      },
       states: {
         Root: {
+          initial: { Left: { decoded: true, data: new Left({}) }, Right: { decoded: true, data: new Right({}) } },
           states: {
             Left: {
+              initial: {
+                decoded: true,
+                data: new LeftIdle({}),
+                target: Machine.targets(States).root.Root.Left.LeftIdle
+              },
               onDone: {
                 branches: "transition1",
                 resolve: ({ snapshot, select: { destination: target } }) => {
@@ -87,24 +84,32 @@ describe("Machine transition snapshot context", () => {
                       }
                     }
                   }
-                }
+                },
+                LeftDone: {}
               }
+            },
+            Right: {
+              initial: {
+                target: Machine.targets(States).root.Root.Right.RightIdle,
+                decoded: true,
+                data: new RightIdle({})
+              },
+              states: { RightIdle: {} }
             }
           }
         }
       }
     })
   })
-
   it("does not expose a fabricated snapshot to choices or state actions", () => {
-    class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {}
-    class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {}
+    class Flow extends Schema.TaggedClass<Flow>("Flow")("Flow", {}) {
+    }
+    class Active extends Schema.TaggedClass<Active>("Active")("Active", {}) {
+    }
     const choiceStates = Machine.state({
-      initial: "Flow",
       states: {
         Flow: {
           schema: Flow,
-          initial: "Routing",
           states: {
             Routing: { type: "choice" },
             Active
@@ -115,14 +120,19 @@ describe("Machine transition snapshot context", () => {
     const targets2 = Machine.targets(choiceStates)
     Machine.make({
       branches: { transition1: { destination: { target: targets2.root.Flow.Active } } },
-
       root: choiceStates,
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => (target.from((to) => to.Flow.decoded(new Flow({}), (flow) => flow.Routing()))))
+      events: Machine.eventsFromSchemas()
     }).handle({
+      initial: {
+        target: Machine.targets(choiceStates).root.Flow,
+        decoded: true,
+        data: new Flow({})
+      },
       states: {
         Flow: {
+          initial: {
+            target: Machine.targets(choiceStates).root.Flow.Routing
+          },
           entry: (context) => {
             expect(context).type.not.toHaveProperty("snapshot")
           },
@@ -135,7 +145,8 @@ describe("Machine transition snapshot context", () => {
                   return context.select.destination.decoded(new Active({}))
                 }
               }
-            }
+            },
+            Active: {}
           }
         }
       }

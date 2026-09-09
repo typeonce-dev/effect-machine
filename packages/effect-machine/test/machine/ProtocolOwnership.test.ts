@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Schema, SchemaGetter } from "effect"
 import { Machine } from "../../src/index.js"
-
 describe("protocol ownership", () => {
   it.effect("validates a constructed event again after it escapes a resolver", () =>
     Effect.gen(function*() {
@@ -9,13 +8,16 @@ describe("protocol ownership", () => {
       const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
       const events = Machine.eventsFromSchemas(Set)
       let retained: unknown
-      const root1 = Machine.state({ initial: "State", states: { State } })
+      const root1 = Machine.state({ states: { State } })
       const machine = Machine.make({
         root: root1,
-        events,
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
+        events
       }).handle({
+        initial: {
+          target: Machine.targets(root1).root.State,
+          decoded: true,
+          data: { _tag: "State" }
+        },
         states: {
           State: {
             on: {
@@ -35,28 +37,35 @@ describe("protocol ownership", () => {
       Object.assign(retained as object, { value: "invalid" })
       const exit = yield* Effect.exit(Machine.plan(machine, initial.state, retained as Schema.Schema.Type<typeof Set>))
       assert.isTrue(Exit.isFailure(exit))
-      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasFails(exit.cause))
+      if (Exit.isFailure(exit)) {
+        assert.isTrue(Cause.hasFails(exit.cause))
+      }
     }))
-
   it.effect("queries internal events without sending them", () =>
     Effect.gen(function*() {
       const State = Schema.TaggedStruct("State", {})
       const Internal = Schema.TaggedStruct("Internal", {})
       const internalEvents = Machine.internalEventsFromSchemas(Internal)
-      const root2 = Machine.state({ initial: "State", states: { State } })
+      const root2 = Machine.state({ states: { State } })
       const machine = Machine.make({
         root: root2,
         events: Machine.eventsFromSchemas(),
-        internalEvents,
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
+        internalEvents
       })
-        .handle({ states: { State: { on: { Internal: { none: true } } } } })
+        .handle({
+          initial: {
+            target: Machine.targets(root2).root.State,
+            decoded: true,
+            data: { _tag: "State" }
+          },
+          states: {
+            State: { on: { Internal: { none: true } } }
+          }
+        })
       const initial = yield* Machine.planInitial(machine)
       assert.isTrue(yield* Machine.can(machine, initial.state, { _tag: "Internal" }))
       assert.isTrue(yield* Machine.can(machine)(initial.state, internalEvents.Internal()))
     }))
-
   for (const boundary of ["encode", "decode"] as const) {
     it.effect(`preserves ${boundary} codec interruption`, () =>
       Effect.gen(function*() {
@@ -68,11 +77,19 @@ describe("protocol ownership", () => {
             Schema.decode({ decode: SchemaGetter.onSome(() => Effect.interrupt), encode: SchemaGetter.passthrough() })
           )
         const State = Schema.TaggedStruct("State", { value: Value })
+        const InitialRoot1 = Machine.state({ states: { State } })
         const machine = Machine.make({
-          root: Machine.state({ initial: "State", states: { State } }),
-          events: Machine.eventsFromSchemas(),
-          initialConfiguration: (root) =>
-            root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State", value: 1 })))
+          root: InitialRoot1,
+          events: Machine.eventsFromSchemas()
+        }).handle({
+          initial: {
+            target: Machine.targets(InitialRoot1).root.State,
+            decoded: true,
+            data: { _tag: "State", value: 1 }
+          },
+          states: {
+            State: {}
+          }
         })
         const initial = yield* Machine.planInitial(machine)
         const operation: Effect.Effect<unknown, Machine.MachineSchemaDecodeError | Machine.MachineSchemaEncodeError> =
@@ -81,7 +98,9 @@ describe("protocol ownership", () => {
             : Machine.decodeSnapshot(machine, yield* Machine.encodeSnapshot(machine, initial.state))
         const exit = yield* Effect.exit(operation)
         assert.isTrue(Exit.isFailure(exit))
-        if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterrupts(exit.cause))
+        if (Exit.isFailure(exit)) {
+          assert.isTrue(Cause.hasInterrupts(exit.cause))
+        }
       }))
   }
 })

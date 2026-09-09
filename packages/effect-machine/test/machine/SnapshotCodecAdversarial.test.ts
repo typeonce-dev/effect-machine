@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("CodecRoot")("CodecRoot", {
   id: Schema.NonEmptyString
 }) {}
@@ -16,9 +15,7 @@ class RightWorking extends Schema.TaggedClass<RightWorking>("CodecRightWorking")
   enabled: Schema.Boolean
 }) {}
 class RightDone extends Schema.TaggedClass<RightDone>("CodecRightDone")("CodecRightDone", {}) {}
-
 const TopologyStates = Machine.state({
-  initial: "Root",
   states: {
     Root: {
       schema: Root,
@@ -26,7 +23,6 @@ const TopologyStates = Machine.state({
       states: {
         left: {
           schema: Left,
-          initial: "working",
           states: {
             working: LeftWorking,
             done: {
@@ -38,7 +34,6 @@ const TopologyStates = Machine.state({
         },
         right: {
           schema: Right,
-          initial: "working",
           states: {
             working: RightWorking,
             done: {
@@ -52,14 +47,55 @@ const TopologyStates = Machine.state({
     }
   }
 })
-
 const topologyMachine = Machine.make({
   id: "codec-topology",
   root: TopologyStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (to) => to.resolve(() => topologyActive())
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(TopologyStates).root.Root,
+    decoded: true,
+    data: new Root({ id: "root-1" })
+  },
+  states: {
+    Root: {
+      initial: {
+        left: {
+          decoded: true,
+          data: new Left({})
+        },
+        right: {
+          decoded: true,
+          data: new Right({})
+        }
+      },
+      states: {
+        left: {
+          initial: {
+            target: Machine.targets(TopologyStates).root.Root.left.working,
+            decoded: true,
+            data: new LeftWorking({ task: "left-1" })
+          },
+          states: {
+            working: {},
+            done: { output: () => 7 }
+          }
+        },
+        right: {
+          initial: {
+            target: Machine.targets(TopologyStates).root.Root.right.working,
+            decoded: true,
+            data: new RightWorking({ enabled: true })
+          },
+          states: {
+            working: {},
+            done: { output: () => true }
+          }
+        }
+      }
+    }
+  }
 })
-
 const topologyActive = () => ({
   path: "" as const,
   value: undefined,
@@ -80,7 +116,6 @@ const topologyActive = () => ({
     }
   }
 })
-
 const topologyFinal = () =>
   ({
     path: "" as const,
@@ -106,7 +141,6 @@ const topologyFinal = () =>
       { path: "Root.right.done" as const, output: true }
     ]
   }) as Machine.Snapshot<typeof TopologyStates>
-
 class Workspace extends Schema.TaggedClass<Workspace>("CodecWorkspace")("CodecWorkspace", {
   revision: Schema.Number
 }) {}
@@ -121,17 +155,13 @@ class Preview extends Schema.TaggedClass<Preview>("CodecPreview")("CodecPreview"
   page: Schema.Number
 }) {}
 class Outside extends Schema.TaggedClass<Outside>("CodecOutside")("CodecOutside", {}) {}
-
 const HistoryStates = Machine.state({
-  initial: "Outside",
   states: {
     Workspace: {
       schema: Workspace,
-      initial: "Editor",
       states: {
         Editor: {
           schema: Editor,
-          initial: "editing",
           states: {
             editing: Editing,
             preview: Preview
@@ -144,14 +174,38 @@ const HistoryStates = Machine.state({
     Outside
   }
 })
-
 const historyMachine = Machine.make({
   id: "codec-history",
   root: HistoryStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Outside.decoded(new Outside({}))))
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(HistoryStates).root.Outside,
+    decoded: true,
+    data: new Outside({})
+  },
+  states: {
+    Workspace: {
+      initial: {
+        target: Machine.targets(HistoryStates).root.Workspace.Editor,
+        data: { document: "initial" }
+      },
+      states: {
+        Editor: {
+          initial: {
+            target: Machine.targets(HistoryStates).root.Workspace.Editor.editing,
+            data: { contents: "", payload: undefined }
+          },
+          states: {
+            editing: {},
+            preview: {}
+          }
+        }
+      }
+    },
+    Outside: {}
+  }
 })
-
 const historySnapshot = () =>
   ({
     ...{ path: "" as const, value: undefined, state: { path: "Outside" as const, value: new Outside({}) } },
@@ -175,52 +229,51 @@ const historySnapshot = () =>
       }
     }
   }) as Machine.Snapshot<typeof HistoryStates>
-
 class RichState extends Schema.TaggedClass<RichState>("CodecRichState")("CodecRichState", {
   createdAt: Schema.Date,
   sequence: Schema.BigInt,
   missing: Schema.Undefined
 }) {}
-
-const RichStates = Machine.state({ initial: "RichState", states: { RichState } })
+const RichStates = Machine.state({ states: { RichState } })
 const richMachine = Machine.make({
   id: "codec-rich",
   root: RichStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.RichState.decoded(
-          new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
-        )
-      )
-    )
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(RichStates).root.RichState,
+    decoded: true,
+    data: new RichState({ createdAt: new Date("2026-08-19T12:00:00.000Z"), sequence: 42n, missing: undefined })
+  },
+  states: {
+    RichState: {}
+  }
 })
-
 interface OpaqueState {
   readonly _tag: "CodecOpaqueState"
   readonly resource: object
 }
-
 const OpaqueState = Schema.declare<OpaqueState>((input): input is OpaqueState =>
   typeof input === "object" && input !== null && "_tag" in input && input._tag === "CodecOpaqueState" &&
   "resource" in input && typeof input.resource === "object" && input.resource !== null
 )
-
-const OpaqueStates = Machine.state({ initial: "OpaqueState", states: { OpaqueState } })
+const OpaqueStates = Machine.state({ states: { OpaqueState } })
 const opaqueMachine = Machine.make({
   id: "codec-opaque",
   root: OpaqueStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.OpaqueState.decoded({ _tag: "CodecOpaqueState", resource: {} }))
-    )
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(OpaqueStates).root.OpaqueState,
+    decoded: true,
+    data: { _tag: "CodecOpaqueState", resource: {} }
+  },
+  states: {
+    OpaqueState: {}
+  }
 })
-
 class OutputDone extends Schema.TaggedClass<OutputDone>("CodecOutputDone")("CodecOutputDone", {}) {}
 const OutputStates = Machine.state({
-  initial: "OutputDone",
   states: {
     OutputDone: { schema: OutputDone, type: "final", output: Schema.Any }
   }
@@ -228,53 +281,55 @@ const OutputStates = Machine.state({
 const outputMachine = Machine.make({
   id: "codec-output",
   root: OutputStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.OutputDone.decoded(new OutputDone({}))))
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(OutputStates).root.OutputDone,
+    decoded: true,
+    data: new OutputDone({})
+  },
+  states: {
+    OutputDone: { output: () => undefined }
+  }
 })
-
 const expectEncodeFailure = Effect.fnUntraced(function*(snapshot: unknown, boundary?: string) {
-  const error = yield* Machine.encodeSnapshot(
-    topologyMachine,
-    snapshot as Machine.Snapshot<typeof TopologyStates>
-  ).pipe(Effect.flip)
+  const error = yield* Machine.encodeSnapshot(topologyMachine, snapshot as Machine.Snapshot<typeof TopologyStates>)
+    .pipe(Effect.flip)
   assert.instanceOf(error, Machine.MachineSchemaEncodeError)
-  if (boundary !== undefined) assert.strictEqual(error.boundary, boundary)
+  if (boundary !== undefined) {
+    assert.strictEqual(error.boundary, boundary)
+  }
 })
-
-const expectDecodeFailure = Effect.fnUntraced(function*(
-  decoding: Effect.Effect<unknown, Machine.MachineSchemaDecodeError>,
-  boundary?: string
-) {
-  const error = yield* decoding.pipe(Effect.flip)
-  assert.instanceOf(error, Machine.MachineSchemaDecodeError)
-  if (boundary !== undefined) assert.strictEqual(error.boundary, boundary)
-})
-
+const expectDecodeFailure = Effect.fnUntraced(
+  function*(decoding: Effect.Effect<unknown, Machine.MachineSchemaDecodeError>, boundary?: string) {
+    const error = yield* decoding.pipe(Effect.flip)
+    assert.instanceOf(error, Machine.MachineSchemaDecodeError)
+    if (boundary !== undefined) {
+      assert.strictEqual(error.boundary, boundary)
+    }
+  }
+)
 describe("snapshot codec adversarial boundaries", () => {
-  it.effect.prop(
-    "turns arbitrary JSON-shaped boundary input into values or typed failures, never defects",
-    { input: FastCheck.jsonValue() },
-    ({ input }) =>
-      Effect.gen(function*() {
-        const encodeExit = yield* Effect.exit(Machine.encodeSnapshot(topologyMachine, input as any))
-        const decodeExit = yield* Effect.exit(Machine.decodeSnapshot(topologyMachine, input))
-        const exits: ReadonlyArray<Exit.Exit<unknown, unknown>> = [encodeExit, decodeExit]
-
-        for (const exit of exits) {
-          if (Exit.isSuccess(exit)) continue
-          assert.strictEqual(Cause.hasDies(exit.cause), false)
-          const error = Cause.findErrorOption(exit.cause)
-          assert(Option.isSome(error))
-          assert.ok(
-            error.value instanceof Machine.MachineSchemaEncodeError ||
-              error.value instanceof Machine.MachineSchemaDecodeError
-          )
+  it.effect.prop("turns arbitrary JSON-shaped boundary input into values or typed failures, never defects", {
+    input: FastCheck.jsonValue()
+  }, ({ input }) =>
+    Effect.gen(function*() {
+      const encodeExit = yield* Effect.exit(Machine.encodeSnapshot(topologyMachine, input as any))
+      const decodeExit = yield* Effect.exit(Machine.decodeSnapshot(topologyMachine, input))
+      const exits: ReadonlyArray<Exit.Exit<unknown, unknown>> = [encodeExit, decodeExit]
+      for (const exit of exits) {
+        if (Exit.isSuccess(exit)) {
+          continue
         }
-      }),
-    { fastCheck: { numRuns: 100, seed: 83_117 } }
-  )
-
+        assert.strictEqual(Cause.hasDies(exit.cause), false)
+        const error = Cause.findErrorOption(exit.cause)
+        assert(Option.isSome(error))
+        assert.ok(
+          error.value instanceof Machine.MachineSchemaEncodeError ||
+            error.value instanceof Machine.MachineSchemaDecodeError
+        )
+      }
+    }), { fastCheck: { numRuns: 100, seed: 83117 } })
   it.effect("round-trips active parallel and completed final configurations through JSON", () =>
     Effect.gen(function*() {
       for (const snapshot of [topologyActive(), topologyFinal()]) {
@@ -282,14 +337,12 @@ describe("snapshot codec adversarial boundaries", () => {
         const decoded = yield* Machine.decodeSnapshot(topologyMachine, JSON.parse(JSON.stringify(encoded)))
         assert.deepStrictEqual(decoded, snapshot)
       }
-
       const encodedFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyFinal())
       assert.deepStrictEqual(encodedFinal.completed, [
         { path: "Root.left.done" as const, output: "7" },
         { path: "Root.right.done" as const, output: true }
       ])
     }))
-
   it.effect("uses canonical JSON codecs for supported rich state values", () =>
     Effect.gen(function*() {
       const snapshot = {
@@ -305,7 +358,6 @@ describe("snapshot codec adversarial boundaries", () => {
         }
       }
       const encoded = yield* Machine.encodeSnapshot(richMachine, snapshot)
-
       assert.deepStrictEqual(encoded.active, [{ path: "" }, {
         path: "RichState",
         value: {
@@ -316,19 +368,16 @@ describe("snapshot codec adversarial boundaries", () => {
         }
       }])
       assert.doesNotThrow(() => JSON.stringify(encoded))
-
       const decoded = yield* Machine.decodeSnapshot(richMachine, JSON.parse(JSON.stringify(encoded)))
       assert.instanceOf(decoded.state.value, RichState)
       assert.instanceOf(decoded.state.value.createdAt, Date)
       assert.strictEqual(decoded.state.value.sequence, 42n)
       assert.strictEqual(decoded.state.value.missing, undefined)
     }))
-
   it.effect("rejects cyclic state, completion, and history values with typed boundary failures", () =>
     Effect.gen(function*() {
       const cyclic: Record<string, unknown> = {}
       cyclic.self = cyclic
-
       const assertFailure = (exit: Exit.Exit<unknown, unknown>, boundary: "state" | "output" | "history") => {
         assert(Exit.isFailure(exit))
         assert.strictEqual(Cause.hasDies(exit.cause), false)
@@ -337,7 +386,6 @@ describe("snapshot codec adversarial boundaries", () => {
         assert.instanceOf(error.value, Machine.MachineSchemaEncodeError)
         assert.strictEqual(error.value.boundary, boundary)
       }
-
       assertFailure(
         yield* Effect.exit(Machine.encodeSnapshot(opaqueMachine, {
           path: "" as const,
@@ -393,35 +441,38 @@ describe("snapshot codec adversarial boundaries", () => {
         "history"
       )
     }))
-
   it.effect("round-trips shallow and deep history records through JSON", () =>
     Effect.gen(function*() {
       const snapshot = historySnapshot()
       const encoded = yield* Machine.encodeSnapshot(historyMachine, snapshot)
       const decoded = yield* Machine.decodeSnapshot(historyMachine, JSON.parse(JSON.stringify(encoded)))
-
       assert.deepStrictEqual(decoded, snapshot)
       assert.instanceOf(decoded.history?.["Workspace.recent"]?.values.Workspace, Workspace)
       assert.instanceOf(decoded.history?.["Workspace.exact"]?.values["Workspace.Editor.editing"], Editing)
     }))
-
   it.effect("resumes a transported stable boundary without running a newly added automatic transition", () =>
     Effect.gen(function*() {
-      class Before extends Schema.TaggedClass<Before>("CodecAutomaticBefore")("CodecAutomaticBefore", {}) {}
-      class Boundary extends Schema.TaggedClass<Boundary>("CodecAutomaticBoundary")("CodecAutomaticBoundary", {}) {}
-      class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {}
-      const states = Machine.state({ initial: "Before", states: { Before, Boundary, After } })
+      class Before extends Schema.TaggedClass<Before>("CodecAutomaticBefore")("CodecAutomaticBefore", {}) {
+      }
+      class Boundary extends Schema.TaggedClass<Boundary>("CodecAutomaticBoundary")("CodecAutomaticBoundary", {}) {
+      }
+      class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {
+      }
+      const states = Machine.state({ states: { Before, Boundary, After } })
       const targets1 = Machine.targets(states)
       const original = Machine.make({
         id: "codec-automatic-original",
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Before.decoded(new Before({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Before,
+          decoded: true,
+          data: new Before({})
+        },
         states: {
           Before: {
-            always: { target: targets1.root.Boundary, decoded: () => (new Boundary({})) }
+            always: { target: targets1.root.Boundary, decoded: true, data: () => (new Boundary({})) }
           },
           Boundary: {},
           After: {}
@@ -431,31 +482,31 @@ describe("snapshot codec adversarial boundaries", () => {
       const changed = Machine.make({
         id: "codec-automatic-changed",
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Before.decoded(new Before({}))))
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Before,
+          decoded: true,
+          data: new Before({})
+        },
         states: {
           Before: {},
           Boundary: {
-            always: { target: targets2.root.After, decoded: () => (new After({})) }
+            always: { target: targets2.root.After, decoded: true, data: () => (new After({})) }
           },
           After: {}
         }
       })
-
       const stable = (yield* Machine.planInitial(original)).state
       assert.strictEqual(stable.state.path, "Boundary")
       const transported = JSON.parse(JSON.stringify(yield* Machine.encodeSnapshot(original, stable)))
       const decoded = yield* Machine.decodeSnapshot(changed, transported)
       const resumed = yield* Machine.resume(changed, decoded)
-
       assert.strictEqual((yield* resumed.state).state.path, "Boundary")
       yield* Effect.yieldNow
       assert.strictEqual((yield* resumed.state).state.path, "Boundary")
       yield* resumed.stop
     }))
-
   it.effect("rejects malformed logical topology before encoding", () =>
     Effect.gen(function*() {
       const valid = topologyActive().state
@@ -478,72 +529,56 @@ describe("snapshot codec adversarial boundaries", () => {
           }
         }
       ]
-
       for (const snapshot of malformed) {
         yield* expectEncodeFailure({ path: "", value: undefined, state: snapshot })
       }
     }))
-
   it.effect("rejects unknown, duplicate, missing, extra, and impossible encoded configurations", () =>
     Effect.gen(function*() {
       const encoded = yield* Machine.encodeSnapshot(topologyMachine, topologyActive())
       const mutations: Array<unknown> = []
-
       const unknown = structuredClone(encoded) as any
       unknown.active[2].path = "Root.left.missing"
       mutations.push(unknown)
-
       const duplicate = structuredClone(encoded) as any
       duplicate.active.push(structuredClone(duplicate.active[2]))
       mutations.push(duplicate)
-
       const missingRegion = structuredClone(encoded) as any
       missingRegion.active = missingRegion.active.filter((entry: any) => !entry.path.startsWith("Root.right"))
       mutations.push(missingRegion)
-
       const extraCompoundBranch = structuredClone(encoded) as any
       extraCompoundBranch.active.push({ path: "Root.left.done" as const, value: { _tag: "CodecLeftDone" } })
       mutations.push(extraCompoundBranch)
-
       const impossibleAncestry = structuredClone(encoded) as any
       impossibleAncestry.active = impossibleAncestry.active.filter((entry: any) => entry.path !== "Root.left")
       mutations.push(impossibleAncestry)
-
       for (const mutation of mutations) {
         yield* expectDecodeFailure(Machine.decodeSnapshot(topologyMachine, mutation), "configuration")
       }
     }))
-
   it.effect("rejects invalid and corrupt completion entries", () =>
     Effect.gen(function*() {
       const encoded = yield* Machine.encodeSnapshot(topologyMachine, topologyFinal())
       const mutations: Array<unknown> = []
-
       const unknown = structuredClone(encoded) as any
       unknown.completed[0].path = "Root.left.missing"
       mutations.push(unknown)
-
       const duplicate = structuredClone(encoded) as any
       duplicate.completed.push(structuredClone(duplicate.completed[0]))
       mutations.push(duplicate)
-
       const wrongOutput = structuredClone(encoded) as any
       wrongOutput.completed[0].output = null
       mutations.push(wrongOutput)
-
       const activeNotFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyActive())
       ;(activeNotFinal as any).completed = [{ path: "Root.left.working" as const, output: undefined }]
       mutations.push(activeNotFinal)
-
       const inactiveFinal = yield* Machine.encodeSnapshot(topologyMachine, topologyActive())
       ;(inactiveFinal as any).completed = [{ path: "Root.left.done" as const, output: "1" }]
       mutations.push(inactiveFinal)
-
       for (const mutation of mutations) {
         yield* expectDecodeFailure(Machine.decodeSnapshot(topologyMachine, mutation))
       }
     }))
-
   it.effect("rejects invalid logical completion entries before encoding", () =>
     Effect.gen(function*() {
       const final = topologyFinal()
@@ -554,12 +589,10 @@ describe("snapshot codec adversarial boundaries", () => {
         { ...active, completed: [{ path: "Root.left.working" as const, output: undefined }] },
         { ...final, completed: [{ path: "Root.left.done" as const, output: null }] }
       ]
-
       for (const snapshot of malformed) {
         yield* expectEncodeFailure({ path: "", value: undefined, state: snapshot })
       }
     }))
-
   it.effect("rejects schema failures on both sides of the codec", () =>
     Effect.gen(function*() {
       const logical = topologyActive().state
@@ -577,53 +610,43 @@ describe("snapshot codec adversarial boundaries", () => {
         }
       }
       yield* expectEncodeFailure({ path: "", value: undefined, state: invalidLogical }, "state")
-
       const encoded = yield* Machine.encodeSnapshot(topologyMachine, { path: "", value: undefined, state: logical })
       const invalidEncoded = structuredClone(encoded) as any
       invalidEncoded.active.find((entry: any) => entry.path === "Root.left.working").value.task = ""
       yield* expectDecodeFailure(Machine.decodeSnapshot(topologyMachine, invalidEncoded), "state")
     }))
-
   it.effect("rejects corrupt history paths, modes, values, and control records", () =>
     Effect.gen(function*() {
       const encoded = yield* Machine.encodeSnapshot(historyMachine, historySnapshot())
       const mutations: Array<unknown> = []
-
       const unknownRecord = structuredClone(encoded) as any
       unknownRecord.history["Workspace.missing"] = unknownRecord.history["Workspace.exact"]
       mutations.push(unknownRecord)
-
       const wrongMode = structuredClone(encoded) as any
       wrongMode.history["Workspace.exact"].mode = "shallow"
       mutations.push(wrongMode)
-
       const duplicatePath = structuredClone(encoded) as any
       duplicatePath.history["Workspace.exact"].active.push("Workspace.Editor")
       mutations.push(duplicatePath)
-
       const missingOwner = structuredClone(encoded) as any
-      missingOwner.history["Workspace.exact"].active = missingOwner.history["Workspace.exact"].active.filter(
-        (path: string) => path !== "Workspace"
-      )
+      missingOwner.history["Workspace.exact"].active = missingOwner.history["Workspace.exact"].active.filter((
+        path: string
+      ) => path !== "Workspace")
       delete missingOwner.history["Workspace.exact"].values.Workspace
       mutations.push(missingOwner)
-
       const extraValue = structuredClone(encoded) as any
       extraValue.history["Workspace.exact"].values["Workspace.Editor.preview"] = {
         _tag: "CodecPreview",
         page: 1
       }
       mutations.push(extraValue)
-
       const invalidValue = structuredClone(encoded) as any
       invalidValue.history["Workspace.exact"].values["Workspace.Editor.editing"].contents = 1
       mutations.push(invalidValue)
-
       const incompleteCompound = structuredClone(encoded) as any
       incompleteCompound.history["Workspace.exact"].active = ["Workspace", "Workspace.Editor"]
       delete incompleteCompound.history["Workspace.exact"].values["Workspace.Editor.editing"]
       mutations.push(incompleteCompound)
-
       const shallowWithDeepDescendant = structuredClone(encoded) as any
       shallowWithDeepDescendant.history["Workspace.recent"].active.push("Workspace.Editor.editing")
       shallowWithDeepDescendant.history["Workspace.recent"].values["Workspace.Editor.editing"] = {
@@ -631,7 +654,6 @@ describe("snapshot codec adversarial boundaries", () => {
         contents: "hello"
       }
       mutations.push(shallowWithDeepDescendant)
-
       const conflictingCompoundChildren = structuredClone(encoded) as any
       conflictingCompoundChildren.history["Workspace.exact"].active.push("Workspace.Editor.preview")
       conflictingCompoundChildren.history["Workspace.exact"].values["Workspace.Editor.preview"] = {
@@ -639,17 +661,14 @@ describe("snapshot codec adversarial boundaries", () => {
         page: 1
       }
       mutations.push(conflictingCompoundChildren)
-
       const outsideOwner = structuredClone(encoded) as any
       outsideOwner.history["Workspace.exact"].active.push("Outside")
       outsideOwner.history["Workspace.exact"].values.Outside = { _tag: "CodecOutside" }
       mutations.push(outsideOwner)
-
       for (const mutation of mutations) {
         yield* expectDecodeFailure(Machine.decodeSnapshot(historyMachine, mutation), "history")
       }
     }))
-
   it.effect("rejects corrupt logical history before encoding", () =>
     Effect.gen(function*() {
       const snapshot = historySnapshot()
@@ -693,7 +712,6 @@ describe("snapshot codec adversarial boundaries", () => {
           }
         }
       ]
-
       for (const malformed of invalid) {
         const error = yield* Machine.encodeSnapshot(historyMachine, malformed as any).pipe(Effect.flip)
         assert.instanceOf(error, Machine.MachineSchemaEncodeError)

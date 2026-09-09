@@ -1,6 +1,5 @@
 import { Machine } from "../../dist/index.js"
 import { Route, State, States } from "./named-branches-control.js"
-
 const targets = Machine.targets(States)
 const machine = Machine.make({
   branches: {
@@ -18,14 +17,11 @@ const machine = Machine.make({
       unchanged: { none: true }
     }
   },
-
   root: States,
-  events: Machine.eventsFromSchemas(Route),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Idle.from(State.cases.Idle.make({}))))
+  events: Machine.eventsFromSchemas(Route)
 })
-
 const handled = machine.handle({
+  initial: { target: targets.root.Idle },
   states: {
     Idle: {
       on: {
@@ -65,5 +61,4 @@ const handled = machine.handle({
     Count: {}
   }
 })
-
 void Machine.planInitial(handled)

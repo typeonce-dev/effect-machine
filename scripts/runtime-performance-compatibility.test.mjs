@@ -277,3 +277,32 @@ test("adapts root definitions while preserving benchmark startup and handler sem
   assert.deepEqual(api.snapshot(snapshot), { path: "Ready", value: { count: 3 } })
   assert.equal(selections, 1)
 })
+
+test("adapts handler-owned initial edges without changing benchmark values", () => {
+  let captured
+  const count = {}
+  const active = { Count: count }
+  const rootApi = {
+    state: (node) => ({ node }),
+    eventsFromSchemas: (...schemas) => schemas,
+    targets: () => ({ root: { Active: active } }),
+    make: (config) => {
+      captured = config
+      return { handle: (handlers) => ({ config, handlers }) }
+    }
+  }
+  const api = makeEffectMachineBenchmarkApi(rootApi)
+  const schema = Symbol("schema")
+  const states = api.states({ Active: { schema, initial: "Count", states: { Count: schema } } })
+  const from = ({ state }) => ({ value: state.value + 1 })
+  const machine = api.make({
+    states: states.states,
+    events: [],
+    initial: api.initial({ target: (to) => to.Active.initial, values: { "Active.Count": { value: 0 } } })
+  }).handle({ Active: { states: { Count: { on: { Increment: api.transition({ target: (to) => to.local.Count(), from }) } } } } })
+  assert.equal("initialConfiguration" in captured, false)
+  assert.equal("initial" in captured.root.node.states.Active, false)
+  assert.equal(machine.handlers.initial.target, active)
+  assert.deepEqual(machine.handlers.states.Active.initial, { target: count, data: { value: 0 } })
+  assert.equal(machine.handlers.states.Active.states.Count.on.Increment.data, from)
+})

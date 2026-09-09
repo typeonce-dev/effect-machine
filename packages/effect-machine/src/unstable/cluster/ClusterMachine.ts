@@ -341,18 +341,23 @@ export const layerMemory: Layer.Layer<Storage> = internal.layerMemory
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { ClusterMachine } from "@typeonce/effect-machine/cluster"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const adapter = ClusterMachine.make("IdleMachine", machine, { version: "1" })
  * ```
  *

@@ -2,23 +2,26 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 describe("MachineTest probe", () => {
   class State extends Schema.TaggedClass<State>("ProbeTypeState")("State", {
     count: Schema.Number
-  }) {}
-  class PublicEvent extends Schema.TaggedClass<PublicEvent>("ProbeTypePublicEvent")("PublicEvent", {}) {}
-  class InternalEvent extends Schema.TaggedClass<InternalEvent>("ProbeTypeInternalEvent")("InternalEvent", {}) {}
-
-  const states = Machine.state({ initial: "State", states: { State } })
-
+  }) {
+  }
+  class PublicEvent extends Schema.TaggedClass<PublicEvent>("ProbeTypePublicEvent")("PublicEvent", {}) {
+  }
+  class InternalEvent extends Schema.TaggedClass<InternalEvent>("ProbeTypeInternalEvent")("InternalEvent", {}) {
+  }
+  const states = Machine.state({ states: { State } })
   const machine = Machine.make({
     root: states,
     events: Machine.eventsFromSchemas(PublicEvent),
-    internalEvents: Machine.internalEventsFromSchemas(InternalEvent),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) => (target.from((to) => to.State.decoded(new State({ count: 0 })))))
+    internalEvents: Machine.internalEventsFromSchemas(InternalEvent)
   }).handle({
+    initial: {
+      target: Machine.targets(states).root.State,
+      decoded: true,
+      data: new State({ count: 0 })
+    },
     states: {
       State: {
         on: {
@@ -28,12 +31,10 @@ describe("MachineTest probe", () => {
       }
     }
   })
-
   it("retains the machine state and public event protocol", () => {
     const started = Machine.start(machine)
     const attached = Effect.flatMap(started, (ref) => MachineTest.probe(machine, ref))
     const sent = Effect.flatMap(attached, (probe) => probe.sendAndAwait(new PublicEvent({})))
-
     expect<Effect.Success<typeof attached>["machine"]>().type.toBe<typeof machine>()
     expect<Effect.Success<typeof sent>>().type.toBe<MachineTest.ProbeStep<typeof machine>>()
     expect<Effect.Success<typeof sent>["before"]["state"]["value"]>().type.toBe<State>()
@@ -45,7 +46,6 @@ describe("MachineTest probe", () => {
     expect<Machine.StoppedError>().type.toBeAssignableTo<Effect.Error<typeof sent>>()
     expect<MachineTest.ProbeUnavailableError>().type.toBeAssignableTo<Effect.Error<typeof attached>>()
   })
-
   it("infers causal command evidence and probe-bound asynchronous observations", () => {
     const started = Machine.start(machine)
     const executed = Effect.flatMap(
@@ -75,18 +75,15 @@ describe("MachineTest probe", () => {
             }
           }))
     )
-
     expect<Effect.Success<typeof executed>["finalModel"]>().type.toBe<number>()
     expect<Effect.Success<typeof executed>["records"][number]["actual"]["result"]>().type.toBe<
       MachineTest.CausalRuntimeCommandResult<typeof machine>
     >()
-    type CausalFailure = Extract<
-      Effect.Error<typeof executed>,
-      { readonly _tag: "MachineTestCausalRuntimeCommandFailure" }
-    >
+    type CausalFailure = Extract<Effect.Error<typeof executed>, {
+      readonly _tag: "MachineTestCausalRuntimeCommandFailure"
+    }>
     expect<CausalFailure>().type.not.toBe<never>()
   })
-
   it("infers reusable runtime laws and law-oriented causal verification", () => {
     const invariant = MachineTest.runtimeInvariants(machine)
     const laws = [
@@ -113,7 +110,6 @@ describe("MachineTest probe", () => {
             MachineTest.sendCommand(new PublicEvent({}))
           ], { invariants: laws }))
     )
-
     expect<Effect.Success<typeof verified>>().type.toBe<
       MachineTest.CausalVerificationTranscript<
         typeof machine,
@@ -126,7 +122,6 @@ describe("MachineTest probe", () => {
     >()
     type InvariantFailure = Extract<Effect.Error<typeof verified>, MachineTest.RuntimeInvariantError<typeof machine>>
     expect<InvariantFailure>().type.not.toBe<never>()
-
     const agreement = Effect.flatMap(
       verified,
       (transcript) => MachineTest.assertPlannerRuntimeAgreement(machine, transcript)

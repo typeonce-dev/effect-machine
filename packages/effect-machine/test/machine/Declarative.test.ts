@@ -1,37 +1,42 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Context, Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 const Root = Machine.state({
-  initial: "Idle",
   states: {
     Idle: {},
     Ready: Schema.TaggedStruct("Ready", { count: Schema.Number }),
     Checkout: {
       schema: Schema.TaggedStruct("Checkout", { orderId: Schema.String }),
-      initial: "Review",
       states: { Review: Schema.TaggedStruct("Review", { total: Schema.Number }) }
     }
   }
 })
 const targets = Machine.targets(Root)
 const events = Machine.events({ Complete: { count: Schema.Number } })
-
 describe("declarative transitions", () => {
   it.effect("accepts a service class as a direct lazy Effect", () =>
     Effect.gen(function*() {
-      class Value extends Context.Service<Value, { readonly count: number }>()("test/direct/Value") {}
+      class Value extends Context.Service<Value, {
+        readonly count: number
+      }>()("test/direct/Value") {
+      }
       const root = Machine.state({
-        initial: "Loading",
         states: {
           Loading: {},
           Done: { type: "final", fields: { count: Schema.Number }, output: Schema.Number }
         }
       })
       const refs = Machine.targets(root)
-      const machine = Machine.make({ root, events: Machine.events({}), effects: { value: Value } }).handle({
+      const machine = Machine.make({
+        root,
+        events: Machine.events({}),
+        effects: { value: Value }
+      }).handle({
+        initial: {
+          target: Machine.targets(root).root.Loading
+        },
         states: {
-          Loading: { invoke: { src: "value", onDone: { target: refs.root.Done, from: ({ output }) => output } } },
+          Loading: { invoke: { src: "value", onDone: { target: refs.root.Done, data: ({ output }) => output } } },
           Done: { output: ({ state }) => state.count }
         }
       })
@@ -41,11 +46,9 @@ describe("declarative transitions", () => {
       }).pipe(Effect.provideService(Value, { count: 7 }))
       assert.strictEqual(count, 7)
     }))
-
   it.effect("captures registered values before caller-owned registries change", () =>
     Effect.gen(function*() {
       const root = Machine.state({
-        initial: "Loading",
         states: {
           Loading: {},
           Done: { type: "final", fields: { value: Schema.Number }, output: Schema.Number }
@@ -57,6 +60,9 @@ describe("declarative transitions", () => {
       const definition = Machine.make({ root, events: Machine.events({}), effects, branches })
       effects.load = Effect.succeed(99)
       const machine = definition.handle({
+        initial: {
+          target: Machine.targets(root).root.Loading
+        },
         states: {
           Loading: {
             invoke: {
@@ -70,15 +76,21 @@ describe("declarative transitions", () => {
       const ref = yield* Machine.start(machine)
       assert.strictEqual(yield* ref.join, 1)
     }))
-
   it.effect("allows inline entry into a choice with inspectable destinations", () =>
     Effect.gen(function*() {
-      const root = Machine.state({ initial: "Idle", states: { Idle: {}, Route: { type: "choice" }, Ready: {} } })
+      const root = Machine.state({ states: { Idle: {}, Route: { type: "choice" }, Ready: {} } })
       const refs = Machine.targets(root)
-      const machine = Machine.make({ root, events: Machine.events({ Go: {} }) }).handle({
+      const machine = Machine.make({
+        root,
+        events: Machine.events({ Go: {} })
+      }).handle({
+        initial: {
+          target: Machine.targets(root).root.Idle
+        },
         states: {
           Idle: { on: { Go: { target: refs.root.Route } } },
-          Route: { choice: { target: refs.root.Ready } }
+          Route: { choice: { target: refs.root.Ready } },
+          Ready: {}
         }
       })
       const initial = yield* Machine.planInitial(machine)
@@ -86,17 +98,22 @@ describe("declarative transitions", () => {
       assert.isTrue(root.matches(next.next, "Ready"))
       assert.strictEqual(Machine.transitionDefinitions(machine)[0]?.branches[0]?.target, "Route")
     }))
-
   it.effect("captures inline topology without evaluating construction", () =>
     Effect.gen(function*() {
       let calls = 0
-      const machine = Machine.make({ root: Root, events }).handle({
+      const machine = Machine.make({
+        root: Root,
+        events
+      }).handle({
+        initial: {
+          target: Machine.targets(Root).root.Idle
+        },
         states: {
           Idle: {
             on: {
               Complete: {
                 target: targets.root.Ready,
-                from: ({ event }) => {
+                data: ({ event }) => {
                   calls++
                   return { count: event.count }
                 }
@@ -104,7 +121,15 @@ describe("declarative transitions", () => {
             }
           },
           Ready: {},
-          Checkout: { states: { Review: {} } }
+          Checkout: {
+            initial: {
+              target: Machine.targets(Root).root.Checkout.Review,
+              data: { total: 0 }
+            },
+            states: {
+              Review: {}
+            }
+          }
         }
       })
       assert.strictEqual(calls, 0)
@@ -118,7 +143,6 @@ describe("declarative transitions", () => {
         state: { path: "Ready", value: { _tag: "Ready", count: 3 } }
       })
     }))
-
   it.effect("captures branch topology and constructs nested values lazily", () =>
     Effect.gen(function*() {
       let calls = 0
@@ -129,6 +153,9 @@ describe("declarative transitions", () => {
           checkout: { review: { target: targets.root.Checkout } }
         }
       }).handle({
+        initial: {
+          target: Machine.targets(Root).root.Idle
+        },
         states: {
           Idle: {
             on: {
@@ -145,7 +172,15 @@ describe("declarative transitions", () => {
             }
           },
           Ready: {},
-          Checkout: { states: { Review: {} } }
+          Checkout: {
+            initial: {
+              target: Machine.targets(Root).root.Checkout.Review,
+              data: { total: 0 }
+            },
+            states: {
+              Review: {}
+            }
+          }
         }
       })
       assert.strictEqual(calls, 0)
@@ -166,12 +201,13 @@ describe("declarative transitions", () => {
         }
       })
     }))
-
   it.effect("runs registered input-taking Effects with provided services", () =>
     Effect.gen(function*() {
-      class Database extends Context.Service<Database, { readonly count: number }>()("test/declarative/Database") {}
+      class Database extends Context.Service<Database, {
+        readonly count: number
+      }>()("test/declarative/Database") {
+      }
       const root = Machine.state({
-        initial: "Idle",
         states: {
           Idle: {},
           Done: { type: "final", schema: Schema.TaggedStruct("Done", { count: Schema.Number }), output: Schema.Number }
@@ -185,6 +221,9 @@ describe("declarative transitions", () => {
           load: (offset: number) => Effect.map(Database, (db) => db.count + offset)
         }
       }).handle({
+        initial: {
+          target: Machine.targets(root).root.Idle
+        },
         states: {
           Idle: {
             invoke: {
@@ -192,7 +231,7 @@ describe("declarative transitions", () => {
               input: () => 2,
               onDone: {
                 target: refs.root.Done,
-                from: ({ output }) => ({ count: output })
+                data: ({ output }) => ({ count: output })
               }
             }
           },
