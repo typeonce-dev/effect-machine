@@ -98,6 +98,10 @@ definition.handle({ states: { Loading: { always: { branches: "complete", resolve
 definition.handle({ states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
 definition.handle({ states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
 
+const eventDefinition = Machine.make({ root: States, events: Machine.events({ Retry: {} }) })
+eventDefinition.handle({ states: { Loading: { on: { /*event-handler-on*/ } } } })
+eventDefinition.handle({ /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
+
 `
 
 const config = ts.readConfigFile(path.join(projectRoot, "tsconfig.json"), ts.sys.readFile)
@@ -296,4 +300,10 @@ test("completes root definition fields and topology", () => {
   for (const key of ["fields", "schema", "type", "output", "annotations"]) {
     assert.equal(root.has(key), true, key)
   }
+})
+
+test("completes handler fields with a public event protocol", () => {
+  assert.equal(completions("event-handler-root").has("entry"), true)
+  assert.equal(completions("event-handler-node").has("invoke"), true)
+  assert.equal(completions("event-handler-on").has("Retry"), true)
 })

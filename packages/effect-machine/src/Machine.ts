@@ -5654,20 +5654,24 @@ export declare namespace Machine {
     }
   }
 
-  type CompletedBranchResult<R> = R extends UpdatingStateConstruction<infer Target, infer S, infer Owner>
-    ? CombinedTarget<UnwrapConstruction<Target>, S, Owner>
+  type CompletedBranchResult<R> = R extends { readonly update: unknown }
+    ? R extends UpdatingStateConstruction<infer Target, infer S, infer Owner>
+      ? CombinedTarget<UnwrapConstruction<Target>, S, Owner>
     : R
-  type SelectedConstruction<K extends string, R> = R extends
-    UpdatingStateConstruction<infer Target, infer S, infer Owner> ? {
-      readonly update: SelectedBranchBuilder<StateUpdateBuilder<S, Owner>, K> extends infer B ? {
-          readonly [M in keyof B]: StateUpdateBuilder<S, Owner>[Extract<M, keyof StateUpdateBuilder<S, Owner>>] extends
-            (...args: infer A) => unknown
-            ? (...args: A) => SelectedBranch<K, CombinedTarget<UnwrapConstruction<Target>, S, Owner>>
-            : never
-        } :
-        never
-    }
-    : SelectedBranch<K, R>
+    : R
+  type SelectedConstruction<K extends string, R> = R extends { readonly update: unknown } ?
+    R extends UpdatingStateConstruction<infer Target, infer S, infer Owner> ? {
+        readonly update: SelectedBranchBuilder<StateUpdateBuilder<S, Owner>, K> extends infer B ? {
+            readonly [M in keyof B]:
+              StateUpdateBuilder<S, Owner>[Extract<M, keyof StateUpdateBuilder<S, Owner>>] extends
+                (...args: infer A) => unknown
+                ? (...args: A) => SelectedBranch<K, CombinedTarget<UnwrapConstruction<Target>, S, Owner>>
+                : never
+          } :
+          never
+      }
+    : SelectedBranch<K, R> :
+    SelectedBranch<K, R>
   type SelectedBranchCallable<Callable, Key extends string> = Callable extends {
     (...args: infer Arguments1): infer Result1
     (...args: infer Arguments2): infer Result2
@@ -6726,7 +6730,9 @@ export declare namespace Machine {
       Sources[K] extends (...args: never[]) => unknown ? Parameters<Sources[K]>["length"] extends 1 ? unknown : never
       : unknown
   }
-  type ReferenceRoot<S extends StateSchemas> = Extract<Omit<S[""], "~effect/Machine/ExplicitInitial">, StateNodeConfig>
+  type ReferenceRoot<S extends StateSchemas> = "~effect/Machine/ExplicitInitial" extends keyof S[""]
+    ? Extract<Omit<S[""], "~effect/Machine/ExplicitInitial">, StateNodeConfig>
+    : Extract<S[""], StateNodeConfig>
   type ReferenceAt<S extends StateSchemas, P extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = TargetReference<
     ReferenceRoot<S>,
     P,
@@ -6899,6 +6905,28 @@ export declare namespace Machine {
     /** Declines the transition before construction when the predicate returns false. */
     readonly guard?: "declinable" extends Acceptance ? ((context: C) => boolean) | undefined : never
   }
+  // Leaf construction needs only schema inputs; expanding the path builder also
+  // computes unrelated nested targets for each contextual event callback.
+  type InlineNodeConstruction<C, Node> = [NodeSchema<Node>] extends [never] ? {
+      readonly from?: (context: C) => undefined
+      readonly decoded?: never
+    } :
+    | { readonly from: (context: C) => NodeMakeInput<Node>; readonly decoded?: never }
+    | { readonly decoded: (context: C) => NodeValue<Node>; readonly from?: never }
+    | ({} extends NodeMakeInput<Node> ? { readonly from?: never; readonly decoded?: never } : never)
+  type InlineDestinationConstruction<
+    S extends StateSchemas,
+    Src extends StateNodeIdentifier<S>,
+    P extends DestinationPath<S>,
+    C
+  > = P extends ChoiceIdentifier<S> ? { readonly from?: never; readonly decoded?: never }
+    : P extends StateIdentifier<S> ?
+      NodeByIdentifier<S, P> extends { readonly states: StateSchemas }
+        ? [NodeSchema<NodeByIdentifier<S, P>>] extends [never]
+          ? ObjectConstruction<C, BranchBuilderAt<S, Src, P>> | ObjectDefault<BranchBuilderAt<S, Src, P>>
+        : never
+      : InlineNodeConstruction<C, NodeByIdentifier<S, P>>
+    : never
   type InlineDestination<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
     readonly [P in DestinationPath<S>]:
       & {
@@ -6919,10 +6947,53 @@ export declare namespace Machine {
         /** Set to true when the resolver can explicitly return decline(). */
         readonly declinable?: never
       }
-      & (ObjectConstruction<C, BranchBuilderAt<S, Src, P>> | ObjectDefault<BranchBuilderAt<S, Src, P>>)
+      & InlineDestinationConstruction<S, Src, P, C>
   }[DestinationPath<S>]
+  type InlinePairConstruction<
+    S extends StateSchemas,
+    Src extends StateNodeIdentifier<S>,
+    P extends string,
+    Owner extends ValuedStateIdentifier<S>,
+    C
+  > = P extends StateIdentifier<S> ? NodeByIdentifier<S, P> extends { readonly states: StateSchemas } ? {
+        readonly [
+          M in Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">
+        ]: BuilderArgs<BranchBuilderAt<S, Src, P>, M> extends readonly [unknown?] ?
+            & {
+              readonly [K in M]: (
+                context: C
+              ) => {
+                /** Selects the declared descendant destination. Supply required values with from or decoded. */
+                readonly target: BuilderArgs<BranchBuilderAt<S, Src, P>, M>[0]
+                /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+                readonly update: BuilderArgs<StateUpdateBuilder<S, Owner>, M>[0]
+              }
+            }
+            & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
+          : never
+      }[Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">]
+    :
+      | {
+        readonly from: (
+          context: C
+        ) => {
+          readonly target: [NodeSchema<NodeByIdentifier<S, P>>] extends [never] ? undefined
+            : NodeMakeInput<NodeByIdentifier<S, P>>
+          readonly update: SchemaByIdentifier<S, Owner>["~type.make.in"]
+        }
+        readonly decoded?: never
+      }
+      | ([NodeSchema<NodeByIdentifier<S, P>>] extends [never] ? never
+        : {
+          readonly decoded: (
+            context: C
+          ) => { readonly target: NodeValue<NodeByIdentifier<S, P>>; readonly update: StateByIdentifier<S, Owner> }
+          readonly from?: never
+        })
+    : never
   type InlineCombined<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = Src extends ChoiceIdentifier<S> ?
     never :
+    [Extract<ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>] extends [never] ? never :
     {
       readonly [P in DestinationPath<S>]: {
         readonly [Owner in Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>]:
@@ -6944,23 +7015,7 @@ export declare namespace Machine {
             /** Set to true when the resolver can explicitly return decline(). */
             readonly declinable?: never
           }
-          & {
-            readonly [
-              M in Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">
-            ]: BuilderArgs<BranchBuilderAt<S, Src, P>, M> extends readonly [unknown?] ?
-                & {
-                  readonly [K in M]: (
-                    context: C
-                  ) => {
-                    /** Selects the declared descendant destination. Supply required values with from or decoded. */
-                    readonly target: BuilderArgs<BranchBuilderAt<S, Src, P>, M>[0]
-                    /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-                    readonly update: BuilderArgs<StateUpdateBuilder<S, Owner>, M>[0]
-                  }
-                }
-                & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
-              : never
-          }[Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">]
+          & InlinePairConstruction<S, Src, P, Owner, C>
       }[Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>]
     }[DestinationPath<S>]
   type InlineUpdate<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = Src extends ChoiceIdentifier<S> ?
@@ -6989,32 +7044,31 @@ export declare namespace Machine {
         }
         & ObjectConstruction<C, StateUpdateBuilder<S, P>>
     }[Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>]
-  type InlineInitial<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
-    readonly [P in Exclude<ObjectCompoundPath<S>, "">]: BranchBuilderAt<S, Src, P> extends {
-      /** Enters a compound or parallel subtree through its declared initialization. */
-      readonly initial: infer B
-    } ?
-        & {
-          /** Enters a compound or parallel subtree through its declared initialization. */
-          readonly initial: ReferenceAt<S, P>
-          /** Selects the declared descendant destination. Supply required values with from or decoded. */
-          readonly target?: never
-          /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-          readonly update?: never
-          /** Restores the declared history reference, using its fallback on first entry. */
-          readonly history?: never
-          /** Accepts the event without selecting a new destination. */
-          readonly none?: never
-          /** Named groups of inspectable destinations used by transition resolvers. */
-          readonly branches?: never
-          /** Selects one declared branch and may enqueue synchronous commands. */
-          readonly resolve?: never
-          /** Set to true when the resolver can explicitly return decline(). */
-          readonly declinable?: never
-        }
-        & (ObjectConstruction<C, B> | ObjectDefault<B>) :
-      never
-  }[Exclude<ObjectCompoundPath<S>, "">]
+  type InlineInitial<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> =
+    [Exclude<ObjectCompoundPath<S>, "">] extends [never] ? never : {
+      readonly [P in Exclude<ObjectCompoundPath<S>, "">]: InitialTargetFactory<NodeByIdentifier<S, P>, P> extends
+        infer B ?
+          & {
+            /** Enters a compound or parallel subtree through its declared initialization. */
+            readonly initial: ReferenceAt<S, P>
+            /** Selects the declared descendant destination. Supply required values with from or decoded. */
+            readonly target?: never
+            /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+            readonly update?: never
+            /** Restores the declared history reference, using its fallback on first entry. */
+            readonly history?: never
+            /** Accepts the event without selecting a new destination. */
+            readonly none?: never
+            /** Named groups of inspectable destinations used by transition resolvers. */
+            readonly branches?: never
+            /** Selects one declared branch and may enqueue synchronous commands. */
+            readonly resolve?: never
+            /** Set to true when the resolver can explicitly return decline(). */
+            readonly declinable?: never
+          }
+          & (ObjectConstruction<C, B> | ObjectDefault<B>) :
+        never
+    }[Exclude<ObjectCompoundPath<S>, "">]
   type BranchSelections<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
     readonly [K in Extract<keyof Group, string>]: {
       /** Selects the declared descendant destination. Supply required values with from or decoded. */
@@ -7028,7 +7082,7 @@ export declare namespace Machine {
     B extends Readonly<Record<string, TransitionBranchInput>>,
     Declinable extends boolean
   > = (
-    context: TransitionBranchesResolveContext<C, B> & DeclineCapability,
+    context: C & { readonly select: BranchSelectors<B> } & DeclineCapability,
     enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
   ) => BranchSelectionResult<B> | (Declinable extends true ? Declined : never)
   type InvalidBranchSelection<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
@@ -7580,6 +7634,19 @@ export declare namespace Machine {
       : K extends "invoke" ? NormalizeObjectInvoke<C[K], R>
       : C[K]
   }
+  // Reverse-map authored fields to avoid expanding every possible transition.
+  // Retain missing fields from H for required handlers and editor completion.
+  type HandlerShape<C, H> =
+    & {
+      readonly [K in keyof C]: K extends keyof H ? K extends "states" ? {
+            readonly [P in keyof C[K]]: P extends keyof NonNullable<H[K]>
+              ? HandlerShape<C[K][P], NonNullable<NonNullable<H[K]>[P]>>
+              : never
+          }
+        : H[K]
+        : never
+    }
+    & Omit<H, keyof C>
   /**
    * Adds object handlers while checking topology, protocols, invocation outcomes, and readiness.
    *
@@ -7603,7 +7670,9 @@ export declare namespace Machine {
       config:
         & C
         & (C extends (...args: never[]) => unknown ? never : unknown)
-        & StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R>
+        & ([Ev[number] | keyof Registered<R, "branches"> | SourceKeys<R>] extends [never]
+          ? StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R>
+          : HandlerShape<C, StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R>>)
         & ValidateObjectConfig<NoInfer<C>, R>
         & RootHandlerValidation<
           S,
