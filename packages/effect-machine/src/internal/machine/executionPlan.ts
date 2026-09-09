@@ -39,6 +39,7 @@ import {
   normalizeTransition,
   planConfiguration,
   removeConflictingTransitions,
+  resolveInitialConfiguration,
   resolveInitialTarget,
   type SelectedTransition,
   sortEntryPaths,
@@ -1145,8 +1146,8 @@ const makeIndexedExecutionPlan = (
           ? (decodeInputSync(machine, machine.input, undefined), args)
           : [decodeInputSync(machine, machine.input, args[0])]
         const initial = machine.initial(...inputArgs as any)
-        const resolved = isInitialTarget(initial)
-          ? resolveInitialTarget(
+        const normalized = isInitialTarget(initial)
+          ? resolveInitialConfiguration(
             machine,
             {
               active: new Set(),
@@ -1157,16 +1158,8 @@ const makeIndexedExecutionPlan = (
             },
             initial,
             InitialEvent
-          ).target
-          : initial
-        const normalized = isInitialTarget(initial)
-          ? normalizeTargetConfigurationSync(machine, {
-            active: new Set(),
-            values: new Map(),
-            outputs: new Map(),
-            history: new Map()
-          }, resolved)
-          : normalizeConfigurationSync(machine, resolved as Machine.Snapshot<any>)
+          ).configuration
+          : normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
         const active = machineReferences === undefined
           ? normalized
           : withMachineReferences(normalized, machineReferences)

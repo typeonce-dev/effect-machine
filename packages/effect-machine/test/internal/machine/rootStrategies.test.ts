@@ -2,6 +2,35 @@ import { assert, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
 import { verifyPlannerStrategies } from "./support/strategyDifferential.js"
+
+it.effect("matches generic startup with constructed and defaulted parallel region data", () => {
+  const root = Machine.state({
+    type: "parallel",
+    states: {
+      Required: { fields: { count: Schema.Number } },
+      Defaulted: {
+        fields: {
+          label: Schema.String.pipe(Schema.optionalKey, Schema.withConstructorDefault(Effect.succeed("default")))
+        }
+      },
+      Empty: {}
+    }
+  })
+  const machine = Machine.make({ root, events: Machine.events({ Noop: {} }) }).handle({
+    initial: { Required: { count: 1 } }
+  })
+  return Effect.gen(function*() {
+    const initial = yield* Machine.planInitial(machine)
+    assert.deepStrictEqual(initial.state.states.Defaulted.value, { _tag: "Defaulted", label: "default" })
+    yield* verifyPlannerStrategies({
+      machine,
+      expected: "indexed-hierarchical",
+      label: "mixed explicit and defaulted region construction",
+      events: [{ _tag: "Noop" }]
+    })
+  })
+})
+
 it.effect("retains independent callback contexts across root, inline, and named transitions", () =>
   Effect.gen(function*() {
     const root = Machine.state({ fields: { count: Schema.Number }, states: { Idle: {} } })

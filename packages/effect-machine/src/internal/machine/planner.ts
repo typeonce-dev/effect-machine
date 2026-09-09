@@ -39,6 +39,7 @@ import {
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
+import { isDataInitializer } from "./initialDeclaration.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
@@ -344,7 +345,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
-            builder: makeStateInitializeBuilder(machine, path)
+            ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = getStateInitializeValues(path, initialized.value)
           values.set(child.path, decodeStateValueSync(machine, child, initializedValues[child.key]))
@@ -372,7 +373,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
-            builder: makeStateInitializeBuilder(machine, path)
+            ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = initialized === undefined
             ? undefined
@@ -388,6 +389,10 @@ const completeHistoryConfiguration = (
               if (
                 initializedValues === undefined || !Object.prototype.hasOwnProperty.call(initializedValues, child.key)
               ) {
+                if (initializer !== undefined && isDataInitializer(initializer)) {
+                  values.set(child.path, decodeStateValueSync(machine, child, makeStateInput({})))
+                  continue
+                }
                 throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
               }
               values.set(
@@ -420,14 +425,24 @@ const completeHistoryConfiguration = (
   }
 }
 
-export function resolveInitialTarget(
+/** Resolves initial data into owned configuration without a snapshot round trip. */
+export function resolveInitialConfiguration(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   target: InitialTargetInstruction,
   event: unknown
 ) {
   const partial = configurationFromInitialTargetSync(machine, configuration, target)
-  const completed = completeHistoryConfiguration(machine, partial, event)
+  return completeHistoryConfiguration(machine, partial, event)
+}
+
+export function resolveInitialTarget(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  target: InitialTargetInstruction,
+  event: unknown
+) {
+  const completed = resolveInitialConfiguration(machine, configuration, target, event)
   const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.path)
   return {
     target: makeTarget(target.path as any, snapshot.value as any, {
