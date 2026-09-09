@@ -14,7 +14,10 @@ const states = Machine.state({ initial: "Idle", states: { Idle } })
 const Events = Machine.eventsFromSchemas(Increment)
 const Emissions = Machine.emittedEventsFromSchemas(Notice)
 
+const targets1 = Machine.targets(states)
 const machine = Machine.make({
+  branches: { transition1: { destination: { target: targets1.root.Idle } } },
+
   id: "counter",
   root: states,
   events: Events,
@@ -24,11 +27,13 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Increment: (to) =>
-          to.branch.Idle().resolve(({ event, target }, enqueue) => {
+        Increment: {
+          branches: "transition1",
+          resolve: ({ event, select: { destination: target } }, enqueue) => {
             enqueue.emit(Emissions.Notice({ value: event.by }))
             return target.decoded(new Idle({}))
-          })
+          }
+        }
       }
     }
   }
@@ -85,7 +90,7 @@ describe("Machine live inspection", () => {
           trigger: { type: "event", event: "Increment" },
           reenter: false,
           branchIndex: 0,
-          branchKey: undefined,
+          branchKey: "destination",
           target: "Idle",
           resolvedTarget: "Idle",
           updates: []
@@ -128,6 +133,8 @@ describe("Machine live inspection", () => {
   it.effect("represents Effect invokes as owned activities rather than child machines", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
+        effects: { source1: Effect.suspend(() => Effect.never) },
+
         id: "activity-root",
         root: states,
         events: Machine.eventsFromSchemas(),
@@ -135,7 +142,7 @@ describe("Machine live inspection", () => {
       }).handle({
         states: {
           Idle: {
-            invoke: (from) => from.effect("worker", () => Effect.never)
+            invoke: { src: "source1", id: "worker" }
           }
         }
       })
@@ -179,6 +186,8 @@ describe("Machine live inspection", () => {
   it.effect("represents Stream invokes as owned Stream activities", () =>
     Effect.scoped(Effect.gen(function*() {
       const active = Machine.make({
+        streams: { source1: Stream.suspend(() => Stream.never) },
+
         id: "stream-activity-root",
         root: states,
         events: Machine.eventsFromSchemas(),
@@ -186,7 +195,7 @@ describe("Machine live inspection", () => {
       }).handle({
         states: {
           Idle: {
-            invoke: (from) => from.stream("updates", () => Stream.never).onDone((to) => to.none)
+            invoke: { src: "source1", id: "updates", onDone: { none: true } }
           }
         }
       })
@@ -232,11 +241,13 @@ describe("Machine live inspection", () => {
         states: {
           ChildIdle: {
             on: {
-              Trigger: (to) =>
-                to.none.resolve(({ parent }, enqueue) => {
+              Trigger: {
+                none: true,
+                resolve: ({ parent }, enqueue) => {
                   enqueue.sendTo(parent, ParentEvents.ChildReady())
                   return undefined
-                })
+                }
+              }
             }
           }
         }
@@ -249,7 +260,10 @@ describe("Machine live inspection", () => {
           ParentDone: { schema: ParentDone, type: "final" }
         }
       })
+      const targets5 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
+        children: { source1: Child },
+
         id: "parent-machine",
         root: parentStates,
         events: Machine.eventsFromSchemas(ParentEvents),
@@ -258,9 +272,9 @@ describe("Machine live inspection", () => {
       }).handle({
         states: {
           ParentIdle: {
-            invoke: (from) => from.child(Child),
+            invoke: { src: "source1" },
             on: {
-              ChildReady: (to) => to.branch.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
+              ChildReady: { target: targets5.root.ParentDone, decoded: () => (new ParentDone({})) }
             }
           },
           ParentDone: {}

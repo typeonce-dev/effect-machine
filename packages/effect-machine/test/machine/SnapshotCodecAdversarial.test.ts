@@ -411,6 +411,7 @@ describe("snapshot codec adversarial boundaries", () => {
       class Boundary extends Schema.TaggedClass<Boundary>("CodecAutomaticBoundary")("CodecAutomaticBoundary", {}) {}
       class After extends Schema.TaggedClass<After>("CodecAutomaticAfter")("CodecAutomaticAfter", {}) {}
       const states = Machine.state({ initial: "Before", states: { Before, Boundary, After } })
+      const targets1 = Machine.targets(states)
       const original = Machine.make({
         id: "codec-automatic-original",
         root: states,
@@ -420,12 +421,13 @@ describe("snapshot codec adversarial boundaries", () => {
       }).handle({
         states: {
           Before: {
-            always: (to) => to.branch.Boundary().resolve(({ target }) => target.decoded(new Boundary({})))
+            always: { target: targets1.root.Boundary, decoded: () => (new Boundary({})) }
           },
           Boundary: {},
           After: {}
         }
       })
+      const targets2 = Machine.targets(states)
       const changed = Machine.make({
         id: "codec-automatic-changed",
         root: states,
@@ -436,7 +438,7 @@ describe("snapshot codec adversarial boundaries", () => {
         states: {
           Before: {},
           Boundary: {
-            always: (to) => to.branch.After().resolve(({ target }) => target.decoded(new After({})))
+            always: { target: targets2.root.After, decoded: () => (new After({})) }
           },
           After: {}
         }

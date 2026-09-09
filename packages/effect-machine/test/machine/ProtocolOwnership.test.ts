@@ -9,8 +9,9 @@ describe("protocol ownership", () => {
       const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
       const events = Machine.eventsFromSchemas(Set)
       let retained: unknown
+      const root1 = Machine.state({ initial: "State", states: { State } })
       const machine = Machine.make({
-        root: Machine.state({ initial: "State", states: { State } }),
+        root: root1,
         events,
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
@@ -18,10 +19,12 @@ describe("protocol ownership", () => {
         states: {
           State: {
             on: {
-              Set: (to) =>
-                to.none.resolve(({ event }) => {
+              Set: {
+                none: true,
+                resolve: ({ event }) => {
                   retained = event
-                })
+                }
+              }
             }
           }
         }
@@ -40,14 +43,15 @@ describe("protocol ownership", () => {
       const State = Schema.TaggedStruct("State", {})
       const Internal = Schema.TaggedStruct("Internal", {})
       const internalEvents = Machine.internalEventsFromSchemas(Internal)
+      const root2 = Machine.state({ initial: "State", states: { State } })
       const machine = Machine.make({
-        root: Machine.state({ initial: "State", states: { State } }),
+        root: root2,
         events: Machine.eventsFromSchemas(),
         internalEvents,
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State" })))
       })
-        .handle({ states: { State: { on: { Internal: (to) => to.none } } } })
+        .handle({ states: { State: { on: { Internal: { none: true } } } } })
       const initial = yield* Machine.planInitial(machine)
       assert.isTrue(yield* Machine.can(machine, initial.state, { _tag: "Internal" }))
       assert.isTrue(yield* Machine.can(machine)(initial.state, internalEvents.Internal()))

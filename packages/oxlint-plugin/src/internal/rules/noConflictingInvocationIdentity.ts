@@ -3,13 +3,15 @@ import { staticMemberName } from "../ast.js"
 import { resolvedVariable, unwrapExpression } from "../ast.js"
 import {
   hasMachineImport,
+  isMachineHandleCall,
+  isMachineMakeCall,
   isMachineMemberCall,
   type MachineBindings,
   makeMachineBindings,
   recordMachineDefinition,
   recordMachineImport
 } from "../imports.js"
-import { isInvokePlanningCallback, type PlanningFunction } from "../planning.js"
+import { isInvokePlanningCallback, isInvokeProperty, type PlanningFunction } from "../planning.js"
 
 interface Identity {
   readonly key: string
@@ -268,6 +270,53 @@ const resolvedEntry = (
   return initializer === undefined ? expression : unwrapExpression(initializer)
 }
 
+const registeredChildren = (
+  node: ESTree.Node,
+  context: Context,
+  bindings: MachineBindings
+): ESTree.ObjectExpression | undefined => {
+  for (
+    let current: ESTree.Node | null = node.parent;
+    current !== null && current.type !== "Program";
+    current = current.parent
+  ) {
+    if (
+      current.type !== "CallExpression" || !isMachineHandleCall(current, bindings) ||
+      current.callee.type !== "MemberExpression"
+    ) continue
+    const receiver = resolvedEntry(context, current.callee.object)
+    if (receiver.type !== "CallExpression" || !isMachineMakeCall(receiver, bindings)) return undefined
+    const argument = receiver.arguments[0]
+    if (argument === undefined || argument.type === "SpreadElement") return undefined
+    const config = resolvedObject(context, argument)
+    const children = config === undefined ? undefined : objectProperty(config, "children")
+    return children === undefined ? undefined : resolvedObject(context, children)
+  }
+  return undefined
+}
+
+const objectInvocationIdentity = (
+  context: Context,
+  entry: ESTree.Expression,
+  bindings: MachineBindings,
+  children: ESTree.ObjectExpression | undefined
+): InvocationIdentity | undefined => {
+  const config = resolvedObject(context, entry)
+  if (config === undefined) return undefined
+  const src = objectProperty(config, "src")
+  if (src === undefined) return undefined
+  if (children !== undefined && src.type === "Literal" && typeof src.value === "string") {
+    const child = objectProperty(children, src.value)
+    const identity = child === undefined ? undefined : descriptorIdentity(context, child, bindings)
+    if (identity !== undefined) return { lifecycle: identity, address: identity }
+  }
+  const lifecycle = staticIdentity(context, objectProperty(config, "id") ?? src, bindings)
+  if (lifecycle === undefined) return undefined
+  const addressNode = objectProperty(config, "address")
+  const address = addressNode === undefined ? undefined : staticIdentity(context, addressNode, bindings)
+  return address === undefined ? { lifecycle } : { lifecycle, address }
+}
+
 export const noConflictingInvocationIdentity: Rule = {
   meta: {
     type: "problem",
@@ -278,7 +327,7 @@ export const noConflictingInvocationIdentity: Rule = {
     schema: [],
     messages: {
       conflictingAddress:
-        "Invocation runtime address {{identity}} is reused in this state. Concurrent children cannot own the same address. Give each from.logic(...) invocation a distinct Machine.childAddress(...), or put sequential work in separate states.",
+        "Invocation runtime address {{identity}} is reused in this state. Concurrent children cannot own the same address. Give each logic invocation a distinct Machine.childAddress(...), or put sequential work in separate states.",
       conflictingBoth:
         "Invocation identity {{identity}} is reused as both lifecycle ID and runtime address in this state. Outcomes become ambiguous and overlapping starts fail. Give each invocation a unique ID/address, or put sequential work in separate states.",
       conflictingLifecycle:
@@ -287,15 +336,14 @@ export const noConflictingInvocationIdentity: Rule = {
   },
   create(context) {
     const bindings = makeMachineBindings(context)
-    const inspect = (node: PlanningFunction): void => {
-      if (!hasMachineImport(bindings) || !isInvokePlanningCallback(node, bindings)) return
-      const parameter = node.params[0]
-      if (parameter?.type !== "Identifier") return
+    const inspectEntries = (
+      entries: ReadonlyArray<ESTree.Expression>,
+      identityOf: (entry: ESTree.Expression) => InvocationIdentity | undefined
+    ): void => {
       const lifecycle = new Map<string, number>()
       const addresses = new Map<string, number>()
-      const entries = returnedEntries(context, node)
       entries.forEach((entry, index) => {
-        const identity = invocationIdentity(context, resolvedEntry(context, entry), parameter.name, bindings)
+        const identity = identityOf(entry)
         if (identity === undefined) return
         const lifecycleConflict = lifecycle.get(identity.lifecycle.key)
         const addressConflict = identity.address === undefined
@@ -333,9 +381,36 @@ export const noConflictingInvocationIdentity: Rule = {
         }
       })
     }
+    const inspect = (node: PlanningFunction): void => {
+      if (!hasMachineImport(bindings) || !isInvokePlanningCallback(node, bindings)) return
+      const parameter = node.params[0]
+      if (parameter?.type !== "Identifier") return
+      inspectEntries(
+        returnedEntries(context, node),
+        (entry) => invocationIdentity(context, resolvedEntry(context, entry), parameter.name, bindings)
+      )
+    }
     return {
       ImportDeclaration: (node) => recordMachineImport(bindings, node),
       VariableDeclarator: (node) => recordMachineDefinition(bindings, node),
+      Property(node) {
+        if (
+          !hasMachineImport(bindings) || !isInvokeProperty(node, bindings) || node.kind !== "init" || node.method ||
+          node.shorthand
+        ) return
+        if (node.parent.type !== "ObjectExpression") return
+        const property = node.parent.properties.find((property) => property === node)
+        if (property?.type !== "Property") return
+        const value = resolvedObjectOrArray(context, property.value)
+        if (value === undefined) return
+        const entries = value.type === "ArrayExpression"
+          ? value.elements.filter((entry): entry is ESTree.Expression =>
+            entry !== null && entry.type !== "SpreadElement"
+          )
+          : [value]
+        const children = registeredChildren(node, context, bindings)
+        inspectEntries(entries, (entry) => objectInvocationIdentity(context, entry, bindings, children))
+      },
       ArrowFunctionExpression: inspect,
       FunctionExpression: inspect
     }

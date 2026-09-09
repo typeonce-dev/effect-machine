@@ -257,6 +257,7 @@ describe("machine operation totality", () => {
           Done: { schema: Done, type: "final", output: Schema.NumberFromString }
         }
       })
+      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Finish),
@@ -266,7 +267,7 @@ describe("machine operation totality", () => {
         states: {
           Value: {
             on: {
-              Finish: (to) => to.branch.Done().resolve(({ target }) => target.decoded({ _tag: "Done" }))
+              Finish: { target: targets1.root.Done, decoded: () => ({ _tag: "Done" }) }
             }
           },
           Done: { output: () => 42 }

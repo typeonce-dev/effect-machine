@@ -62,7 +62,15 @@ describe("Machine transition snapshot context", () => {
   it.effect("lets an effectful event handler inspect a sibling region", () =>
     Effect.gen(function*() {
       let captured: Machine.Snapshot<typeof States> | undefined
+      const targets1 = Machine.targets(States)
       const machine = Machine.make({
+        branches: {
+          transition1: {
+            online: { target: targets1.root.System.Playback.Playing, title: "Network is online" },
+            unchanged: { none: true }
+          }
+        },
+
         root: States,
         events: Machine.eventsFromSchemas(BufferReady),
         initialConfiguration: initialDefinition
@@ -74,16 +82,15 @@ describe("Machine transition snapshot context", () => {
                 states: {
                   Buffering: {
                     on: {
-                      BufferReady: (to) =>
-                        to.branches({
-                          online: { title: "Network is online", target: to.local.Playing() },
-                          unchanged: { target: to.none }
-                        }).resolve(({ snapshot, select }) => {
+                      BufferReady: {
+                        branches: "transition1",
+                        resolve: ({ snapshot, select }) => {
                           captured = snapshot
                           return States.matches(snapshot, "System.Network.Online")
                             ? select.online.decoded(new Playing({}))
                             : select.unchanged()
-                        })
+                        }
+                      }
                     }
                   }
                 }
@@ -107,7 +114,13 @@ describe("Machine transition snapshot context", () => {
   it.effect("shares one beginning-of-microstep snapshot across parallel transitions", () =>
     Effect.gen(function*() {
       const captured: Array<Machine.Snapshot<typeof States>> = []
+      const targets2 = Machine.targets(States)
       const machine = Machine.make({
+        branches: {
+          transition1: { destination: { target: targets2.root.System.Playback.Playing } },
+          transition2: { destination: { target: targets2.root.System.Network.Offline } }
+        },
+
         root: States,
         events: Machine.eventsFromSchemas(Disconnect),
         initialConfiguration: initialDefinition
@@ -119,11 +132,13 @@ describe("Machine transition snapshot context", () => {
                 states: {
                   Buffering: {
                     on: {
-                      Disconnect: (to) =>
-                        to.local.Playing().resolve(({ snapshot, target }) => {
+                      Disconnect: {
+                        branches: "transition1",
+                        resolve: ({ snapshot, select: { destination: target } }) => {
                           captured.push(snapshot)
                           return target.decoded(new Playing({}))
-                        })
+                        }
+                      }
                     }
                   }
                 }
@@ -132,11 +147,13 @@ describe("Machine transition snapshot context", () => {
                 states: {
                   Online: {
                     on: {
-                      Disconnect: (to) =>
-                        to.local.Offline().resolve(({ snapshot, target }) => {
+                      Disconnect: {
+                        branches: "transition2",
+                        resolve: ({ snapshot, select: { destination: target } }) => {
                           captured.push(snapshot)
                           return target.decoded(new Offline({}))
-                        })
+                        }
+                      }
                     }
                   }
                 }
@@ -160,7 +177,15 @@ describe("Machine transition snapshot context", () => {
   it.effect("captures the complete configuration for an eventless transition", () =>
     Effect.gen(function*() {
       let captured: Machine.Snapshot<typeof States> | undefined
+      const targets3 = Machine.targets(States)
       const machine = Machine.make({
+        branches: {
+          transition1: {
+            online: { target: targets3.root.System.Playback.Playing, title: "Network is online" },
+            unchanged: { none: true }
+          }
+        },
+
         root: States,
         events: Machine.eventsFromSchemas(),
         initialConfiguration: initialDefinition
@@ -171,16 +196,15 @@ describe("Machine transition snapshot context", () => {
               Playback: {
                 states: {
                   Buffering: {
-                    always: (to) =>
-                      to.branches({
-                        online: { title: "Network is online", target: to.local.Playing() },
-                        unchanged: { target: to.none }
-                      }).resolve(({ snapshot, select }) => {
+                    always: {
+                      branches: "transition1",
+                      resolve: ({ snapshot, select }) => {
                         captured = snapshot
                         return States.matches(snapshot, "System.Network.Online")
                           ? select.online.decoded(new Playing({}))
                           : select.unchanged()
-                      })
+                      }
+                    }
                   }
                 }
               }
@@ -228,7 +252,10 @@ describe("Machine transition snapshot context", () => {
         }
       })
       let captured: Machine.Snapshot<typeof completionStates> | undefined
+      const targets4 = Machine.targets(completionStates)
       const machine = Machine.make({
+        branches: { transition1: { destination: { target: targets4.root.System.Work.Restarted } } },
+
         root: completionStates,
         events: Machine.eventsFromSchemas(),
         initialConfiguration: (root) =>
@@ -245,11 +272,13 @@ describe("Machine transition snapshot context", () => {
           System: {
             states: {
               Work: {
-                onDone: (to) =>
-                  to.local.Restarted().resolve(({ snapshot, target }) => {
+                onDone: {
+                  branches: "transition1",
+                  resolve: ({ snapshot, select: { destination: target } }) => {
                     captured = snapshot
                     return target.decoded(new Restarted({}))
-                  })
+                  }
+                }
               }
             }
           }

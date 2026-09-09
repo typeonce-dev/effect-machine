@@ -134,7 +134,13 @@ describe("structural active state types", () => {
   })
 
   it("types structural handler contexts and targets without fake values", () => {
+    const targets1 = Machine.targets(States)
     Machine.make({
+      branches: {
+        transition1: { destination: { target: targets1.root.player.transport.Ready } },
+        transition2: { destination: { target: targets1.root.player.transport.Ready } }
+      },
+
       root: States,
       events: Machine.eventsFromSchemas(Select, Loaded, Play),
       initialConfiguration: (root) =>
@@ -156,37 +162,37 @@ describe("structural active state types", () => {
                     expect(state).type.toBe<undefined>()
                   },
                   on: {
-                    Select: (to) => {
-                      expect(to.local).type.not.toHaveProperty("with")
-                      return to.local.Loading().resolve(({ containingState, ancestors, state, target }) => {
+                    Select: {
+                      target: targets1.root.player.transport.Loading,
+                      from: ({ containingState, ancestors, state }) => {
                         expect(state).type.toBe<undefined>()
                         expect(containingState).type.toBe<undefined>()
                         expect(ancestors).type.toBe<{}>()
-                        expect(target.from).type.toBeCallableWith({ url: "/song.mp3" })
-                        expect(target.from).type.not.toBeCallableWith()
-                        return target.from({ url: "/song.mp3" })
-                      })
+                        return { url: "/song.mp3" }
+                      }
                     }
                   }
                 },
                 Loading: {
                   on: {
-                    Loaded: (to) =>
-                      to.local.Ready().resolve(({ event, target }) =>
+                    Loaded: {
+                      branches: "transition1",
+                      resolve: ({ event, select: { destination: target } }) =>
                         target.from(
                           { duration: event.duration },
                           (ready) => ready.Paused.from()
                         )
-                      )
+                    }
                   }
                 },
                 Ready: {
                   states: {
                     Paused: {
                       on: {
-                        Play: (to) =>
-                          to.local.with.resolve(({ containingState, ancestors, state, target }) => {
-                            expect(to.local.with).type.not.toBeAssignableTo<() => unknown>()
+                        Play: {
+                          branches: "transition2",
+                          resolve: ({ containingState, ancestors, state, select: { destination: target } }) => {
+                            expect(target).type.not.toBeAssignableTo<() => unknown>()
                             expect(state).type.toBe<undefined>()
                             expect(containingState).type.toBe<Ready>()
                             expect(ancestors).type.toBe<{ readonly "player.transport.Ready": Ready }>()
@@ -194,7 +200,8 @@ describe("structural active state types", () => {
                               { duration: containingState.duration },
                               (ready) => ready.Playing.from({ position: 0 })
                             )
-                          })
+                          }
+                        }
                       }
                     }
                   }

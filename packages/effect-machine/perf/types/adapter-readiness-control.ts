@@ -32,6 +32,7 @@ export const snapshot = {
   state: { path: "Ready" as const, value: Ready.make({}) }
 }
 
+const targets1 = Machine.targets(States)
 export const machine = Machine.make({
   id: "perf-readiness",
   root: States,
@@ -49,7 +50,7 @@ export const machine = Machine.make({
       states: {
         Idle: {},
         Route: {
-          choice: (to) => to.branch.Ready().resolve(({ target }) => target.from(Ready.make({})))
+          choice: { target: targets1.root.Ready, from: () => (Ready.make({})) }
         }
       }
     },

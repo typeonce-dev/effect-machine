@@ -61,133 +61,46 @@ AtomMachine.familyChild(atomParent, {
 })
 
 const States = Machine.state({ initial: "Loading", states: { Loading: {}, Done: {}, Failed: {} } })
+const targets = Machine.targets(States)
+Machine.make({ /*invoke-sources*/root: States, events: Machine.eventsFromSchemas() })
 const definition = Machine.make({
-  root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) => root./*initial-operations*/resolve(({ /*initial-context*/ ...context }) => context.target./*initial-exact-target*/from(to => to./*initial-selector*/Loading.from()))
+  effects: { load: (tag: symbol) => Effect.fail("offline").pipe(Effect.as(tag)) },
+  streams: { updates: Stream.make(1) },
+  branches: { complete: { ready: { target: targets./*branch-target-scopes*/root.Done }, unchanged: { none: true } } },
+  root: States, events: Machine.eventsFromSchemas(),
+  initialConfiguration: root => root./*initial-operations*/resolve(({ /*initial-context*/ ...context }) => context.target./*initial-exact-target*/from(to => to./*initial-selector*/Loading.from()))
 })
+definition.handle({ states: { Loading: { invoke: {
+  src: "load", input: ({ /*invoke-source-context*/ ...context }) => context.event._tag,
+  onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready./*done-exact-target*/from() },
+  onFailure: { target: targets.root./*done-target*/Failed, from: ({ /*failure-context*/ ...context }) => undefined }
+} } } })
+definition.handle({ states: { Loading: {
+// @ts-expect-error Incomplete invocation exposes required properties in completion.
+invoke: {
+  src: "load", input: () => Machine.InitialEventTypeId, /*invoke-properties*/
+} } } })
+definition.handle({ states: { Loading: { invoke: {
+  src: "updates", onElement: { none: true, resolve: ({ /*element-context*/ ...context }) => undefined }, onDone: { none: true }
+} } } })
+const requiredParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.parent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
+requiredParentDefinition.handle({ states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
+const optionalParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.optionalParent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
+optionalParentDefinition.handle({ states: { Loading: { invoke: { src: "wait", input: ({ /*optional-parent-context*/ ...context }) => undefined } } } })
+definition.handle({ states: { Loading: {
+// @ts-expect-error Incomplete transition exposes its operation fields in completion.
+always: { /*transition-selector*/ }
+} } })
+definition.handle({ states: { Loading: { on: {}, always: { target: targets.root.Done, /*selected-operations*/ } } } })
+definition.handle({ states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
+definition.handle({ states: { Loading: { always: { target: targets./*target-scopes*/root.Done, from: ({ /*transition-context*/ ...context }) => undefined } } } })
+definition.handle({ states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready./*transition-exact-target*/from() } } } })
+definition.handle({ states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
+definition.handle({ states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
 
-definition.handle({ states: {
-  Loading: {
-    invoke: (from) =>
-      from./*invoke-sources*/effect("load", ({ /*invoke-source-context*/ ...context }) =>
-        Effect.fail("offline").pipe(Effect.as(context.event._tag)))
-      .onDone((to) =>
-        to.branch./*done-target*/Done()./*selected-operations*/resolve(({ /*done-context*/ ...context }) =>
-          context.target./*done-exact-target*/from()))
-      .onFailure((to) =>
-        to.branch.Failed().resolve(({ /*failure-context*/ ...context }) =>
-          context.target.from()))
-  },
-  Done: {},
-  Failed: {}
-} })
-
-const requiredParentDefinition = Machine.make({
-  root: States,
-  events: Machine.eventsFromSchemas(),
-  parent: Machine.parent(Machine.eventsFromSchemas()),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.Loading.from()))
-})
-
-requiredParentDefinition.handle({ states: {
-  Loading: {
-    invoke: (from) =>
-      from.effect("required-parent", ({ /*required-parent-context*/ ...context }) => Effect.never)
-  },
-  Done: {},
-  Failed: {}
-} })
-
-const optionalParentDefinition = Machine.make({
-  root: States,
-  events: Machine.eventsFromSchemas(),
-  parent: Machine.optionalParent(Machine.eventsFromSchemas()),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.Loading.from()))
-})
-
-optionalParentDefinition.handle({ states: {
-  Loading: {
-    invoke: (from) =>
-      from.effect("optional-parent", ({ /*optional-parent-context*/ ...context }) => Effect.never)
-  },
-  Done: {},
-  Failed: {}
-} })
-
-definition.handle({ states: {
-  Loading: {
-    invoke: (from) =>
-      from.stream("updates", () => Stream.make(1))
-      .onElement((to) =>
-        to.none.resolve(({ /*element-context*/ ...context }) => undefined))
-      .onDone((to) => to.none)
-  },
-  Done: {},
-  Failed: {}
-} })
-
-definition.handle({ states: {
-  Loading: {
-    invoke: (from) =>
-      from.effect("incomplete", () => Effect.fail("offline").pipe(Effect.as(1)))
-      ./*invoke-properties*/onDone((to) => to.none)
-      .onFailure((to) => to.none)
-  },
-  Done: {},
-  Failed: {}
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) => to./*transition-selector*/none
-  }
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) =>
-      to.none.resolve(({ /*targetless-context*/ ...context }) => undefined)
-  }
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) =>
-      to./*target-scopes*/branch.Done().resolve(({ /*transition-context*/ ...context }) =>
-        context.target./*transition-exact-target*/from())
-  }
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) =>
-      to.branches({
-        ready: {
-          title: "ready",
-          target: to./*branch-target-scopes*/branch.Done()
-        },
-        unchanged: { target: to.none }
-      }).resolve(({ /*branch-resolve-context*/ ...context }) =>
-        context.select./*branch-select-keys*/ready.from())
-  }
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) =>
-      to.none.resolve(({ /*required-context*/ ...context }) => undefined)
-  }
-} })
-
-definition.handle({ states: {
-  Loading: {
-    always: (to) =>
-      to.none.resolve(({ /*declinable-context*/ ...context }) => context.decline(), {
-        declinable: true
-      })
-  }
-} })
+const eventDefinition = Machine.make({ root: States, events: Machine.events({ Retry: {} }) })
+eventDefinition.handle({ states: { Loading: { on: { /*event-handler-on*/ } } } })
+eventDefinition.handle({ /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
 
 `
 
@@ -262,12 +175,12 @@ test("contextually completes data-last AtomMachine selectors", () => {
 
 test("contextually completes Effect invocation factories while authoring", () => {
   const sources = completions("invoke-sources")
-  assert.deepEqual([...sources].filter((name) => ["effect", "stream", "timer", "logic", "child"].includes(name)).sort(), [
-    "child",
-    "effect",
+  assert.deepEqual([...sources].filter((name) => ["effects", "streams", "timers", "logic", "children"].includes(name)).sort(), [
+    "children",
+    "effects",
     "logic",
-    "stream",
-    "timer"
+    "streams",
+    "timers"
   ])
 
   const sourceContext = completions("invoke-source-context")
@@ -284,7 +197,7 @@ test("contextually completes Effect invocation factories while authoring", () =>
   const done = completions("done-context")
   assert.equal(done.has("output"), true)
   assert.equal(done.has("state"), true)
-  assert.equal(done.has("target"), true)
+  assert.equal(done.has("select"), true)
 
   const doneTarget = completions("done-target")
   assert.equal(doneTarget.has("Done"), true)
@@ -298,7 +211,7 @@ test("contextually completes Effect invocation factories while authoring", () =>
   const failure = completions("failure-context")
   assert.equal(failure.has("error"), true)
   assert.equal(failure.has("state"), true)
-  assert.equal(failure.has("target"), true)
+  assert.equal(failure.has("target"), false)
 
   const properties = completions("invoke-properties")
   assert.equal(properties.has("onDone"), true)
@@ -334,20 +247,17 @@ test("contextually completes transition definitions while authoring", () => {
   const selector = completions("transition-selector")
   assert.equal(selector.has("none"), true)
   assert.equal(selector.has("branches"), true)
-  assert.equal(selector.has("full"), true)
+  assert.equal(selector.has("full"), false)
 
   const scopes = completions("target-scopes")
-  assert.equal(scopes.has("none"), true)
-  assert.equal(scopes.has("local"), true)
-  assert.equal(scopes.has("branch"), true)
-  assert.equal(scopes.has("full"), true)
-  assert.equal(scopes.has("history"), true)
+  assert.equal(scopes.has("root"), true)
+  assert.equal(scopes.has("local"), false)
 
   const context = completions("transition-context")
   assert.equal(context.has("state"), true)
   assert.equal(context.has("ancestors"), true)
   assert.equal(context.has("snapshot"), true)
-  assert.equal(context.has("target"), true)
+  assert.equal(context.has("root"), true)
 
   const exactTarget = completions("transition-exact-target")
   assert.equal(exactTarget.has("from"), true)
@@ -359,11 +269,8 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(targetless.has("target"), false)
 
   const branchScopes = completions("branch-target-scopes")
-  assert.equal(branchScopes.has("none"), true)
-  assert.equal(branchScopes.has("local"), true)
-  assert.equal(branchScopes.has("branch"), true)
-  assert.equal(branchScopes.has("full"), true)
-  assert.equal(branchScopes.has("history"), true)
+  assert.equal(branchScopes.has("root"), true)
+  assert.equal(branchScopes.has("branch"), false)
 
   const resolve = completions("branch-resolve-context")
   assert.equal(resolve.has("state"), true)
@@ -376,14 +283,14 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(select.has("Done"), false)
 
   const required = completions("required-context")
-  assert.equal(required.has("decline"), false)
+  assert.equal(required.has("decline"), true)
 
   const declinable = completions("declinable-context")
   assert.equal(declinable.has("decline"), true)
 
   const selected = completions("selected-operations")
-  assert.equal(selected.has("resolve"), true)
-  assert.equal(selected.has("reenter"), true)
+  assert.equal(selected.has("from"), true)
+  assert.equal(selected.has("decoded"), true)
 
 })
 
@@ -393,4 +300,10 @@ test("completes root definition fields and topology", () => {
   for (const key of ["fields", "schema", "type", "output", "annotations"]) {
     assert.equal(root.has(key), true, key)
   }
+})
+
+test("completes handler fields with a public event protocol", () => {
+  assert.equal(completions("event-handler-root").has("entry"), true)
+  assert.equal(completions("event-handler-node").has("invoke"), true)
+  assert.equal(completions("event-handler-on").has("Retry"), true)
 })

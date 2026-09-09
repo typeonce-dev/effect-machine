@@ -20,7 +20,13 @@ const States = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(States)
 const base = Machine.make({
+  branches: {
+    transition3: { destination: { target: targets1.root.opened } },
+    transition4: { destination: { target: targets1.root.opened } }
+  },
+
   root: States,
   events: Machine.eventsFromSchemas(Open),
   initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.closed.decoded(new Closed({})))))
@@ -32,7 +38,7 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.decoded(new Opened({ id: "team-1" })))
+            Open: { initial: targets1.root.opened, decoded: () => (new Opened({ id: "team-1" })) }
           }
         },
         // @ts-expect-error!
@@ -44,7 +50,7 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "team-1" }))
+            Open: { initial: targets1.root.opened, from: () => ({ id: "team-1" }) }
           }
         },
         opened: {
@@ -57,13 +63,14 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: (to) =>
-              to.branch.opened().resolve(({ target }) =>
+            Open: {
+              branches: "transition3",
+              resolve: ({ select: { destination: target } }) =>
                 target.decoded(
                   new Opened({ id: "team-1" }),
                   (opened) => opened.loading.decoded(new Loading({}))
                 )
-              )
+            }
           }
         },
         opened: {}
@@ -76,9 +83,10 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: (to) =>
-              to.branch.opened().resolve(({ target }) => {
-                expect(to.branch.opened.initial).type.not.toBeAssignableTo<() => unknown>()
+            Open: {
+              branches: "transition4",
+              resolve: ({ select: { destination: target } }) => {
+                expect(target.initial).type.not.toBeAssignableTo<() => unknown>()
                 expect(target).type.toHaveProperty("initial")
                 expect(target.initial.decoded).type.not.toBeCallableWith()
                 expect(target.initial.decoded).type.toBeCallableWith(new Opened({ id: "team-1" }))
@@ -87,7 +95,8 @@ describe("declared initial entry types", () => {
                   new Opened({ id: "team-1" }),
                   (opened) => opened.loading.decoded(new Loading({}))
                 )
-              })
+              }
+            }
           }
         }
       }

@@ -18,8 +18,9 @@ class Deposit extends Schema.TaggedClass<Deposit>("Deposit")("Deposit", {
 
 const States = Machine.state({ initial: "account", states: { account: Account } })
 
-const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) =>
-  Machine.make({
+const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) => {
+  const targets1 = Machine.targets(States)
+  return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Withdraw, Deposit),
     initialConfiguration: (root) =>
@@ -28,18 +29,19 @@ const makeAccountMachine = (withdraw: (balance: number, amount: number) => numbe
     states: {
       account: {
         on: {
-          Withdraw: (to) =>
-            to.branch.account().resolve(({ event, state, target }) =>
-              target.decoded(new Account({ balance: withdraw(state.balance, event.amount) }))
-            ),
-          Deposit: (to) =>
-            to.branch.account().resolve(({ event, state, target }) =>
-              target.decoded(new Account({ balance: state.balance + event.amount }))
-            )
+          Withdraw: {
+            target: targets1.root.account,
+            decoded: ({ event, state }) => (new Account({ balance: withdraw(state.balance, event.amount) }))
+          },
+          Deposit: {
+            target: targets1.root.account,
+            decoded: ({ event, state }) => (new Account({ balance: state.balance + event.amount }))
+          }
         }
       }
     }
   })
+}
 
 describe("MachineTest invariants", () => {
   it.effect("finds semantic failures that structural verification cannot detect", () =>

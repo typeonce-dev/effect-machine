@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { Machine } from "../../dist/index.js"
-import { Done, Loaded, machine, Notice, Start, States } from "./exact-channels-control.js"
+import { Done, Idle, Input, Loaded, Notice, Start, States } from "./exact-channels-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
   true :
@@ -8,17 +8,32 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
 
+const targets = Machine.targets(States)
+const machine = Machine.make({
+  branches: { finish: { done: { target: targets.root.Done } } },
+
+  root: States,
+  events: Machine.eventsFromSchemas(Start),
+  internalEvents: Machine.internalEventsFromSchemas(Loaded),
+  emittedEvents: Machine.emittedEventsFromSchemas(Notice),
+  input: Input,
+  initialConfiguration: (root) =>
+    root.resolve(({ input, target }) => target.from((to) => to.Idle.from(Idle.make({ value: input.seed }))))
+})
+
 const complete = machine.handle({
   states: {
     Idle: {
       entry: () => {},
       on: {
-        Start: (to) =>
-          to.branch.Done().resolve(({ event, target }, enqueue) => {
+        Start: {
+          branches: "finish",
+          resolve: ({ event, select }, enqueue) => {
             enqueue.emit(Notice.make({ value: event.value }))
-            return target.from(Done.make({ value: event.value }))
-          }),
-        Loaded: (to) => to.branch.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+            return select.done.from(Done.make({ value: event.value }))
+          }
+        },
+        Loaded: { target: targets.root.Done, from: ({ event }) => ({ value: event.value }) }
       }
     },
     Done: {

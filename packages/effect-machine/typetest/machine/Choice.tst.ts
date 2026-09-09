@@ -34,7 +34,10 @@ describe("Machine choice pseudo-states", () => {
   })
 
   it("exposes only choice context and requires implementation before planning", () => {
+    const targets1 = Machine.targets(States)
     const incomplete = Machine.make({
+      branches: { transition1: { destination: { target: targets1.root.Flow.Approved } } },
+
       root: States,
       events: Machine.eventsFromSchemas(),
       initialConfiguration: (root) =>
@@ -48,15 +51,17 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             Routing: {
-              choice: (to) =>
-                to.local.Approved().resolve((context) => {
-                  expect(to.local.Approved()).type.not.toHaveProperty("reenter")
+              choice: {
+                branches: "transition1",
+                resolve: (context) => {
+                  expect(context.select.destination).type.not.toHaveProperty("reenter")
                   expect(context).type.not.toHaveProperty("state")
                   expect(context.containingState).type.toBe<Flow>()
                   expect(context.ancestors.Flow).type.toBe<Flow>()
                   expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
-                  return context.target.decoded(new Approved({}))
-                })
+                  return context.select.destination.decoded(new Approved({}))
+                }
+              }
             }
           }
         }
@@ -66,7 +71,10 @@ describe("Machine choice pseudo-states", () => {
   })
 
   it("rejects Effects returned by choice resolvers", () => {
+    const targets2 = Machine.targets(States)
     const machine = Machine.make({
+      branches: { transition1: { destination: { target: targets2.root.Flow.Approved } } },
+
       root: States,
       events: Machine.eventsFromSchemas(),
       initialConfiguration: (root) =>
@@ -79,11 +87,11 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             Routing: {
-              choice: (to) =>
-                to.local.Approved().resolve(({ target }) =>
-                  // @ts-expect-error!
-                  Effect.succeed(target.decoded(new Approved({})))
-                )
+              choice: {
+                branches: "transition1",
+                // @ts-expect-error!
+                resolve: ({ select: { destination: target } }) => Effect.succeed(target.decoded(new Approved({})))
+              }
             }
           }
         }
@@ -138,7 +146,10 @@ describe("Machine choice pseudo-states", () => {
   })
 
   it("validates the selected choice result", () => {
+    const targets3 = Machine.targets(States)
     const base = Machine.make({
+      branches: { transition1: { destination: { target: targets3.root.Flow.Rejected } } },
+
       root: States,
       events: Machine.eventsFromSchemas(),
       initialConfiguration: (root) =>
@@ -151,11 +162,13 @@ describe("Machine choice pseudo-states", () => {
         Flow: {
           states: {
             Routing: {
-              choice: (to) =>
-                to.local.Rejected().resolve(({ target: selectedTarget }) => {
+              choice: {
+                branches: "transition1",
+                resolve: ({ select: { destination: selectedTarget } }) => {
                   expect(selectedTarget.decoded).type.not.toBeCallableWith(new Approved({}))
                   return selectedTarget.decoded(new Rejected({}))
-                })
+                }
+              }
             }
           }
         }
@@ -171,20 +184,11 @@ describe("Machine choice pseudo-states", () => {
       }
     })
 
-    const declinableChoice = null as unknown as Machine.Machine.TransitionConfig<
-      { readonly "": typeof States.node },
-      readonly [],
-      readonly [],
-      "Flow.Routing",
-      Machine.Machine.ChoiceContext<{ readonly "": typeof States.node }, readonly [], readonly [], "Flow.Routing">,
-      false,
-      "declinable"
-    >
     expect(base.handle).type.not.toBeCallableWith({
       states: {
         Flow: {
           states: {
-            Routing: { choice: declinableChoice }
+            Routing: { choice: { branches: "transition1", declinable: true, resolve: () => undefined } }
           }
         }
       }

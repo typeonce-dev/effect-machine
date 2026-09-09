@@ -17,6 +17,7 @@ const ChildStates = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(ChildStates)
 export const invokeGalleryChildMachine = Machine.make({
   id: "invoke-gallery-child",
   root: ChildStates,
@@ -27,10 +28,10 @@ export const invokeGalleryChildMachine = Machine.make({
   states: {
     Working: {
       on: {
-        FinishChild: (to) =>
-          to.branch.Done().resolve(({ state, target }) =>
-            target.decoded(new ChildDone({ result: `${state.task}:complete` }))
-          )
+        FinishChild: {
+          target: targets1.root.Done,
+          decoded: ({ state }) => (new ChildDone({ result: `${state.task}:complete` }))
+        }
       }
     },
     Done: {
@@ -110,7 +111,27 @@ const GalleryStates = Machine.state({
   }
 })
 
+const targets2 = Machine.targets(GalleryStates)
 export const invokeOutcomesMachine = Machine.make({
+  branches: {
+    transition13: {
+      ready: { target: targets2.root.Completed, title: "Worker reports ready" },
+      waiting: { none: true, title: "Worker is still starting" }
+    }
+  },
+  effects: {
+    source1: ({ state }: { readonly state: LoadingDocument }) =>
+      state.request === "fail" ? Effect.fail("document unavailable") : Effect.succeed("document loaded")
+  },
+  streams: {
+    source2: Stream.suspend(() =>
+      Stream.fromIterable([1, 2, 3]).pipe(Stream.concat(Stream.fail("stream disconnected")))
+    )
+  },
+  timers: { source3: "2 seconds" },
+  logic: { source4: processLogic },
+  children: { source5: InvokedChild },
+
   id: "invoke-outcomes",
   root: GalleryStates,
   events: GalleryEvents,
@@ -126,115 +147,118 @@ export const invokeOutcomesMachine = Machine.make({
     Gallery: {
       initialize: ({ builder }) => builder.decoded(new Choose({})),
       on: {
-        Reset: (to) => to.local.Choose().resolve(({ target }) => target.decoded(new Choose({})))
+        Reset: { target: targets2.root.Gallery.Choose, decoded: () => (new Choose({})) }
       },
       states: {
         Choose: {
           on: {
-            RunEffect: (to) =>
-              to.local.LoadingDocument().resolve(({ event, target }) =>
-                target.decoded(new LoadingDocument({ request: event.request }))
-              ),
-            RunStream: (to) =>
-              to.local.StreamingUpdates().resolve(({ target }) => target.decoded(new StreamingUpdates({ values: [] }))),
-            RunTimer: (to) =>
-              to.local.WaitingForTimeout().resolve(({ target }) =>
-                target.decoded(new WaitingForTimeout({ delay: "2 seconds" }))
-              ),
-            RunProcess: (to) =>
-              to.local.WatchingProcess().resolve(({ target }) => target.decoded(new WatchingProcess({ revision: 1 }))),
-            RunChild: (to) => to.local.RunningChild().resolve(({ target }) => target.decoded(new RunningChild({})))
+            RunEffect: {
+              target: targets2.root.Gallery.LoadingDocument,
+              decoded: ({ event }) => (new LoadingDocument({ request: event.request }))
+            },
+            RunStream: {
+              target: targets2.root.Gallery.StreamingUpdates,
+              decoded: () => (new StreamingUpdates({ values: [] }))
+            },
+            RunTimer: {
+              target: targets2.root.Gallery.WaitingForTimeout,
+              decoded: () => (new WaitingForTimeout({ delay: "2 seconds" }))
+            },
+            RunProcess: {
+              target: targets2.root.Gallery.WatchingProcess,
+              decoded: () => (new WatchingProcess({ revision: 1 }))
+            },
+            RunChild: { target: targets2.root.Gallery.RunningChild, decoded: () => (new RunningChild({})) }
           }
         },
         LoadingDocument: {
-          invoke: (from) =>
-            from.effect(
-              "load-document",
-              ({ state }) =>
-                state.request === "fail" ? Effect.fail("document unavailable") : Effect.succeed("document loaded")
-            ).onDone((to) =>
-              to.branch.Completed().resolve(({ output, target }) =>
-                target.decoded(new Completed({ source: "effect", result: output }))
-              )
-            ).onFailure((to) =>
-              to.branch.Failed().resolve(({ error, target }) =>
-                target.decoded(new Failed({ source: "effect", message: error }))
-              )
-            )
+          invoke: {
+            src: "source1",
+            id: "load-document",
+            input: (context) => context,
+            onDone: {
+              target: targets2.root.Completed,
+              decoded: ({ output }) => (new Completed({ source: "effect", result: output }))
+            },
+            onFailure: {
+              target: targets2.root.Failed,
+              decoded: ({ error }) => (new Failed({ source: "effect", message: error }))
+            }
+          }
         },
         StreamingUpdates: {
-          invoke: (from) =>
-            from.stream(
-              "document-updates",
-              () => Stream.fromIterable([1, 2, 3]).pipe(Stream.concat(Stream.fail("stream disconnected")))
-            ).onElement((to) =>
-              to.none.resolve(({ element }, enqueue) => {
+          invoke: {
+            src: "source2",
+            id: "document-updates",
+            onElement: {
+              none: true,
+              resolve: ({ element }, enqueue) => {
                 enqueue.raise(GalleryInternalEvents.StreamValue({ value: element }))
-              })
-            ).onDone((to) =>
-              to.branch.Completed().resolve(({ state, target }) =>
-                target.decoded(new Completed({ source: "stream", result: state.values.join(", ") }))
-              )
-            ).onFailure((to) =>
-              to.branch.Failed().resolve(({ error, target }) =>
-                target.decoded(new Failed({ source: "stream", message: error }))
-              )
-            ),
+              }
+            },
+            onDone: {
+              target: targets2.root.Completed,
+              decoded: ({ state }) => (new Completed({ source: "stream", result: state.values.join(", ") }))
+            },
+            onFailure: {
+              target: targets2.root.Failed,
+              decoded: ({ error }) => (new Failed({ source: "stream", message: error }))
+            }
+          },
           on: {
-            StreamValue: (to) =>
-              to.local.StreamingUpdates().resolve(({ event, state, target }) =>
-                target.decoded(new StreamingUpdates({ values: [...state.values, event.value] }))
-              )
+            StreamValue: {
+              target: targets2.root.Gallery.StreamingUpdates,
+              decoded: ({ event, state }) => (new StreamingUpdates({ values: [...state.values, event.value] }))
+            }
           }
         },
         WaitingForTimeout: {
-          invoke: (from) =>
-            from.timer("request-timeout", "2 seconds").onDone((to) =>
-              to.branch.Completed().resolve(({ target }) =>
-                target.decoded(new Completed({ source: "timer", result: "timeout elapsed" }))
-              )
-            )
+          invoke: {
+            src: "source3",
+            id: "request-timeout",
+            onDone: {
+              target: targets2.root.Completed,
+              decoded: () => (new Completed({ source: "timer", result: "timeout elapsed" }))
+            }
+          }
         },
         WatchingProcess: {
-          invoke: (from) =>
-            from.logic("status-worker", {
-              address: Machine.childAddress("status-worker"),
-              logic: processLogic
-            }).onFailure((to) =>
-              to.branch.Failed().resolve(({ error, target }) =>
-                target.decoded(new Failed({ source: "process", message: String(error) }))
-              )
-            ).onSnapshot((to) =>
-              to.branches({
-                ready: { title: "Worker reports ready", target: to.branch.Completed() },
-                waiting: { title: "Worker is still starting", target: to.none }
-              }).resolve(({ select, snapshot }) =>
+          invoke: {
+            src: "source4",
+            id: "status-worker",
+            address: Machine.childAddress("status-worker"),
+            onFailure: {
+              target: targets2.root.Failed,
+              decoded: ({ error }) => (new Failed({ source: "process", message: String(error) }))
+            },
+            onSnapshot: {
+              branches: "transition13",
+              resolve: ({ select, snapshot }) =>
                 snapshot.state === "ready"
                   ? select.ready.decoded(new Completed({ source: "process", result: "ready" }))
                   : select.waiting()
-              )
-            )
+            }
+          }
         },
         RunningChild: {
-          invoke: (from) =>
-            from.child(InvokedChild).onDone((to) =>
-              to.branch.Completed().resolve(({ output, target }) =>
-                target.decoded(new Completed({ source: "child machine", result: output }))
-              )
-            )
+          invoke: {
+            src: "source5",
+            onDone: {
+              target: targets2.root.Completed,
+              decoded: ({ output }) => (new Completed({ source: "child machine", result: output }))
+            }
+          }
         }
       }
     },
     Completed: {
       on: {
-        Reset: (to) =>
-          to.branch.Gallery.initial.resolve(({ target }) => target.decoded(new Gallery({ selectedDemo: null })))
+        Reset: { initial: targets2.root.Gallery, decoded: () => (new Gallery({ selectedDemo: null })) }
       }
     },
     Failed: {
       on: {
-        Reset: (to) =>
-          to.branch.Gallery.initial.resolve(({ target }) => target.decoded(new Gallery({ selectedDemo: null })))
+        Reset: { initial: targets2.root.Gallery, decoded: () => (new Gallery({ selectedDemo: null })) }
       }
     }
   }

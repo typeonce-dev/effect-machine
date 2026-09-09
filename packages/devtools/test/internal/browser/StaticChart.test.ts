@@ -989,7 +989,10 @@ describe("Static chart", () => {
     assert.isTrue(layout.regions.some(({ nodePaths }) => nodePaths.includes("Disabled")))
 
     const recent = layout.nodes.find(({ node }) => node.path === "Workspace.recent")
-    const resume = layout.edges.find((edge) => edge.kind === "transition" && edge.edge.label === "ResumeShallow")
+    const resume = layout.edges.find((edge) =>
+      edge.kind === "transition" && edge.edge.trigger.type === "event" && edge.edge.trigger.event === "ResumeShallow" &&
+      edge.edge.target === "Workspace.recent"
+    )
     if (recent === undefined || resume?.kind !== "transition") assert.fail("Expected the shallow history transition")
     const approach = resume.points.at(-2)!
     const end = resume.points.at(-1)!

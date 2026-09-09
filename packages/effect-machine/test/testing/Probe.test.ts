@@ -20,7 +20,10 @@ class RaisedIncrement extends Schema.TaggedClass<RaisedIncrement>("ProbeRaisedIn
 
 const states = Machine.state({ initial: "Counter", states: { Counter } })
 
+const targets1 = Machine.targets(states)
 const machine = Machine.make({
+  branches: { transition3: { destination: { target: targets1.root.Counter } } },
+
   root: states,
   events: Machine.eventsFromSchemas(Increment, Noop, Ignored, Decline, Burst, Reenter),
   internalEvents: Machine.internalEventsFromSchemas(RaisedIncrement),
@@ -30,23 +33,28 @@ const machine = Machine.make({
   states: {
     Counter: {
       on: {
-        Increment: (to) =>
-          to.branch.Counter().resolve(({ event, state, target }) =>
-            target.decoded(new Counter({ count: state.count + event.amount }))
-          ),
-        Noop: (to) => to.none,
-        Decline: (to) => to.none.resolve(({ decline }) => decline(), { declinable: true }),
-        Reenter: (to) =>
-          to.branch.Counter().reenter().resolve(({ state, target }) =>
-            target.decoded(new Counter({ count: state.count }))
-          ),
-        Burst: (to) =>
-          to.branch.Counter().resolve(({ state, target }, enqueue) => {
+        Increment: {
+          target: targets1.root.Counter,
+          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+        },
+        Noop: { none: true },
+        Decline: { none: true, resolve: ({ decline }) => decline(), declinable: true },
+        Reenter: {
+          target: targets1.root.Counter,
+          reenter: true,
+          decoded: ({ state }) => (new Counter({ count: state.count }))
+        },
+        Burst: {
+          branches: "transition3",
+          resolve: ({ state, select: { destination: target } }, enqueue) => {
             enqueue.raise(new RaisedIncrement({}))
             return target.decoded(new Counter({ count: state.count + 1 }))
-          }),
-        RaisedIncrement: (to) =>
-          to.branch.Counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 10 })))
+          }
+        },
+        RaisedIncrement: {
+          target: targets1.root.Counter,
+          decoded: ({ state }) => (new Counter({ count: state.count + 10 }))
+        }
       }
     }
   }
@@ -154,7 +162,15 @@ describe("MachineTest probe", () => {
       class Load extends Schema.TaggedClass<Load>("ProbeInvokeLoad")("Load", {}) {}
       const invokeStates = Machine.state({ initial: "Idle", states: { Idle, Loading } })
       let starts = 0
+      const targets2 = Machine.targets(invokeStates)
       const invokeMachine = Machine.make({
+        effects: {
+          source1: Effect.suspend(() => {
+            starts += 1
+            return Effect.never
+          })
+        },
+
         root: invokeStates,
         events: Machine.eventsFromSchemas(Load),
         initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
@@ -162,15 +178,11 @@ describe("MachineTest probe", () => {
         states: {
           Idle: {
             on: {
-              Load: (to) => to.branch.Loading().resolve(({ target }) => target.decoded(new Loading({})))
+              Load: { target: targets2.root.Loading, decoded: () => (new Loading({})) }
             }
           },
           Loading: {
-            invoke: (from) =>
-              from.effect("loader", () => {
-                starts += 1
-                return Effect.never
-              })
+            invoke: { src: "source1", id: "loader" }
           }
         }
       })

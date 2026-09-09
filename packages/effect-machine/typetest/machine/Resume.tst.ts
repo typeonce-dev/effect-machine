@@ -10,6 +10,7 @@ class Tick extends Schema.TaggedClass<Tick>("Tick")("Tick", {}) {}
 const States = Machine.state({ initial: "Idle", states: { Idle } })
 type Snapshot = Machine.Snapshot<typeof States>
 
+const targets1 = Machine.targets(States)
 const machine = Machine.make({
   root: States,
   events: Machine.eventsFromSchemas(Tick),
@@ -20,8 +21,7 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Tick: (to) =>
-          to.branch.Idle().resolve(({ state, target }) => target.decoded(new Idle({ value: state.value + 1 })))
+        Tick: { target: targets1.root.Idle, decoded: ({ state }) => (new Idle({ value: state.value + 1 })) }
       }
     }
   }

@@ -7,20 +7,28 @@ it.effect("compares flat updates and verifies guarded updates retain generic pla
   Effect.gen(function*() {
     for (const guarded of [false, true]) {
       const events = Machine.events({ Add: { by: Schema.Number }, Refresh: {} })
+      const root1 = Machine.state({ fields: { count: Schema.Number } })
+      const targets1 = Machine.targets(root1)
       const machine = Machine.make({
-        root: Machine.state({ fields: { count: Schema.Number } }),
+        root: root1,
         events,
         initial: (root) => root.from(() => ({ count: 0 }))
       }).handle({
         on: {
-          Add: (to) =>
-            (guarded ? to.self.update.guard(({ event }) => event.by > 0) : to.self.update).from((
-              { current, event }
-            ) => ({ count: current.count + event.by })),
-          Refresh: (to) =>
-            to.none.reenter().resolve((_, enqueue) => {
+          Add: {
+            update: targets1.root,
+            guard: guarded
+              ? ({ event }) => event.by > 0
+              : undefined,
+            from: ({ root, event }) => ({ count: root.count + event.by })
+          },
+          Refresh: {
+            none: true,
+            reenter: true,
+            resolve: (_, enqueue) => {
               enqueue.raise(events.Add({ by: 1 }))
-            })
+            }
+          }
         }
       })
       yield* verifyPlannerStrategies({
@@ -42,49 +50,58 @@ it.effect("compares atomic construction and verifies guards retain generic plann
       class Root extends Schema.TaggedClass<Root>("Root")("Root", { count: Schema.Number }) {}
       class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: Schema.String }) {}
       const events = Machine.events({ Save: { allowed: Schema.Boolean }, Decoded: {}, Branch: {}, Finish: {} })
+      const root2 = Machine.state({
+        schema: Root,
+        initial: "Idle",
+        states: { Idle: {}, Saved: { schema: Saved }, Done: { type: "final" } }
+      })
+      const targets2 = Machine.targets(root2)
       const machine = Machine.make({
-        root: Machine.state({
-          schema: Root,
-          initial: "Idle",
-          states: { Idle: {}, Saved: { schema: Saved }, Done: { type: "final" } }
-        }),
+        branches: { transition1: { saved: { target: targets2.root.Saved } } },
+
+        root: root2,
         events,
         initial: (root) => root.from(() => ({ count: 0 }))
       }).handle({
-        on: { Save: (to) => to.self.update.from(({ current }) => ({ count: current.count + 10 })) },
+        on: { Save: { update: targets2.root, from: ({ root: current }) => ({ count: current.count + 10 }) } },
         states: {
           Idle: {
             on: {
-              Save: (to) => {
-                const selected = to.local.Saved().updating(to.root)
-                return (guarded ? selected.guard(({ event }) => event.allowed) : selected).from(({ current }) => ({
-                  target: { text: "saved" },
-                  update: { count: current.count + 1 }
-                }))
+              Save: {
+                target: targets2.root.Saved,
+                update: targets2.root,
+                guard: guarded
+                  ? ({ event }) => event.allowed
+                  : undefined,
+                from: ({ root }) => ({ target: { text: "saved" }, update: { count: root.count + 1 } })
               },
-              Decoded: (to) =>
-                to.local.Saved().updating(to.root).decoded(({ current }) => ({
+              Decoded: {
+                target: targets2.root.Saved,
+                update: targets2.root,
+                decoded: ({ root: current }) => ({
                   target: new Saved({ text: "decoded" }),
                   update: new Root({ count: current.count + 2 })
-                }))
+                })
+              }
             }
           },
           Saved: {
             on: {
-              Save: (to) => {
-                const selected = to.local.Saved().updating(to.root).reenter()
-                return (guarded ? selected.guard(({ event }) => event.allowed) : selected).from((
-                  { current, state }
-                ) => ({
-                  target: { text: state.text },
-                  update: { count: current.count + 1 }
-                }))
+              Save: {
+                target: targets2.root.Saved,
+                update: targets2.root,
+                reenter: true,
+                guard: guarded
+                  ? ({ event }) => event.allowed
+                  : undefined,
+                from: ({ root, state }) => ({ target: { text: state.text }, update: { count: root.count + 1 } })
               },
-              Branch: (to) =>
-                to.branches({ saved: { target: to.local.Saved() } }).reenter().resolve(({ state, select }) =>
-                  select.saved.decoded(state)
-                ),
-              Finish: (to) => to.local.Done()
+              Branch: {
+                branches: "transition1",
+                reenter: true,
+                resolve: ({ state, select }) => select.saved.decoded(state)
+              },
+              Finish: { target: targets2.root.Done }
             }
           }
         }

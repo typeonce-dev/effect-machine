@@ -9,6 +9,7 @@ describe("MachineTest invariants", () => {
   class Internal extends Schema.TaggedClass<Internal>("Internal")("Internal", {}) {}
 
   const States = Machine.state({ initial: "idle", states: { idle: Idle } })
+
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Tick),
@@ -19,8 +20,8 @@ describe("MachineTest invariants", () => {
     states: {
       idle: {
         on: {
-          Tick: (to) => to.none,
-          Internal: (to) => to.none
+          Tick: { none: true },
+          Internal: { none: true }
         }
       }
     }

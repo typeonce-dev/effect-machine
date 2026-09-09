@@ -87,7 +87,7 @@ const scenarios = [
   },
   {
     id: "named-branches",
-    label: "fluent transition (10 named branches)",
+    label: "declared transition (10 named branches)",
     file: "named-branches.ts",
     control: "named-branches-control",
     maxInstantiations: 160_000,
@@ -115,7 +115,7 @@ const scenarios = [
   },
   {
     id: "dynamic-invoke",
-    label: "fluent invocation (state-dependent Effect)",
+    label: "registered invocation (input-taking Effect)",
     file: "dynamic-invoke.ts",
     control: "dynamic-invoke-control",
     maxInstantiations: 122_000,

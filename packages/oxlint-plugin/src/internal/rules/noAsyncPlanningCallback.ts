@@ -13,7 +13,7 @@ export const noAsyncPlanningCallback: Rule = {
     schema: [],
     messages: {
       asyncOperation:
-        "{{operation}} starts asynchronous work during synchronous planning. Move it into the owning state's invoke declaration using from.effect(...), from.stream(...), or from.timer(...), then handle completion or failure with onDone/onFailure.",
+        "{{operation}} starts asynchronous work during synchronous planning. Move it into the owning state's invoke declaration using registered effects, streams, or timers, then handle completion or failure with onDone/onFailure.",
       asyncPlanning:
         "Planning callbacks must be synchronous. Remove async and move the asynchronous work into the owning state's invoke declaration, then transition from onDone/onFailure."
     }

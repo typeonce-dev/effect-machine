@@ -4,13 +4,14 @@ import { Machine } from "../../src/index.js"
 
 const CounterRoot = Machine.state({ fields: { count: Schema.Number } })
 const Events = Machine.events({ Increment: { by: Schema.Number } })
+const targets1 = Machine.targets(CounterRoot)
 const counter = Machine.make({
   root: CounterRoot,
   events: Events,
   initial: (root) => root.from(() => ({ count: 0 }))
 }).handle({
   on: {
-    Increment: (to) => to.self.update.from(({ current, event }) => ({ count: current.count + event.by }))
+    Increment: { update: targets1.root, from: ({ root: current, event }) => ({ count: current.count + event.by }) }
   }
 })
 
@@ -31,15 +32,18 @@ const EditorRoot = Machine.state({
   states: { Editing: {}, Saving: {} }
 })
 const EditorEvents = Machine.events({ Save: {}, Edit: {}, Increment: { by: Schema.Number } })
+const targets2 = Machine.targets(EditorRoot)
 const editor = Machine.make({
   root: EditorRoot,
   events: EditorEvents,
   initial: (root) => root.from(() => ({ count: 0 }))
 }).handle({
-  on: { Increment: (to) => to.self.update.from(({ current, event }) => ({ count: current.count + event.by })) },
+  on: {
+    Increment: { update: targets2.root, from: ({ root: current, event }) => ({ count: current.count + event.by }) }
+  },
   states: {
-    Editing: { on: { Save: (to) => to.local.Saving() } },
-    Saving: { on: { Edit: (to) => to.local.Editing() } }
+    Editing: { on: { Save: { target: targets2.root.Saving } } },
+    Saving: { on: { Edit: { target: targets2.root.Editing } } }
   }
 })
 
@@ -94,16 +98,25 @@ it("declines guarded child transitions and tries the root handler", async () => 
   const root = Machine.state({ fields: { count: Schema.Number }, initial: "Idle", states: { Idle: {}, Busy: {} } })
   let constructed = 0
   const events = Machine.events({ Go: { allowed: Schema.Boolean } })
-  const machine = Machine.make({ root, events, initial: (root) => root.from(() => ({ count: 0 })) }).handle({
-    on: { Go: (to) => to.self.update.from(({ current }) => ({ count: current.count + 1 })) },
+  const targets3 = Machine.targets(root)
+  const machine = Machine.make({
+    branches: { transition1: { destination: { target: targets3.root.Busy } } },
+    root,
+    events,
+    initial: (root) => root.from(() => ({ count: 0 }))
+  }).handle({
+    on: { Go: { update: targets3.root, from: ({ root: current }) => ({ count: current.count + 1 }) } },
     states: {
       Idle: {
         on: {
-          Go: (to) =>
-            to.local.Busy().guard(({ event }) => event.allowed).resolve(({ target }) => {
+          Go: {
+            branches: "transition1",
+            guard: ({ event }) => event.allowed,
+            resolve: ({ select: { destination: target } }) => {
               constructed++
               return target.from()
-            })
+            }
+          }
         }
       }
     }
@@ -146,6 +159,7 @@ it("returns the completed workflow output through the root boundary", async () =
       Workflow: { initial: "Working", states: { Working: {}, Finished: { type: "final", output: Schema.Number } } }
     }
   })
+  const targets4 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Finish: {} }),
@@ -154,7 +168,7 @@ it("returns the completed workflow output through the root boundary", async () =
     states: {
       Workflow: {
         states: {
-          Working: { on: { Finish: (to) => to.local.Finished() } },
+          Working: { on: { Finish: { target: targets4.root.Workflow.Finished } } },
           Finished: { output: () => 42 }
         }
       }
@@ -193,19 +207,25 @@ it("retains current root fields when restoring descendant history", async () => 
     }
   })
   const events = Machine.events({ Next: {}, Leave: {}, Return: {}, Increment: {} })
-  const machine = Machine.make({ root, events, initial: (root) => root.from(() => ({ count: 0 })) }).handle({
-    on: { Increment: (to) => to.self.update.from(({ current }) => ({ count: current.count + 1 })) },
+  const targets5 = Machine.targets(root)
+  const machine = Machine.make({
+    branches: { transition1: { destination: { history: targets5.root.Editing.recent } } },
+    root,
+    events,
+    initial: (root) => root.from(() => ({ count: 0 }))
+  }).handle({
+    on: { Increment: { update: targets5.root, from: ({ root: current }) => ({ count: current.count + 1 }) } },
     states: {
       Editing: {
-        on: { Leave: (to) => to.branch.Away() },
+        on: { Leave: { target: targets5.root.Away } },
         history: {
           recent: {
             default: ({ target }) => target.from({ count: 999 }, (to) => to.Editing.from((editing) => editing.A.from()))
           }
         },
-        states: { A: { on: { Next: (to) => to.local.B() } } }
+        states: { A: { on: { Next: { target: targets5.root.Editing.B } } } }
       },
-      Away: { on: { Return: (to) => to.history.Editing.recent.resolve(({ target }) => target()) } }
+      Away: { on: { Return: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() } } }
     }
   })
   let snapshot = (await Effect.runPromise(Machine.planInitial(machine))).state
@@ -218,8 +238,9 @@ it("retains current root fields when restoring descendant history", async () => 
 
 it("checks a bare guard before selecting a default destination", async () => {
   const root = Machine.state({ initial: "Idle", states: { Idle: {}, Busy: {} } })
+  const targets6 = Machine.targets(root)
   const machine = Machine.make({ root, events: Machine.events({ Start: { allowed: Schema.Boolean } }) }).handle({
-    states: { Idle: { on: { Start: (to) => to.local.Busy().guard(({ event }) => event.allowed) } } }
+    states: { Idle: { on: { Start: { target: targets6.root.Busy, guard: ({ event }) => event.allowed } } } }
   })
   const initial = await Effect.runPromise(Machine.planInitial(machine))
   const blocked = await Effect.runPromise(Machine.plan(machine, initial.state, { _tag: "Start", allowed: false }))

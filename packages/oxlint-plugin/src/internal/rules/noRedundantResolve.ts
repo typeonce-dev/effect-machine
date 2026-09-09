@@ -65,14 +65,48 @@ export const noRedundantResolve: Rule = {
     messages: {
       redundantResolver:
         "Remove this resolver. The selected target already applies default construction, so use the target selector directly.",
-      redundantTargetlessResolver:
-        "Remove this empty resolver. Use the targetless selector directly, preserving its modifiers."
+      redundantTargetlessResolver: "Remove this empty resolver. Keep none: true and the transition modifiers."
     }
   },
   create(context) {
     const bindings = makeMachineBindings(context)
     return {
       ImportDeclaration: (node) => recordMachineImport(bindings, node),
+      Property(node) {
+        if (
+          node.computed || node.key.type !== "Identifier" || node.key.name !== "resolve" ||
+          node.parent.type !== "ObjectExpression"
+        ) return
+        const callback = node.value
+        if (callback.type !== "ArrowFunctionExpression" && callback.type !== "FunctionExpression") return
+        if (
+          callback.async || callback.generator || callback.params.length > 0 || !isEmptyResolver(callback) ||
+          !isPlanningCallback(callback, bindings)
+        ) return
+        const object = node.parent
+        const targetless = object.properties.some((property) =>
+          property.type === "Property" && !property.computed && property.key.type === "Identifier" &&
+          property.key.name === "none" && property.value.type === "Literal" && property.value.value === true
+        )
+        if (!targetless) return
+        context.report({
+          node,
+          messageId: "redundantTargetlessResolver",
+          ...(context.sourceCode.getCommentsInside(object).length === 0 ?
+            {
+              fix: (fixer) =>
+                fixer.replaceText(
+                  object,
+                  `{ ${
+                    object.properties.filter((property) => property !== node).map((property) =>
+                      context.sourceCode.getText(property)
+                    ).join(", ")
+                  } }`
+                )
+            } :
+            {})
+        })
+      },
       CallExpression(node) {
         if (
           !hasMachineImport(bindings) ||

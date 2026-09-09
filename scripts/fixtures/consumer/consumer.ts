@@ -22,7 +22,18 @@ const States = Machine.state({ initial: "Idle", states: State.cases })
 const PublicEvents = Machine.eventsFromSchemas(PublicEvent)
 const InternalEvents = Machine.internalEventsFromSchemas(InternalEvent)
 
+const targets = Machine.targets(States)
 const machine = Machine.make({
+  effects: { load: Effect.succeed("ready") },
+  timers: { delay: "1 second" },
+  branches: {
+    start: {
+      cached: { target: targets.root.Loading },
+      measured: { none: true },
+      named: { target: targets.root.Done },
+      confirmed: { target: targets.root.Idle }
+    }
+  },
   id: "Consumer",
   root: States,
   events: PublicEvents,
@@ -33,23 +44,17 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Start: (to) =>
-          to.branches({
-            cached: { target: to.branch.Loading() },
-            measured: { target: to.none },
-            named: { target: to.branch.Done() },
-            confirmed: { target: to.branch.Idle() }
-          }).resolve(({ select }) => select.cached.decoded(State.cases.Loading.make({})))
+        Start: { branches: "start", resolve: ({ select }) => select.cached.decoded(State.cases.Loading.make({})) }
       }
     },
     Loading: {
-      invoke: (from) => [
-        from.effect("fixture-load", () => Effect.succeed("ready")).onDone((to) => to.none),
-        from.timer("fixture-delay", "1 second").onDone((to) => to.none)
-      ],
+      invoke: [{ src: "load", id: "fixture-load", onDone: { none: true } }, {
+        src: "delay",
+        id: "fixture-delay",
+        onDone: { none: true }
+      }],
       on: {
-        Loaded: (to) =>
-          to.branch.Done().resolve(({ event, target }) => target.decoded(State.cases.Done.make({ value: event.value })))
+        Loaded: { target: targets.root.Done, decoded: ({ event }) => State.cases.Done.make({ value: event.value }) }
       }
     },
     Done: {}

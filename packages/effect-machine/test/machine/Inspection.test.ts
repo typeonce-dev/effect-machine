@@ -65,6 +65,7 @@ const ChoiceStates = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(ChoiceStates)
 const choiceMachine = Machine.make({
   root: ChoiceStates,
   events: Machine.eventsFromSchemas(),
@@ -75,7 +76,7 @@ const choiceMachine = Machine.make({
     Flow: {
       states: {
         Routing: {
-          choice: (to) => to.local.Ready().resolve(({ target }) => target.decoded(new Ready({})))
+          choice: { target: targets1.root.Flow.Ready, decoded: () => (new Ready({})) }
         }
       }
     }

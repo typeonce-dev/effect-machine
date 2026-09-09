@@ -9,6 +9,7 @@ class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Continue extends Schema.TaggedClass<Continue>("Continue")("Continue", {}) {}
 
 const States = Machine.state({ initial: "Idle", states: { Idle } })
+
 const machine = Machine.make({
   root: States,
   events: Machine.eventsFromSchemas(Continue),
@@ -17,7 +18,7 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Continue: (to) => to.none
+        Continue: { none: true }
       }
     }
   }

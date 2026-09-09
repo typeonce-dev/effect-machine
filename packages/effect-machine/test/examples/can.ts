@@ -7,7 +7,7 @@ const machine = Machine.make({
   events: Machine.eventsFromSchemas(),
   internalEvents,
   initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
-}).handle({ states: { Idle: { on: { Loaded: (to) => to.none } } } })
+}).handle({ states: { Idle: { on: { Loaded: { none: true } } } } })
 
 export const canLoad = Effect.gen(function*() {
   const initial = yield* Machine.planInitial(machine)

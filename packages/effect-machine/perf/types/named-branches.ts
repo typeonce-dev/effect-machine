@@ -1,24 +1,37 @@
 import { Machine } from "../../dist/index.js"
-import { machine, State } from "./named-branches-control.js"
+import { Route, State, States } from "./named-branches-control.js"
+
+const targets = Machine.targets(States)
+const machine = Machine.make({
+  branches: {
+    route: {
+      length1: { target: targets.root.Text },
+      length2: { target: targets.root.Count },
+      length3: { target: targets.root.Text },
+      length4: { target: targets.root.Count },
+      length5: { target: targets.root.Text },
+      length6: { none: true },
+      length7: { target: targets.root.Count },
+      length8: { target: targets.root.Text },
+      length9: { target: targets.root.Count },
+      length10: { target: targets.root.Idle },
+      unchanged: { none: true }
+    }
+  },
+
+  root: States,
+  events: Machine.eventsFromSchemas(Route),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) => target.from((to) => to.Idle.from(State.cases.Idle.make({}))))
+})
 
 const handled = machine.handle({
   states: {
     Idle: {
       on: {
-        Route: (to) =>
-          to.branches({
-            length1: { target: to.branch.Text() },
-            length2: { target: to.branch.Count() },
-            length3: { target: to.branch.Text() },
-            length4: { target: to.branch.Count() },
-            length5: { target: to.branch.Text() },
-            length6: { target: to.none },
-            length7: { target: to.branch.Count() },
-            length8: { target: to.branch.Text() },
-            length9: { target: to.branch.Count() },
-            length10: { target: to.branch.Idle() },
-            unchanged: { target: to.none }
-          }).resolve(({ event, select }) => {
+        Route: {
+          branches: "route",
+          resolve: ({ event, select }) => {
             const value = event.value
             switch (value.length) {
               case 1:
@@ -44,7 +57,8 @@ const handled = machine.handle({
               default:
                 return select.unchanged()
             }
-          })
+          }
+        }
       }
     },
     Text: {},

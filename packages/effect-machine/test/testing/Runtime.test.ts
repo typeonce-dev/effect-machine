@@ -22,8 +22,9 @@ class Burst extends Schema.TaggedClass<Burst>("RuntimeBurst")("Burst", {}) {}
 
 const CounterStates = Machine.state({ initial: "Counter", states: { Counter } })
 
-const makeCounterMachine = () =>
-  Machine.make({
+const makeCounterMachine = () => {
+  const targets1 = Machine.targets(CounterStates)
+  return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Add),
     internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
@@ -33,20 +34,24 @@ const makeCounterMachine = () =>
     states: {
       Counter: {
         on: {
-          Add: (to) =>
-            to.branch.Counter().resolve(({ event, state, target }) =>
-              target.decoded(new Counter({ count: state.count + event.amount }))
-            ),
-          InternalAdd: (to) =>
-            to.branch.Counter().resolve(({ event, state, target }) =>
-              target.decoded(new Counter({ count: state.count + event.amount }))
-            )
+          Add: {
+            target: targets1.root.Counter,
+            decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+          },
+          InternalAdd: {
+            target: targets1.root.Counter,
+            decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+          }
         }
       }
     }
   })
+}
 
+const targets2 = Machine.targets(CounterStates)
 const causalMachine = Machine.make({
+  branches: { transition2: { destination: { target: targets2.root.Counter } } },
+
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Noop, Ignored, Burst),
   internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
@@ -56,20 +61,22 @@ const causalMachine = Machine.make({
   states: {
     Counter: {
       on: {
-        Add: (to) =>
-          to.branch.Counter().resolve(({ event, state, target }) =>
-            target.decoded(new Counter({ count: state.count + event.amount }))
-          ),
-        Noop: (to) => to.none,
-        Burst: (to) =>
-          to.branch.Counter().resolve(({ state, target }, enqueue) => {
+        Add: {
+          target: targets2.root.Counter,
+          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+        },
+        Noop: { none: true },
+        Burst: {
+          branches: "transition2",
+          resolve: ({ state, select: { destination: target } }, enqueue) => {
             enqueue.raise(new InternalAdd({ amount: 10 }))
             return target.decoded(new Counter({ count: state.count + 1 }))
-          }),
-        InternalAdd: (to) =>
-          to.branch.Counter().resolve(({ event, state, target }) =>
-            target.decoded(new Counter({ count: state.count + event.amount }))
-          )
+          }
+        },
+        InternalAdd: {
+          target: targets2.root.Counter,
+          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+        }
       }
     }
   }
@@ -250,7 +257,10 @@ describe("MachineTest runtime commands", () => {
       class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {}
       const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
+      const targets3 = Machine.targets(states)
       const machine = Machine.make({
+        timers: { source1: "1 second" },
+
         root: states,
         events: Machine.eventsFromSchemas(),
         internalEvents: Machine.internalEventsFromSchemas(Timeout),
@@ -259,10 +269,11 @@ describe("MachineTest runtime commands", () => {
       }).handle({
         states: {
           Waiting: {
-            invoke: (from) =>
-              from.timer("timeout", "1 second").onDone((to) =>
-                to.branch.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
-              )
+            invoke: {
+              src: "source1",
+              id: "timeout",
+              onDone: { target: targets3.root.TimedOut, decoded: () => (new TimedOut({})) }
+            }
           },
           TimedOut: {}
         }
@@ -733,7 +744,10 @@ describe("MachineTest causal runtime commands", () => {
       class TimedOut extends Schema.TaggedClass<TimedOut>("CausalTimedOut")("TimedOut", {}) {}
       class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {}
       const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
+      const targets4 = Machine.targets(states)
       const timerMachine = Machine.make({
+        timers: { source1: "1 second" },
+
         root: states,
         events: Machine.eventsFromSchemas(),
         internalEvents: Machine.internalEventsFromSchemas(Timeout),
@@ -742,10 +756,11 @@ describe("MachineTest causal runtime commands", () => {
       }).handle({
         states: {
           Waiting: {
-            invoke: (from) =>
-              from.timer("timeout", "1 second").onDone((to) =>
-                to.branch.TimedOut().resolve(({ target }) => target.decoded(new TimedOut({})))
-              )
+            invoke: {
+              src: "source1",
+              id: "timeout",
+              onDone: { target: targets4.root.TimedOut, decoded: () => (new TimedOut({})) }
+            }
           },
           TimedOut: {}
         }

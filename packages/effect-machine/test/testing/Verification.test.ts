@@ -34,32 +34,50 @@ const NavigationStates = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(NavigationStates)
 const navigationMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets1.root.app } } },
+
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Go)
 }).handle({
   states: {
     off: {
       on: {
-        Go: (to) =>
-          to.branch.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.two.decoded(new Two({}))))
+        Go: {
+          branches: "transition1",
+          resolve: ({ select: { destination: target } }) =>
+            target.decoded(new App({}), (app) => app.two.decoded(new Two({})))
+        }
       }
     }
   }
 })
 
+const targets2 = Machine.targets(NavigationStates)
 const raisedNavigationMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets2.root.app } },
+    transition2: { destination: { target: targets2.root.app } }
+  },
+
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Go),
   initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.off.decoded(new Off({}))))
 }).handle({
   states: {
     off: {
-      always: (to) =>
-        to.branch.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({})))),
+      always: {
+        branches: "transition1",
+        resolve: ({ select: { destination: target } }) =>
+          target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+      },
       on: {
-        Go: (to) =>
-          to.branch.app().resolve(({ target }) => target.decoded(new App({}), (app) => app.one.decoded(new One({}))))
+        Go: {
+          branches: "transition2",
+          resolve: ({ select: { destination: target } }) =>
+            target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+        }
       }
     }
   }
@@ -67,7 +85,10 @@ const raisedNavigationMachine = Machine.make({
 
 const CounterStates = Machine.state({ initial: "counter", states: { counter: Counter } })
 
+const targets3 = Machine.targets(CounterStates)
 const counterMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets3.root.counter } } },
+
   root: CounterStates,
   events: Machine.eventsFromSchemas(Increment, Noop),
   initialConfiguration: (root) =>
@@ -76,15 +97,19 @@ const counterMachine = Machine.make({
   states: {
     counter: {
       on: {
-        Increment: (to) =>
-          to.branch.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
-        Noop: (to) => to.none
+        Increment: { target: targets3.root.counter, decoded: ({ state }) => (new Counter({ count: state.count + 1 })) },
+        Noop: { none: true }
       }
     }
   }
 })
 
+const targets4 = Machine.targets(CounterStates)
 const conditionalMachine = Machine.make({
+  branches: {
+    transition1: { negative: { none: true }, zero: { target: targets4.root.counter }, positive: { none: true } }
+  },
+
   root: CounterStates,
   events: Machine.eventsFromSchemas(Select),
   initialConfiguration: (root) =>
@@ -93,24 +118,23 @@ const conditionalMachine = Machine.make({
   states: {
     counter: {
       on: {
-        Select: (to) =>
-          to.branches({
-            negative: { target: to.none },
-            zero: { target: to.branch.counter() },
-            positive: { target: to.none }
-          }).resolve(({ event, select }) =>
+        Select: {
+          branches: "transition1",
+          resolve: ({ event, select }) =>
             event.value < 0
               ? select.negative()
               : event.value === 0
               ? select.zero.decoded(new Counter({ count: 0 }))
               : select.positive()
-          )
+        }
       }
     }
   }
 })
 
 const invokedMachine = Machine.make({
+  effects: { source1: Effect.suspend(() => Effect.succeed(1)), source2: Effect.suspend(() => Effect.succeed(2)) },
+
   root: CounterStates,
   events: Machine.eventsFromSchemas(),
   initialConfiguration: (root) =>
@@ -118,12 +142,11 @@ const invokedMachine = Machine.make({
 }).handle({
   states: {
     counter: {
-      invoke: (
-        from
-      ) => [
-        from.effect("first", () => Effect.succeed(1)).onDone((to) => to.none),
-        from.effect("second", () => Effect.succeed(2)).onDone((to) => to.none)
-      ]
+      invoke: [{ src: "source1", id: "first", onDone: { none: true } }, {
+        src: "source2",
+        id: "second",
+        onDone: { none: true }
+      }]
     }
   }
 })
@@ -146,7 +169,13 @@ const RoutedStartupStates = Machine.state({
   }
 })
 
+const targets6 = Machine.targets(RoutedStartupStates)
 const routedStartupMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets6.root.a.second } },
+    transition2: { destination: { target: targets6.root.b } }
+  },
+
   root: RoutedStartupStates,
   events: Machine.eventsFromSchemas(),
   initialConfiguration: (root) =>
@@ -156,10 +185,10 @@ const routedStartupMachine = Machine.make({
     a: {
       states: {
         route: {
-          choice: (to) => to.local.second().resolve(({ target }) => target())
+          choice: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
         },
         second: {
-          choice: (to) => to.branch.b().resolve(({ target }) => target.decoded(new StartupB({})))
+          choice: { target: targets6.root.b, decoded: () => (new StartupB({})) }
         }
       }
     },
@@ -187,7 +216,13 @@ const ChoiceResolutionStates = Machine.state({
   }
 })
 
+const targets7 = Machine.targets(ChoiceResolutionStates)
 const choiceResolutionMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets7.root.flow.first } },
+    transition2: { destination: { target: targets7.root.flow.second } }
+  },
+
   root: ChoiceResolutionStates,
   events: Machine.eventsFromSchemas(Route),
   initialConfiguration: (root) =>
@@ -200,14 +235,14 @@ const choiceResolutionMachine = Machine.make({
       states: {
         ready: {
           on: {
-            Route: (to) => to.local.first().resolve(({ target }) => target())
+            Route: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
           }
         },
         first: {
-          choice: (to) => to.local.second().resolve(({ target }) => target())
+          choice: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
         },
         second: {
-          choice: (to) => to.local.routed().resolve(({ target }) => target.decoded(new ChoiceRouted({})))
+          choice: { target: targets7.root.flow.routed, decoded: () => (new ChoiceRouted({})) }
         },
         routed: {}
       }
@@ -215,7 +250,10 @@ const choiceResolutionMachine = Machine.make({
   }
 })
 
+const targets8 = Machine.targets(NavigationStates)
 const reentryMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets8.root.app } } },
+
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Restart),
   initialConfiguration: (root) =>
@@ -226,10 +264,12 @@ const reentryMachine = Machine.make({
   states: {
     app: {
       on: {
-        Restart: (to) =>
-          to.branch.app().reenter().resolve(({ target }) =>
+        Restart: {
+          branches: "transition1",
+          reenter: true,
+          resolve: ({ select: { destination: target } }) =>
             target.decoded(new App({}), (app) => app.one.decoded(new One({})))
-          )
+        }
       }
     }
   }
@@ -303,7 +343,13 @@ const HistoryStates = Machine.state({
   }
 })
 
+const targets9 = Machine.targets(HistoryStates)
 const historyMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets9.root.away } },
+    transition2: { destination: { history: targets9.root.workspace.exact } }
+  },
+
   root: HistoryStates,
   events: Machine.eventsFromSchemas(Leave, Resume),
   initialConfiguration: (root) =>
@@ -342,7 +388,7 @@ const historyMachine = Machine.make({
         }
       },
       on: {
-        Leave: (to) => to.branch.away().resolve(({ target }) => target.decoded(new Away({})))
+        Leave: { target: targets9.root.away, decoded: () => (new Away({})) }
       },
       states: {
         editor: {
@@ -352,7 +398,7 @@ const historyMachine = Machine.make({
     },
     away: {
       on: {
-        Resume: (to) => to.history.workspace.exact.resolve(({ target }) => target())
+        Resume: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
       }
     }
   }
@@ -389,7 +435,10 @@ const structuralHistoryInitial = () => ({
   }
 })
 
+const targets10 = Machine.targets(StructuralHistoryStates)
 const structuralHistoryMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets10.root.away } } },
+
   root: StructuralHistoryStates,
   events: Machine.eventsFromSchemas(Leave),
   initialConfiguration: (root) =>
@@ -403,7 +452,7 @@ const structuralHistoryMachine = Machine.make({
         exact: { default: structuralHistoryInitial }
       },
       on: {
-        Leave: (to) => to.branch.away().resolve(({ target }) => target.from())
+        Leave: { target: targets10.root.away }
       }
     }
   }
@@ -456,7 +505,10 @@ const DoneTransitionStates = Machine.state({
   }
 })
 
+const targets11 = Machine.targets(DoneTransitionStates)
 const doneTransitionMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets11.root.archived } } },
+
   root: DoneTransitionStates,
   events: Machine.eventsFromSchemas(),
   initialConfiguration: (root) =>
@@ -468,7 +520,7 @@ const doneTransitionMachine = Machine.make({
 }).handle({
   states: {
     workflow: {
-      onDone: (to) => to.branch.archived().resolve(({ target }) => target.decoded(new Archived({}))),
+      onDone: { target: targets11.root.archived, decoded: () => (new Archived({})) },
       states: {
         finished: {
           output: () => "workflow-output"

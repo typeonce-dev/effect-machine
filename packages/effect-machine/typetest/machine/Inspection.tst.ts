@@ -30,6 +30,7 @@ describe("Machine inspection", () => {
       state: { path: "root.idle", value: new Idle({}) }
     }
   }
+
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Reset),
@@ -41,7 +42,7 @@ describe("Machine inspection", () => {
     states: {
       root: {
         on: {
-          Reset: (to) => to.none
+          Reset: { none: true }
         }
       }
     }
@@ -49,6 +50,7 @@ describe("Machine inspection", () => {
 
   it("exposes one closed operational protocol from prepared machines", () => {
     const FlatStates = Machine.state({ initial: "Idle", states: { Idle } })
+
     const executable = Machine.make({
       root: FlatStates,
       events: Machine.eventsFromSchemas(Reset),
@@ -57,7 +59,7 @@ describe("Machine inspection", () => {
       states: {
         Idle: {
           on: {
-            Reset: (to) => to.none
+            Reset: { none: true }
           }
         }
       }
@@ -213,6 +215,7 @@ describe("Machine inspection", () => {
 
   it("requires statically selected transitions", () => {
     const FlatStates = Machine.state({ initial: "idle", states: { idle: Idle, running: Running } })
+    const targets3 = Machine.targets(FlatStates)
     const flat = Machine.make({
       root: FlatStates,
       events: Machine.eventsFromSchemas(Reset),
@@ -222,7 +225,7 @@ describe("Machine inspection", () => {
       states: {
         idle: {
           on: {
-            Reset: (to) => to.branch.running().resolve(({ target }) => target.decoded(new Running({})))
+            Reset: { target: targets3.root.running, decoded: () => (new Running({})) }
           }
         }
       }

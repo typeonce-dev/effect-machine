@@ -76,7 +76,16 @@ const States = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(States)
 export const plannerMachine = Machine.make({
+  branches: {
+    transition1: {
+      urgent: { target: targets1.root.Working, title: "Finish immediately" },
+      normal: { target: targets1.root.Working, title: "Wait in working" }
+    }
+  },
+  effects: { source1: Effect.suspend(() => Effect.never) },
+
   id: "planner-example",
   root: States,
   events: Events,
@@ -118,11 +127,9 @@ export const plannerMachine = Machine.make({
   states: {
     Idle: {
       on: {
-        Begin: (to) =>
-          to.branches({
-            urgent: { title: "Finish immediately", target: to.branch.Working() },
-            normal: { title: "Wait in working", target: to.branch.Working() }
-          }).resolve(({ event, self, select, state }, enqueue) => {
+        Begin: {
+          branches: "transition1",
+          resolve: ({ event, self, select, state }, enqueue) => {
             enqueue.emit(new Planned({ job: event.job }))
             enqueue.sendTo(self, Events.Cancel({ reason: "planner command example" }))
             if (event.priority === "urgent") enqueue.raise(InternalEvents.AutoFinish())
@@ -130,18 +137,18 @@ export const plannerMachine = Machine.make({
             return event.priority === "urgent"
               ? select.urgent.decoded(working)
               : select.normal.decoded(working)
-          })
+          }
+        }
       }
     },
     Working: {
-      invoke: (from) => from.effect("monitor-job", () => Effect.never),
+      invoke: { src: "source1", id: "monitor-job" },
       on: {
-        AutoFinish: (to) =>
-          to.branch.Finished().resolve(({ state, target }) => target.decoded(new Finished({ job: state.job }))),
-        Cancel: (to) =>
-          to.branch.Idle().resolve(({ event, state, target }) =>
-            target.decoded(new Idle({ owner: `${state.owner} · ${event.reason}` }))
-          )
+        AutoFinish: { target: targets1.root.Finished, decoded: ({ state }) => (new Finished({ job: state.job })) },
+        Cancel: {
+          target: targets1.root.Idle,
+          decoded: ({ event, state }) => (new Idle({ owner: `${state.owner} · ${event.reason}` }))
+        }
       }
     },
     Finished: {

@@ -131,11 +131,13 @@ describe("machine reference event channels", () => {
         states: {
           Idle: {
             on: {
-              Publish: (to) =>
-                to.none.resolve(({ event }, enqueue) => {
+              Publish: {
+                none: true,
+                resolve: ({ event }, enqueue) => {
                   enqueue.emit(Emissions.Published({ value: event.value }))
                   return undefined
-                })
+                }
+              }
             }
           }
         }
@@ -184,11 +186,13 @@ describe("machine reference event channels", () => {
         states: {
           Idle: {
             on: {
-              Publish: (to) =>
-                to.none.resolve((_, enqueue) => {
+              Publish: {
+                none: true,
+                resolve: (_, enqueue) => {
                   enqueue.emit(Emissions.Published({ value: "invalid" } as never))
                   return undefined
-                })
+                }
+              }
             }
           }
         }
@@ -230,7 +234,10 @@ describe("machine reference event channels", () => {
       const ChildEmissions = Machine.emittedEventsFromSchemas(Notice)
       const childStates = Machine.state({ initial: "Waiting", states: { Waiting, Reported } })
       let rootHadParent = true
+      const targets3 = Machine.targets(childStates)
       const childMachine = Machine.make({
+        branches: { transition1: { destination: { target: targets3.root.Reported } } },
+
         root: childStates,
         events: ChildEvents,
         parent: Machine.optionalParent(ParentEvents),
@@ -241,15 +248,17 @@ describe("machine reference event channels", () => {
         states: {
           Waiting: {
             on: {
-              Trigger: (to) =>
-                to.branch.Reported().resolve(({ parent, target }, enqueue) => {
+              Trigger: {
+                branches: "transition1",
+                resolve: ({ parent, select: { destination: target } }, enqueue) => {
                   rootHadParent = parent !== undefined
                   enqueue.emit(ChildEmissions.Notice({ value: 1 }))
                   if (parent !== undefined) {
                     enqueue.sendTo(parent, ParentEvents.ChildReported({ value: 1 }))
                   }
                   return target.decoded(new Reported({}))
-                })
+                }
+              }
             }
           },
           Reported: {}
@@ -277,7 +286,11 @@ describe("machine reference event channels", () => {
           Finished: { schema: Finished, type: "final", output: Schema.String }
         }
       })
+      const targets4 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
+        branches: { transition1: { destination: { target: targets4.root.Finished } } },
+        children: { source1: Child },
+
         root: parentStates,
         events: Machine.eventsFromSchemas(ParentEvents, Notice),
         initialConfiguration: (root) =>
@@ -285,12 +298,13 @@ describe("machine reference event channels", () => {
       }).handle({
         states: {
           Awaiting: {
-            invoke: (from) => from.child(Child),
+            invoke: { src: "source1" },
             on: {
-              ChildReported: (to) =>
-                to.branch.Finished().resolve(({ target }) => target.decoded(new Finished({ source: "parent event" }))),
-              Notice: (to) =>
-                to.branch.Finished().resolve(({ target }) => target.decoded(new Finished({ source: "emission" })))
+              ChildReported: {
+                target: targets4.root.Finished,
+                decoded: () => (new Finished({ source: "parent event" }))
+              },
+              Notice: { target: targets4.root.Finished, decoded: () => (new Finished({ source: "emission" })) }
             }
           },
           Finished: { output: ({ state }) => state.source }
@@ -320,6 +334,23 @@ describe("machine reference event channels", () => {
       const ParentEvents = Machine.eventsFromSchemas(ChildReady)
       const childStates = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
       const childDefinition = Machine.make({
+        effects: {
+          source1: ({
+            parent
+          }: Machine.Machine.InvokeContext<
+            {
+              readonly "":
+                & { readonly initial: "ChildIdle"; readonly states: { readonly ChildIdle: typeof ChildIdle } }
+                & { readonly "~effect/Machine/ExplicitInitial": true }
+            },
+            readonly [],
+            readonly [],
+            "ChildIdle",
+            readonly [],
+            Machine.Machine.ParentEventSchemas<"required", readonly [typeof ChildReady]>
+          >) => parent.send(ParentEvents.ChildReady())
+        },
+
         root: childStates,
         events: Machine.eventsFromSchemas(),
         parent: Machine.parent(ParentEvents),
@@ -329,11 +360,13 @@ describe("machine reference event channels", () => {
       const childMachine = childDefinition.handle({
         states: {
           ChildIdle: {
-            invoke: (from) =>
-              from.effect("notify-ready", ({ parent }) => parent.send(ParentEvents.ChildReady())).onDone((to) =>
-                to.none
-              )
-                .onFailure((to) => to.none)
+            invoke: {
+              src: "source1",
+              id: "notify-ready",
+              input: (context) => context,
+              onDone: { none: true },
+              onFailure: { none: true }
+            }
           }
         }
       })
@@ -346,7 +379,10 @@ describe("machine reference event channels", () => {
           ParentDone: { schema: ParentDone, type: "final", output: Schema.Void }
         }
       })
+      const targets6 = Machine.targets(parentStates)
       const parentMachine = Machine.make({
+        children: { source1: Child },
+
         root: parentStates,
         events: ParentEvents,
         initialConfiguration: (root) =>
@@ -354,9 +390,9 @@ describe("machine reference event channels", () => {
       }).handle({
         states: {
           ParentWaiting: {
-            invoke: (from) => from.child(Child).onFailure((to) => to.none),
+            invoke: { src: "source1", onFailure: { none: true } },
             on: {
-              ChildReady: (to) => to.branch.ParentDone().resolve(({ target }) => target.decoded(new ParentDone({})))
+              ChildReady: { target: targets6.root.ParentDone, decoded: () => (new ParentDone({})) }
             }
           },
           ParentDone: { output: () => undefined }

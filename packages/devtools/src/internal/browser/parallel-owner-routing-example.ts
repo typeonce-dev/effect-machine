@@ -18,6 +18,23 @@ const ChildParentEvents = Machine.eventsFromSchemas(ChildSignal)
 const ParallelOwnerChildStates = Machine.state({ initial: "Idle", states: { Idle: ChildIdle } })
 
 export const parallelOwnerRoutingChildMachine = Machine.make({
+  effects: {
+    source1: ({
+      parent
+    }: Machine.Machine.InvokeContext<
+      {
+        readonly "": { readonly initial: "Idle"; readonly states: { readonly Idle: typeof ChildIdle } } & {
+          readonly "~effect/Machine/ExplicitInitial": true
+        }
+      },
+      readonly [],
+      readonly [],
+      "Idle",
+      readonly [],
+      Machine.Machine.ParentEventSchemas<"required", readonly [typeof ChildSignal]>
+    >) => parent.send(ChildParentEvents.ChildSignal())
+  },
+
   id: "parallel-owner-routing-child",
   root: ParallelOwnerChildStates,
   events: Machine.eventsFromSchemas(),
@@ -26,11 +43,13 @@ export const parallelOwnerRoutingChildMachine = Machine.make({
 }).handle({
   states: {
     Idle: {
-      invoke: (from) =>
-        from.effect(
-          "signal-parent",
-          ({ parent }) => parent.send(ChildParentEvents.ChildSignal())
-        ).onDone((to) => to.none).onFailure((to) => to.none)
+      invoke: {
+        src: "source1",
+        id: "signal-parent",
+        input: (context) => context,
+        onDone: { none: true },
+        onFailure: { none: true }
+      }
     }
   }
 })
@@ -64,7 +83,10 @@ const ParallelOwnerStates = Machine.state({
   }
 })
 
+const targets2 = Machine.targets(ParallelOwnerStates)
 export const parallelOwnerRoutingMachine = Machine.make({
+  children: { source1: ParallelOwnerChild },
+
   id: "parallel-owner-routing",
   root: ParallelOwnerStates,
   events: Machine.eventsFromSchemas(PrintRequested, ChildParentEvents),
@@ -83,13 +105,12 @@ export const parallelOwnerRoutingMachine = Machine.make({
   states: {
     Print: {
       initialize: ({ builder }) => builder.Options.from({}).Operation.from({}),
-      invoke: (from) =>
-        from.child(ParallelOwnerChild).onFailure((to) =>
-          to.branch.Print.Operation.Active().resolve(({ target }) => target.decoded(new Active({})))
-        ),
+      invoke: {
+        src: "source1",
+        onFailure: { target: targets2.root.Print.Operation.Active, decoded: () => (new Active({})) }
+      },
       on: {
-        PrintRequested: (to) =>
-          to.branch.Print.Operation.Printing().resolve(({ target }) => target.decoded(new Printing({})))
+        PrintRequested: { target: targets2.root.Print.Operation.Printing, decoded: () => (new Printing({})) }
       },
       states: {
         Options: {

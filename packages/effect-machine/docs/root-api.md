@@ -14,10 +14,11 @@ const Root = Machine.state({
   initial: "Closed",
   states: { Closed: {}, Open: {} }
 })
+const targets = Machine.targets(Root)
 const Door = Machine.make({ root: Root, events: Events }).handle({
   states: {
-    Closed: { on: { Open: (to) => to.local.Open() } },
-    Open: { on: { Close: (to) => to.local.Closed() } }
+    Closed: { on: { Open: { target: targets.root.Open } } },
+    Open: { on: { Close: { target: targets.root.Closed } } }
   }
 })
 ```
@@ -37,6 +38,7 @@ const Root = Machine.state({
   }
 })
 const Events = Machine.events({ Rename: { title: Schema.String }, Save: {} })
+const targets = Machine.targets(Root)
 const Editor = Machine.make({
   root: Root,
   events: Events,
@@ -44,10 +46,10 @@ const Editor = Machine.make({
 }).handle({
   initialize: ({ builder, state }) => builder.from({ draft: state.title }),
   on: {
-    Rename: (to) => to.self.update.from(({ event }) => ({ title: event.title }))
+    Rename: { update: targets.root, from: ({ event }) => ({ title: event.title }) }
   },
   states: {
-    Editing: { on: { Save: (to) => to.local.Saving() } }
+    Editing: { on: { Save: { target: targets.root.Saving } } }
   }
 })
 ```
@@ -72,14 +74,15 @@ The complete snapshot always includes the root:
 ```
 
 Root handlers remain active across child transitions. Child handlers receive
-their own state, typed ancestors, and the complete snapshot. `to.root.update`
-addresses root data from a child. `to.self.update` addresses the handler owner.
+their own state, typed ancestors, `root`, and the complete snapshot.
+`update: targets.root` addresses root data from a child. An explicit descendant
+reference addresses a valued handler owner or retained ancestor.
 Both replace the entire value; omitted fields are not silently retained.
 Updates preserve the active topology and do not restart scoped work.
 
 Simultaneous transitions retain conflict checking. Two parallel handlers cannot
-silently overwrite the same owner. Use `.updating(owner)` to combine a selected
-destination and a retained owner's value in one atomic transition.
+silently overwrite the same owner. Use `{ target, update }` to combine a selected destination and a retained
+owner's value in one atomic transition.
 
 ## Schemas and reusable descriptors
 
@@ -139,75 +142,72 @@ a validated snapshot, including its completion and history metadata.
 
 ## Construction, guards, and branches
 
-A selected target supports a direct callback:
+Ordinary transitions declare their destination inline. `from` constructs schema
+make input; `decoded` returns an already decoded value. Omit construction only
+when the selected state can be constructed without arguments.
 
 ```ts
-Save: (to) => to.local.Saving().from(({ event }) => ({ requestId: event.requestId }))
+Save: {
+  target: targets.root.Saving,
+  guard: ({ state }) => state.draft.length > 0,
+  from: ({ state }) => ({ requestId: state.draft })
+}
 ```
 
-Use `.decoded(({ state }) => state)` for already decoded schema values. Use
-`.resolve((context, enqueue) => ...)` when constructing child configurations or
-queuing commands; its `context.target.from(...)` and `.decoded(...)` take values
-and explicit child builders.
+A false guard declines the handler and allows ancestor fallback. `{ none: true }`
+accepts an event without changing topology. Initial entry and total choices
+cannot decline. `reenter: true` explicitly restarts the handler source; a value
+update alone retains its lifecycle and cannot request reentry.
 
-A guard runs before construction and commands:
+Use a branch group in `make` for conditional selection, commands, or explicit
+nested construction. The resolver receives constructors derived from that
+exact declaration, so its result cannot introduce another destination.
 
 ```ts
-Save: (to) => to.local.Saving()
-  .guard(({ state }) => state.draft.length > 0)
-  .from(({ state }) => ({ requestId: state.draft }))
+// In make:
+branches: {
+  choose: {
+    saving: { target: targets.root.Saving, title: "Save changes" },
+    idle: { target: targets.root.Idle }
+  }
+}
+
+// In handle:
+Choose: {
+  branches: "choose",
+  resolve: ({ event, select }) => event.save
+    ? select.saving.from({ requestId: event.requestId })
+    : select.idle.from()
+}
 ```
 
-A false guard declines this handler, allowing ancestor fallback. Guards are not
-available for mandatory initial resolution or a total choice. `.none` accepts
-an event without changing topology; declining and accepting have different
-semantics. Named branches keep `{ target, title? }`: `target` identifies the
-checked destination and `title` supplies optional presentation metadata.
+Declare `declinable: true` if a resolver may return `decline()`. Guards and
+resolvers must remain synchronous and deterministic.
 
-Guards also apply to standalone owner updates and combined transitions:
+An owner update replaces its entire value. A combined transition constructs
+both values atomically:
 
 ```ts
-Increment: (to) => to.self.update
-  .guard(({ current }) => current.count < 10)
-  .from(({ current }) => ({ ...current, count: current.count + 1 }))
-
-Save: (to) => to.local.Saving().updating(to.root)
-  .guard(({ current }) => current.draft.length > 0)
-  .from(({ current }) => ({
-    target: { requestId: current.draft },
-    update: { ...current, attempts: current.attempts + 1 }
-  }))
+Save: {
+  target: targets.root.Saving,
+  update: targets.root,
+  from: ({ root, event }) => ({
+    target: { requestId: event.requestId },
+    update: { ...root, attempts: root.attempts + 1 }
+  })
+}
 ```
 
-Combined `.from` returns constructor inputs for both the destination and the
-complete owner replacement. `.decoded` returns their decoded values instead.
-For a destination with no construction arguments, use `target: undefined`.
-Both values are validated before applying either change; destination entry
-observes the updated owner. Use `.resolve` for mixed construction methods,
-explicit child configurations, or commands.
+Destination entry sees the updated owner. Use a named branch with the same
+`{ target, update }` declaration for nested construction or mixed methods:
+`select.saved.from(payload).update.decoded(ownerValue)`.
 
-Reentry is a modifier before construction:
-
-```ts
-Retry: (to) => to.local.Saving().reenter()
-  .from(({ event }) => ({ requestId: event.requestId }))
-
-Refresh: (to) => to.none.reenter()
-
-Choose: (to) => to.branches({
-  saving: { target: to.local.Saving() },
-  idle: { target: to.local.Idle() }
-}).reenter().resolve(({ state, select }) =>
-  state.retry ? select.saving.from({ requestId: state.requestId }) : select.idle.from()
-)
-```
-
-`.reenter()` restarts the handler source. It composes with `.updating`, `.guard`,
-`.from`, `.decoded`, and `.resolve` wherever reentry is supported. Apply it to
-the whole named-branches builder, whose individual targets describe topology.
-Migrate `.resolve(callback, { reenter: true })` to `.reenter().resolve(callback)`;
-remove `{ reenter: false }`. `to.self.update` retains the source lifecycle and
-does not expose `.reenter()`.
+All destination references are paths derived by `Machine.targets(Root)`.
+`target` selects a descendant; `initial` enters a compound or parallel subtree
+using its declared initialization; `history` restores a history reference.
+`update: targets.root` changes root data while preserving active children.
+There is no transition operation that replaces an arbitrary full root
+configuration. Use explicit branches to keep every possible destination visible.
 
 ## Completion and history
 

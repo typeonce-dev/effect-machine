@@ -61,7 +61,7 @@ const streamLogic = (
   }
 })
 
-const resolveValue = (value: unknown, context: Machine.InvokeContext<any, any, any, any>): unknown =>
+const resolveValue = (value: unknown, context: Omit<Machine.InvokeContext<any, any, any, any>, "root">): unknown =>
   typeof value === "function" ? value(context) : value
 
 const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
@@ -76,7 +76,7 @@ const makeChildOwner = (scope: Runtime.ProcessScope<any>): ChildOwner<any> => ({
 
 const resolveOne = (
   raw: InvocationDefinition.InvocationDefinition,
-  context: Machine.InvokeContext<any, any, any, any>,
+  context: Omit<Machine.InvokeContext<any, any, any, any>, "root">,
   path: string
 ): AnyConfig => {
   if ("effect" in raw) {

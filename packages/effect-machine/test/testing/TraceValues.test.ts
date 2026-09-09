@@ -5,13 +5,15 @@ import { MachineTest } from "../../src/testing/index.js"
 
 const State = Schema.TaggedStruct("State", { data: Schema.Unknown })
 const Ping = Schema.TaggedStruct("Ping", {})
-const make = (data: unknown) =>
-  Machine.make({
-    root: Machine.state({ initial: "State", states: { State } }),
+const make = (data: unknown) => {
+  const root1 = Machine.state({ initial: "State", states: { State } })
+  return Machine.make({
+    root: root1,
     events: Machine.eventsFromSchemas(Ping),
     initialConfiguration: (root) =>
       root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State", data })))
-  }).handle({ states: { State: { on: { Ping: (to) => to.none } } } })
+  }).handle({ states: { State: { on: { Ping: { none: true } } } } })
+}
 
 describe("trace value verification", () => {
   const different: ReadonlyArray<readonly [string, unknown, unknown]> = [

@@ -28,6 +28,7 @@ describe("machine reference event channels", () => {
   const InternalEvents = Machine.internalEventsFromSchemas(Local)
   const Emissions = Machine.emittedEventsFromSchemas(Published, ValuedPublished)
   const states = Machine.state({ initial: "Idle", states: { Idle } })
+
   const childMachine = Machine.make({
     root: states,
     events: Events,
@@ -39,7 +40,7 @@ describe("machine reference event channels", () => {
     states: {
       Idle: {
         on: {
-          Ping: (to) => to.none
+          Ping: { none: true }
         }
       }
     }
@@ -66,11 +67,13 @@ describe("machine reference event channels", () => {
       states: {
         Idle: {
           on: {
-            Ping: (to) =>
-              to.none.resolve((context) => {
+            Ping: {
+              none: true,
+              resolve: (context) => {
                 expect<"parent">().type.not.toBeAssignableTo<keyof typeof context>()
                 return undefined
-              })
+              }
+            }
           }
         }
       }
@@ -88,8 +91,9 @@ describe("machine reference event channels", () => {
       states: {
         Idle: {
           on: {
-            Ping: (to) =>
-              to.none.resolve(({ parent, self }, enqueue) => {
+            Ping: {
+              none: true,
+              resolve: ({ parent, self }, enqueue) => {
                 expect(self.send).type.toBeCallableWith(Events.Ping())
                 expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
                 expect(enqueue.sendTo).type.toBeCallableWith(self, Events.Ping())
@@ -105,7 +109,8 @@ describe("machine reference event channels", () => {
                 expect(enqueue.emit).type.toBeCallableWith(Emissions.ValuedPublished({ value: 1 }))
                 expect(enqueue.emit).type.not.toBeCallableWith(Events.Ping())
                 return undefined
-              })
+              }
+            }
           }
         }
       }
@@ -114,17 +119,20 @@ describe("machine reference event channels", () => {
 
   it("composes builder protocols and checks required parent inputs", () => {
     const compatible = Machine.make({
+      children: { source1: Child },
+
       root: states,
       events: Machine.eventsFromSchemas(Ping, ParentEvents),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     })
     compatible.handle({
       states: {
-        Idle: { invoke: (from) => from.child(Child) }
+        Idle: { invoke: { src: "source1" } }
       }
     })
 
     const incompatible = Machine.make({
+      children: { worker: Child },
       root: states,
       events: Machine.eventsFromSchemas(Ping, OtherParentEvent),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
@@ -132,14 +140,7 @@ describe("machine reference event channels", () => {
     expect(incompatible.handle).type.not.toBeCallableWith({
       states: {
         Idle: {
-          invoke: (
-            from: Machine.Machine.InvokeSelector<
-              { readonly "": typeof states.node },
-              readonly [typeof Ping, typeof OtherParentEvent],
-              readonly [],
-              "Idle"
-            >
-          ) => from.child(Child)
+          invoke: { src: "worker" }
         }
       }
     })
@@ -174,6 +175,31 @@ describe("machine reference event channels", () => {
 
   it("contextually binds invocation self and parent references to the owning machine protocols", () => {
     Machine.make({
+      effects: {
+        source1: ({
+          parent,
+          self
+        }: Machine.Machine.InvokeContext<
+          {
+            readonly "": { readonly initial: "Idle"; readonly states: { readonly Idle: typeof Idle } } & {
+              readonly "~effect/Machine/ExplicitInitial": true
+            }
+          },
+          readonly [typeof Ping, typeof Local],
+          readonly [typeof Published, typeof ValuedPublished],
+          "Idle",
+          readonly [typeof Ping],
+          Machine.Machine.ParentEventSchemas<"required", readonly [typeof ParentNotice]>
+        >) => {
+          expect(self.send).type.toBeCallableWith(Events.Ping())
+          expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
+          expect(self.send).type.not.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+          expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
+          expect(parent.send).type.not.toBeCallableWith(Events.Ping())
+          return Effect.void
+        }
+      },
+
       root: states,
       events: Events,
       internalEvents: InternalEvents,
@@ -183,27 +209,27 @@ describe("machine reference event channels", () => {
     }).handle({
       states: {
         Idle: {
-          invoke: (from) =>
-            from.effect("notify-parent", ({ parent, self }) => {
-              expect(self.send).type.toBeCallableWith(Events.Ping())
-              expect(self.send).type.not.toBeCallableWith(InternalEvents.Local())
-              expect(self.send).type.not.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
-              expect(parent.send).type.toBeCallableWith(ParentEvents.ParentNotice({ value: 1 }))
-              expect(parent.send).type.not.toBeCallableWith(Events.Ping())
-              return Effect.void
-            }).onDone((to) =>
-              to.none.resolve(({ parent, self }, enqueue) => {
+          invoke: {
+            src: "source1",
+            id: "notify-parent",
+            input: (context) => context,
+            onDone: {
+              none: true,
+              resolve: ({ parent, self }, enqueue) => {
                 enqueue.sendTo(self, Events.Ping())
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
                 return undefined
-              })
-            )
+              }
+            }
+          }
         }
       }
     })
 
     const requiredParentMachine = Machine.make({
+      effects: { source1: Effect.suspend(() => Effect.fail("failed" as const)) },
+
       root: states,
       events: Events,
       parent: Machine.parent(ParentEvents),
@@ -211,15 +237,19 @@ describe("machine reference event channels", () => {
     }).handle({
       states: {
         Idle: {
-          invoke: (from) =>
-            from.effect("notify-parent-failure", () => Effect.fail("failed" as const)).onFailure((to) =>
-              to.none.resolve(({ parent, self }, enqueue) => {
+          invoke: {
+            src: "source1",
+            id: "notify-parent-failure",
+            onFailure: {
+              none: true,
+              resolve: ({ parent, self }, enqueue) => {
                 enqueue.sendTo(self, Events.Ping())
                 enqueue.sendTo(parent, ParentEvents.ParentNotice({ value: 1 }))
                 expect(enqueue.sendTo).type.not.toBeCallableWith(parent, Events.Ping())
                 return undefined
-              })
-            )
+              }
+            }
+          }
         }
       }
     })

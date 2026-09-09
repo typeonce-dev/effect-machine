@@ -34,9 +34,11 @@ describe("Interactive text visualization", () => {
       acceptance: "required",
       branches: [{
         id: "application.workflow.idle:transition:0:branch:0",
-        type: "direct",
+        type: "branch",
+        key: "destination",
+        title: "destination",
         target: "application.workflow.running",
-        selection: { path: "application.workflow.running", kind: "state", scope: "local" },
+        selection: { path: "application.workflow.running", kind: "state", scope: "branch" },
         updates: ["application.workflow"]
       }]
     })
@@ -103,11 +105,11 @@ describe("Interactive text visualization", () => {
     const document = buildDocument()
     const plannerDocument = MachineDocument.make(plannerMachine)
     const api = (
-      source: string,
+      _source: string,
       selection: MachineDocument.Selection,
       updates: ReadonlyArray<string> = []
     ): string | undefined =>
-      branchTargetApi(document, source, {
+      branchTargetApi({
         id: "test-branch",
         type: "direct",
         target: selection.path,
@@ -125,33 +127,33 @@ describe("Interactive text visualization", () => {
     )
 
     assert.deepStrictEqual(
-      begin?.branches.map((branch) => branchTargetApi(plannerDocument, begin.source, branch)),
-      ["to.branch.Working()", "to.branch.Working()"]
+      begin?.branches.map((branch) => branchTargetApi(branch)),
+      ["{ target: targets.root.Working }", "{ target: targets.root.Working }"]
     )
 
     assert.strictEqual(
-      start === undefined ? undefined : branchTargetApi(document, start.source, start.branches[0]!),
-      "to.local.running().updating(to.branch.application.workflow)"
+      start === undefined ? undefined : branchTargetApi(start.branches[0]!),
+      "{ target: targets.root.application.workflow.running, update: targets.root.application.workflow }"
     )
     assert.strictEqual(
-      refresh === undefined ? undefined : branchTargetApi(document, refresh.source, refresh.branches[0]!),
-      "to.local.update"
+      refresh === undefined ? undefined : branchTargetApi(refresh.branches[0]!),
+      "{ update: targets.root.application.workflow }"
     )
     assert.strictEqual(
       api("application.workflow.running.editing", {
         path: "application.workflow.running",
         kind: "state",
-        scope: "local"
+        scope: "branch"
       }),
-      "to.local.with"
+      "{ target: targets.root.application.workflow.running }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
         path: "application.workflow.running",
         kind: "initial",
-        scope: "local"
+        scope: "branch"
       }),
-      "to.local.running.initial"
+      "{ initial: targets.root.application.workflow.running }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -159,7 +161,7 @@ describe("Interactive text visualization", () => {
         kind: "update",
         scope: "branch"
       }),
-      "to.branch.application.workflow.update"
+      "{ update: targets.root.application.workflow }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -167,7 +169,7 @@ describe("Interactive text visualization", () => {
         kind: "history",
         scope: "full"
       }),
-      "to.history.application.workflow.recent"
+      "{ history: targets.root.application.workflow.recent }"
     )
     assert.strictEqual(
       api("application.workflow.idle", {
@@ -175,9 +177,9 @@ describe("Interactive text visualization", () => {
         kind: "none",
         scope: "local"
       }),
-      "to.none"
+      "{ none: true }"
     )
-    assert.strictEqual(api("application", document.initial.selection), "to")
+    assert.strictEqual(api("application", document.initial.selection), "initialConfiguration")
   })
 
   it("accepts an empty partial topology", () => {

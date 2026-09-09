@@ -178,7 +178,9 @@ describe("Machine history states", () => {
     )
   })
 
-  it("exposes zero-argument history targets without value overrides", () => {
+  it("exposes history references without value overrides", () => {
+    const targets1 = Machine.targets(States)
+
     const definition = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(Resume),
@@ -189,23 +191,18 @@ describe("Machine history states", () => {
       states: {
         support: {
           on: {
-            Resume: (to) => {
-              expect(to.history.checkout.recent).type.not.toBeAssignableTo<() => unknown>()
-              expect(to.history.checkout.recent).type.toHaveProperty("resolve")
-              expect(to.branch.checkout).type.not.toHaveProperty("recent")
-              expect(to.local).type.not.toHaveProperty("recent")
-              expect(to.branch).type.not.toHaveProperty("recent")
-              return to.history.checkout.exact.resolve(({ target }) => {
-                expect(target).type.toBeCallableWith()
-                return target()
-              })
-            }
+            Resume: { history: targets1.root.checkout.exact }
           }
         }
       }
     })
 
     expect(incomplete).type.toBeAssignableTo<Machine.Machine.Any>()
+    expect(targets1.root.checkout.exact).type.not.toBeAssignableTo<() => unknown>()
+    expect(targets1.root.checkout.exact).type.not.toHaveProperty("from")
+    expect(definition.handle).type.not.toBeCallableWith({
+      states: { support: { on: { Resume: { history: targets1.root.checkout.exact, from: () => ({}) } } } }
+    })
   })
 
   it("requires typed defaults and only the shallow-dependent initializer", () => {
@@ -213,7 +210,10 @@ describe("Machine history states", () => {
       "checkout.payment"
     >()
 
+    const targets2 = Machine.targets(States)
     const definition = Machine.make({
+      branches: { transition1: { destination: { history: targets2.root.checkout.recent } } },
+
       root: States,
       events: Machine.eventsFromSchemas(Resume),
       initialConfiguration: (root) =>
@@ -223,7 +223,7 @@ describe("Machine history states", () => {
       states: {
         support: {
           on: {
-            Resume: (to) => to.history.checkout.recent.resolve(({ target }) => target())
+            Resume: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
           }
         }
       }

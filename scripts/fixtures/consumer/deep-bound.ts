@@ -95,7 +95,15 @@ const States = Machine.state({
 })
 
 const Emissions = Machine.emittedEventsFromSchemas(Emitted.cases.Notice)
+
+const targets = Machine.targets(States)
 const definition = Machine.make({
+  effects: { load: Effect.asVoid(ExternalService) },
+  children: { child: Child },
+  branches: {
+    ready: { ready: { target: targets.root.Ready } },
+    notice: { saved: { target: targets.root.Ready.Editor.Saving } }
+  },
   root: States,
   events: Machine.eventsFromSchemas(Event.cases.Begin, Event.cases.Save, ChildParentEvents),
   internalEvents: Machine.internalEventsFromSchemas(Internal.cases.Loaded, Internal.cases.ChildCompleted),
@@ -109,10 +117,11 @@ const definition = Machine.make({
 const machine = definition.handle({
   states: {
     Idle: {
-      invoke: (from) => from.effect("deep-inline-invoke", () => Effect.asVoid(ExternalService)).onDone((to) => to.none),
+      invoke: { src: "load", id: "deep-inline-invoke", onDone: { none: true } },
       on: {
-        Begin: (to) =>
-          to.branch.Ready().resolve(({ target }) =>
+        Begin: {
+          branches: "ready",
+          resolve: ({ select: { ready: target } }) =>
             target.decoded(
               State.cases.Ready.make({}),
               (ready) =>
@@ -121,7 +130,7 @@ const machine = definition.handle({
                   (editor) => editor.Editing.decoded(State.cases.Editing.make({ value: "ready" }))
                 )
             )
-          )
+        }
       }
     },
     Ready: {
@@ -130,26 +139,27 @@ const machine = definition.handle({
           states: {
             Editing: {
               on: {
-                Save: (to) =>
-                  to.local.Saving().resolve(({ event, target }) =>
-                    target.decoded(State.cases.Saving.make({ value: event.value }))
-                  ),
-                Loaded: (to) => to.none
+                Save: {
+                  target: targets.root.Ready.Editor.Saving,
+                  decoded: ({ event }) => State.cases.Saving.make({ value: event.value })
+                },
+                Loaded: { none: true }
               }
             },
             Saving: {
-              invoke: (from) =>
-                from.child(Child, { input: ({ state }) => ({ value: state.value }) }).onDone((to) => to.none),
+              invoke: { src: "child", input: ({ state }) => ({ value: state.value }), onDone: { none: true } },
               on: {
-                ChildNotice: (to) =>
-                  to.local.Saving().resolve(({ event, target }, enqueue) => {
+                ChildNotice: {
+                  branches: "notice",
+                  resolve: ({ event, select }, enqueue) => {
                     enqueue.emit(Emissions.Notice({ value: event.value }))
-                    return target.decoded(State.cases.Saving.make({ value: event.value }))
-                  }),
-                ChildCompleted: (to) =>
-                  to.branch.Done().resolve(({ event, target }) =>
-                    target.decoded(State.cases.Done.make({ value: event.value }))
-                  )
+                    return select.saved.decoded(State.cases.Saving.make({ value: event.value }))
+                  }
+                },
+                ChildCompleted: {
+                  target: targets.root.Done,
+                  decoded: ({ event }) => State.cases.Done.make({ value: event.value })
+                }
               }
             }
           }

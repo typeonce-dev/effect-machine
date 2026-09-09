@@ -35,6 +35,8 @@ export const CounterEvents = Machine.eventsFromSchemas(
   })
 )
 
+const targets = Machine.targets(CounterStates)
+
 export const CounterMachine = Machine.make({
   id: "Counter",
   root: CounterStates,
@@ -43,13 +45,13 @@ export const CounterMachine = Machine.make({
 }).handle({ states: {
   Idle: {
     on: {
-      Start: (to) => to.branch.Running().resolve(({ target }) => target.from({ count: 0 }))
+      Start: { target: targets.root.Running, from: () => ({ count: 0 }) }
     }
   },
   Running: {
     on: {
-      Increment: (to) => to.branch.Running().resolve(({ state, target }) => target.from({ count: state.count + 1 })),
-      Stop: (to) => to.branch.Idle()
+      Increment: { update: targets.root.Running, from: ({ state }) => ({ count: state.count + 1 }) },
+      Stop: { target: targets.root.Idle }
     }
   }
 } })
@@ -171,16 +173,16 @@ const DocumentEvents = Machine.eventsFromSchemas(
   })
 )
 
+const documentTargets = Machine.targets(DocumentStates)
 const DocumentMachine = Machine.make({
   root: DocumentStates,
-  events: DocumentEvents,
-  initial: (to) => to.Closed()
+  events: DocumentEvents
 }).handle({ states: {
   Closed: {},
   Open: {
     on: {
       // All Open children close the document in the same way.
-      Close: (to) => to.branch.Closed()
+      Close: { target: documentTargets.root.Closed }
     },
     states: {
       Editing: {},
@@ -209,20 +211,20 @@ export const CheckoutEvents = Machine.eventsFromSchemas(
   })
 )
 
+const checkoutTargets = Machine.targets(CheckoutStates)
 const CheckoutMachine = Machine.make({
   root: CheckoutStates,
-  events: CheckoutEvents,
-  initial: (to) => to.Editing()
+  events: CheckoutEvents
 }).handle({ states: {
   Editing: {
     on: {
-      Submit: (to) => to.branch.Submitting()
+      Submit: { target: checkoutTargets.root.Submitting }
     }
   },
   Submitting: {
     on: {
       // Cancel has meaning while work is in progress.
-      Cancel: (to) => to.branch.Editing()
+      Cancel: { target: checkoutTargets.root.Editing }
     }
   },
   Complete: {}
@@ -293,18 +295,21 @@ const LoadStates = Machine.state({ initial: "Idle", states: {
   Failed: LoadState.cases.Failed
 } })
 
+const loadTargets = Machine.targets(LoadStates)
 const LoadMachine = Machine.make({
   root: LoadStates,
+  effects: { loadDocument },
   events: Machine.eventsFromSchemas(),
   initialConfiguration: root => root.resolve(({ target }) => target.from(to => to.Idle.from()))
 }).handle({ states: {
   Idle: {},
   Loading: {
-    invoke: (from) =>
-      from
-        .effect("load-document", ({ state }) => loadDocument(state.documentId))
-        .onDone((to) => to.branch.Ready().resolve(({ output, target }) => target.from({ content: output })))
-        .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
+    invoke: {
+      src: "loadDocument",
+      input: ({ state }) => state.documentId,
+      onDone: { target: loadTargets.root.Ready, from: ({ output }) => ({ content: output }) },
+      onFailure: { target: loadTargets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+    }
   },
   Ready: {},
   Failed: {}
@@ -323,10 +328,16 @@ logic or child process that can be active at the same time a unique runtime
 address as well:
 
 ```ts
+// Register timers: { loadTimeout: "10 seconds" } in make.
 Loading: {
-  invoke: (from) => [
-    from.effect("load-document", loadDocument),
-    from.timer("load-timeout", "10 seconds")
+  invoke: [
+    {
+      src: "loadDocument",
+      input: ({ state }) => state.documentId,
+      onDone: { target: loadTargets.root.Ready, from: ({ output }) => ({ content: output }) },
+      onFailure: { target: loadTargets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+    },
+    { src: "loadTimeout", onDone: { target: loadTargets.root.Idle } }
   ]
 }
 ```
@@ -339,27 +350,13 @@ reuse its identity.
 
 ### Choose state-owned or process-owned children
 
-Use `from.child(...)` when the child belongs to one state and must stop when
-that state exits. Use a child family and `children.spawn(...)` when runtime
-events determine the ids or cardinality and the children must survive owner
-state changes:
-
-```ts
-const Worker = Machine.childFamily(workerMachine)
-
-Commissioning: {
-  invoke: (from) =>
-    from.effect("start-workers", ({ children, state }) =>
-      Effect.forEach(
-        state.workers,
-        (input) => children.spawn(Worker(input.id), { input }),
-        { discard: true }
-      )
-    )
-    .onDone((to) => to.branch.Running())
-    .onFailure((to) => to.branch.Failed())
-}
-```
+Register a descriptor in `make({ children: { worker: Worker } })` and use
+`invoke: { src: "worker", ...outcomes }` when a child belongs to one state and
+must stop when that state exits. Use a child family and `children.spawn(...)`
+inside a registered Effect when runtime events determine ids or cardinality
+and the children must survive owner state changes. See the
+[dynamic children example](../README.md#dynamic-children) for the complete
+input mapping and service requirements.
 
 The Effect owns the startup attempt. The machine process owns every child that
 starts successfully. Leaving `Commissioning` does not stop those children.
@@ -380,24 +377,25 @@ const ReviewEvents = Machine.eventsFromSchemas(
   })
 )
 
+const reviewTargets = Machine.targets(ReviewStates)
 const ReviewMachine = Machine.make({
   root: ReviewStates,
   events: ReviewEvents,
-  initial: (to) => to.Pending()
+  branches: {
+    evaluate: {
+      accepted: { target: reviewTargets.root.Accepted },
+      rejected: { target: reviewTargets.root.Rejected }
+    }
+  }
 }).handle({ states: {
   Pending: {
     on: {
-      Evaluate: (to) =>
-        to
-          .branches({
-            accepted: { target: to.branch.Accepted() },
-            rejected: { target: to.branch.Rejected() }
-          })
-          .resolve(({ event, select }) =>
-            event.score >= 80
-              ? select.accepted.from()
-              : select.rejected.from()
-          )
+      Evaluate: {
+        branches: "evaluate",
+        resolve: ({ event, select }) => event.score >= 80
+          ? select.accepted.from()
+          : select.rejected.from()
+      }
     }
   },
   Accepted: {},
@@ -410,50 +408,27 @@ Do not read the clock, generate randomness, call a service, or await work while
 choosing a transition. Receive such values in an event or produce them through
 state-owned work first.
 
-When only an active compound or parallel state's value changes, use its static
-update selection instead of reconstructing its active descendants:
+When only an active state's value changes, use `update` to preserve its active
+descendants and running work:
 
 ```ts
-Changed: (to) =>
-  to.local.update(({ current, owner }) =>
-    owner.from({ revision: current.revision + 1 })
-  )
+Changed: {
+  update: targets.root.Document,
+  from: ({ ancestors }) => ({
+    ...ancestors.Document,
+    revision: ancestors.Document.revision + 1
+  })
+}
 ```
 
-`to.local.update` addresses the nearest valued compound scope.
-`to.branch.<path>.update` addresses a valued compound or parallel ancestor of
-the handler source. Both preserve the complete active descendant
-configuration. Neither runs lifecycle actions or restarts state-owned work by
-default. Use an event handled inside a parallel sibling when that sibling owns
-the value that must change.
-
-When topology changes and one valued ancestor remains active but needs a new
-value, declare the owner on the destination:
-
-```ts
-CreatePlan: (to) =>
-  to.local.SavingPlan()
-    .updating(to.branch.Ready)
-    .resolve(({ current, event, owner, target }) =>
-      target.from({ request: event.input }).update(
-        owner.decoded(new Ready({ ...current, notice: null }))
-      )
-    )
-```
-
-`.updating(...)` accepts the retained state selector itself. It makes the
-owner replacement mandatory at compile time: the resolver must finish a
-destination construction with `.update(...)`. `current` is the owner's
-decoded pre-transition value. `target` constructs the destination and `owner`
-constructs the complete replacement value.
-
-Both instructions are validated and applied atomically. The retained owner is
-not reentered, destination entry sees its new value, and eventless
-stabilization runs afterward. Only local and branch targets that retain the
-owner expose `.updating`; full targets do not. Combined targets support one
-owner. Keep separate domain changes explicit by constructing the complete
-owner value instead of relying on a partial merge helper. Combined updates use
-a direct resolver; named branches support value-only updates.
+Choose a valued source or retained ancestor explicitly. To change a parallel
+sibling, send an event handled by that sibling. Combine a destination and one
+retained owner update with `{ target, update, from }`; the callback returns
+`{ target: destinationInput, update: completeOwnerInput }`. Both values are
+validated atomically, and destination entry sees the new owner value. A named
+branch can declare the same pair when a resolver needs commands or nested
+construction. Its constructor requires `.update.from(...)` or
+`.update.decoded(...)` before the selection can be returned.
 
 ## Test paths and invariants
 

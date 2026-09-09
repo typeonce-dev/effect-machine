@@ -14,6 +14,8 @@ const rule = plugin.rules["no-browser-api-in-planning"]
 tester.run("no-browser-api-in-planning", rule, {
   valid: [
     `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ effects: { work: input => Effect.sync(() => fetch("/api")) }, streams: { workStream: input => Stream.fromEffect(Effect.sync(() => Date.now())) } }).handle({})`,
+    `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("storage", () => localStorage.getItem("key")) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ document, navigator }) => document.read(navigator) } } })`,

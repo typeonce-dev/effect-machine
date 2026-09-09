@@ -24,8 +24,14 @@ class Add extends Schema.TaggedClass<Add>("Add")("Add", {
 
 const States = Machine.state({ initial: "Idle", states: { Idle, Ready } })
 
-const makeTraceMachine = (onAction: () => void) =>
-  Machine.make({
+const makeTraceMachine = (onAction: () => void) => {
+  const targets1 = Machine.targets(States)
+  return Machine.make({
+    branches: {
+      transition1: { destination: { target: targets1.root.Ready } },
+      transition2: { destination: { target: targets1.root.Ready } }
+    },
+
     root: States,
     events: Machine.eventsFromSchemas(Start, Add),
     input: TestInput,
@@ -37,24 +43,29 @@ const makeTraceMachine = (onAction: () => void) =>
     states: {
       Idle: {
         on: {
-          Start: (to) =>
-            to.branch.Ready().resolve(({ target }) => {
+          Start: {
+            branches: "transition1",
+            resolve: ({ select: { destination: target } }) => {
               onAction()
               return target.decoded(new Ready({ count: 0 }))
-            })
+            }
+          }
         }
       },
       Ready: {
         on: {
-          Add: (to) =>
-            to.branch.Ready().resolve(({ event, state, target }) => {
+          Add: {
+            branches: "transition2",
+            resolve: ({ event, state, select: { destination: target } }) => {
               onAction()
               return target.decoded(new Ready({ count: state.count + event.amount }))
-            })
+            }
+          }
         }
       }
     }
   })
+}
 
 describe("MachineTest", () => {
   it("derives complete scenarios from machine schemas and reports diagnostics", () => {
@@ -197,6 +208,7 @@ describe("MachineTest", () => {
           disabled: Disabled
         }
       })
+      const targets2 = Machine.targets(ParallelStates)
       const machine = Machine.make({
         root: ParallelStates,
         events: Machine.eventsFromSchemas(Stop),
@@ -217,7 +229,7 @@ describe("MachineTest", () => {
                 states: {
                   idle: {
                     on: {
-                      Stop: (to) => to.branch.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+                      Stop: { target: targets2.root.disabled, decoded: () => (new Disabled({})) }
                     }
                   }
                 }
@@ -226,7 +238,7 @@ describe("MachineTest", () => {
                 states: {
                   idle: {
                     on: {
-                      Stop: (to) => to.branch.disabled().resolve(({ target }) => target.decoded(new Disabled({})))
+                      Stop: { target: targets2.root.disabled, decoded: () => (new Disabled({})) }
                     }
                   }
                 }
@@ -261,8 +273,9 @@ describe("MachineTest", () => {
 
   it.effect("reports both targets as undefined for a targetless transition", () =>
     Effect.gen(function*() {
+      const root3 = Machine.state({ initial: "Idle", states: { Idle } })
       const machine = Machine.make({
-        root: Machine.state({ initial: "Idle", states: { Idle } }),
+        root: root3,
         events: Machine.eventsFromSchemas(Start),
         initialConfiguration: (to) =>
           to.resolve(() => ({
@@ -274,7 +287,7 @@ describe("MachineTest", () => {
         states: {
           Idle: {
             on: {
-              Start: (to) => to.none
+              Start: { none: true }
             }
           }
         }

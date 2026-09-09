@@ -30,40 +30,18 @@ Use this split when deciding where code belongs:
 If a component coordinates a workflow, an atom performs business work, or a
 provider has no ownership purpose, inspect that code more closely.
 
-## Remove identity resolvers
+## Keep ordinary transitions inline
 
-A target that supports default construction does not need a resolver whose only
-job is returning `target.from()`.
+Use `{ target: targets.root.Running }` for a state with default construction.
+Use `{ target: targets.root.Running, from: ({ event }) => ({ count: event.count }) }`
+when the destination needs data. The checker rejects missing required fields.
+Use `decoded` for values already decoded by their schema.
 
-```ts
-// Redundant
-const handlers = {
-  Start: (to) =>
-    to.branch.Running().resolve(({ target }) => target.from())
-}
-
-// Preferred
-const handlers = {
-  Start: (to) => to.branch.Running()
-}
-```
-
-This applies to schema-less states and schemas whose constructor fields are all
-optional or defaulted. The type checker rejects the shorter form when the
-target needs data.
-
-Keep `.resolve(...)` when it uses handler context, constructs state data,
-updates a retained owner, chooses a branch, declines a transition, or enqueues
-commands. For resolver-free reentry, use `.reenter()`:
-
-```ts
-const handlers = {
-  Refresh: (to) => to.local.Ready().reenter()
-}
-```
-
-Review check: search for `.resolve(...)` callbacks that only return an empty
-`target.from()` and remove the callback.
+Reserve named branch groups and `resolve` for conditional outcomes, commands,
+or nested construction. The group lives in `make`; its resolver selects only
+constructors derived from those declarations. Avoid an extra branch group for
+an ordinary transition. Use `reenter: true` when the source must restart.
+An empty targetless resolver simplifies to `{ none: true }`.
 
 ## Choose React ownership or keyed family lookup
 
@@ -176,29 +154,21 @@ Model `Submit` as the component-facing event. Let a machine state own the work
 and its lifetime:
 
 ```ts
+// In make: effects: { submitOrder }
+// targets is Machine.targets(OrderStates).
 machine.handle({ states: {
   Editing: {
     on: {
-      Submit: (to) =>
-        to.branch.Submitting().resolve(({ event, target }) =>
-          target.from({ order: event.order })
-        )
+      Submit: { target: targets.root.Submitting, from: ({ event }) => ({ order: event.order }) }
     }
   },
   Submitting: {
-    invoke: (from) =>
-      from
-        .effect("submit-order", ({ state }) => submitOrder(state.order))
-        .onDone((to) =>
-          to.branch.Complete().resolve(({ output, target }) =>
-            target.from({ order: output })
-          )
-        )
-        .onFailure((to) =>
-          to.branch.Failed().resolve(({ error, target }) =>
-            target.from({ message: String(error) })
-          )
-        )
+    invoke: {
+      src: "submitOrder",
+      input: ({ state }) => state.order,
+      onDone: { target: targets.root.Complete, from: ({ output }) => ({ order: output }) },
+      onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+    }
   }
 } })
 ```

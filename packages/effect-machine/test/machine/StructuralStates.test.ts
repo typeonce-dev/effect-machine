@@ -72,8 +72,15 @@ const States = Machine.state({
   }
 })
 
-const makeMachine = () =>
-  Machine.make({
+const makeMachine = () => {
+  const targets1 = Machine.targets(States)
+  return Machine.make({
+    branches: {
+      transition1: { destination: { target: targets1.root.player.transport.Loading } },
+      transition2: { destination: { target: targets1.root.player.transport.Ready } },
+      transition3: { destination: { target: targets1.root.player.transport.Ready.Playing } }
+    },
+
     root: States,
     events: Machine.eventsFromSchemas(SourceSelected, Loaded, Play, Mute),
     initialConfiguration: (root) =>
@@ -94,42 +101,48 @@ const makeMachine = () =>
             states: {
               Empty: {
                 on: {
-                  SourceSelected: (to) =>
-                    to.local.Loading().resolve(({ event, state, target }) => {
+                  SourceSelected: {
+                    branches: "transition1",
+                    resolve: ({ event, state, select: { destination: target } }) => {
                       assert.strictEqual(state, undefined)
                       return target.from({ url: event.url })
-                    })
+                    }
+                  }
                 }
               },
               Loading: {
                 on: {
-                  Loaded: (to) =>
-                    to.local.Ready().resolve(({ event, state, target }) => {
+                  Loaded: {
+                    branches: "transition2",
+                    resolve: ({ event, state, select: { destination: target } }) => {
                       assert.strictEqual(state._tag, "Loading")
                       return target.from(
                         { duration: event.duration },
                         (ready) => ready.Paused.from()
                       )
-                    })
+                    }
+                  }
                 }
               },
               Ready: {
                 states: {
                   Paused: {
                     on: {
-                      Play: (to) =>
-                        to.local.Playing().resolve(({ containingState, state, target }) => {
+                      Play: {
+                        branches: "transition3",
+                        resolve: ({ containingState, state, select: { destination: target } }) => {
                           assert.strictEqual(state, undefined)
                           return target.from({ position: Math.min(0, containingState.duration) })
-                        })
+                        }
+                      }
                     }
                   },
                   Playing: {
                     on: {
-                      Mute: (to) =>
-                        to.branch.player.settings.Muted().resolve(({ event, target }) =>
-                          target.from({ volume: event.volume })
-                        )
+                      Mute: {
+                        target: targets1.root.player.settings.Muted,
+                        from: ({ event }) => ({ volume: event.volume })
+                      }
                     }
                   }
                 }
@@ -140,6 +153,7 @@ const makeMachine = () =>
       }
     }
   })
+}
 
 const HistoryStates = Machine.state({
   initial: "away",
@@ -176,7 +190,15 @@ const historyFallback = () => ({
   }
 })
 
+const targets2 = Machine.targets(HistoryStates)
 const historyMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets2.root.away } },
+    transition2: { destination: { target: targets2.root.flow.section.Editing } },
+    transition3: { destination: { history: targets2.root.flow.recent } },
+    transition4: { destination: { history: targets2.root.flow.exact } }
+  },
+
   root: HistoryStates,
   events: Machine.eventsFromSchemas(Edit, Leave, ResumeShallow, ResumeDeep),
   initialConfiguration: (root) =>
@@ -191,14 +213,14 @@ const historyMachine = Machine.make({
         exact: { default: historyFallback }
       },
       on: {
-        Leave: (to) => to.branch.away().resolve(({ target }) => target.from())
+        Leave: { target: targets2.root.away }
       },
       states: {
         section: {
           states: {
             Idle: {
               on: {
-                Edit: (to) => to.local.Editing().resolve(({ event, target }) => target.from({ draft: event.draft }))
+                Edit: { target: targets2.root.flow.section.Editing, from: ({ event }) => ({ draft: event.draft }) }
               }
             }
           }
@@ -207,8 +229,8 @@ const historyMachine = Machine.make({
     },
     away: {
       on: {
-        ResumeShallow: (to) => to.history.flow.recent.resolve(({ target }) => target()),
-        ResumeDeep: (to) => to.history.flow.exact.resolve(({ target }) => target())
+        ResumeShallow: { branches: "transition3", resolve: ({ select: { destination: target } }) => target() },
+        ResumeDeep: { branches: "transition4", resolve: ({ select: { destination: target } }) => target() }
       }
     }
   }

@@ -38,6 +38,13 @@ other.resolve(({ target }) => target.from())`
   invalid: [
     {
       code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({}).handle({ on: { Reset: { none: true, reenter: true, resolve: () => {} } } })`,
+      output: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({}).handle({ on: { Reset: { none: true, reenter: true } } })`,
+      errors: [{ messageId: "redundantTargetlessResolver" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready().resolve(({ target }) => target.from()) })`,
       output: `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready() })`,
