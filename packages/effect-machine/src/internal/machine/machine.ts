@@ -403,7 +403,12 @@ const runCapturedBranch = (
 ): unknown => {
   const selectedTarget = getSelectionBuilder(context.target, branch.selection, stateNodes, source)
   if (branch.resolve === undefined) return constructSelectedTarget(selectedTarget)
-  const resolverContext = { ...context }
+  // This fresh context is owned by this evaluation and can be retained by user callbacks.
+  const resolverContext: Record<string, any> = {
+    ...context,
+    root: source === "" ? context.state : context.ancestors[""],
+    decline: Topology.makeDeclined
+  }
   if (branch.selection.kind === "none") delete resolverContext.target
   else resolverContext.target = selectedTarget
   if (branch.selection.kind === "update") {
@@ -426,7 +431,6 @@ const runCapturedBranch = (
       source
     )
   }
-  if (branch.declinable === true) resolverContext.decline = Topology.makeDeclined
   const resolved = branch.resolve(resolverContext, enqueue)
   if (Topology.isDeclined(resolved)) {
     if (branch.declinable !== true) {
@@ -586,11 +590,12 @@ const validateSelectedBranchResult = (
   validateResolvedSelection(result, selection, stateNodes)
 }
 
-// All source-dependent schema relationships have been checked by the public types.
+// Invocation input contexts do not pass through captured transition evaluation.
 const objectContext = (context: Record<string, any>, path: string): Record<string, any> => ({
   ...context,
   root: path === "" ? context.state : context.ancestors[""]
 })
+
 const normalizeObjectTransition = (
   raw: unknown,
   declaration: Declaration.Declaration,
@@ -659,8 +664,7 @@ const normalizeObjectTransition = (
       reenter: config.reenter,
       declinable,
       resolve: (context: Record<string, any>, enqueue: unknown) => {
-        const ctx = { ...objectContext(context, path), decline: Topology.makeDeclined }
-        return guarded && !guard(ctx) ? Topology.makeDeclined() : resolve(ctx, enqueue)
+        return guarded && !guard(context) ? Topology.makeDeclined() : resolve(context, enqueue)
       }
     }
   }
@@ -675,12 +679,11 @@ const normalizeObjectTransition = (
     declinable,
     ...(!guarded && method === undefined && resolve === undefined ? {} : {
       resolve: (context: Record<string, any>, enqueue: unknown) => {
-        const ctx = objectContext(context, path)
-        if (guarded && !guard(ctx)) return Topology.makeDeclined()
+        if (guarded && !guard(context)) return Topology.makeDeclined()
         if (method !== undefined && construct !== undefined) {
-          return constructSelectionValue(selection, context, method, construct(ctx))
+          return constructSelectionValue(selection, context, method, construct(context))
         }
-        if (resolve !== undefined) return resolve({ ...ctx, decline: Topology.makeDeclined }, enqueue)
+        if (resolve !== undefined) return resolve(context, enqueue)
         return selection.kind === "none" ? undefined : constructSelectedTarget(context.target)
       }
     })
@@ -712,10 +715,13 @@ const captureTransition = (
     const branches = captureNamedBranches(branching.branches(), path, trigger)
     const owner = Object.freeze({})
     const evaluate = (context: Record<string, any>, enqueue: unknown) => {
-      const resolverContext = { ...context }
+      const resolverContext: Record<string, any> = {
+        ...context,
+        root: path === "" ? context.state : context.ancestors[""],
+        decline: Topology.makeDeclined
+      }
       delete resolverContext.target
       resolverContext.select = makeBranchSelectors(context, branches, owner, stateNodes, path)
-      if (declinable) resolverContext.decline = Topology.makeDeclined
       const selected = resolve(resolverContext, enqueue)
       if (Topology.isDeclined(selected)) {
         if (!declinable) {

@@ -2,6 +2,31 @@ import { strict as assert } from "node:assert"
 import { test } from "node:test"
 import { makeEffectMachineBenchmarkApi } from "../packages/effect-machine/perf/runtime/effect-machine-compatibility.mjs"
 
+test("passes value constructors directly to both native transition APIs", () => {
+  const from = ({ state }) => ({ value: state.value + 1 })
+  const fluent = makeEffectMachineBenchmarkApi({ eventsFromSchemas: (...schemas) => schemas })
+  const selected = { from: (callback) => callback }
+  assert.equal(fluent.transition({ target: (to) => to.local.Count(), from })({ local: { Count: () => selected } }), from)
+
+  const root = { node: { states: { Count: {} } } }
+  const count = {}
+  const object = makeEffectMachineBenchmarkApi({
+    eventsFromSchemas: (...schemas) => schemas,
+    targets: () => ({ root: { Count: count } }),
+    make: () => ({ handle: (handlers) => handlers })
+  })
+  const handled = object.make({
+    states: root,
+    events: [],
+    initial: object.initial({ target: (to) => to.Count() })
+  }).handle({
+    Count: { on: { Increment: object.transition({ target: (to) => to.local.Count(), from }) } }
+  })
+  assert.equal(handled.states.Count.on.Increment.target, count)
+  assert.equal(handled.states.Count.on.Increment.from, from)
+  assert.deepEqual(handled.states.Count.on.Increment.from({ state: { value: 1 } }), { value: 2 })
+})
+
 test("adapts the state-definition constructor across the public rename", () => {
   const definitions = { Idle: "schema" }
   const current = makeEffectMachineBenchmarkApi({ states: (states) => ({ api: "current", states }) })

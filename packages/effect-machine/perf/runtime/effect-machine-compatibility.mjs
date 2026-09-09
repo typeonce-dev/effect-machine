@@ -23,9 +23,14 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   const fluentTransition = (definition) => (to) => {
     const selection = selectInstruction(definition.target(hasRoot ? { ...to, full: to.branch } : to))
     const reentered = definition.reenter === true && typeof selection.reenter === "function" ? selection.reenter() : undefined
-    if (definition.resolve !== undefined) {
+    const constructor = reentered ?? selection
+    if (definition.from !== undefined && typeof constructor.from === "function" && (definition.reenter !== true || reentered !== undefined)) {
+      return constructor.from(definition.from)
+    }
+    const resolve = definition.from === undefined ? definition.resolve : (context) => context.target.from(definition.from(context))
+    if (resolve !== undefined) {
       const chainable = reentered !== undefined && typeof reentered.resolve === "function"
-      return (chainable ? reentered : selection).resolve(definition.resolve, {
+      return (chainable ? reentered : selection).resolve(resolve, {
         ...(definition.reenter === true && !chainable ? { reenter: true } : {}),
         ...(definition.declinable === true ? { declinable: true } : {})
       })
@@ -43,8 +48,9 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
     target: (to) => selectInstruction(definition.target(to))
   })
 
-  const objectTransition = (definition) => ({
+  const objectTransition = ({ from, ...definition }) => ({
     ...definition,
+    ...(from === undefined ? {} : { resolve: (context) => context.target.from(from(context)) }),
     target: (to) => selectInstruction(definition.target(to))
   })
 
@@ -85,7 +91,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
         const target = selectInstruction(definition.target({ full: selectorsForRoot, branch: selectorsForRoot, local: siblings }))
         return {
           target,
-          ...(definition.resolve === undefined ? {} : { from: (context) => definition.resolve({ ...context, target: { from: (value) => value } }) }),
+          ...(definition.from !== undefined ? { from: definition.from } : definition.resolve === undefined ? {} : { from: (context) => definition.resolve({ ...context, target: { from: (value) => value } }) }),
           ...(definition.reenter === true ? { reenter: true } : {})
         }
       }

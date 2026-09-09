@@ -3,6 +3,64 @@ import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
 import { verifyPlannerStrategies } from "./support/strategyDifferential.js"
 
+it.effect("retains independent callback contexts across root, inline, and named transitions", () =>
+  Effect.gen(function*() {
+    const root = Machine.state({ fields: { count: Schema.Number }, initial: "Idle", states: { Idle: {} } })
+    const targets = Machine.targets(root)
+    const retained: Array<{ readonly root: { readonly count: number }; readonly snapshot: unknown }> = []
+    const machine = Machine.make({
+      root,
+      events: Machine.events({ Increment: {}, Observe: {}, IncrementRoot: {} }),
+      initial: (root) => root.from(() => ({ count: 0 })),
+      branches: { observe: { stay: { none: true } } }
+    }).handle({
+      on: {
+        IncrementRoot: {
+          update: targets.root,
+          from: (context) => {
+            retained.push(context)
+            return { count: context.root.count + 1 }
+          }
+        }
+      },
+      states: {
+        Idle: {
+          on: {
+            Increment: {
+              update: targets.root,
+              from: (context) => {
+                retained.push(context)
+                return { count: context.root.count + 1 }
+              }
+            },
+            Observe: {
+              branches: "observe",
+              resolve: (context) => {
+                retained.push(context)
+                return context.select.stay()
+              }
+            }
+          }
+        }
+      }
+    })
+    yield* verifyPlannerStrategies({
+      machine,
+      expected: "indexed-hierarchical",
+      label: "retained callback contexts",
+      events: [{ _tag: "Increment" }, { _tag: "Observe" }, { _tag: "IncrementRoot" }]
+    })
+    assert.deepStrictEqual(retained.map((context) => context.root.count), [0, 0, 1, 1, 1, 1])
+    assert.strictEqual(new Set(retained).size, retained.length)
+    for (const context of retained) {
+      assert.deepStrictEqual(context.snapshot, {
+        path: "",
+        value: { _tag: "", count: context.root.count },
+        state: { path: "Idle", value: undefined }
+      })
+    }
+  }))
+
 it.effect("constructs schema defaults throughout a parallel root", () => {
   const machine = Machine.make({
     root: Machine.state({
