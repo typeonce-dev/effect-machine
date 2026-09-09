@@ -11,6 +11,7 @@ describe("MachineTest coverage and observed graph", () => {
   class Start extends Schema.TaggedClass<Start>("Start")("Start", {}) {}
 
   const States = Machine.state({ initial: "idle", states: { idle: Idle, done: Done } })
+  const targets1 = Machine.targets(States)
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Start),
@@ -19,7 +20,7 @@ describe("MachineTest coverage and observed graph", () => {
     states: {
       idle: {
         on: {
-          Start: (to) => to.branch.done().resolve(({ target }) => target.decoded(new Done({})))
+          Start: { target: targets1.root.done, decoded: () => (new Done({})) }
         }
       },
       done: {}

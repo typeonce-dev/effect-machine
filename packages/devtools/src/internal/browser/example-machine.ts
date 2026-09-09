@@ -92,7 +92,14 @@ const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
   "application.workflow"
 > => snapshot
 
+const targets1 = Machine.targets(States)
 export const machine = Machine.make({
+  branches: {
+    transition1: {
+      destination: { target: targets1.root.application.workflow.running, update: targets1.root.application.workflow }
+    }
+  },
+
   id: "inspection-example",
   root: States,
   events: Machine.eventsFromSchemas(Start, Finish, Disconnect, Refresh),
@@ -110,19 +117,18 @@ export const machine = Machine.make({
           states: {
             idle: {
               on: {
-                Start: (to) =>
-                  to.local.running()
-                    .updating(to.branch.application.workflow)
-                    .resolve(({ owner, target }) =>
-                      target.decoded(
-                        new Running({}),
-                        (running) => running.editing.decoded(new Editing({}))
-                      ).update(owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 })))
-                    ),
-                Refresh: (to) =>
-                  to.local.update.resolve(({ owner }) =>
-                    owner.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
-                  )
+                Start: {
+                  branches: "transition1",
+                  resolve: ({ select: { destination: target } }) =>
+                    target.decoded(
+                      new Running({}),
+                      (running) => running.editing.decoded(new Editing({}))
+                    ).update.decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 }))
+                },
+                Refresh: {
+                  update: targets1.root.application.workflow,
+                  decoded: () => (new Workflow({ document: "Machine.ts", unsavedChanges: 0 }))
+                }
               }
             },
             running: {
@@ -130,7 +136,10 @@ export const machine = Machine.make({
               states: {
                 editing: {
                   on: {
-                    Finish: (to) => to.local.complete().resolve(({ target }) => target.decoded(new Complete({})))
+                    Finish: {
+                      target: targets1.root.application.workflow.running.complete,
+                      decoded: () => (new Complete({}))
+                    }
                   }
                 }
               }
@@ -141,7 +150,7 @@ export const machine = Machine.make({
           states: {
             online: {
               on: {
-                Disconnect: (to) => to.local.offline().resolve(({ target }) => target.decoded(new Offline({})))
+                Disconnect: { target: targets1.root.application.connection.offline, decoded: () => (new Offline({})) }
               }
             }
           }

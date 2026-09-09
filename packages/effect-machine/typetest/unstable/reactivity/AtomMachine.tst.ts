@@ -142,14 +142,17 @@ describe("AtomMachine", () => {
   it("derives invoked child protocols from the child descriptor", () => {
     const childMachine = makeMachine()
     const Child = Machine.child("child", childMachine)
+
     const parentMachine = Machine.make({
+      children: { source1: Child },
+
       root: States,
       events: Machine.eventsFromSchemas(),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.Idle.decoded(new Idle({})))))
     }).handle({
       states: {
         Idle: {
-          invoke: (from) => from.child(Child)
+          invoke: { src: "source1" }
         }
       }
     })
@@ -187,7 +190,10 @@ describe("AtomMachine", () => {
     expect(AtomMachine.matches).type.not.toBeCallableWith(direct, "Missing")
 
     const Child = Machine.child("emitting-child", machine)
+
     const parentMachine = Machine.make({
+      children: { source1: Child },
+
       root: States,
       events: Machine.eventsFromSchemas(),
       emittedEvents: Emissions,
@@ -195,7 +201,7 @@ describe("AtomMachine", () => {
     }).handle({
       states: {
         Idle: {
-          invoke: (from) => from.child(Child)
+          invoke: { src: "source1" }
         }
       }
     })
@@ -458,6 +464,8 @@ describe("AtomMachine", () => {
 
   it("preserves bound runtime errors and child protocols through families", () => {
     const machine = Machine.make({
+      effects: { source1: Effect.suspend(() => Effect.as(Multiplier, undefined)) },
+
       root: States,
       events: Machine.eventsFromSchemas(Tick),
       input: Schema.String,
@@ -465,8 +473,7 @@ describe("AtomMachine", () => {
     }).handle({
       states: {
         Idle: {
-          invoke: (from) =>
-            from.effect("read-multiplier", () => Effect.as(Multiplier, undefined)).onDone((to) => to.none)
+          invoke: { src: "source1", id: "read-multiplier", onDone: { none: true } }
         }
       }
     })
@@ -569,6 +576,7 @@ describe("AtomMachine", () => {
   })
 
   it("only exposes public input events through atom send boundaries", () => {
+    const targets4 = Machine.targets(States)
     const machine = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(Tick),
@@ -578,8 +586,8 @@ describe("AtomMachine", () => {
       states: {
         Idle: {
           on: {
-            Tick: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({}))),
-            InternalTick: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new Idle({})))
+            Tick: { target: targets4.root.Idle, decoded: () => (new Idle({})) },
+            InternalTick: { target: targets4.root.Idle, decoded: () => (new Idle({})) }
           }
         }
       }

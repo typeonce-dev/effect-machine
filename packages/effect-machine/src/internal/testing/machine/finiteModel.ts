@@ -1315,13 +1315,6 @@ const findSnapshot = (snapshot: unknown, path: string): unknown => {
   return undefined
 }
 
-const selectHistoryTarget = (builder: Record<string, any>, path: string): unknown => {
-  const parts = path.split(".")
-  let current: any = builder
-  for (let index = 0; index < parts.length - 1; index++) current = current[parts[index]!]
-  return current[parts[parts.length - 1]!]
-}
-
 const selectableDefinitionTarget = (
   source: string,
   target: string,
@@ -1340,26 +1333,20 @@ const selectableDefinitionTarget = (
 }
 
 const selectDefinitionTarget = (
-  selector: Record<string, any>,
+  references: Record<string, any>,
   source: string,
   target: string,
   byPath: ReadonlyMap<string, FlatFiniteState>
-): unknown => {
+): Readonly<Record<string, unknown>> => {
   const selected = byPath.get(target)!
-  if (selected.node._tag === "History") {
-    return selectHistoryTarget(selector.history, target)
-  }
-  const sourceRoot = byPath.get(source)!.root
-  if (selected.root !== sourceRoot) {
-    const root = target.split(".")[0]!
-    return selector.branch[root]()
-  }
-  const selectable = selectableDefinitionTarget(source, target, byPath)
-  let current = selector.branch
-  const parts = selectable.split(".")
-  for (const part of parts) current = current[part]
-  if (typeof current === "function") return current()
-  return current.initial
+  const selectedPath = selected.node._tag === "History" ?
+    target
+    : selected.root !== byPath.get(source)!.root ?
+    target.split(".")[0]!
+    : selectableDefinitionTarget(source, target, byPath)
+  let reference = references
+  for (const part of selectedPath.split(".")) reference = reference[part]
+  return selected.node._tag === "History" ? { history: reference } : { target: reference }
 }
 
 const resolveDefinitionTarget = (
@@ -1410,18 +1397,23 @@ const makeHandlers = (
   states: ReadonlyArray<FiniteState>,
   parent: string | undefined,
   byPath: ReadonlyMap<string, FlatFiniteState>,
-  transitions: ReadonlyMap<string, FiniteTransition>
+  transitions: ReadonlyMap<string, FiniteTransition>,
+  references: Record<string, any>,
+  branches: Record<string, Readonly<Record<string, unknown>>>
 ): Record<string, unknown> => {
   const handlers: Record<string, unknown> = Object.create(null)
   for (const node of states) {
     const path = parent === undefined ? node.key : `${parent}.${node.key}`
     if (node._tag === "History") continue
     if (node._tag === "Choice") {
+      const group = `choice:${path}`
+      branches[group] = { destination: selectDefinitionTarget(references, path, node.selected, byPath) }
       handlers[node.key] = {
-        choice: (to: Record<string, any>) =>
-          (selectDefinitionTarget(to, path, node.selected, byPath) as any).resolve(
-            ({ target }: { readonly target: any }) => resolveDefinitionTarget(target, path, node.selected, byPath)
-          )
+        choice: {
+          branches: group,
+          resolve: ({ select }: { readonly select: any }) =>
+            resolveDefinitionTarget(select.destination, path, node.selected, byPath)
+        }
       }
       continue
     }
@@ -1434,15 +1426,19 @@ const makeHandlers = (
     let onDone: unknown
     for (const transition of transitions.values()) {
       if (transition.source !== path) continue
-      const config = (to: Record<string, any>) => {
-        const selected = transition.target === undefined
-          ? to.none
-          : selectDefinitionTarget(to, path, transition.target, byPath)
-        const resolve = transition.target === undefined
-          ? () => undefined
-          : ({ target }: { readonly target: any }) =>
-            resolveDefinitionTarget(target, path, transition.target!, byPath, transition.targetValue)
-        return ("reenter" in transition && transition.reenter ? selected.reenter() : selected).resolve(resolve)
+      const group = `transition:${path}:${triggerKey(transition.trigger)}`
+      if (transition.target !== undefined) {
+        branches[group] = {
+          destination: selectDefinitionTarget(references, path, transition.target, byPath)
+        }
+      }
+      const config = {
+        ...(transition.target === undefined ? { none: true } : {
+          branches: group,
+          resolve: ({ select }: { readonly select: any }) =>
+            resolveDefinitionTarget(select.destination, path, transition.target!, byPath, transition.targetValue)
+        }),
+        ...("reenter" in transition && transition.reenter ? { reenter: true } : {})
       }
       if (transition.trigger.type === "event") on[transition.trigger.event] = config
       else if (transition.trigger.type === "always") always = config
@@ -1489,7 +1485,7 @@ const makeHandlers = (
                     builder
                   )
             }),
-          states: makeHandlers(node.states, path, byPath, transitions)
+          states: makeHandlers(node.states, path, byPath, transitions, references, branches)
         }
         : {})
     }
@@ -1515,18 +1511,21 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const defined = Machine.state({ initial: model.initial, states: stateTree } as any)
   const eventSchemas = model.events.map((event) => Schema.TaggedStruct(event, {}))
   const initial = byPath.get(model.initial)!
-  const machine = Machine.make({
-    root: defined,
-    events: Machine.eventsFromSchemas(...eventSchemas) as any
-  } as any)
   const transitions = new Map(model.transitions.map((transition) => [
     `${transition.source}\u0000${triggerKey(transition.trigger)}`,
     transition
   ]))
+  const branches: Record<string, Readonly<Record<string, unknown>>> = Object.create(null)
+  const handlers = makeHandlers(model.roots, undefined, byPath, transitions, Machine.targets(defined).root, branches)
+  const machine = Machine.make({
+    root: defined,
+    branches,
+    events: Machine.eventsFromSchemas(...eventSchemas) as any
+  } as any)
   return machine.handle(
     {
       initialize: ({ builder }: any) => builder.decoded(stateValue(initial)),
-      states: makeHandlers(model.roots, undefined, byPath, transitions)
+      states: handlers
     } as any
   ) as Machine.Machine.Any
 }

@@ -62,8 +62,16 @@ const makeCounter = (state: {
   actions: number
   inFlight: number
   maxInFlight: number
-}) =>
-  Machine.make({
+}) => {
+  const targets1 = Machine.targets(CounterStates)
+  return Machine.make({
+    branches: {
+      transition1: { destination: { target: targets1.root.Count } },
+      transition2: { destination: { target: targets1.root.Count } },
+      transition4: { destination: { target: targets1.root.Count } },
+      transition5: { destination: { target: targets1.root.Count } }
+    },
+
     id: "Counter",
     root: CounterStates,
     events: Machine.eventsFromSchemas(Increment, Fail, Finish, RaiseFromAction, SpawnFromAction),
@@ -77,8 +85,9 @@ const makeCounter = (state: {
           state.initialEntries += 1
         },
         on: {
-          Increment: (to) =>
-            to.branch.Count().resolve(({ event, state: current, target }, enqueue) => {
+          Increment: {
+            branches: "transition1",
+            resolve: ({ event, state: current, select: { destination: target } }, enqueue) => {
               state.actions += 1
               state.inFlight += 1
               state.maxInFlight = Math.max(state.maxInFlight, state.inFlight)
@@ -86,31 +95,36 @@ const makeCounter = (state: {
               const value = current.value + event.by
               enqueue.emit(new Changed({ value }))
               return target.decoded(new Count({ value }))
-            }),
-          Fail: (to) =>
-            to.branch.Count().resolve(({ state: current, target }, enqueue) => {
+            }
+          },
+          Fail: {
+            branches: "transition2",
+            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.emit(new Changed({ value: 999 }))
               return target.decoded(current)
-            }),
-          Finish: (to) =>
-            to.branch.Done().resolve(({ state: current, target }) =>
-              target.decoded(new Done({ value: current.value }))
-            ),
-          RaiseFromAction: (to) =>
-            to.branch.Count().resolve(({ state: current, target }, enqueue) => {
+            }
+          },
+          Finish: { target: targets1.root.Done, decoded: ({ state: current }) => (new Done({ value: current.value })) },
+          RaiseFromAction: {
+            branches: "transition4",
+            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.raise(new Increment({ by: 1, block: false }))
               return target.decoded(current)
-            }),
-          SpawnFromAction: (to) =>
-            to.branch.Count().resolve(({ state: current, target }, enqueue) => {
+            }
+          },
+          SpawnFromAction: {
+            branches: "transition5",
+            resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.stop(UnsupportedChild)
               return target.decoded(current)
-            })
+            }
+          }
         }
       },
       Done: {}
     }
   })
+}
 
 const storageKey = (entityType: string, entityId: string): string => `${entityType}\u0000${entityId}`
 
@@ -379,6 +393,7 @@ describe("ClusterMachine", () => {
       const opaqueStates = Machine.state({ initial: "OpaqueState", states: { OpaqueState } })
       const resource: { self?: unknown } = {}
       resource.self = resource
+      const targets2 = Machine.targets(opaqueStates)
       const opaqueMachine = Machine.make({
         root: opaqueStates,
         events: Machine.eventsFromSchemas(Fail),
@@ -388,7 +403,7 @@ describe("ClusterMachine", () => {
         states: {
           OpaqueState: {
             on: {
-              Fail: (to) => to.branch.OpaqueState().resolve(({ state: current, target }) => target.decoded(current))
+              Fail: { target: targets2.root.OpaqueState, decoded: ({ state: current }) => current }
             }
           }
         }
@@ -649,6 +664,8 @@ describe("ClusterMachine", () => {
     Effect.gen(function*() {
       const states = Machine.state({ initial: "Count", states: { Count } })
       const invoked = Machine.make({
+        effects: { source1: Effect.suspend(() => Effect.void) },
+
         id: "Invoked",
         root: states,
         events: Machine.eventsFromSchemas(Increment),
@@ -657,7 +674,7 @@ describe("ClusterMachine", () => {
       }).handle({
         states: {
           Count: {
-            invoke: (from) => from.effect("child", () => Effect.void).onDone((to) => to.none)
+            invoke: { src: "source1", id: "child", onDone: { none: true } }
           }
         }
       })

@@ -29,7 +29,11 @@ describe("Machine event constructor collections", () => {
   const states = Machine.state({ initial: "Idle", states: { Idle: {} } })
   const events = Machine.eventsFromSchemas(PublicEvent, SetLabel, FiniteEvent)
   const internalEvents = Machine.internalEventsFromSchemas(InternalEvent)
+
   const machine = Machine.make({
+    effects: { source1: Effect.suspend(() => Effect.succeed("ready")) },
+    timers: { source2: "1 second" },
+
     root: states,
     events,
     internalEvents,
@@ -114,22 +118,27 @@ describe("Machine event constructor collections", () => {
       machine.handle({
         states: {
           Idle: {
-            invoke: (
-              from
-            ) => [
-              from.effect("load", () => Effect.succeed("ready")).onDone((to) =>
-                to.none.resolve(({ output }, enqueue) => {
+            invoke: [{
+              src: "source1",
+              id: "load",
+              onDone: {
+                none: true,
+                resolve: ({ output }, enqueue) => {
                   enqueue.raise(internalEvents.Loaded({ value: output }))
                   return undefined
-                })
-              ),
-              from.timer("timeout", "1 second").onDone((to) =>
-                to.none.resolve((_, enqueue) => {
+                }
+              }
+            }, {
+              src: "source2",
+              id: "timeout",
+              onDone: {
+                none: true,
+                resolve: (_, enqueue) => {
                   enqueue.raise(internalEvents.Failed())
                   return undefined
-                })
-              )
-            ]
+                }
+              }
+            }]
           }
         }
       })

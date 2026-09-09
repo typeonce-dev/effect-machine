@@ -38,7 +38,16 @@ const ReviewEvents = Machine.eventsFromSchemas(
 const saveReview: Effect.Effect<string, string> = Effect.succeed("deterministic-chart")
 const publishReview = Effect.succeed("deterministic-chart")
 
+const targets1 = Machine.targets(ReviewStates)
 export const hierarchyRoutingMachine = Machine.make({
+  branches: {
+    transition1: {
+      save: { target: targets1.root.Workflow.Saving, title: "Save the review" },
+      invalid: { target: targets1.root.Workflow.Review.Failed, title: "Show validation failure" }
+    }
+  },
+  effects: { source1: Effect.suspend(() => saveReview), source2: Effect.suspend(() => publishReview) },
+
   id: "hierarchy-routing",
   root: ReviewStates,
   events: ReviewEvents,
@@ -56,21 +65,13 @@ export const hierarchyRoutingMachine = Machine.make({
       states: {
         Review: {
           on: {
-            Submit: (to) =>
-              to.branches({
-                save: {
-                  title: "Save the review",
-                  target: to.branch.Workflow.Saving()
-                },
-                invalid: {
-                  title: "Show validation failure",
-                  target: to.local.Failed()
-                }
-              }).resolve(({ event, select }) =>
+            Submit: {
+              branches: "transition1",
+              resolve: ({ event, select }) =>
                 event.route === "save"
                   ? select.save.from()
                   : select.invalid.from({ message: "Add a title before continuing." })
-              )
+            }
           },
           states: {
             Form: {},
@@ -78,20 +79,22 @@ export const hierarchyRoutingMachine = Machine.make({
           }
         },
         Saving: {
-          invoke: (from) =>
-            from.effect("save-review", () => saveReview).onDone((to) => to.branch.Workflow.Publishing()).onFailure((
-              to
-            ) =>
-              to.branch.Workflow.Review.Failed().resolve(({ target }) =>
-                target.from({ message: "The review could not be saved." })
-              )
-            )
+          invoke: {
+            src: "source1",
+            id: "save-review",
+            onDone: { target: targets1.root.Workflow.Publishing },
+            onFailure: {
+              target: targets1.root.Workflow.Review.Failed,
+              from: () => ({ message: "The review could not be saved." })
+            }
+          }
         },
         Publishing: {
-          invoke: (from) =>
-            from.effect("publish-review", () => publishReview).onDone((to) =>
-              to.branch.Workflow.Complete().resolve(({ output, target }) => target.from({ slug: output }))
-            )
+          invoke: {
+            src: "source2",
+            id: "publish-review",
+            onDone: { target: targets1.root.Workflow.Complete, from: ({ output }) => ({ slug: output }) }
+          }
         },
         Complete: {}
       }

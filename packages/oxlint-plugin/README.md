@@ -55,170 +55,110 @@ calls on definitions declared in the same module. They do not resolve an
 imported machine definition or guess the result of an arbitrary function call.
 
 Planning checks cover initial, transition, resolution, lifecycle, choice,
-initialization, output, history fallback, and invocation declaration
-callbacks. A nested invocation source is state-owned work and is not treated
-as planning.
+initialization, output, history fallback, and invocation input callbacks.
+Registered source programs are state-owned work and are not treated as planning.
 
 ## Rules
 
 ### `effect-machine/no-redundant-resolve`
 
-Removes a resolver whose only result is empty default construction:
+An empty targetless resolver has no work to do:
 
 ```ts
 // Before
-const handlers = {
-  Start: (to) => to.branch.Running().resolve(({ target }) => target.from())
-}
-
-// After `oxlint --fix`
-const handlers = {
-  Start: (to) => to.branch.Running()
-}
+Ignore: { none: true, resolve: () => {} }
+// After oxlint --fix
+Ignore: { none: true }
 ```
 
-The fixer does not run when the resolver has options, comments, construction
-input, or any other work.
-
-Resolver-only reentry uses `.reenter()`:
-
-```ts
-// Before
-to.local.Ready().reenter().resolve(({ target }) => target.from())
-
-// After `oxlint --fix`
-to.local.Ready().reenter()
-```
-
-An empty `to.none.resolve(() => {})` is similarly reduced to `to.none`.
+The fixer preserves callbacks with comments or meaningful work. Ordinary
+transitions with default construction use `{ target: targets.root.Ready }`.
 
 ### `effect-machine/no-async-planning-callback`
 
-Rejects `async` planning callbacks and direct Promise, fetch, timer, or
-scheduling operations during planning. A machine plans synchronously and has
-no lifetime in which to own work started by a transition.
+Rejects asynchronous work in transition construction, guards, resolvers,
+lifecycle handlers, initializers, and invocation input mappers. Register lazy
+Effects and Streams in `make`, then let a state invoke them:
 
 ```ts
-// Incorrect: the transition starts unowned work.
-const incorrect = {
-  Submit: (to) => {
-    fetch("/orders", { method: "POST" })
-    return to.branch.Complete()
-  }
-}
-
-// Correct: the state owns and cancels the work.
-const correct = {
-  Submitting: {
-    invoke: (from) =>
-      from.effect("submit-order", () => submitOrder())
-        .onDone((to) => to.branch.Complete())
-        .onFailure((to) => to.branch.Failed())
+// In make: effects: { submitOrder }
+Submitting: {
+  invoke: {
+    src: "submitOrder",
+    input: ({ state }) => state.order,
+    onDone: { target: targets.root.Complete, from: ({ output }) => ({ order: output }) },
+    onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
   }
 }
 ```
 
-The rule only reports known unshadowed globals. Calls inside the source passed
-to `from.effect`, `from.stream`, or another invocation builder remain valid.
+Source programs may perform asynchronous work. Input mappers only select
+inputs synchronously. The rule reports known unshadowed globals, not arbitrary
+function calls whose behavior it cannot determine.
 
 ### `effect-machine/no-conflicting-invocation-identity`
 
-Requires every invocation declared by one state to have a unique lifecycle ID
-and every concurrently owned logic or child process to have a unique runtime
-address.
+Invocations on one state require unique lifecycle IDs. Effects, Streams, and
+timers default their ID to `src`; an explicit `id` overrides it. Logic and child
+processes also require unique addresses while active.
 
 ```ts
-// Incorrect: both outcomes use the "load" lifecycle ID.
-const incorrect = {
-  invoke: (from) => [
-    from.effect("load", loadAccount),
-    from.timer("load", "10 seconds")
-  ]
-}
+// Incorrect: both declarations explicitly use the same ID.
+invoke: ;
+;[
+  { src: "loadAccount", id: "load", ...accountOutcomes },
+  { src: "loadTimeout", id: "load", ...timeoutOutcomes }
+]
 
-// Correct
-const correct = {
-  invoke: (from) => [
-    from.effect("load-account", loadAccount),
-    from.timer("load-timeout", "10 seconds")
-  ]
-}
+// Correct: distinct registered source names supply distinct default IDs.
+invoke: ;
+;[
+  { src: "loadAccount", ...accountOutcomes },
+  { src: "loadTimeout", ...timeoutOutcomes }
+]
 ```
 
-Duplicate lifecycle IDs make outcome routing ambiguous. Duplicate active
-addresses fail at runtime. If two operations must run sequentially, put them
-in separate states and transition from the first invocation's outcome instead
-of relying on completion timing.
-
-The rule compares only identities it can prove equal, such as literals, the
-same binding, static `Machine.childAddress(...)` values, and local
-`Machine.child(...)` descriptors. It checks one state's invocation declaration
-at a time and does not guess whether separate states can be active together.
+The rule resolves static literals, local bindings, `Machine.childAddress`, and
+child descriptors registered in the same module's `make` call. It checks one
+state's invocation array at a time. Runtime validation also checks concurrent
+ownership; use separate states when two lifecycles must run sequentially.
 
 ### `effect-machine/no-browser-api-in-planning`
 
-Rejects direct access to stateful browser APIs such as `document`,
-`localStorage`, `navigator`, `location`, workers, and browser event APIs during
-planning.
+Rejects ambient browser access such as `localStorage`, `document`, `navigator`,
+and event APIs from planning callbacks. Obtain external facts in registered
+Effects and pass their results through invocation outcomes. Keep purely visual
+work such as focusing or measuring elements in the UI adapter.
 
-```ts
-// Incorrect: transition planning reads ambient storage.
-const incorrect = {
-  Restore: (to) =>
-    localStorage.getItem("draft") === null
-      ? to.branch.Empty()
-      : to.branch.Editing()
-}
-
-// Correct: state-owned work reads storage and reports an outcome.
-const correct = {
-  Restoring: {
-    invoke: (from) =>
-      from.effect("restore-draft", () => restoreDraft())
-        .onDone((to) => to.branch.Editing())
-        .onFailure((to) => to.branch.Empty())
-  }
-}
-```
-
-If browser work affects the workflow, move it into a state-owned invocation.
-If it only focuses, measures, or renders UI, keep it in the UI adapter. Pure
-data utilities such as `URL`, `URLSearchParams`, `TextEncoder`, and
-`structuredClone` are not reported.
+Pure data utilities such as `URL`, `URLSearchParams`, `TextEncoder`, and
+`structuredClone` remain valid.
 
 ### `effect-machine/no-nondeterministic-planning`
 
-Rejects direct reads of ambient time or randomness during planning, including
-`Date.now()`, zero-argument `new Date()`, `Math.random()`, crypto randomness,
-performance clocks, `Temporal.Now`, and process clocks.
+Rejects ambient time and randomness in planning callbacks, including
+`Date.now()`, zero-argument `new Date()`, `Math.random()`, and crypto randomness.
+Receive facts through events or machine input, or obtain them in invoked work:
 
 ```ts
-// Incorrect: the same event and snapshot can select different results.
-const incorrect = {
-  Check: (to) =>
-    Date.now() >= deadline
-      ? to.branch.Expired()
-      : to.none
+// In make:
+branches: {
+  expiry: {
+    expired: { target: targets.root.Expired },
+    current: { none: true }
+  }
 }
 
-// Correct: receive the external fact as part of the event protocol.
-const correct = {
-  Check: (to) =>
-    to.branches({
-      expired: { target: to.branch.Expired() },
-      current: { target: to.branch.Current() }
-    }).resolve(({ event, select }) =>
-      event.now >= event.deadline
-        ? select.expired.from()
-        : select.current.from()
-    )
+// In handle:
+Check: {
+  branches: "expiry",
+  resolve: ({ event, select }) => event.now >= event.deadline
+    ? select.expired.from()
+    : select.current()
 }
 ```
 
-Pass the value through machine input or an event when it is already known. If
-the machine must obtain it, produce it in a state-owned invocation and
-transition from the invocation outcome. Deterministic operations such as
-`new Date(event.timestamp)` and `Date.parse(state.createdAt)` remain valid.
+Deterministic operations such as `new Date(event.timestamp)` and
+`Date.parse(state.createdAt)` remain valid.
 
 ### `effect-machine/prefer-inline-handle`
 

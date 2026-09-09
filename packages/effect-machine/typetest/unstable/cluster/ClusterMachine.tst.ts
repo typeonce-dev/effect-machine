@@ -84,6 +84,7 @@ describe("ClusterMachine", () => {
 
   const states = Machine.state({ initial: "Count", states: { Count } })
 
+  const targets1 = Machine.targets(states)
   const machine = Machine.make({
     id: "Counter",
     root: states,
@@ -94,11 +95,11 @@ describe("ClusterMachine", () => {
     states: {
       Count: {
         on: {
-          Increment: (to) =>
-            to.branch.Count().resolve(({ event, state, target }) =>
-              target.decoded(new Count({ value: state.value + event.by }))
-            ),
-          Reset: (to) => to.branch.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+          Increment: {
+            target: targets1.root.Count,
+            decoded: ({ event, state }) => (new Count({ value: state.value + event.by }))
+          },
+          Reset: { target: targets1.root.Count, decoded: () => (new Count({ value: 0 })) }
         }
       }
     }

@@ -6,7 +6,7 @@ import type { EventTransition } from "./transition.js"
 
 // Source callbacks cross the erased machine-definition boundary here. Their
 // state, event, error and service relationships are checked by the public builder.
-type Context = Machine.InvokeContext<any, any, any, any>
+type Context = Omit<Machine.InvokeContext<any, any, any, any>, "root">
 interface Outcomes {
   readonly onDone?: EventTransition<any, any, any, any>
   readonly onFailure?: EventTransition<any, any, any, any>

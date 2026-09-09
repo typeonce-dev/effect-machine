@@ -117,7 +117,21 @@ const defaultWorkspaceSnapshot = () => ({
   }
 })
 
+const targets1 = Machine.targets(TransitionStates)
 export const transitionSemanticsMachine = Machine.make({
+  branches: {
+    transition4: {
+      draft: { target: targets1.root.Workspace.Draft, title: "Preferred route is draft" },
+      review: { initial: targets1.root.Workspace.Review, title: "Preferred route is review" }
+    },
+    transition7: {
+      review: { initial: targets1.root.Workspace.Review, title: "Enter the review flow" },
+      publish: { target: targets1.root.Workspace.Finished, title: "Publish without review" }
+    },
+    transition14: { destination: { history: targets1.root.Workspace.recent } },
+    transition15: { destination: { history: targets1.root.Workspace.exact } }
+  },
+
   id: "transition-semantics",
   root: TransitionStates,
   events: Machine.eventsFromSchemas(
@@ -148,87 +162,80 @@ export const transitionSemanticsMachine = Machine.make({
         exact: { default: defaultWorkspaceSnapshot }
       },
       on: {
-        Pause: (to) =>
-          to.branch.Paused().resolve(({ event, target }) => target.decoded(new Paused({ reason: event.reason }))),
-        BumpWorkspace: (to) =>
-          to.branch.Workspace.update.resolve(({ current, owner }) =>
-            owner.decoded(
-              new Workspace({
-                revision: current.revision + 1,
-                preferredRoute: current.preferredRoute
-              })
-            )
-          )
+        Pause: { target: targets1.root.Paused, decoded: ({ event }) => (new Paused({ reason: event.reason })) },
+        BumpWorkspace: {
+          update: targets1.root.Workspace,
+          decoded: ({ state: current }) => (new Workspace({
+            revision: current.revision + 1,
+            preferredRoute: current.preferredRoute
+          }))
+        }
       },
-      onDone: (to) =>
-        to.branch.Published().resolve(({ target }) => target.decoded(new Published({ result: "workspace published" }))),
+      onDone: { target: targets1.root.Published, decoded: () => (new Published({ result: "workspace published" })) },
       states: {
         Routing: {
-          choice: (to) =>
-            to.branches({
-              draft: { title: "Preferred route is draft", target: to.local.Draft() },
-              review: { title: "Preferred route is review", target: to.local.Review.initial }
-            }).resolve(({ containingState, select }) =>
+          choice: {
+            branches: "transition4",
+            resolve: ({ containingState, select }) =>
               containingState.preferredRoute === "review"
                 ? select.review.decoded(new Review({ requestedBy: "initial route" }))
                 : select.draft.decoded(new Draft({ text: "", autosaves: 0 }))
-            )
+          }
         },
         Draft: {
           on: {
-            Edit: (to) =>
-              to.local.Draft().resolve(({ event, state, target }) =>
-                target.decoded(new Draft({ text: event.text, autosaves: state.autosaves }))
-              ),
-            Save: (to) => to.local.AutoSaving().resolve(({ target }) => target.decoded(new AutoSaving({}))),
-            Submit: (to) =>
-              to.branches({
-                review: { title: "Enter the review flow", target: to.local.Review.initial },
-                publish: { title: "Publish without review", target: to.local.Finished() }
-              }).resolve(({ event, select }) =>
+            Edit: {
+              target: targets1.root.Workspace.Draft,
+              decoded: ({ event, state }) => (new Draft({ text: event.text, autosaves: state.autosaves }))
+            },
+            Save: { target: targets1.root.Workspace.AutoSaving, decoded: () => (new AutoSaving({})) },
+            Submit: {
+              branches: "transition7",
+              resolve: ({ event, select }) =>
                 event.mode === "publish"
                   ? select.publish.decoded(new WorkspaceFinished({ result: "published directly" }))
                   : select.review.decoded(new Review({ requestedBy: event.requestedBy }))
-              ),
-            Refresh: (to) => to.none.reenter(),
-            Ignore: (to) => to.none,
-            MaybeHandle: (to) =>
-              to.none.resolve(({ decline, event }) => event.accept ? undefined : decline(), {
-                declinable: true
-              })
+            },
+            Refresh: { none: true, reenter: true },
+            Ignore: { none: true },
+            MaybeHandle: {
+              none: true,
+              resolve: ({ decline, event }) => event.accept ? undefined : decline(),
+              declinable: true
+            }
           }
         },
         AutoSaving: {
-          always: (to) =>
-            to.local.Draft().resolve(({ target }) =>
-              target.decoded(new Draft({ text: "Autosaved draft", autosaves: 1 }))
-            )
+          always: {
+            target: targets1.root.Workspace.Draft,
+            decoded: () => (new Draft({ text: "Autosaved draft", autosaves: 1 }))
+          }
         },
         Review: {
           initialize: ({ builder }) => builder.decoded(new Checking({ checks: ["types", "tests"] })),
-          onDone: (to) =>
-            to.branch.Workspace.Finished().resolve(({ target }) =>
-              target.decoded(new WorkspaceFinished({ result: "approved review" }))
-            ),
+          onDone: {
+            target: targets1.root.Workspace.Finished,
+            decoded: () => (new WorkspaceFinished({ result: "approved review" }))
+          },
           states: {
             Checking: {
               on: {
-                Approve: (to) =>
-                  to.local.Approved().resolve(({ event, target }) =>
-                    target.decoded(new Approved({ reviewer: event.reviewer }))
-                  ),
-                Reject: (to) =>
-                  to.local.ChangesRequested().resolve(({ event, target }) =>
-                    target.decoded(new ChangesRequested({ reason: event.reason }))
-                  )
+                Approve: {
+                  target: targets1.root.Workspace.Review.Approved,
+                  decoded: ({ event }) => (new Approved({ reviewer: event.reviewer }))
+                },
+                Reject: {
+                  target: targets1.root.Workspace.Review.ChangesRequested,
+                  decoded: ({ event }) => (new ChangesRequested({ reason: event.reason }))
+                }
               }
             },
             ChangesRequested: {
               on: {
-                Revise: (to) =>
-                  to.branch.Workspace.Draft().resolve(({ target }) =>
-                    target.decoded(new Draft({ text: "Revised draft", autosaves: 0 }))
-                  )
+                Revise: {
+                  target: targets1.root.Workspace.Draft,
+                  decoded: () => (new Draft({ text: "Revised draft", autosaves: 0 }))
+                }
               }
             }
           }
@@ -237,16 +244,16 @@ export const transitionSemanticsMachine = Machine.make({
     },
     Paused: {
       on: {
-        Create: (to) =>
-          to.branch.Workspace.initial.resolve(({ event, target }) =>
-            target.decoded(new Workspace({ revision: 0, preferredRoute: event.route }))
-          ),
-        ResumeShallow: (to) => to.history.Workspace.recent.resolve(({ target }) => target()),
-        ResumeDeep: (to) => to.history.Workspace.exact.resolve(({ target }) => target()),
-        Restart: (to) =>
-          to.branch.Workspace.initial.resolve(({ target }) =>
-            target.decoded(new Workspace({ revision: 0, preferredRoute: "draft" }))
-          )
+        Create: {
+          initial: targets1.root.Workspace,
+          decoded: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
+        },
+        ResumeShallow: { branches: "transition14", resolve: ({ select: { destination: target } }) => target() },
+        ResumeDeep: { branches: "transition15", resolve: ({ select: { destination: target } }) => target() },
+        Restart: {
+          initial: targets1.root.Workspace,
+          decoded: () => (new Workspace({ revision: 0, preferredRoute: "draft" }))
+        }
       }
     },
     Disabled: {},

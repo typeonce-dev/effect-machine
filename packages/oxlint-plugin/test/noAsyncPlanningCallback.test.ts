@@ -14,6 +14,8 @@ const rule = plugin.rules["no-async-planning-callback"]
 tester.run("no-async-planning-callback", rule, {
   valid: [
     `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ effects: { work: input => Effect.sync(() => fetch("/api")) }, streams: { workStream: input => Stream.fromEffect(Effect.sync(() => Date.now())) } }).handle({})`,
+    `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("load", async () => undefined) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
 const other = { resolve: (_callback: unknown) => undefined }
@@ -45,6 +47,16 @@ Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry:
 } } })`
   ],
   invalid: [
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({}).handle({ states: { Loading: { invoke: { src: "load", input: async () => 1, onDone: { none: true, resolve: async () => {} } } } } })`,
+      errors: [{ messageId: "asyncPlanning" }, { messageId: "asyncPlanning" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({}).handle({ on: { Save: { target: destination, from: async () => ({}) } } })`,
+      errors: [{ messageId: "asyncPlanning" }]
+    },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ root: Machine.state({}) }).handle({ on: { Update: (to) => to.self.update.from(async () => ({ count: 1 })) } })`,

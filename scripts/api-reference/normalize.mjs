@@ -337,6 +337,7 @@ const childTypes = (type) => {
     case "union":
       return type.types ?? []
     case "mapped":
+      return [type.parameterType, type.templateType]
     case "optional":
     case "rest":
     case "typeOperator":

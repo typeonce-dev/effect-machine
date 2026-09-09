@@ -10,6 +10,7 @@ describe("MachineTest exploration", () => {
   class Internal extends Schema.TaggedClass<Internal>("Internal")("Internal", {}) {}
 
   const States = Machine.state({ initial: "counter", states: { counter: Counter } })
+
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Increment),
@@ -21,8 +22,8 @@ describe("MachineTest exploration", () => {
     states: {
       counter: {
         on: {
-          Increment: (to) => to.none,
-          Internal: (to) => to.none
+          Increment: { none: true },
+          Internal: { none: true }
         }
       }
     }

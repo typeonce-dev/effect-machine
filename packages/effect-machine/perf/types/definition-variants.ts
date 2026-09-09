@@ -1,5 +1,5 @@
 import { Machine } from "../../dist/index.js"
-import { Done, Flow, Idle, machine, Running } from "./definition-variants-control.js"
+import { Done, Flow, Idle, machine, Running, States } from "./definition-variants-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
   true :
@@ -7,6 +7,7 @@ type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
 
+const targets = Machine.targets(States)
 const complete = machine.handle({
   states: {
     Flow: {
@@ -18,17 +19,16 @@ const complete = machine.handle({
       },
       states: {
         Route: {
-          choice: (to) => to.local.Idle().resolve(({ target }) => target.from(Idle.make({})))
+          choice: { target: targets.root.Flow.Idle }
         },
         Idle: {
           on: {
-            Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+            Start: { target: targets.root.Flow.Running }
           }
         },
         Running: {
           on: {
-            Finish: (to) =>
-              to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+            Finish: { target: targets.root.Flow.Done, from: ({ event }) => ({ value: event.value }) }
           }
         },
         Done: {
@@ -45,7 +45,7 @@ const idleOnly = machine.handle({
       states: {
         Idle: {
           on: {
-            Start: (to) => to.local.Running().resolve(({ target }) => target.from(Running.make({})))
+            Start: { target: targets.root.Flow.Running }
           }
         }
       }
@@ -59,8 +59,7 @@ const runningOnly = machine.handle({
       states: {
         Running: {
           on: {
-            Finish: (to) =>
-              to.local.Done().resolve(({ event, target }) => target.from(Done.make({ value: event.value })))
+            Finish: { target: targets.root.Flow.Done, from: ({ event }) => ({ value: event.value }) }
           }
         }
       }

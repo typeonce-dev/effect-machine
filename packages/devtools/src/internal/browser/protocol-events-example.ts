@@ -56,7 +56,21 @@ const ChildStates = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(ChildStates)
 export const requiredParentChildMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets1.root.Working } },
+    transition3: { destination: { target: targets1.root.Working } }
+  },
+  effects: {
+    source1: (
+      { parent, state }: {
+        readonly parent: Machine.MachineTarget<Machine.Machine.EventInput<ChildProgress | ChildFinished | ChildProblem>>
+        readonly state: ChildWorking
+      }
+    ) => parent.send(ParentEvents.ChildProgress({ percent: state.progress }))
+  },
+
   id: "required-parent-child",
   root: ChildStates,
   events: ChildEvents,
@@ -68,38 +82,43 @@ export const requiredParentChildMachine = Machine.make({
   states: {
     Idle: {
       on: {
-        BeginChildWork: (to) =>
-          to.branch.Working().resolve(({ event, target }, enqueue) => {
+        BeginChildWork: {
+          branches: "transition1",
+          resolve: ({ event, select: { destination: target } }, enqueue) => {
             enqueue.raise(ChildInternalEvents.Heartbeat({ percent: 25 }))
             enqueue.emit(ChildEmissions.ChildTrace({ message: `started ${event.job}` }))
             return target.decoded(new ChildWorking({ job: event.job, progress: 0 }))
-          })
+          }
+        }
       }
     },
     Working: {
-      invoke: (from) =>
-        from.effect(
-          "report-progress-to-parent",
-          ({ parent, state }) => parent.send(ParentEvents.ChildProgress({ percent: state.progress }))
-        ).onDone((to) => to.none).onFailure((to) =>
-          to.branch.Cancelled().resolve(({ error, target }) =>
-            target.decoded(new ChildCancelled({ reason: String(error) }))
-          )
-        ),
+      invoke: {
+        src: "source1",
+        id: "report-progress-to-parent",
+        input: (context) => context,
+        onDone: { none: true },
+        onFailure: {
+          target: targets1.root.Cancelled,
+          decoded: ({ error }) => (new ChildCancelled({ reason: String(error) }))
+        }
+      },
       on: {
-        Heartbeat: (to) =>
-          to.branch.Working().resolve(({ event, state, target }, enqueue) => {
+        Heartbeat: {
+          branches: "transition3",
+          resolve: ({ event, state, select: { destination: target } }, enqueue) => {
             enqueue.raise(ChildInternalEvents.CommitChildWork())
             return target.decoded(new ChildWorking({ job: state.job, progress: event.percent }))
-          }),
-        CommitChildWork: (to) =>
-          to.branch.Done().resolve(({ state, target }) =>
-            target.decoded(new ChildDone({ result: `${state.job}:complete` }))
-          ),
-        CancelChildWork: (to) =>
-          to.branch.Cancelled().resolve(({ event, target }) =>
-            target.decoded(new ChildCancelled({ reason: event.reason }))
-          )
+          }
+        },
+        CommitChildWork: {
+          target: targets1.root.Done,
+          decoded: ({ state }) => (new ChildDone({ result: `${state.job}:complete` }))
+        },
+        CancelChildWork: {
+          target: targets1.root.Cancelled,
+          decoded: ({ event }) => (new ChildCancelled({ reason: event.reason }))
+        }
       }
     },
     Done: {
@@ -136,7 +155,14 @@ const ParentStates = Machine.state({
   }
 })
 
+const targets2 = Machine.targets(ParentStates)
 export const parentProtocolMachine = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets2.root.Supervising } },
+    transition3: { destination: { target: targets2.root.Complete } }
+  },
+  children: { source1: ProtocolChild },
+
   id: "parent-child-protocol",
   root: ParentStates,
   events: Machine.eventsFromSchemas(LaunchChild, ResetParent, ParentEvents),
@@ -145,33 +171,32 @@ export const parentProtocolMachine = Machine.make({
   states: {
     Idle: {
       on: {
-        LaunchChild: (to) =>
-          to.branch.Supervising().resolve(({ target }) => target.decoded(new Supervising({ latestProgress: 0 })))
+        LaunchChild: { target: targets2.root.Supervising, decoded: () => (new Supervising({ latestProgress: 0 })) }
       }
     },
     Supervising: {
-      invoke: (from) =>
-        from.child(ProtocolChild).onDone((to) =>
-          to.branch.Complete().resolve(({ output, target }) => target.decoded(new ParentComplete({ result: output })))
-        ).onFailure((to) =>
-          to.branch.Failed().resolve(({ error, target }) =>
-            target.decoded(new ParentFailed({ message: String(error) }))
-          )
-        ),
+      invoke: {
+        src: "source1",
+        onDone: { target: targets2.root.Complete, decoded: ({ output }) => (new ParentComplete({ result: output })) },
+        onFailure: {
+          target: targets2.root.Failed,
+          decoded: ({ error }) => (new ParentFailed({ message: String(error) }))
+        }
+      },
       on: {
-        ChildProgress: (to) =>
-          to.branch.Supervising().resolve(({ event, target }) =>
-            target.decoded(new Supervising({ latestProgress: event.percent }))
-          ),
-        ChildFinished: (to) =>
-          to.branch.Complete().resolve(({ event, target }) =>
-            target.decoded(new ParentComplete({ result: event.result }))
-          ),
-        ChildProblem: (to) =>
-          to.branch.Failed().resolve(({ event, target }) =>
-            target.decoded(new ParentFailed({ message: event.message }))
-          ),
-        ResetParent: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new ParentIdle({})))
+        ChildProgress: {
+          target: targets2.root.Supervising,
+          decoded: ({ event }) => (new Supervising({ latestProgress: event.percent }))
+        },
+        ChildFinished: {
+          target: targets2.root.Complete,
+          decoded: ({ event }) => (new ParentComplete({ result: event.result }))
+        },
+        ChildProblem: {
+          target: targets2.root.Failed,
+          decoded: ({ event }) => (new ParentFailed({ message: event.message }))
+        },
+        ResetParent: { target: targets2.root.Idle, decoded: () => (new ParentIdle({})) }
       }
     },
     Complete: {
@@ -179,7 +204,7 @@ export const parentProtocolMachine = Machine.make({
     },
     Failed: {
       on: {
-        ResetParent: (to) => to.branch.Idle().resolve(({ target }) => target.decoded(new ParentIdle({})))
+        ResetParent: { target: targets2.root.Idle, decoded: () => (new ParentIdle({})) }
       }
     }
   }
@@ -196,7 +221,10 @@ class PublishOutside extends Schema.TaggedClass<PublishOutside>("OptionalParentP
 
 const OptionalParentStates = Machine.state({ initial: "Detached", states: { Detached, Published } })
 
+const targets3 = Machine.targets(OptionalParentStates)
 export const optionalParentMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets3.root.Published } } },
+
   id: "optional-parent-protocol",
   root: OptionalParentStates,
   events: Machine.eventsFromSchemas(PublishOutside),
@@ -207,13 +235,15 @@ export const optionalParentMachine = Machine.make({
   states: {
     Detached: {
       on: {
-        PublishOutside: (to) =>
-          to.branch.Published().resolve(({ event, parent, target }, enqueue) => {
+        PublishOutside: {
+          branches: "transition1",
+          resolve: ({ event, parent, select: { destination: target } }, enqueue) => {
             if (parent !== undefined) {
               enqueue.sendTo(parent, ParentEvents.ChildFinished({ result: event.result }))
             }
             return target.decoded(new Published({ deliveredToParent: parent !== undefined }))
-          })
+          }
+        }
       }
     },
     Published: {}

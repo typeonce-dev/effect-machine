@@ -98,19 +98,6 @@ describe("Machine", () => {
       down: Down
     }
   })
-  type DownInvokeSelector = Machine.Machine.InvokeSelector<
-    { readonly "": typeof UpStates.node },
-    readonly [typeof SignIn],
-    readonly [],
-    "down"
-  >
-  type DownInvoke = Machine.Machine.InvokeBuilderInput<
-    { readonly "": typeof UpStates.node },
-    readonly [typeof SignIn],
-    readonly [],
-    "down"
-  >
-
   const NestedParallelStates = Machine.state({
     initial: "root",
     states: {
@@ -497,7 +484,10 @@ describe("Machine", () => {
 
   it("types the closed enqueue protocol without exposing Effects", () => {
     const worker = Machine.childAddress<SignIn>("worker")
+    const targets1 = Machine.targets(UpStates)
     const machine = Machine.make({
+      branches: { transition1: { destination: { target: targets1.root.down } } },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       emittedEvents: Machine.emittedEventsFromSchemas(SignInCompleted),
@@ -506,8 +496,9 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) =>
-              to.branch.down().resolve(({ event, target }, enqueue) => {
+            SignIn: {
+              branches: "transition1",
+              resolve: ({ event, select: { destination: target } }, enqueue) => {
                 expect(enqueue.raise).type.toBeCallableWith(event)
                 expect(enqueue.raise).type.not.toBeCallableWith(new Down({}))
                 expect(enqueue.emit).type.toBeCallableWith(new SignInCompleted({ userId: event.userId }))
@@ -517,7 +508,8 @@ describe("Machine", () => {
                 expect(enqueue.stop).type.toBeCallableWith(worker)
                 expect(enqueue.stop).type.not.toBeCallableWith("worker")
                 return target.decoded(new Down({}))
-              })
+              }
+            }
           }
         }
       }
@@ -564,7 +556,10 @@ describe("Machine", () => {
 
   it("invoke infers one-shot outputs from factories in the owning state", () => {
     expect(Machine).type.not.toHaveProperty("invoke")
+    const targets2 = Machine.targets(UpStates)
     const machine = Machine.make({
+      effects: { source1: Effect.suspend(() => Effect.succeed(1)) },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -573,21 +568,36 @@ describe("Machine", () => {
     machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.effect("valid", () => Effect.succeed(1)).onDone((to) =>
-              to.branch.down().resolve(({ target }) => target.decoded(new Down({})))
-            )
+          invoke: { src: "source1", id: "valid", onDone: { target: targets2.root.down, decoded: () => (new Down({})) } }
         }
       }
     })
-    const incomplete = (from: DownInvokeSelector) => from.effect("invalid", () => Effect.succeed(1))
-    const from = null as unknown as DownInvokeSelector
-    expect(incomplete).type.not.toBeAssignableTo<DownInvoke>()
-    expect(from.effect).type.not.toBeCallableWith("direct-effect", Effect.succeed(1))
+    expect(machine.handle).type.not.toBeCallableWith({ states: { down: { invoke: { src: "source1" } } } })
+    // Lazy Effects are valid registered values; a value source forbids an input mapper.
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "source1", input: () => undefined, onDone: { none: true } } } }
+    })
   })
 
-  it("contextually types dynamic Effect sources through the fluent invocation builder", () => {
+  it("contextually types dynamic Effect sources through registered invocation sources", () => {
+    const targets3 = Machine.targets(UpStates)
     const machine = Machine.make({
+      effects: {
+        source1: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => {
+          expect(state).type.toBe<Down>()
+          return Effect.succeed(state._tag)
+        }
+      },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -596,24 +606,55 @@ describe("Machine", () => {
     machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.effect("dynamic", ({ state }) => {
-              expect(state).type.toBe<Down>()
-              return Effect.succeed(state._tag)
-            }).onDone((to) => to.branch.down().resolve(({ target }) => target.decoded(new Down({}))))
+          invoke: {
+            src: "source1",
+            id: "dynamic",
+            input: (context) => context,
+            onDone: { target: targets3.root.down, decoded: () => (new Down({})) }
+          }
         }
       }
     })
   })
 
-  it("infers Stream elements, failures, and services through the fluent invocation builder", () => {
+  it("infers Stream elements, failures, and services through registered invocation sources", () => {
     class StreamFailure {
       readonly _tag = "StreamFailure"
     }
     const updates: Stream.Stream<1, StreamFailure, EntryRequirement> = Stream.fromEffect(
       Effect.as(EntryRequirement, 1 as const)
     ).pipe(Stream.concat(Stream.fail(new StreamFailure())))
+
     const machine = Machine.make({
+      streams: {
+        source1: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => {
+          expect(state).type.toBe<Down>()
+          return updates
+        },
+        source2: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => {
+          expect(state).type.toBe<Down>()
+          return updates
+        }
+      },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.down.decoded(new Down({}))))
@@ -621,19 +662,24 @@ describe("Machine", () => {
     const handled = machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.stream("updates", ({ state }) => {
-              expect(state).type.toBe<Down>()
-              return updates
-            }).onElement((to) =>
-              to.none.resolve(({ element }) => {
+          invoke: {
+            src: "source1",
+            id: "updates",
+            input: (context) => context,
+            onElement: {
+              none: true,
+              resolve: ({ element }) => {
                 expect(element).type.toBe<1>()
-              })
-            ).onDone((to) => to.none).onFailure((to) =>
-              to.none.resolve(({ error }) => {
+              }
+            },
+            onDone: { none: true },
+            onFailure: {
+              none: true,
+              resolve: ({ error }) => {
                 expect(error).type.toBe<StreamFailure>()
-              })
-            )
+              }
+            }
+          }
         }
       }
     })
@@ -644,19 +690,24 @@ describe("Machine", () => {
     const staticHandled = machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.stream("static-updates", ({ state }) => {
-              expect(state).type.toBe<Down>()
-              return updates
-            }).onElement((to) =>
-              to.none.resolve(({ element }) => {
+          invoke: {
+            src: "source2",
+            id: "static-updates",
+            input: (context) => context,
+            onElement: {
+              none: true,
+              resolve: ({ element }) => {
                 expect(element).type.toBe<1>()
-              })
-            ).onDone((to) => to.none).onFailure((to) =>
-              to.none.resolve(({ error }) => {
+              }
+            },
+            onDone: { none: true },
+            onFailure: {
+              none: true,
+              resolve: ({ error }) => {
                 expect(error).type.toBe<StreamFailure>()
-              })
-            )
+              }
+            }
+          }
         }
       }
     })
@@ -666,24 +717,27 @@ describe("Machine", () => {
   })
 
   it("requires only reachable Stream handlers", () => {
-    type Context = Machine.Machine.InvokeContext<
-      { readonly "": typeof UpStates.node },
-      readonly [typeof SignIn],
-      readonly [],
-      "down"
-    >
-    const values = (_: Context) => Stream.make(1)
-    const failure = (_: Context) => Stream.fail("unavailable" as const)
-
-    const missingElement = (from: DownInvokeSelector) => from.stream("missing-element", values).onDone((to) => to.none)
-    const missingDone = (from: DownInvokeSelector) => from.stream("missing-done", values).onElement((to) => to.none)
-    const missingFailure = (from: DownInvokeSelector) => from.stream("missing-failure", failure).onDone((to) => to.none)
-    const from = null as unknown as DownInvokeSelector
-
-    expect(missingElement).type.not.toBeAssignableTo<DownInvoke>()
-    expect(missingDone).type.not.toBeAssignableTo<DownInvoke>()
-    expect(missingFailure).type.not.toBeAssignableTo<DownInvoke>()
-    expect(from.stream("unreachable-element", failure)).type.not.toHaveProperty("onElement")
+    const machine = Machine.make({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      streams: { values: Stream.make(1), failure: Stream.fail("unavailable" as const) }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "values", onDone: { none: true } } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "values", onElement: { none: true } } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "failure", onDone: { none: true } } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        down: {
+          invoke: { src: "failure", onDone: { none: true }, onFailure: { none: true }, onElement: { none: true } }
+        }
+      }
+    })
   })
 
   it("infers dynamic Effect invocation channels from the source return", () => {
@@ -691,7 +745,24 @@ describe("Machine", () => {
       readonly _tag = "LoadFailure"
     }
     const load = (userId: string) => Effect.fail(new LoadFailure()).pipe(Effect.as({ userId }))
+
     const machine = Machine.make({
+      effects: {
+        source1: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => {
+          expect(state).type.toBe<Down>()
+          return load(state._tag)
+        }
+      },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -700,11 +771,13 @@ describe("Machine", () => {
     machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.effect("dynamic", ({ state }) => {
-              expect(state).type.toBe<Down>()
-              return load(state._tag)
-            }).onDone((to) => to.none).onFailure((to) => to.none)
+          invoke: {
+            src: "source1",
+            id: "dynamic",
+            input: (context) => context,
+            onDone: { none: true },
+            onFailure: { none: true }
+          }
         }
       }
     })
@@ -714,7 +787,61 @@ describe("Machine", () => {
     class LoadFailure {
       readonly _tag = "LoadFailure"
     }
+
     const machine = Machine.make({
+      effects: {
+        source1: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => Effect.succeed(state._tag),
+        source2: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => Effect.fail(new LoadFailure()).pipe(Effect.annotateLogs("state", state._tag)),
+        source3: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => Effect.never.pipe(Effect.annotateLogs("state", state._tag)),
+        source4: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => Effect.as(EntryRequirement, state._tag),
+        source5: ({
+          state
+        }: Machine.Machine.InvokeContext<
+          { readonly "": typeof UpStates.node },
+          readonly [typeof SignIn],
+          readonly [],
+          "down",
+          readonly [typeof SignIn],
+          readonly []
+        >) => Effect.as(EntryRequirement, state._tag)
+      },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -723,16 +850,16 @@ describe("Machine", () => {
     machine.handle({
       states: {
         down: {
-          invoke: (
-            from
-          ) => [
-            from.effect("success", ({ state }) => Effect.succeed(state._tag)).onDone((to) => to.none),
-            from.effect(
-              "failure",
-              ({ state }) => Effect.fail(new LoadFailure()).pipe(Effect.annotateLogs("state", state._tag))
-            ).onFailure((to) => to.none),
-            from.effect("never", ({ state }) => Effect.never.pipe(Effect.annotateLogs("state", state._tag))),
-            from.effect("requirements", ({ state }) => Effect.as(EntryRequirement, state._tag)).onDone((to) => to.none)
+          invoke: [
+            { src: "source1", id: "success", input: (context) => context, onDone: { none: true } },
+            {
+              src: "source2",
+              id: "failure",
+              input: (context) => context,
+              onFailure: { none: true }
+            },
+            { src: "source3", id: "never", input: (context) => context },
+            { src: "source4", id: "requirements", input: (context) => context, onDone: { none: true } }
           ]
         }
       }
@@ -741,10 +868,7 @@ describe("Machine", () => {
     const requirementsHandled = machine.handle({
       states: {
         down: {
-          invoke: (from) =>
-            from.effect("requirements-only", ({ state }) => Effect.as(EntryRequirement, state._tag)).onDone((to) =>
-              to.none
-            )
+          invoke: { src: "source5", id: "requirements-only", input: (context) => context, onDone: { none: true } }
         }
       }
     })
@@ -755,29 +879,52 @@ describe("Machine", () => {
   })
 
   it("rejects unreachable and missing handlers for dynamic Effect invocations", () => {
-    type Context = Machine.Machine.InvokeContext<
-      { readonly "": typeof UpStates.node },
-      readonly [typeof SignIn],
-      readonly [],
-      "down"
-    >
-    const success = (_: Context) => Effect.succeed("user-1")
-    const failure = (_: Context) => Effect.fail("unavailable" as const)
-    const pending = (_: Context) => Effect.never
-
-    const missingDone = (from: DownInvokeSelector) => from.effect("missing-done", success)
-    const missingFailure = (from: DownInvokeSelector) => from.effect("missing-failure", failure)
-    const from = null as unknown as DownInvokeSelector
-    const successful = from.effect("unreachable-failure", success)
-    const failed = from.effect("unreachable-done", failure)
-    const never = from.effect("pending", pending)
-
-    expect(missingDone).type.not.toBeAssignableTo<DownInvoke>()
-    expect(missingFailure).type.not.toBeAssignableTo<DownInvoke>()
-    expect(successful).type.not.toHaveProperty("onFailure")
-    expect(failed).type.not.toHaveProperty("onDone")
-    expect(never).type.not.toHaveProperty("onDone")
-    expect(never).type.not.toHaveProperty("onFailure")
+    const machine = Machine.make({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      effects: {
+        success: (_: string) => Effect.succeed("user-1"),
+        failure: (_: string) => Effect.fail("unavailable" as const),
+        pending: (_: string) => Effect.never
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "success", input: () => "id" } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "failure", input: () => "id" } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        down: {
+          invoke: {
+            src: "success",
+            input: () => "id",
+            onDone: { none: true },
+            onFailure: { none: true }
+          }
+        }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        down: {
+          invoke: {
+            src: "failure",
+            input: () => "id",
+            onFailure: { none: true },
+            onDone: { none: true }
+          }
+        }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "pending", input: () => "id", onDone: { none: true } } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "pending", input: () => "id", onFailure: { none: true } } } }
+    })
+    machine.handle({ states: { down: { invoke: { src: "pending", input: () => "id" } } } })
   })
 
   it("separates public input events from the complete internal protocol", () => {
@@ -790,16 +937,20 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) =>
-              to.none.resolve(({ event }) => {
+            SignIn: {
+              none: true,
+              resolve: ({ event }) => {
                 expect(event).type.toBe<SignIn>()
                 return undefined
-              }),
-            SignInCompleted: (to) =>
-              to.none.resolve(({ event }) => {
+              }
+            },
+            SignInCompleted: {
+              none: true,
+              resolve: ({ event }) => {
                 expect(event).type.toBe<SignInCompleted>()
                 return undefined
-              })
+              }
+            }
           }
         }
       }
@@ -849,40 +1000,25 @@ describe("Machine", () => {
   })
 
   it("invoke requires only the lifecycle handlers reachable from the source type", () => {
-    const failure = () => Effect.fail("unavailable" as const)
     const erasedFailure = () => Effect.fail("unavailable" as const) as Effect.Effect<never, any>
+
     const machine = Machine.make({
+      effects: { source1: Effect.suspend(erasedFailure) },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       internalEvents: Machine.internalEventsFromSchemas(SignInCompleted),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
     })
 
-    type Selector = Machine.Machine.InvokeSelector<
-      { readonly "": typeof UpStates.node },
-      readonly [typeof SignIn, typeof SignInCompleted],
-      readonly [],
-      "down",
-      readonly [typeof SignIn]
-    >
-    type Invoke = Machine.Machine.InvokeBuilderInput<
-      { readonly "": typeof UpStates.node },
-      readonly [typeof SignIn, typeof SignInCompleted],
-      readonly [],
-      "down",
-      readonly [typeof SignIn]
-    >
-    const missingFailure = (from: Selector) => from.effect("missing-failure", failure)
-    const erased = (from: Selector) => from.effect("erased-failure", erasedFailure)
-    const from = null as unknown as Selector
-
-    expect(missingFailure).type.not.toBeAssignableTo<Invoke>()
-    expect(erased).type.not.toBeAssignableTo<Invoke>()
-    expect(from.effect("unreachable-failure", () => Effect.succeed("user-1"))).type.not.toHaveProperty("onFailure")
+    expect(machine.handle).type.not.toBeCallableWith({ states: { down: { invoke: { src: "source1" } } } })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "source1", onDone: { none: true } } } }
+    })
     machine.handle({
       states: {
         down: {
-          invoke: (from) => from.effect("erased-failure", erasedFailure).onFailure((to) => to.none)
+          invoke: { src: "source1", id: "erased-failure", onFailure: { none: true } }
         }
       }
     })
@@ -890,7 +1026,10 @@ describe("Machine", () => {
 
   it("constructs sibling targets from destructured source fields", () => {
     const states = Machine.state({ initial: "source", states: { source: Up, target: RetaggedUp } })
+    const targets9 = Machine.targets(states)
     Machine.make({
+      branches: { transition1: { destination: { target: targets9.root.target } } },
+
       root: states,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) =>
@@ -899,14 +1038,16 @@ describe("Machine", () => {
       states: {
         source: {
           on: {
-            SignIn: (to) =>
-              to.branch.target().resolve(({ state, target }) => {
+            SignIn: {
+              branches: "transition1",
+              resolve: ({ state, select: { destination: target } }) => {
                 const { _tag: _, ...fields } = state
                 expect(target.from).type.toBeCallableWith({ ...fields, attempt: 1 })
                 expect(target.from).type.not.toBeCallableWith(fields)
                 expect(target.from).type.not.toBeCallableWith({ ...fields, attempt: "invalid" })
                 return target.from({ ...fields, attempt: 1 })
-              })
+              }
+            }
           }
         }
       }
@@ -941,34 +1082,36 @@ describe("Machine", () => {
     const Child = Machine.child("child", child)
     expect(Machine.sendTo).type.toBeCallableWith(Child, new SignIn({ userId: "child" }))
     expect(Machine.sendTo).type.not.toBeCallableWith(Child, new Down({}))
+
     const parent = Machine.make({
+      children: { source1: Child },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
     })
-    type ParentInvokeSelector = Machine.Machine.InvokeSelector<
-      Machine.Machine.States<typeof parent>,
-      readonly [typeof SignIn],
-      readonly [],
-      "down"
-    >
-
     parent.handle({
       states: {
         down: {
-          invoke: (from: ParentInvokeSelector) =>
-            from.child(Child, { input: { userId: "child" } }).onSnapshot((to) =>
-              to.none.resolve(({ snapshot }) => {
+          invoke: {
+            src: "source1",
+            input: () => ({ userId: "child" }),
+            onSnapshot: {
+              none: true,
+              resolve: ({ snapshot }) => {
                 expect(snapshot.state).type.toBe<Machine.Snapshot<typeof childStates>>()
                 return undefined
-              })
-            ).onDone((to) =>
-              to.none.resolve(({ output, state }) => {
+              }
+            },
+            onDone: {
+              none: true,
+              resolve: ({ output, state }) => {
                 expect(output).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
                 return undefined
-              })
-            )
+              }
+            }
+          }
         }
       }
     })
@@ -978,13 +1121,27 @@ describe("Machine", () => {
       }
     })
 
-    const childBuilder = (null as unknown as ParentInvokeSelector).child(Child, { input: { userId: "child" } })
-    expect(childBuilder.onSnapshot).type.not.toBeCallableWith(() => new Down({}))
-    expect(childBuilder.onDone).type.not.toBeCallableWith(() => new Down({}))
+    expect(parent.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "source1", input: () => ({ userId: "child" }), onDone: () => new Down({}) } } }
+    })
+    expect(parent.handle).type.not.toBeCallableWith({
+      states: {
+        down: {
+          invoke: {
+            src: "source1",
+            input: () => ({ userId: "child" }),
+            onDone: { none: true },
+            onSnapshot: () => new Down({})
+          }
+        }
+      }
+    })
   })
 
   it("types nested invocation output handlers against their owning state", () => {
     const machine = Machine.make({
+      effects: { source1: Effect.suspend(() => Effect.succeed(Option.some(1))) },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -997,7 +1154,7 @@ describe("Machine", () => {
             auth: {
               states: {
                 signedOut: {
-                  invoke: (from) => from.effect("nested", () => Effect.succeed(Option.some(1))).onDone((to) => to.none)
+                  invoke: { src: "source1", id: "nested", onDone: { none: true } }
                 }
               }
             },
@@ -1042,6 +1199,7 @@ describe("Machine", () => {
   })
 
   it("start exposes machine infrastructure failure channels", () => {
+    const targets12 = Machine.targets(UpStates)
     const machine = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
@@ -1050,7 +1208,7 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) => to.branch.down().resolve(({ target }) => target.decoded(new Down({})))
+            SignIn: { target: targets12.root.down, decoded: () => (new Down({})) }
           }
         }
       }
@@ -1166,7 +1324,19 @@ describe("Machine", () => {
   })
 
   it("branching transitions infer unbounded named targets", () => {
+    const targets13 = Machine.targets(UpStates)
     const machine = Machine.make({
+      branches: {
+        transition1: {
+          recognized: { target: targets13.root.down, title: "recognized user" },
+          measured: { none: true, title: "measured user id" },
+          named: { target: targets13.root.down, title: "named user" },
+          active: { none: true, title: "active user" }
+        },
+        transition2: { accepted: { target: targets13.root.down }, consumed: { none: true } },
+        transition3: { ignored: { none: true } }
+      },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.down.decoded(new Down({}))))
@@ -1176,25 +1346,10 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) =>
-              to.branches({
-                recognized: {
-                  title: "recognized user",
-                  target: to.branch.down()
-                },
-                measured: {
-                  title: "measured user id",
-                  target: to.none
-                },
-                named: {
-                  title: "named user",
-                  target: to.branch.down()
-                },
-                active: {
-                  title: "active user",
-                  target: to.none
-                }
-              }).reenter().resolve(({ event, select, state }) => {
+            SignIn: {
+              branches: "transition1",
+              reenter: true,
+              resolve: ({ event, select, state }) => {
                 expect(event).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
                 expect(select.recognized.decoded).type.toBeCallableWith(new Down({}))
@@ -1209,7 +1364,8 @@ describe("Machine", () => {
                   default:
                     return select.recognized.decoded(new Down({}))
                 }
-              })
+              }
+            }
           }
         }
       }
@@ -1219,10 +1375,10 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) => to.none.reenter()
+            SignIn: { none: true, reenter: true }
           },
           // @ts-expect-error!
-          always: (to) => to.none.reenter()
+          always: { none: true, reenter: true }
         }
       }
     })
@@ -1232,7 +1388,7 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: (to) => to.branch.up()
+            SignIn: { target: targets13.root.up }
           }
         }
       }
@@ -1242,16 +1398,16 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) =>
-              to.branches({
-                accepted: { target: to.branch.down() },
-                consumed: { target: to.none }
-              }).resolve((context) => {
+            SignIn: {
+              branches: "transition2",
+              resolve: (context) => {
                 expect(context.decline()).type.toBe<Machine.Machine.Declined>()
                 if (context.event.userId === "decline") return context.decline()
                 if (context.event.userId === "consume") return context.select.consumed()
                 return context.select.accepted.decoded(new Down({}))
-              }, { declinable: true })
+              },
+              declinable: true
+            }
           }
         }
       }
@@ -1261,11 +1417,11 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) => {
-              expect(to.none).type.not.toBeAssignableTo<() => unknown>()
-              return to.none.resolve((context) => {
-                expect(context).type.not.toHaveProperty("decline")
-              })
+            SignIn: {
+              none: true,
+              resolve: (context) => {
+                expect(context.decline).type.toBeCallableWith()
+              }
             }
           }
         }
@@ -1277,7 +1433,7 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: (to) => to.none.resolve(({ decline }) => decline())
+            SignIn: { none: true, resolve: ({ decline }) => decline() }
           }
         }
       }
@@ -1288,7 +1444,7 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: (to) => to.none.resolve(() => undefined, { declinable: widenedDeclinable })
+            SignIn: { none: true, resolve: () => undefined, declinable: widenedDeclinable }
           }
         }
       }
@@ -1299,73 +1455,39 @@ describe("Machine", () => {
         down: {
           on: {
             // @ts-expect-error!
-            SignIn: (to) => to.branches({ ignored: { target: to.none } }).resolve(() => undefined)
+            SignIn: { branches: "transition3", resolve: () => undefined }
           }
         }
       }
     })
-    machine.handle({
-      states: {
-        down: {
-          on: {
-            SignIn: (to) => {
-              // @ts-expect-error!
-              return to.branches({}).resolve(() => {
-                throw new Error("unreachable")
-              })
-            }
-          }
-        }
-      }
+    expect(Machine.make).type.not.toBeCallableWith({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      branches: { invalid: {} }
     })
-    machine.handle({
-      states: {
-        down: {
-          on: {
-            SignIn: (to) => {
-              // @ts-expect-error!
-              return to.branches({ "": { target: to.none } }).resolve(() => {
-                throw new Error("unreachable")
-              })
-            }
-          }
-        }
-      }
+    expect(Machine.make).type.not.toBeCallableWith({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      branches: { invalid: { "": { none: true } } }
     })
-    machine.handle({
-      states: {
-        down: {
-          on: {
-            SignIn: (to) => {
-              // @ts-expect-error!
-              return to.branches({ 0: { target: to.none } }).resolve(() => {
-                throw new Error("unreachable")
-              })
-            }
-          }
-        }
-      }
+    expect(Machine.make).type.not.toBeCallableWith({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      branches: { invalid: { 0: { none: true } } }
     })
     const symbolBranch = Symbol("branch")
-    machine.handle({
-      states: {
-        down: {
-          on: {
-            SignIn: (to) => {
-              // @ts-expect-error!
-              return to.branches({
-                valid: { target: to.none },
-                [symbolBranch]: { target: to.none }
-              }).resolve(({ select }) => select.valid())
-            }
-          }
-        }
-      }
+    expect(Machine.make).type.not.toBeCallableWith({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      branches: { invalid: { valid: { none: true }, [symbolBranch]: { none: true } } }
     })
   })
 
   it("handle accepts nested states through reserved states objects", () => {
+    const targets14 = Machine.targets(UpStates)
     const machine = Machine.make({
+      branches: { transition1: { destination: { target: targets14.root.up.auth.signedIn } } },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.down.decoded(new Down({})))))
@@ -1379,12 +1501,14 @@ describe("Machine", () => {
               states: {
                 signedOut: {
                   on: {
-                    SignIn: (to) =>
-                      to.local.signedIn().resolve(({ event, state, target }) => {
+                    SignIn: {
+                      branches: "transition1",
+                      resolve: ({ event, state, select: { destination: target } }) => {
                         expect(event).type.toBe<SignIn>()
                         expect(state).type.toBe<SignedOut>()
                         return target.decoded(new SignedIn({ userId: event.userId }))
-                      })
+                      }
+                    }
                   }
                 }
               }
@@ -1396,6 +1520,7 @@ describe("Machine", () => {
   })
 
   it("handle accepts parent config and child config in the same object", () => {
+    const targets15 = Machine.targets(UpStates)
     const machine = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
@@ -1415,20 +1540,22 @@ describe("Machine", () => {
             }
             void id
           },
-          always: (to) =>
-            to.none.resolve(({ event }) => {
+          always: {
+            none: true,
+            resolve: ({ event }) => {
               expect(event).type.toBe<SignIn | Machine.InitialEvent>()
               return undefined
-            }),
+            }
+          },
           states: {
             auth: {
               states: {
                 signedOut: {
                   on: {
-                    SignIn: (to) =>
-                      to.local.signedIn().resolve(({ event, target }) =>
-                        target.decoded(new SignedIn({ userId: event.userId }))
-                      )
+                    SignIn: {
+                      target: targets15.root.up.auth.signedIn,
+                      decoded: ({ event }) => (new SignedIn({ userId: event.userId }))
+                    }
                   }
                 }
               }
@@ -1450,7 +1577,10 @@ describe("Machine", () => {
   })
 
   it("onDone handlers receive typed state context without Effect requirements", () => {
+    const targets16 = Machine.targets(UpStates)
     const machine = Machine.make({
+      branches: { transition1: { destination: { target: targets16.root.down } } },
+
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) =>
@@ -1471,13 +1601,15 @@ describe("Machine", () => {
         up: {
           states: {
             auth: {
-              onDone: (to) =>
-                to.branch.down().resolve(({ event, output, state, target }) => {
+              onDone: {
+                branches: "transition1",
+                resolve: ({ event, output, state, select: { destination: target } }) => {
                   expect(event).type.toBe<SignIn | Machine.InitialEvent>()
                   expect(output).type.toBe<undefined>()
                   expect(state).type.toBe<Auth>()
                   return target.decoded(new Down({}))
-                }),
+                }
+              },
               states: {
                 signedIn: {}
               }
@@ -1656,8 +1788,14 @@ describe("Machine", () => {
     })
     expect(Machine.planInitial).type.not.toBeCallableWith(machine)
     expect(Machine.start).type.not.toBeCallableWith(machine)
-    const from = null as unknown as DownInvokeSelector
-    expect(from.child).type.not.toBeCallableWith(Machine.child("incomplete", machine))
+    const parent = Machine.make({
+      root: UpStates,
+      events: Machine.eventsFromSchemas(SignIn),
+      children: { incomplete: Machine.child("incomplete", machine) }
+    })
+    expect(parent.handle).type.not.toBeCallableWith({
+      states: { down: { invoke: { src: "incomplete", onDone: { none: true } } } }
+    })
     expect(machine).type.not.toBeAssignableTo<ForgedCompleteMachine>()
 
     const complete = machine.handle({
@@ -1732,7 +1870,10 @@ describe("Machine", () => {
       }
     })
 
+    const targets17 = Machine.targets(States)
     const machine = Machine.make({
+      branches: { transition1: { destination: { target: targets17.root.down } } },
+
       root: States,
       events: Machine.eventsFromSchemas(SignIn),
       initialConfiguration: (root) =>
@@ -1746,11 +1887,13 @@ describe("Machine", () => {
     machine.handle({
       states: {
         auth: {
-          onDone: (to) =>
-            to.branch.down().resolve(({ output, target }) => {
+          onDone: {
+            branches: "transition1",
+            resolve: ({ output, select: { destination: target } }) => {
               expect(output).type.toBe<string>()
               return target.decoded(new Down({}))
-            }),
+            }
+          },
           states: {
             signedIn: {
               output: ({ state }) => state.userId
@@ -1828,6 +1971,7 @@ describe("Machine", () => {
         }
       }
     })
+
     const machine = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(SignIn),
@@ -1842,8 +1986,9 @@ describe("Machine", () => {
     machine.handle({
       states: {
         payment: {
-          onDone: (to) =>
-            to.none.resolve(({ output }) => {
+          onDone: {
+            none: true,
+            resolve: ({ output }) => {
               expect(output.status).type.toBe<"approved" | "declined">()
               if (output.status === "approved") {
                 expect(output.authId).type.toBe<string>()
@@ -1851,7 +1996,8 @@ describe("Machine", () => {
                 expect(output.reason).type.toBe<string>()
               }
               return undefined
-            }),
+            }
+          },
           states: {
             approved: {
               output: ({ state }) => ({
@@ -1911,6 +2057,7 @@ describe("Machine", () => {
         }
       }
     })
+
     const machine = Machine.make({
       root: States,
       events: Machine.eventsFromSchemas(SignIn),
@@ -1934,12 +2081,14 @@ describe("Machine", () => {
               requestId: outputs.sync.requestId
             }
           },
-          onDone: (to) =>
-            to.none.resolve(({ output }) => {
+          onDone: {
+            none: true,
+            resolve: ({ output }) => {
               expect(output.userId).type.toBe<string>()
               expect(output.requestId).type.toBe<string>()
               return undefined
-            }),
+            }
+          },
           states: {
             auth: {
               states: {
@@ -2113,8 +2262,10 @@ describe("Machine", () => {
     expect(complete).type.not.toHaveProperty("done")
   })
 
-  it("target.full constructs typed full snapshots", () => {
-    const context = null as unknown as SignInContext
+  it("internal target constructors: target.full constructs typed full snapshots", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
     const full = null as unknown as Machine.Machine.FullTargetBuilder<typeof UpStates.node.states>
     const snapshot = full.up.decoded(
       new Up({ id: "up-1" }),
@@ -2152,7 +2303,9 @@ describe("Machine", () => {
             (sync) => sync.idle.from({})
           )
     )
-    const context = null as unknown as SignedOutContext
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     const local = context.target.local.signedIn.from({ userId: "user-1" })
     const full = context.target.branch[""].down.from({})
     const localWith = context.target.local.with.from(
@@ -2276,24 +2429,13 @@ describe("Machine", () => {
         }
       }
     })
-    type Context = Machine.Machine.HandlerContext<
-      { readonly "": typeof States.node },
-      readonly [typeof SignIn],
-      [],
-      "Flow.Idle",
-      "SignIn",
-      never,
-      never
-    >
-    type ParallelContext = Machine.Machine.HandlerContext<
-      { readonly "": typeof ParallelStates.node },
-      readonly [typeof SignIn],
-      [],
-      "Parallel.left.LeftIdle",
-      "SignIn",
-      never,
-      never
-    >
+    type Context = { readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof States.node }, "Flow.Idle"> }
+    type ParallelContext = {
+      readonly target: Machine.Machine.TargetBuilder<
+        { readonly "": typeof ParallelStates.node },
+        "Parallel.left.LeftIdle"
+      >
+    }
     const context = null as unknown as Context
     const parallelContext = null as unknown as ParallelContext
     const FlowInitial = null as unknown as Machine.Machine.SelectionBuilder<
@@ -2374,7 +2516,9 @@ describe("Machine", () => {
     expect(FlowInitial.from).type.not.toBeCallableWith()
     expect(ParallelInitial.from).type.not.toBeCallableWith()
 
-    const requiredContext = null as unknown as SignedOutContext
+    const requiredContext = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     expect(UpInitial.from).type.not.toBeCallableWith(
       (up: ChildBuilder<typeof UpInitial>) =>
         up
@@ -2397,8 +2541,15 @@ describe("Machine", () => {
   })
 
   it("from preserves parallel-region exhaustiveness", () => {
-    const context = null as unknown as NestedIdleContext
-    const activeContext = null as unknown as NestedActiveContext
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof NestedParallelStates.node }, "root.idle">
+    }
+    const activeContext = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<
+        { readonly "": typeof NestedParallelStates.node },
+        "root.work.auth.signedOut"
+      >
+    }
     const work = null as unknown as ChildBuilder<typeof context.target.local.work>
     const afterAuth = work.auth.from(
       { userId: "guest" },
@@ -2475,8 +2626,10 @@ describe("Machine", () => {
     expect(ActiveInitial.from).type.not.toBeCallableWith({ requestId: 1 })
   })
 
-  it("target.full requires every parallel region", () => {
-    const context = null as unknown as SignInContext
+  it("internal target constructors: target.full requires every parallel region", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
 
     expect(context.target.branch[""].up.decoded).type.not.toBeCallableWith(
       new Up({ id: "up-1" }),
@@ -2488,8 +2641,10 @@ describe("Machine", () => {
     )
   })
 
-  it("target.full exposes every compound child", () => {
-    const context = null as unknown as SignInContext
+  it("internal target constructors: target.full exposes every compound child", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
     const up = null as unknown as ChildBuilder<typeof context.target.branch[""]["up"]>
     const auth = null as unknown as ChildBuilder<typeof up.auth>
 
@@ -2497,8 +2652,10 @@ describe("Machine", () => {
     expect(auth.signedIn.decoded).type.toBeCallableWith(new SignedIn({ userId: "user-1" }))
   })
 
-  it("target.local requires every region when entering an inactive nested parallel state", () => {
-    const context = null as unknown as NestedIdleContext
+  it("internal target constructors: target.local requires every region when entering an inactive nested parallel state", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof NestedParallelStates.node }, "root.idle">
+    }
     const target = context.target.local.work.decoded(
       new Payment({}),
       (work) =>
@@ -2527,8 +2684,10 @@ describe("Machine", () => {
     )
   })
 
-  it("target.branch requires every region when entering an inactive nested parallel state", () => {
-    const context = null as unknown as NestedIdleContext
+  it("internal target constructors: target.branch requires every region when entering an inactive nested parallel state", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof NestedParallelStates.node }, "root.idle">
+    }
     const target = context.target.branch[""].root.work.decoded(
       new Payment({}),
       (work) =>
@@ -2556,7 +2715,9 @@ describe("Machine", () => {
   })
 
   it("nested parallel target builders remove regions and validate payloads", () => {
-    const context = null as unknown as NestedIdleContext
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof NestedParallelStates.node }, "root.idle">
+    }
     const work = null as unknown as ChildBuilder<typeof context.target.local.work>
     const afterAuth = work.auth.decoded(
       new Auth({ userId: "guest" }),
@@ -2571,8 +2732,13 @@ describe("Machine", () => {
     )
   })
 
-  it("target.branch keeps partial navigation for an already-active parallel state", () => {
-    const context = null as unknown as NestedActiveContext
+  it("internal target constructors: target.branch keeps partial navigation for an already-active parallel state", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<
+        { readonly "": typeof NestedParallelStates.node },
+        "root.work.auth.signedOut"
+      >
+    }
     const target = context.target.branch[""].root.work.sync.decoded(
       new Sync({ enabled: true }),
       (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
@@ -2583,8 +2749,10 @@ describe("Machine", () => {
     expect(target.path).type.toBe<"root.work.sync.syncing">()
   })
 
-  it("target.local constructs typed local leaf targets", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.local constructs typed local leaf targets", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     const target = context.target.local.signedIn.decoded(new SignedIn({ userId: "user-1" }))
 
     expect(target).type.toBeAssignableTo<
@@ -2594,15 +2762,19 @@ describe("Machine", () => {
     expect(target.value).type.toBe<SignedIn>()
   })
 
-  it("target.local exposes the source compound children when the source is compound", () => {
-    const context = null as unknown as AuthContext
+  it("internal target constructors: target.local exposes the source compound children when the source is compound", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth">
+    }
 
     expect(context.target.local.signedOut.decoded).type.toBeCallableWith(new SignedOut({}))
     expect(context.target.local.signedIn.decoded).type.toBeCallableWith(new SignedIn({ userId: "user-1" }))
   })
 
-  it("target.local.with checks the local compound value", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.local.with checks the local compound value", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     const target = context.target.local.with.decoded(
       new Auth({ userId: "user-1" }),
       (auth) => auth.signedIn.decoded(new SignedIn({ userId: "user-1" }))
@@ -2616,8 +2788,10 @@ describe("Machine", () => {
     )
   })
 
-  it("target.local rejects unrelated children and wrong values", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.local rejects unrelated children and wrong values", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
 
     expect(context.target.local).type.not.toHaveProperty("sync")
     expect(context.target.local).type.not.toHaveProperty("down")
@@ -2625,17 +2799,23 @@ describe("Machine", () => {
     expect(context.target.local.signedIn.decoded).type.not.toBeCallableWith(new SignedOut({}))
   })
 
-  it("target.local exposes the root compound children", () => {
-    const context = null as unknown as SignInContext
+  it("internal target constructors: target.local exposes the root compound children", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
 
     expect(context.target.local).type.toHaveProperty("up")
     expect(context.target.local).type.toHaveProperty("down")
     expect(context.target.local).type.not.toHaveProperty("with")
   })
 
-  it("target.branch starts at the shared machine root", () => {
-    const context = null as unknown as SignedOutContext
-    const downContext = null as unknown as SignInContext
+  it("internal target constructors: target.branch starts at the shared machine root", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
+    const downContext = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
 
     expect(context.target.branch[""]).type.toHaveProperty("up")
     expect(context.target.branch[""]).type.toHaveProperty("down")
@@ -2643,8 +2823,10 @@ describe("Machine", () => {
     expect(downContext.target.branch[""]).type.toHaveProperty("up")
   })
 
-  it("target.branch constructs typed partial branch targets", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.branch constructs typed partial branch targets", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     const target = context.target.branch[""].up.sync.decoded(
       new Sync({ enabled: true }),
       (sync) => sync.syncing.decoded(new Syncing({ requestId: "sync-1" }))
@@ -2657,8 +2839,10 @@ describe("Machine", () => {
     expect(target.value).type.toBe<Syncing>()
   })
 
-  it("target.branch can replace ancestors before selecting a leaf", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.branch can replace ancestors before selecting a leaf", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
     const target = context.target.branch[""].up.decoded(
       new Up({ id: "up-2" }),
       (up) =>
@@ -2672,8 +2856,10 @@ describe("Machine", () => {
     expect(target.value).type.toBe<SignedIn>()
   })
 
-  it("target.branch rejects non-leaf targets and wrong values", () => {
-    const context = null as unknown as SignedOutContext
+  it("internal target constructors: target.branch rejects non-leaf targets and wrong values", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "up.auth.signedOut">
+    }
 
     expect(context.target.branch[""].up.decoded).type.not.toBeCallableWith(new Up({ id: "up-1" }))
     expect(context.target.branch[""].up.sync.decoded).type.not.toBeCallableWith(new Sync({ enabled: true }))
@@ -2685,8 +2871,10 @@ describe("Machine", () => {
     expect(context.target.branch[""].up.auth.signedIn.decoded).type.not.toBeCallableWith(new SignedOut({}))
   })
 
-  it("target is not callable", () => {
-    const context = null as unknown as SignInContext
+  it("internal target constructor containers are not callable", () => {
+    const context = null as unknown as {
+      readonly target: Machine.Machine.TargetBuilder<{ readonly "": typeof UpStates.node }, "down">
+    }
 
     expect<IsCallable<typeof context.target>>().type.toBe<false>()
     expect(context.target.none()).type.toBe<Machine.Machine.NoTarget>()
@@ -2694,6 +2882,7 @@ describe("Machine", () => {
 
   it("requires explicit targetless transitions", () => {
     expect(Machine).type.not.toHaveProperty("targetless")
+
     const definition = Machine.make({
       root: UpStates,
       events: Machine.eventsFromSchemas(SignIn),
@@ -2710,11 +2899,13 @@ describe("Machine", () => {
         states: {
           down: {
             on: {
-              SignIn: (to) =>
-                to.none.resolve(({ event }, enqueue) => {
+              SignIn: {
+                none: true,
+                resolve: ({ event }, enqueue) => {
                   expect(event).type.toBe<SignIn>()
                   expect(enqueue.raise).type.toBeCallableWith(event)
-                })
+                }
+              }
             }
           }
         }
@@ -2724,10 +2915,8 @@ describe("Machine", () => {
       states: {
         down: {
           on: {
-            SignIn: (to) => {
-              // @ts-expect-error!
-              return to.none.resolve(() => 1)
-            }
+            // @ts-expect-error! Targetless resolvers cannot return unrelated values.
+            SignIn: { none: true, resolve: () => 1 }
           }
         }
       }

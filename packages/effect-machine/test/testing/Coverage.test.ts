@@ -17,7 +17,10 @@ class Finish extends Schema.TaggedClass<Finish>("Finish")("Finish", {}) {}
 
 const CounterStates = Machine.state({ initial: "count", states: { count: Count, done: Done } })
 
+const targets1 = Machine.targets(CounterStates)
 const counterMachine = Machine.make({
+  branches: { transition1: { destination: { target: targets1.root.count } } },
+
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Finish),
   initialConfiguration: (root) =>
@@ -26,12 +29,14 @@ const counterMachine = Machine.make({
   states: {
     count: {
       on: {
-        Add: (to) =>
-          to.branch.count().reenter().resolve(
-            ({ event, state, target }) => target.decoded(new Count({ value: state.value + event.amount })),
-            { declinable: true }
-          ),
-        Finish: (to) => to.branch.done().resolve(({ target }) => target.decoded(new Done({})))
+        Add: {
+          branches: "transition1",
+          reenter: true,
+          resolve: ({ event, state, select: { destination: target } }) =>
+            target.decoded(new Count({ value: state.value + event.amount })),
+          declinable: true
+        },
+        Finish: { target: targets1.root.done, decoded: () => (new Done({})) }
       }
     },
     done: {}
@@ -52,7 +57,12 @@ const opaqueMachine = Machine.make({
 })
 
 const StartupStates = Machine.state({ initial: "count", states: { count: Count } })
+const targets2 = Machine.targets(StartupStates)
 const startupMachine = Machine.make({
+  branches: {
+    transition1: { zero: { target: targets2.root.count, title: "Count is zero" }, unchanged: { none: true } }
+  },
+
   root: StartupStates,
   events: Machine.eventsFromSchemas(Add),
   initialConfiguration: (root) =>
@@ -60,20 +70,18 @@ const startupMachine = Machine.make({
 }).handle({
   states: {
     count: {
-      always: (to) =>
-        to.branches({
-          zero: { title: "Count is zero", target: to.branch.count() },
-          unchanged: { target: to.none }
-        }).resolve(({ state, select }) =>
+      always: {
+        branches: "transition1",
+        resolve: ({ state, select }) =>
           state.value === 0
             ? select.zero.decoded(new Count({ value: 1 }))
             : select.unchanged()
-        ),
+      },
       on: {
-        Add: (to) =>
-          to.branch.count().resolve(({ event, state, target }) =>
-            target.decoded(new Count({ value: state.value + event.amount }))
-          )
+        Add: {
+          target: targets2.root.count,
+          decoded: ({ event, state }) => (new Count({ value: state.value + event.amount }))
+        }
       }
     }
   }
@@ -84,6 +92,8 @@ class Select extends Schema.TaggedClass<Select>("CoverageSelect")("Select", {
 }) {}
 
 const branchMachine = Machine.make({
+  branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
+
   root: StartupStates,
   events: Machine.eventsFromSchemas(Select),
   initialConfiguration: (root) =>
@@ -92,18 +102,15 @@ const branchMachine = Machine.make({
   states: {
     count: {
       on: {
-        Select: (to) =>
-          to.branches({
-            negative: { target: to.none },
-            zero: { target: to.none },
-            positive: { target: to.none }
-          }).resolve(({ event, select }) =>
+        Select: {
+          branches: "transition1",
+          resolve: ({ event, select }) =>
             event.value < 0
               ? select.negative()
               : event.value === 0
               ? select.zero()
               : select.positive()
-          )
+        }
       }
     }
   }
@@ -125,9 +132,9 @@ const finiteEventMachine = Machine.make({
   states: {
     count: {
       on: {
-        [Tick]: (to) => to.none,
-        Alpha: (to) => to.none,
-        Beta: (to) => to.none
+        [Tick]: { none: true },
+        Alpha: { none: true },
+        Beta: { none: true }
       }
     }
   }

@@ -42,25 +42,25 @@ in lockstep with this package.
 
 ## Quick start
 
-Start with events and root-owned data. A data-only machine needs no child states:
+Declare the root once, derive its references, then add behavior with event maps:
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
 
 const Root = Machine.state({ fields: { count: Schema.Number } })
+const targets = Machine.targets(Root)
 const Events = Machine.events({ Increment: { by: Schema.Number } })
-const CounterDefinition = Machine.make({
+const Counter = Machine.make({
   root: Root,
   events: Events,
   initial: (root) => root.from(() => ({ count: 0 }))
-})
-const Counter = CounterDefinition.handle({
+}).handle({
   on: {
-    Increment: (to) =>
-      to.self.update.from(({ current, event }) => ({
-        count: current.count + event.by
-      }))
+    Increment: {
+      update: targets.root,
+      from: ({ root, event }) => ({ count: root.count + event.by })
+    }
   }
 })
 
@@ -70,688 +70,267 @@ const program = Effect.scoped(Effect.gen(function*() {
 }))
 ```
 
-`self.update` replaces the owner's complete value without exiting and reentering
-it. Its children and scoped work remain active. Add `initial` and `states` to
-the same root descriptor when the workflow needs distinct modes; the root data
-survives transitions between those children.
-
-See [the root API guide](./docs/root-api.md) for topology-only machines,
-initialization, reusable schemas, guards, migration, and observation contracts.
-
-`handle` creates a complete implementation boundary. Its result does not
-expose `handle`, so all behavior for one machine belongs in the same handler
-tree. Reuse the definition when multiple independent implementations are
-useful, such as production and testing variants:
-
-```ts
-const ProductionCounter = CounterDefinition.handle(productionHandlers)
-const TestingCounter = CounterDefinition.handle(testingHandlers)
-```
-
-`Machine.start` returns a `MachineRef` with `send`, `state`, `snapshot`,
-`changes`, `emissions`, `join`, and `stop`. Sending enqueues an event; observe
-`changes` or use the testing probe when work must be causally acknowledged.
+Root data is shared state. `update: targets.root` replaces that value while
+retaining the active child configuration and its running work. Ordinary
+transitions target a descendant; the root itself is not a destination.
 
 ## Modeling workflow
 
-1. Define reusable domain schemas where they express a domain boundary.
-2. Declare one root with `Machine.state`. Use inline children or mount reusable
-   descriptors under `states`. `fields` builds a tagged schema; `schema` keeps
-   an existing schema and its construction behavior.
-3. Declare field records with `Machine.events`, `Machine.internalEvents`, and
-   `Machine.emittedEvents`. Import existing tagged unions or tagged classes with
-   the corresponding `eventsFromSchemas`, `internalEventsFromSchemas`, or
-   `emittedEventsFromSchemas` constructor.
-4. Pass the root descriptor to `Machine.make({ root, events })`. Supply root
-   values with `initial`; declared child defaults determine startup topology.
-5. Implement root behavior directly in `handle`, with child behavior in its
-   `states` property. Add runtime, Atom, testing, or Cluster adapters at the
-   application boundary.
+Put data on the lowest state that owns it. Use tagged schemas or `fields` for
+state-owned values and `{}` for structural states. Prefer distinct states over
+boolean flags that allow impossible combinations. Put shared behavior on the
+lowest common ancestor, and reserve parallel states for independent modes.
 
-The root has path `""`; children retain paths such as `Editing` and
-`Editing.Form`. Use `Root.path(...)` to validate path literals. Type full
-snapshots as `Machine.Snapshot<typeof Root>` or `Machine.Snapshot<typeof machine>`,
-state values as `Machine.Value<typeof Root, Path>`, and selected snapshots as
-`Machine.SnapshotAt<typeof Root, Path>`.
+`Machine.state` declares topology. `Machine.make` captures protocols, startup
+input, sources, and named branch groups. `.handle` implements behavior in one
+nested object and returns an executable machine. One definition can create
+independent implementations by calling `.handle` more than once.
 
-### Make invalid states unrepresentable
-
-Treat topology as a domain contract, not as file organization. A parallel state
-declares the full Cartesian product of its regions, so use it only when every
-combination has a coherent meaning. If one region must inspect another before
-entering a state safely, prefer a compound hierarchy that makes the forbidden
-combination impossible. `matches` remains useful for views, tests, and genuine
-coordination between independent regions; it should not repair an invalid
-state product.
-
-Keep state-scoped Effects beneath the state that guarantees their resources,
-and enforce command availability in the machine rather than only by disabling
-UI controls. When entering an inactive compound or parallel state's declared
-default, select `.initial`; explicitly construct descendants only for a
-non-default configuration or a complete replacement of an already-active
-parallel root.
-
-### Construct state through builders
-
-Use `.from(...)` when constructing a new state from schema make input:
+### Construct state values
 
 ```ts
-target.from({ draft: event.draft })
-```
-
-The machine runs these inputs through the state schema while planning. Schema
-defaults, transformations, refinements, and tagged-class identity are
-therefore preserved, and decode failures remain typed machine failures. This
-is the default construction path.
-
-Use `.decoded(...)` when the value is already a `Schema.Type`:
-
-```ts
-target.decoded(new Ready({ notice: null }))
-```
-
-The machine still validates the value against the schema's type side. It does
-not run encoded-input transformations again. State builders are not callable;
-the method name always makes the construction mode visible.
-
-When sibling states share fields, remove the source discriminator and pass the
-remaining fields through the target schema:
-
-```ts
-const handlers = {
-  Submit: (to) =>
-    to.local.Saving().resolve(({ state, target }) => {
-      const { _tag: _, ...fields } = state
-      return target.from({ ...fields, attempt: 1 })
-    })
-}
-```
-
-Omit `schema` when a state represents control flow but owns no data. Use `{}`
-instead of defining an empty tagged schema:
-
-```ts
-const States = Machine.state({
-  initial: "Form",
+const Root = Machine.state({
+  initial: "Idle",
   states: {
-    Form: {
-      initial: "Editing",
-      states: {
-        Editing: {},
-        Saving
-      }
-    }
+    Idle: {},
+    Loading: { fields: { query: Schema.String } },
+    Ready: { fields: { items: Schema.Array(Schema.String) } },
+    Failed: { fields: { message: Schema.String } }
   }
 })
+const targets = Machine.targets(Root)
+const Events = Machine.events({ Search: { query: Schema.String }, Reset: {} })
 
-const definition = Machine.make({
-  root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Form.from((form) => form.Editing.from())))
-})
-```
-
-Schema-less states remain active, targetable, matchable, and visible through
-`getSnapshot`, but have no value to read. Their builders expose only `.from`,
-their handler `state` is `undefined`, and `get` / `getWithParents` accept only
-schema-backed paths. Add a schema later if the state starts owning data.
-
-Keep data-bearing state schemas together in a named `Schema.TaggedUnion` and
-reference its cases from the topology. For a standalone state schema whose
-class identity is useful, declare a named `Schema.TaggedClass`. Do not bury
-inline `fields` in a `Machine.state` descriptor.
-
-Put data on the narrowest state where it is valid. If sibling phases share
-data, put it on their compound parent.
-
-### Separate inputs, raised events, and emissions
-
-`events` is the public machine-input protocol. Events raised to the same machine
-belong in `internalEvents`. Ephemeral outward notifications have their own
-`emittedEvents` protocol:
-
-```ts
-export const CommandEvent = Machine.eventsFromSchemas(
-  Schema.TaggedUnion({ Save: {} })
-)
-export type PublicCommandEvent = Machine.EventOf<typeof CommandEvent>
-const InternalEvent = Machine.internalEventsFromSchemas(
-  Schema.TaggedUnion({
-    Saved: { id: Schema.String },
-    SaveFailed: { message: Schema.String }
-  })
-)
-const Emissions = Machine.emittedEventsFromSchemas(
-  Schema.TaggedUnion({
-    SaveObserved: { id: Schema.String }
-  })
-)
-
-const definition = Machine.make({
-  root: States,
-  events: CommandEvent,
-  internalEvents: InternalEvent,
-  emittedEvents: Emissions,
-  initial: (to) => to.Idle()
-})
-```
-
-Handlers see both protocols. Typed `send`, `Machine.can`, and `Machine.plan`
-accept only public events. Event tags must be unique and public/internal tags
-must be disjoint.
-
-Export the descriptor returned by `Machine.events` instead of exporting its
-schemas. This keeps the deferred constructors as the standard way to create
-events without exposing schema `.make` methods:
-
-```ts
-ref.send(CommandEvent.Save())
-enqueue.raise(InternalEvent.Saved({ id: "entry-1" }))
-enqueue.emit(Emissions.SaveObserved({ id: "entry-1" }))
-```
-
-The returned constructors preserve each schema's make input, including required
-fields and constructor defaults. They defer schema construction until delivery,
-so invalid values fail planning or the running machine with
-`MachineSchemaDecodeError` instead of throwing at the call site.
-Schemas with an open discriminator such as `_tag: Schema.String` remain valid
-protocols but cannot expose a finite constructor set; pass a complete event
-object to `send` or `Machine.plan` for those events.
-
-`ref.emissions` is a hot `Stream`: it publishes only notifications produced
-after subscription, replays nothing, and completes when the machine terminates.
-Snapshots remain separate and stateful: `ref.changes` begins with the current
-lifecycle snapshot and then follows later changes. Use `Machine.prepare` when
-an observer must be installed before initial-entry actions run:
-
-```ts
-const prepared = yield * Machine.prepare(machine)
-
-yield * prepared.emissions.pipe(
-  Stream.runForEach(handleEmission),
-  Effect.forkScoped({ startImmediately: true })
-)
-
-const ref = yield * prepared.start
-```
-
-`Machine.start(machine)` remains the one-step convenience for callers that do
-not observe startup emissions. Preparation does not retain or replay an
-emission: the observer is simply subscribed before initialization begins.
-
-### Inspect a live machine tree
-
-`Machine.prepare(machine).inspection` is the operational counterpart to the
-domain-facing `changes` and `emissions` streams. It observes the prepared root
-and every locally owned child, `Logic` process, Effect, and timer in one total
-publication order:
-
-```ts
-const prepared = yield * Machine.prepare(checkout)
-
-yield * prepared.inspection.pipe(
-  Stream.runForEach((record) => Console.log(record.sequence, record.subject.id, record._tag)),
-  Effect.forkScoped({ startImmediately: true })
-)
-
-const checkoutRef = yield * prepared.start
-```
-
-For a handled input, the stream may expose values such as:
-
-```ts
-{ _tag: "EventSent", sequence: 2, deliveryId: 0,
-  subject: { id: "checkout", sessionId: "machine:0", kind: "Machine" },
-  source: undefined, target: { id: "checkout", sessionId: "machine:0" },
-  event: CheckoutEvents.Submit(), causedBy: undefined }
-
-{ _tag: "EventProcessed", sequence: 4, macrostepId: 0,
-  deliveryId: 0, handled: true, configurationChanged: true,
-  before: { status: "active", state: /* ... */ },
-  after: { status: "active", state: /* ... */ }, microsteps: [/* ... */] }
-```
-
-The closed `Machine.Inspection.Event` union also reports creation,
-initialization and startup failure, direct `Logic` state updates, outward
-emissions, Effect/timer activity lifecycles, and termination. Records erase
-unrelated child protocols to `unknown`; application-level observation remains
-typed through each reference's `changes` and `emissions`.
-
-The stream is hot, non-replayed, never fails, and completes after the root
-terminates. Subscribe before `prepared.start` to capture initialization. Local
-session ids are unique only inside that prepared ownership tree: `machine:0`
-is the root and later ids identify its descendants. They are intentionally not
-distributed identities. Cluster placement, routing, and correlation continue
-to use Cluster entity, runner, and request identities at the integration
-boundary.
-
-`AtomMachine.inspection(machineAtom)` provides the same root-scoped stream and
-starts a fresh atom-backed machine only after its inspection subscription is
-installed.
-
-Invalid event and emission constructions fail the machine with a typed
-`MachineSchemaDecodeError`; they do not throw from the constructor call.
-
-### Send explicitly between machines
-
-`raise` targets the current machine in the same macrostep. `sendTo` targets a
-machine mailbox and is processed later. A machine that requires an owner
-declares the subset of parent inputs it may send with `Machine.parent`:
-
-```ts
-const ParentEvents = Machine.eventsFromSchemas(ChildFinished)
-
-const child = Machine.make({
-  root: ChildStates,
-  events: ChildEvents,
-  parent: Machine.parent(ParentEvents),
-  initial: (to) => to.Working()
-}).handle({
+const Search = Machine.make({ root: Root, events: Events }).handle({
   states: {
-    Working: {
+    Idle: {
       on: {
-        Finish: (to) =>
-          to.branch.Done().resolve(({ parent, target }, enqueue) => {
-            enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-            return target.from()
-          })
+        Search: {
+          target: targets.root.Loading,
+          from: ({ event }) => ({ query: event.query })
+        }
       }
     },
-    Done: {}
-  }
-})
-
-const Child = Machine.child("worker", child)
-const ParentInputs = Machine.eventsFromSchemas(Start, ParentEvents)
-```
-
-`parent` is statically present in every child callback, and root APIs such as
-`Machine.start`, `Machine.planInitial`, Atom machines, and Cluster machines
-reject this machine. When `Child` is invoked, the parent definition must accept
-every declared parent event; otherwise `.handle(...)` is a compile-time error.
-Inside the child, the parent target accepts only those declared events.
-
-Use `parent: Machine.optionalParent(ParentEvents)` when the same machine is
-intentionally valid both as a root and as a child. In that case `parent` is
-`MachineTarget<...> | undefined` and must be narrowed before sending. When no
-parent declaration is present, callbacks do not expose a `parent` property.
-`emit` never sends to the parent: it only publishes on the emitting machine's
-`emissions` stream.
-
-Every handler also receives `self`, which can be targeted with `sendTo` when a
-later mailbox turn is required. Use `raise` instead for same-macrostep work.
-Both `self` and `parent` are minimal `Machine.MachineTarget<Event>` values. The
-shared `Machine.MachineReferences<InputEvents, ParentEvents>` context keeps
-their input protocols separate without exposing snapshot or lifecycle APIs.
-Structural state values use distinct names: `containingState` is the immediate
-valued state in the same statechart, while `ancestors` maps valued ancestor
-paths. `parent` always means the owning machine target.
-
-### Choose the target by scope
-
-| Builder          | Use when                                 | Preserves                                         |
-| ---------------- | ---------------------------------------- | ------------------------------------------------- |
-| `target.none()`  | Handling without selecting a destination | The complete current configuration                |
-| `target.local`   | Moving inside the nearest compound scope | Ancestors and unrelated parallel regions          |
-| `target.branch`  | Moving elsewhere under the active root   | Omitted active ancestors and parallel regions     |
-| `target.full`    | Replacing or selecting a complete root   | Nothing implicit for a newly selected root        |
-| `target.history` | Restoring a declared history node        | The remembered configuration or its typed default |
-
-Every required transition handler selects a target from its inline `to`
-builder. Return a bare selection such as `to.local.Idle()` when the selected
-builder supports zero-argument construction; the machine applies the same
-default construction as `target.from()`. This includes empty schemas and
-schemas whose constructor fields are all optional or defaulted. TypeScript
-rejects the bare form when state data or nested configuration is required.
-Call `.resolve(...)` when construction depends on handler context or the
-transition needs to enqueue commands. An absent handler ignores the trigger; `to.none` handles
-it and retains queued commands, raised events, and emitted events without
-selecting a destination. Concrete destinations stay narrowed inside their
-resolver, and `to.branches({...})` gives the resolver only the declared named
-`select` builders. Builders describe the
-next logical configuration. Shared states exit and enter only when paths
-change; call `.reenter()` before `.from(...)`, `.decoded(...)`, or `.resolve(...)`
-when the source must restart. Default-constructible targets can finish at
-`.reenter()`. With `to.none`, reentry
-restarts the source while retaining its configuration.
-
-Topology-only definition instructions are values: `to.none`, declared
-`.initial` and history selections, and `to.local.with`. Concrete state and
-choice destinations remain calls such as `to.local.Running()`. Runtime named
-branch builders remain callable, including `select.unchanged()`, because their
-result carries the selected branch evidence.
-
-### Update an active scope value
-
-Use `to.local.update(...)` to replace the value owned by the nearest active
-compound scope without rebuilding its active child. Use
-`to.branch.<path>.update(...)` for a valued compound or parallel ancestor of the
-handler source:
-
-```ts
-const handlers = {
-  Increment: (to) => to.branch.root.session.update.from(({ current }) => ({ count: current.count + 1 }))
-}
-```
-
-The update keeps the exact active descendants, their values, history records,
-completion outputs, and unrelated parallel regions. It runs no exit or entry
-actions and does not restart state-owned work. Eventless stabilization still
-runs, so an `always` transition can react to the new value.
-
-The plain update method remains useful when topology does not change. It is
-also a static selection for a named branch:
-
-```ts
-to.branches({
-  changed: { target: to.local.update },
-  unchanged: { target: to.none }
-}).resolve(({ select, event }) =>
-  event.changed
-    ? select.changed.from({ count: event.count })
-    : select.unchanged()
-)
-```
-
-### Change topology and a retained owner together
-
-When a transition enters another child and also replaces a valued ancestor
-that stays active, declare both operations on the same target:
-
-```ts
-const handlers = {
-  CreatePlan: (to) =>
-    to.local.SavingPlan()
-      .updating(to.branch.Ready)
-      .from(({ current, event }) => ({
-        target: { request: { _tag: "Create", input: event.input } },
-        update: { ...current, notice: null }
-      }))
-}
-```
-
-`to.local.SavingPlan()` selects topology. `.updating(to.branch.Ready)` names
-the retained valued owner and makes its replacement mandatory. `.from(...)`
-returns `{ target, update }` with constructor inputs for both values;
-`.decoded(...)` returns already decoded values for both. `current` is that
-owner's decoded value from the pre-transition snapshot. Use `.resolve(...)`
-when constructing explicit children, mixing construction methods, or queuing
-commands; its `target` and `owner` builders construct the two values.
-
-The topology change and owner replacement apply atomically in one microstep.
-The owner does not exit or reenter, its work is not restarted, and destination
-entry actions observe the new owner value. Eventless stabilization follows.
-Only one retained owner may be replaced by a combined target. A `full` target,
-or any target that exits the selected owner, does not expose `.updating`.
-Named branches support value-only updates; a combined update declares its
-destination directly.
-
-For a schema-less destination, construction remains explicit:
-
-```ts
-to.local.Idle()
-  .updating(to.branch.Ready)
-  .resolve(({ current, output, owner, target }) =>
-    target.from().update(
-      owner.decoded(
-        new Ready({
-          ...current,
-          day: output,
-          notice: "Plan changed."
-        })
-      )
-    )
-  )
-```
-
-Both values derive from the same pre-transition snapshot and are validated
-before lifecycle actions run. Competing transitions that write the same owner
-conflict; document order and hierarchy select one writer rather than applying
-last-write-wins behavior.
-
-Use `.guard(predicate)` before construction to decline an update without
-constructing values or queuing commands. It is available on standalone and
-combined updates. A false guard allows ancestor fallback. A resolver may also
-return `decline()` with `{ declinable: true }` for decisions during resolution.
-Call `.reenter()` before construction on event or invocation transitions when
-the handler source should exit and enter again. Reentry applies to that source,
-not to the retained ancestor whose value changed.
-
-The selector omits `update` for schema-less scopes, atomic and final states,
-inactive branches, parallel sibling regions, and choice resolvers. Updating a
-parallel sibling requires an event handled by that region.
-
-Use `declinable: true` when a resolver may decide that its transition is not
-enabled. Only that resolver receives `decline()`, and its return type expands to
-accept the opaque declined result:
-
-```ts
-const handlers = {
-  Submit: (to) =>
-    to.local.Saving().resolve(
-      ({ event, target, decline }) => accepts(event) ? target.from({ draft: event.draft }) : decline(),
-      { declinable: true }
-    )
-}
-```
-
-Declining discards work enqueued by that resolver. Event and eventless dispatch
-continues with the next eligible ancestor; if no candidate accepts, no
-transition is selected. This differs from `target.none()`, which consumes the
-trigger and prevents an ancestor from handling it. `transitionDefinitions`
-reports each handler's `acceptance` as `"required"` or `"declinable"` while
-preserving the exact declared target branches. Choices and initial routing must
-remain total and cannot use declinable transitions. Completion and invocation
-outcomes have no ancestor candidate: declining one ignores that lifecycle
-occurrence and leaves the current configuration active.
-
-Use `Machine.can` when a caller needs to test a concrete event against a
-snapshot. The direct and machine-specialized forms have the same semantics:
-
-```ts
-const canSubmit = yield * Machine.can(machine, snapshot, Submit({ draft }))
-
-const canMachine = Machine.can(machine)
-const canCancel = yield * canMachine(snapshot, Cancel())
-```
-
-`can` returns `true` when at least one required or non-declined handler accepts
-the event. Targetless transitions count as accepted. Invalid event input fails
-with `MachineSchemaDecodeError`; a valid unhandled event returns `false`.
-Declinable resolvers run to decide acceptance, but collected commands,
-emissions, and raised events are discarded. Required resolvers and transition
-lifecycle do not run.
-
-## Statechart capabilities
-
-`Machine.state` supports:
-
-- atomic states;
-- compound states with one active child;
-- parallel states with one active state in every region;
-- final states and typed outputs;
-- transient choice states;
-- shallow and deep history states.
-
-Declare topology—including finality, output schemas, choices, and history—only
-in `states`. Handlers implement behavior and output computation without
-repeating structural metadata. Final children complete their parent, so
-`onDone` belongs on that compound or parallel parent.
-
-Transition, entry, exit, choice, initial, and history callbacks are
-synchronous. Conditions use ordinary TypeScript control flow. Callbacks may
-select state and enqueue explicit `raise`, `emit`, `sendTo`, or `stop` commands;
-arbitrary asynchronous Effects do not run inside planning.
-
-## Effects, Streams, timers, and child machines
-
-State-scoped work starts on entry and is interrupted on exit:
-
-```ts
-machine.handle({
-  states: {
-    Loading: {
-      invoke: (from) =>
-        from.effect("save-document", () => saveDocument)
-          .onDone((to) => to.branch.Saved().resolve(({ output, target }) => target.from({ id: output.id })))
-          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: String(error) })))
-    },
-    Waiting: {
-      invoke: (from) =>
-        from.timer("save-timeout", "3 seconds")
-          .onDone((to) => to.branch.Failed().resolve(({ target }) => target.from({ message: "Timed out" })))
-    }
+    Loading: { on: { Reset: { target: targets.root.Idle } } }
   }
 })
 ```
 
-The state-local `from` selector starts an `effect`, `stream`, `timer`, reusable
-`logic`, or complete `child` statechart. The selected source determines which
-lifecycle methods the chain requires and which methods are available. For
-example, an Effect with non-`never` output and error channels must handle both;
-the completed chain is the value returned by the callback:
+`from` accepts the schema's make input, including defaults and transformations.
+`decoded` accepts its decoded value, preserving class instances. The planner
+validates both boundaries and reports `MachineSchemaDecodeError`. Omit construction
+only when the selected builder supports empty default construction.
 
-```ts
-machine.handle({
-  states: {
-    Loading: {
-      invoke: (from) =>
-        from.effect("load-document", ({ state }) => loadDocument(state.documentId))
-          .onDone((to) => to.branch.Ready().resolve(({ output, target }) => target.from({ document: output })))
-          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ message: error.message })))
-    }
-  }
-})
-```
+A callback receives the specific event and source-state types, plus `root`,
+`containingState`, `ancestors`, and the appropriate machine references. A
+transition callback also receives the current logical `snapshot`. There is no
+unrestricted destination builder in the callback.
 
-A Stream source remains independent of the parent event protocol. Each element
-is mapped by `onElement`, and the next element is not pulled until that parent
-macrostep commits:
+### Declare advanced and conditional transitions
 
-```ts
-machine.handle({
-  states: {
-    Listening: {
-      invoke: (from) =>
-        from.stream("channel", () => channelMessages)
-          .onElement((to) =>
-            to.none.resolve(({ element }, enqueue) => {
-              enqueue.raise(Events.MessageReceived({ message: element }))
-            })
-          )
-          .onDone((to) => to.none)
-          .onFailure((to) => to.branch.Failed().resolve(({ error, target }) => target.from({ error })))
-    }
-  }
-})
-```
-
-`to.none` is the targetless transition value. Return it directly to keep the
-current configuration, or call `.resolve(...)` when the transition only needs
-to enqueue commands. A block resolver may omit its return because it is
-contextually typed to return `undefined`.
-
-Inside `.handle(...)`, `from` receives the owning machine's public input and
-declared parent protocol contextually. Source and lifecycle callbacks can send
-through `self` and `parent` while retaining the invoked Effect's output and
-error inference:
+A resolver that chooses a branch, constructs nested children, or enqueues
+commands uses a named group in `make`. The group captures every possible edge
+before any resolver executes:
 
 ```ts
 const machine = Machine.make({
-  events: Commands,
-  internalEvents: InternalEvents,
-  parent: Machine.parent(ParentEvents)
-  // ...
+  root: Root,
+  events: Events,
+  branches: {
+    search: {
+      loading: { target: targets.root.Loading, title: "Query supplied" },
+      idle: { target: targets.root.Idle, title: "Empty query" }
+    }
+  }
 }).handle({
   states: {
-    Saving: {
-      invoke: (from) =>
-        from.effect("notify-parent", () => saveDocument)
-          .onDone((to) =>
-            to.none.resolve(({ parent, self }, enqueue) => {
-              enqueue.sendTo(self, Commands.Save())
-              enqueue.sendTo(parent, ParentEvents.ChildFinished({ id: "job-1" }))
-            })
-          )
-          .onFailure((to) => to.none)
+    Idle: {
+      on: {
+        Search: {
+          branches: "search",
+          resolve: ({ event, select }) =>
+            event.query.length > 0
+              ? select.loading.from({ query: event.query })
+              : select.idle.from()
+        }
+      }
     }
   }
 })
 ```
 
-Return an array of completed chains to compose multiple state-owned activities.
-The source computation itself, process logic, or `Machine.child(id, machine)`
-descriptor can be named and reused; the invocation chain stays local so its
-transitions retain the exact owning state and machine protocols.
+Each selector is bound to its declared destination. Its constructor rejects a
+payload belonging to another branch. A single-target group works the same way;
+there is no second path declaration in the resolver. For a compound target,
+`select.checkout.from(parentValues, child => child.Review.from(childValues))`
+constructs the explicitly selected subtree. Parallel constructors require every
+entered region. Required initializers and final output implementations remain
+part of machine readiness checking.
+
+Use `guard: context => boolean` to decline before construction or commands.
+For a resolver that can decline, explicitly add `declinable: true`; only then may
+it return `context.decline()`. `reenter: true` restarts the handler's source
+where that operation supports reentry. A retained source-value update does not
+restart its lifecycle.
+
+### Select destinations and retain owners
+
+All references come from the same root descriptor supplied to `make`:
+
+| Declaration                                           | Meaning                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| `{ target: targets.root.Checkout.Review, from: ... }` | Enter a declared destination with its value.                              |
+| `{ initial: targets.root.Checkout, from: ... }`       | Enter the declared initial configuration of a compound or parallel state. |
+| `{ history: targets.root.Checkout.recent }`           | Restore a declared history state.                                         |
+| `{ update: targets.root.Checkout, from: ... }`        | Replace a retained active owner's value.                                  |
+| `{ update: targets.root, from: ... }`                 | Replace root data and retain active descendants.                          |
+| `{ none: true }`                                      | Accept an event without changing the configuration.                       |
+
+An atomic transition can enter a destination and update one retained owner:
 
 ```ts
-const refreshCache = Cache.refresh
-
-machine.handle({
-  states: {
-    Active: {
-      invoke: (from) => [
-        from.effect("refresh-cache", () => refreshCache).onDone((to) => to.none).onFailure((to) => to.none),
-        from.timer("expire-session", "5 minutes").onDone((to) => to.branch.Expired())
-      ]
-    }
-  }
-})
+Save: {
+  target: targets.root.Checkout.Saving,
+  update: targets.root.Checkout,
+  from: ({ event, ancestors }) => ({
+    target: { request: event.request },
+    update: { ...ancestors.Checkout, revision: event.revision }
+  })
+}
 ```
 
-`onDone` is required for a non-`never` output, and `onFailure` is required for a
-non-`never` typed error. Streams additionally require `onElement` when their
-element channel is non-`never` and always require `onDone`; logic and child
-chains optionally expose `onSnapshot`. A handled method disappears from the
-next builder step, so every reachable lifecycle channel is handled exactly
-once. Defects, interruption, and source-construction failures terminate the
-owning runtime. Effect sources are factories evaluated when their state is
-entered. Use an Effect containing `Effect.sleep(...)` for generic work, while
-`from.timer(...)` keeps timer intent explicit and makes static durations visible
-through activity inspection.
+The complete replacement values are validated before either change is applied.
+Advanced construction declares both references in a branch and uses
+`select.saved.from(destinationValues).update.from(ownerValues)`.
+A retained owner must be active for that source and remain active through the
+transition. A sibling region's value cannot be updated through this operation.
 
-### Spawn dynamic child machines
+The runtime transition API does not replace arbitrary complete root
+configurations. `initialConfiguration` and history defaults retain complete
+configuration construction for startup and restoration.
 
-Use `from.child(...)` when a state owns a fixed child lifecycle. Use the
-`children` context inside an invoked Effect when the machine process owns an
-open set of children that must survive state changes:
+### Protocols and ownership
+
+`Machine.events` defines public messages. `Machine.internalEvents` adds
+machine-local raised events; `Machine.emittedEvents` defines notifications.
+Their `FromSchemas` counterparts accept existing tagged schemas. Public and
+internal tags must be disjoint. Deferred event constructors are validated when
+the runtime receives the event.
+
+Declare `parent: Machine.parent(events)` for a required owner protocol, or
+`Machine.optionalParent(events)` for a machine that may run independently.
+Handlers receive typed `self` and, when declared, `parent` references. Resolvers
+use their second `enqueue` parameter to raise, emit, send, or stop work.
+Planning stays synchronous: perform asynchronous work in an invocation.
+
+`Machine.prepare(machine)` exposes an `inspection` stream for the live local
+machine tree; subscribe before running `prepared.start` to observe startup. Distributed
+placement, transport, routing, and identity belong to the explicit Cluster
+adapter.
+
+## Statechart capabilities
+
+The same root supports compound and parallel states, eventless `always`
+transitions, ordered named choices, final states, `onDone` completion,
+initializers, shallow and deep history, and retained snapshots. The topology
+is captured directly from declarations; visualization and branch coverage do
+not execute user resolvers or depend on TypeScript source extraction.
+
+A compound root completes with its direct completed workflow's output unless
+that child handles completion first. Parallel completion waits for all required
+regions. An arbitrary final descendant does not finish every ancestor.
+
+## Effects, Streams, timers, and child machines
+
+Register programs inside `make`, then invoke them by `src`:
 
 ```ts
-const Plant = Machine.childFamily(plantMachine)
-
-const central = Machine.make({
-  events: Machine.eventsFromSchemas(ResourcesOffered, PlantBroken)
-  // ...
+const Search = Machine.make({
+  root: Root,
+  events: Events,
+  effects: {
+    load: (query: string) => searchItems(query),
+    refreshCache: Cache.refresh
+  },
+  streams: { updates: changes },
+  timers: { timeout: "5 seconds" },
+  logic: { worker: workerLogic },
+  children: { validation: ValidationChild }
 }).handle({
   states: {
-    Commissioning: {
-      invoke: (from) =>
-        from.effect("commission-wave", ({ children, state }) =>
-          Effect.forEach(
-            state.plants,
-            (input) => children.spawn(Plant(input.id), { input }),
-            { discard: true }
-          ))
-          .onDone((to) => to.branch.Operating())
-          .onFailure((to) => to.branch.CommissioningFailed())
+    Loading: {
+      invoke: {
+        src: "load",
+        input: ({ state }) => state.query,
+        onDone: { target: targets.root.Ready, from: ({ output }) => ({ items: output }) },
+        onFailure: { target: targets.root.Failed, from: ({ error }) => ({ message: error.message }) }
+      }
     }
   }
 })
 ```
 
-`children.spawn` completes after initialization. The new child remains owned
-by the machine process after the commissioning Effect completes or its state
-exits. `children.sendTo` and `children.stop` address one active child from an
-Effect; transition resolvers use `enqueue.sendTo` and `enqueue.stop` with the
-same descriptor. Duplicate active ids fail with `ChildAlreadyExistsError` and
-do not replace the existing child. Earlier successful spawns remain active if
-a later spawn in the same wave fails.
+Effects and Streams are lazy values: pass them directly when they need no
+input. Use `Effect.suspend` or `Stream.suspend` when construction itself must be
+deferred. An input-taking source has exactly one required parameter and the
+invocation must supply a typed `input` mapper. A direct value forbids `input`.
+Zero-argument and optional-argument factories are rejected to keep this choice
+explicit. Source names are unique across all five registries.
 
-The child machine's declared `Machine.parent(...)` events must be accepted by
-the owner. This is checked at each spawn call even though ids and cardinality
-remain dynamic. `scope.spawn(child, { input })` provides the same descriptor
-form for lower-level process logic, where the process event protocol is known.
+| Source         | Required handlers                                                                                   | Optional handlers |
+| -------------- | --------------------------------------------------------------------------------------------------- | ----------------- |
+| Effect         | `onDone` when success is not `never`; `onFailure` when error is not `never`                         | None              |
+| Stream         | `onElement` when its element is not `never`; `onFailure` when error is not `never`; always `onDone` | None              |
+| Timer          | `onDone`                                                                                            | None              |
+| Logic or child | Reachable `onDone` and `onFailure`                                                                  | `onSnapshot`      |
+
+A `void` success still requires `onDone`. Unreachable channels are rejected.
+Startup errors, defects, and interruption follow the existing runtime failure
+and cancellation boundaries; a typed `onFailure` handles the source's declared
+runtime error channel.
+
+```ts
+invoke: ;
+;[
+  {
+    src: "updates",
+    onElement: {
+      none: true,
+      resolve: ({ element }, enqueue) => {
+        enqueue.raise(Events.Changed({ value: element }))
+      }
+    },
+    onDone: { none: true },
+    onFailure: { none: true }
+  },
+  { src: "timeout", onDone: { target: targets.root.Expired } },
+  { src: "worker", id: "worker", address: WorkerAddress, onSnapshot: { none: true } },
+  { src: "validation", input: ({ state }) => ({ query: state.query }), onDone: { none: true } }
+]
+```
+
+Include each handler demanded by the concrete program's type. Use an explicit
+`id` for simultaneous instances of one source; effect, stream, and timer IDs
+default to `src`. Logic requires a lifecycle `id` and a typed `Machine.childAddress`.
+A child uses its `Machine.child` descriptor's identity and protocol. All
+invocations are owned by their state and cancelled when it exits.
+
+Effect services flow through the used sources and lifecycle effects into the
+machine's requirements. Unused registrations add no requirements. Supply them
+with ordinary `Effect.provide` / `Effect.provideService`, or an Atom runtime
+backed by a Layer. Context services provide implementation substitution and
+scoped resources; there is no separate machine-specific dependency container.
+
+### Dynamic children
+
+A registered `Machine.child` describes a fixed state-owned child. For an open
+set of process-owned children, use `Machine.childFamily` with the `children`
+capability supplied to a registered Effect through its input mapper.
+`children.spawn` completes after child initialization; the child survives the
+commissioning invocation and state. `children.sendTo` and `children.stop`
+address it from Effects; resolvers use `enqueue.sendTo` and `enqueue.stop`.
+Duplicate active IDs fail with `ChildAlreadyExistsError` and preserve the
+existing child. Parent-protocol compatibility is checked at each spawn.
 
 ## Reactivity
 
@@ -902,8 +481,8 @@ import { MachineTest } from "@typeonce/effect-machine/testing"
 
 const trace = yield* MachineTest.run(Counter, {
   events: [
-    { _tag: "Start" },
-    { _tag: "Increment" }
+    { _tag: "Increment", by: 1 },
+    { _tag: "Increment", by: 2 }
   ]
 })
 
@@ -939,8 +518,8 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Use `.guard(predicate)` to decline a transition before state construction, or
-`.resolve(..., { declinable: true })` to use `decline()` during resolution.
+Use `guard: predicate` to decline before construction, or `declinable: true`
+when a resolver can return `decline()`.
 Pull requests that change `src/` or `package.json` need
 a changeset and the performance checks described in `AGENTS.md`.
 

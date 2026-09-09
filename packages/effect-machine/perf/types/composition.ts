@@ -1,17 +1,6 @@
 import { Context, Data, Effect } from "effect"
 import { Machine } from "../../dist/index.js"
-import {
-  App,
-  Editing,
-  Editor,
-  EditorDone,
-  machine,
-  States,
-  Sync,
-  SyncDone,
-  SyncIdle,
-  Workspace
-} from "./composition-control.js"
+import { App, Editing, Editor, EditorDone, States, Sync, SyncDone, SyncIdle, Workspace } from "./composition-control.js"
 
 type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
   true :
@@ -23,6 +12,27 @@ class CompositionService extends Context.Service<CompositionService, string>()(
   "perf/composition/CompositionService"
 ) {}
 class CompositionFailure extends Data.TaggedError("CompositionFailure")<{}> {}
+
+const targets = Machine.targets(States)
+const machine = Machine.make({
+  branches: { enter: { app: { target: targets.root.App } } },
+
+  root: States,
+  events: Machine.eventsFromSchemas(),
+  initialConfiguration: (root) =>
+    root.resolve(({ target }) =>
+      target.from((to) =>
+        to.App.from(App.make({}), (app) =>
+          app.Workspace.from(
+            Workspace.make({}),
+            (workspace) =>
+              workspace
+                .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
+                .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
+          ))
+      )
+    )
+})
 
 const handled = machine.handle({
   states: {
@@ -70,9 +80,10 @@ const handled = machine.handle({
           }
         },
         Route: {
-          choice: (to) =>
-            to.branch.App().resolve(({ target }) =>
-              target.from(App.make({}), (app) =>
+          choice: {
+            branches: "enter",
+            resolve: ({ select }) =>
+              select.app.from(App.make({}), (app) =>
                 app.Workspace.from(
                   Workspace.make({}),
                   (workspace) =>
@@ -80,7 +91,7 @@ const handled = machine.handle({
                       .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
                       .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
                 ))
-            )
+          }
         }
       }
     }

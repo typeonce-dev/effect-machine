@@ -28,9 +28,22 @@ const ReplicationEvents = Machine.eventsFromSchemas(
   })
 )
 
-const operation = (): Effect.Effect<void, string> => Effect.succeed(undefined)
+const operation: Effect.Effect<void, string> = Effect.succeed(undefined)
 
+const targets1 = Machine.targets(ReplicationStates)
 export const sharedTerminalRoutingMachine = Machine.make({
+  effects: {
+    source1: operation,
+    source2: operation,
+    source3: operation,
+    source4: operation,
+    source5: operation,
+    source6: operation,
+    source7: operation,
+    source8: operation,
+    source9: operation
+  },
+
   id: "shared-terminal-routing",
   root: ReplicationStates,
   events: ReplicationEvents,
@@ -38,108 +51,126 @@ export const sharedTerminalRoutingMachine = Machine.make({
 }).handle({
   states: {
     Connecting: {
-      invoke: (from) =>
-        from.effect("connect", operation)
-          .onDone((to) => to.branch.IdentifyingSource())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source1",
+        id: "connect",
+        onDone: { target: targets1.root.IdentifyingSource },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     IdentifyingSource: {
-      invoke: (from) =>
-        from.effect("identify-source", operation)
-          .onDone((to) => to.branch.ReadingServerInfo())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source2",
+        id: "identify-source",
+        onDone: { target: targets1.root.ReadingServerInfo },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     ReadingServerInfo: {
-      invoke: (from) =>
-        from.effect("read-server-info", operation)
-          .onDone((to) => to.branch.ReadingSlot())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source3",
+        id: "read-server-info",
+        onDone: { target: targets1.root.ReadingSlot },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     ReadingSlot: {
-      invoke: (from) =>
-        from.effect("read-slot", operation)
-          .onDone((to) => to.branch.CreatingSlot())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source4",
+        id: "read-slot",
+        onDone: { target: targets1.root.CreatingSlot },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     CreatingSlot: {
-      invoke: (from) =>
-        from.effect("create-slot", operation)
-          .onDone((to) => to.branch.CopyingSnapshot())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source5",
+        id: "create-slot",
+        onDone: { target: targets1.root.CopyingSnapshot },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     CopyingSnapshot: {
-      invoke: (from) =>
-        from.effect("copy-snapshot", operation)
-          .onDone((to) => to.branch.CatchingUp())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source6",
+        id: "copy-snapshot",
+        onDone: { target: targets1.root.CatchingUp },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     CatchingUp: {
-      invoke: (from) =>
-        from.effect("catch-up", operation)
-          .onDone((to) => to.branch.ApplyingChanges())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source7",
+        id: "catch-up",
+        onDone: { target: targets1.root.ApplyingChanges },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     ApplyingChanges: {
-      invoke: (from) =>
-        from.effect("apply-changes", operation)
-          .onDone((to) => to.branch.Ready())
-          .onFailure((to) => to.branch.Failed()),
+      invoke: {
+        src: "source8",
+        id: "apply-changes",
+        onDone: { target: targets1.root.Ready },
+        onFailure: { target: targets1.root.Failed }
+      },
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     Ready: {
       on: {
-        SessionUnavailable: (to) => to.branch.SessionUnavailable(),
-        StopRequested: (to) => to.branch.Stopping()
+        SessionUnavailable: { target: targets1.root.SessionUnavailable },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     SessionUnavailable: {
       on: {
-        Retry: (to) => to.branch.Connecting(),
-        StopRequested: (to) => to.branch.Stopping()
+        Retry: { target: targets1.root.Connecting },
+        StopRequested: { target: targets1.root.Stopping }
       }
     },
     Stopping: {
-      invoke: (from) =>
-        from.effect("stop-session", operation)
-          .onDone((to) => to.branch.Stopped())
-          .onFailure((to) => to.branch.Failed())
+      invoke: {
+        src: "source9",
+        id: "stop-session",
+        onDone: { target: targets1.root.Stopped },
+        onFailure: { target: targets1.root.Failed }
+      }
     },
     Stopped: {},
     Failed: {
       on: {
-        Retry: (to) => to.branch.Connecting(),
-        StopRequested: (to) => to.branch.Stopping()
+        Retry: { target: targets1.root.Connecting },
+        StopRequested: { target: targets1.root.Stopping }
       }
     }
   }

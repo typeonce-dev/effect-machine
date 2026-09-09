@@ -95,7 +95,10 @@ const ParallelStates = Machine.state({
   }
 })
 
+const targets1 = Machine.targets(ParallelStates)
 export const parallelCompletionMachine = Machine.make({
+  timers: { source1: "5 seconds" },
+
   id: "parallel-completion",
   root: ParallelStates,
   events: Machine.eventsFromSchemas(
@@ -115,40 +118,39 @@ export const parallelCompletionMachine = Machine.make({
   states: {
     Cart: {
       on: {
-        Checkout: (to) =>
-          to.branch.Order.initial.resolve(({ event, target }) =>
-            target.decoded(new Order({ orderId: event.orderId, total: event.total }))
-          )
+        Checkout: {
+          initial: targets1.root.Order,
+          decoded: ({ event }) => (new Order({ orderId: event.orderId, total: event.total }))
+        }
       }
     },
     Order: {
       initialize: ({ builder }) => builder.payment.from({ attempts: 0 }).fulfillment.from({ warehouse: "north" }),
       on: {
-        CancelOrder: (to) =>
-          to.branch.Cancelled().resolve(({ event, target }) =>
-            target.decoded(new OrderCancelled({ reason: event.reason }))
-          )
+        CancelOrder: {
+          target: targets1.root.Cancelled,
+          decoded: ({ event }) => (new OrderCancelled({ reason: event.reason }))
+        }
       },
-      onDone: (to) =>
-        to.branch.Complete().resolve(({ target }) => target.decoded(new OrderComplete({ orderId: "completed-order" }))),
+      onDone: { target: targets1.root.Complete, decoded: () => (new OrderComplete({ orderId: "completed-order" })) },
       states: {
         payment: {
           initialize: ({ builder }) => builder.from(),
           states: {
             AwaitingAuthorization: {
               on: {
-                Authorize: (to) =>
-                  to.local.Authorized().resolve(({ event, target }) =>
-                    target.decoded(new Authorized({ authorizationId: event.authorizationId }))
-                  ),
-                CompleteAll: (to) =>
-                  to.local.Authorized().resolve(({ event, target }) =>
-                    target.decoded(new Authorized({ authorizationId: event.authorizationId }))
-                  ),
-                DeclinePayment: (to) =>
-                  to.branch.Cancelled().resolve(({ event, target }) =>
-                    target.decoded(new OrderCancelled({ reason: event.reason }))
-                  )
+                Authorize: {
+                  target: targets1.root.Order.payment.Authorized,
+                  decoded: ({ event }) => (new Authorized({ authorizationId: event.authorizationId }))
+                },
+                CompleteAll: {
+                  target: targets1.root.Order.payment.Authorized,
+                  decoded: ({ event }) => (new Authorized({ authorizationId: event.authorizationId }))
+                },
+                DeclinePayment: {
+                  target: targets1.root.Cancelled,
+                  decoded: ({ event }) => (new OrderCancelled({ reason: event.reason }))
+                }
               }
             }
           }
@@ -158,38 +160,44 @@ export const parallelCompletionMachine = Machine.make({
           states: {
             WaitingForPayment: {
               on: {
-                Authorize: (to) =>
-                  to.local.Packing().resolve(({ target }) => target.decoded(new Packing({ packageCount: 1 }))),
-                Pack: (to) =>
-                  to.local.Packing().resolve(({ event, target }) =>
-                    target.decoded(new Packing({ packageCount: event.packages }))
-                  ),
-                CompleteAll: (to) =>
-                  to.local.Shipped().resolve(({ event, target }) =>
-                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                  )
+                Authorize: {
+                  target: targets1.root.Order.fulfillment.Packing,
+                  decoded: () => (new Packing({ packageCount: 1 }))
+                },
+                Pack: {
+                  target: targets1.root.Order.fulfillment.Packing,
+                  decoded: ({ event }) => (new Packing({ packageCount: event.packages }))
+                },
+                CompleteAll: {
+                  target: targets1.root.Order.fulfillment.Shipped,
+                  decoded: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
+                }
               }
             },
             Packing: {
-              invoke: (from) =>
-                from.timer("packing-sla", "5 seconds").onDone((to) =>
-                  to.none.resolve((_, enqueue) => {
+              invoke: {
+                src: "source1",
+                id: "packing-sla",
+                onDone: {
+                  none: true,
+                  resolve: (_, enqueue) => {
                     enqueue.raise(ParallelInternalEvents.AutoShip())
-                  })
-                ),
+                  }
+                }
+              },
               on: {
-                AutoShip: (to) =>
-                  to.local.Shipped().resolve(({ target }) =>
-                    target.decoded(new Shipped({ trackingCode: "automatic" }))
-                  ),
-                Ship: (to) =>
-                  to.local.Shipped().resolve(({ event, target }) =>
-                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                  ),
-                CompleteAll: (to) =>
-                  to.local.Shipped().resolve(({ event, target }) =>
-                    target.decoded(new Shipped({ trackingCode: event.trackingCode }))
-                  )
+                AutoShip: {
+                  target: targets1.root.Order.fulfillment.Shipped,
+                  decoded: () => (new Shipped({ trackingCode: "automatic" }))
+                },
+                Ship: {
+                  target: targets1.root.Order.fulfillment.Shipped,
+                  decoded: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
+                },
+                CompleteAll: {
+                  target: targets1.root.Order.fulfillment.Shipped,
+                  decoded: ({ event }) => (new Shipped({ trackingCode: event.trackingCode }))
+                }
               }
             }
           }
@@ -201,8 +209,7 @@ export const parallelCompletionMachine = Machine.make({
     },
     Cancelled: {
       on: {
-        RetryOrder: (to) =>
-          to.branch.Order.initial.resolve(({ target }) => target.decoded(new Order({ orderId: "retry", total: 0 })))
+        RetryOrder: { initial: targets1.root.Order, decoded: () => (new Order({ orderId: "retry", total: 0 })) }
       }
     }
   }

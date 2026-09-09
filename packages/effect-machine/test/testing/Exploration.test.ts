@@ -17,7 +17,10 @@ class Seed extends Schema.Class<Seed>("Seed")({ count: Schema.Int }) {}
 
 const States = Machine.state({ initial: "counter", states: { counter: Counter } })
 
+const targets1 = Machine.targets(States)
 const machine = Machine.make({
+  branches: { transition1: { destination: { target: targets1.root.counter } } },
+
   root: States,
   events: Machine.eventsFromSchemas(Increment, Reset, Corrupt),
   initialConfiguration: (root) =>
@@ -26,10 +29,9 @@ const machine = Machine.make({
   states: {
     counter: {
       on: {
-        Increment: (to) =>
-          to.branch.counter().resolve(({ state, target }) => target.decoded(new Counter({ count: state.count + 1 }))),
-        Reset: (to) => to.branch.counter().resolve(({ target }) => target.decoded(new Counter({ count: 0 }))),
-        Corrupt: (to) => to.branch.counter().resolve(({ target }) => target.decoded(new Counter({ count: -1 })))
+        Increment: { target: targets1.root.counter, decoded: ({ state }) => (new Counter({ count: state.count + 1 })) },
+        Reset: { target: targets1.root.counter, decoded: () => (new Counter({ count: 0 })) },
+        Corrupt: { target: targets1.root.counter, decoded: () => (new Counter({ count: -1 })) }
       }
     }
   }
@@ -39,6 +41,8 @@ const finiteEvents = ({ snapshot }: MachineTest.ExplorationStateContext<typeof m
   snapshot.state.value.count < 2 ? [new Increment({})] : [new Reset({})]
 
 const branchMachine = Machine.make({
+  branches: { transition1: { negative: { none: true }, zero: { none: true }, positive: { none: true } } },
+
   root: States,
   events: Machine.eventsFromSchemas(Select),
   initialConfiguration: (root) =>
@@ -47,18 +51,15 @@ const branchMachine = Machine.make({
   states: {
     counter: {
       on: {
-        Select: (to) =>
-          to.branches({
-            negative: { target: to.none },
-            zero: { target: to.none },
-            positive: { target: to.none }
-          }).resolve(({ event, select }) =>
+        Select: {
+          branches: "transition1",
+          resolve: ({ event, select }) =>
             event.value < 0
               ? select.negative()
               : event.value === 0
               ? select.zero()
               : select.positive()
-          )
+        }
       }
     }
   }

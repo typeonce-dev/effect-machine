@@ -13,8 +13,10 @@ describe("dynamic child machines", () => {
 
   const Input = Schema.Struct({ id: Schema.String })
   const ParentEvents = Machine.eventsFromSchemas(ParentNotice)
+  const root1 = Machine.state({ initial: "ChildIdle", states: { ChildIdle } })
+
   const childMachine = Machine.make({
-    root: Machine.state({ initial: "ChildIdle", states: { ChildIdle } }),
+    root: root1,
     events: Machine.eventsFromSchemas(ChildEvent),
     input: Input,
     parent: Machine.parent(ParentEvents),
@@ -23,7 +25,7 @@ describe("dynamic child machines", () => {
   }).handle({
     states: {
       ChildIdle: {
-        on: { ChildEvent: (to) => to.none }
+        on: { ChildEvent: { none: true } }
       }
     }
   })
@@ -44,54 +46,96 @@ describe("dynamic child machines", () => {
   })
 
   it("types statechart-owned dynamic child operations", () => {
+    const root2 = Machine.state({ initial: "ParentIdle", states: { ParentIdle } })
+
     Machine.make({
-      root: Machine.state({ initial: "ParentIdle", states: { ParentIdle } }),
+      effects: {
+        source1: ({
+          children
+        }: Machine.Machine.InvokeContext<
+          {
+            readonly "":
+              & { readonly initial: "ParentIdle"; readonly states: { readonly ParentIdle: typeof ParentIdle } }
+              & { readonly "~effect/Machine/ExplicitInitial": true }
+          },
+          readonly [typeof ParentNotice, typeof OtherEvent],
+          readonly [],
+          "ParentIdle",
+          readonly [typeof ParentNotice, typeof OtherEvent],
+          readonly []
+        >) => {
+          expect(children.spawn).type.toBeCallableWith(Child("p-1"), { input: { id: "p-1" } })
+          expect(children.spawn).type.not.toBeCallableWith(Child("p-1"))
+          expect(children.spawn).type.toBeCallableWith(VoidChild("void"))
+          expect(children.spawn).type.not.toBeCallableWith(VoidChild("void"), { input: { id: "void" } })
+          expect(children.spawn).type.not.toBeCallableWith(
+            Child("erased") as Machine.ChildMachine.Any,
+            { input: { id: "erased" } }
+          )
+          expect(children.sendTo).type.toBeCallableWith(Child("p-1"), new ChildEvent({}))
+          expect(children.sendTo).type.not.toBeCallableWith(Child("p-1"), new ParentNotice({}))
+          expect(children.stop).type.toBeCallableWith(Child("p-1"))
+
+          const spawned = children.spawn(Child("p-1"), { input: { id: "p-1" } })
+          expect<Effect.Success<typeof spawned>>().type.toBe<Machine.ChildMachine.Ref<ReturnType<typeof Child>>>()
+          expect<Effect.Error<typeof spawned>>().type.toBe<
+            Machine.ChildAlreadyExistsError | Machine.ChildMachine.StartError<ReturnType<typeof Child>>
+          >()
+          return spawned
+        }
+      },
+
+      root: root2,
       events: Machine.eventsFromSchemas(ParentNotice, OtherEvent),
       initialConfiguration: (root) =>
         root.resolve(({ target }) => target.from((to) => to.ParentIdle.decoded(new ParentIdle({}))))
     }).handle({
       states: {
         ParentIdle: {
-          invoke: (from) =>
-            from.effect("spawn", ({ children }) => {
-              expect(children.spawn).type.toBeCallableWith(Child("p-1"), { input: { id: "p-1" } })
-              expect(children.spawn).type.not.toBeCallableWith(Child("p-1"))
-              expect(children.spawn).type.toBeCallableWith(VoidChild("void"))
-              expect(children.spawn).type.not.toBeCallableWith(VoidChild("void"), { input: { id: "void" } })
-              expect(children.spawn).type.not.toBeCallableWith(
-                Child("erased") as Machine.ChildMachine.Any,
-                { input: { id: "erased" } }
-              )
-              expect(children.sendTo).type.toBeCallableWith(Child("p-1"), new ChildEvent({}))
-              expect(children.sendTo).type.not.toBeCallableWith(Child("p-1"), new ParentNotice({}))
-              expect(children.stop).type.toBeCallableWith(Child("p-1"))
-
-              const spawned = children.spawn(Child("p-1"), { input: { id: "p-1" } })
-              expect<Effect.Success<typeof spawned>>().type.toBe<Machine.ChildMachine.Ref<ReturnType<typeof Child>>>()
-              expect<Effect.Error<typeof spawned>>().type.toBe<
-                Machine.ChildAlreadyExistsError | Machine.ChildMachine.StartError<ReturnType<typeof Child>>
-              >()
-              return spawned
-            }).onDone((to) => to.none).onFailure((to) => to.none)
+          invoke: {
+            src: "source1",
+            id: "spawn",
+            input: (context) => context,
+            onDone: { none: true },
+            onFailure: { none: true }
+          }
         }
       }
     })
   })
 
   it("rejects a child whose parent protocol is not accepted", () => {
+    const root3 = Machine.state({ initial: "ParentIdle", states: { ParentIdle } })
+
     Machine.make({
-      root: Machine.state({ initial: "ParentIdle", states: { ParentIdle } }),
+      effects: {
+        source1: ({
+          children
+        }: Machine.Machine.InvokeContext<
+          {
+            readonly "":
+              & { readonly initial: "ParentIdle"; readonly states: { readonly ParentIdle: typeof ParentIdle } }
+              & { readonly "~effect/Machine/ExplicitInitial": true }
+          },
+          readonly [typeof OtherEvent],
+          readonly [],
+          "ParentIdle",
+          readonly [typeof OtherEvent],
+          readonly []
+        >) => {
+          expect(children.spawn).type.not.toBeCallableWith(Child("p-1"), { input: { id: "p-1" } })
+          return Effect.void
+        }
+      },
+
+      root: root3,
       events: Machine.eventsFromSchemas(OtherEvent),
       initialConfiguration: (root) =>
         root.resolve(({ target }) => target.from((to) => to.ParentIdle.decoded(new ParentIdle({}))))
     }).handle({
       states: {
         ParentIdle: {
-          invoke: (from) =>
-            from.effect("incompatible", ({ children }) => {
-              expect(children.spawn).type.not.toBeCallableWith(Child("p-1"), { input: { id: "p-1" } })
-              return Effect.void
-            }).onDone((to) => to.none)
+          invoke: { src: "source1", id: "incompatible", input: (context) => context, onDone: { none: true } }
         }
       }
     })

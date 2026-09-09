@@ -16,12 +16,13 @@ const Root = Machine.state({
   initial: "Locked",
   states: { Locked: {}, Unlocked: {} }
 })
+const targets = Machine.targets(Root)
 const Events = Machine.events({ Coin: {}, Push: {} })
 
 const Turnstile = Machine.make({ root: Root, events: Events }).handle({
   states: {
-    Locked: { on: { Coin: (to) => to.local.Unlocked() } },
-    Unlocked: { on: { Push: (to) => to.local.Locked() } }
+    Locked: { on: { Coin: { target: targets.root.Unlocked } } },
+    Unlocked: { on: { Push: { target: targets.root.Locked } } }
   }
 })
 

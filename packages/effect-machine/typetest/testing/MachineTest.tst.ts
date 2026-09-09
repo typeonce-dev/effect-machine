@@ -13,6 +13,7 @@ describe("MachineTest", () => {
   class InternalEvent extends Schema.TaggedClass<InternalEvent>("InternalEvent")("InternalEvent", {}) {}
 
   const States = Machine.state({ initial: "idle", states: { idle: Idle } })
+
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(PublicEvent),
@@ -23,8 +24,8 @@ describe("MachineTest", () => {
     states: {
       idle: {
         on: {
-          PublicEvent: (to) => to.none,
-          InternalEvent: (to) => to.none
+          PublicEvent: { none: true },
+          InternalEvent: { none: true }
         }
       }
     }
@@ -96,18 +97,23 @@ describe("MachineTest", () => {
 
   it("does not require invoke services while planning scenarios", () => {
     class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {}
+
     const invokedMachine = Machine.make({
+      effects: {
+        source1: Effect.suspend(() =>
+          Effect.gen(function*() {
+            yield* InvokeRequirement
+          })
+        )
+      },
+
       root: States,
       events: Machine.eventsFromSchemas(PublicEvent),
       initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
     }).handle({
       states: {
         idle: {
-          invoke: (from) =>
-            from.effect("service-backed-invoke", () =>
-              Effect.gen(function*() {
-                yield* InvokeRequirement
-              })).onDone((to) => to.none)
+          invoke: { src: "source1", id: "service-backed-invoke", onDone: { none: true } }
         }
       }
     })

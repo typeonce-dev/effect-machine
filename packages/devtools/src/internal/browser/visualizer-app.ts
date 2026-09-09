@@ -76,8 +76,6 @@ const stateLink = (path: string, label: string, navigate: StateNavigator): HTMLB
 }
 
 const renderBranch = (
-  document: VisualizationDocument,
-  source: string,
   branch: VisualizationBranch,
   navigate: StateNavigator
 ): HTMLElement => {
@@ -88,7 +86,7 @@ const renderBranch = (
     main.append(createElement("span", "branch-arrow", "→"), stateLink(branch.target, branch.target, navigate))
   } else if (branch.selection.kind === "update") {
     main.append(
-      badge(branch.selection.scope === "local" ? "to.local.update" : "value update", "update"),
+      badge("value update", "update"),
       createElement("span", "branch-target", "Updates the owner value")
     )
   } else {
@@ -96,7 +94,7 @@ const renderBranch = (
   }
   row.append(main)
 
-  const api = branchTargetApi(document, source, branch)
+  const api = branchTargetApi(branch)
   const details: Array<readonly [string, MetadataValue]> = api === undefined
     ? [["Selection", branch.selection.kind], ["Scope", branch.selection.scope]]
     : [["API", api]]
@@ -111,7 +109,6 @@ const renderBranch = (
 }
 
 const renderTransition = (
-  document: VisualizationDocument,
   transition: VisualizationTransition,
   navigate: StateNavigator,
   showSource = false
@@ -134,16 +131,13 @@ const renderTransition = (
 
   if (transition.branches.length > 0) {
     const branches = createElement("div", "branch-list")
-    transition.branches.forEach((branch) =>
-      branches.append(renderBranch(document, transition.source, branch, navigate))
-    )
+    transition.branches.forEach((branch) => branches.append(renderBranch(branch, navigate)))
     card.append(branches)
   }
   return card
 }
 
 const renderIncomingTransition = (
-  document: VisualizationDocument,
   incoming: IncomingTransition,
   navigate: StateNavigator
 ): HTMLElement => {
@@ -156,7 +150,7 @@ const renderIncomingTransition = (
   header.append(title, flags)
   card.append(header)
 
-  const api = branchTargetApi(document, incoming.transition.source, incoming.branch)
+  const api = branchTargetApi(incoming.branch)
   const details: Array<readonly [string, MetadataValue]> = [
     ["Source", stateLink(incoming.transition.source, incoming.transition.source, navigate)],
     ["API", api]
@@ -576,16 +570,14 @@ export const renderVisualizer = (
     if (inspection.outgoing.length > 0) {
       const transitions = createElement("section", "inspector-section")
       transitions.append(inspectionSection("Transitions", inspection.outgoing.length))
-      inspection.outgoing.forEach((transition) =>
-        transitions.append(renderTransition(visualization, transition, navigateToState))
-      )
+      inspection.outgoing.forEach((transition) => transitions.append(renderTransition(transition, navigateToState)))
       inspectorContent.append(transitions)
     }
     if (inspection.incoming.length > 0) {
       const incoming = createElement("section", "inspector-section")
       incoming.append(inspectionSection("Entered by", inspection.incoming.length))
       inspection.incoming.forEach((transition) =>
-        incoming.append(renderIncomingTransition(visualization, transition, navigateToState))
+        incoming.append(renderIncomingTransition(transition, navigateToState))
       )
       inspectorContent.append(incoming)
     }
@@ -623,9 +615,7 @@ export const renderVisualizer = (
       const details = createElement("section", "inspector-section")
       details.append(inspectionSection("Branches", transition.branches.length))
       const branches = createElement("div", "inspection-card branch-list")
-      transition.branches.forEach((branch) =>
-        branches.append(renderBranch(visualization, transition.source, branch, navigateToState))
-      )
+      transition.branches.forEach((branch) => branches.append(renderBranch(branch, navigateToState)))
       details.append(branches)
       inspectorContent.append(details)
     }
@@ -758,7 +748,7 @@ export const renderVisualizer = (
     const choice = frame.choice
     const transition = transitionsById.get(choice.transitionId)
     const branch = transition?.branches.find(({ id }) => id === choice.branchId)
-    const api = branch === undefined ? undefined : branchTargetApi(visualization, choice.source, branch)
+    const api = branch === undefined ? undefined : branchTargetApi(branch)
     const selection = createElement("section", "inspector-section")
     selection.append(inspectionSection("Selected branch"))
     const card = createElement("article", "inspection-card trace-card")

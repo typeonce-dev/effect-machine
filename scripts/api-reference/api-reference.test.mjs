@@ -4,6 +4,55 @@ import { ReflectionKind } from "typedoc"
 import { splitJsDocComment } from "./module-comment.mjs"
 import { normalizeApiModule, validateApiDocumentation } from "./normalize.mjs"
 
+test("documents fields inside an indexed mapped declaration", () => {
+  const reflection = {
+    id: 0,
+    name: "Machine",
+    kind: ReflectionKind.Module,
+    children: [{
+      id: 1,
+      name: "Invocation",
+      kind: ReflectionKind.TypeAlias,
+      flags: {},
+      comment: { summary: [{ kind: "text", text: "Registered invocation." }] },
+      type: {
+        type: "indexedAccess",
+        indexType: { type: "intrinsic", name: "string" },
+        objectType: {
+          type: "mapped",
+          parameter: "K",
+          parameterType: { type: "intrinsic", name: "string" },
+          templateType: {
+            type: "reflection",
+            declaration: {
+              id: 2,
+              name: "__type",
+              kind: ReflectionKind.TypeLiteral,
+              children: [{
+                id: 3,
+                name: "src",
+                kind: ReflectionKind.Property,
+                flags: { isReadonly: true },
+                comment: { summary: [{ kind: "text", text: "Registered source name." }] },
+                type: { type: "intrinsic", name: "string" }
+              }]
+            }
+          }
+        }
+      }
+    }]
+  }
+  const normalized = normalizeApiModule({ children: [reflection] }, [{
+    owner: "Invocation",
+    title: "Invocation fields",
+    roots: [{ reflection: "Invocation" }]
+  }])
+  const members = normalized.groups[0].declarations[0].usageSections[0].roots[0].members
+  assert.deepEqual(members.map(({ name, description }) => ({ name, description })), [
+    { name: "src", description: "Registered source name." }
+  ])
+})
+
 test("parses an Effect-style leading module comment", () => {
   assert.deepEqual(
     splitJsDocComment(`

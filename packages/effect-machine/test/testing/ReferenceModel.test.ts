@@ -985,6 +985,7 @@ describe("MachineTest finite-model reference interpreter", () => {
           outside: Outside
         }
       })
+      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Local, Exit),
@@ -1011,10 +1012,11 @@ describe("MachineTest finite-model reference interpreter", () => {
                 states: {
                   idle: {
                     on: {
-                      Local: (to) =>
-                        to.local.done().resolve(({ target }) => target.decoded({ _tag: "LeftDone", version: 1 })),
-                      Exit: (to) =>
-                        to.branch.outside().resolve(({ target }) => target.decoded({ _tag: "Outside", version: 1 }))
+                      Local: {
+                        target: targets1.root.root.left.done,
+                        decoded: () => ({ _tag: "LeftDone", version: 1 })
+                      },
+                      Exit: { target: targets1.root.outside, decoded: () => ({ _tag: "Outside", version: 1 }) }
                     }
                   }
                 }
@@ -1023,10 +1025,14 @@ describe("MachineTest finite-model reference interpreter", () => {
                 states: {
                   idle: {
                     on: {
-                      Local: (to) =>
-                        to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 1 })),
-                      Exit: (to) =>
-                        to.local.idle().resolve(({ target }) => target.decoded({ _tag: "RightIdle", version: 2 }))
+                      Local: {
+                        target: targets1.root.root.right.idle,
+                        decoded: () => ({ _tag: "RightIdle", version: 1 })
+                      },
+                      Exit: {
+                        target: targets1.root.root.right.idle,
+                        decoded: () => ({ _tag: "RightIdle", version: 2 })
+                      }
                     }
                   }
                 }

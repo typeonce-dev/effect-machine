@@ -710,7 +710,7 @@ const makeTransitionContext = <
   path: string,
   event: Machine.EventByTag<Events, EventTag>,
   snapshot: Machine.Snapshot<States>
-): Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any> => ({
+): ConstructionContext<Machine.HandlerContext<States, Events, Emits, StateId, EventTag, any, any>> => ({
   ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
@@ -732,7 +732,7 @@ const makeDoneContext = <
   event: Machine.LifecycleEvent<Events>,
   output: unknown,
   snapshot: Machine.Snapshot<States>
-): Machine.DoneContext<States, Events, Emits, StateId> => ({
+): ConstructionContext<Machine.DoneContext<States, Events, Emits, StateId>> => ({
   ...resolveMachineReferences(machine, configuration),
   state: configuration.values.get(path) as Machine.StateByIdentifier<States, StateId>,
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
@@ -797,7 +797,7 @@ const selectAlwaysTransitions = <
     States,
     E,
     R,
-    Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>
+    ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
   >
 > => {
   const selected: Array<
@@ -805,7 +805,7 @@ const selectAlwaysTransitions = <
       States,
       E,
       R,
-      Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>
+      ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
     >
   > = []
   const selectedSources = new Set<string>()
@@ -826,7 +826,7 @@ const selectAlwaysTransitions = <
               States,
               E,
               R,
-              Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>
+              ConstructionContext<Machine.AlwaysContext<States, Events, Emits, Machine.StateIdentifier<States>>>
             >,
             context: {
               ...resolveMachineReferences(machine, configuration),
@@ -877,7 +877,7 @@ const selectDoneTransitions = <
     States,
     E,
     R,
-    Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>
+    ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
   >
 > => {
   const selected: Array<
@@ -885,7 +885,7 @@ const selectDoneTransitions = <
       States,
       E,
       R,
-      Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>
+      ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
     >
   > = []
   const selectedSources = new Set<string>()
@@ -903,7 +903,7 @@ const selectDoneTransitions = <
           States,
           E,
           R,
-          Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>
+          ConstructionContext<Machine.DoneContext<States, Events, Emits, Machine.StateIdentifier<States>>>
         >,
         context: makeDoneContext<States, Events, Emits, Machine.StateIdentifier<States>>(
           machine,
@@ -935,14 +935,7 @@ const selectEventTransitions = <
     States,
     E,
     R,
-    Machine.HandlerContext<States, Events, Emits, Machine.StateIdentifier<States>, Machine.TagOf<Events[number]>, E, R>
-  >
-> => {
-  const selected: Array<
-    SelectedTransition<
-      States,
-      E,
-      R,
+    ConstructionContext<
       Machine.HandlerContext<
         States,
         Events,
@@ -951,6 +944,25 @@ const selectEventTransitions = <
         Machine.TagOf<Events[number]>,
         E,
         R
+      >
+    >
+  >
+> => {
+  const selected: Array<
+    SelectedTransition<
+      States,
+      E,
+      R,
+      ConstructionContext<
+        Machine.HandlerContext<
+          States,
+          Events,
+          Emits,
+          Machine.StateIdentifier<States>,
+          Machine.TagOf<Events[number]>,
+          E,
+          R
+        >
       >
     >
   > = []
@@ -972,14 +984,16 @@ const selectEventTransitions = <
               States,
               E,
               R,
-              Machine.HandlerContext<
-                States,
-                Events,
-                Emits,
-                Machine.StateIdentifier<States>,
-                Machine.TagOf<Events[number]>,
-                E,
-                R
+              ConstructionContext<
+                Machine.HandlerContext<
+                  States,
+                  Events,
+                  Emits,
+                  Machine.StateIdentifier<States>,
+                  Machine.TagOf<Events[number]>,
+                  E,
+                  R
+                >
               >
             >,
             context: makeTransitionContext<
@@ -2357,3 +2371,7 @@ export const planInitial = (
         : new StartupError({ cause: Cause.die(error) })
     }
   })
+
+// Captured constructors are private planner inputs. Public callbacks receive root data
+// and the constructors bound to their declared branches during normalization.
+type ConstructionContext<C> = Omit<C, "root"> & { readonly target: unknown }

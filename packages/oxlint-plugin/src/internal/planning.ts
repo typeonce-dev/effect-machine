@@ -102,6 +102,25 @@ const isHistoryDefaultProperty = (
   return isStateConfig(historyEntries.parent.parent, bindings)
 }
 
+export const isInvokeProperty = (node: ESTree.Node, bindings: MachineBindings): boolean =>
+  node.type === "Property" && propertyName(node) === "invoke" && node.parent.type === "ObjectExpression" &&
+  isStateConfig(node.parent, bindings)
+
+const isInvocationConfig = (node: ESTree.ObjectExpression, bindings: MachineBindings): boolean =>
+  isInvokeProperty(node.parent, bindings) ||
+  (node.parent.type === "ArrayExpression" && isInvokeProperty(node.parent.parent, bindings))
+
+const isTransitionConfig = (node: ESTree.ObjectExpression, bindings: MachineBindings): boolean => {
+  const property = node.parent
+  if (isEventHandlerProperty(property, bindings)) return true
+  if (property.type !== "Property" || property.parent.type !== "ObjectExpression") return false
+  const name = propertyName(property)
+  return name !== undefined && (
+    (["always", "choice", "onDone"].includes(name) && isStateConfig(property.parent, bindings)) ||
+    (["onDone", "onFailure", "onElement", "onSnapshot"].includes(name) && isInvocationConfig(property.parent, bindings))
+  )
+}
+
 const isPropertyPlanningCallback = (
   node: PlanningFunction,
   bindings: MachineBindings
@@ -114,6 +133,11 @@ const isPropertyPlanningCallback = (
   ) return false
 
   const name = propertyName(property)
+  if (
+    name !== undefined && ["resolve", "from", "decoded", "guard"].includes(name) &&
+    isTransitionConfig(property.parent, bindings)
+  ) return true
+  if (name === "input" && isInvocationConfig(property.parent, bindings)) return true
   return name === "initial" || name === "initialConfiguration"
     ? isMachineMakeConfig(property.parent, bindings)
     : (name !== undefined && statePlanningProperties.has(name) && isStateConfig(property.parent, bindings)) ||

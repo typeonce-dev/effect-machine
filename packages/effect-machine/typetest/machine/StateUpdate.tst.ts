@@ -46,7 +46,9 @@ const States = Machine.state({
 
 describe("Machine state-value updates", () => {
   it("exposes updates only for the valued active ancestor chain", () => {
+    const targets1 = Machine.targets(States)
     const machine = Machine.make({
+      branches: { auth: { owner: { update: targets1.root.root.work.auth } } },
       root: States,
       events: Machine.eventsFromSchemas(Tick),
       initialConfiguration: (root) =>
@@ -76,25 +78,16 @@ describe("Machine state-value updates", () => {
                   states: {
                     signedOut: {
                       on: {
-                        Tick: (to) => {
-                          expect(to.local).type.toHaveProperty("update")
-                          expect(to.local.update).type.toHaveProperty("resolve")
-                          expect(to.branch.root).type.toHaveProperty("update")
-                          expect(to.branch.root.work).type.toHaveProperty("update")
-                          expect(to.branch.root.work.auth).type.toHaveProperty("update")
-                          expect(to.branch.root.work.auth.signedOut).type.toHaveProperty("update")
-                          expect(to.branch.root.work.sync).type.not.toHaveProperty("update")
-                          expect(to.full).type.not.toHaveProperty("update")
-                          expect(to.history).type.not.toHaveProperty("update")
-                          expect(to.none).type.not.toHaveProperty("update")
-
-                          return to.local.update.reenter().resolve(({ current, owner, state }) => {
+                        Tick: {
+                          branches: "auth",
+                          reenter: true,
+                          resolve: ({ ancestors, select, state }) => {
                             expect(state).type.toBe<SignedOut>()
-                            expect(current).type.toBe<Auth>()
-                            expect(owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
-                            expect(owner.from).type.toBeCallableWith({ user: "next" })
-                            return owner.decoded(new Auth({ user: "next" }))
-                          })
+                            expect(ancestors["root.work.auth"]).type.toBe<Auth>()
+                            expect(select.owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
+                            expect(select.owner.from).type.toBeCallableWith({ user: "next" })
+                            return select.owner.decoded(new Auth({ user: "next" }))
+                          }
                         }
                       }
                     }
@@ -108,157 +101,177 @@ describe("Machine state-value updates", () => {
     })
   })
 
-  it("requires a declared retained owner to be replaced by the combined resolver", () => {
-    const transition = null as unknown as Machine.Machine.TransitionSelector<
-      { readonly "": typeof States.node },
-      readonly [typeof Tick],
-      readonly [],
-      "root.work.auth.signedOut",
-      Machine.Machine.HandlerContext<
-        { readonly "": typeof States.node },
-        readonly [typeof Tick],
-        readonly [],
-        "root.work.auth.signedOut",
-        "Tick",
-        never,
-        never
-      >,
-      false,
-      "required"
-    >
-
-    transition.local.signedIn()
-      .updating(transition.branch.root.work.auth)
-      .resolve(({ current, owner, target }) => {
-        expect(current).type.toBe<Auth>()
-        expect(owner.from).type.toBeCallableWith({ user: "next" })
-        expect(owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
-        // @ts-expect-error! Decoded construction is named and the target itself is not callable.
-        target(new SignedIn({}))
-        expect(target.from).type.toBeCallableWith({})
-        expect(target.decoded).type.toBeCallableWith(new SignedIn({}))
-        return target.decoded(new SignedIn({})).update(
-          owner.decoded(new Auth({ user: "next" }))
-        )
-      })
-
-    transition.local.signedIn()
-      .updating(transition.branch.root.work.auth)
-      .resolve(
-        // @ts-expect-error! Declaring `.updating(...)` requires the resolver to finish with `.update.resolve(...)`.
-        ({ target }) => target.decoded(new SignedIn({}))
-      )
-
-    transition.local.signedIn().updating(
-      // @ts-expect-error! The sibling sync owner does not contain the source and destination.
-      transition.branch.root.work.sync
-    )
-
-    expect(transition.branches).type.not.toBeCallableWith({
-      changed: {
-        target: transition.local.signedIn().updating(transition.branch.root.work.auth)
+  it("requires the declared retained owner replacement", () => {
+    const targets = Machine.targets(States)
+    const machine = Machine.make({
+      root: States,
+      events: Machine.eventsFromSchemas(Tick),
+      branches: {
+        signIn: { signedIn: { target: targets.root.root.work.auth.signedIn, update: targets.root.root.work.auth } },
+        wrongOwner: { signedIn: { target: targets.root.root.work.auth.signedIn, update: targets.root.root.work.sync } },
+        change: { changed: { update: targets.root.root }, unchanged: { none: true } }
       }
     })
-
-    expect(transition.branch.structural()).type.not.toHaveProperty("updating")
+    machine.handle({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: {
+                          branches: "signIn",
+                          resolve: ({ ancestors, select }) => {
+                            expect(ancestors["root.work.auth"]).type.toBe<Auth>()
+                            expect(select.signedIn.from).type.toBeCallableWith({})
+                            expect(select.signedIn.decoded).type.toBeCallableWith(new SignedIn({}))
+                            const selected = select.signedIn.decoded(new SignedIn({}))
+                            expect(selected.update.from).type.toBeCallableWith({ user: "next" })
+                            expect(selected.update.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
+                            return selected.update.decoded(new Auth({ user: "next" }))
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    machine.handle({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: {
+                          branches: "signIn",
+                          // @ts-expect-error! The declared retained owner must be constructed before returning a branch.
+                          resolve: ({ select }) => select.signedIn.decoded(new SignedIn({}))
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: {
+                          branches: "wrongOwner",
+                          resolve: () => undefined
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    machine.handle({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: {
+                          branches: "change",
+                          declinable: true,
+                          resolve: ({ select, decline, ancestors }) =>
+                            ancestors.root.revision === 0 ? select.changed.from({ revision: 1 }) : decline()
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedOut: {
+                      on: {
+                        Tick: {
+                          branches: "change",
+                          resolve: () => undefined
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
   })
 
-  it("supports named update branches and rejects missing update evidence", () => {
-    const update = null as unknown as Machine.Machine.TransitionSelector<
-      { readonly "": typeof States.node },
-      readonly [typeof Tick],
-      readonly [],
-      "root.work.auth.signedOut",
-      Machine.Machine.HandlerContext<
-        { readonly "": typeof States.node },
-        readonly [typeof Tick],
-        readonly [],
-        "root.work.auth.signedOut",
-        "Tick",
-        never,
-        never
-      >,
-      true,
-      "required" | "declinable"
-    >
-
-    update.branches({
-      changed: { target: update.branch.root.update, title: "Root changed" },
-      unchanged: { target: update.none }
-    }).resolve(({ select }) => select.changed.from({ revision: 1 }))
-
-    update.local.update.resolve(({ owner }) => owner.from({ user: "next" }), { declinable: true })
-    update.local.update.resolve(({ decline }) => decline(), { declinable: true })
-
-    update.local.update.resolve(
-      // @ts-expect-error!
-      () => new Auth({ user: "next" })
-    )
-    update.local.update.resolve(
-      // @ts-expect-error!
-      () => undefined
-    )
-  })
-
-  it("omits updates from structural scopes and choice resolvers", () => {
-    type StructuralSelector = Machine.Machine.TransitionSelector<
-      { readonly "": typeof States.node },
-      readonly [typeof Tick],
-      readonly [],
-      "structural.idle",
-      Machine.Machine.HandlerContext<
-        { readonly "": typeof States.node },
-        readonly [typeof Tick],
-        readonly [],
-        "structural.idle",
-        "Tick",
-        never,
-        never
-      >,
-      true,
-      "required"
-    >
-    const structural = null as unknown as StructuralSelector
-    expect(structural.local).type.not.toHaveProperty("update")
-    expect(structural.branch.structural).type.not.toHaveProperty("update")
-
-    type ChoiceSelector = Machine.Machine.TransitionSelector<
-      { readonly "": typeof States.node },
-      readonly [typeof Tick],
-      readonly [],
-      "root.routing",
-      Machine.Machine.ChoiceContext<
-        { readonly "": typeof States.node },
-        readonly [typeof Tick],
-        readonly [],
-        "root.routing"
-      >,
-      false,
-      "required"
-    >
-    const choice = null as unknown as ChoiceSelector
-    expect(choice.local).type.not.toHaveProperty("update")
-    expect(choice.branch.root).type.not.toHaveProperty("update")
-
-    type FinalSelector = Machine.Machine.TransitionSelector<
-      { readonly "": typeof States.node },
-      readonly [typeof Tick],
-      readonly [],
-      "root.work.auth.signedIn",
-      Machine.Machine.HandlerContext<
-        { readonly "": typeof States.node },
-        readonly [typeof Tick],
-        readonly [],
-        "root.work.auth.signedIn",
-        "Tick",
-        never,
-        never
-      >,
-      true,
-      "required"
-    >
-    const final = null as unknown as FinalSelector
-    expect(final.branch.root.work.auth.signedIn).type.not.toHaveProperty("update")
-    expect(final.branch.root.work.auth).type.toHaveProperty("update")
+  it("rejects updates to structural states, choice updates, and final-state transitions", () => {
+    const targets = Machine.targets(States)
+    const machine = Machine.make({ root: States, events: Machine.eventsFromSchemas(Tick) })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: { structural: { on: { Tick: { update: targets.root.structural, from: () => ({}) } } } }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        root: { states: { routing: { choice: { update: targets.root.root, from: () => ({ revision: 1 }) } } } }
+      }
+    })
+    expect(machine.handle).type.not.toBeCallableWith({
+      states: {
+        root: {
+          states: {
+            work: {
+              states: {
+                auth: {
+                  states: {
+                    signedIn: { on: { Tick: { update: targets.root.root.work.auth, from: () => ({ user: "next" }) } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
   })
 })

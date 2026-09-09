@@ -45,6 +45,23 @@ Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke
   invalid: [
     {
       code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ effects: { load: effect } }).handle({ invoke: [{ src: "load" }, { src: "load" }] })`,
+      errors: [{ messageId: "conflictingLifecycle" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+const Child = Machine.child("child", childMachine)
+const definition = Machine.make({ children: { first: Child, second: Child } })
+definition.handle({ invoke: [{ src: "first" }, { src: "second" }] })`,
+      errors: [{ messageId: "conflictingBoth" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
+Machine.make({ logic: { first: logic, second: logic } }).handle({ invoke: [{ src: "first", id: "a", address: Machine.childAddress("worker") }, { src: "second", id: "b", address: Machine.childAddress("worker") }] })`,
+      errors: [{ messageId: "conflictingAddress" }]
+    },
+    {
+      code: `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => [
   from.effect("load", load),
   from.timer("load", 1000)

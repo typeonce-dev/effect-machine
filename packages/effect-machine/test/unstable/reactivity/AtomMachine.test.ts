@@ -67,8 +67,9 @@ const waitForResult = <A, E>(
     Effect.map((values) => Array.from(values)[0]!)
   )
 
-const makeCounterMachine = () =>
-  Machine.make({
+const makeCounterMachine = () => {
+  const targets1 = Machine.targets(CounterStates)
+  return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Finish),
     initialConfiguration: (root) =>
@@ -77,18 +78,20 @@ const makeCounterMachine = () =>
     states: {
       Count: {
         on: {
-          Finish: (to) =>
-            to.branch.Count().resolve(({ state, event, target }) =>
-              target.decoded(new Count({ value: state.value + event.by }))
-            )
+          Finish: {
+            target: targets1.root.Count,
+            decoded: ({ state, event }) => (new Count({ value: state.value + event.by }))
+          }
         }
       },
       Done: {}
     }
   })
+}
 
-const makeInputCounterMachine = () =>
-  Machine.make({
+const makeInputCounterMachine = () => {
+  const targets2 = Machine.targets(CounterStates)
+  return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Finish),
     input: Schema.Number,
@@ -98,15 +101,16 @@ const makeInputCounterMachine = () =>
     states: {
       Count: {
         on: {
-          Finish: (to) =>
-            to.branch.Count().resolve(({ state, event, target }) =>
-              target.decoded(new Count({ value: state.value + event.by }))
-            )
+          Finish: {
+            target: targets2.root.Count,
+            decoded: ({ state, event }) => (new Count({ value: state.value + event.by }))
+          }
         }
       },
       Done: {}
     }
   })
+}
 
 const forceGc = async () => {
   for (let attempt = 0; attempt < 10; attempt++) {
@@ -197,7 +201,15 @@ describe("AtomMachine", () => {
       let initialCalls = 0
       const invokeStarts = yield* Ref.make(0)
       const invokeStopped = yield* Deferred.make<void>()
+      const targets3 = Machine.targets(CounterStates)
       const machine = Machine.make({
+        logic: {
+          source1: Machine.logic({
+            initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
+            run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
+          })
+        },
+
         root: CounterStates,
         events: Machine.eventsFromSchemas(Finish),
         initialConfiguration: (root) =>
@@ -208,19 +220,12 @@ describe("AtomMachine", () => {
       }).handle({
         states: {
           Count: {
-            invoke: (from) =>
-              from.logic("active", {
-                address: Machine.childAddress("active"),
-                logic: Machine.logic({
-                  initial: () => Ref.update(invokeStarts, (n) => n + 1).pipe(Effect.as(undefined)),
-                  run: () => Effect.never.pipe(Effect.onInterrupt(() => Deferred.succeed(invokeStopped, void 0)))
-                })
-              }),
+            invoke: { src: "source1", id: "active", address: Machine.childAddress("active") },
             on: {
-              Finish: (to) =>
-                to.branch.Count().resolve(({ event, state, target }) =>
-                  target.decoded(new Count({ value: state.value + event.by }))
-                )
+              Finish: {
+                target: targets3.root.Count,
+                decoded: ({ event, state }) => (new Count({ value: state.value + event.by }))
+              }
             }
           },
           Done: {}
@@ -267,8 +272,12 @@ describe("AtomMachine", () => {
       const registry = yield* makeRegistry
       const childMachine = makeCounterMachine()
       const Child = Machine.child("counter", childMachine)
+      const root4 = Machine.state({ initial: "Count", states: { Count, ValueRead } })
+      const targets4 = Machine.targets(root4)
       const parent = Machine.make({
-        root: Machine.state({ initial: "Count", states: { Count, ValueRead } }),
+        children: { source1: Child },
+
+        root: root4,
         events: Machine.eventsFromSchemas(Finish, ReadValue),
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
@@ -276,14 +285,13 @@ describe("AtomMachine", () => {
         states: {
           Count: {
             on: {
-              Finish: (to) =>
-                to.branch.ValueRead().resolve(({ target }) => target.decoded(new ValueRead({ value: "active" })))
+              Finish: { target: targets4.root.ValueRead, decoded: () => (new ValueRead({ value: "active" })) }
             }
           },
           ValueRead: {
-            invoke: (from) => from.child(Child).onDone((to) => to.none),
+            invoke: { src: "source1", onDone: { none: true } },
             on: {
-              ReadValue: (to) => to.branch.Count().resolve(({ target }) => target.decoded(new Count({ value: 0 })))
+              ReadValue: { target: targets4.root.Count, decoded: () => (new Count({ value: 0 })) }
             }
           }
         }
@@ -380,17 +388,39 @@ describe("AtomMachine", () => {
       const registry = yield* makeRegistry
       const childMachine = makeCounterMachine()
       const Child = Machine.childFamily(childMachine)
+      const root5 = Machine.state({ initial: "Count", states: { Count } })
       const parent = Machine.make({
-        root: Machine.state({ initial: "Count", states: { Count } }),
+        effects: {
+          source1: (
+            { children }: Machine.Machine.InvokeContext<
+              {
+                readonly "": { readonly initial: "Count"; readonly states: { readonly Count: typeof Count } } & {
+                  readonly "~effect/Machine/ExplicitInitial": true
+                }
+              },
+              readonly [],
+              readonly [],
+              "Count",
+              readonly [],
+              readonly []
+            >
+          ) => children.spawn(Child("dynamic"))
+        },
+
+        root: root5,
         events: Machine.eventsFromSchemas(),
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
         states: {
           Count: {
-            invoke: (from) =>
-              from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
-                .onFailure((to) => to.none)
+            invoke: {
+              src: "source1",
+              id: "spawn-counter",
+              input: (context) => context,
+              onDone: { none: true },
+              onFailure: { none: true }
+            }
           }
         }
       })
@@ -417,17 +447,39 @@ describe("AtomMachine", () => {
       const registry = yield* makeRegistry
       const childMachine = makeCounterMachine()
       const Child = Machine.childFamily(childMachine)
+      const root6 = Machine.state({ initial: "Count", states: { Count } })
       const parent = Machine.make({
-        root: Machine.state({ initial: "Count", states: { Count } }),
+        effects: {
+          source1: (
+            { children }: Machine.Machine.InvokeContext<
+              {
+                readonly "": { readonly initial: "Count"; readonly states: { readonly Count: typeof Count } } & {
+                  readonly "~effect/Machine/ExplicitInitial": true
+                }
+              },
+              readonly [],
+              readonly [],
+              "Count",
+              readonly [],
+              readonly []
+            >
+          ) => children.spawn(Child("dynamic"))
+        },
+
+        root: root6,
         events: Machine.eventsFromSchemas(),
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
       }).handle({
         states: {
           Count: {
-            invoke: (from) =>
-              from.effect("spawn-counter", ({ children }) => children.spawn(Child("dynamic"))).onDone((to) => to.none)
-                .onFailure((to) => to.none)
+            invoke: {
+              src: "source1",
+              id: "spawn-counter",
+              input: (context) => context,
+              onDone: { none: true },
+              onFailure: { none: true }
+            }
           }
         }
       })
@@ -670,7 +722,10 @@ describe("AtomMachine", () => {
       })
       let requiredResolverCalls = 0
       let declinableResolverCalls = 0
+      const targets7 = Machine.targets(states)
       const machine = Machine.make({
+        branches: { transition1: { destination: { target: targets7.root.CanDone } } },
+
         root: states,
         events,
         initialConfiguration: (root) =>
@@ -679,16 +734,21 @@ describe("AtomMachine", () => {
         states: {
           CanIdle: {
             on: {
-              Check: (to) =>
-                to.none.resolve(({ event, decline }) => {
+              Check: {
+                none: true,
+                resolve: ({ event, decline }) => {
                   declinableResolverCalls++
                   return event.accept ? undefined : decline()
-                }, { declinable: true }),
-              Complete: (to) =>
-                to.branch.CanDone().resolve(({ target }) => {
+                },
+                declinable: true
+              },
+              Complete: {
+                branches: "transition1",
+                resolve: ({ select: { destination: target } }) => {
                   requiredResolverCalls++
                   return target.decoded(new CanDone({}))
-                })
+                }
+              }
             }
           },
           CanDone: {}
@@ -782,8 +842,12 @@ describe("AtomMachine", () => {
       class FaultLoading extends Schema.TaggedClass<FaultLoading>("AtomCanFaultLoading")("FaultLoading", {}) {}
       class Begin extends Schema.TaggedClass<Begin>("AtomCanBegin")("Begin", {}) {}
       const failure = new Error("runtime failed")
+      const root8 = Machine.state({ initial: "FaultIdle", states: { FaultIdle, FaultLoading } })
+      const targets8 = Machine.targets(root8)
       const faultMachine = Machine.make({
-        root: Machine.state({ initial: "FaultIdle", states: { FaultIdle, FaultLoading } }),
+        effects: { source1: Effect.suspend(() => Effect.die(failure)) },
+
+        root: root8,
         events: Machine.eventsFromSchemas(Begin),
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.FaultIdle.decoded(new FaultIdle({}))))
@@ -791,11 +855,11 @@ describe("AtomMachine", () => {
         states: {
           FaultIdle: {
             on: {
-              Begin: (to) => to.branch.FaultLoading().resolve(({ target }) => target.decoded(new FaultLoading({})))
+              Begin: { target: targets8.root.FaultLoading, decoded: () => (new FaultLoading({})) }
             }
           },
           FaultLoading: {
-            invoke: (from) => from.effect("fail", () => Effect.die(failure))
+            invoke: { src: "source1", id: "fail" }
           }
         }
       })
@@ -978,18 +1042,20 @@ describe("AtomMachine", () => {
   it.effect("runs a machine and exposes the final snapshot", () =>
     Effect.scoped(Effect.gen(function*() {
       const registry = yield* makeRegistry
-      const machine = Machine.make({
-        root: Machine.state({
-          initial: "Count",
-          states: {
-            Count,
-            Done: {
-              schema: Done,
-              type: "final",
-              output: Schema.Number
-            }
+      const root9 = Machine.state({
+        initial: "Count",
+        states: {
+          Count,
+          Done: {
+            schema: Done,
+            type: "final",
+            output: Schema.Number
           }
-        }),
+        }
+      })
+      const targets9 = Machine.targets(root9)
+      const machine = Machine.make({
+        root: root9,
         events: Machine.eventsFromSchemas(Finish),
         initialConfiguration: (root) =>
           root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 1 }))))
@@ -997,10 +1063,10 @@ describe("AtomMachine", () => {
         states: {
           Count: {
             on: {
-              Finish: (to) =>
-                to.branch.Done().resolve(({ state, event, target }) =>
-                  target.decoded(new Done({ value: state.value + event.by }))
-                )
+              Finish: {
+                target: targets9.root.Done,
+                decoded: ({ state, event }) => (new Done({ value: state.value + event.by }))
+              }
             }
           },
           Done: {

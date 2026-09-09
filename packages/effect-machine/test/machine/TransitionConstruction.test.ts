@@ -10,8 +10,11 @@ const events = Machine.events({
   Reset: {},
   Change: { allowed: Schema.Boolean }
 })
+const root1 = Machine.state({ schema: Root, initial: "Idle", states: { Idle: {}, Saved: { schema: Saved } } })
+const targets1 = Machine.targets(root1)
 const definition = Machine.make({
-  root: Machine.state({ schema: Root, initial: "Idle", states: { Idle: {}, Saved: { schema: Saved } } }),
+  branches: { rootUpdate: { updated: { update: targets1.root } } },
+  root: root1,
   events,
   initial: (root) => root.from(() => ({ count: 0 }))
 })
@@ -24,11 +27,14 @@ describe("transition construction", () => {
         states: {
           Idle: {
             on: {
-              Save: (to) =>
-                to.local.Saved().updating(to.root).from(({ event }) => ({
+              Save: {
+                target: targets1.root.Saved,
+                update: targets1.root,
+                from: ({ event }) => ({
                   target: { text: event.text },
                   update: { count: event.count }
-                }))
+                })
+              }
             }
           },
           Saved: {
@@ -55,8 +61,11 @@ describe("transition construction", () => {
         states: {
           Idle: {
             on: {
-              Save: (to) =>
-                to.local.Saved().updating(to.root).decoded(() => ({ target: targetValue, update: rootValue }))
+              Save: {
+                target: targets1.root.Saved,
+                update: targets1.root,
+                decoded: () => ({ target: targetValue, update: rootValue })
+              }
             }
           }
         }
@@ -73,10 +82,14 @@ describe("transition construction", () => {
     Effect.gen(function*() {
       const machine = definition.handle({
         states: {
-          Idle: { on: { Save: (to) => to.local.Saved().from(({ event }) => ({ text: event.text })) } },
+          Idle: { on: { Save: { target: targets1.root.Saved, from: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             on: {
-              Reset: (to) => to.local.Idle().updating(to.root).from(() => ({ target: undefined, update: { count: 5 } }))
+              Reset: {
+                target: targets1.root.Idle,
+                update: targets1.root,
+                from: () => ({ target: undefined, update: { count: 5 } })
+              }
             }
           }
         }
@@ -97,11 +110,14 @@ describe("transition construction", () => {
           states: {
             Idle: {
               on: {
-                Save: (to) =>
-                  to.local.Saved().updating(to.root).from(() => ({
+                Save: {
+                  target: targets1.root.Saved,
+                  update: targets1.root,
+                  from: () => ({
                     target: { text: invalidOwner ? "valid" : 42 as unknown as string },
                     update: { count: invalidOwner ? "invalid" as unknown as number : 1 }
-                  }))
+                  })
+                }
               }
             },
             Saved: {
@@ -126,25 +142,29 @@ describe("transition construction", () => {
       for (const combined of [false, true]) {
         let constructed = 0
         const machine = definition.handle({
-          on: { Change: (to) => to.self.update.from(({ current }) => ({ count: current.count + 10 })) },
+          on: { Change: { update: targets1.root, from: ({ root: current }) => ({ count: current.count + 10 }) } },
           states: {
             Idle: {
               on: {
-                Change: (to) =>
-                  combined
-                    ? to.local.Saved().updating(to.root).guard(({ current, event }) =>
-                      current.count === 0 && event.allowed
-                    ).from(() => {
+                Change: combined ?
+                  {
+                    target: targets1.root.Saved,
+                    update: targets1.root,
+                    guard: ({ root, event }) => root.count === 0 && event.allowed,
+                    from: () => {
                       constructed++
                       return { target: { text: "saved" }, update: { count: 1 } }
-                    })
-                    : to.root.update.guard(({ current, event }) => current.count === 0 && event.allowed).resolve(
-                      ({ owner }, enqueue) => {
-                        constructed++
-                        enqueue.raise(events.Reset())
-                        return owner.from({ count: 1 })
-                      }
-                    )
+                    }
+                  } :
+                  {
+                    branches: "rootUpdate",
+                    guard: ({ root, event }) => root.count === 0 && event.allowed,
+                    resolve: ({ select }, enqueue) => {
+                      constructed++
+                      enqueue.raise(events.Reset())
+                      return select.updated.from({ count: 1 })
+                    }
+                  }
               }
             }
           }
@@ -171,7 +191,7 @@ describe("transition construction", () => {
           lifecycle.push("root")
         },
         states: {
-          Idle: { on: { Save: (to) => to.local.Saved().from(({ event }) => ({ text: event.text })) } },
+          Idle: { on: { Save: { target: targets1.root.Saved, from: ({ event }) => ({ text: event.text }) } } },
           Saved: {
             entry: () => {
               lifecycle.push("enter")
@@ -180,16 +200,23 @@ describe("transition construction", () => {
               lifecycle.push("exit")
             },
             on: {
-              Change: (to) =>
-                to.local.Saved().updating(to.root).reenter().guard(({ event }) => event.allowed)
-                  .from(({ current, state }) => ({
-                    target: { text: state.text },
-                    update: { count: current.count + 1 }
-                  })),
-              Reset: (to) =>
-                to.none.reenter().resolve((_, enqueue) => {
-                  enqueue.raise(events.Change({ allowed: false }))
+              Change: {
+                target: targets1.root.Saved,
+                update: targets1.root,
+                reenter: true,
+                guard: ({ event }) => event.allowed,
+                from: ({ root: current, state }) => ({
+                  target: { text: state.text },
+                  update: { count: current.count + 1 }
                 })
+              },
+              Reset: {
+                none: true,
+                reenter: true,
+                resolve: (_, enqueue) => {
+                  enqueue.raise(events.Change({ allowed: false }))
+                }
+              }
             }
           }
         }
@@ -217,7 +244,7 @@ describe("transition construction", () => {
             entry: () => {
               entered++
             },
-            on: { Change: (to) => to.none.reenter().guard(({ event }) => event.allowed) }
+            on: { Change: { none: true, reenter: true, guard: ({ event }) => event.allowed } }
           }
         }
       })
@@ -232,18 +259,16 @@ describe("transition construction", () => {
       assert.strictEqual(accepted.next.state.path, "Idle")
     }))
 
-  it("rejects removed resolver options instead of silently ignoring reentry", () => {
+  it("rejects conflicting construction methods", () => {
     assert.throws(() =>
       definition.handle({
         states: {
           Idle: {
             on: {
-              Reset: (to) =>
-                // @ts-expect-error reentry is a modifier, not a resolver option
-                to.none.resolve(() => undefined, { reenter: true })
+              Reset: { none: true, resolve: () => undefined, from: () => undefined } as any
             }
           }
         }
-      }), /Use .reenter\(\)/)
+      }), /construction methods are mutually exclusive/)
   })
 })

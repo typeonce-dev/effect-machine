@@ -58,7 +58,29 @@ const AuthEvents = Machine.eventsFromSchemas(
   })
 )
 
+const targets1 = Machine.targets(AuthStates)
 export const layoutResilienceMachine = Machine.make({
+  branches: {
+    transition4: {
+      requestVerification: {
+        target: targets1.root.Editing.RequestingVerification,
+        title: "Request a verification code"
+      },
+      login: { target: targets1.root.Editing.SubmittingLogin, title: "Submit password login" },
+      invalid: { target: targets1.root.Editing.Form.Failed, title: "Show validation failure" }
+    }
+  },
+  effects: {
+    source1: ({ containingState }: { readonly containingState: { readonly email: string } }) =>
+      containingState.email === "fail"
+        ? Effect.fail("invalid credentials")
+        : Effect.succeed("/creator"),
+    source2: ({ containingState }: { readonly containingState: { readonly email: string } }) =>
+      containingState.email === "fail"
+        ? Effect.fail("verification unavailable")
+        : Effect.succeed(undefined)
+  },
+
   id: "layout-resilience",
   root: AuthStates,
   events: AuthEvents,
@@ -79,37 +101,26 @@ export const layoutResilienceMachine = Machine.make({
       states: {
         Form: {
           on: {
-            EmailChanged: (to) =>
-              to.branch.Editing.update.resolve(({ current, event, owner }) =>
-                owner.from({ ...current, email: event.value })
-              ),
-            LoginMethodChanged: (to) =>
-              to.branch.Editing.update.resolve(({ current, event, owner }) =>
-                owner.from({ ...current, loginMethod: event.value })
-              ),
-            PasswordChanged: (to) =>
-              to.branch.Editing.update.resolve(({ current, event, owner }) =>
-                owner.from({ ...current, password: event.value })
-              ),
-            Submit: (to) =>
-              to.branches({
-                requestVerification: {
-                  title: "Request a verification code",
-                  target: to.branch.Editing.RequestingVerification()
-                },
-                login: {
-                  title: "Submit password login",
-                  target: to.branch.Editing.SubmittingLogin()
-                },
-                invalid: {
-                  title: "Show validation failure",
-                  target: to.local.Failed()
-                }
-              }).resolve(({ event, select }) => {
+            EmailChanged: {
+              update: targets1.root.Editing,
+              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, email: event.value })
+            },
+            LoginMethodChanged: {
+              update: targets1.root.Editing,
+              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, loginMethod: event.value })
+            },
+            PasswordChanged: {
+              update: targets1.root.Editing,
+              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, password: event.value })
+            },
+            Submit: {
+              branches: "transition4",
+              resolve: ({ event, select }) => {
                 if (event.route === "login") return select.login.from()
                 if (event.route === "verification") return select.requestVerification.from()
                 return select.invalid.from({ message: "Enter valid authentication details." })
-              })
+              }
+            }
           },
           states: {
             Ready: {},
@@ -117,32 +128,35 @@ export const layoutResilienceMachine = Machine.make({
           }
         },
         SubmittingLogin: {
-          invoke: (from) =>
-            from.effect("submit-login", ({ containingState }) =>
-              containingState.email === "fail"
-                ? Effect.fail("invalid credentials")
-                : Effect.succeed("/creator")).onDone((to) =>
-                to.branch.Navigating().resolve(({ output, target }) => target.from({ href: output }))).onFailure((to) =>
-                to.branch.Editing.Form.Failed().resolve(({ target }) =>
-                  target.from({ message: "Email or password is incorrect." })
-                ))
+          invoke: {
+            src: "source1",
+            id: "submit-login",
+            input: (context) => context,
+            onDone: { target: targets1.root.Navigating, from: ({ output }) => ({ href: output }) },
+            onFailure: {
+              target: targets1.root.Editing.Form.Failed,
+              from: () => ({ message: "Email or password is incorrect." })
+            }
+          }
         },
         RequestingVerification: {
-          invoke: (from) =>
-            from.effect("request-verification", ({ containingState }) =>
-              containingState.email === "fail"
-                ? Effect.fail("verification unavailable")
-                : Effect.succeed(undefined)).onDone((to) =>
-                to.branch.Verification.initial.resolve(({ containingState, target }) =>
-                  target.from({
-                    mode: containingState.mode,
-                    email: containingState.email,
-                    code: ""
-                  })
-                )).onFailure((to) =>
-                to.branch.Editing.Form.Failed().resolve(({ target }) =>
-                  target.from({ message: "The verification code could not be sent." })
-                ))
+          invoke: {
+            src: "source2",
+            id: "request-verification",
+            input: (context) => context,
+            onDone: {
+              initial: targets1.root.Verification,
+              from: ({ containingState }) => ({
+                mode: containingState.mode,
+                email: containingState.email,
+                code: ""
+              })
+            },
+            onFailure: {
+              target: targets1.root.Editing.Form.Failed,
+              from: () => ({ message: "The verification code could not be sent." })
+            }
+          }
         }
       }
     },

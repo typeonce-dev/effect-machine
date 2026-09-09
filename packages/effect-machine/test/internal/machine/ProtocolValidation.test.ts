@@ -11,8 +11,9 @@ describe("event validation across execution strategies", () => {
         const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
         const events = Machine.eventsFromSchemas(Set)
         let retained: unknown
+        const root1 = Machine.state({ initial: "Ready", states: { Ready: Schema.TaggedStruct("Ready", {}) } })
         const machine = Machine.make({
-          root: Machine.state({ initial: "Ready", states: { Ready: Schema.TaggedStruct("Ready", {}) } }),
+          root: root1,
           events,
           initialConfiguration: (root) =>
             root.resolve(({ target }) => target.from((to) => to.Ready.decoded({ _tag: "Ready" })))
@@ -20,10 +21,12 @@ describe("event validation across execution strategies", () => {
           states: {
             Ready: {
               on: {
-                Set: (to) =>
-                  to.none.resolve(({ event }) => {
+                Set: {
+                  none: true,
+                  resolve: ({ event }) => {
                     retained = event
-                  })
+                  }
+                }
               }
             }
           }

@@ -18,8 +18,9 @@ class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", 
 
 const States = Machine.state({ initial: "Active", states: { Active } })
 
-const trackedMachine = (onStart: () => void) =>
-  Machine.make({
+const trackedMachine = (onStart: () => void) => {
+  const targets1 = Machine.targets(States)
+  return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Increment),
     input: Schema.Number,
@@ -32,12 +33,12 @@ const trackedMachine = (onStart: () => void) =>
     states: {
       Active: {
         on: {
-          Increment: (to) =>
-            to.branch.Active().resolve(({ state, target }) => target.decoded(new Active({ value: state.value + 1 })))
+          Increment: { target: targets1.root.Active, decoded: ({ state }) => (new Active({ value: state.value + 1 })) }
         }
       }
     }
   })
+}
 
 afterEach(cleanup)
 

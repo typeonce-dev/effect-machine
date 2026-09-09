@@ -87,7 +87,17 @@ const initialWorkflow = (): Machine.Machine.CompleteSnapshotContaining<
   "application.workflow"
 > => initial
 
+const targets1 = Machine.targets(States)
 const machineDefinition = Machine.make({
+  branches: {
+    start: {
+      running: { target: targets1.root.application.workflow.running, update: targets1.root.application.workflow }
+    },
+    unsafe: { disabled: { target: targets1.root.disabled } },
+    transition1: { destination: { update: targets1.root.application.workflow } },
+    transition2: { destination: { target: targets1.root.application.connection.offline } }
+  },
+
   id: "inspection-example",
   root: States,
   events: Machine.eventsFromSchemas(Start, Disconnect, Refresh),
@@ -110,20 +120,23 @@ const makeMachine = (unsafeStart = false) =>
               idle: {
                 on: {
                   Start: unsafeStart ?
-                    (to) =>
-                      to.branch.disabled().resolve(({ target }) =>
-                        ({ ...target.decoded(new Disabled({})), path: "application.workflow.idle" }) as any
-                      ) :
-                    (to) =>
-                      to.local.running()
-                        .updating(to.branch.application.workflow)
-                        .resolve(({ owner, target }) =>
-                          target.decoded(
-                            new Running({}),
-                            (running) => running.editing.decoded(new Editing({}))
-                          ).update(owner.decoded(new Workflow({})))
-                        ),
-                  Refresh: (to) => to.local.update.resolve(({ owner }) => owner.decoded(new Workflow({})))
+                    {
+                      branches: "unsafe",
+                      resolve: ({ select }) =>
+                        ({
+                          ...select.disabled.decoded(new Disabled({})),
+                          result: { path: "application.workflow.idle", value: new Disabled({}) }
+                        }) as any
+                    } :
+                    {
+                      branches: "start",
+                      resolve: ({ select }) =>
+                        select.running.decoded(
+                          new Running({}),
+                          (running) => running.editing.decoded(new Editing({}))
+                        ).update.decoded(new Workflow({}))
+                    },
+                  Refresh: { update: targets1.root.application.workflow, decoded: () => (new Workflow({})) }
                 }
               },
               running: {
@@ -135,7 +148,7 @@ const makeMachine = (unsafeStart = false) =>
             states: {
               online: {
                 on: {
-                  Disconnect: (to) => to.local.offline().resolve(({ target }) => target.decoded(new Offline({})))
+                  Disconnect: { target: targets1.root.application.connection.offline, decoded: () => (new Offline({})) }
                 }
               }
             }
@@ -168,7 +181,13 @@ const LifecycleStates = Machine.state({
   }
 })
 
+const targets2 = Machine.targets(LifecycleStates)
 const lifecycleDefinition = Machine.make({
+  branches: {
+    transition1: { destination: { target: targets2.root.workflow } },
+    transition2: { destination: { target: targets2.root.disabled } }
+  },
+
   id: "lifecycle-inspection",
   root: LifecycleStates,
   events: Machine.eventsFromSchemas(),
@@ -179,18 +198,26 @@ const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined)
   lifecycleDefinition.handle({
     states: {
       idle: {
-        always: (to) =>
-          to.branch.workflow().resolve(({ target }) => {
+        always: {
+          branches: "transition1",
+          resolve: ({ select: { destination: target } }) => {
             const selected = target.decoded(new Workflow({}), (workflow) => workflow.complete.decoded(new Complete({})))
-            return unsafe === "always" ? ({ ...selected, path: "idle" } as any) : selected
-          })
+            return unsafe === "always"
+              ? ({ ...selected, result: { path: "idle", value: new Running({}) } } as unknown as typeof selected)
+              : selected
+          }
+        }
       },
       workflow: {
-        onDone: (to) =>
-          to.branch.disabled().resolve(({ target }) => {
+        onDone: {
+          branches: "transition2",
+          resolve: ({ select: { destination: target } }) => {
             const selected = target.decoded(new Disabled({}))
-            return unsafe === "done" ? ({ ...selected, path: "workflow" } as any) : selected
-          })
+            return unsafe === "done"
+              ? ({ ...selected, result: { path: "workflow", value: new Disabled({}) } } as unknown as typeof selected)
+              : selected
+          }
+        }
       }
     }
   })
@@ -260,9 +287,11 @@ describe("Machine structural visualization", () => {
         reenter: false,
         acceptance: "required",
         branches: [{
-          type: "direct",
+          type: "branch",
+          key: "running",
+          title: "running",
           target: "application.workflow.running",
-          selection: { path: "application.workflow.running", kind: "state", scope: "local" },
+          selection: { path: "application.workflow.running", kind: "state", scope: "branch" },
           updates: ["application.workflow"]
         }]
       },
@@ -274,7 +303,7 @@ describe("Machine structural visualization", () => {
         branches: [{
           type: "direct",
           target: undefined,
-          selection: { path: "application.workflow", kind: "update", scope: "local" },
+          selection: { path: "application.workflow", kind: "update", scope: "branch" },
           updates: ["application.workflow"]
         }]
       },
@@ -286,7 +315,7 @@ describe("Machine structural visualization", () => {
         branches: [{
           type: "direct",
           target: "application.connection.offline",
-          selection: { path: "application.connection.offline", kind: "state", scope: "local" },
+          selection: { path: "application.connection.offline", kind: "state", scope: "branch" },
           updates: []
         }]
       }
@@ -294,8 +323,9 @@ describe("Machine structural visualization", () => {
   })
 
   it("describes reentry, eventless, and completion handlers", () => {
+    const root3 = Machine.state({ initial: "idle", states: { idle: Idle } })
     const metadataMachine = Machine.make({
-      root: Machine.state({ initial: "idle", states: { idle: Idle } }),
+      root: root3,
       events: Machine.eventsFromSchemas(Refresh),
       initialConfiguration: (to) =>
         to.resolve(() => ({
@@ -307,10 +337,10 @@ describe("Machine structural visualization", () => {
       states: {
         idle: {
           on: {
-            Refresh: (to) => to.none.reenter().resolve(() => undefined)
+            Refresh: { none: true, reenter: true, resolve: () => undefined }
           },
-          always: (to) => to.none,
-          onDone: (to) => to.none
+          always: { none: true },
+          onDone: { none: true }
         }
       }
     })
@@ -370,7 +400,9 @@ describe("Machine structural visualization", () => {
           reenter: false,
           acceptance: "required",
           branches: [{
-            type: "direct",
+            type: "branch",
+            key: "destination",
+            title: "destination",
             target: "workflow",
             selection: { path: "workflow", kind: "state", scope: "branch" },
             updates: []
@@ -382,7 +414,9 @@ describe("Machine structural visualization", () => {
           reenter: false,
           acceptance: "required",
           branches: [{
-            type: "direct",
+            type: "branch",
+            key: "destination",
+            title: "destination",
             target: "disabled",
             selection: { path: "disabled", kind: "state", scope: "branch" },
             updates: []
@@ -398,10 +432,10 @@ describe("Machine structural visualization", () => {
           "└─ ● (root) [compound, initial: idle]",
           "   ├─ ○ idle",
           "   │  └─ ◇ always",
-          "   │     └┄ → workflow",
+          "   │     └┄ [destination] → workflow",
           "   ├─ ○ workflow [compound, initial: complete]",
           "   │  ├─ ◇ done",
-          "   │  │  └┄ → disabled",
+          "   │  │  └┄ [destination] → disabled",
           "   │  └─ ○ complete [final]",
           "   └─ ● disabled",
           "",
@@ -422,7 +456,7 @@ describe("Machine structural visualization", () => {
         "   │  ├─ ● workflow [compound, initial: idle]",
         "   │  │  ├─ ● idle",
         "   │  │  │  ├─ ◇ on: Start",
-        "   │  │  │  │  └┄ → running / update application.workflow",
+        "   │  │  │  │  └┄ [running] → running / update application.workflow",
         "   │  │  │  └─ ◇ on: Refresh",
         "   │  │  │     └┄ update application.workflow",
         "   │  │  ├─ ○ running [compound, initial: editing]",
@@ -451,7 +485,7 @@ describe("Machine structural visualization", () => {
     assert.include(rendered, "state_6 --> [*]")
     assert.include(rendered, "state \"○ recent [history: shallow]\" as state_7")
     assert.include(rendered, "[*] --> state_1")
-    assert.include(rendered, "state_3 --> state_4: Start / update application.workflow")
+    assert.include(rendered, "state_3 --> state_4: Start [running] / update application.workflow")
     assert.include(rendered, "state_3: Refresh / update application.workflow")
     assert.include(rendered, "state_9 --> state_10: Disconnect")
     assert.notMatch(rendered, /state_\d+ --> state_\d+: Refresh/)

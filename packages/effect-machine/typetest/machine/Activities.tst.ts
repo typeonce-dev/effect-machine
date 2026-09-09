@@ -7,7 +7,10 @@ class Dynamic extends Schema.TaggedClass<Dynamic>("Dynamic")("Dynamic", {}) {}
 class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
 
 const States = Machine.state({ initial: "Loading", states: { Loading, Dynamic } })
+
 const machine = Machine.make({
+  timers: { source1: "1 second", source2: (_input: undefined) => ("2 seconds" as const) },
+
   root: States,
   events: Machine.eventsFromSchemas(TimedOut),
   initialConfiguration: (root) =>
@@ -15,10 +18,10 @@ const machine = Machine.make({
 }).handle({
   states: {
     Loading: {
-      invoke: (from) => from.timer("timeout", "1 second").onDone((to) => to.none)
+      invoke: { src: "source1", id: "timeout", onDone: { none: true } }
     },
     Dynamic: {
-      invoke: (from) => from.timer("dynamic", () => "2 seconds" as const).onDone((to) => to.none)
+      invoke: { src: "source2", id: "dynamic", input: () => undefined, onDone: { none: true } }
     }
   }
 })

@@ -11,6 +11,7 @@ describe("MachineTest probe", () => {
   class InternalEvent extends Schema.TaggedClass<InternalEvent>("ProbeTypeInternalEvent")("InternalEvent", {}) {}
 
   const states = Machine.state({ initial: "State", states: { State } })
+
   const machine = Machine.make({
     root: states,
     events: Machine.eventsFromSchemas(PublicEvent),
@@ -21,8 +22,8 @@ describe("MachineTest probe", () => {
     states: {
       State: {
         on: {
-          PublicEvent: (to) => to.none,
-          InternalEvent: (to) => to.none
+          PublicEvent: { none: true },
+          InternalEvent: { none: true }
         }
       }
     }

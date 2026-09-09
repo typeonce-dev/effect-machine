@@ -53,6 +53,7 @@ describe("pure planning and managed runtime differential", () => {
           Done: { schema: Done, type: "final", output: Schema.Number }
         }
       })
+      const targets1 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Cascade, Ignore, Finish),
@@ -63,15 +64,18 @@ describe("pure planning and managed runtime differential", () => {
         states: {
           Count: {
             on: {
-              Cascade: (to) =>
-                to.none.resolve((_, enqueue) => {
+              Cascade: {
+                none: true,
+                resolve: (_, enqueue) => {
                   enqueue.raise(new Increment({}))
                   return undefined
-                }),
-              Increment: (to) =>
-                to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 }))),
-              Finish: (to) =>
-                to.branch.Done().resolve(({ state, target }) => target.decoded(new Done({ value: state.value })))
+                }
+              },
+              Increment: {
+                target: targets1.root.Count,
+                decoded: ({ state }) => (new Count({ value: state.value + 1 }))
+              },
+              Finish: { target: targets1.root.Done, decoded: ({ state }) => (new Done({ value: state.value })) }
             }
           },
           Done: { output: ({ state }) => state.value }
@@ -148,7 +152,13 @@ describe("pure planning and managed runtime differential", () => {
         readonly left: number
         readonly right: number
       }> = []
+      const targets2 = Machine.targets(states)
       const machine = Machine.make({
+        branches: {
+          transition1: { destination: { target: targets2.root.Done } },
+          transition2: { destination: { target: targets2.root.Running.Left } }
+        },
+
         root: states,
         events: Machine.eventsFromSchemas(Advance, Inspect, Finish),
         internalEvents: Machine.internalEventsFromSchemas(Bump),
@@ -165,38 +175,43 @@ describe("pure planning and managed runtime differential", () => {
         states: {
           Running: {
             on: {
-              Finish: (to) =>
-                to.branch.Done().resolve(({ snapshot, target }) => {
+              Finish: {
+                branches: "transition1",
+                resolve: ({ snapshot, select: { destination: target } }) => {
                   if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
                   return target.decoded(
                     new Done({
                       value: snapshot.state.states.Left.value.value + snapshot.state.states.Right.value.value
                     })
                   )
-                })
+                }
+              }
             },
             states: {
               Left: {
                 on: {
-                  Advance: (to) =>
-                    to.branch.Running.Left().resolve(({ state, target }, enqueue) => {
+                  Advance: {
+                    branches: "transition2",
+                    resolve: ({ state, select: { destination: target } }, enqueue) => {
                       enqueue.raise(new Bump({}))
                       return target.decoded(new Left({ value: state.value + 1 }))
-                    })
+                    }
+                  }
                 }
               },
               Right: {
                 on: {
-                  Advance: (to) =>
-                    to.branch.Running.Right().resolve(({ state, target }) =>
-                      target.decoded(new Right({ value: state.value + 10 }))
-                    ),
-                  Bump: (to) =>
-                    to.branch.Running.Right().resolve(({ state, target }) =>
-                      target.decoded(new Right({ value: state.value + 100 }))
-                    ),
-                  Inspect: (to) =>
-                    to.none.resolve((context) => {
+                  Advance: {
+                    target: targets2.root.Running.Right,
+                    decoded: ({ state }) => (new Right({ value: state.value + 10 }))
+                  },
+                  Bump: {
+                    target: targets2.root.Running.Right,
+                    decoded: ({ state }) => (new Right({ value: state.value + 100 }))
+                  },
+                  Inspect: {
+                    none: true,
+                    resolve: (context) => {
                       const { state, containingState, ancestors, snapshot } = context
                       if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
                       const expectedKeys = [
@@ -205,7 +220,9 @@ describe("pure planning and managed runtime differential", () => {
                         "containingState",
                         "ancestors",
                         "event",
-                        "snapshot"
+                        "snapshot",
+                        "root",
+                        "decline"
                       ]
                       const spread = { ...context }
                       assert.deepStrictEqual(Object.keys(context), expectedKeys)
@@ -224,7 +241,8 @@ describe("pure planning and managed runtime differential", () => {
                         right: snapshot.state.states.Right.value.value
                       })
                       return undefined
-                    })
+                    }
+                  }
                 }
               }
             }
@@ -460,7 +478,13 @@ describe("pure planning and managed runtime differential", () => {
           Finished: { schema: Finished, type: "final", output: Schema.String }
         }
       })
+      const targets3 = Machine.targets(states)
       const machine = Machine.make({
+        branches: {
+          transition1: { destination: { target: targets3.root.Working } },
+          transition2: { destination: { target: targets3.root.Finished } }
+        },
+
         root: states,
         events: Machine.eventsFromSchemas(Begin),
         internalEvents: Machine.internalEventsFromSchemas(RaisedOne, RaisedTwo),
@@ -474,13 +498,15 @@ describe("pure planning and managed runtime differential", () => {
               enqueue.emit(new Notice({ label: "initial" }))
             },
             on: {
-              Begin: (to) =>
-                to.branch.Working().resolve(({ target }, enqueue) => {
+              Begin: {
+                branches: "transition1",
+                resolve: ({ select: { destination: target } }, enqueue) => {
                   record("transition:begin")
                   enqueue.emit(new Notice({ label: "transition" }))
                   enqueue.raise(new RaisedOne({}))
                   return target.decoded(new Working({}))
-                })
+                }
+              }
             }
           },
           Working: {
@@ -490,18 +516,22 @@ describe("pure planning and managed runtime differential", () => {
               enqueue.raise(new RaisedTwo({}))
             },
             on: {
-              RaisedOne: (to) =>
-                to.none.resolve((_, enqueue) => {
+              RaisedOne: {
+                none: true,
+                resolve: (_, enqueue) => {
                   record("raised:one")
                   enqueue.emit(new Notice({ label: "raised-one" }))
                   return undefined
-                }),
-              RaisedTwo: (to) =>
-                to.branch.Finished().resolve(({ target }, enqueue) => {
+                }
+              },
+              RaisedTwo: {
+                branches: "transition2",
+                resolve: ({ select: { destination: target } }, enqueue) => {
                   record("raised:two")
                   enqueue.emit(new Notice({ label: "raised-two" }))
                   return target.decoded(new Finished({}))
-                })
+                }
+              }
             }
           },
           Finished: {
@@ -577,6 +607,7 @@ describe("pure planning and managed runtime differential", () => {
       class Ignore extends Schema.TaggedClass<Ignore>("DifferentialIgnore")("Ignore", {}) {}
       class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {}
       const states = Machine.state({ initial: "Idle", states: { Idle, Active } })
+      const targets4 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Ignore, Go),
@@ -585,7 +616,7 @@ describe("pure planning and managed runtime differential", () => {
         states: {
           Idle: {
             on: {
-              Go: (to) => to.branch.Active().resolve(({ target }) => target.decoded(new Active({})))
+              Go: { target: targets4.root.Active, decoded: () => (new Active({})) }
             }
           },
           Active: {}

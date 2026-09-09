@@ -111,9 +111,9 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  *
  * **Gotchas**
  *
- * Use `.guard(predicate)` to decline a transition before constructing its next
- * state. Use `.resolve(..., { declinable: true })` when conditional resolution
- * needs to return `decline()`. Use `after` for cancellable state-scoped delays.
+ * Use `guard` to decline a transition before constructing its next state.
+ * Use `declinable: true` when a named branch resolver may return `decline()`.
+ * Register cancellable state-scoped delays in `make({ timers })`.
  *
  * **Example**
  *
@@ -122,16 +122,19 @@ type IsAny<A> = 0 extends (1 & A) ? true : false
  * import { Schema } from "effect"
  *
  * const events = Machine.events({ Add: { by: Schema.Number } })
+ * const Root = Machine.state({ fields: { count: Schema.Number } })
+ * const targets = Machine.targets(Root)
  * export const counter = Machine.make({
- *   root: Machine.state({ fields: { count: Schema.Number } }),
+ *   root: Root,
  *   events,
  *   initial: (root) => root.from(() => ({ count: 0 }))
  * }).handle({
  *   on: {
- *     Add: (to) =>
- *       to.self.update.guard(({ event }) => event.by > 0).from(({ current, event }) => ({
- *         count: current.count + event.by
- *       }))
+ *     Add: {
+ *       update: targets.root,
+ *       guard: ({ event }) => event.by > 0,
+ *       from: ({ root, event }) => ({ count: root.count + event.by })
+ *     }
  *   }
  * })
  * ```
@@ -246,7 +249,7 @@ export interface Machine<
   ) => Machine.TargetBuilder<States, Source>
 
   /** @internal */
-  readonly handlers: Machine.StateConfigs<States, Events, Emits, UnhandledStates, Machine.TagOf<Events[number]>, E, R>
+  readonly handlers: Readonly<Record<string, unknown>>
 
   /** @internal */
   readonly initial: (...args: [...Machine.InputArgs<Input>]) => Machine.InitialResult<States, InitialE, InitialR>
@@ -278,7 +281,8 @@ export interface Definition<
   Output = never,
   Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
   InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events,
-  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly []
+  ParentEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
+  Registrations extends Machine.Registrations = {}
 > extends
   Machine<
     States,
@@ -306,12 +310,14 @@ export interface Definition<
    * **Example**
    *
    * ```ts
+   * const targets = Machine.targets(States)
    * const counter = definition.handle({ states: {
    *   Count: {
    *     on: {
-   *       Increment: (to) =>
-   *         to.branch.Count().resolve(({ event, state, target }) =>
-   *           target.decoded(new Count({ value: state.value + event.by })))
+   *       Increment: {
+   *         update: targets.root.Count,
+   *         decoded: ({ event, state }) => new Count({ value: state.value + event.by })
+   *       }
    *     }
    *   }
    * } })
@@ -324,16 +330,13 @@ export interface Definition<
     Events,
     Emits,
     Input,
-    Machine.StateIdentifier<States>,
-    never,
-    never,
     InitialE,
     InitialR,
     FinalStates,
     Output,
-    never,
     InputEvents,
-    ParentEvents
+    ParentEvents,
+    Registrations
   >
 }
 
@@ -665,9 +668,6 @@ type IncompatibleRuntime<Requirements, Events, Emits> = Requirements extends Run
   : never
 
 const InvokeTypeId: typeof internal.InvokeTypeId = internal.InvokeTypeId
-const TransitionTypeId: typeof internal.TransitionTypeId = internal.TransitionTypeId
-declare const TransitionBuilderTypeId: unique symbol
-declare const InvokeBuilderTypeId: unique symbol
 declare const InitialBuilderTypeId: unique symbol
 
 type StateDefinitionError<
@@ -4750,7 +4750,7 @@ export declare namespace Machine {
    * do not directly control state re-entry. Exit and entry paths are derived
    * from the previous and next active paths. Shared active ancestors remain
    * entered even when a `full` target supplies their values again. Use an event
-   * transition with `.reenter()` when the source should explicitly exit and
+   * transition with `reenter: true` when the source should explicitly exit and
    * enter again.
    *
    * @category models
@@ -4841,205 +4841,7 @@ export declare namespace Machine {
     Scope extends Topology.TargetSelectionScope | undefined = Topology.TargetSelectionScope | undefined
   > = () => SelectionValue<Builder, Path, Kind, Scope>
 
-  type InitialSelectionMethod<
-    Builder,
-    Path extends string,
-    Scope extends Topology.TargetSelectionScope
-  > = Builder extends { readonly initial: infer Initial } ? {
-      readonly initial: SelectionValue<Initial, Path, "initial", Scope>
-    }
-    : {}
-
-  type SelectionTreeWithPrefix<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Scope extends "local" | "branch",
-    Builder
-  > = {
-    readonly [Key in Extract<ActiveStateKey<States> | ChoiceStateKey<States>, keyof Builder>]: SelectionNode<
-      AllStates,
-      States[Key],
-      JoinPath<Prefix, Key>,
-      Scope,
-      Builder[Key]
-    >
-  }
-
-  type SelectionNode<
-    AllStates extends StateSchemas,
-    Node,
-    Path extends string,
-    Scope extends "local" | "branch",
-    Builder
-  > = Node extends ChoiceStateNodeConfig ? SelectionMethod<
-      Builder,
-      Path,
-      "choice",
-      Scope
-    >
-    : Node extends { readonly states: infer Children extends StateSchemas } ?
-        & SelectionMethod<Builder, Path, "state", Scope>
-        & InitialSelectionMethod<Builder, Path, Scope>
-        & SelectionTreeWithPrefix<AllStates, Children, Path, Scope, Builder>
-    : SelectionMethod<Builder, Path, "state", Scope>
-
-  /** @internal */
-  type StateUpdateSelectionForNode<
-    AllStates extends StateSchemas,
-    Node,
-    Path extends string,
-    Scope extends "local" | "branch"
-  > = Node extends { readonly type: "final" } ? {} : NodeSchema<Node> extends never ? {}
-  : {
-    readonly update: SelectionValue<
-      StateUpdateBuilder<AllStates, Extract<Path, ValuedStateIdentifier<AllStates>>>,
-      Path,
-      "update",
-      Scope
-    >
-  }
-
-  /** @internal */
-  type BranchUpdateSelectionPath<
-    AllStates extends StateSchemas,
-    Node,
-    Path extends string,
-    Rest extends string,
-    Scope extends "local" | "branch" = "branch"
-  > =
-    & StateUpdateSelectionForNode<AllStates, Node, Path, Scope>
-    & (Node extends { readonly states: infer Children extends StateSchemas } ?
-      Rest extends `${infer Head}.${infer Tail}` ? Head extends keyof Children ? {
-            readonly [Key in Head]: BranchUpdateSelectionPath<
-              AllStates,
-              Children[Head],
-              JoinPath<Path, Head>,
-              Tail,
-              Scope
-            >
-          }
-        : {}
-      : Rest extends keyof Children ? {
-          readonly [Key in Rest]: StateUpdateSelectionForNode<
-            AllStates,
-            Children[Rest],
-            JoinPath<Path, Rest>,
-            Scope
-          >
-        }
-      : {}
-      : {})
-
-  type FullSelectionNode<
-    AllStates extends StateSchemas,
-    Node,
-    Path extends StateIdentifier<AllStates>,
-    Builder
-  > = Node extends { readonly states: StateSchemas } ?
-      & SelectionMethod<Builder, Path, "state", "full">
-      & InitialSelectionMethod<Builder, Path, "full">
-    : SelectionMethod<Builder, Path, "state", "full">
-
   type RootBuilder<Builder> = Builder extends { readonly "": infer Root } ? Root : never
-
-  type FullTargetSelector<States extends StateSchemas> =
-    & SelectionValue<RootBuilder<FullTargetBuilder<States>>, "", "state", "full">
-    & InitialSelectionMethod<RootBuilder<FullTargetBuilder<States>>, "", "full">
-
-  type BranchTargetSelector<States extends StateSchemas, Source extends StateNodeIdentifier<States>> =
-    States[""] extends { readonly states: infer Children extends StateSchemas } ?
-        & SelectionTreeWithPrefix<States, Children, "", "branch", RootBuilder<BranchTargetBuilder<States, Source>>>
-        & (Source extends ChoiceIdentifier<States> ? {}
-          : Omit<BranchUpdateSelectionPath<States, States[""], "", Source>, "update">)
-      : {}
-
-  type LocalTargetSelector<
-    States extends StateSchemas,
-    Source extends StateNodeIdentifier<States>
-  > = NearestCompoundScope<States, Source> extends infer Scope ? [Scope] extends [never] ? {}
-    : Scope extends StateIdentifier<States> ?
-      ChildrenOf<States, Scope> extends infer Children extends StateSchemas ?
-        LocalTargetBuilder<States, Source> extends infer Builder ?
-            & SelectionTreeWithPrefix<States, Children, Scope, "local", Builder>
-            & ("with" extends keyof Builder ? {
-                readonly with: SelectionValue<Builder["with"], Scope, "state", "local">
-              }
-              : {})
-            & (Source extends ChoiceIdentifier<States> ? {}
-              : Scope extends ValuedStateIdentifier<States> ? {
-                  readonly update: SelectionValue<StateUpdateBuilder<States, Scope>, Scope, "update", "local">
-                }
-              : {})
-        : {}
-      : {}
-    : {}
-    : {}
-
-  type HistorySelectionTree<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Prefix extends string,
-    Builder
-  > = {
-    readonly [Key in Extract<HistoryContainingKey<States>, keyof Builder>]: States[Key] extends HistoryStateNodeConfig ?
-      SelectionValue<
-        Builder[Key],
-        JoinPath<Prefix, Key>,
-        "history",
-        "full"
-      >
-      : States[Key] extends { readonly states: infer Children extends StateSchemas } ? HistorySelectionTree<
-          AllStates,
-          Children,
-          JoinPath<Prefix, Key>,
-          Builder[Key]
-        >
-      : never
-  }
-
-  /**
-   * Definition-time topology selector available to an ordinary transition.
-   *
-   * Topology-only instructions (`none`, declared `initial` and history
-   * selections, and `local.with`) are values.
-   *
-   * State and choice destinations remain callable selection methods so their
-   * target-specific resolver APIs retain exact inference.
-   */
-  export interface TargetSelector<
-    States extends StateSchemas,
-    Source extends StateNodeIdentifier<States>
-  > {
-    /** Replaces this handler owner's value without reentry. */
-    /** Selects the current handler owner for a value update without reentry. */
-    readonly self: Source extends ValuedStateIdentifier<States>
-      ? StateUpdateSelectionForNode<States, NodeByIdentifier<States, Source>, Source, "branch">
-      : {}
-    /** Addresses the root and its retained value from any active descendant. */
-    readonly root: "" extends ActiveStateKey<States> ?
-        & SelectionNode<
-          States,
-          States[""],
-          "",
-          "branch",
-          (BranchTargetBuilder<States, Source> extends { readonly "": infer Builder } ? Builder : never)
-        >
-        & StateUpdateSelectionForNode<States, States[""], "", "branch">
-      : never
-    /** Handles the trigger without selecting a destination. */
-    readonly none: SelectionValue<TargetBuilder<States, Source>["none"], never, "none", "local">
-    /** Selects a destination or updates the nearest active compound scope. */
-    readonly local: LocalTargetSelector<States, Source>
-    /** Selects a destination or updates a valued active ancestor under the current root. */
-    readonly branch: BranchTargetSelector<States, Source>
-    /** Selects a complete destination under any top-level state. */
-    readonly full: FullTargetSelector<States>
-    /** Restores a shallow or deep history pseudo-state. */
-    readonly history: States[""] extends { readonly states: infer Children extends StateSchemas }
-      ? HistorySelectionTree<States, Children, "", RootBuilder<HistoryTargetBuilder<States>>>
-      : {}
-  }
 
   /** Definition-time selector that can choose only a valid top-level initial entry. */
   type InitialTargetSelector<States extends StateSchemas> = {
@@ -5078,13 +4880,8 @@ export declare namespace Machine {
     /** Event that selected this handler, narrowed by its `_tag`. */
     readonly event: EventByTag<Events, EventTag>
 
-    /**
-     * Provides typed builders for choosing the next active state from this
-     * handler. Each builder documents which existing state values it keeps.
-     *
-     * @since 0.4.0
-     */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
   }
 
   /**
@@ -5129,6 +4926,8 @@ export declare namespace Machine {
     readonly children: ChildOwner<EventOf<InputEvents>>
     /** Value owned by the state that owns this invocation. */
     readonly state: StateByIdentifier<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
     /** Value owned by the nearest schema-backed ancestor, when one exists. */
     readonly containingState: ParentStateValue<States, StateId>
     /** Schema-backed ancestor values keyed by their complete state paths. */
@@ -5162,8 +4961,8 @@ export declare namespace Machine {
     readonly containingState: ParentStateValue<States, StateId>
     /** Schema-backed ancestor values keyed by their complete state paths. */
     readonly ancestors: ParentStateValues<States, StateId>
-    /** Builders for selecting the owning machine's next state. */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
     /** Latest active lifecycle snapshot published by the invoked logic or child. */
     readonly snapshot: Extract<RuntimeSnapshot<State, Error, Output>, { readonly status: "active" }>
   }
@@ -5193,8 +4992,8 @@ export declare namespace Machine {
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
-    /** Builders for selecting the owning machine's next state. */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
     /** Successful output produced by the invocation. */
     readonly output: Output
   }
@@ -5219,8 +5018,8 @@ export declare namespace Machine {
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
-    /** Builders for selecting the owning machine's next state. */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
     /** Next element emitted by the invoked Stream. */
     readonly element: Element
   }
@@ -5245,8 +5044,8 @@ export declare namespace Machine {
     readonly ancestors: ParentStateValues<States, StateId>
     /** Complete owning-machine configuration captured for this transition. */
     readonly snapshot: Snapshot<States>
-    /** Builders for selecting the owning machine's next state. */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
     /** Typed failure produced by the invocation. */
     readonly error: Error
   }
@@ -5276,14 +5075,8 @@ export declare namespace Machine {
     /** Lifecycle event retained while the eventless transition is evaluated. */
     readonly event: LifecycleEvent<Events>
 
-    /**
-     * Provides typed builders for choosing the next active state from this
-     * eventless handler. Each builder documents which existing state values it
-     * keeps.
-     *
-     * @since 0.4.0
-     */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
   }
 
   /**
@@ -5313,14 +5106,8 @@ export declare namespace Machine {
     /** Output produced by the completed final child or parallel regions. */
     readonly output: CompletionOutputByIdentifier<States, StateId>
 
-    /**
-     * Provides typed builders for choosing the next active state after this
-     * state completes. Each builder documents which existing state values it
-     * keeps.
-     *
-     * @since 0.4.0
-     */
-    readonly target: TargetBuilder<States, StateId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
   }
 
   /** Context passed to a transient choice resolver. There is no `state` value. */
@@ -5346,8 +5133,8 @@ export declare namespace Machine {
     }
     /** Lifecycle event that led to the transient choice. */
     readonly event: LifecycleEvent<Events>
-    /** Builders for selecting the concrete destination of this choice. */
-    readonly target: TargetBuilder<States, ChoiceId>
+    /** Value owned by the logical root. */
+    readonly root: StateByIdentifier<States, Extract<"", StateIdentifier<States>>>
   }
 
   /**
@@ -5444,7 +5231,7 @@ export declare namespace Machine {
    *
    * Handlers return snapshots for complete state replacement, target builder
    * results for path-safe partial transitions, state-value updates, or
-   * an explicit targetless result. In a machine definition, select `to.none`;
+   * an explicit targetless result. In a machine definition, select `{ none: true }`;
    * its optional resolver returns `undefined`. Raw decoded state values are
    * not accepted as transition targets.
    *
@@ -5542,8 +5329,8 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type EventTransitionReturn<Transition> = Transition extends (...args: any) => infer Authored ?
-    Authored extends TransitionBuilderEvidence<infer Result, any> ? Result : never
+  export type EventTransitionReturn<Transition> = Transition extends
+    { readonly initial: TargetReference<any, infer P, any> } ? InitialTarget<P>
     : Transition extends { readonly resolve?: infer Resolve } ?
       NonNullable<Resolve> extends (...args: any) => infer Ret ? Ret : never
     : never
@@ -5578,7 +5365,9 @@ export declare namespace Machine {
    * @category utility types
    * @since 0.4.0
    */
-  export type InvokeResolvedSource<Source> = Source extends (...args: any) => infer Resolved ? Resolved : Source
+  export type InvokeResolvedSource<Source> = Source extends LazyProgramValue ? Source
+    : Source extends (...args: any) => infer Resolved ? Resolved
+    : Source
 
   type InvokeFactoryResult<Source> = Source extends (...args: any) => infer Resolved ? Resolved : never
 
@@ -5633,8 +5422,7 @@ export declare namespace Machine {
   export type InvokeInitialError<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly initialError: Types.Covariant<infer InitialError> }
   } ? InitialError
-    : InvokeLogic<Invoke> extends Logic<any, any, any, any, any, infer InitialError> ? InitialError
-    : never
+    : LogicInitialErrorOf<InvokeLogic<Invoke>>
   /**
    * Extracts the runtime error from an invoked child process.
    *
@@ -5644,8 +5432,7 @@ export declare namespace Machine {
   export type InvokeRuntimeError<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly error: Types.Covariant<infer Error> }
   } ? Error
-    : InvokeLogic<Invoke> extends Logic<any, any, infer Error, any, any, any> ? Error
-    : never
+    : LogicErrorOf<InvokeLogic<Invoke>>
   /**
    * Extracts the output from an invoked child process.
    *
@@ -5655,8 +5442,7 @@ export declare namespace Machine {
   export type InvokeOutput<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly output: Types.Covariant<infer Output> }
   } ? Output
-    : InvokeLogic<Invoke> extends Logic<any, any, any, any, infer Output, any> ? Output
-    : never
+    : LogicOutputOf<InvokeLogic<Invoke>>
   /**
    * Extracts the service requirements from an invoke source child process logic.
    *
@@ -5666,8 +5452,7 @@ export declare namespace Machine {
   export type InvokeServices<Invoke> = Invoke extends {
     readonly [InvokeTypeId]: { readonly requirements: Types.Covariant<infer Requirements> }
   } ? Requirements
-    : InvokeLogic<Invoke> extends Logic<any, any, any, infer Requirements, any, any> ? Requirements
-    : never
+    : LogicServicesOf<InvokeLogic<Invoke>>
   /**
    * Extracts events emitted directly by an invoked child.
    *
@@ -5768,24 +5553,8 @@ export declare namespace Machine {
     | Effect.Services<ChoiceReturn<Config>>
     | InvokeRequirements<Config>
 
-  /** Type evidence retained by an authored transition without affecting runtime data. */
-  export interface TransitionTyped<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance = "required"
-  > {
-    readonly [TransitionTypeId]: {
-      readonly owner: Types.Covariant<readonly [States, Events, Emits, StateId, Context]>
-      readonly acceptance: Types.Covariant<Acceptance>
-    }
-  }
-
   /** The only transition value accepted by machine handler APIs. */
-  export type TransitionConfig<
+  type TransitionConfig<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -5793,13 +5562,12 @@ export declare namespace Machine {
     Context,
     Reenter extends boolean = false,
     Acceptance extends TransitionAcceptance = "required"
-  > = TransitionBuilderInput<States, Events, Emits, StateId, Context, Reenter, Acceptance>
+  > = Transition<States, StateId, Context, Events, Emits, {}, Reenter, Acceptance>
 
   export type SelectionBuilder<Selection> = Selection extends TargetSelection<infer Builder, any, any, any> ? Builder
     : never
   export type SelectionKind<Selection> = Selection extends TargetSelection<any, any, infer Kind, any> ? Kind : never
   export type SelectionPath<Selection> = Selection extends TargetSelection<any, infer Path, any, any> ? Path : never
-  type SelectionScope<Selection> = Selection extends TargetSelection<any, any, any, infer Scope> ? Scope : never
   export type TargetBuilderResult<Builder> =
     | (Builder extends (...args: any) => infer Result ? Result : never)
     | (Builder extends { readonly decoded: (...args: any) => infer Result } ? Result : never)
@@ -5808,20 +5576,9 @@ export declare namespace Machine {
     TargetBuilderResult<Builder>
     : never
 
-  type RetainedUpdateOwner<
-    States extends StateSchemas,
-    Source extends StateNodeIdentifier<States>,
-    Selection
-  > = Extract<
-    ParentStateIdentifier<Source>,
-    ParentStateIdentifier<Extract<SelectionPath<Selection>, string>> & ValuedStateIdentifier<States>
-  >
-
-  type RetainedOwnerSelector<Owner extends string> = () => TargetSelection<any, Owner, "state", "branch">
-
   /**
    * Destination construction returned when a transition declares one retained
-   * valued owner with `.updating(...)`.
+   * valued owner with a `{ target, update }` declaration.
    *
    * @category models
    * @since 0.22.0
@@ -5873,82 +5630,11 @@ export declare namespace Machine {
     & Omit<Context, "target">
     & (SelectionKind<Selection> extends "none" ? {} : { readonly target: SelectionBuilder<Selection> })
 
-  type StateUpdateResolveContext<
-    States extends StateSchemas,
-    Context,
-    Owner extends ValuedStateIdentifier<States>
-  > = Omit<Context, "target"> & {
-    /** Decoded owner value from the pre-transition snapshot. */
-    readonly current: StateByIdentifier<States, Owner>
-    /** Constructs the complete replacement for the selected owner. */
-    readonly owner: StateUpdateBuilder<States, Owner>
-  }
-
-  type UpdatingTransitionResolveContext<
-    States extends StateSchemas,
-    Context,
-    Selection,
-    Owner extends ValuedStateIdentifier<States>
-  > = Omit<Context, "target"> & {
-    /** Decoded owner value from the pre-transition snapshot. */
-    readonly current: StateByIdentifier<States, Owner>
-    /** Constructs the selected topology and requires `.update(...)`. */
-    readonly target: UpdatingTargetBuilder<SelectionBuilder<Selection>, States, Owner>
-    /** Constructs the complete replacement for the retained owner. */
-    readonly owner: StateUpdateBuilder<States, Owner>
-  }
-
   /** Context capability available only to explicitly declinable resolvers. */
   export interface DeclineCapability {
     /** Declines this candidate and continues hierarchical transition selection. */
     readonly decline: () => Declined
   }
-
-  export type TransitionResolver<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Selection
-  > = (
-    context: TransitionResolveContext<Context, Selection>,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) => SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined
-
-  export type DeclinableTransitionResolver<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Selection
-  > = (
-    context: TransitionResolveContext<Context, Selection> & DeclineCapability,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) =>
-    | (SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined)
-    | Declined
-
-  /** @internal */
-  type StateUpdateResolver<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Owner extends ValuedStateIdentifier<States>
-  > = (
-    context: StateUpdateResolveContext<States, Context, Owner>,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) => StateUpdate<States, Owner>
-
-  /** @internal */
-  type DeclinableStateUpdateResolver<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Owner extends ValuedStateIdentifier<States>
-  > = (
-    context: StateUpdateResolveContext<States, Context, Owner> & DeclineCapability,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) => StateUpdate<States, Owner> | Declined
 
   /** One named destination declared by a branching transition. */
   export interface TransitionBranchInput<
@@ -5968,14 +5654,29 @@ export declare namespace Machine {
     }
   }
 
+  type CompletedBranchResult<R> = R extends UpdatingStateConstruction<infer Target, infer S, infer Owner>
+    ? CombinedTarget<UnwrapConstruction<Target>, S, Owner>
+    : R
+  type SelectedConstruction<K extends string, R> = R extends
+    UpdatingStateConstruction<infer Target, infer S, infer Owner> ? {
+      readonly update: SelectedBranchBuilder<StateUpdateBuilder<S, Owner>, K> extends infer B ? {
+          readonly [M in keyof B]: StateUpdateBuilder<S, Owner>[Extract<M, keyof StateUpdateBuilder<S, Owner>>] extends
+            (...args: infer A) => unknown
+            ? (...args: A) => SelectedBranch<K, CombinedTarget<UnwrapConstruction<Target>, S, Owner>>
+            : never
+        } :
+        never
+    }
+    : SelectedBranch<K, R>
   type SelectedBranchCallable<Callable, Key extends string> = Callable extends {
     (...args: infer Arguments1): infer Result1
     (...args: infer Arguments2): infer Result2
   } ? {
-      (...args: Arguments1): SelectedBranch<Key, Result1>
-      (...args: Arguments2): SelectedBranch<Key, Result2>
+      (...args: Arguments1): SelectedConstruction<Key, Result1>
+      (...args: Arguments2): SelectedConstruction<Key, Result2>
     }
-    : Callable extends (...args: infer Arguments) => infer Result ? (...args: Arguments) => SelectedBranch<Key, Result>
+    : Callable extends (...args: infer Arguments) => infer Result ?
+      (...args: Arguments) => SelectedConstruction<Key, Result>
     : {}
 
   type SelectedBranchBuilderProperties<Builder, Key extends string> = {
@@ -5999,7 +5700,7 @@ export declare namespace Machine {
   export type BranchSelectionResult<Branches extends Readonly<Record<string, TransitionBranchInput>>> = {
     readonly [Key in Extract<keyof Branches, string>]: SelectedBranch<
       Key,
-      SelectedTargetResult<Branches[Key]["target"]>
+      CompletedBranchResult<SelectedTargetResult<Branches[Key]["target"]>>
     >
   }[Extract<keyof Branches, string>]
 
@@ -6007,108 +5708,6 @@ export declare namespace Machine {
     Context,
     Branches extends Readonly<Record<string, TransitionBranchInput>>
   > = Omit<Context, "target"> & { readonly select: BranchSelectors<Branches> }
-
-  export type TransitionBranchesResolver<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Branches extends Readonly<Record<string, TransitionBranchInput>>
-  > = (
-    context: TransitionBranchesResolveContext<Context, Branches>,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) => BranchSelectionResult<Branches>
-
-  export type DeclinableTransitionBranchesResolver<
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Context,
-    Branches extends Readonly<Record<string, TransitionBranchInput>>
-  > = (
-    context: TransitionBranchesResolveContext<Context, Branches> & DeclineCapability,
-    enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-  ) => BranchSelectionResult<Branches> | Declined
-
-  /** @internal Type evidence retained by a transition authored through its bound selector. */
-  export interface TransitionBuilderEvidence<out Result, out Acceptance extends TransitionAcceptance> {
-    readonly [TransitionBuilderTypeId]: {
-      readonly result: Types.Covariant<Result>
-      readonly acceptance: Types.Covariant<Acceptance>
-    }
-  }
-
-  type TransitionRequiredOptions = {
-    /** Keeps the transition required. The resolver cannot return `decline()`. */
-    readonly declinable?: false
-    readonly reenter?: never
-  }
-
-  type TransitionDeclinableOptions = {
-    /** Adds `decline()` to the resolver context and permits declining this candidate. */
-    readonly declinable: true
-    readonly reenter?: never
-  }
-
-  type BuiltTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Result,
-    Acceptance extends TransitionAcceptance
-  > =
-    & TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
-    & TransitionBuilderEvidence<Result, Acceptance>
-
-  interface TransitionResolveRequired<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, any>
-  > {
-    (
-      resolve: TransitionResolver<Events, Emits, Context, Selection>,
-      options?: TransitionRequiredOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined,
-      "required"
-    >
-  }
-
-  interface TransitionResolveDeclinable<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, any>
-  > {
-    (
-      resolve: DeclinableTransitionResolver<Events, Emits, Context, Selection>,
-      options: TransitionDeclinableOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      | (SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined)
-      | Declined,
-      "declinable"
-    >
-  }
 
   type ConstructionCallbacks<Context, Builder, Result> = {
     readonly [
@@ -6120,481 +5719,6 @@ export declare namespace Machine {
       ) => Result :
       never
   }
-
-  type GuardedTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, any>
-  > =
-    & ConstructionCallbacks<
-      Omit<Context, "target">,
-      SelectionBuilder<Selection>,
-      BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection> | Declined,
-        "declinable"
-      >
-    >
-    & (SelectionSupportsDefaultConstruction<Selection> extends true ? BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection> | Declined,
-        "declinable"
-      >
-      : {})
-    & {
-      readonly resolve: (
-        resolve: TransitionResolver<Events, Emits, Context, Selection>,
-        options?: TransitionRequiredOptions
-      ) => BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection> | Declined,
-        "declinable"
-      >
-    }
-
-  /**
-   * A selected transition target with target-specific resolver operations.
-   *
-   * **Example** (Constructing state while reentering)
-   *
-   * ```ts
-   * Reset: (to) =>
-   *   to.branch.Ready().reenter().from(({ event }) => ({ count: event.count }))
-   * ```
-   *
-   * @inlineType TransitionRequiredOptions
-   * @inlineType TransitionDeclinableOptions
-   */
-  export type TransitionTarget<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance,
-    Selection extends TargetSelection<any, any, any>
-  > =
-    & Selection
-    & ("declinable" extends Acceptance ? {
-        /** Declines this candidate before construction when the predicate is false. */
-        readonly guard: (
-          predicate: (context: Omit<Context, "target">) => boolean
-        ) => GuardedTransition<States, Events, Emits, StateId, Context, Reenter, Selection>
-      } :
-      {})
-    & ConstructionCallbacks<
-      Omit<Context, "target">,
-      SelectionBuilder<Selection>,
-      BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection>,
-        "required"
-      >
-    >
-    & (SelectionSupportsDefaultConstruction<Selection> extends true ? BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectionKind<Selection> extends "none" ? undefined : SelectedTargetResult<Selection> | undefined,
-        "required"
-      >
-      : {})
-    & {
-      /** Evaluates state construction after this transition is selected. */
-      readonly resolve:
-        & TransitionResolveRequired<States, Events, Emits, StateId, Context, Reenter, Selection>
-        & ("declinable" extends Acceptance ? TransitionResolveDeclinable<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            Selection
-          >
-          : {})
-    }
-    & ([Reenter] extends [true] ? {
-        /** Forces source exit and entry, preserving subsequent construction and guards. */
-        readonly reenter: () => Omit<
-          TransitionTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection>,
-          typeof Topology.TargetSelectionTypeId
-        >
-      } :
-      {})
-    & (SelectionKind<Selection> extends "state" ?
-      SelectionScope<Selection> extends "local" | "branch" ?
-        RetainedUpdateOwner<States, StateId, Selection> extends infer Owner extends ValuedStateIdentifier<States> ?
-          [Owner] extends [never] ? {}
-          : {
-            /** Declares one valued owner retained by the selected topology. */
-            readonly updating: <SelectedOwner extends Owner>(
-              owner: RetainedOwnerSelector<SelectedOwner>
-            ) => UpdatingTransitionTarget<
-              States,
-              Events,
-              Emits,
-              StateId,
-              Context,
-              Reenter,
-              Acceptance,
-              Selection,
-              SelectedOwner
-            >
-          }
-        : {}
-      : {}
-      : {})
-
-  type UpdatingConstructionCallbacks<Context, Builder, OwnerBuilder, Result> = {
-    readonly [
-      Method in Extract<keyof Builder & keyof OwnerBuilder, "from" | "decoded"> as Builder[Method] extends
-        (...args: infer Args) => unknown ? Args extends readonly [unknown?] ? Method : never : never
-    ]: Builder[Method] extends (...args: infer Args) => unknown ?
-      OwnerBuilder[Method] extends (value: infer Update) => unknown ?
-        (construct: (context: Context) => { readonly target: Args[0]; readonly update: Update }) => Result
-      : never :
-      never
-  }
-
-  type UpdatingCallbacks<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, "state">,
-    Owner extends ValuedStateIdentifier<States>,
-    Acceptance extends TransitionAcceptance
-  > = UpdatingConstructionCallbacks<
-    Omit<UpdatingTransitionResolveContext<States, Context, Selection, Owner>, "owner" | "target">,
-    SelectionBuilder<Selection>,
-    StateUpdateBuilder<States, Owner>,
-    BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      | CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>
-      | (Acceptance extends "declinable" ? Declined : never),
-      Acceptance
-    >
-  >
-
-  type GuardedUpdatingTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, "state">,
-    Owner extends ValuedStateIdentifier<States>
-  > = UpdatingCallbacks<States, Events, Emits, StateId, Context, Reenter, Selection, Owner, "declinable"> & {
-    readonly resolve: (
-      resolve: (
-        context: UpdatingTransitionResolveContext<States, Context, Selection, Owner>,
-        enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-      ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
-      options?: TransitionRequiredOptions
-    ) => BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
-      "declinable"
-    >
-  }
-
-  /**
-   * A topology selection that requires one retained owner replacement.
-   *
-   * `.from` constructs both values from schema inputs; `.decoded` accepts both
-   * decoded values. Both callbacks return `{ target, update }` and read the same
-   * pre-transition snapshot. Use `.resolve` for explicit child construction,
-   * mixed construction methods, or queued commands.
-   *
-   * **Example** (Guarding an atomic destination and owner update)
-   *
-   * ```ts
-   * Save: (to) => to.local.Saving().updating(to.root)
-   *   .guard(({ current }) => current.draft.length > 0)
-   *   .from(({ current }) => ({
-   *     target: { text: current.draft },
-   *     update: { ...current, attempts: current.attempts + 1 }
-   *   }))
-   * ```
-   */
-  export type UpdatingTransitionTarget<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance,
-    Selection extends TargetSelection<any, any, "state">,
-    Owner extends ValuedStateIdentifier<States>
-  > =
-    & Selection
-    & UpdatingCallbacks<States, Events, Emits, StateId, Context, Reenter, Selection, Owner, "required">
-    & ([Reenter] extends [true] ? {
-        readonly reenter: () => Omit<
-          UpdatingTransitionTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection, Owner>,
-          typeof Topology.TargetSelectionTypeId
-        >
-      } :
-      {})
-    & ("declinable" extends Acceptance ? {
-        /** Declines before either value is constructed or any commands are enqueued. */
-        readonly guard: (
-          predicate: (
-            context: Omit<UpdatingTransitionResolveContext<States, Context, Selection, Owner>, "owner" | "target">
-          ) => boolean
-        ) => GuardedUpdatingTransition<States, Events, Emits, StateId, Context, Reenter, Selection, Owner>
-      } :
-      {})
-    & {
-      /** @internal */
-      readonly "~effect/Machine/UpdatingTransitionTarget": Owner
-      readonly resolve:
-        & ((
-          resolve: (
-            context: UpdatingTransitionResolveContext<States, Context, Selection, Owner>,
-            enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-          ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
-          options?: TransitionRequiredOptions
-        ) => BuiltTransition<
-          States,
-          Events,
-          Emits,
-          StateId,
-          Context,
-          Reenter,
-          CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner>,
-          "required"
-        >)
-        & ("declinable" extends Acceptance ? (
-            resolve: (
-              context: UpdatingTransitionResolveContext<States, Context, Selection, Owner> & DeclineCapability,
-              enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-            ) => CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
-            options: TransitionDeclinableOptions
-          ) => BuiltTransition<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            CombinedTarget<UnwrapConstruction<SelectedTargetResult<Selection>>, States, Owner> | Declined,
-            "declinable"
-          >
-          : {})
-    }
-
-  /** @internal */
-  interface StateUpdateTransitionRequired<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, "update">
-  > {
-    (
-      resolve: StateUpdateResolver<
-        States,
-        Events,
-        Emits,
-        Context,
-        Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
-      >,
-      options?: TransitionRequiredOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      SelectedTargetResult<Selection>,
-      "required"
-    >
-  }
-
-  /** @internal */
-  interface StateUpdateTransitionDeclinable<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, "update">
-  > {
-    (
-      resolve: DeclinableStateUpdateResolver<
-        States,
-        Events,
-        Emits,
-        Context,
-        Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
-      >,
-      options: TransitionDeclinableOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      SelectedTargetResult<Selection> | Declined,
-      "declinable"
-    >
-  }
-
-  type GuardedStateUpdateTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Selection extends TargetSelection<any, any, "update">
-  > =
-    & ConstructionCallbacks<
-      Omit<
-        StateUpdateResolveContext<States, Context, Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>>,
-        "owner"
-      >,
-      SelectionBuilder<Selection>,
-      BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection> | Declined,
-        "declinable"
-      >
-    >
-    & {
-      readonly resolve: (
-        resolve: StateUpdateResolver<
-          States,
-          Events,
-          Emits,
-          Context,
-          Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
-        >,
-        options?: TransitionRequiredOptions
-      ) => BuiltTransition<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        SelectedTargetResult<Selection> | Declined,
-        "declinable"
-      >
-    }
-
-  /** @internal */
-  type StateUpdateTransition<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance,
-    Selection extends TargetSelection<any, any, "update">
-  > =
-    & Selection
-    & ([Reenter] extends [true] ? {
-        /** Reenters the source while updating its retained valued ancestor. */
-        readonly reenter: () => Omit<
-          StateUpdateTransition<States, Events, Emits, StateId, Context, Reenter, Acceptance, Selection>,
-          typeof Topology.TargetSelectionTypeId
-        >
-      } :
-      {})
-    & ("declinable" extends Acceptance ? {
-        /** Declines before replacing the selected owner value. */
-        readonly guard: (
-          predicate: (
-            context: Omit<
-              StateUpdateResolveContext<
-                States,
-                Context,
-                Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>
-              >,
-              "owner"
-            >
-          ) => boolean
-        ) => GuardedStateUpdateTransition<States, Events, Emits, StateId, Context, Reenter, Selection>
-      } :
-      {})
-    & ConstructionCallbacks<
-      Omit<
-        StateUpdateResolveContext<States, Context, Extract<SelectionPath<Selection>, ValuedStateIdentifier<States>>>,
-        "owner"
-      >,
-      SelectionBuilder<Selection>,
-      BuiltTransition<States, Events, Emits, StateId, Context, Reenter, SelectedTargetResult<Selection>, "required">
-    >
-    & {
-      readonly resolve:
-        & StateUpdateTransitionRequired<States, Events, Emits, StateId, Context, Reenter, Selection>
-        & ("declinable" extends Acceptance ? StateUpdateTransitionDeclinable<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            Selection
-          >
-          : {})
-    }
 
   /** @internal Type evidence retained by a machine initial-entry declaration. */
   export interface InitialBuilderEvidence<out Selection> {
@@ -6683,204 +5807,6 @@ export declare namespace Machine {
       }
   ) => InitialBuilderEvidence<TargetSelection<any, any, any>>
 
-  type TransitionSelectorNode<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance,
-    Node
-  > = Node extends TargetSelection<any, any, "update"> ? StateUpdateTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      Acceptance,
-      Node
-    >
-    : Node extends (...args: infer Args) => infer Selection ? Selection extends TargetSelection<any, any, any> ?
-          & ((...args: Args) => TransitionTarget<
-            States,
-            Events,
-            Emits,
-            StateId,
-            Context,
-            Reenter,
-            Acceptance,
-            Selection
-          >)
-          & {
-            readonly [Key in keyof Node]: TransitionSelectorNode<
-              States,
-              Events,
-              Emits,
-              StateId,
-              Context,
-              Reenter,
-              Acceptance,
-              Node[Key]
-            >
-          }
-      : never
-    : Node extends TargetSelection<any, any, any> ? TransitionTarget<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        Acceptance,
-        Node
-      >
-    : {
-      readonly [Key in keyof Node]: TransitionSelectorNode<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Context,
-        Reenter,
-        Acceptance,
-        Node[Key]
-      >
-    }
-
-  interface TransitionBranchesResolveRequired<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Branches extends Readonly<Record<string, TransitionBranchInput>>
-  > {
-    (
-      resolve: TransitionBranchesResolver<Events, Emits, Context, Branches>,
-      options?: TransitionRequiredOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      BranchSelectionResult<Branches>,
-      "required"
-    >
-  }
-
-  interface TransitionBranchesResolveDeclinable<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Branches extends Readonly<Record<string, TransitionBranchInput>>
-  > {
-    (
-      resolve: DeclinableTransitionBranchesResolver<Events, Emits, Context, Branches>,
-      options: TransitionDeclinableOptions
-    ): BuiltTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Reenter,
-      BranchSelectionResult<Branches> | Declined,
-      "declinable"
-    >
-  }
-
-  type TransitionSelectorTargets<
-    in out States extends StateSchemas,
-    in out Events extends ReadonlyArray<TaggedSchema>,
-    in out Emits extends ReadonlyArray<TaggedSchema>,
-    in out StateId extends StateNodeIdentifier<States>,
-    in out Context,
-    in out Reenter extends boolean,
-    in out Acceptance extends TransitionAcceptance
-  > = {
-    readonly [Key in keyof TargetSelector<States, StateId>]: TransitionSelectorNode<
-      States,
-      Events,
-      Emits,
-      StateId,
-      Context,
-      Key extends "self" ? false : Reenter,
-      Acceptance,
-      TargetSelector<States, StateId>[Key]
-    >
-  }
-
-  type TransitionBranchesTarget<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance,
-    Branches extends Readonly<Record<string, TransitionBranchInput>>
-  > =
-    & {
-      /** Resolves exactly one declared branch after this transition is selected. */
-      readonly resolve:
-        & TransitionBranchesResolveRequired<States, Events, Emits, StateId, Context, Reenter, Branches>
-        & ("declinable" extends Acceptance
-          ? TransitionBranchesResolveDeclinable<States, Events, Emits, StateId, Context, Reenter, Branches>
-          : {})
-    }
-    & ([Reenter] extends [true] ? {
-        readonly reenter: () => TransitionBranchesTarget<
-          States,
-          Events,
-          Emits,
-          StateId,
-          Context,
-          Reenter,
-          Acceptance,
-          Branches
-        >
-      } :
-      {})
-
-  /** Selector supplied to inline transition declarations. */
-  export interface TransitionSelector<
-    in out States extends StateSchemas,
-    in out Events extends ReadonlyArray<TaggedSchema>,
-    in out Emits extends ReadonlyArray<TaggedSchema>,
-    in out StateId extends StateNodeIdentifier<States>,
-    in out Context,
-    in out Reenter extends boolean,
-    in out Acceptance extends TransitionAcceptance
-  > extends TransitionSelectorTargets<States, Events, Emits, StateId, Context, Reenter, Acceptance> {
-    /** Declares a closed set of named destinations for one resolver. */
-    readonly branches: <const Branches extends Readonly<Record<string, TransitionBranchInput>>>(
-      branches: Branches & ValidateTransitionBranchRecord<NoInfer<Branches>>
-    ) => TransitionBranchesTarget<States, Events, Emits, StateId, Context, Reenter, Acceptance, Branches>
-  }
-
-  /** Inline transition declaration accepted by state and invocation handlers. */
-  export type TransitionBuilderInput<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<States>,
-    Context,
-    Reenter extends boolean,
-    Acceptance extends TransitionAcceptance
-  > = (
-    to: TransitionSelector<States, Events, Emits, StateId, Context, Reenter, Acceptance>
-  ) =>
-    & TransitionTyped<States, Events, Emits, StateId, Context, Reenter, Acceptance>
-    & TransitionBuilderEvidence<any, Acceptance>
-
   export type InvokeTransition<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
@@ -6892,7 +5818,7 @@ export declare namespace Machine {
   export type InvokeSource<Value, Context> = Value | ((context: Context) => Value)
 
   /** Inline state-owned work that runs for the lifetime of its active state. */
-  export interface InvokeOwned<
+  interface InvokeOwned<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -6903,27 +5829,6 @@ export declare namespace Machine {
     readonly "~effect/Machine/InvokeOwner"?: Types.Covariant<
       readonly [States, Events, Emits, StateId, InputEvents, ParentEvents]
     >
-  }
-
-  /** Type evidence retained by a completed state-owned invocation. */
-  export interface InvokeTyped<
-    Output,
-    Error,
-    Requirements,
-    InitialError,
-    Emits = never,
-    ParentEvent = never,
-    Outcomes = never
-  > {
-    readonly [InvokeTypeId]: {
-      readonly output: Types.Covariant<Output>
-      readonly error: Types.Covariant<Error>
-      readonly requirements: Types.Covariant<Requirements>
-      readonly initialError: Types.Covariant<InitialError>
-      readonly emits: Types.Covariant<Emits>
-      readonly parentEvents: Types.Covariant<ParentEvent>
-      readonly outcomes: Types.Covariant<Outcomes>
-    }
   }
 
   type StoredInvokeConfig<
@@ -7047,554 +5952,6 @@ export declare namespace Machine {
   export type LogicOutputOf<Value> = Effect.Success<LogicRunEffectOf<Value>>
   export type LogicInitialErrorOf<Value> = Effect.Error<LogicInitialEffectOf<Value>>
 
-  type RequiredInvokeChannel<Value, Channel extends string> = IsAny<Value> extends true ? Channel
-    : [Value] extends [never] ? never
-    : Channel
-
-  type InvokeBuilderResult<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Output,
-    Error,
-    Requirements,
-    InitialError,
-    ChildEmits,
-    ChildParentEvent,
-    Outcomes
-  > =
-    & InvokeOwned<States, Events, Emits, StateId, InputEvents, ParentEvents>
-    & InvokeTyped<Output, Error, Requirements, InitialError, ChildEmits, ChildParentEvent, Outcomes>
-    & { readonly [InvokeBuilderTypeId]: true }
-
-  /** Lifecycle handlers exposed according to the selected invocation source. */
-  type InvokeBuilder<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Output,
-    Error,
-    Requirements,
-    InitialError,
-    ChildEmits,
-    ChildParentEvent,
-    Element,
-    Pending extends string,
-    SnapshotHandler,
-    Outcomes = never
-  > =
-    & ([Pending] extends [never] ? InvokeBuilderResult<
-        States,
-        Events,
-        Emits,
-        StateId,
-        InputEvents,
-        ParentEvents,
-        Output,
-        Error,
-        Requirements,
-        InitialError,
-        ChildEmits,
-        ChildParentEvent,
-        Outcomes
-      >
-      : {})
-    & ("done" extends Pending ? {
-        /** Handles successful completion and exposes the invocation output. */
-        readonly onDone: <
-          const Handler extends InvokeTransition<
-            States,
-            Events,
-            Emits,
-            StateId,
-            InvokeDoneContext<States, Events, Emits, StateId, Output, InputEvents, ParentEvents>
-          >
-        >(
-          handler:
-            & Handler
-            & InvokeTransition<
-              States,
-              Events,
-              Emits,
-              StateId,
-              InvokeDoneContext<States, Events, Emits, StateId, Output, InputEvents, ParentEvents>
-            >
-        ) => InvokeBuilder<
-          States,
-          Events,
-          Emits,
-          StateId,
-          InputEvents,
-          ParentEvents,
-          Output,
-          Error,
-          Requirements,
-          InitialError,
-          ChildEmits,
-          ChildParentEvent,
-          Element,
-          Exclude<Pending, "done">,
-          SnapshotHandler,
-          Outcomes | Handler
-        >
-      }
-      : {})
-    & ("failure" extends Pending ? {
-        /** Handles typed failure and exposes the invocation error. */
-        readonly onFailure: <
-          const Handler extends InvokeTransition<
-            States,
-            Events,
-            Emits,
-            StateId,
-            InvokeFailureContext<States, Events, Emits, StateId, Error, InputEvents, ParentEvents>
-          >
-        >(
-          handler:
-            & Handler
-            & InvokeTransition<
-              States,
-              Events,
-              Emits,
-              StateId,
-              InvokeFailureContext<States, Events, Emits, StateId, Error, InputEvents, ParentEvents>
-            >
-        ) => InvokeBuilder<
-          States,
-          Events,
-          Emits,
-          StateId,
-          InputEvents,
-          ParentEvents,
-          Output,
-          Error,
-          Requirements,
-          InitialError,
-          ChildEmits,
-          ChildParentEvent,
-          Element,
-          Exclude<Pending, "failure">,
-          SnapshotHandler,
-          Outcomes | Handler
-        >
-      }
-      : {})
-    & ("element" extends Pending ? {
-        /** Handles each backpressured element emitted by an invoked Stream. */
-        readonly onElement: <
-          const Handler extends InvokeTransition<
-            States,
-            Events,
-            Emits,
-            StateId,
-            InvokeElementContext<States, Events, Emits, StateId, Element, InputEvents, ParentEvents>
-          >
-        >(
-          handler:
-            & Handler
-            & InvokeTransition<
-              States,
-              Events,
-              Emits,
-              StateId,
-              InvokeElementContext<States, Events, Emits, StateId, Element, InputEvents, ParentEvents>
-            >
-        ) => InvokeBuilder<
-          States,
-          Events,
-          Emits,
-          StateId,
-          InputEvents,
-          ParentEvents,
-          Output,
-          Error,
-          Requirements,
-          InitialError,
-          ChildEmits,
-          ChildParentEvent,
-          Element,
-          Exclude<Pending, "element">,
-          SnapshotHandler,
-          Outcomes | Handler
-        >
-      }
-      : {})
-    & ([SnapshotHandler] extends [never] ? {} : {
-      /** Handles each active snapshot published by invoked logic or a child machine. */
-      readonly onSnapshot: <const Handler extends SnapshotHandler>(handler: Handler & SnapshotHandler) => InvokeBuilder<
-        States,
-        Events,
-        Emits,
-        StateId,
-        InputEvents,
-        ParentEvents,
-        Output,
-        Error,
-        Requirements,
-        InitialError,
-        ChildEmits,
-        ChildParentEvent,
-        Element,
-        Pending,
-        never,
-        Outcomes | Handler
-      >
-    })
-
-  type EffectInvokeBuilder<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Source extends (...args: ReadonlyArray<any>) => Effect.Effect<any, any, any>
-  > = InvokeBuilder<
-    States,
-    Events,
-    Emits,
-    StateId,
-    InputEvents,
-    ParentEvents,
-    Effect.Success<ReturnType<Source>>,
-    Effect.Error<ReturnType<Source>>,
-    Effect.Services<ReturnType<Source>>,
-    never,
-    never,
-    never,
-    never,
-    | RequiredInvokeChannel<Effect.Success<ReturnType<Source>>, "done">
-    | RequiredInvokeChannel<Effect.Error<ReturnType<Source>>, "failure">,
-    never
-  >
-
-  type StreamInvokeBuilder<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Source extends (...args: ReadonlyArray<any>) => Stream.Stream<any, any, any>
-  > = InvokeBuilder<
-    States,
-    Events,
-    Emits,
-    StateId,
-    InputEvents,
-    ParentEvents,
-    void,
-    Stream.Error<ReturnType<Source>>,
-    Stream.Services<ReturnType<Source>>,
-    never,
-    never,
-    never,
-    Stream.Success<ReturnType<Source>>,
-    | "done"
-    | RequiredInvokeChannel<Stream.Success<ReturnType<Source>>, "element">
-    | RequiredInvokeChannel<Stream.Error<ReturnType<Source>>, "failure">,
-    never
-  >
-
-  type LogicInvokeBuilder<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    ChildLogic
-  > = InvokeBuilder<
-    States,
-    Events,
-    Emits,
-    StateId,
-    InputEvents,
-    ParentEvents,
-    LogicOutputOf<ChildLogic>,
-    LogicErrorOf<ChildLogic>,
-    LogicServicesOf<ChildLogic>,
-    LogicInitialErrorOf<ChildLogic>,
-    never,
-    never,
-    never,
-    | RequiredInvokeChannel<LogicOutputOf<ChildLogic>, "done">
-    | RequiredInvokeChannel<LogicErrorOf<ChildLogic>, "failure">,
-    InvokeTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      InvokeSnapshotContext<
-        States,
-        Events,
-        Emits,
-        StateId,
-        LogicStateOf<ChildLogic>,
-        LogicErrorOf<ChildLogic>,
-        LogicOutputOf<ChildLogic>,
-        InputEvents,
-        ParentEvents
-      >
-    >
-  >
-
-  type ChildInvokeBuilder<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Child extends ChildMachine.Any,
-    ChildDefinition extends Machine.Any = Child["machine"]
-  > = InvokeBuilder<
-    States,
-    Events,
-    Emits,
-    StateId,
-    InputEvents,
-    ParentEvents,
-    Output<ChildDefinition>,
-    Error<ChildDefinition> | ActionError<Services<ChildDefinition>>,
-    Services<ChildDefinition>,
-    InitialError<ChildDefinition>,
-    EmittedEvent<ChildDefinition>,
-    EventOf<Machine.ParentEvents<ChildDefinition>>,
-    never,
-    | RequiredInvokeChannel<Output<ChildDefinition>, "done">
-    | RequiredInvokeChannel<Error<ChildDefinition> | ActionError<Services<ChildDefinition>>, "failure">,
-    InvokeTransition<
-      States,
-      Events,
-      Emits,
-      StateId,
-      InvokeSnapshotContext<
-        States,
-        Events,
-        Emits,
-        StateId,
-        Snapshot<Machine.States<ChildDefinition>>,
-        Error<ChildDefinition>,
-        Output<ChildDefinition>,
-        InputEvents,
-        ParentEvents
-      >
-    >
-  >
-
-  /**
-   * Selects state-owned work and begins its lifecycle-handler chain.
-   *
-   * Each source exposes exactly the lifecycle methods that it can produce. A
-   * chain becomes returnable from `invoke` only after every reachable required
-   * channel has been handled.
-   *
-   * **Example** (Invoking an Effect)
-   *
-   * ```ts
-   * invoke: (from) =>
-   *   from.effect("load-user", () => loadUser).onDone((to) =>
-   *     to.branch.Ready().resolve(({ output, target }) => target.from({ user: output }))
-   *   ).onFailure((to) =>
-   *     to.branch.Failed().resolve(({ error, target }) => target.from({ error }))
-   *   )
-   * ```
-   *
-   * @inlineType EffectInvokeBuilder
-   * @inlineType StreamInvokeBuilder
-   * @inlineType LogicInvokeBuilder
-   * @inlineType ChildInvokeBuilder
-   * @inlineType InvokeBuilder
-   *
-   * @category models
-   * @since 0.18.0
-   */
-  export interface InvokeSelector<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > {
-    /**
-     * Starts a fresh Effect each time the owning state is entered.
-     *
-     * @param id Parent-local lifecycle identifier.
-     * @param source Lazy Effect factory evaluated on every entry.
-     */
-    readonly effect: <
-      const Source extends (
-        context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-      ) => Effect.Effect<unknown, unknown, unknown>
-    >(
-      id: InvokeLifecycleId,
-      source: Source
-    ) => EffectInvokeBuilder<States, Events, Emits, StateId, InputEvents, ParentEvents, Source>
-
-    /**
-     * Starts a fresh, backpressured Stream each time the owning state is entered.
-     *
-     * @param id Parent-local lifecycle identifier.
-     * @param source Lazy Stream factory evaluated on every entry.
-     */
-    readonly stream: <
-      const Source extends (
-        context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-      ) => Stream.Stream<unknown, unknown, any>
-    >(
-      id: InvokeLifecycleId,
-      source: Source
-    ) => StreamInvokeBuilder<States, Events, Emits, StateId, InputEvents, ParentEvents, Source>
-
-    /**
-     * Starts a cancellable state-scoped timer.
-     *
-     * @param id Parent-local lifecycle identifier.
-     * @param duration Duration input or context-dependent duration factory.
-     */
-    readonly timer: (
-      id: InvokeLifecycleId,
-      duration: InvokeSource<
-        Duration.Input,
-        InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-      >
-    ) => InvokeBuilder<
-      States,
-      Events,
-      Emits,
-      StateId,
-      InputEvents,
-      ParentEvents,
-      void,
-      never,
-      never,
-      never,
-      never,
-      never,
-      never,
-      "done",
-      never
-    >
-
-    /**
-     * Starts reusable process logic at a typed parent-local address.
-     *
-     * @param id Parent-local lifecycle identifier.
-     * @param options Address and reusable logic value or factory.
-     */
-    readonly logic: {
-      <
-        const Source extends (
-          context: InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-        ) => unknown,
-        Address extends ChildAddress<never>
-      >(
-        id: InvokeLifecycleId,
-        options: {
-          /** Typed parent-local address used to send events to this logic. */
-          readonly address:
-            & Address
-            & ChildAddress.Compatibility<Address, LogicEventOf<ReturnType<NoInfer<Source>>>>
-          /** Context-dependent factory that returns reusable process logic. */
-          readonly logic: Source
-        },
-        ..._validation: ReturnType<Source> extends { readonly initial: unknown; readonly run: unknown } ? [] : [
-          "logic factory must return Machine.Logic"
-        ]
-      ): LogicInvokeBuilder<
-        States,
-        Events,
-        Emits,
-        StateId,
-        InputEvents,
-        ParentEvents,
-        ReturnType<Source>
-      >
-      <const Source, Address extends ChildAddress<never>>(
-        id: InvokeLifecycleId,
-        options: {
-          /** Typed parent-local address used to send events to this logic. */
-          readonly address: Address & ChildAddress.Compatibility<Address, LogicEventOf<NoInfer<Source>>>
-          /** Reusable process logic started when the owning state enters. */
-          readonly logic: Source
-        },
-        ..._validation: Source extends { readonly initial: unknown; readonly run: unknown } ? [] : [
-          "logic must implement Machine.Logic"
-        ]
-      ): LogicInvokeBuilder<
-        States,
-        Events,
-        Emits,
-        StateId,
-        InputEvents,
-        ParentEvents,
-        Source
-      >
-    }
-
-    /**
-     * Starts a complete child statechart represented by a reusable descriptor.
-     *
-     * @param child Reusable descriptor created with `Machine.child`.
-     * @param options Input construction for a child with a non-void input schema.
-     */
-    readonly child: <const Child extends ChildMachine.Any>(
-      child:
-        & Child
-        & (Child["machine"] extends EnsureExecutable<
-          Machine.States<Child["machine"]>,
-          Machine.UnhandledStates<Child["machine"]>,
-          Machine.OutputStates<Child["machine"]>
-        > ? unknown
-          : never),
-      ...options: InputSchema<Child["machine"]> extends typeof Schema.Void ? [options?: { readonly input?: never }]
-        : [options: {
-          /** Child input value or factory evaluated from the owning state context. */
-          readonly input: InvokeSource<
-            Input<Child["machine"]>,
-            InvokeContext<States, Events, Emits, StateId, InputEvents, ParentEvents>
-          >
-        }]
-    ) => ChildInvokeBuilder<States, Events, Emits, StateId, InputEvents, ParentEvents, Child>
-  }
-
-  /**
-   * Inline invocation declaration accepted by an active state handler.
-   *
-   * Return one completed source chain or an array of completed chains. Source
-   * computations and child descriptors may be extracted, but the chain stays
-   * local to preserve the owning state and machine protocols.
-   *
-   * @category models
-   * @since 0.18.0
-   */
-  export type InvokeBuilderInput<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > = (
-    from: InvokeSelector<States, Events, Emits, StateId, InputEvents, ParentEvents>
-  ) =>
-    | (InvokeOwned<States, Events, Emits, StateId, InputEvents, ParentEvents> & {
-      readonly [InvokeBuilderTypeId]: true
-    })
-    | ReadonlyArray<
-      InvokeOwned<States, Events, Emits, StateId, InputEvents, ParentEvents> & {
-        readonly [InvokeBuilderTypeId]: true
-      }
-    >
-
   /** Output construction available to final and output-producing parallel states. */
   type OutputHandlerConfig<
     States extends StateSchemas,
@@ -7622,86 +5979,6 @@ export declare namespace Machine {
     : {
       readonly output?: never
     }
-
-  /**
-   * Configuration accepted for a non-final state.
-   *
-   * **Example** (State actions, events, and invocation)
-   *
-   * ```ts
-   * machine.handle({ states: {
-   *   Loading: {
-   *     entry: (_, enqueue) => enqueue.emit({ _tag: "Started" }),
-   *     invoke: (from) =>
-   *       from.effect("load", () => load).onDone((to) => to.branch.Ready()),
-   *     on: { Cancel: (to) => to.branch.Idle() }
-   *   }
-   * } })
-   * ```
-   *
-   * @inlineType ActiveOutputHandlerConfig
-   * @inlineType OutputHandlerConfig
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export type ActiveStateConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    E,
-    R,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > = {
-    /** Runs synchronously when the state is entered and may enqueue commands. */
-    readonly entry?: (
-      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
-      enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-    ) => StateActionResult<any, any>
-    /** Runs synchronously before the state is exited and may enqueue commands. */
-    readonly exit?: (
-      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
-      enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-    ) => StateActionResult<any, any>
-    /** Starts state-owned Effect, Stream, timer, logic, or child lifecycles. */
-    readonly invoke?: InvokeBuilderInput<States, Events, Emits, StateId, InputEvents, ParentEvents>
-    /** Eventless transition evaluated after the state becomes stable. */
-    readonly always?: TransitionConfig<
-      States,
-      Events,
-      Emits,
-      StateId,
-      AlwaysContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
-      false,
-      TransitionAcceptance
-    >
-    /** Transition evaluated after this compound or parallel state completes. */
-    readonly onDone?: TransitionConfig<
-      States,
-      Events,
-      Emits,
-      StateId,
-      DoneContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
-      false,
-      TransitionAcceptance
-    >
-    /** Event handlers keyed by the `_tag` of the machine's public or internal events. */
-    readonly on?: {
-      readonly [EventTag in TagOf<Events[number]>]?: TransitionConfig<
-        States,
-        Events,
-        Emits,
-        StateId,
-        HandlerContext<States, Events, Emits, StateId, EventTag, E, R, InputEvents, ParentEvents>,
-        true,
-        TransitionAcceptance
-      >
-    }
-    /** Supplies missing direct initial-child values required by implicit entry and shallow history. */
-    readonly initialize?: StateInitializeHandler<States, Events, Emits, StateId, InputEvents, ParentEvents>
-  } & ActiveOutputHandlerConfig<States, Events, StateId>
 
   /**
    * Values constructed for a state's schema-valued direct initial children.
@@ -7882,7 +6159,7 @@ export declare namespace Machine {
   }
 
   /** Required implementation for a choice pseudo-state. */
-  export interface ChoiceStateConfig<
+  interface ChoiceStateConfig<
     States extends StateSchemas,
     Events extends ReadonlyArray<TaggedSchema>,
     Emits extends ReadonlyArray<TaggedSchema>,
@@ -7908,68 +6185,7 @@ export declare namespace Machine {
     readonly initialize?: never
   }
 
-  /**
-   * Configuration accepted for a final state.
-   *
-   * @inlineType OutputHandlerConfig
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export type FinalStateConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > = {
-    /** Runs synchronously when the final state is entered and may enqueue commands. */
-    readonly entry?: (
-      context: StateActionContext<States, Events, Emits, StateId, InputEvents, ParentEvents>,
-      enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
-    ) => StateActionResult<any, any>
-    readonly exit?: never
-    readonly always?: never
-    readonly onDone?: never
-    readonly on?: never
-  } & OutputHandlerConfig<States, Events, StateId, FinalOutputContext<States, Events, StateId>>
-
-  /**
-   * Configuration accepted by `handle` for a state tag.
-   *
-   * @category models
-   * @since 0.4.0
-   */
-  export type HandlerConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateIdentifier<States>,
-    E,
-    R,
-    InputEvents extends ReadonlyArray<TaggedSchema> = Events,
-    ParentEvents extends ReadonlyArray<TaggedSchema> = readonly []
-  > = NodeByIdentifier<States, StateId> extends { readonly type: "final" } ?
-    FinalStateConfig<States, Events, Emits, StateId, InputEvents, ParentEvents>
-    : ActiveStateConfig<States, Events, Emits, StateId, E, R, InputEvents, ParentEvents>
-
-  type HandlerNodeConfig<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Path extends StateNodeIdentifier<States>,
-    E,
-    R,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>
-  > = Path extends ChoiceIdentifier<States> ? ChoiceStateConfig<States, Events, Emits, Path, InputEvents, ParentEvents>
-    : Path extends StateIdentifier<States> ? HandlerConfig<States, Events, Emits, Path, E, R, InputEvents, ParentEvents>
-    : never
-
   type HandlerChildren<Node> = Node extends { readonly states: infer Children extends StateSchemas } ? Children : never
-
-  type HandlerNodeId<States extends StateSchemas, Path extends string> = Extract<Path, StateNodeIdentifier<States>>
 
   type HandlerConfigPart<Config> = {
     readonly [Key in keyof Config as Key extends "states" ? never : Key]: Config[Key]
@@ -8012,78 +6228,6 @@ export declare namespace Machine {
       }
     }
     : { readonly [Key in Path]?: Validation }
-
-  /** Nested handler-tree structure shared by active and final state configs. */
-  type HandlerNode<
-    AllStates extends StateSchemas,
-    Node,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    E,
-    R,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    StateId extends StateNodeIdentifier<AllStates>
-  > =
-    & HandlerNodeConfig<AllStates, Events, Emits, StateId, E, R, InputEvents, ParentEvents>
-    & (StateId extends ChoiceIdentifier<AllStates> ? {
-        readonly states?: never
-        readonly history?: never
-      }
-      : HandlerChildren<Node> extends infer Children extends StateSchemas ? [Children] extends [never] ? {
-            readonly states?: never
-            readonly history?: never
-          }
-        : {
-          /** Child-state handlers nested according to the declared state topology. */
-          readonly states?: HandlerTree<
-            AllStates,
-            Children,
-            Events,
-            Emits,
-            E,
-            R,
-            InputEvents,
-            ParentEvents,
-            Extract<StateId, StateIdentifier<AllStates>>
-          >
-          /** First-use defaults keyed by direct history pseudo-state. */
-          readonly history?: HistoryDefaultConfig<
-            AllStates,
-            Events,
-            Emits,
-            Extract<StateId, StateIdentifier<AllStates>>,
-            Children
-          >
-        }
-      : {
-        readonly states?: never
-        readonly history?: never
-      })
-
-  type HandlerTree<
-    AllStates extends StateSchemas,
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    E,
-    R,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>,
-    Prefix extends string
-  > = {
-    readonly [Key in ActiveStateKey<States> | ChoiceStateKey<States>]?: HandlerNode<
-      AllStates,
-      States[Key],
-      Events,
-      Emits,
-      E,
-      R,
-      InputEvents,
-      ParentEvents,
-      HandlerNodeId<AllStates, JoinPath<Prefix, Key>>
-    >
-  }
 
   type HandlerNodeConfigKey =
     | "always"
@@ -8226,30 +6370,6 @@ export declare namespace Machine {
     >
   : never
 
-  type HandlerInitializeValidationAtPath<Config, Path extends string> = HandlerConfigAtPath<Config, Path> extends
-    infer StateConfig ? [StateConfig] extends [never] ? HandlerValidationAtPath<Path, {
-        readonly initialize: HandlerValidationError<
-          "State requires initialize because a transition enters its declared initial configuration",
-          Path
-        >
-      }>
-    : "initialize" extends keyof StateConfig ? never
-    : HandlerValidationAtPath<Path, {
-      readonly initialize: HandlerValidationError<
-        "State requires initialize because a transition enters its declared initial configuration",
-        Path
-      >
-    }>
-    : never
-
-  type HandlerInitialTargetValidationForPaths<
-    AllStates extends StateSchemas,
-    Config,
-    Required
-  > = Types.UnionToIntersection<
-    Required extends string ? HandlerInitializeValidationAtPath<Config, Required> : unknown
-  >
-
   type HandlerTreeInitialTargetPath<Config> = string extends keyof Config ? never
     : Config extends object ? {
         readonly [Key in keyof Config]:
@@ -8257,16 +6377,6 @@ export declare namespace Machine {
           | (Config[Key] extends { readonly states: infer Children } ? HandlerTreeInitialTargetPath<Children> : never)
       }[keyof Config]
     : never
-
-  type HandlerInitialTargetValidation<
-    AllStates extends StateSchemas,
-    Config
-  > = HandlerTreeInitialTargetPath<Config> extends infer TargetPath ? HandlerInitialTargetValidationForPaths<
-      AllStates,
-      Config,
-      RequiredInitializersForTargetPath<AllStates, TargetPath>
-    >
-    : unknown
 
   type HandlerChildrenValidation<
     Node,
@@ -8397,64 +6507,6 @@ export declare namespace Machine {
     >
   > = [Incompatible] extends [never] ? unknown
     : HandlerValidationError<"Handler config requires an incompatible machine runtime", StateId, Incompatible>
-
-  type HandlerNodeValidationAtPath<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>,
-    StateId extends StateNodeIdentifier<AllStates>,
-    NodeConfig = HandlerConfigAtPath<Config, StateId>
-  > = [NodeConfig] extends [never] ? never
-    : HandlerNodeValidation<
-      AllStates,
-      HandlerNodeByPath<AllStates, StateId>,
-      Events,
-      InputEvents,
-      Emits,
-      StateId,
-      NodeConfig,
-      AvailableOutputStates
-    > extends infer Validation ? unknown extends Validation ? never
-      : "" extends keyof AllStates ? StateId extends "" ? { readonly ""?: Validation }
-        : { readonly ""?: { readonly states: HandlerValidationAtPath<StateId, Validation> } }
-      : HandlerValidationAtPath<StateId, Validation>
-    : never
-
-  type HandlerTreeNodeValidations<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>
-  > = Types.UnionToIntersection<
-    StateNodeIdentifier<AllStates> extends infer StateId extends StateNodeIdentifier<AllStates> ?
-      StateId extends StateNodeIdentifier<AllStates> ? HandlerNodeValidationAtPath<
-          AllStates,
-          Events,
-          InputEvents,
-          Emits,
-          Config,
-          AvailableOutputStates,
-          StateId
-        >
-      : never
-      : never
-  >
-
-  type HandlerTreeValidation<
-    AllStates extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Config,
-    AvailableOutputStates extends StateIdentifier<AllStates>
-  > =
-    & HandlerUnknownStateKeyValidation<AllStates, "", Config>
-    & HandlerTreeNodeValidations<AllStates, Events, InputEvents, Emits, Config, AvailableOutputStates>
 
   type RootInitialTargetValidation<States extends StateSchemas, Config> =
     RequiredInitializersForTargetPath<States, HandlerTreeInitialTargetPath<{ readonly "": Config }>> extends
@@ -8644,73 +6696,942 @@ export declare namespace Machine {
     ParentEvents
   >
 
+  type ObjectCompoundPath<S extends StateSchemas> = {
+    readonly [P in StateIdentifier<S>]: NodeByIdentifier<S, P> extends {
+      /** Child handlers nested according to the declared root topology. */
+      readonly states: StateSchemas
+    } ? P :
+      never
+  }[StateIdentifier<S>]
+  type LazyProgramValue = Effect.Effect<unknown, unknown, unknown> | Stream.Stream<unknown, unknown, unknown>
+
+  /** Registered lazy programs and their optional explicit input adapters. */
+  export type Program<Value> = Value | ((...args: never[]) => Value)
+  export type EffectSources = Readonly<Record<string, Program<Effect.Effect<unknown, unknown, unknown>>>>
+  export type StreamSources = Readonly<Record<string, Program<Stream.Stream<unknown, unknown, unknown>>>>
+  export type TimerSources = Readonly<Record<string, Program<Duration.Input>>>
+  export type LogicSources = Readonly<Record<string, unknown>>
+  export type ValidateLogicSources<Sources> = {
+    readonly [K in keyof Sources]: InvokeResolvedSource<Sources[K]> extends {
+      /** Enters a compound or parallel subtree through its declared initialization. */
+      readonly initial: (...args: never[]) => Effect.Effect<unknown, unknown, unknown>
+      readonly run: (...args: never[]) => Effect.Effect<unknown, unknown, unknown>
+    } ? unknown
+      : never
+  }
+
+  export type ChildSources = Readonly<Record<string, ChildMachine.Any>>
+  export type ValidatePrograms<Sources> = {
+    readonly [K in keyof Sources]: Sources[K] extends LazyProgramValue ? unknown :
+      Sources[K] extends (...args: never[]) => unknown ? Parameters<Sources[K]>["length"] extends 1 ? unknown : never
+      : unknown
+  }
+  type ReferenceRoot<S extends StateSchemas> = Extract<Omit<S[""], "~effect/Machine/ExplicitInitial">, StateNodeConfig>
+  type ReferenceAt<S extends StateSchemas, P extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = TargetReference<
+    ReferenceRoot<S>,
+    P,
+    P extends HistoryIdentifier<S> ? "history" : P extends ChoiceIdentifier<S> ? "choice" : "state"
+  >
+  type ReferenceUnion<S extends StateSchemas, Paths extends StateNodeIdentifier<S> | HistoryIdentifier<S>> = {
+    readonly [P in Paths]: ReferenceAt<S, P>
+  }[Paths]
+  type DestinationPath<S extends StateSchemas> = Exclude<StateNodeIdentifier<S>, "">
+  type RootSchemas<Root extends StateNodeConfig> = { readonly "": Root }
+
+  /** A topology declaration; its state values are constructed by a resolver. */
+  export type BranchDeclaration<Root extends StateNodeConfig, S extends StateSchemas = RootSchemas<Root>> =
+    & {
+      /** Optional presentation label for this named branch. */
+      readonly title?: string
+    }
+    & (
+      | {
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target: ReferenceUnion<S, DestinationPath<S>>
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: ReferenceUnion<S, ValuedStateIdentifier<S>>
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+      }
+      | {
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update: ReferenceUnion<S, ValuedStateIdentifier<S>>
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+      }
+      | {
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial: ReferenceUnion<S, Exclude<ObjectCompoundPath<S>, "">>
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+      }
+      | {
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history: ReferenceUnion<S, HistoryIdentifier<S>>
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+      }
+      | {
+        /** Accepts the event without selecting a new destination. */
+        readonly none: true
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+      }
+    )
+  export type BranchDefinitions<Root extends StateNodeConfig> = Readonly<
+    Record<string, Readonly<Record<string, BranchDeclaration<Root>>>>
+  >
+  /** Source programs and named topology declarations captured by a machine definition. */
+  export interface Registrations {
+    /** Lazy Effects or functions with one required input, invoked by registered name. */
+    readonly effects?: EffectSources
+    /** Lazy Streams or functions with one required input, invoked by registered name. */
+    readonly streams?: StreamSources
+    /** Cancellable delays, supplied as durations or functions of one required input. */
+    readonly timers?: TimerSources
+    /** Logic values or functions of one required input; their Effect channels remain inferred. */
+    readonly logic?: LogicSources
+    /** Child machine descriptors registered for state-owned invocation. */
+    readonly children?: ChildSources
+    /** Named groups of inspectable destinations used by transition resolvers. */
+    readonly branches?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
+  }
+  type Registered<R, Kind extends PropertyKey> = Kind extends keyof R ? NonNullable<R[Kind]> : {}
+  type AtBuilder<T, P extends string> = P extends "" ? T
+    : P extends `${infer H}.${infer Rest}` ? H extends keyof T ? AtBuilder<T[H], Rest> : never
+    : P extends keyof T ? T[P]
+    : never
+  type BranchBuilderAt<S extends StateSchemas, Src extends StateNodeIdentifier<S>, P extends string> = AtBuilder<
+    RootBuilder<BranchTargetBuilder<S, Src>>,
+    P
+  >
+  type RefPath<R> = R extends TargetReference<any, infer P, any> ? P : never
+  type SelectionOf<S extends StateSchemas, Src extends StateNodeIdentifier<S>, D> = D extends {
+    /** Selects the declared descendant destination. Supply required values with from or decoded. */
+    readonly target: infer Ref
+  } ? RefPath<Ref> extends infer P extends StateNodeIdentifier<S> ? D extends {
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update: infer Update
+      } ?
+        RefPath<Update> extends
+          infer Owner extends Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>
+          ? TargetSelection<UpdatingTargetBuilder<BranchBuilderAt<S, Src, P>, S, Owner>, P, "state", "branch"> :
+        never
+      : TargetSelection<BranchBuilderAt<S, Src, P>, P, P extends ChoiceIdentifier<S> ? "choice" : "state", "branch">
+    : never
+    : D extends {
+      /** Enters a compound or parallel subtree through its declared initialization. */
+      readonly initial: infer Ref
+    } ? RefPath<Ref> extends infer P extends string ? BranchBuilderAt<S, Src, P> extends {
+          /** Enters a compound or parallel subtree through its declared initialization. */
+          readonly initial: infer B
+        } ? TargetSelection<B, P, "initial", "branch">
+        : never :
+      never
+    : D extends {
+      /** Restores the declared history reference, using its fallback on first entry. */
+      readonly history: infer Ref
+    } ?
+      RefPath<Ref> extends infer P extends string
+        ? TargetSelection<AtBuilder<RootBuilder<HistoryTargetBuilder<S>>, P>, P, "history", "full"> :
+      never
+    : D extends {
+      /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+      readonly update: infer Ref
+    } ?
+      RefPath<Ref> extends infer P extends Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>
+        ? TargetSelection<StateUpdateBuilder<S, P>, P, "update", "branch"> :
+      never
+    : D extends {
+      /** Accepts the event without selecting a new destination. */
+      readonly none: true
+    } ? TargetSelection<() => NoTarget, never, "none", "local">
+    : never
+  type BuilderArgs<B, K extends PropertyKey> = K extends keyof B
+    ? B[K] extends (...args: infer A) => unknown ? A : never
+    : never
+  type ObjectConstruction<C, B> = {
+    readonly [M in Extract<keyof B, "from" | "decoded">]: BuilderArgs<B, M> extends readonly [unknown?] ?
+        & { readonly [K in M]: (context: C) => BuilderArgs<B, M>[0] }
+        & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
+      : never
+  }[Extract<keyof B, "from" | "decoded">]
+  type ObjectDefault<B> = B extends {
+    /** Constructs schema make input from the typed source context. */
+    readonly from: () => unknown
+  } | (() => unknown) ? {
+      /** Constructs schema make input from the typed source context. */
+      readonly from?: never /** Supplies an already decoded schema value from the typed source context. */
+      readonly decoded?: never
+    }
+    : never
+  type ObjectPolicy<C, Reenter extends boolean, Acceptance extends TransitionAcceptance> = {
+    /** Set to true to exit and reenter the handler source. */
+    readonly reenter?: Reenter extends true ? boolean : never
+    /** Declines the transition before construction when the predicate returns false. */
+    readonly guard?: "declinable" extends Acceptance ? ((context: C) => boolean) | undefined : never
+  }
+  type InlineDestination<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
+    readonly [P in DestinationPath<S>]:
+      & {
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target: ReferenceAt<S, P>
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+        /** Named groups of inspectable destinations used by transition resolvers. */
+        readonly branches?: never
+        /** Selects one declared branch and may enqueue synchronous commands. */
+        readonly resolve?: never
+        /** Set to true when the resolver can explicitly return decline(). */
+        readonly declinable?: never
+      }
+      & (ObjectConstruction<C, BranchBuilderAt<S, Src, P>> | ObjectDefault<BranchBuilderAt<S, Src, P>>)
+  }[DestinationPath<S>]
+  type InlineCombined<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = Src extends ChoiceIdentifier<S> ?
+    never :
+    {
+      readonly [P in DestinationPath<S>]: {
+        readonly [Owner in Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>]:
+          & {
+            /** Selects the declared descendant destination. Supply required values with from or decoded. */
+            readonly target: ReferenceAt<S, P>
+            /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+            readonly update: ReferenceAt<S, Owner>
+            /** Enters a compound or parallel subtree through its declared initialization. */
+            readonly initial?: never
+            /** Restores the declared history reference, using its fallback on first entry. */
+            readonly history?: never
+            /** Accepts the event without selecting a new destination. */
+            readonly none?: never
+            /** Named groups of inspectable destinations used by transition resolvers. */
+            readonly branches?: never
+            /** Selects one declared branch and may enqueue synchronous commands. */
+            readonly resolve?: never
+            /** Set to true when the resolver can explicitly return decline(). */
+            readonly declinable?: never
+          }
+          & {
+            readonly [
+              M in Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">
+            ]: BuilderArgs<BranchBuilderAt<S, Src, P>, M> extends readonly [unknown?] ?
+                & {
+                  readonly [K in M]: (
+                    context: C
+                  ) => {
+                    /** Selects the declared descendant destination. Supply required values with from or decoded. */
+                    readonly target: BuilderArgs<BranchBuilderAt<S, Src, P>, M>[0]
+                    /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+                    readonly update: BuilderArgs<StateUpdateBuilder<S, Owner>, M>[0]
+                  }
+                }
+                & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
+              : never
+          }[Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">]
+      }[Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>]
+    }[DestinationPath<S>]
+  type InlineUpdate<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = Src extends ChoiceIdentifier<S> ?
+    never :
+    {
+      readonly [P in Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>]:
+        & {
+          /** Set to true to exit and reenter the handler source. */
+          readonly reenter?: P extends Src ? never : boolean
+          /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+          readonly update: ReferenceAt<S, P>
+          /** Selects the declared descendant destination. Supply required values with from or decoded. */
+          readonly target?: never
+          /** Enters a compound or parallel subtree through its declared initialization. */
+          readonly initial?: never
+          /** Restores the declared history reference, using its fallback on first entry. */
+          readonly history?: never
+          /** Accepts the event without selecting a new destination. */
+          readonly none?: never
+          /** Named groups of inspectable destinations used by transition resolvers. */
+          readonly branches?: never
+          /** Selects one declared branch and may enqueue synchronous commands. */
+          readonly resolve?: never
+          /** Set to true when the resolver can explicitly return decline(). */
+          readonly declinable?: never
+        }
+        & ObjectConstruction<C, StateUpdateBuilder<S, P>>
+    }[Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>]
+  type InlineInitial<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
+    readonly [P in Exclude<ObjectCompoundPath<S>, "">]: BranchBuilderAt<S, Src, P> extends {
+      /** Enters a compound or parallel subtree through its declared initialization. */
+      readonly initial: infer B
+    } ?
+        & {
+          /** Enters a compound or parallel subtree through its declared initialization. */
+          readonly initial: ReferenceAt<S, P>
+          /** Selects the declared descendant destination. Supply required values with from or decoded. */
+          readonly target?: never
+          /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+          readonly update?: never
+          /** Restores the declared history reference, using its fallback on first entry. */
+          readonly history?: never
+          /** Accepts the event without selecting a new destination. */
+          readonly none?: never
+          /** Named groups of inspectable destinations used by transition resolvers. */
+          readonly branches?: never
+          /** Selects one declared branch and may enqueue synchronous commands. */
+          readonly resolve?: never
+          /** Set to true when the resolver can explicitly return decline(). */
+          readonly declinable?: never
+        }
+        & (ObjectConstruction<C, B> | ObjectDefault<B>) :
+      never
+  }[Exclude<ObjectCompoundPath<S>, "">]
+  type BranchSelections<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
+    readonly [K in Extract<keyof Group, string>]: {
+      /** Selects the declared descendant destination. Supply required values with from or decoded. */
+      readonly target: SelectionOf<S, Src, Group[K]>
+    }
+  }
+  type ObjectBranchResolver<
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    C,
+    B extends Readonly<Record<string, TransitionBranchInput>>,
+    Declinable extends boolean
+  > = (
+    context: TransitionBranchesResolveContext<C, B> & DeclineCapability,
+    enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+  ) => BranchSelectionResult<B> | (Declinable extends true ? Declined : never)
+  type InvalidBranchSelection<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
+    readonly [K in keyof Group]: Src extends ChoiceIdentifier<S> ? Group[K] extends {
+        /** Accepts the event without selecting a new destination. */
+        readonly none: true
+      } | {
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update: unknown
+      } ? K
+      : [SelectionBuilder<SelectionOf<S, Src, Group[K]>>] extends [never] ? K
+      : never
+      : [SelectionBuilder<SelectionOf<S, Src, Group[K]>>] extends [never] ? K
+      : never
+  }[keyof Group]
+  type ObjectBranches<
+    S extends StateSchemas,
+    Src extends StateNodeIdentifier<S>,
+    C,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    R,
+    Acceptance extends TransitionAcceptance
+  > = {
+    readonly [K in Extract<keyof Registered<R, "branches">, string>]:
+      & ([InvalidBranchSelection<S, Src, Registered<R, "branches">[K]>] extends [never] ? unknown : never)
+      & {
+        /** Named groups of inspectable destinations used by transition resolvers. */
+        readonly branches: K
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+        /** Constructs schema make input from the typed source context. */
+        readonly from?: never
+        /** Supplies an already decoded schema value from the typed source context. */
+        readonly decoded?: never
+      }
+      & {
+        /** Set to true when the resolver can explicitly return decline(). */
+        readonly declinable?: "declinable" extends Acceptance ? boolean : false
+        /** Selects one declared branch and may enqueue synchronous commands. */
+        readonly resolve: ObjectBranchResolver<Ev, Em, C, BranchSelections<S, Src, Registered<R, "branches">[K]>, true>
+      }
+  }[Extract<keyof Registered<R, "branches">, string>]
   /**
-   * Adds state handlers from a root state object.
+   * A transition with an inspectable destination and source-specific construction.
+   *
+   * @category models
+   * @since 0.34.0
+   */
+  export type Transition<
+    S extends StateSchemas,
+    Src extends StateNodeIdentifier<S>,
+    C,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    R,
+    Reenter extends boolean = false,
+    Acceptance extends TransitionAcceptance = "required"
+  > =
+    & ObjectPolicy<C, Reenter, Acceptance>
+    & (
+      | InlineDestination<S, Src, C>
+      | InlineUpdate<S, Src, C>
+      | InlineCombined<S, Src, C>
+      | InlineInitial<S, Src, C>
+      | {
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history: ReferenceUnion<S, HistoryIdentifier<S>>
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Accepts the event without selecting a new destination. */
+        readonly none?: never
+        /** Named groups of inspectable destinations used by transition resolvers. */
+        readonly branches?: never
+        /** Selects one declared branch and may enqueue synchronous commands. */
+        readonly resolve?: never
+        /** Constructs schema make input from the typed source context. */
+        readonly from?: never
+        /** Supplies an already decoded schema value from the typed source context. */
+        readonly decoded?: never
+        /** Set to true when the resolver can explicitly return decline(). */
+        readonly declinable?: never
+      }
+      | (Src extends ChoiceIdentifier<S> ? never : {
+        /** Accepts the event without selecting a new destination. */
+        readonly none: true
+        /** Selects the declared descendant destination. Supply required values with from or decoded. */
+        readonly target?: never
+        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
+        readonly update?: never
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+        /** Named groups of inspectable destinations used by transition resolvers. */
+        readonly branches?: never
+        /** Constructs schema make input from the typed source context. */
+        readonly from?: never
+        /** Supplies an already decoded schema value from the typed source context. */
+        readonly decoded?: never
+        /** Set to true when the resolver can explicitly return decline(). */
+        readonly declinable?: "declinable" extends Acceptance ? boolean : false
+        /** Selects one declared branch and may enqueue synchronous commands. */
+        readonly resolve?: (
+          context: C & DeclineCapability,
+          enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+        ) => undefined | Declined
+      })
+      | ObjectBranches<S, Src, C, Ev, Em, R, Acceptance>
+    )
+  type SourceValue<R, K extends PropertyKey> = {
+    readonly [Kind in "effects" | "streams" | "timers" | "logic" | "children"]: K extends keyof Registered<R, Kind>
+      ? Registered<R, Kind>[K]
+      : never
+  }["effects" | "streams" | "timers" | "logic" | "children"]
+  type SourceKind<R, K extends PropertyKey> = {
+    readonly [Kind in "effects" | "streams" | "timers" | "logic" | "children"]: K extends keyof Registered<R, Kind>
+      ? Kind
+      : never
+  }["effects" | "streams" | "timers" | "logic" | "children"]
+  type SourceKeys<R> = {
+    readonly [Kind in "effects" | "streams" | "timers" | "logic" | "children"]: keyof Registered<R, Kind>
+  }["effects" | "streams" | "timers" | "logic" | "children"]
+  type SourceInput<F, C> = F extends LazyProgramValue ? { readonly input?: never } :
+    F extends (...args: never[]) => unknown ? Parameters<F>["length"] extends 1 ? {
+          /** Maps the owning state context to the registered source input. */
+          readonly input: (context: C) => Parameters<F>[0]
+        } :
+      never
+    : {
+      /** Maps the owning state context to the registered source input. */
+      readonly input?: never
+    }
+  type ResolvedInvoke<R, K extends PropertyKey> = SourceKind<R, K> extends "effects" ?
+    { readonly effect: () => InvokeResolvedSource<SourceValue<R, K>> }
+    : SourceKind<R, K> extends "streams" ? { readonly stream: () => InvokeResolvedSource<SourceValue<R, K>> }
+    : SourceKind<R, K> extends "timers" ? { readonly after: Duration.Input }
+    : SourceKind<R, K> extends "logic" ? {
+        /** Logic values or functions of one required input; their Effect channels remain inferred. */
+        readonly logic: InvokeResolvedSource<SourceValue<R, K>>
+      }
+    : SourceKind<R, K> extends "children" ?
+        & { readonly child: SourceValue<R, K> }
+        & (SourceValue<R, K> extends ChildMachine<string, infer M> ? {
+            readonly [InvokeTypeId]: {
+              readonly error: Types.Covariant<Error<M> | ActionError<Services<M>>>
+              readonly initialError: Types.Covariant<InitialError<M>>
+              readonly requirements: Types.Covariant<Services<M>>
+            }
+          } :
+          never) :
+    never
+  type RegisteredInvocationInput<R, K extends PropertyKey, C> = SourceKind<R, K> extends "children" ?
+    SourceValue<R, K> extends ChildMachine<string, infer M> ? InputSchema<M> extends typeof Schema.Void ? {
+          /** Maps the owning state context to the registered source input. */
+          readonly input?: never
+        }
+      : {
+        /** Maps the owning state context to the registered source input. */
+        readonly input: (context: C) => Input<M>
+      } :
+    never
+    : SourceInput<SourceValue<R, K>, C>
+  type ObjectOutcome<
+    S extends StateSchemas,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    Src extends StateIdentifier<S>,
+    In extends ReadonlyArray<TaggedSchema>,
+    Pa extends ReadonlyArray<TaggedSchema>,
+    R,
+    V,
+    Channel extends "onDone" | "onFailure" | "onElement" | "onSnapshot"
+  > = [V] extends [never] ? {} : Channel extends "onDone" ? {
+      /** Handles successful invocation or state completion with its exact output type. */
+      readonly onDone: Transition<
+        S,
+        Src,
+        InvokeDoneContext<S, Ev, Em, Src, V, In, Pa>,
+        Ev,
+        Em,
+        R,
+        true,
+        TransitionAcceptance
+      >
+    } :
+  Channel extends "onFailure" ? {
+      /** Handles the typed failure of the invoked source; required exactly when that channel is reachable. */
+      readonly onFailure: Transition<
+        S,
+        Src,
+        InvokeFailureContext<S, Ev, Em, Src, V, In, Pa>,
+        Ev,
+        Em,
+        R,
+        true,
+        TransitionAcceptance
+      >
+    } :
+  Channel extends "onElement" ? {
+      /** Handles each Stream element; required when the element type is reachable. */
+      readonly onElement: Transition<
+        S,
+        Src,
+        InvokeElementContext<S, Ev, Em, Src, V, In, Pa>,
+        Ev,
+        Em,
+        R,
+        true,
+        TransitionAcceptance
+      >
+    } :
+  {
+    /** Optionally handles active snapshots of invoked logic or a child machine. */
+    readonly onSnapshot: Transition<
+      S,
+      Src,
+      InvokeSnapshotContext<S, Ev, Em, Src, V, never, never, In, Pa>,
+      Ev,
+      Em,
+      R,
+      true,
+      TransitionAcceptance
+    >
+  }
+  type RegisteredInvokeError<R, K extends PropertyKey> = SourceKind<R, K> extends "children"
+    ? SourceValue<R, K> extends ChildMachine<string, infer M> ? Error<M> | ActionError<Services<M>> : never
+    : InvokeRuntimeError<ResolvedInvoke<R, K>>
+  /**
+   * A registered source invocation with its required input and reachable outcomes.
+   *
+   * @category models
+   * @since 0.34.0
+   */
+  export type Invocation<
+    S extends StateSchemas,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    Src extends StateIdentifier<S>,
+    In extends ReadonlyArray<TaggedSchema>,
+    Pa extends ReadonlyArray<TaggedSchema>,
+    R
+  > = {
+    readonly [K in Extract<SourceKeys<R>, string>]: Types.Simplify<
+      & {
+        /** Name of the source registered in make. */
+        readonly src: K
+      }
+      & (SourceKind<R, K> extends "children" ? {
+          /** Lifecycle identifier; Effects, Streams, and timers default to their registered source name. */
+          readonly id?:
+            never /** Typed runtime address required for invoked logic; child descriptors carry their own address. */
+          readonly address?: never
+        }
+        : SourceKind<R, K> extends "logic" ? {
+            /** Lifecycle identifier; Effects, Streams, and timers default to their registered source name. */
+            readonly id: InvokeLifecycleId
+            /** Typed runtime address required for invoked logic; child descriptors carry their own address. */
+            readonly address: ChildAddress<LogicEventOf<InvokeResolvedSource<SourceValue<R, K>>>>
+          }
+        : {
+          /** Lifecycle identifier; Effects, Streams, and timers default to their registered source name. */
+          readonly id?:
+            InvokeLifecycleId /** Typed runtime address required for invoked logic; child descriptors carry their own address. */
+          readonly address?: never
+        })
+      & (SourceKind<R, K> extends "children"
+        ? SourceValue<R, K> extends ChildMachine<string, infer M>
+          ? M extends EnsureExecutable<States<M>, UnhandledStates<M>, OutputStates<M>> ? unknown : never
+        : never
+        : unknown)
+      & RegisteredInvocationInput<R, K, InvokeContext<S, Ev, Em, Src, In, Pa>>
+      & ObjectOutcome<S, Ev, Em, Src, In, Pa, R, InvokeOutput<ResolvedInvoke<R, K>>, "onDone">
+      & ObjectOutcome<S, Ev, Em, Src, In, Pa, R, RegisteredInvokeError<R, K>, "onFailure">
+      & ObjectOutcome<
+        S,
+        Ev,
+        Em,
+        Src,
+        In,
+        Pa,
+        R,
+        SourceKind<R, K> extends "streams"
+          ? Stream.Success<Extract<InvokeResolvedSource<SourceValue<R, K>>, Stream.Stream<any, any, any>>> :
+          never,
+        "onElement"
+      >
+      & (SourceKind<R, K> extends "logic" | "children" ? Partial<
+          ObjectOutcome<S, Ev, Em, Src, In, Pa, R, LogicStateOf<InvokeLogic<ResolvedInvoke<R, K>>>, "onSnapshot">
+        >
+        : {})
+    >
+  }[Extract<SourceKeys<R>, string>]
+  type ObjectLifecycle<
+    S extends StateSchemas,
+    Node,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    Src extends StateNodeIdentifier<S>,
+    In extends ReadonlyArray<TaggedSchema>,
+    Pa extends ReadonlyArray<TaggedSchema>
+  > = Src extends StateIdentifier<S> ?
+      & {
+        /** Runs synchronously on entry and may enqueue commands. */
+        readonly entry?: (
+          context: StateActionContext<S, Ev, Em, Src, In, Pa>,
+          enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+        ) => StateActionResult<any, any>
+      }
+      & (Node extends { readonly type: "final" } ?
+          & {
+            /** Runs synchronously on exit and may enqueue commands. */
+            readonly exit?: never /** Constructs required values for the declared initial child or parallel regions. */
+            readonly initialize?: never
+          }
+          & OutputHandlerConfig<S, Ev, Src, FinalOutputContext<S, Ev, Src>>
+        : {
+          /** Runs synchronously on exit and may enqueue commands. */
+          readonly exit?: (
+            context: StateActionContext<S, Ev, Em, Src, In, Pa>,
+            enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
+          ) => StateActionResult<any, any>
+          /** Constructs required values for the declared initial child or parallel regions. */
+          readonly initialize?: StateInitializeHandler<S, Ev, Em, Src, In, Pa>
+        } & ActiveOutputHandlerConfig<S, Ev, Src>)
+    : {
+      /** Runs synchronously on entry and may enqueue commands. */
+      readonly entry?: never /** Runs synchronously on exit and may enqueue commands. */
+      readonly exit?: never /** Constructs required values for the declared initial child or parallel regions. */
+      readonly initialize?: never /** Constructs the decoded output declared by the state schema. */
+      readonly output?: never
+    }
+  /**
+   * Handlers for a node of the declared root tree.
+   *
+   * @category models
+   * @since 0.34.0
+   */
+  export type StateHandler<
+    S extends StateSchemas,
+    Node,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    Src extends StateNodeIdentifier<S>,
+    In extends ReadonlyArray<TaggedSchema>,
+    Pa extends ReadonlyArray<TaggedSchema>,
+    R
+  > =
+    & ObjectLifecycle<S, Node, Ev, Em, Src, In, Pa>
+    & (Src extends ChoiceIdentifier<S> ? {
+        /** Required total transition for a transient choice state. */
+        readonly choice: Transition<S, Src, ChoiceContext<S, Ev, Em, Src, In, Pa>, Ev, Em, R>
+        /** Event handlers keyed by the public or internal event tag. */
+        readonly on?: never
+        /** Eventless transition evaluated during stabilization. */
+        readonly always?: never
+        /** Handles successful invocation or state completion with its exact output type. */
+        readonly onDone?: never
+        /** One registered invocation or an array with distinct lifecycle identities. */
+        readonly invoke?: never
+        /** Child handlers nested according to the declared root topology. */
+        readonly states?: never
+        /** Restores the declared history reference, using its fallback on first entry. */
+        readonly history?: never
+      }
+      : Src extends StateIdentifier<S> ? Node extends { readonly type: "final" } ? {
+            /** Event handlers keyed by the public or internal event tag. */
+            readonly on?: never
+            /** Eventless transition evaluated during stabilization. */
+            readonly always?: never
+            /** Handles successful invocation or state completion with its exact output type. */
+            readonly onDone?: never
+            /** Required total transition for a transient choice state. */
+            readonly choice?: never
+            /** One registered invocation or an array with distinct lifecycle identities. */
+            readonly invoke?: never
+            /** Child handlers nested according to the declared root topology. */
+            readonly states?: never
+            /** Restores the declared history reference, using its fallback on first entry. */
+            readonly history?: never
+          }
+        :
+          & {
+            /** Event handlers keyed by the public or internal event tag. */
+            readonly on?: {
+              readonly [Tag in TagOf<Ev[number]>]?: Transition<
+                S,
+                Src,
+                HandlerContext<S, Ev, Em, Src, Tag, never, never, In, Pa>,
+                Ev,
+                Em,
+                R,
+                true,
+                TransitionAcceptance
+              >
+            }
+            /** Eventless transition evaluated during stabilization. */
+            readonly always?: Transition<
+              S,
+              Src,
+              AlwaysContext<S, Ev, Em, Src, In, Pa>,
+              Ev,
+              Em,
+              R,
+              false,
+              TransitionAcceptance
+            >
+            /** Handles successful invocation or state completion with its exact output type. */
+            readonly onDone?: Transition<
+              S,
+              Src,
+              DoneContext<S, Ev, Em, Src, In, Pa>,
+              Ev,
+              Em,
+              R,
+              false,
+              TransitionAcceptance
+            >
+            /** Required total transition for a transient choice state. */
+            readonly choice?: never
+            /** One registered invocation or an array with distinct lifecycle identities. */
+            readonly invoke?:
+              | Invocation<S, Ev, Em, Src, In, Pa, R>
+              | (ReadonlyArray<Invocation<S, Ev, Em, Src, In, Pa, R>> & {
+                /** Name of the source registered in make. */
+                readonly src?: never
+              })
+          }
+          & (Node extends {
+            /** Child handlers nested according to the declared root topology. */
+            readonly states: infer Children extends StateSchemas
+          } ? {
+              /** Child handlers nested according to the declared root topology. */
+              readonly states?: {
+                readonly [K in ActiveStateKey<Children> | ChoiceStateKey<Children>]?: StateHandler<
+                  S,
+                  Children[K],
+                  Ev,
+                  Em,
+                  Extract<JoinPath<Src, K>, StateNodeIdentifier<S>>,
+                  In,
+                  Pa,
+                  R
+                >
+              }
+              /** Restores the declared history reference, using its fallback on first entry. */
+              readonly history?: HistoryDefaultConfig<S, Ev, Em, Src, Children>
+            } :
+            {
+              /** Child handlers nested according to the declared root topology. */
+              readonly states?: never /** Restores the declared history reference, using its fallback on first entry. */
+              readonly history?: never
+            }) :
+      never)
+  type ValidateObjectTransition<T> =
+    & {
+      readonly [
+        K in Exclude<
+          keyof T,
+          | "target"
+          | "update"
+          | "initial"
+          | "history"
+          | "none"
+          | "branches"
+          | "from"
+          | "decoded"
+          | "resolve"
+          | "guard"
+          | "reenter"
+          | "declinable"
+        >
+      ]: never
+    }
+    & (T extends {
+      /** Set to true when the resolver can explicitly return decline(). */
+      readonly declinable: infer D
+    } ? boolean extends D ? {
+          /** Set to true when the resolver can explicitly return decline(). */
+          readonly declinable: never
+        } :
+      unknown
+      : unknown)
+    & (T extends {
+      /** Set to true when the resolver can explicitly return decline(). */
+      readonly declinable: true
+    } ? unknown
+      : T extends {
+        /** Selects one declared branch and may enqueue synchronous commands. */
+        readonly resolve: (...args: any[]) => infer Result
+      } ? [Extract<Result, Declined>] extends [never] ? unknown : {
+          /** Selects one declared branch and may enqueue synchronous commands. */
+          readonly resolve: never
+        }
+      : unknown)
+  type AllowedInvokeChannels<R, K extends PropertyKey> =
+    | ([InvokeOutput<ResolvedInvoke<R, K>>] extends [never] ? never : "onDone")
+    | ([RegisteredInvokeError<R, K>] extends [never] ? never : "onFailure")
+    | (SourceKind<R, K> extends "streams"
+      ? [Stream.Success<Extract<InvokeResolvedSource<SourceValue<R, K>>, Stream.Stream<any, any, any>>>] extends [never]
+        ? never
+      : "onElement"
+      : never)
+    | (SourceKind<R, K> extends "logic" | "children" ? "onSnapshot" : never)
+  type ValidateObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
+    { readonly [K in keyof I]: ValidateObjectInvoke<I[K], R> } :
+    I extends {
+      /** Name of the source registered in make. */
+      readonly src: infer Src extends PropertyKey
+    } ? {
+        readonly [K in keyof I]: K extends AllowedInvokeChannels<R, Src> ? ValidateObjectTransition<I[K]>
+          : K extends "src" | "id" | "address" | "input" ? unknown
+          : never
+      } :
+    never
+  type ObjectDeclarations<C> =
+    | Extract<keyof C, "on" | "always" | "onDone" | "choice" | "invoke">
+    | (C extends { readonly states: infer Children }
+      ? { readonly [K in keyof Children]: ObjectDeclarations<Children[K]> }[keyof Children]
+      : never)
+  type ValidateObjectConfig<C, R> = [ObjectDeclarations<C>] extends [never] ? unknown : {
+    readonly [K in keyof C]: K extends "states" ? { readonly [P in keyof C[K]]: ValidateObjectConfig<C[K][P], R> }
+      : K extends "on" ? { readonly [P in keyof C[K]]: ValidateObjectTransition<C[K][P]> }
+      : K extends "always" | "onDone" | "choice" ? ValidateObjectTransition<C[K]>
+      : K extends "invoke" ? ValidateObjectInvoke<C[K], R>
+      : unknown
+  }
+  type NormalizeObjectInvoke<I, R> = I extends ReadonlyArray<unknown> ?
+    { readonly [K in keyof I]: NormalizeObjectInvoke<I[K], R> }
+    : I extends {
+      /** Name of the source registered in make. */
+      readonly src: infer K extends PropertyKey
+    } ? Omit<I, "src"> & ResolvedInvoke<R, K>
+    : I
+  type NormalizeObjectConfig<C, R> = [SourceKeys<R>] extends [never] ? C : {
+    readonly [K in keyof C]: K extends "states" ? { readonly [P in keyof C[K]]: NormalizeObjectConfig<C[K][P], R> }
+      : K extends "invoke" ? NormalizeObjectInvoke<C[K], R>
+      : C[K]
+  }
+  /**
+   * Adds object handlers while checking topology, protocols, invocation outcomes, and readiness.
    *
    * @category combinators
-   * @since 0.4.0
+   * @since 0.34.0
    */
   export interface Handler<
-    States extends StateSchemas,
-    Events extends ReadonlyArray<TaggedSchema>,
-    Emits extends ReadonlyArray<TaggedSchema>,
-    Input extends Schema.Top,
-    UnhandledStates extends StateIdentifier<States>,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates extends StateIdentifier<States>,
-    Output,
-    OutputStates extends StateIdentifier<States>,
-    InputEvents extends ReadonlyArray<TaggedSchema>,
-    ParentEvents extends ReadonlyArray<TaggedSchema>
+    S extends StateSchemas,
+    Ev extends ReadonlyArray<TaggedSchema>,
+    Em extends ReadonlyArray<TaggedSchema>,
+    I extends Schema.Top,
+    IE,
+    IR,
+    Final extends StateIdentifier<S>,
+    Out,
+    In extends ReadonlyArray<TaggedSchema>,
+    Pa extends ReadonlyArray<TaggedSchema>,
+    R
   > {
-    <
-      const Config
-    >(
+    <const C>(
       config:
-        & Config
-        & (Config extends (...args: never[]) => unknown ? never : unknown)
-        & HandlerNode<
-          States,
-          States[""],
-          Events,
-          Emits,
-          E,
-          R,
-          InputEvents,
-          ParentEvents,
-          Extract<"", StateNodeIdentifier<States>>
-        >
+        & C
+        & (C extends (...args: never[]) => unknown ? never : unknown)
+        & StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R>
+        & ValidateObjectConfig<NoInfer<C>, R>
         & RootHandlerValidation<
-          States,
-          Events,
-          InputEvents,
-          Emits,
-          NoInfer<Config>,
-          | OutputStates
-          | Extract<
-            HandlerTreeEvidence<States, { readonly "": NoInfer<Config> }>["outputState"],
-            StateIdentifier<States>
+          S,
+          Ev,
+          In,
+          Em,
+          NormalizeObjectConfig<NoInfer<C>, R>,
+          Extract<
+            HandlerTreeEvidence<S, { readonly "": NormalizeObjectConfig<NoInfer<C>, R> }>["outputState"],
+            StateIdentifier<S>
           >
         >
     ): HandleTreeResult<
-      States,
-      Events,
-      Emits,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      OutputStates,
-      InputEvents,
-      ParentEvents,
-      { readonly "": Config }
+      S,
+      Ev,
+      Em,
+      I,
+      StateIdentifier<S>,
+      never,
+      never,
+      IE,
+      IR,
+      Final,
+      Out,
+      never,
+      In,
+      Pa,
+      { readonly "": NormalizeObjectConfig<C, R> }
     >
   }
 
@@ -8768,15 +7689,19 @@ export declare namespace Machine {
     E,
     R
   > {
+    /** Runs synchronously on entry and may enqueue commands. */
     readonly entry?: (
       context: StateActionContext<States, Events, Emits, StateId>,
       enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
     ) => StateActionResult<E, R>
+    /** Runs synchronously on exit and may enqueue commands. */
     readonly exit?: (
       context: StateActionContext<States, Events, Emits, StateId>,
       enqueue: Enqueue<EventOf<Events>, EmittedEventOf<Emits>>
     ) => StateActionResult<E, R>
+    /** One registered invocation or an array with distinct lifecycle identities. */
     readonly invoke?: StoredInvokeDefinition<States, Events, Emits, StateId>
+    /** Eventless transition evaluated during stabilization. */
     readonly always?: TransitionConfig<
       States,
       Events,
@@ -8786,6 +7711,7 @@ export declare namespace Machine {
       false,
       TransitionAcceptance
     >
+    /** Handles successful invocation or state completion with its exact output type. */
     readonly onDone?: TransitionConfig<
       States,
       Events,
@@ -8795,9 +7721,11 @@ export declare namespace Machine {
       false,
       TransitionAcceptance
     >
+    /** Constructs the decoded output declared by the state schema. */
     readonly output?:
       | ((context: FinalOutputContext<States, Events, StateId>) => unknown)
       | ((context: ParallelOutputContext<States, Events, StateId>) => unknown)
+    /** Event handlers keyed by the public or internal event tag. */
     readonly on?: EventHandlerMap<States, Events, Emits, StateId, EventTag, E, R>
   }
 
@@ -8849,7 +7777,10 @@ export declare namespace Snapshot {
   export type Node<State> = State extends { readonly path: string; readonly value: unknown } ?
       | State
       | (State extends { readonly state: infer Child } ? Node<Child>
-        : State extends { readonly states: infer Regions } ? Node<Regions[keyof Regions]>
+        : State extends {
+          /** Child handlers nested according to the declared root topology. */
+          readonly states: infer Regions
+        } ? Node<Regions[keyof Regions]>
         : never) :
     never
   /** Every valid absolute path in a logical snapshot type. */
@@ -8977,6 +7908,76 @@ export const isFinal: <
  */
 export const state: StateConstructor = internal.state as StateConstructor
 
+/**
+ * An opaque reference to one node in a declared state tree.
+ *
+ * @category models
+ * @since 0.34.0
+ */
+export interface TargetReference<
+  Root extends Machine.StateNodeConfig,
+  Path extends string,
+  Kind extends "state" | "choice" | "history"
+> {
+  readonly [internal.TargetReferenceTypeId]: {
+    readonly root: { readonly node: Root }
+    readonly path: Path
+    readonly kind: Kind
+  }
+}
+
+type TargetReferenceTree<Root extends Machine.StateNodeConfig, Node, Path extends string> =
+  & TargetReference<
+    Root,
+    Path,
+    Node extends { readonly type: "history" } ? "history"
+      : Node extends { readonly type: "choice" } ? "choice"
+      : "state"
+  >
+  & (Node extends {
+    /** Child handlers nested according to the declared root topology. */
+    readonly states: infer Children
+  } ? {
+      readonly [Key in Extract<keyof Children, string>]: TargetReferenceTree<
+        Root,
+        Children[Key],
+        Machine.JoinPath<Path, Key>
+      >
+    } :
+    {})
+
+/**
+ * References for every path in a declared root tree.
+ *
+ * @category models
+ * @since 0.34.0
+ */
+export interface Targets<Root extends Machine.StateNodeConfig> {
+  /** Root data owner and the starting point for descendant state references. */
+  readonly root: TargetReferenceTree<Root, Root, "">
+}
+
+/**
+ * Derives immutable state references from a root descriptor.
+ *
+ * References follow the declared tree: `targets.root.Checkout.Review`.
+ * Creating references does not construct state values or start machine work.
+ *
+ * @category constructors
+ * @since 0.34.0
+ */
+export const targets: <const Root extends Machine.StateNodeConfig>(root: State<Root>) => Targets<Root> = internal
+  .targets as unknown as <const Root extends Machine.StateNodeConfig>(
+    root: State<Root>
+  ) => Targets<Root>
+
+type UniqueSourceNames<F, S, T, L, C> = [
+  | Extract<keyof F, keyof S | keyof T | keyof L | keyof C>
+  | Extract<keyof S, keyof T | keyof L | keyof C>
+  | Extract<keyof T, keyof L | keyof C>
+  | Extract<keyof L, keyof C>
+] extends [never] ? unknown : { readonly "~effect/Machine/DuplicateSourceName": never }
+
 type MakeConfig<
   Root extends Machine.StateNodeConfig,
   InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
@@ -8985,8 +7986,28 @@ type MakeConfig<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentDeclaration extends Parent.Any | undefined
+  ParentDeclaration extends Parent.Any | undefined,
+  Effects extends Machine.EffectSources,
+  Streams extends Machine.StreamSources,
+  Timers extends Machine.TimerSources,
+  Logics extends Machine.LogicSources,
+  Children extends Machine.ChildSources,
+  Branches extends Machine.BranchDefinitions<Root>
 > = {
+  /** Lazy Effects or functions with one required input, invoked by registered name. */
+  readonly effects?: Effects & Machine.ValidatePrograms<Effects>
+  /** Lazy Streams or functions with one required input, invoked by registered name. */
+  readonly streams?: Streams & Machine.ValidatePrograms<Streams>
+  /** Cancellable delays, supplied as durations or functions of one required input. */
+  readonly timers?: Timers & Machine.ValidatePrograms<Timers>
+  /** Logic values or functions of one required input; their Effect channels remain inferred. */
+  readonly logic?: Logics & Machine.ValidatePrograms<Logics> & Machine.ValidateLogicSources<NoInfer<Logics>>
+  /** Child machine descriptors registered for state-owned invocation. */
+  readonly children?: Children
+  /** Named groups of inspectable destinations used by transition resolvers. */
+  readonly branches?:
+    & Branches
+    & { readonly [K in keyof Branches]: ValidateTransitionBranchRecord<NoInfer<Branches[K]>> }
   /** Stable definition identifier used by inspection and visualization. */
   readonly id?: string
   /** State topology and value schemas, captured by a `Machine.state` descriptor. */
@@ -9018,7 +8039,13 @@ type MakeResult<
   InitialE,
   InitialR,
   InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentDeclaration extends Parent.Any | undefined
+  ParentDeclaration extends Parent.Any | undefined,
+  Effects extends Machine.EffectSources,
+  Streams extends Machine.StreamSources,
+  Timers extends Machine.TimerSources,
+  Logics extends Machine.LogicSources,
+  Children extends Machine.ChildSources,
+  Branches extends Readonly<Record<string, Readonly<Record<string, unknown>>>>
 > = Definition<
   { readonly "": Root },
   readonly [...InputEvents, ...InternalEvents],
@@ -9029,14 +8056,37 @@ type MakeResult<
   Machine.TerminalOutput<{ readonly "": Root }>,
   Emits,
   InputEvents,
-  Machine.ParentEventsOf<ParentDeclaration>
+  Machine.ParentEventsOf<ParentDeclaration>,
+  {
+    /** Lazy Effects or functions with one required input, invoked by registered name. */
+    readonly effects: Effects
+    /** Lazy Streams or functions with one required input, invoked by registered name. */
+    readonly streams: Streams
+    /** Cancellable delays, supplied as durations or functions of one required input. */
+    readonly timers: Timers
+    /** Logic values or functions of one required input; their Effect channels remain inferred. */
+    readonly logic: Logics
+    /** Child machine descriptors registered for state-owned invocation. */
+    readonly children: Children
+    /** Named groups of inspectable destinations used by transition resolvers. */
+    readonly branches: Branches
+  }
 >
 
 type RootInitialization<Root extends Machine.StateNodeConfig, Input> =
   & { readonly initialConfiguration?: never }
-  & (Machine.NodeSchema<Root> extends never ? { readonly initial?: Machine.RootInitialBuilderInput<Root, Input> }
-    : {} extends NodeMakeInput<Root> ? { readonly initial?: Machine.RootInitialBuilderInput<Root, Input> }
-    : { readonly initial: Machine.RootInitialBuilderInput<Root, Input> })
+  & (Machine.NodeSchema<Root> extends never ? {
+      /** Enters a compound or parallel subtree through its declared initialization. */
+      readonly initial?: Machine.RootInitialBuilderInput<Root, Input>
+    }
+    : {} extends NodeMakeInput<Root> ? {
+        /** Enters a compound or parallel subtree through its declared initialization. */
+        readonly initial?: Machine.RootInitialBuilderInput<Root, Input>
+      }
+    : {
+      /** Enters a compound or parallel subtree through its declared initialization. */
+      readonly initial: Machine.RootInitialBuilderInput<Root, Input>
+    })
 
 /** @inline */
 interface Make {
@@ -9049,10 +8099,32 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentDeclaration extends Parent.Any | undefined = undefined
+    const ParentDeclaration extends Parent.Any | undefined = undefined,
+    const Effects extends Machine.EffectSources = {},
+    const Streams extends Machine.StreamSources = {},
+    const Timers extends Machine.TimerSources = {},
+    const Logics extends Machine.LogicSources = {},
+    const Children extends Machine.ChildSources = {},
+    const Branches extends Machine.BranchDefinitions<NoInfer<Root>> = {}
   >(
     config:
-      & MakeConfig<Root, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
+      & MakeConfig<
+        Root,
+        InputEvents,
+        Emits,
+        Input,
+        InitialE,
+        InitialR,
+        InternalEvents,
+        ParentDeclaration,
+        Effects,
+        Streams,
+        Timers,
+        Logics,
+        Children,
+        Branches
+      >
+      & UniqueSourceNames<NoInfer<Effects>, NoInfer<Streams>, NoInfer<Timers>, NoInfer<Logics>, NoInfer<Children>>
       & {
         /** Mutually exclusive with a complete initial configuration. */
         readonly initial?: never
@@ -9070,7 +8142,13 @@ interface Make {
     InitialE,
     InitialR,
     InternalEvents,
-    ParentDeclaration
+    ParentDeclaration,
+    Effects,
+    Streams,
+    Timers,
+    Logics,
+    Children,
+    Branches
   >
   /** @param config Complete schema-first machine definition. */
   <
@@ -9081,10 +8159,32 @@ interface Make {
     InitialE = never,
     InitialR = never,
     const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-    const ParentDeclaration extends Parent.Any | undefined = undefined
+    const ParentDeclaration extends Parent.Any | undefined = undefined,
+    const Effects extends Machine.EffectSources = {},
+    const Streams extends Machine.StreamSources = {},
+    const Timers extends Machine.TimerSources = {},
+    const Logics extends Machine.LogicSources = {},
+    const Children extends Machine.ChildSources = {},
+    const Branches extends Machine.BranchDefinitions<NoInfer<Root>> = {}
   >(
     config:
-      & MakeConfig<Root, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration>
+      & MakeConfig<
+        Root,
+        InputEvents,
+        Emits,
+        Input,
+        InitialE,
+        InitialR,
+        InternalEvents,
+        ParentDeclaration,
+        Effects,
+        Streams,
+        Timers,
+        Logics,
+        Children,
+        Branches
+      >
+      & UniqueSourceNames<NoInfer<Effects>, NoInfer<Streams>, NoInfer<Timers>, NoInfer<Logics>, NoInfer<Children>>
       & Exclude<
         RootInitialization<NoInfer<Root>, Input["Type"]>,
         { readonly initialConfiguration: unknown }
@@ -9097,7 +8197,13 @@ interface Make {
     InitialE,
     InitialR,
     InternalEvents,
-    ParentDeclaration
+    ParentDeclaration,
+    Effects,
+    Streams,
+    Timers,
+    Logics,
+    Children,
+    Branches
   >
 }
 
@@ -9142,6 +8248,7 @@ interface Make {
  *
  * const States = Machine.state({ initial: "Count", states: { Count } })
  * const Events = Machine.eventsFromSchemas(Increment)
+ * const targets = Machine.targets(States)
  *
  * const counter = Machine.make({
  *   root: States,
@@ -9150,9 +8257,10 @@ interface Make {
  * }).handle({ states: {
  *   Count: {
  *     on: {
- *       Increment: (to) =>
- *         to.branch.Count().resolve(({ event, state, target }) =>
- *           target.decoded(new Count({ value: state.value + event.by })))
+ *       Increment: {
+ *         update: targets.root.Count,
+ *         decoded: ({ event, state }) => new Count({ value: state.value + event.by })
+ *       }
  *     }
  *   }
  * } })
@@ -9524,25 +8632,24 @@ type TransitionBranchRecordError<Message extends string, Key extends PropertyKey
   readonly key: Key
 }
 
-type InvalidStaticTransitionBranchKey<Branches> = Extract<keyof Branches, "" | number | symbol>
-
-type InvalidUpdatingTransitionBranchKey<Branches> = {
-  readonly [Key in keyof Branches]: Branches[Key] extends {
-    readonly target: { readonly "~effect/Machine/UpdatingTransitionTarget": string }
-  } ? Key
-    : never
-}[keyof Branches]
+type InvalidStaticTransitionBranchKey<Branches> = Extract<
+  keyof Branches,
+  "" | number | symbol | `${number}` | "NaN" | "Infinity" | "-Infinity"
+>
 
 type ValidateTransitionBranchRecord<Branches> = [keyof Branches] extends [never] ?
   TransitionBranchRecordError<"Branch records must contain at least one branch">
-  : [InvalidStaticTransitionBranchKey<Branches>] extends [never] ?
-    [InvalidUpdatingTransitionBranchKey<Branches>] extends [never] ? unknown
-    : TransitionBranchRecordError<
-      "Updating targets require a direct resolver",
-      InvalidUpdatingTransitionBranchKey<Branches>
-    >
-  : TransitionBranchRecordError<
-    "Branch keys must be non-empty, non-index strings",
+  : [InvalidStaticTransitionBranchKey<Branches>] extends [never] ? {
+      readonly [K in keyof Branches]:
+        & {
+          readonly [
+            Extra in Exclude<keyof Branches[K], "target" | "update" | "initial" | "history" | "none" | "title">
+          ]: never
+        }
+        & (Branches[K] extends { readonly title: "" } ? { readonly title: never } : unknown)
+    } :
+  TransitionBranchRecordError<
+    "Branch keys must be non-empty, non-numeric strings",
     InvalidStaticTransitionBranchKey<Branches>
   >
 
@@ -9650,10 +8757,12 @@ export const planInitial: <
   & (
     | {
       readonly done: true
+      /** Constructs the decoded output declared by the state schema. */
       readonly output: Output
     }
     | {
       readonly done: false
+      /** Constructs the decoded output declared by the state schema. */
       readonly output: undefined
     }
   ),
@@ -9859,7 +8968,7 @@ export const enabled: <
  *   events: Machine.eventsFromSchemas(),
  *   internalEvents,
  *   initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
- * }).handle({ states: { Idle: { on: { Loaded: (to) => to.none } } } })
+ * }).handle({ states: { Idle: { on: { Loaded: { none: true } } } } })
  *
  * export const canLoad = Effect.gen(function*() {
  *   const initial = yield* Machine.planInitial(machine)
@@ -9977,6 +9086,7 @@ export const can: {
  * class On extends Schema.TaggedClass<On>("On")("On", {}) {}
  * class Toggle extends Schema.TaggedClass<Toggle>("Toggle")("Toggle", {}) {}
  * const States = Machine.state({ initial: "Off", states: { Off, On } })
+ * const targets = Machine.targets(States)
  * const machine = Machine.make({
  *   root: States,
  *   events: Machine.eventsFromSchemas(Toggle),
@@ -9984,8 +9094,7 @@ export const can: {
  * }).handle({ states: {
  *   Off: {
  *     on: {
- *       Toggle: (to) =>
- *         to.branch.On().resolve(({ target }) => target.from())
+ *       Toggle: { target: targets.root.On }
  *     }
  *   },
  *   On: {}
@@ -10066,10 +9175,12 @@ export const plan: <
   & (
     | {
       readonly done: true
+      /** Constructs the decoded output declared by the state schema. */
       readonly output: Output
     }
     | {
       readonly done: false
+      /** Constructs the decoded output declared by the state schema. */
       readonly output: undefined
     }
   ),
@@ -10114,6 +9225,7 @@ export const logic: <
   InitialError = never,
   InitialRequirements = never
 >(options: {
+  /** Enters a compound or parallel subtree through its declared initialization. */
   readonly initial:
     | State
     | ((
@@ -10172,7 +9284,7 @@ export const childAddress: <Event = never>(id: string) => ChildAddress<Event> = 
  * This Effect requires a managed process runtime. A named child id must be
  * unique for the current parent until that child stops.
  *
- * Use a state's `invoke: (from) => from.logic(...)` declaration for children
+ * Register logic in `make({ logic })` and use `invoke: { src, id, address, ...outcomes }` for children
  * that start and stop with that state.
  * @see {@link sendTo} for sending events to named children.
  * @category runtime

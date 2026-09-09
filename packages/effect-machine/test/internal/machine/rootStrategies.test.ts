@@ -23,20 +23,24 @@ it.effect("constructs schema defaults throughout a parallel root", () => {
 })
 
 it.effect("compares structural leaves, reentry, raised events and completion with generic planning", () => {
+  const root1 = Machine.state({ initial: "Idle", states: { Idle: {}, Busy: {}, Done: { type: "final" } } })
+  const targets1 = Machine.targets(root1)
   const machine = Machine.make({
-    root: Machine.state({ initial: "Idle", states: { Idle: {}, Busy: {}, Done: { type: "final" } } }),
+    root: root1,
     events: Machine.events({ Begin: {}, Reenter: {}, Finish: {}, Complete: {} })
   }).handle({
     states: {
-      Idle: { on: { Begin: (to) => to.local.Busy() } },
+      Idle: { on: { Begin: { target: targets1.root.Busy } } },
       Busy: {
         on: {
-          Reenter: (to) => to.none.reenter(),
-          Finish: (to) =>
-            to.none.resolve((_, enqueue) => {
+          Reenter: { none: true, reenter: true },
+          Finish: {
+            none: true,
+            resolve: (_, enqueue) => {
               enqueue.raise({ _tag: "Complete" })
-            }),
-          Complete: (to) => to.local.Done()
+            }
+          },
+          Complete: { target: targets1.root.Done }
         }
       }
     }
@@ -55,15 +59,16 @@ it.effect("compares structural leaves, reentry, raised events and completion wit
 
 it.effect("keeps flat root updates and retained snapshots equal to generic planning", () => {
   const root = Machine.state({ fields: { count: Schema.Number } })
+  const targets2 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Increment: { by: Schema.Number }, Noop: {}, Reenter: {} }),
     initial: (root) => root.from(() => ({ count: 0 }))
   }).handle({
     on: {
-      Increment: (to) => to.self.update.from(({ current, event }) => ({ count: current.count + event.by })),
-      Noop: (to) => to.none,
-      Reenter: (to) => to.none.reenter()
+      Increment: { update: targets2.root, from: ({ root: current, event }) => ({ count: current.count + event.by }) },
+      Noop: { none: true },
+      Reenter: { none: true, reenter: true }
     }
   })
   return verifyPlannerStrategies({
@@ -81,15 +86,18 @@ it.effect("keeps flat root updates and retained snapshots equal to generic plann
 
 it.effect("keeps root values and child transitions equal to generic planning", () => {
   const root = Machine.state({ fields: { count: Schema.Number }, initial: "Idle", states: { Idle: {}, Busy: {} } })
+  const targets3 = Machine.targets(root)
   const machine = Machine.make({
     root,
     events: Machine.events({ Increment: { by: Schema.Number }, Start: {}, Stop: {} }),
     initial: (root) => root.from(() => ({ count: 0 }))
   }).handle({
-    on: { Increment: (to) => to.self.update.from(({ current, event }) => ({ count: current.count + event.by })) },
+    on: {
+      Increment: { update: targets3.root, from: ({ root: current, event }) => ({ count: current.count + event.by }) }
+    },
     states: {
-      Idle: { on: { Start: (to) => to.local.Busy() } },
-      Busy: { on: { Stop: (to) => to.local.Idle() } }
+      Idle: { on: { Start: { target: targets3.root.Busy } } },
+      Busy: { on: { Stop: { target: targets3.root.Idle } } }
     }
   })
   return verifyPlannerStrategies({

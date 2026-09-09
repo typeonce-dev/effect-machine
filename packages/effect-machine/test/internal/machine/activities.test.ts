@@ -27,6 +27,21 @@ let dynamicFactoryEvaluations = 0
 const timerDuration = "10 seconds"
 const activityStates = Machine.state({ initial: "Loading", states: { Loading, Dynamic } })
 const activityMachine = Machine.make({
+  effects: { source2: Effect.suspend(() => Effect.fail("unavailable").pipe(Effect.as(1))) },
+  streams: { source4: Stream.suspend(() => Stream.empty) },
+  timers: { source3: timerDuration },
+  logic: {
+    dynamic: (_input: undefined) => {
+      dynamicFactoryEvaluations++
+      return Machine.logic({ initial: undefined, run: () => Effect.never })
+    },
+    source1: Machine.logic({
+      initial: undefined,
+      run: () => Effect.never
+    })
+  },
+  children: { source5: child },
+
   id: "activity-inspection",
   root: activityStates,
   events: Machine.eventsFromSchemas(WorkSucceeded, WorkFailed, LoadTimedOut),
@@ -34,32 +49,21 @@ const activityMachine = Machine.make({
 }).handle({
   states: {
     Loading: {
-      invoke: (
-        from
-      ) => [
-        from.logic("poll-server", {
-          address: Machine.childAddress("poll-server"),
-          logic: Machine.logic({
-            initial: undefined,
-            run: () => Effect.never
-          })
-        }),
-        from.effect("load-document", () => Effect.fail("unavailable").pipe(Effect.as(1))).onDone((to) => to.none)
-          .onFailure((to) => to.none),
-        from.timer("load-timeout", timerDuration).onDone((to) => to.none),
-        from.stream("updates", () => Stream.empty).onDone((to) => to.none),
-        from.child(child)
+      invoke: [
+        { src: "source1", id: "poll-server", address: Machine.childAddress("poll-server") },
+        { src: "source2", id: "load-document", onDone: { none: true }, onFailure: { none: true } },
+        { src: "source3", id: "load-timeout", onDone: { none: true } },
+        { src: "source4", id: "updates", onDone: { none: true } },
+        { src: "source5" }
       ]
     },
     Dynamic: {
-      invoke: (from) =>
-        from.logic("context-owned", {
-          address: Machine.childAddress("context-owned"),
-          logic: () => {
-            dynamicFactoryEvaluations++
-            return Machine.logic({ initial: undefined, run: () => Effect.never })
-          }
-        })
+      invoke: {
+        src: "dynamic",
+        id: "context-owned",
+        address: Machine.childAddress("context-owned"),
+        input: () => undefined
+      }
     }
   }
 })
@@ -169,6 +173,8 @@ describe("machine activity metadata", () => {
       Effect.sync(() => {
         const id = `generated-timer-${idSuffix}`
         const generated = Machine.make({
+          timers: { source1: durationMillis },
+
           root: activityStates,
           events: Machine.eventsFromSchemas(LoadTimedOut),
           initialConfiguration: (root) =>
@@ -176,7 +182,7 @@ describe("machine activity metadata", () => {
         }).handle({
           states: {
             Loading: {
-              invoke: (from) => from.timer(id, durationMillis).onDone((to) => to.none)
+              invoke: { src: "source1", id: id, onDone: { none: true } }
             }
           }
         })

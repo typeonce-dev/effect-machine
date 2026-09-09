@@ -105,6 +105,7 @@ const initial = (() => {
   return { path: "", value: undefined, state } as Machine.Snapshot<typeof States>
 })()
 
+const targets1 = Machine.targets(States)
 const machine = Machine.make({
   root: States,
   events: Machine.eventsFromSchemas(Advance),
@@ -137,10 +138,13 @@ const machine = Machine.make({
                                                   states: {
                                                     idle: {
                                                       on: {
-                                                        Advance: (to) =>
-                                                          to.local.done().resolve(({ event, target }) =>
-                                                            target.decoded(new DeepDone({ value: event.value }))
-                                                          )
+                                                        Advance: {
+                                                          target:
+                                                            targets1.root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10.n11.done,
+                                                          decoded: (
+                                                            { event }
+                                                          ) => (new DeepDone({ value: event.value }))
+                                                        }
                                                       }
                                                     },
                                                     done: {}

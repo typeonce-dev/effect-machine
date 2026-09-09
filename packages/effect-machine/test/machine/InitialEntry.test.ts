@@ -40,8 +40,9 @@ const States = Machine.state({
   }
 })
 
-const makeMachine = () =>
-  Machine.make({
+const makeMachine = () => {
+  const targets1 = Machine.targets(States)
+  return Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(Open, OpenInvalid),
     initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.closed.decoded(new Closed({}))))
@@ -49,8 +50,8 @@ const makeMachine = () =>
     states: {
       closed: {
         on: {
-          Open: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "team-1" })),
-          OpenInvalid: (to) => to.branch.opened.initial.resolve(({ target }) => target.from({ id: "" }))
+          Open: { initial: targets1.root.opened, from: () => ({ id: "team-1" }) },
+          OpenInvalid: { initial: targets1.root.opened, from: () => ({ id: "" }) }
         }
       },
       opened: {
@@ -58,6 +59,7 @@ const makeMachine = () =>
       }
     }
   })
+}
 
 const ParallelStates = Machine.state({
   initial: "outside",
@@ -78,8 +80,9 @@ const ParallelStates = Machine.state({
   }
 })
 
-const makeParallelMachine = () =>
-  Machine.make({
+const makeParallelMachine = () => {
+  const targets2 = Machine.targets(ParallelStates)
+  return Machine.make({
     root: ParallelStates,
     events: Machine.eventsFromSchemas(EnterDashboard),
     initialConfiguration: (root) =>
@@ -88,7 +91,7 @@ const makeParallelMachine = () =>
     states: {
       outside: {
         on: {
-          EnterDashboard: (to) => to.branch.dashboard.initial.resolve(({ target }) => target.decoded(new Dashboard({})))
+          EnterDashboard: { initial: targets2.root.dashboard, decoded: () => (new Dashboard({})) }
         }
       },
       dashboard: {
@@ -101,6 +104,7 @@ const makeParallelMachine = () =>
       }
     }
   })
+}
 
 const ChoiceStates = Machine.state({
   initial: "outside",
@@ -117,8 +121,9 @@ const ChoiceStates = Machine.state({
   }
 })
 
-const makeChoiceMachine = () =>
-  Machine.make({
+const makeChoiceMachine = () => {
+  const targets3 = Machine.targets(ChoiceStates)
+  return Machine.make({
     root: ChoiceStates,
     events: Machine.eventsFromSchemas(EnterFlow),
     initialConfiguration: (root) =>
@@ -127,18 +132,19 @@ const makeChoiceMachine = () =>
     states: {
       outside: {
         on: {
-          EnterFlow: (to) => to.branch.flow.initial.resolve(({ target }) => target.decoded(new Flow({})))
+          EnterFlow: { initial: targets3.root.flow, decoded: () => (new Flow({})) }
         }
       },
       flow: {
         states: {
           routing: {
-            choice: (to) => to.local.approved().resolve(({ target }) => target.decoded(new Approved({})))
+            choice: { target: targets3.root.flow.approved, decoded: () => (new Approved({})) }
           }
         }
       }
     }
   })
+}
 
 const StructuralStates = Machine.state({
   initial: "outside",
@@ -151,8 +157,9 @@ const StructuralStates = Machine.state({
   }
 })
 
-const makeStructuralMachine = () =>
-  Machine.make({
+const makeStructuralMachine = () => {
+  const targets4 = Machine.targets(StructuralStates)
+  return Machine.make({
     root: StructuralStates,
     events: Machine.eventsFromSchemas(EnterFlow),
     initialConfiguration: (root) =>
@@ -161,11 +168,12 @@ const makeStructuralMachine = () =>
     states: {
       outside: {
         on: {
-          EnterFlow: (to) => to.branch.group.initial.resolve(({ target }) => target.from())
+          EnterFlow: { initial: targets4.root.group }
         }
       }
     }
   })
+}
 
 const NestedStates = Machine.state({
   initial: "root",
@@ -184,8 +192,9 @@ const NestedStates = Machine.state({
   }
 })
 
-const makeNestedMachine = () =>
-  Machine.make({
+const makeNestedMachine = () => {
+  const targets5 = Machine.targets(NestedStates)
+  return Machine.make({
     root: NestedStates,
     events: Machine.eventsFromSchemas(OpenLocal, OpenBranch),
     initialConfiguration: (root) =>
@@ -196,8 +205,8 @@ const makeNestedMachine = () =>
         states: {
           closed: {
             on: {
-              OpenLocal: (to) => to.local.opened.initial.resolve(({ target }) => target.from({ id: "local" })),
-              OpenBranch: (to) => to.branch.root.opened.initial.resolve(({ target }) => target.from({ id: "branch" }))
+              OpenLocal: { initial: targets5.root.root.opened, from: () => ({ id: "local" }) },
+              OpenBranch: { initial: targets5.root.root.opened, from: () => ({ id: "branch" }) }
             }
           },
           opened: {
@@ -207,6 +216,7 @@ const makeNestedMachine = () =>
       }
     }
   })
+}
 
 describe("declared initial entry", () => {
   it.effect("captures the target-first selector once and evaluates its resolver only when planned", () =>

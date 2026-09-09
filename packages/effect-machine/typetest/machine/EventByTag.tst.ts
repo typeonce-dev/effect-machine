@@ -32,6 +32,7 @@ describe("Machine.EventByTag", () => {
 
   it("narrows handler contexts for every finite tag", () => {
     const states = Machine.state({ initial: "Idle", states: { Idle } })
+
     Machine.make({
       root: states,
       events: Machine.eventsFromSchemas(FiniteUnion),
@@ -40,24 +41,28 @@ describe("Machine.EventByTag", () => {
       states: {
         Idle: {
           on: {
-            Alpha: (to) =>
-              to.none.resolve(({ event }) => {
+            Alpha: {
+              none: true,
+              resolve: ({ event }) => {
                 expect(event).type.toBe<{
                   readonly _tag: "Alpha"
                   readonly payload: string
                   readonly count: number
                 }>()
                 return undefined
-              }),
-            Beta: (to) =>
-              to.none.resolve(({ event }) => {
+              }
+            },
+            Beta: {
+              none: true,
+              resolve: ({ event }) => {
                 expect(event).type.toBe<{
                   readonly _tag: "Beta"
                   readonly payload: string
                   readonly count: number
                 }>()
                 return undefined
-              })
+              }
+            }
           }
         }
       }
