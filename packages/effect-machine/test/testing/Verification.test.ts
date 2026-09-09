@@ -2,7 +2,6 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 class Off extends Schema.TaggedClass<Off>("Off")("Off", {}) {}
 class App extends Schema.TaggedClass<App>("App")("App", {}) {}
 class One extends Schema.TaggedClass<One>("One")("One", {}) {}
@@ -18,14 +17,11 @@ class Route extends Schema.TaggedClass<Route>("VerificationRoute")("Route", {}) 
 class Select extends Schema.TaggedClass<Select>("VerificationSelect")("Select", {
   value: Schema.Int
 }) {}
-
 const NavigationStates = Machine.state({
-  initial: "off",
   states: {
     off: Off,
     app: {
       schema: App,
-      initial: "one",
       states: {
         one: One,
         two: Two
@@ -33,14 +29,15 @@ const NavigationStates = Machine.state({
     }
   }
 })
-
 const targets1 = Machine.targets(NavigationStates)
 const navigationMachine = Machine.make({
   branches: { transition1: { destination: { target: targets1.root.app } } },
-
   root: NavigationStates,
   events: Machine.eventsFromSchemas(Go)
 }).handle({
+  initial: {
+    target: Machine.targets(NavigationStates).root.off
+  },
   states: {
     off: {
       on: {
@@ -50,21 +47,32 @@ const navigationMachine = Machine.make({
             target.decoded(new App({}), (app) => app.two.decoded(new Two({})))
         }
       }
+    },
+    app: {
+      initial: {
+        target: Machine.targets(NavigationStates).root.app.one
+      },
+      states: {
+        one: {},
+        two: {}
+      }
     }
   }
 })
-
 const targets2 = Machine.targets(NavigationStates)
 const raisedNavigationMachine = Machine.make({
   branches: {
     transition1: { destination: { target: targets2.root.app } },
     transition2: { destination: { target: targets2.root.app } }
   },
-
   root: NavigationStates,
-  events: Machine.eventsFromSchemas(Go),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.off.decoded(new Off({}))))
+  events: Machine.eventsFromSchemas(Go)
 }).handle({
+  initial: {
+    target: Machine.targets(NavigationStates).root.off,
+    decoded: true,
+    data: new Off({})
+  },
   states: {
     off: {
       always: {
@@ -79,42 +87,56 @@ const raisedNavigationMachine = Machine.make({
             target.decoded(new App({}), (app) => app.one.decoded(new One({})))
         }
       }
+    },
+    app: {
+      initial: {
+        target: Machine.targets(NavigationStates).root.app.one
+      },
+      states: {
+        one: {},
+        two: {}
+      }
     }
   }
 })
-
-const CounterStates = Machine.state({ initial: "counter", states: { counter: Counter } })
-
+const CounterStates = Machine.state({ states: { counter: Counter } })
 const targets3 = Machine.targets(CounterStates)
 const counterMachine = Machine.make({
   branches: { transition1: { destination: { target: targets3.root.counter } } },
-
   root: CounterStates,
-  events: Machine.eventsFromSchemas(Increment, Noop),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.counter.decoded(new Counter({ count: 0 }))))
+  events: Machine.eventsFromSchemas(Increment, Noop)
 }).handle({
+  initial: {
+    target: Machine.targets(CounterStates).root.counter,
+    decoded: true,
+    data: new Counter({ count: 0 })
+  },
   states: {
     counter: {
       on: {
-        Increment: { target: targets3.root.counter, decoded: ({ state }) => (new Counter({ count: state.count + 1 })) },
+        Increment: {
+          target: targets3.root.counter,
+          decoded: true,
+          data: ({ state }) => (new Counter({ count: state.count + 1 }))
+        },
         Noop: { none: true }
       }
     }
   }
 })
-
 const targets4 = Machine.targets(CounterStates)
 const conditionalMachine = Machine.make({
   branches: {
     transition1: { negative: { none: true }, zero: { target: targets4.root.counter }, positive: { none: true } }
   },
-
   root: CounterStates,
-  events: Machine.eventsFromSchemas(Select),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.counter.decoded(new Counter({ count: 0 }))))
+  events: Machine.eventsFromSchemas(Select)
 }).handle({
+  initial: {
+    target: Machine.targets(CounterStates).root.counter,
+    decoded: true,
+    data: new Counter({ count: 0 })
+  },
   states: {
     counter: {
       on: {
@@ -131,15 +153,16 @@ const conditionalMachine = Machine.make({
     }
   }
 })
-
 const invokedMachine = Machine.make({
   effects: { source1: Effect.suspend(() => Effect.succeed(1)), source2: Effect.suspend(() => Effect.succeed(2)) },
-
   root: CounterStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.counter.decoded(new Counter({ count: 0 }))))
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(CounterStates).root.counter,
+    decoded: true,
+    data: new Counter({ count: 0 })
+  },
   states: {
     counter: {
       invoke: [{ src: "source1", id: "first", onDone: { none: true } }, {
@@ -150,16 +173,12 @@ const invokedMachine = Machine.make({
     }
   }
 })
-
 class StartupA extends Schema.TaggedClass<StartupA>("StartupA")("StartupA", {}) {}
 class StartupB extends Schema.TaggedClass<StartupB>("StartupB")("StartupB", {}) {}
-
 const RoutedStartupStates = Machine.state({
-  initial: "b",
   states: {
     a: {
       schema: StartupA,
-      initial: "route",
       states: {
         route: { type: "choice" },
         second: { type: "choice" }
@@ -168,44 +187,44 @@ const RoutedStartupStates = Machine.state({
     b: StartupB
   }
 })
-
 const targets6 = Machine.targets(RoutedStartupStates)
 const routedStartupMachine = Machine.make({
   branches: {
     transition1: { destination: { target: targets6.root.a.second } },
     transition2: { destination: { target: targets6.root.b } }
   },
-
   root: RoutedStartupStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.a.decoded(new StartupA({}), (a) => a.route())))
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(RoutedStartupStates).root.a,
+    decoded: true,
+    data: new StartupA({})
+  },
   states: {
     a: {
+      initial: {
+        target: Machine.targets(RoutedStartupStates).root.a.route
+      },
       states: {
         route: {
           choice: { branches: "transition1", resolve: ({ select: { destination: target } }) => target() }
         },
         second: {
-          choice: { target: targets6.root.b, decoded: () => (new StartupB({})) }
+          choice: { target: targets6.root.b, decoded: true, data: () => (new StartupB({})) }
         }
       }
     },
     b: {}
   }
 })
-
 class ChoiceFlow extends Schema.TaggedClass<ChoiceFlow>("ChoiceFlow")("ChoiceFlow", {}) {}
 class ChoiceReady extends Schema.TaggedClass<ChoiceReady>("ChoiceReady")("ChoiceReady", {}) {}
 class ChoiceRouted extends Schema.TaggedClass<ChoiceRouted>("ChoiceRouted")("ChoiceRouted", {}) {}
-
 const ChoiceResolutionStates = Machine.state({
-  initial: "flow",
   states: {
     flow: {
       schema: ChoiceFlow,
-      initial: "ready",
       states: {
         ready: ChoiceReady,
         first: { type: "choice" },
@@ -215,23 +234,27 @@ const ChoiceResolutionStates = Machine.state({
     }
   }
 })
-
 const targets7 = Machine.targets(ChoiceResolutionStates)
 const choiceResolutionMachine = Machine.make({
   branches: {
     transition1: { destination: { target: targets7.root.flow.first } },
     transition2: { destination: { target: targets7.root.flow.second } }
   },
-
   root: ChoiceResolutionStates,
-  events: Machine.eventsFromSchemas(Route),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.flow.decoded(new ChoiceFlow({}), (flow) => flow.ready.decoded(new ChoiceReady({}))))
-    )
+  events: Machine.eventsFromSchemas(Route)
 }).handle({
+  initial: {
+    target: Machine.targets(ChoiceResolutionStates).root.flow,
+    decoded: true,
+    data: new ChoiceFlow({})
+  },
   states: {
     flow: {
+      initial: {
+        target: Machine.targets(ChoiceResolutionStates).root.flow.ready,
+        decoded: true,
+        data: new ChoiceReady({})
+      },
       states: {
         ready: {
           on: {
@@ -242,27 +265,32 @@ const choiceResolutionMachine = Machine.make({
           choice: { branches: "transition2", resolve: ({ select: { destination: target } }) => target() }
         },
         second: {
-          choice: { target: targets7.root.flow.routed, decoded: () => (new ChoiceRouted({})) }
+          choice: { target: targets7.root.flow.routed, decoded: true, data: () => (new ChoiceRouted({})) }
         },
         routed: {}
       }
     }
   }
 })
-
 const targets8 = Machine.targets(NavigationStates)
 const reentryMachine = Machine.make({
   branches: { transition1: { destination: { target: targets8.root.app } } },
-
   root: NavigationStates,
-  events: Machine.eventsFromSchemas(Restart),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.app.decoded(new App({}), (app) => app.one.decoded(new One({}))))
-    )
+  events: Machine.eventsFromSchemas(Restart)
 }).handle({
+  initial: {
+    target: Machine.targets(NavigationStates).root.app,
+    decoded: true,
+    data: new App({})
+  },
   states: {
+    off: {},
     app: {
+      initial: {
+        target: Machine.targets(NavigationStates).root.app.one,
+        decoded: true,
+        data: new One({})
+      },
       on: {
         Restart: {
           branches: "transition1",
@@ -270,17 +298,18 @@ const reentryMachine = Machine.make({
           resolve: ({ select: { destination: target } }) =>
             target.decoded(new App({}), (app) => app.one.decoded(new One({})))
         }
+      },
+      states: {
+        one: {},
+        two: {}
       }
     }
   }
 })
-
 class Dashboard extends Schema.TaggedClass<Dashboard>("Dashboard")("Dashboard", {}) {}
 class Left extends Schema.TaggedClass<Left>("Left")("Left", {}) {}
 class Right extends Schema.TaggedClass<Right>("Right")("Right", {}) {}
-
 const ParallelStates = Machine.state({
-  initial: "dashboard",
   states: {
     dashboard: {
       schema: Dashboard,
@@ -292,21 +321,25 @@ const ParallelStates = Machine.state({
     }
   }
 })
-
 const parallelMachine = Machine.make({
   root: ParallelStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.dashboard.decoded(
-          new Dashboard({}),
-          (dashboard) => dashboard.left.decoded(new Left({})).right.decoded(new Right({}))
-        )
-      )
-    )
-}).handle({ states: { dashboard: {} } })
-
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(ParallelStates).root.dashboard,
+    decoded: true,
+    data: new Dashboard({})
+  },
+  states: {
+    dashboard: {
+      initial: { left: { decoded: true, data: new Left({}) }, right: { decoded: true, data: new Right({}) } },
+      states: {
+        left: {},
+        right: {}
+      }
+    }
+  }
+})
 class Workspace extends Schema.TaggedClass<Workspace>("Workspace")("Workspace", {}) {}
 class Editor extends Schema.TaggedClass<Editor>("Editor")("Editor", {}) {}
 class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {
@@ -315,17 +348,13 @@ class Editing extends Schema.TaggedClass<Editing>("Editing")("Editing", {
 class Away extends Schema.TaggedClass<Away>("Away")("Away", {}) {}
 class Leave extends Schema.TaggedClass<Leave>("Leave")("Leave", {}) {}
 class Resume extends Schema.TaggedClass<Resume>("Resume")("Resume", {}) {}
-
 const HistoryStates = Machine.state({
-  initial: "away",
   states: {
     workspace: {
       schema: Workspace,
-      initial: "editor",
       states: {
         editor: {
           schema: Editor,
-          initial: "editing",
           states: {
             editing: Editing
           }
@@ -342,57 +371,64 @@ const HistoryStates = Machine.state({
     away: Away
   }
 })
-
 const targets9 = Machine.targets(HistoryStates)
 const historyMachine = Machine.make({
   branches: {
     transition1: { destination: { target: targets9.root.away } },
     transition2: { destination: { history: targets9.root.workspace.exact } }
   },
-
   root: HistoryStates,
-  events: Machine.eventsFromSchemas(Leave, Resume),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.workspace.decoded(new Workspace({}), (workspace) =>
-          workspace.editor.decoded(
-            new Editor({}),
-            (editor) => editor.editing.decoded(new Editing({ revision: 1 }))
-          ))
-      )
-    )
+  events: Machine.eventsFromSchemas(Leave, Resume)
 }).handle({
+  initial: {
+    target: Machine.targets(HistoryStates).root.workspace,
+    decoded: true,
+    data: new Workspace({})
+  },
   states: {
     workspace: {
+      initial: {
+        target: Machine.targets(HistoryStates).root.workspace.editor,
+        decoded: true,
+        data: new Editor({})
+      },
       history: {
         recent: {
           default: ({ target }) =>
             target.from((to) =>
-              to.workspace.decoded(new Workspace({}), (workspace) =>
-                workspace.editor.decoded(
-                  new Editor({}),
-                  (editor) => editor.editing.decoded(new Editing({ revision: 0 }))
-                ))
+              to.workspace.decoded(
+                new Workspace({}),
+                (workspace) =>
+                  workspace.editor.decoded(new Editor({}), (editor) =>
+                    editor.editing.decoded(new Editing({ revision: 0 })))
+              )
             )
         },
         exact: {
           default: ({ target }) =>
             target.from((to) =>
-              to.workspace.decoded(new Workspace({}), (workspace) =>
-                workspace.editor.decoded(
-                  new Editor({}),
-                  (editor) => editor.editing.decoded(new Editing({ revision: 0 }))
-                ))
+              to.workspace.decoded(
+                new Workspace({}),
+                (workspace) =>
+                  workspace.editor.decoded(new Editor({}), (editor) =>
+                    editor.editing.decoded(new Editing({ revision: 0 })))
+              )
             )
         }
       },
       on: {
-        Leave: { target: targets9.root.away, decoded: () => (new Away({})) }
+        Leave: { target: targets9.root.away, decoded: true, data: () => (new Away({})) }
       },
       states: {
         editor: {
-          initialize: ({ builder }) => builder.decoded(new Editing({ revision: 0 }))
+          initial: {
+            target: Machine.targets(HistoryStates).root.workspace.editor.editing,
+            decoded: true,
+            data: ({}) => new Editing({ revision: 0 })
+          },
+          states: {
+            editing: {}
+          }
         }
       }
     },
@@ -403,15 +439,11 @@ const historyMachine = Machine.make({
     }
   }
 })
-
 const StructuralHistoryStates = Machine.state({
-  initial: "away",
   states: {
     workspace: {
-      initial: "editor",
       states: {
         editor: {
-          initial: "idle",
           states: { idle: {} }
         },
         exact: { type: "history", history: "deep" }
@@ -420,7 +452,6 @@ const StructuralHistoryStates = Machine.state({
     away: {}
   }
 })
-
 const structuralHistoryInitial = () => ({
   path: "" as const,
   value: undefined,
@@ -434,34 +465,42 @@ const structuralHistoryInitial = () => ({
     }
   }
 })
-
 const targets10 = Machine.targets(StructuralHistoryStates)
 const structuralHistoryMachine = Machine.make({
   branches: { transition1: { destination: { target: targets10.root.away } } },
-
   root: StructuralHistoryStates,
-  events: Machine.eventsFromSchemas(Leave),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.workspace.from((workspace) => workspace.editor.from((editor) => editor.idle.from())))
-    )
+  events: Machine.eventsFromSchemas(Leave)
 }).handle({
+  initial: {
+    target: Machine.targets(StructuralHistoryStates).root.workspace
+  },
   states: {
     workspace: {
+      initial: {
+        target: Machine.targets(StructuralHistoryStates).root.workspace.editor
+      },
       history: {
         exact: { default: structuralHistoryInitial }
       },
       on: {
         Leave: { target: targets10.root.away }
+      },
+      states: {
+        editor: {
+          initial: {
+            target: Machine.targets(StructuralHistoryStates).root.workspace.editor.idle
+          },
+          states: {
+            idle: {}
+          }
+        }
       }
-    }
+    },
+    away: {}
   }
 })
-
 class Finished extends Schema.TaggedClass<Finished>("Finished")("Finished", {}) {}
-
 const CompletionStates = Machine.state({
-  initial: "finished",
   states: {
     finished: {
       schema: Finished,
@@ -470,29 +509,27 @@ const CompletionStates = Machine.state({
     }
   }
 })
-
 const completionMachine = Machine.make({
   root: CompletionStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.finished.decoded(new Finished({}))))
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(CompletionStates).root.finished,
+    decoded: true,
+    data: new Finished({})
+  },
   states: {
     finished: {
       output: () => "complete"
     }
   }
 })
-
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
 class Archived extends Schema.TaggedClass<Archived>("Archived")("Archived", {}) {}
-
 const DoneTransitionStates = Machine.state({
-  initial: "workflow",
   states: {
     workflow: {
       schema: Workflow,
-      initial: "finished",
       states: {
         finished: {
           schema: Finished,
@@ -504,62 +541,66 @@ const DoneTransitionStates = Machine.state({
     archived: Archived
   }
 })
-
 const targets11 = Machine.targets(DoneTransitionStates)
 const doneTransitionMachine = Machine.make({
   branches: { transition1: { destination: { target: targets11.root.archived } } },
-
   root: DoneTransitionStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.workflow.decoded(new Workflow({}), (workflow) => workflow.finished.decoded(new Finished({})))
-      )
-    )
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(DoneTransitionStates).root.workflow,
+    decoded: true,
+    data: new Workflow({})
+  },
   states: {
     workflow: {
-      onDone: { target: targets11.root.archived, decoded: () => (new Archived({})) },
+      initial: {
+        target: Machine.targets(DoneTransitionStates).root.workflow.finished,
+        decoded: true,
+        data: new Finished({})
+      },
+      onDone: { target: targets11.root.archived, decoded: true, data: () => (new Archived({})) },
       states: {
         finished: {
           output: () => "workflow-output"
         }
       }
-    }
+    },
+    archived: {}
   }
 })
-
 const nestedCompletionMachine = Machine.make({
   root: DoneTransitionStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.workflow.decoded(new Workflow({}), (workflow) => workflow.finished.decoded(new Finished({})))
-      )
-    )
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(DoneTransitionStates).root.workflow,
+    decoded: true,
+    data: new Workflow({})
+  },
   states: {
     workflow: {
+      initial: {
+        target: Machine.targets(DoneTransitionStates).root.workflow.finished,
+        decoded: true,
+        data: new Finished({})
+      },
       states: {
         finished: {
           output: () => "nested-output"
         }
       }
-    }
+    },
+    archived: {}
   }
 })
-
 const laws = (error: MachineTest.VerificationError): ReadonlyArray<MachineTest.VerificationLaw> =>
   error.violations.map((violation) => violation.law)
-
 describe("MachineTest.verify", () => {
   it.effect("accepts structural configurations and history without invented values", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(structuralHistoryMachine, { events: [new Leave({})] })
       yield* MachineTest.verify(structuralHistoryMachine, trace)
-
       const valuedState = {
         ...trace,
         final: { ...trace.final, state: { ...trace.final.state, value: { _tag: "Invented" } } }
@@ -570,7 +611,6 @@ describe("MachineTest.verify", () => {
       assert.ok(
         stateError.violations.some((violation) => violation.law === "configuration.schema" && violation.path === "away")
       )
-
       const final = trace.final as any
       const exact = final.history["workspace.exact"]
       const valuedHistory = {
@@ -593,7 +633,6 @@ describe("MachineTest.verify", () => {
         historyError.violations.some((violation) => violation.law === "history.value" && violation.path === "workspace")
       )
     }))
-
   it.effect("accepts valid compound, parallel, history, and completion traces", () =>
     Effect.gen(function*() {
       const navigation = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
@@ -603,7 +642,6 @@ describe("MachineTest.verify", () => {
       const completion = yield* MachineTest.run(completionMachine, { events: [] })
       const doneTransition = yield* MachineTest.run(doneTransitionMachine, { events: [] })
       const nestedCompletion = yield* MachineTest.run(nestedCompletionMachine, { events: [] })
-
       yield* MachineTest.verify(navigationMachine, navigation)
       yield* MachineTest.verify(raisedNavigationMachine, raisedNavigation)
       yield* MachineTest.verify(parallelMachine, parallel)
@@ -612,7 +650,6 @@ describe("MachineTest.verify", () => {
       yield* MachineTest.verify(doneTransitionMachine, doneTransition)
       yield* MachineTest.verify(nestedCompletionMachine, nestedCompletion)
     }))
-
   it.effect("allows same-path value updates while rejecting implausible changed no-ops", () =>
     Effect.gen(function*() {
       const updated = yield* MachineTest.run(counterMachine, { events: [new Increment({})] })
@@ -622,7 +659,6 @@ describe("MachineTest.verify", () => {
       assert.deepStrictEqual(updateMicrostep.entryPaths, [])
       assert.strictEqual((updated.final.state.value as Counter).count, 1)
       yield* MachineTest.verify(counterMachine, updated)
-
       const noop = yield* MachineTest.run(counterMachine, { events: [new Noop({})] })
       const step = noop.steps[0]!
       const microstep = step.plan.microsteps[0]!
@@ -641,7 +677,6 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(error), "microsteps.changed")
     }))
-
   it.effect("requires lifecycle boundaries to match retained reentry scopes", () =>
     Effect.gen(function*() {
       const reentry = yield* MachineTest.run(reentryMachine, { events: [new Restart({})] })
@@ -668,7 +703,6 @@ describe("MachineTest.verify", () => {
       assert.ok(
         missingError.violations.some((violation) => violation.law === "microsteps.reentry" && violation.path === "app")
       )
-
       const updated = yield* MachineTest.run(counterMachine, { events: [new Increment({})] })
       const updateStep = updated.steps[0]!
       const updateMicrostep = updateStep.plan.microsteps[0]!
@@ -694,7 +728,6 @@ describe("MachineTest.verify", () => {
         violation.law === "microsteps.reentry" && violation.path === "counter"
       ))
     }))
-
   it.effect("reports omitted parallel regions and duplicate active states", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(parallelMachine, { events: [] })
@@ -710,7 +743,6 @@ describe("MachineTest.verify", () => {
         laws: ["configuration"]
       }).pipe(Effect.flip)
       assert.include(laws(omittedError), "configuration.parallel")
-
       const duplicate = {
         ...trace,
         final: {
@@ -723,7 +755,6 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(duplicateError), "configuration.duplicate")
     }))
-
   it.effect("reports reversed entry order with its event and microstep", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
@@ -739,7 +770,6 @@ describe("MachineTest.verify", () => {
           }
         }]
       } as typeof trace
-
       const error = yield* MachineTest.verify(navigationMachine, reversed, {
         laws: ["microsteps"]
       }).pipe(Effect.flip)
@@ -747,12 +777,10 @@ describe("MachineTest.verify", () => {
       assert.strictEqual(violation?.eventIndex, 0)
       assert.strictEqual(violation?.microstepIndex, 0)
     }))
-
   it.effect("reports unknown and active history paths", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(historyMachine, { events: [] })
       const workspace = trace.final as any
-
       const unknown = {
         ...trace,
         final: {
@@ -764,7 +792,6 @@ describe("MachineTest.verify", () => {
         laws: ["configuration"]
       }).pipe(Effect.flip)
       assert.include(laws(unknownError), "configuration.path")
-
       const activeHistory = {
         ...trace,
         final: {
@@ -779,7 +806,6 @@ describe("MachineTest.verify", () => {
         violation.law === "configuration.path" && violation.path === "workspace.recent"
       ))
     }))
-
   it.effect("reports invalid remembered values in public history metadata", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(historyMachine, { events: [new Leave({})] })
@@ -801,7 +827,6 @@ describe("MachineTest.verify", () => {
           }
         }
       } as typeof trace
-
       const error = yield* MachineTest.verify(historyMachine, corrupted, {
         laws: ["history"]
       }).pipe(Effect.flip)
@@ -809,7 +834,6 @@ describe("MachineTest.verify", () => {
         error.violations.some((violation) => violation.law === "history.value" && violation.path === "workspace.editor")
       )
     }))
-
   it.effect("distinguishes shallow containment from complete deep history", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(historyMachine, { events: [new Leave({})] })
@@ -840,14 +864,12 @@ describe("MachineTest.verify", () => {
           }
         }
       } as typeof trace
-
       const error = yield* MachineTest.verify(historyMachine, corrupted, {
         laws: ["history"]
       }).pipe(Effect.flip)
       assert.include(laws(error), "history.shallow")
       assert.include(laws(error), "history.deep")
     }))
-
   it.effect("rejects orphan descendants in deep history", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(historyMachine, { events: [new Leave({})] })
@@ -862,14 +884,11 @@ describe("MachineTest.verify", () => {
             "workspace.exact": {
               ...deep,
               active: deep.active.filter((path: string) => path !== "workspace.editor"),
-              values: Object.fromEntries(
-                Object.entries(deep.values).filter(([path]) => path !== "workspace.editor")
-              )
+              values: Object.fromEntries(Object.entries(deep.values).filter(([path]) => path !== "workspace.editor"))
             }
           }
         }
       } as typeof trace
-
       const error = yield* MachineTest.verify(historyMachine, corrupted, {
         laws: ["history"]
       }).pipe(Effect.flip)
@@ -877,7 +896,6 @@ describe("MachineTest.verify", () => {
         violation.law === "history.deep" && violation.message.includes("without ancestor")
       ))
     }))
-
   it.effect("reports inconsistent done and output data", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(completionMachine, { events: [] })
@@ -892,14 +910,12 @@ describe("MachineTest.verify", () => {
           }
         }
       } as unknown as typeof trace
-
       const error = yield* MachineTest.verify(completionMachine, corrupted, {
         laws: ["completion"]
       }).pipe(Effect.flip)
       assert.include(laws(error), "completion.done")
       assert.include(laws(error), "completion.output")
     }))
-
   it.effect("requires every nested completion in settled snapshots", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(nestedCompletionMachine, { events: [] })
@@ -912,12 +928,13 @@ describe("MachineTest.verify", () => {
             ...trace.initial.plan,
             state: {
               ...state,
-              completed: state.completed.filter(({ path }: { readonly path: string }) => path !== "workflow.finished")
+              completed: state.completed.filter(({ path }: {
+                readonly path: string
+              }) => path !== "workflow.finished")
             }
           }
         }
       } as typeof trace
-
       const error = yield* MachineTest.verify(nestedCompletionMachine, corrupted, {
         laws: ["completion"]
       }).pipe(Effect.flip)
@@ -925,7 +942,6 @@ describe("MachineTest.verify", () => {
         violation.law === "completion.record" && violation.path === "workflow.finished"
       ))
     }))
-
   it.effect("binds retained targets to the exact selected branch and selection scope", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
@@ -945,7 +961,6 @@ describe("MachineTest.verify", () => {
           }
         }]
       } as typeof trace
-
       const error = yield* MachineTest.verify(navigationMachine, corrupted, {
         laws: ["definitions"]
       }).pipe(Effect.flip)
@@ -954,14 +969,12 @@ describe("MachineTest.verify", () => {
       assert.strictEqual(violation?.microstepIndex, 0)
       assert.strictEqual(violation?.path, "off")
     }))
-
   it.effect("rejects invalid named-branch evidence", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(conditionalMachine, { events: [new Select({ value: -1 })] })
       const step = trace.steps[0]!
       const microstep = step.plan.microsteps[0]!
       const transition = microstep.transitions[0]!
-
       const invalidIndex = {
         ...trace,
         steps: [{
@@ -979,7 +992,6 @@ describe("MachineTest.verify", () => {
         laws: ["definitions"]
       }).pipe(Effect.flip)
       assert.include(laws(indexError), "definitions.branchIndex")
-
       const wrongKey = {
         ...trace,
         steps: [{
@@ -997,7 +1009,6 @@ describe("MachineTest.verify", () => {
         laws: ["definitions"]
       }).pipe(Effect.flip)
       assert.include(laws(keyError), "definitions.branchKey")
-
       const crossBranch = {
         ...trace,
         steps: [{
@@ -1016,11 +1027,9 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(branchError), "definitions.selection")
     }))
-
   it.effect("accepts an exact initial choice route to another root", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(routedStartupMachine, { events: [] })
-
       assert.deepStrictEqual(trace.initial.startingConfiguration, ["", "b"])
       assert.deepStrictEqual(
         trace.initial.plan.microsteps[0]?.transitions.map(({ branchIndex, source, target, trigger }) => ({
@@ -1036,7 +1045,6 @@ describe("MachineTest.verify", () => {
       )
       yield* MachineTest.verify(routedStartupMachine, trace, { laws: ["definitions"] })
     }))
-
   it.effect("rejects a startup root without an exact initial choice route", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
@@ -1047,7 +1055,6 @@ describe("MachineTest.verify", () => {
           startingState: trace.final
         }
       } as typeof trace
-
       const error = yield* MachineTest.verify(navigationMachine, corrupted, {
         laws: ["definitions"]
       }).pipe(Effect.flip)
@@ -1055,7 +1062,6 @@ describe("MachineTest.verify", () => {
       assert.strictEqual(violation?.eventIndex, undefined)
       assert.strictEqual(violation?.path, "")
     }))
-
   it.effect("binds resolved targets to direct and chained choice evidence", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(choiceResolutionMachine, { events: [new Route({})] })
@@ -1074,7 +1080,6 @@ describe("MachineTest.verify", () => {
         ]
       )
       yield* MachineTest.verify(choiceResolutionMachine, trace, { laws: ["definitions"] })
-
       const transition = microstep.transitions[0]!
       const corrupted = {
         ...trace,
@@ -1093,7 +1098,6 @@ describe("MachineTest.verify", () => {
         laws: ["definitions"]
       }).pipe(Effect.flip)
       assert.include(laws(error), "definitions.resolution")
-
       const missingRoute = {
         ...trace,
         steps: [{
@@ -1111,7 +1115,6 @@ describe("MachineTest.verify", () => {
         law === "definitions.resolution" && message.includes("without an exact retained route")
       ))
     }))
-
   it.effect("rejects a wrong active descendant as a resolved state target", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(navigationMachine, { events: [new Go({})] })
@@ -1131,14 +1134,12 @@ describe("MachineTest.verify", () => {
           }
         }]
       } as typeof trace
-
       const error = yield* MachineTest.verify(navigationMachine, corrupted, {
         laws: ["definitions"]
       }).pipe(Effect.flip)
       const violation = error.violations.find(({ law }) => law === "definitions.resolution")
       assert.strictEqual(violation?.path, "app.one")
     }))
-
   it.effect("validates every simultaneous transition resolution independently", () =>
     Effect.gen(function*() {
       const machine = MachineTest.compileModel({
@@ -1191,7 +1192,6 @@ describe("MachineTest.verify", () => {
       const step = trace.steps[0]!
       const microstep = step.plan.microsteps[0]!
       assert.strictEqual(microstep.transitions.length, 2)
-
       const corrupted = {
         ...trace,
         steps: [{
@@ -1213,19 +1213,17 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(error), "definitions.resolution")
     }))
-
   it.effect("binds history resolution to the declared owner", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(historyMachine, { events: [new Leave({}), new Resume({})] })
       const step = trace.steps[1]!
       const microstep = step.plan.microsteps[0]!
       const transition = microstep.transitions[0]!
-      assert.deepStrictEqual(
-        { target: transition.target, resolvedTarget: transition.resolvedTarget },
-        { target: "workspace.exact", resolvedTarget: "workspace" }
-      )
+      assert.deepStrictEqual({ target: transition.target, resolvedTarget: transition.resolvedTarget }, {
+        target: "workspace.exact",
+        resolvedTarget: "workspace"
+      })
       yield* MachineTest.verify(historyMachine, trace, { laws: ["definitions"] })
-
       const corrupted = {
         ...trace,
         steps: [trace.steps[0]!, {
@@ -1244,7 +1242,6 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(error), "definitions.resolution")
     }))
-
   it.effect("distinguishes invoke definitions by lifecycle id and outcome", () =>
     Effect.gen(function*() {
       const trace = yield* MachineTest.run(invokedMachine, { events: [] })
@@ -1280,7 +1277,6 @@ describe("MachineTest.verify", () => {
         }
       }
       yield* MachineTest.verify(invokedMachine, withInvoke, { laws: ["definitions"] })
-
       const wrongId = {
         ...withInvoke,
         initial: {
@@ -1302,12 +1298,10 @@ describe("MachineTest.verify", () => {
       }).pipe(Effect.flip)
       assert.include(laws(error), "definitions.transition")
     }))
-
   const generatedNavigation = MachineTest.scenarios(navigationMachine, {
     minEvents: 0,
     maxEvents: 20
   })
-
   it.effect.prop(
     "verifies schema-derived scenarios after every shrink",
     { scenario: generatedNavigation.arbitrary },

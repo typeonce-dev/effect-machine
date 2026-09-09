@@ -1,9 +1,7 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Effect, Schema } from "effect"
-
 const Mode = Schema.Literals(["login", "signup"])
 const LoginMethod = Schema.Literals(["code", "password"])
-
 const AuthState = Schema.TaggedUnion({
   Editing: {
     mode: Mode,
@@ -19,16 +17,12 @@ const AuthState = Schema.TaggedUnion({
   },
   Navigating: { href: Schema.String }
 })
-
 const AuthStates = Machine.state({
-  initial: "Editing",
   states: {
     Editing: {
       schema: AuthState.cases.Editing,
-      initial: "Form",
       states: {
         Form: {
-          initial: "Ready",
           states: {
             Ready: {},
             Failed: AuthState.cases.EditingFailed
@@ -40,7 +34,6 @@ const AuthStates = Machine.state({
     },
     Verification: {
       schema: AuthState.cases.Verification,
-      initial: "CodeEntry",
       states: {
         CodeEntry: {}
       }
@@ -48,16 +41,12 @@ const AuthStates = Machine.state({
     Navigating: AuthState.cases.Navigating
   }
 })
-
-const AuthEvents = Machine.eventsFromSchemas(
-  Schema.TaggedUnion({
-    EmailChanged: { value: Schema.String },
-    LoginMethodChanged: { value: LoginMethod },
-    PasswordChanged: { value: Schema.String },
-    Submit: { route: Schema.Literals(["verification", "login", "invalid"]) }
-  })
-)
-
+const AuthEvents = Machine.eventsFromSchemas(Schema.TaggedUnion({
+  EmailChanged: { value: Schema.String },
+  LoginMethodChanged: { value: LoginMethod },
+  PasswordChanged: { value: Schema.String },
+  Submit: { route: Schema.Literals(["verification", "login", "invalid"]) }
+}))
 const targets1 = Machine.targets(AuthStates)
 export const layoutResilienceMachine = Machine.make({
   branches: {
@@ -71,53 +60,68 @@ export const layoutResilienceMachine = Machine.make({
     }
   },
   effects: {
-    source1: ({ containingState }: { readonly containingState: { readonly email: string } }) =>
+    source1: ({ containingState }: {
+      readonly containingState: {
+        readonly email: string
+      }
+    }) =>
       containingState.email === "fail"
         ? Effect.fail("invalid credentials")
         : Effect.succeed("/creator"),
-    source2: ({ containingState }: { readonly containingState: { readonly email: string } }) =>
+    source2: ({ containingState }: {
+      readonly containingState: {
+        readonly email: string
+      }
+    }) =>
       containingState.email === "fail"
         ? Effect.fail("verification unavailable")
         : Effect.succeed(undefined)
   },
-
   id: "layout-resilience",
   root: AuthStates,
-  events: AuthEvents,
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.Editing.from({
-          mode: "login",
-          email: "",
-          loginMethod: "code",
-          password: ""
-        }, (editing) => editing.Form.from((form) => form.Ready.from()))
-      )
-    )
+  events: AuthEvents
 }).handle({
+  initial: {
+    target: Machine.targets(AuthStates).root.Editing,
+    data: {
+      mode: "login",
+      email: "",
+      loginMethod: "code",
+      password: ""
+    }
+  },
   states: {
     Editing: {
+      initial: {
+        target: Machine.targets(AuthStates).root.Editing.Form
+      },
       states: {
         Form: {
+          initial: {
+            target: Machine.targets(AuthStates).root.Editing.Form.Ready
+          },
           on: {
             EmailChanged: {
               update: targets1.root.Editing,
-              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, email: event.value })
+              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, email: event.value })
             },
             LoginMethodChanged: {
               update: targets1.root.Editing,
-              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, loginMethod: event.value })
+              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, loginMethod: event.value })
             },
             PasswordChanged: {
               update: targets1.root.Editing,
-              from: ({ ancestors: { "Editing": current }, event }) => ({ ...current, password: event.value })
+              data: ({ ancestors: { "Editing": current }, event }) => ({ ...current, password: event.value })
             },
             Submit: {
               branches: "transition4",
               resolve: ({ event, select }) => {
-                if (event.route === "login") return select.login.from()
-                if (event.route === "verification") return select.requestVerification.from()
+                if (event.route === "login") {
+                  return select.login.from()
+                }
+                if (event.route === "verification") {
+                  return select.requestVerification.from()
+                }
                 return select.invalid.from({ message: "Enter valid authentication details." })
               }
             }
@@ -132,10 +136,10 @@ export const layoutResilienceMachine = Machine.make({
             src: "source1",
             id: "submit-login",
             input: (context) => context,
-            onDone: { target: targets1.root.Navigating, from: ({ output }) => ({ href: output }) },
+            onDone: { target: targets1.root.Navigating, data: ({ output }) => ({ href: output }) },
             onFailure: {
               target: targets1.root.Editing.Form.Failed,
-              from: () => ({ message: "Email or password is incorrect." })
+              data: () => ({ message: "Email or password is incorrect." })
             }
           }
         },
@@ -146,7 +150,7 @@ export const layoutResilienceMachine = Machine.make({
             input: (context) => context,
             onDone: {
               initial: targets1.root.Verification,
-              from: ({ containingState }) => ({
+              data: ({ containingState }) => ({
                 mode: containingState.mode,
                 email: containingState.email,
                 code: ""
@@ -154,13 +158,16 @@ export const layoutResilienceMachine = Machine.make({
             },
             onFailure: {
               target: targets1.root.Editing.Form.Failed,
-              from: () => ({ message: "The verification code could not be sent." })
+              data: () => ({ message: "The verification code could not be sent." })
             }
           }
         }
       }
     },
     Verification: {
+      initial: {
+        target: Machine.targets(AuthStates).root.Verification.CodeEntry
+      },
       states: {
         CodeEntry: {}
       }

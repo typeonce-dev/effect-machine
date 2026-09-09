@@ -82,7 +82,7 @@ const getBoundaryResultDecoder = (schema: Schema.Top): BoundaryResultDecoder => 
 
 const MachineProtocolTypeId = Symbol.for("effect/Machine/protocol")
 
-const getProtocolSchemas = (machine: Machine.Any): MachineProtocolSchemas => {
+const getProtocolSchemas = (machine: object): MachineProtocolSchemas => {
   const protocol = (machine as any)[MachineProtocolTypeId] as MachineProtocolSchemas | undefined
   if (protocol === undefined) {
     throw new Error("Machine protocol is unavailable")
@@ -90,7 +90,7 @@ const getProtocolSchemas = (machine: Machine.Any): MachineProtocolSchemas => {
   return protocol
 }
 
-const setProtocolSchemas = (machine: Machine.Any, protocol: MachineProtocolSchemas): void => {
+const setProtocolSchemas = (machine: object, protocol: MachineProtocolSchemas): void => {
   Object.defineProperty(machine, MachineProtocolTypeId, {
     value: protocol,
     enumerable: false
@@ -173,7 +173,7 @@ export const setProtocol = (machine: Machine.Any): void => {
   })
 }
 
-export const copyProtocol = (source: Machine.Any, target: Machine.Any): void =>
+export const copyProtocol = (source: object, target: object): void =>
   setProtocolSchemas(target, getProtocolSchemas(source))
 
 export const getEventName = (event: unknown): string | undefined =>

@@ -1,16 +1,12 @@
 import { Schema } from "effect"
 import { Machine } from "../../dist/index.js"
-
 export const Flow = Schema.TaggedStruct("Flow", {})
 export const Idle = Schema.TaggedStruct("Idle", {})
 export const Ready = Schema.TaggedStruct("Ready", {})
-
 export const States = Machine.state({
-  initial: "Ready",
   states: {
     Flow: {
       schema: Flow,
-      initial: "Idle",
       states: {
         Idle,
         Route: {
@@ -25,22 +21,26 @@ export const States = Machine.state({
     Ready
   }
 })
-
 export const snapshot = {
   path: "" as const,
   value: undefined,
   state: { path: "Ready" as const, value: Ready.make({}) }
 }
-
 const targets1 = Machine.targets(States)
 export const machine = Machine.make({
   id: "perf-readiness",
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Ready.from(Ready.make({}))))
+  events: Machine.eventsFromSchemas()
 }).handle({
+  initial: {
+    target: Machine.targets(States).root.Ready,
+    data: Ready.make({})
+  },
   states: {
     Flow: {
+      initial: {
+        target: Machine.targets(States).root.Flow.Idle
+      },
       history: {
         recent: {
           default: ({ target }) =>
@@ -50,7 +50,7 @@ export const machine = Machine.make({
       states: {
         Idle: {},
         Route: {
-          choice: { target: targets1.root.Ready, from: () => (Ready.make({})) }
+          choice: { target: targets1.root.Ready, data: () => (Ready.make({})) }
         }
       }
     },

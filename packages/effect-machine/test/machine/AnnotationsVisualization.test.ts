@@ -3,20 +3,15 @@ import { Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { makeMermaidRenderer } from "./visualization/mermaid.js"
 import { makeTextRenderer } from "./visualization/text.js"
-
 class Workflow extends Schema.TaggedClass<Workflow>("Workflow")("Workflow", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
-
 const AnnotatedWorkflow = Workflow.annotate({ title: "Document workflow" })
 const AnnotatedIdle = Idle.annotate({ title: "Waiting for edits" })
-
 const States = Machine.state({
-  initial: "Workflow",
   states: {
     Workflow: {
       schema: AnnotatedWorkflow,
-      initial: "Idle",
       states: {
         Idle: AnnotatedIdle,
         Routing: {
@@ -33,25 +28,32 @@ const States = Machine.state({
     }
   }
 })
-
 const machine = Machine.make({
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) => to.Workflow.decoded(new Workflow({}), (workflow) => workflow.Idle.decoded(new Idle({}))))
-    )
+  events: Machine.eventsFromSchemas()
+}).handle({
+  initial: {
+    target: Machine.targets(States).root.Workflow,
+    decoded: true,
+    data: new Workflow({})
+  },
+  states: {
+    Workflow: {
+      initial: {
+        target: Machine.targets(States).root.Workflow.Idle,
+        decoded: true,
+        data: new Idle({})
+      },
+      states: {
+        Idle: {},
+        Routing: { choice: { target: Machine.targets(States).root.Workflow.Done } },
+        Done: {}
+      }
+    }
+  }
 })
-
-const renderMachine = makeTextRenderer<
-  typeof machine,
-  Machine.Snapshot<typeof States>
->(Machine)
-const renderMermaid = makeMermaidRenderer<
-  typeof machine,
-  Machine.Snapshot<typeof States>
->(Machine)
-
+const renderMachine = makeTextRenderer<typeof machine, Machine.Snapshot<typeof States>>(Machine)
+const renderMermaid = makeMermaidRenderer<typeof machine, Machine.Snapshot<typeof States>>(Machine)
 describe("Machine annotation visualization", () => {
   it("uses titles for active, choice, and history display while preserving structural keys", () => {
     assert.strictEqual(
@@ -64,15 +66,15 @@ describe("Machine annotation visualization", () => {
         "   └─ ○ Document workflow (Workflow) [compound, initial: Idle]",
         "      ├─ ○ Waiting for edits (Idle)",
         "      ├─ ○ Select persistence route (Routing) [choice]",
+        "      │  └─ ◇ choice",
+        "      │     └┄ → Done",
         "      ├─ ○ Previous workflow state (Recent) [history, deep]",
         "      └─ ○ Done"
       ].join("\n")
     )
   })
-
   it("renders titled choice, history, and final states as Mermaid", () => {
     const rendered = renderMermaid(machine)
-
     assert.include(rendered, "state \"○ Document workflow (Workflow)\" as state_1")
     assert.include(rendered, "state \"○ Select persistence route (Routing)\" as state_3")
     assert.include(rendered, "state state_3 <<choice>>")

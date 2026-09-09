@@ -1,19 +1,31 @@
 import { assert, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Machine } from "../../src/index.js"
-
 it.effect("planning and encoding reject malformed snapshots through typed failures", () =>
   Effect.gen(function*() {
+    const InitialRoot1 = Machine.state({
+      type: "parallel",
+      states: {
+        Left: { states: { Ready: {} } },
+        Right: {}
+      }
+    })
     const machine = Machine.make({
-      root: Machine.state({
-        type: "parallel",
-        states: {
-          Left: { initial: "Ready", states: { Ready: {} } },
-          Right: {}
-        }
-      }),
+      root: InitialRoot1,
       events: Machine.events({ Ping: {} })
-    }).handle({ states: { Left: { states: { Ready: {} } }, Right: {} } })
+    }).handle({
+      states: {
+        Left: {
+          initial: {
+            target: Machine.targets(InitialRoot1).root.Left.Ready
+          },
+          states: {
+            Ready: {}
+          }
+        },
+        Right: {}
+      }
+    })
     const initial = yield* Machine.planInitial(machine)
     const state = initial.state
     const malformed: ReadonlyArray<unknown> = [

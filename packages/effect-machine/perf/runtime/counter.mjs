@@ -55,6 +55,7 @@ export const counterMachine = benchmarkApi.make({
   events: benchmarkApi.events(CounterEvent.cases.Increment, CounterEvent.cases.Finish),
   initial: benchmarkApi.initial({
     target: (to) => to.Count(),
+    values: { Count: { value: 0 } },
     resolve: ({ target }) => target.from(CounterState.cases.Count.make({ value: 0 }))
   }, () => CounterStates.initial.Count.from({ value: 0 }))
 }).handle({
@@ -144,6 +145,7 @@ const hierarchicalCounterMachine = benchmarkApi.make({
   events: benchmarkApi.events(HierarchicalEvent.cases.Increment, HierarchicalEvent.cases.Finish),
   initial: benchmarkApi.initial({
     target: (to) => to.Active.initial,
+    values: { "Active.Count": { value: 0 } },
     resolve: ({ target }) => target.from((active) => active.Count.from({ value: 0 }))
   }, () =>
     HierarchicalStates.initial.Active.from(
@@ -200,6 +202,7 @@ const parallelCounterMachine = benchmarkApi.make({
   events: benchmarkApi.events(HierarchicalEvent.cases.IncrementLeft, HierarchicalEvent.cases.IncrementRight, HierarchicalEvent.cases.Finish),
   initial: benchmarkApi.initial({
     target: (to) => to.Active.initial,
+    values: { "Active.Left": { value: 0 }, "Active.Right": { value: 0 } },
     resolve: ({ target }) =>
       target.from((active) =>
         active

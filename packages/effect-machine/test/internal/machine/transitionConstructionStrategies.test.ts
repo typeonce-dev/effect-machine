@@ -2,7 +2,6 @@ import { it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
 import { verifyPlannerStrategies } from "./support/strategyDifferential.js"
-
 it.effect("compares flat updates and verifies guarded updates retain generic planning", () =>
   Effect.gen(function*() {
     for (const guarded of [false, true]) {
@@ -11,16 +10,16 @@ it.effect("compares flat updates and verifies guarded updates retain generic pla
       const targets1 = Machine.targets(root1)
       const machine = Machine.make({
         root: root1,
-        events,
-        initial: (root) => root.from(() => ({ count: 0 }))
+        events
       }).handle({
+        root: () => ({ count: 0 }),
         on: {
           Add: {
             update: targets1.root,
             guard: guarded
               ? ({ event }) => event.by > 0
               : undefined,
-            from: ({ root, event }) => ({ count: root.count + event.by })
+            data: ({ root, event }) => ({ count: root.count + event.by })
           },
           Refresh: {
             none: true,
@@ -43,27 +42,29 @@ it.effect("compares flat updates and verifies guarded updates retain generic pla
       })
     }
   }))
-
 it.effect("compares atomic construction and verifies guards retain generic planning", () =>
   Effect.gen(function*() {
     for (const guarded of [false, true]) {
-      class Root extends Schema.TaggedClass<Root>("Root")("Root", { count: Schema.Number }) {}
-      class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: Schema.String }) {}
+      class Root extends Schema.TaggedClass<Root>("Root")("Root", { count: Schema.Number }) {
+      }
+      class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: Schema.String }) {
+      }
       const events = Machine.events({ Save: { allowed: Schema.Boolean }, Decoded: {}, Branch: {}, Finish: {} })
       const root2 = Machine.state({
         schema: Root,
-        initial: "Idle",
         states: { Idle: {}, Saved: { schema: Saved }, Done: { type: "final" } }
       })
       const targets2 = Machine.targets(root2)
       const machine = Machine.make({
         branches: { transition1: { saved: { target: targets2.root.Saved } } },
-
         root: root2,
-        events,
-        initial: (root) => root.from(() => ({ count: 0 }))
+        events
       }).handle({
-        on: { Save: { update: targets2.root, from: ({ root: current }) => ({ count: current.count + 10 }) } },
+        initial: {
+          target: Machine.targets(root2).root.Idle
+        },
+        root: () => ({ count: 0 }),
+        on: { Save: { update: targets2.root, data: ({ root: current }) => ({ count: current.count + 10 }) } },
         states: {
           Idle: {
             on: {
@@ -73,12 +74,13 @@ it.effect("compares atomic construction and verifies guards retain generic plann
                 guard: guarded
                   ? ({ event }) => event.allowed
                   : undefined,
-                from: ({ root }) => ({ target: { text: "saved" }, update: { count: root.count + 1 } })
+                data: ({ root }) => ({ target: { text: "saved" }, update: { count: root.count + 1 } })
               },
               Decoded: {
                 target: targets2.root.Saved,
                 update: targets2.root,
-                decoded: ({ root: current }) => ({
+                decoded: true,
+                data: ({ root: current }) => ({
                   target: new Saved({ text: "decoded" }),
                   update: new Root({ count: current.count + 2 })
                 })
@@ -94,7 +96,7 @@ it.effect("compares atomic construction and verifies guards retain generic plann
                 guard: guarded
                   ? ({ event }) => event.allowed
                   : undefined,
-                from: ({ root, state }) => ({ target: { text: state.text }, update: { count: root.count + 1 } })
+                data: ({ root, state }) => ({ target: { text: state.text }, update: { count: root.count + 1 } })
               },
               Branch: {
                 branches: "transition1",
@@ -103,7 +105,8 @@ it.effect("compares atomic construction and verifies guards retain generic plann
               },
               Finish: { target: targets2.root.Done }
             }
-          }
+          },
+          Done: {}
         }
       })
       yield* verifyPlannerStrategies({

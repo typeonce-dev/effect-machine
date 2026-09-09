@@ -31,6 +31,7 @@ import * as Configuration from "./configuration.js"
 import * as Declaration from "./declaration.js"
 import type { ChildAlreadyExistsError, InfiniteTransitionError, StartupError } from "./errors.js"
 import type { CapturedStateConfig } from "./implementation.js"
+import * as InitialDeclaration from "./initialDeclaration.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as internalPlanner from "./planner.js"
 import * as internalProcess from "./process.js"
@@ -41,13 +42,7 @@ import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
 import { ChildMachineLogicTypeId } from "./symbols.js"
-import {
-  getLocalTargetScope,
-  getTargetBuilderNode,
-  makeSnapshotBuilder,
-  makeTargetBuilder,
-  withFrom
-} from "./targetBuilder.js"
+import { getLocalTargetScope, makeTargetBuilder, withFrom } from "./targetBuilder.js"
 import * as TargetReference from "./targetReference.js"
 import * as Topology from "./topology.js"
 
@@ -97,7 +92,7 @@ const Proto = {
 }
 
 const makeWithHandlers = (
-  self: Definition.Any,
+  self: Machine.Any,
   handlers: Readonly<Record<string, CapturedStateConfig>>
 ): Machine.Any => {
   const machine = Object.create(Proto)
@@ -139,14 +134,6 @@ type CapturedNamedBranch = {
   readonly selection: Topology.TargetSelection
 }
 
-const InitialBuilderDescriptorTypeId: unique symbol = Symbol("effect/Machine/InitialBuilderDescriptor")
-
-type InitialBuilderDescriptor = {
-  readonly [InitialBuilderDescriptorTypeId]: typeof InitialBuilderDescriptorTypeId
-  readonly selection: Topology.TargetSelection
-  readonly resolve: (context: any) => unknown
-}
-
 const plainTargetSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
   selection.kind === "none"
     ? Topology.noneTargetSelection
@@ -166,47 +153,6 @@ const constructSelectionValue = (
   return context.target[method](values.target).update(context.owner[method](values.update))
 }
 
-const makeInitialBuilderDescriptor = (
-  selection: Topology.TargetSelection,
-  resolve: (context: any) => unknown
-): InitialBuilderDescriptor =>
-  Object.freeze({
-    [InitialBuilderDescriptorTypeId]: InitialBuilderDescriptorTypeId,
-    selection: plainTargetSelection(selection),
-    resolve
-  })
-
-const decorateInitialSelection = (selection: Topology.TargetSelection): Topology.TargetSelection =>
-  Object.freeze({
-    ...selection,
-    from: (value: (context: any) => unknown) =>
-      makeInitialBuilderDescriptor(selection, (context) => context.target.from(value(context))),
-    decoded: (value: (context: any) => unknown) =>
-      makeInitialBuilderDescriptor(selection, (context) => context.target.decoded(value(context))),
-    resolve: (resolve: (context: any) => unknown) => makeInitialBuilderDescriptor(selection, resolve)
-  })
-
-const decorateInitialSelectorNode = (node: unknown): unknown => {
-  if (Topology.isTargetSelection(node)) return decorateInitialSelection(node)
-  if (typeof node === "function") {
-    const wrapped = ((...args: ReadonlyArray<unknown>) => decorateInitialSelection(node(...args))) as
-      & ((...args: ReadonlyArray<unknown>) => unknown)
-      & Record<string, unknown>
-    for (const key of Object.keys(node)) {
-      wrapped[key] = decorateInitialSelectorNode((node as unknown as Record<string, unknown>)[key])
-    }
-    return Object.freeze(wrapped)
-  }
-  if (typeof node === "object" && node !== null) {
-    const wrapped: Record<string, unknown> = {}
-    for (const key of Object.keys(node)) {
-      wrapped[key] = decorateInitialSelectorNode((node as Record<string, unknown>)[key])
-    }
-    return Object.freeze(wrapped)
-  }
-  return node
-}
-
 const transitionTargetSelection = (
   selection: Topology.TargetSelection
 ): Machine.TransitionTargetSelection =>
@@ -220,12 +166,6 @@ const selectionUpdates = (selection: Topology.TargetSelection): ReadonlyArray<st
   selection.updatePath === undefined ?
     selection.kind === "update" && selection.path !== undefined ? [selection.path] : []
     : [selection.updatePath]
-
-const makeSelectionValue = (
-  kind: Topology.TargetSelectionKind,
-  path: string | undefined,
-  scope: Topology.TargetSelectionScope
-): Topology.TargetSelection => Topology.makeTargetSelection(kind, path, scope)
 
 const makeStateUpdateSelection = (
   path: string,
@@ -611,7 +551,7 @@ const normalizeObjectTransition = (
     "history",
     "none",
     "branches",
-    "from",
+    "data",
     "decoded",
     "resolve",
     "guard",
@@ -623,20 +563,21 @@ const normalizeObjectTransition = (
       throw new Error("Machine transition contains an unknown field")
     }
   }
-  for (const key of ["from", "decoded", "resolve", "guard"]) {
+  for (const key of ["resolve", "guard"]) {
     if (config[key] !== undefined && typeof config[key] !== "function") {
       throw new Error(`Machine transition ${key} must be a function`)
     }
   }
   const guard = typeof config.guard === "function" ? config.guard : undefined
   const resolve = typeof config.resolve === "function" ? config.resolve : undefined
-  const construct = typeof config.from === "function"
-    ? config.from
-    : typeof config.decoded === "function"
-    ? config.decoded
-    : undefined
-  const methods = ["from", "decoded", "resolve"].filter((key) => config[key] !== undefined)
-  if (methods.length > 1) throw new Error("Machine transition construction methods are mutually exclusive")
+  if (config.decoded !== undefined && typeof config.decoded !== "boolean") {
+    throw new Error("Machine decoded must be a boolean construction flag")
+  }
+  const hasData = Object.prototype.hasOwnProperty.call(config, "data")
+  if (config.decoded === true && !hasData) throw new Error("Machine decoded construction requires data")
+  if (hasData && resolve !== undefined) throw new Error("Machine data and resolve are mutually exclusive")
+  const data = config.data
+  const construct = typeof data === "function" ? data : () => data
   const guarded = guard !== undefined
   const declinable = guarded || config.declinable === true
   if (typeof config.branches === "string") {
@@ -645,7 +586,7 @@ const normalizeObjectTransition = (
       throw new Error("Machine branching transition requires a registered group and resolver")
     }
     if (
-      ["target", "update", "initial", "history", "none", "from", "decoded"].some((key) => config[key] !== undefined)
+      ["target", "update", "initial", "history", "none", "data", "decoded"].some((key) => config[key] !== undefined)
     ) throw new Error("Machine branching transition cannot redeclare its destination")
     const entries = Object.fromEntries(
       Object.entries(group).map(([key, spec]) => [key, {
@@ -672,7 +613,7 @@ const normalizeObjectTransition = (
   if (resolve !== undefined && selection.kind !== "none") {
     throw new Error("Machine advanced construction requires a declared branch group")
   }
-  const method = config.from !== undefined ? "from" : config.decoded !== undefined ? "decoded" : undefined
+  const method = hasData ? config.decoded === true ? "decoded" : "from" : undefined
   return {
     target: () => selection,
     reenter: config.reenter,
@@ -911,9 +852,26 @@ const flattenHandlers = (
 
 const makeHandle = (self: Definition.Any, declaration: Declaration.Declaration): Definition.Any["handle"] =>
   ((config: Record<string, unknown>) => {
+    const captured = InitialDeclaration.capture(declaration.root, config)
+    const compiled = Object.assign(Object.create(Proto), self)
+    Protocol.copyProtocol(self, compiled)
+    compiled.states = Object.freeze({ "": captured.node })
+    compiled.stateNodes = Topology.compileStateNodes(compiled.states)
+    if (compiled.stateNodes.byPath.get("").schema === undefined && config.root !== undefined) {
+      throw new Error("Machine schema-less root cannot construct data")
+    }
+    const constructRoot = compiled.stateNodes.byPath.get("").schema === undefined
+      ? () => undefined
+      : InitialDeclaration.construction(config.root)
+    compiled.initial = (input: unknown) => Topology.makeInitialTarget("", constructRoot({ input }))
+    compiled.initialDefinition = Object.freeze({
+      target: "",
+      selection: Object.freeze({ path: "", kind: "initial", scope: "initial" })
+    })
+    compiled.makeTargetBuilder = makeTargetBuilder(compiled.states, compiled.stateNodes)
     const handlers: Record<PropertyKey, CapturedStateConfig> = Object.create(null)
-    flattenHandlers(handlers, self.stateNodes, self.states, "", declaration, { "": config })
-    return makeWithHandlers(self, handlers)
+    flattenHandlers(handlers, compiled.stateNodes, compiled.states, "", declaration, { "": captured.handlers })
+    return makeWithHandlers(compiled, handlers)
   }) as Definition.Any["handle"]
 
 export const isMachine = (
@@ -952,96 +910,6 @@ export const isFinal = <
   >,
   state: Machine.Snapshot<States>
 ): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine as any, state)
-
-const getInitialSelectionBuilder = (
-  initialBuilder: Record<string, any>,
-  selection: Topology.TargetSelection
-): Record<string, any> => {
-  const path = selection.path
-  if (path === undefined || path.includes(".")) {
-    throw new Error("Machine initial target must select one top-level state")
-  }
-  const builder = initialBuilder[path]
-  if (typeof builder !== "object" || builder === null || typeof builder.from !== "function") {
-    throw new Error(`Machine could not construct selected initial state "${path}"`)
-  }
-  return builder
-}
-
-const captureInitialBranch = (
-  definition: unknown,
-  initialBuilder: Record<string, any>,
-  configuration: boolean
-): {
-  readonly selection: Topology.TargetSelection
-  readonly resolve?: (context: any) => unknown
-  readonly builder: Record<string, any>
-} => {
-  if (definition !== undefined && typeof definition !== "function") {
-    throw new Error("Machine initial definition must be a target-first callback")
-  }
-  const selector = decorateInitialSelection(makeSelectionValue(configuration ? "state" : "initial", "", "initial"))
-  const result = definition === undefined ? selector : definition(selector)
-  let selection: Topology.TargetSelection
-  let resolve: ((context: any) => unknown) | undefined
-  if (Topology.isTargetSelection(result)) {
-    selection = plainTargetSelection(result)
-  } else if (hasProperty(result, InitialBuilderDescriptorTypeId)) {
-    const descriptor = result as InitialBuilderDescriptor
-    selection = descriptor.selection
-    resolve = descriptor.resolve
-  } else {
-    throw new Error("Machine initial definition must select exactly one target")
-  }
-  if (selection.kind !== "state" && selection.kind !== "initial") {
-    throw new Error("Machine initial target must select a top-level state or its declared initial entry")
-  }
-  const captured = {
-    selection,
-    builder: getInitialSelectionBuilder(initialBuilder, selection)
-  }
-  return resolve === undefined ? Object.freeze(captured) : Object.freeze({ ...captured, resolve })
-}
-
-const validateInitialSelection = (result: unknown, selection: Topology.TargetSelection): void => {
-  if (
-    typeof result !== "object" || result === null || !hasProperty(result, "path") || result.path !== selection.path
-  ) {
-    const resultPath = typeof result === "object" && result !== null && hasProperty(result, "path")
-      ? String(result.path)
-      : "<invalid>"
-    throw new Error(`Machine initial resolver selected "${selection.path}" but constructed "${resultPath}"`)
-  }
-}
-
-const compileInitial = (
-  definition: unknown,
-  states: Machine.StateTree,
-  stateNodes: Machine.StateNodes,
-  configuration = false
-): {
-  readonly initial: (input?: unknown) => unknown
-  readonly definition: Machine.InitialDefinition
-} => {
-  const rootNode = getTargetBuilderNode(stateNodes, "")
-  const initialBuilder = configuration ?
-    makeSnapshotBuilder(states, { mode: "full", prefix: "" }) as Record<string, any>
-    : { "": withFrom((value: unknown) => Topology.makeInitialTarget("", value), "leaf", rootNode.schema !== undefined) }
-  const branch = captureInitialBranch(definition, initialBuilder, configuration)
-  return {
-    initial: (input?: unknown) => {
-      const result = branch.resolve === undefined
-        ? constructSelectedTarget(branch.builder)
-        : branch.resolve({ input, target: branch.builder })
-      validateInitialSelection(result, branch.selection)
-      return result
-    },
-    definition: Object.freeze({
-      target: branch.selection.path!,
-      selection: transitionTargetSelection(branch.selection) as Machine.InitialDefinition["selection"]
-    })
-  }
-}
 
 export const state = (node: unknown): State<Machine.StateNodeConfig> => {
   const captured = StateDefinition.captureRoot(node) as Machine.StateNodeConfig
@@ -1115,17 +983,18 @@ export const make = <
     readonly logic?: unknown
     readonly children?: unknown
     readonly branches?: unknown
-    readonly initialConfiguration?: unknown
     readonly events: Machine.EventProtocol<"public", InputEvents>
     readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
     readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
     readonly parent?: ParentDeclaration
     readonly input?: Input
-    readonly initial: unknown
   }
 ): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration> => {
+  if (Object.hasOwn(config, "initial") || Object.hasOwn(config, "initialConfiguration")) {
+    throw new Error("Machine initial edges and root data belong in handle")
+  }
   const states = Object.freeze({ "": config.root.node })
-  const self = Object.create(Proto)
+  const self = Object.create(PipeablePrototype)
   self.states = states
   self.root = config.root
   self.events = config.events
@@ -1134,16 +1003,6 @@ export const make = <
   self.parent = config.parent
   self.input = config.input
   self.id = config.id
-  self.stateNodes = Topology.compileStateNodes(states)
-  const compiledInitial = compileInitial(
-    config.initialConfiguration ?? config.initial,
-    states,
-    self.stateNodes,
-    config.initialConfiguration !== undefined
-  )
-  self.initial = compiledInitial.initial
-  self.initialDefinition = compiledInitial.definition
-  self.makeTargetBuilder = makeTargetBuilder(states, self.stateNodes)
   self.handlers = Object.create(null)
   self.handle = makeHandle(self, Declaration.capture(config.root, config))
   Protocol.setProtocol(self)

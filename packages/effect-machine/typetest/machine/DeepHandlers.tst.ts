@@ -1,7 +1,6 @@
 import { Context, Data, Effect, Schema } from "effect"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
 class Branch extends Schema.TaggedClass<Branch>("Branch")("Branch", {}) {}
 class Hub extends Schema.TaggedClass<Hub>("Hub")("Hub", {}) {}
@@ -13,62 +12,52 @@ class RightRegion extends Schema.TaggedClass<RightRegion>("RightRegion")("RightR
 class LeftDone extends Schema.TaggedClass<LeftDone>("LeftDone")("LeftDone", { value: Schema.String }) {}
 class RightDone extends Schema.TaggedClass<RightDone>("RightDone")("RightDone", { value: Schema.Number }) {}
 class Advance extends Schema.TaggedClass<Advance>("Advance")("Advance", { value: Schema.String }) {}
-
-class DeepService extends Context.Service<DeepService, string>()("types/deep/DeepService") {}
-class DeepActionService extends Context.Service<DeepActionService, string>()("types/deep/DeepActionService") {}
-class DeepFailure extends Data.TaggedError("DeepFailure")<{}> {}
-class DeepActionFailure extends Data.TaggedError("DeepActionFailure")<{}> {}
-
+class DeepService extends Context.Service<DeepService, string>()("types/deep/DeepService") {
+}
+class DeepActionService extends Context.Service<DeepActionService, string>()("types/deep/DeepActionService") {
+}
+class DeepFailure extends Data.TaggedError("DeepFailure")<{}> {
+}
+class DeepActionFailure extends Data.TaggedError("DeepActionFailure")<{}> {
+}
 const DeepStates = Machine.state({
-  initial: "Root",
   states: {
     Root: {
       schema: Root,
-      initial: "L1",
       states: {
         L1: {
           schema: Branch,
-          initial: "L2",
           states: {
             L2: {
               schema: Branch,
-              initial: "L3",
               states: {
                 L3: {
                   schema: Branch,
-                  initial: "L4",
                   states: {
                     L4: {
                       schema: Branch,
-                      initial: "L5",
                       states: {
                         L5: {
                           schema: Branch,
-                          initial: "L6",
                           states: {
                             L6: {
                               schema: Branch,
-                              initial: "L7",
                               states: {
                                 L7: {
                                   schema: Branch,
-                                  initial: "L8",
                                   states: {
                                     L8: {
                                       schema: Branch,
-                                      initial: "L9",
                                       states: {
                                         L9: {
                                           schema: Branch,
-                                          initial: "L10",
                                           states: {
                                             L10: {
                                               schema: Branch,
-                                              initial: "Hub",
                                               states: {
                                                 Hub: {
                                                   schema: Hub,
-                                                  initial: "Route",
+
                                                   states: {
                                                     Route: { type: "choice" },
                                                     Idle,
@@ -87,7 +76,6 @@ const DeepStates = Machine.state({
                                                       states: {
                                                         left: {
                                                           schema: LeftRegion,
-                                                          initial: "LeftDone",
                                                           states: {
                                                             LeftDone: {
                                                               schema: LeftDone,
@@ -98,7 +86,6 @@ const DeepStates = Machine.state({
                                                         },
                                                         right: {
                                                           schema: RightRegion,
-                                                          initial: "RightDone",
                                                           states: {
                                                             RightDone: {
                                                               schema: RightDone,
@@ -136,12 +123,10 @@ const DeepStates = Machine.state({
     }
   }
 })
-
 const deepHistoryFallback = (
-  target: Machine.Machine.HistoryDefaultTargetBuilder<
-    { readonly "": typeof DeepStates.node },
-    "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub"
-  >
+  target: Machine.Machine.HistoryDefaultTargetBuilder<{
+    readonly "": typeof DeepStates.node
+  }, "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub">
 ) =>
   target.from((tree) =>
     tree.Root.decoded(
@@ -160,42 +145,117 @@ const deepHistoryFallback = (
                             l10.Hub.decoded(new Hub({}), (hub) => hub.Idle.decoded(new Idle({})))))))))))))
     )
   )
-
 const makeDeepMachine = () =>
   Machine.make({
     root: DeepStates,
-    events: Machine.eventsFromSchemas(Advance),
-    initialConfiguration: (to) =>
-      to.resolve((): never => {
-        throw new Error("type-only")
-      })
+    events: Machine.eventsFromSchemas(Advance)
   })
-
-const atHub = <const Config>(config: Config) =>
+const atHub = <const Config extends object>(config: Config) =>
   ({
-    Root: {
-      states: {
-        L1: {
-          states: {
-            L2: {
-              states: {
-                L3: {
-                  states: {
-                    L4: {
-                      states: {
-                        L5: {
-                          states: {
-                            L6: {
-                              states: {
-                                L7: {
-                                  states: {
-                                    L8: {
-                                      states: {
-                                        L9: {
-                                          states: {
-                                            L10: {
-                                              states: {
-                                                Hub: config
+    initial: { target: Machine.targets(DeepStates).root.Root },
+    states: {
+      Root: {
+        initial: { target: Machine.targets(DeepStates).root.Root.L1 },
+        states: {
+          L1: {
+            initial: { target: Machine.targets(DeepStates).root.Root.L1.L2 },
+            states: {
+              L2: {
+                initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3 },
+                states: {
+                  L3: {
+                    initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4 },
+                    states: {
+                      L4: {
+                        initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5 },
+                        states: {
+                          L5: {
+                            initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6 },
+                            states: {
+                              L6: {
+                                initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7 },
+                                states: {
+                                  L7: {
+                                    initial: { target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8 },
+                                    states: {
+                                      L8: {
+                                        initial: {
+                                          target: Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9
+                                        },
+                                        states: {
+                                          L9: {
+                                            initial: {
+                                              target:
+                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10
+                                            },
+                                            states: {
+                                              L10: {
+                                                initial: {
+                                                  target:
+                                                    Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10
+                                                      .Hub
+                                                },
+                                                states: {
+                                                  Hub: {
+                                                    initial: {
+                                                      target:
+                                                        Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7.L8.L9
+                                                          .L10.Hub.Idle
+                                                    },
+                                                    history: {
+                                                      recent: {
+                                                        default: (
+                                                          { target }: {
+                                                            target: Parameters<typeof deepHistoryFallback>[0]
+                                                          }
+                                                        ) => deepHistoryFallback(target)
+                                                      }
+                                                    },
+                                                    states: {
+                                                      Route: {
+                                                        choice: {
+                                                          target:
+                                                            Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6.L7
+                                                              .L8.L9.L10.Hub.Idle
+                                                        }
+                                                      },
+                                                      Idle: {},
+                                                      Done: { output: ({ state }: { state: Done }) => state.value },
+                                                      Work: {
+                                                        output: () => ({ left: "", right: 0 }),
+                                                        states: {
+                                                          left: {
+                                                            initial: {
+                                                              target:
+                                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6
+                                                                  .L7.L8.L9.L10.Hub.Work.left.LeftDone,
+                                                              data: { value: "" }
+                                                            },
+                                                            states: {
+                                                              LeftDone: {
+                                                                output: ({ state }: { state: LeftDone }) => state.value
+                                                              }
+                                                            }
+                                                          },
+                                                          right: {
+                                                            initial: {
+                                                              target:
+                                                                Machine.targets(DeepStates).root.Root.L1.L2.L3.L4.L5.L6
+                                                                  .L7.L8.L9.L10.Hub.Work.right.RightDone,
+                                                              data: { value: 0 }
+                                                            },
+                                                            states: {
+                                                              RightDone: {
+                                                                output: ({ state }: { state: RightDone }) => state.value
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    },
+                                                    ...config
+                                                  }
+                                                }
                                               }
                                             }
                                           }
@@ -223,7 +283,7 @@ const atHub = <const Config>(config: Config) =>
 describe("deep handler trees", () => {
   it("keeps branded validation effective at deep paths", () => {
     const machine = makeDeepMachine()
-
+    machine.handle(atHub({}))
     expect(machine.handle).type.not.toBeCallableWith(atHub({
       states: {
         Missing: {}
@@ -249,111 +309,86 @@ describe("deep handler trees", () => {
       onDone: () => undefined
     }))
   })
-
   it("retains exact evidence through a narrow depth-24 tree", () => {
     const NarrowNode = Schema.TaggedStruct("NarrowNode", {})
-    class NarrowService extends Context.Service<NarrowService, string>()("types/deep/NarrowService") {}
-    class NarrowFailure extends Data.TaggedError("NarrowFailure")<{}> {}
-
+    class NarrowService extends Context.Service<NarrowService, string>()("types/deep/NarrowService") {
+    }
+    class NarrowFailure extends Data.TaggedError("NarrowFailure")<{}> {
+    }
     const States = Machine.state({
-      initial: "n0",
       states: {
         n0: {
           schema: NarrowNode,
-          initial: "n1",
           states: {
             n1: {
               schema: NarrowNode,
-              initial: "n2",
               states: {
                 n2: {
                   schema: NarrowNode,
-                  initial: "n3",
                   states: {
                     n3: {
                       schema: NarrowNode,
-                      initial: "n4",
                       states: {
                         n4: {
                           schema: NarrowNode,
-                          initial: "n5",
                           states: {
                             n5: {
                               schema: NarrowNode,
-                              initial: "n6",
                               states: {
                                 n6: {
                                   schema: NarrowNode,
-                                  initial: "n7",
                                   states: {
                                     n7: {
                                       schema: NarrowNode,
-                                      initial: "n8",
                                       states: {
                                         n8: {
                                           schema: NarrowNode,
-                                          initial: "n9",
                                           states: {
                                             n9: {
                                               schema: NarrowNode,
-                                              initial: "n10",
                                               states: {
                                                 n10: {
                                                   schema: NarrowNode,
-                                                  initial: "n11",
                                                   states: {
                                                     n11: {
                                                       schema: NarrowNode,
-                                                      initial: "n12",
                                                       states: {
                                                         n12: {
                                                           schema: NarrowNode,
-                                                          initial: "n13",
                                                           states: {
                                                             n13: {
                                                               schema: NarrowNode,
-                                                              initial: "n14",
                                                               states: {
                                                                 n14: {
                                                                   schema: NarrowNode,
-                                                                  initial: "n15",
                                                                   states: {
                                                                     n15: {
                                                                       schema: NarrowNode,
-                                                                      initial: "n16",
                                                                       states: {
                                                                         n16: {
                                                                           schema: NarrowNode,
-                                                                          initial: "n17",
                                                                           states: {
                                                                             n17: {
                                                                               schema: NarrowNode,
-                                                                              initial: "n18",
                                                                               states: {
                                                                                 n18: {
                                                                                   schema: NarrowNode,
-                                                                                  initial: "n19",
                                                                                   states: {
                                                                                     n19: {
                                                                                       schema: NarrowNode,
-                                                                                      initial: "n20",
                                                                                       states: {
                                                                                         n20: {
                                                                                           schema: NarrowNode,
-                                                                                          initial: "n21",
                                                                                           states: {
                                                                                             n21: {
                                                                                               schema: NarrowNode,
-                                                                                              initial: "n22",
                                                                                               states: {
                                                                                                 n22: {
                                                                                                   schema: NarrowNode,
-                                                                                                  initial: "n23",
                                                                                                   states: {
                                                                                                     n23: {
                                                                                                       schema:
                                                                                                         NarrowNode,
-                                                                                                      initial: "n24",
                                                                                                       states: {
                                                                                                         n24: {
                                                                                                           schema:
@@ -414,60 +449,276 @@ describe("deep handler trees", () => {
     })
     const machine = Machine.make({
       root: States,
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (to) =>
-        to.resolve((): never => {
-          throw new Error("type-only")
-        })
+      events: Machine.eventsFromSchemas()
     }).handle({
+      initial: {
+        target: Machine.targets(States).root.n0,
+        data: () => {
+          throw new Error("type-only constructor")
+        }
+      },
       states: {
         n0: {
+          initial: {
+            target: Machine.targets(States).root.n0.n1,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
           states: {
             n1: {
+              initial: {
+                target: Machine.targets(States).root.n0.n1.n2,
+                data: () => {
+                  throw new Error("type-only constructor")
+                }
+              },
               states: {
                 n2: {
+                  initial: {
+                    target: Machine.targets(States).root.n0.n1.n2.n3,
+                    data: () => {
+                      throw new Error("type-only constructor")
+                    }
+                  },
                   states: {
                     n3: {
+                      initial: {
+                        target: Machine.targets(States).root.n0.n1.n2.n3.n4,
+                        data: () => {
+                          throw new Error("type-only constructor")
+                        }
+                      },
                       states: {
                         n4: {
+                          initial: {
+                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5,
+                            data: () => {
+                              throw new Error("type-only constructor")
+                            }
+                          },
                           states: {
                             n5: {
+                              initial: {
+                                target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6,
+                                data: () => {
+                                  throw new Error("type-only constructor")
+                                }
+                              },
                               states: {
                                 n6: {
+                                  initial: {
+                                    target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7,
+                                    data: () => {
+                                      throw new Error("type-only constructor")
+                                    }
+                                  },
                                   states: {
                                     n7: {
+                                      initial: {
+                                        target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8,
+                                        data: () => {
+                                          throw new Error("type-only constructor")
+                                        }
+                                      },
                                       states: {
                                         n8: {
+                                          initial: {
+                                            target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9,
+                                            data: () => {
+                                              throw new Error("type-only constructor")
+                                            }
+                                          },
                                           states: {
                                             n9: {
+                                              initial: {
+                                                target: Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10,
+                                                data: () => {
+                                                  throw new Error("type-only constructor")
+                                                }
+                                              },
                                               states: {
                                                 n10: {
+                                                  initial: {
+                                                    target:
+                                                      Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
+                                                        .n11,
+                                                    data: () => {
+                                                      throw new Error("type-only constructor")
+                                                    }
+                                                  },
                                                   states: {
                                                     n11: {
+                                                      initial: {
+                                                        target:
+                                                          Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9.n10
+                                                            .n11.n12,
+                                                        data: () => {
+                                                          throw new Error("type-only constructor")
+                                                        }
+                                                      },
                                                       states: {
                                                         n12: {
+                                                          initial: {
+                                                            target:
+                                                              Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7.n8.n9
+                                                                .n10.n11.n12.n13,
+                                                            data: () => {
+                                                              throw new Error("type-only constructor")
+                                                            }
+                                                          },
                                                           states: {
                                                             n13: {
+                                                              initial: {
+                                                                target:
+                                                                  Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6.n7
+                                                                    .n8.n9.n10.n11.n12.n13.n14,
+                                                                data: () => {
+                                                                  throw new Error("type-only constructor")
+                                                                }
+                                                              },
                                                               states: {
                                                                 n14: {
+                                                                  initial: {
+                                                                    target:
+                                                                      Machine.targets(States).root.n0.n1.n2.n3.n4.n5.n6
+                                                                        .n7.n8.n9.n10.n11.n12.n13.n14.n15,
+                                                                    data: () => {
+                                                                      throw new Error("type-only constructor")
+                                                                    }
+                                                                  },
                                                                   states: {
                                                                     n15: {
+                                                                      initial: {
+                                                                        target:
+                                                                          Machine.targets(States).root.n0.n1.n2.n3.n4.n5
+                                                                            .n6.n7.n8.n9.n10.n11.n12.n13.n14.n15.n16,
+                                                                        data: () => {
+                                                                          throw new Error("type-only constructor")
+                                                                        }
+                                                                      },
                                                                       states: {
                                                                         n16: {
+                                                                          initial: {
+                                                                            target:
+                                                                              Machine.targets(States).root.n0.n1.n2.n3
+                                                                                .n4.n5.n6.n7.n8.n9.n10.n11.n12.n13.n14
+                                                                                .n15.n16.n17,
+                                                                            data: () => {
+                                                                              throw new Error("type-only constructor")
+                                                                            }
+                                                                          },
                                                                           states: {
                                                                             n17: {
+                                                                              initial: {
+                                                                                target:
+                                                                                  Machine.targets(States).root.n0.n1.n2
+                                                                                    .n3.n4.n5.n6.n7.n8.n9.n10.n11.n12
+                                                                                    .n13.n14.n15.n16.n17.n18,
+                                                                                data: () => {
+                                                                                  throw new Error(
+                                                                                    "type-only constructor"
+                                                                                  )
+                                                                                }
+                                                                              },
                                                                               states: {
                                                                                 n18: {
+                                                                                  initial: {
+                                                                                    target:
+                                                                                      Machine.targets(States).root.n0.n1
+                                                                                        .n2.n3.n4.n5.n6.n7.n8.n9.n10.n11
+                                                                                        .n12.n13.n14.n15.n16.n17.n18
+                                                                                        .n19,
+                                                                                    data: () => {
+                                                                                      throw new Error(
+                                                                                        "type-only constructor"
+                                                                                      )
+                                                                                    }
+                                                                                  },
                                                                                   states: {
                                                                                     n19: {
+                                                                                      initial: {
+                                                                                        target:
+                                                                                          Machine.targets(States).root
+                                                                                            .n0.n1.n2.n3.n4.n5.n6.n7.n8
+                                                                                            .n9.n10.n11.n12.n13.n14.n15
+                                                                                            .n16.n17.n18.n19.n20,
+                                                                                        data: () => {
+                                                                                          throw new Error(
+                                                                                            "type-only constructor"
+                                                                                          )
+                                                                                        }
+                                                                                      },
                                                                                       states: {
                                                                                         n20: {
+                                                                                          initial: {
+                                                                                            target:
+                                                                                              Machine.targets(States)
+                                                                                                .root.n0.n1.n2.n3.n4.n5
+                                                                                                .n6.n7.n8.n9.n10.n11.n12
+                                                                                                .n13.n14.n15.n16.n17.n18
+                                                                                                .n19.n20.n21,
+                                                                                            data: () => {
+                                                                                              throw new Error(
+                                                                                                "type-only constructor"
+                                                                                              )
+                                                                                            }
+                                                                                          },
                                                                                           states: {
                                                                                             n21: {
+                                                                                              initial: {
+                                                                                                target: Machine.targets(
+                                                                                                  States
+                                                                                                ).root.n0.n1.n2.n3.n4
+                                                                                                  .n5.n6.n7.n8.n9.n10
+                                                                                                  .n11.n12.n13.n14.n15
+                                                                                                  .n16.n17.n18.n19.n20
+                                                                                                  .n21.n22,
+                                                                                                data: () => {
+                                                                                                  throw new Error(
+                                                                                                    "type-only constructor"
+                                                                                                  )
+                                                                                                }
+                                                                                              },
                                                                                               states: {
                                                                                                 n22: {
+                                                                                                  initial: {
+                                                                                                    target:
+                                                                                                      Machine.targets(
+                                                                                                        States
+                                                                                                      ).root.n0.n1.n2.n3
+                                                                                                        .n4.n5.n6.n7.n8
+                                                                                                        .n9.n10.n11.n12
+                                                                                                        .n13.n14.n15.n16
+                                                                                                        .n17.n18.n19.n20
+                                                                                                        .n21.n22.n23,
+                                                                                                    data: () => {
+                                                                                                      throw new Error(
+                                                                                                        "type-only constructor"
+                                                                                                      )
+                                                                                                    }
+                                                                                                  },
                                                                                                   states: {
                                                                                                     n23: {
+                                                                                                      initial: {
+                                                                                                        target: Machine
+                                                                                                          .targets(
+                                                                                                            States
+                                                                                                          ).root.n0.n1
+                                                                                                          .n2.n3.n4.n5
+                                                                                                          .n6.n7.n8.n9
+                                                                                                          .n10.n11.n12
+                                                                                                          .n13.n14.n15
+                                                                                                          .n16.n17.n18
+                                                                                                          .n19.n20.n21
+                                                                                                          .n22.n23
+                                                                                                          .n24,
+                                                                                                        data: () => {
+                                                                                                          throw new Error(
+                                                                                                            "type-only constructor"
+                                                                                                          )
+                                                                                                        }
+                                                                                                      },
                                                                                                       states: {
                                                                                                         n24: {
                                                                                                           entry:
@@ -525,7 +776,6 @@ describe("deep handler trees", () => {
         }
       }
     })
-
     expect<Machine.Machine.UnhandledStates<typeof machine>>().type.toBe<never>()
     expect<Machine.Machine.Error<typeof machine>>().type.toBe<never>()
     expect<Machine.Machine.Services<typeof machine>>().type.toBe<never>()

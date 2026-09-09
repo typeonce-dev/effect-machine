@@ -1,14 +1,15 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 import * as Effect from "effect/Effect"
-
-class Idle extends Schema.TaggedClass<Idle>("PlannerIdle")("Idle", { owner: Schema.String }) {}
+class Idle extends Schema.TaggedClass<Idle>("PlannerIdle")("Idle", { owner: Schema.String }) {
+}
 class Working extends Schema.TaggedClass<Working>("PlannerWorking")("Working", {
   owner: Schema.String,
   job: Schema.String
-}) {}
-class Finished extends Schema.TaggedClass<Finished>("PlannerFinished")("Finished", { job: Schema.String }) {}
-
+}) {
+}
+class Finished extends Schema.TaggedClass<Finished>("PlannerFinished")("Finished", { job: Schema.String }) {
+}
 const Owner = Schema.NonEmptyString.annotate({
   title: "Owner",
   description: "A non-empty name carried into the initial Idle state."
@@ -33,7 +34,6 @@ const Route = Schema.Union([
   title: "Route",
   description: "Choose a literal direct route or provide a queue."
 })
-
 class Begin extends Schema.TaggedClass<Begin>("PlannerBegin")("Begin", {
   job: Schema.NonEmptyString.annotate({
     title: "Job",
@@ -59,23 +59,56 @@ class Begin extends Schema.TaggedClass<Begin>("PlannerBegin")("Begin", {
   ),
   labels: Schema.optionalKey(Labels),
   route: Schema.optionalKey(Route)
-}) {}
-class Cancel extends Schema.TaggedClass<Cancel>("PlannerCancel")("Cancel", { reason: Schema.String }) {}
-class AutoFinish extends Schema.TaggedClass<AutoFinish>("PlannerAutoFinish")("AutoFinish", {}) {}
-class Planned extends Schema.TaggedClass<Planned>("PlannerPlanned")("Planned", { job: Schema.String }) {}
-
+}) {
+}
+class Cancel extends Schema.TaggedClass<Cancel>("PlannerCancel")("Cancel", { reason: Schema.String }) {
+}
+class AutoFinish extends Schema.TaggedClass<AutoFinish>("PlannerAutoFinish")("AutoFinish", {}) {
+}
+class Planned extends Schema.TaggedClass<Planned>("PlannerPlanned")("Planned", { job: Schema.String }) {
+}
 const Events = Machine.eventsFromSchemas(Begin, Cancel)
 const InternalEvents = Machine.internalEventsFromSchemas(AutoFinish)
 const Emissions = Machine.emittedEventsFromSchemas(Planned)
 const States = Machine.state({
-  initial: "Idle",
+  fields: {
+    input: Schema.toType(Schema.Struct({
+      owner: Owner,
+      attempts: Attempts,
+      notifications: Schema.Boolean.annotate({
+        title: "Notifications",
+        description: "A required boolean with false as a valid value."
+      }),
+      mode: Schema.Literals(["guided", "automatic"]).annotate({
+        title: "Mode",
+        description: "A fixed set of startup modes."
+      }),
+      note: Schema.optionalKey(
+        Schema.String.check(Schema.isMaxLength(40)).annotate({
+          title: "Note",
+          description: "Optional startup text limited to forty characters."
+        })
+      ),
+      labels: Schema.optionalKey(Labels),
+      preferences: Schema.optionalKey(
+        Schema.Struct({
+          retries: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3 })).annotate({
+            title: "Retries"
+          }),
+          dryRun: Schema.Boolean.annotate({ title: "Dry run" })
+        }).annotate({
+          title: "Preferences",
+          description: "An optional nested object."
+        })
+      )
+    }))
+  },
   states: {
     Idle,
     Working,
     Finished: { schema: Finished, type: "final", output: Schema.String }
   }
 })
-
 const targets1 = Machine.targets(States)
 export const plannerMachine = Machine.make({
   branches: {
@@ -85,7 +118,6 @@ export const plannerMachine = Machine.make({
     }
   },
   effects: { source1: Effect.suspend(() => Effect.never) },
-
   id: "planner-example",
   root: States,
   events: Events,
@@ -120,10 +152,14 @@ export const plannerMachine = Machine.make({
         description: "An optional nested object."
       })
     )
-  }),
-  initialConfiguration: (root) =>
-    root.resolve(({ input, target }) => target.from((to) => to.Idle.decoded(new Idle({ owner: input.owner }))))
+  })
 }).handle({
+  initial: {
+    target: Machine.targets(States).root.Idle,
+    decoded: true,
+    data: ({ root: { input: input } }) => new Idle({ owner: input.owner })
+  },
+  root: ({ input }) => ({ input }),
   states: {
     Idle: {
       on: {
@@ -132,7 +168,9 @@ export const plannerMachine = Machine.make({
           resolve: ({ event, self, select, state }, enqueue) => {
             enqueue.emit(new Planned({ job: event.job }))
             enqueue.sendTo(self, Events.Cancel({ reason: "planner command example" }))
-            if (event.priority === "urgent") enqueue.raise(InternalEvents.AutoFinish())
+            if (event.priority === "urgent") {
+              enqueue.raise(InternalEvents.AutoFinish())
+            }
             const working = new Working({ owner: state.owner, job: event.job })
             return event.priority === "urgent"
               ? select.urgent.decoded(working)
@@ -144,10 +182,15 @@ export const plannerMachine = Machine.make({
     Working: {
       invoke: { src: "source1", id: "monitor-job" },
       on: {
-        AutoFinish: { target: targets1.root.Finished, decoded: ({ state }) => (new Finished({ job: state.job })) },
+        AutoFinish: {
+          target: targets1.root.Finished,
+          decoded: true,
+          data: ({ state }) => (new Finished({ job: state.job }))
+        },
         Cancel: {
           target: targets1.root.Idle,
-          decoded: ({ event, state }) => (new Idle({ owner: `${state.owner} · ${event.reason}` }))
+          decoded: true,
+          data: ({ event, state }) => (new Idle({ owner: `${state.owner} · ${event.reason}` }))
         }
       }
     },

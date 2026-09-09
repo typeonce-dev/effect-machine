@@ -3,7 +3,6 @@ import { Effect, Schema } from "effect"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
-
 describe("event validation across execution strategies", () => {
   for (const strategy of ["generic", "auto"] as const) {
     it.effect(`rejects mutated decoded events in the ${strategy} planner`, () =>
@@ -11,13 +10,16 @@ describe("event validation across execution strategies", () => {
         const Set = Schema.TaggedStruct("Set", { value: Schema.Int })
         const events = Machine.eventsFromSchemas(Set)
         let retained: unknown
-        const root1 = Machine.state({ initial: "Ready", states: { Ready: Schema.TaggedStruct("Ready", {}) } })
+        const root1 = Machine.state({ states: { Ready: Schema.TaggedStruct("Ready", {}) } })
         const machine = Machine.make({
           root: root1,
-          events,
-          initialConfiguration: (root) =>
-            root.resolve(({ target }) => target.from((to) => to.Ready.decoded({ _tag: "Ready" })))
+          events
         }).handle({
+          initial: {
+            target: Machine.targets(root1).root.Ready,
+            decoded: true,
+            data: { _tag: "Ready" }
+          },
           states: {
             Ready: {
               on: {

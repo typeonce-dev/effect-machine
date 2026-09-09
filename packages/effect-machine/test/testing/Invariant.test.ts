@@ -3,62 +3,57 @@ import { Effect, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 class Account extends Schema.TaggedClass<Account>("Account")("Account", {
   balance: Schema.Int
 }) {}
-
 class Withdraw extends Schema.TaggedClass<Withdraw>("Withdraw")("Withdraw", {
   amount: Schema.Int
 }) {}
-
 class Deposit extends Schema.TaggedClass<Deposit>("Deposit")("Deposit", {
   amount: Schema.Int
 }) {}
-
-const States = Machine.state({ initial: "account", states: { account: Account } })
-
+const States = Machine.state({ states: { account: Account } })
 const makeAccountMachine = (withdraw: (balance: number, amount: number) => number) => {
   const targets1 = Machine.targets(States)
   return Machine.make({
     root: States,
-    events: Machine.eventsFromSchemas(Withdraw, Deposit),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) => target.from((to) => to.account.decoded(new Account({ balance: 10 }))))
+    events: Machine.eventsFromSchemas(Withdraw, Deposit)
   }).handle({
+    initial: {
+      target: Machine.targets(States).root.account,
+      decoded: true,
+      data: new Account({ balance: 10 })
+    },
     states: {
       account: {
         on: {
           Withdraw: {
             target: targets1.root.account,
-            decoded: ({ event, state }) => (new Account({ balance: withdraw(state.balance, event.amount) }))
+            decoded: true,
+            data: ({ event, state }) => (new Account({ balance: withdraw(state.balance, event.amount) }))
           },
           Deposit: {
             target: targets1.root.account,
-            decoded: ({ event, state }) => (new Account({ balance: state.balance + event.amount }))
+            decoded: true,
+            data: ({ event, state }) => (new Account({ balance: state.balance + event.amount }))
           }
         }
       }
     }
   })
 }
-
 describe("MachineTest invariants", () => {
   it.effect("finds semantic failures that structural verification cannot detect", () =>
     Effect.gen(function*() {
       const machine = makeAccountMachine((balance, amount) => balance - amount * 2)
       const define = MachineTest.invariants(machine)
-      const nonNegative = define.state(
-        "balance is never negative",
-        ({ snapshot }) => snapshot.state.value.balance >= 0 || `negative balance: ${snapshot.state.value.balance}`
-      )
+      const nonNegative = define.state("balance is never negative", ({ snapshot }) =>
+        snapshot.state.value.balance >= 0 || `negative balance: ${snapshot.state.value.balance}`)
       const trace = yield* MachineTest.run(machine, {
         events: [new Withdraw({ amount: 6 }), new Withdraw({ amount: 1 })]
       })
-
       yield* MachineTest.verify(machine, trace)
       const error = yield* MachineTest.checkInvariants(machine, trace, [nonNegative]).pipe(Effect.flip)
-
       assert.strictEqual(error.trace, trace)
       assert.deepStrictEqual(error.report.checks, [{
         invariant: "balance is never negative",
@@ -92,28 +87,20 @@ describe("MachineTest invariants", () => {
         }
       ])
     }))
-
   it.effect("checks public steps and complete traces with the same evidence", () =>
     Effect.gen(function*() {
       const machine = makeAccountMachine((balance, amount) => balance - amount)
       const define = MachineTest.invariants(machine)
-      const exactWithdrawal = define.step(
-        "withdrawal removes exactly its amount",
-        ({ after, before, event }) =>
-          event._tag !== "Withdraw" ||
-          after.state.value.balance === before.state.value.balance - event.amount ||
-          "withdrawal arithmetic changed"
-      )
-      const preservesEventCount = define.trace(
-        "trace retains every input event",
-        ({ trace }) => trace.steps.length === trace.scenario.events.length
-      )
+      const exactWithdrawal = define.step("withdrawal removes exactly its amount", ({ after, before, event }) =>
+        event._tag !== "Withdraw" ||
+        after.state.value.balance === before.state.value.balance - event.amount ||
+        "withdrawal arithmetic changed")
+      const preservesEventCount = define.trace("trace retains every input event", ({ trace }) =>
+        trace.steps.length === trace.scenario.events.length)
       const trace = yield* MachineTest.run(machine, {
         events: [new Deposit({ amount: 2 }), new Withdraw({ amount: 5 })]
       })
-
       const report = yield* MachineTest.checkInvariants(machine, trace, [exactWithdrawal, preservesEventCount])
-
       assert.deepStrictEqual(report.checks, [
         {
           invariant: "withdrawal removes exactly its amount",
@@ -131,7 +118,6 @@ describe("MachineTest invariants", () => {
         }
       ])
     }))
-
   it.effect("distinguishes untested conditions from required observations", () =>
     Effect.gen(function*() {
       const machine = makeAccountMachine((balance, amount) => balance - amount)
@@ -144,7 +130,6 @@ describe("MachineTest invariants", () => {
         when: ({ event }) => event._tag === "Withdraw",
         require: { minObservations: 1 }
       })
-
       const optionalReport = yield* MachineTest.checkInvariants(machine, trace, [optional])
       assert.deepStrictEqual(optionalReport.checks, [{
         invariant: "only after overdraft",
@@ -153,7 +138,6 @@ describe("MachineTest invariants", () => {
         observations: 0,
         failures: 0
       }])
-
       const error = yield* MachineTest.checkInvariants(machine, trace, [required]).pipe(Effect.flip)
       assert.deepStrictEqual(error.report.checks, [{
         invariant: "a withdrawal is exercised",
@@ -165,41 +149,30 @@ describe("MachineTest invariants", () => {
       assert.strictEqual(error.violations[0]?.kind, "observations")
       assert.match(error.violations[0]?.message ?? "", /required at least 1 observation but observed 0/)
     }))
-
   it.effect("can target internal microsteps without duplicating settled observations", () =>
     Effect.gen(function*() {
       const machine = makeAccountMachine((balance, amount) => balance - amount)
       const define = MachineTest.invariants(machine)
       const phases: Array<MachineTest.StateObservation> = []
-      const microsteps = define.state(
-        "microstep balance remains finite",
-        ({ phase, snapshot }) => {
-          phases.push(phase)
-          return Number.isFinite(snapshot.state.value.balance)
-        },
-        { observe: "microsteps" }
-      )
+      const microsteps = define.state("microstep balance remains finite", ({ phase, snapshot }) => {
+        phases.push(phase)
+        return Number.isFinite(snapshot.state.value.balance)
+      }, { observe: "microsteps" })
       const trace = yield* MachineTest.run(machine, {
         events: [new Deposit({ amount: 1 })]
       })
-
       const report = yield* MachineTest.checkInvariants(machine, trace, [microsteps])
-
       assert.deepStrictEqual(phases, ["microstep"])
       assert.strictEqual(report.checks[0]?.observations, 1)
     }))
-
   const safeMachine = makeAccountMachine((balance, amount) => balance - amount)
   const safe = MachineTest.invariants(safeMachine).state(
     "non-negative generated balances",
     ({ snapshot }) => snapshot.state.value.balance >= 0
   )
   const safeScenarios = MachineTest.scenarios(safeMachine, {
-    eventsArbitrary: FastCheck.array(
-      FastCheck.integer({ min: 0, max: 5 }).map((amount) => new Deposit({ amount }))
-    )
+    eventsArbitrary: FastCheck.array(FastCheck.integer({ min: 0, max: 5 }).map((amount) => new Deposit({ amount })))
   })
-
   it.effect.prop(
     "rechecks invariants after every FastCheck shrink",
     { scenario: safeScenarios.arbitrary },
@@ -209,7 +182,6 @@ describe("MachineTest invariants", () => {
       ),
     { fastCheck: { numRuns: 25 } }
   )
-
   it("validates invariant metadata eagerly", () => {
     const define = MachineTest.invariants(safeMachine)
     assert.throws(() => define.trace("", () => true), /name to be a non-empty string/)

@@ -20,11 +20,11 @@ import {
   normalizeTargetConfigurationSync,
   type PlanningMachineReferences,
   snapshotFromConfiguration,
-  validateInitialConfiguration,
   withMachineReferences
 } from "./configuration.js"
 import { InfiniteTransitionError, StoppedError } from "./errors.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
+import { isDataInitializer } from "./initialDeclaration.js"
 import * as InvocationEvent from "./invocationEvent.js"
 import {
   broadenTransitionBoundary,
@@ -39,6 +39,7 @@ import {
   normalizeTransition,
   planConfiguration,
   removeConflictingTransitions,
+  resolveInitialConfiguration,
   resolveInitialTarget,
   type SelectedTransition,
   sortEntryPaths,
@@ -213,7 +214,8 @@ const compileIndexedExecutionDescriptor = (
     // the hierarchical planner so their entry and exit boundaries stay explicit.
     flat: nodes.every((node) => node.parent === undefined && (node.type === "atomic" || node.type === "final")) || (
       nodes[0]?.path === "" && nodes[0].type === "compound" && nodes[0].schema === undefined &&
-      (toImpl(machine).handlers[""] === undefined || Reflect.ownKeys(toImpl(machine).handlers[""]!).length === 0) &&
+      (toImpl(machine).handlers[""] === undefined ||
+        Reflect.ownKeys(toImpl(machine).handlers[""]!).every((key) => key === "initialize")) &&
       nodes.slice(1).every((node) => node.parent === "" && (node.type === "atomic" || node.type === "final")) &&
       [...transitionsByPath.values()].every((events) =>
         [...events.values()].every((transition) =>
@@ -1130,10 +1132,10 @@ const makeIndexedExecutionPlan = (
   snapshot: (state) => snapshotFromIndexedState(indexed, state as OwnedIndexedState),
   plan: (state, event, retainMicrosteps = false, machineReferences) =>
     planIndexedState(machine, indexed, state as OwnedIndexedState, event, retainMicrosteps, machineReferences),
-  // Initializers may enqueue commands and emissions. Managed startup owns that
-  // work through the generic initial planner; indexed event execution remains valid.
+  // Only captured data constructors can use indexed startup. Unknown initializer
+  // protocols retain generic startup so commands and emissions cannot be dropped.
   ...(Object.values(toImpl(machine).handlers as Record<string, CapturedStateConfig>).some((config) =>
-      "initialize" in config
+      config.initialize !== undefined && !isDataInitializer(config.initialize)
     ) ?
     {} :
     {
@@ -1144,8 +1146,8 @@ const makeIndexedExecutionPlan = (
           ? (decodeInputSync(machine, machine.input, undefined), args)
           : [decodeInputSync(machine, machine.input, args[0])]
         const initial = machine.initial(...inputArgs as any)
-        const resolved = isInitialTarget(initial)
-          ? resolveInitialTarget(
+        const normalized = isInitialTarget(initial)
+          ? resolveInitialConfiguration(
             machine,
             {
               active: new Set(),
@@ -1156,20 +1158,11 @@ const makeIndexedExecutionPlan = (
             },
             initial,
             InitialEvent
-          ).target
-          : initial
-        const normalized = isInitialTarget(initial)
-          ? normalizeTargetConfigurationSync(machine, {
-            active: new Set(),
-            values: new Map(),
-            outputs: new Map(),
-            history: new Map()
-          }, resolved)
-          : normalizeConfigurationSync(machine, resolved as Machine.Snapshot<any>)
+          ).configuration
+          : normalizeConfigurationSync(machine, initial as Machine.Snapshot<any>)
         const active = machineReferences === undefined
           ? normalized
           : withMachineReferences(normalized, machineReferences)
-        if (machine.initialDefinition.selection.kind === "initial") validateInitialConfiguration(machine, active)
         const completed = completeConfigurationSync(machine, active, InitialEvent).configuration
         const configuration = ownedIndexedStateFromActive(indexed, completed)
         const state = snapshotFromIndexedState(indexed, configuration)

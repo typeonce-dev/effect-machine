@@ -330,7 +330,8 @@ export const getStateNodeDefinition = (
         states: definition.states
       }
     }
-    if (typeof definition.initial !== "string") {
+    const initial = "initial" in definition ? definition.initial : undefined
+    if (typeof initial !== "string") {
       throw new Error(`Machine.make expected compound state "${path}" to declare an initial child`)
     }
     return {
@@ -339,7 +340,7 @@ export const getStateNodeDefinition = (
       annotations,
       type: "compound",
       history: undefined,
-      initial: definition.initial,
+      initial,
       states: definition.states
     }
   }

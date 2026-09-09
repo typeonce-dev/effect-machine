@@ -2,21 +2,32 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Exit, Schema } from "effect"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 const State = Schema.TaggedStruct("State", { data: Schema.Unknown })
 const Ping = Schema.TaggedStruct("Ping", {})
 const make = (data: unknown) => {
-  const root1 = Machine.state({ initial: "State", states: { State } })
+  const root1 = Machine.state({ states: { State } })
   return Machine.make({
     root: root1,
-    events: Machine.eventsFromSchemas(Ping),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) => target.from((to) => to.State.decoded({ _tag: "State", data })))
-  }).handle({ states: { State: { on: { Ping: { none: true } } } } })
+    events: Machine.eventsFromSchemas(Ping)
+  }).handle({
+    initial: {
+      target: Machine.targets(root1).root.State,
+      decoded: true,
+      data: { _tag: "State", data }
+    },
+    states: {
+      State: { on: { Ping: { none: true } } }
+    }
+  })
 }
-
 describe("trace value verification", () => {
-  const different: ReadonlyArray<readonly [string, unknown, unknown]> = [
+  const different: ReadonlyArray<
+    readonly [
+      string,
+      unknown,
+      unknown
+    ]
+  > = [
     ["regular expressions", /a/, /b/],
     ["non-finite numbers", NaN, null],
     ["infinities", Infinity, -Infinity],
@@ -41,7 +52,6 @@ describe("trace value verification", () => {
         assert.isTrue(Exit.isFailure(exit))
       }))
   }
-
   it.effect("verifies and formats invalid dates without throwing eagerly", () =>
     Effect.gen(function*() {
       const machine = make(new Date(NaN))
@@ -56,7 +66,6 @@ describe("trace value verification", () => {
       yield* MachineTest.verify(machine, equivalent)
       assert.include(MachineTest.formatTrace(equivalent), "Invalid Date")
     }))
-
   it.effect("defers verification until the returned Effect runs", () =>
     Effect.gen(function*() {
       const machine = make(1)
@@ -74,12 +83,17 @@ describe("trace value verification", () => {
       yield* verify
       assert.isAbove(reads, 0)
     }))
-
   it.effect("compares cyclic data while allowing decoded copies of shared values", () =>
     Effect.gen(function*() {
-      const cyclic: { value: number; self?: unknown } = { value: 1 }
+      const cyclic: {
+        value: number
+        self?: unknown
+      } = { value: 1 }
       cyclic.self = cyclic
-      const copy: { value: number; self?: unknown } = { value: 1 }
+      const copy: {
+        value: number
+        self?: unknown
+      } = { value: 1 }
       copy.self = copy
       const machine = make({ first: cyclic, second: cyclic })
       const trace = yield* MachineTest.run(machine, { events: [] })

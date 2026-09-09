@@ -1738,7 +1738,13 @@ export const verify = <M extends AnyMachine>(
           const node = byPath.get(path)
           if (node?.type !== "compound") continue
           const child = node.children.find((child) => starting.active.has(child))
-          if (byPath.get(node.initial ?? "")?.type !== "choice" && child !== node.initial) {
+          const routed = initialChoiceRouteRoot() !== undefined &&
+            trace.initial.plan.microsteps[0]?.transitions.some((transition) => {
+              const target = transition.resolvedTarget ?? transition.target
+              return target !== undefined && child !== undefined &&
+                isDescendantOrSelf(String(target), child)
+            })
+          if (byPath.get(node.initial ?? "")?.type !== "choice" && child !== node.initial && !routed) {
             add(
               "definitions.initial",
               initialLocation,

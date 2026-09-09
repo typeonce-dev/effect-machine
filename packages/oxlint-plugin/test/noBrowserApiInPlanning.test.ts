@@ -16,17 +16,17 @@ tester.run("no-browser-api-in-planning", rule, {
     `import { Machine } from "@typeonce/effect-machine"
 Machine.make({ effects: { work: input => Effect.sync(() => fetch("/api")) }, streams: { workStream: input => Stream.fromEffect(Effect.sync(() => Date.now())) } }).handle({})`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { invoke: (from) => from.effect("storage", () => localStorage.getItem("key")) } } })`,
+Machine.make({}).handle({ states: { Ready: { invoke: (from) => from.effect("storage", () => localStorage.getItem("key")) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: ({ document, navigator }) => document.read(navigator) } } })`,
+Machine.make({}).handle({ states: { Ready: { entry: ({ document, navigator }) => document.read(navigator) } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: { entry: () => {
+Machine.make({}).handle({ states: { Ready: { entry: () => {
   const url = new URL("https://example.com")
   const params = new URLSearchParams(url.search)
   return structuredClone(params)
 } } } })`,
     `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => {
+Machine.make({}).handle({ root: (to) => {
   window.fetch("/api")
   window.crypto.randomUUID()
   return to.Ready()
@@ -35,7 +35,7 @@ Machine.make({ initial: (to) => {
   invalid: [
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => {
+Machine.make({}).handle({ root: (to) => {
   document.querySelector("main")
   localStorage.getItem("key")
   globalThis.navigator.onLine
@@ -49,7 +49,7 @@ Machine.make({ initial: (to) => {
     },
     {
       code: `import { Machine } from "@typeonce/effect-machine"
-Machine.make({ initial: (to) => to.Ready() }).handle({ states: { Ready: {
+Machine.make({}).handle({ states: { Ready: {
   output: () => sessionStorage.length,
   history: { recent: { default: (to) => location.pathname ? to.none : to.none } }
 } } })`,

@@ -384,21 +384,28 @@ type EnsureValuedSelectorPath<State, Path extends string> = [Path] extends [Valu
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- *
+ * import { Schema } from "effect"
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
- * }) {}
- * const States = Machine.state({ initial: "Count", states: { Count } })
+ * }) {
+ * }
+ * const States = Machine.state({ states: { Count } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
- * }).handle({ states: { Count: {} } })
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Count,
+ *     decoded: true,
+ *     data: new Count({ value: 0 })
+ *   },
+ *   states: {
+ *     Count: {}
+ *   }
+ * })
  * const machineAtom = AtomMachine.make(machine)
- *
  * const countAtom = AtomMachine.select(machineAtom, "Count")
  * ```
  *
@@ -624,19 +631,24 @@ export const selectSnapshotChild: {
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const machineAtom = AtomMachine.make(machine)
- *
  * const isIdleAtom = AtomMachine.matches(machineAtom, "Idle")
  * ```
  *
@@ -1102,18 +1114,23 @@ export const familyChild: <
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { AtomMachine } from "@typeonce/effect-machine/reactivity"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const machineAtom = AtomMachine.make(machine)
  * ```
  *

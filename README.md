@@ -11,21 +11,23 @@ Effect-native, schema-first, completely type-safe state machines and statecharts
 ```ts
 import { Machine } from "@typeonce/effect-machine"
 import { Effect } from "effect"
-
 const Root = Machine.state({
-  initial: "Locked",
   states: { Locked: {}, Unlocked: {} }
 })
 const targets = Machine.targets(Root)
 const Events = Machine.events({ Coin: {}, Push: {} })
-
-const Turnstile = Machine.make({ root: Root, events: Events }).handle({
+const Turnstile = Machine.make({
+  root: Root,
+  events: Events
+}).handle({
+  initial: {
+    target: targets.root.Locked
+  },
   states: {
     Locked: { on: { Coin: { target: targets.root.Unlocked } } },
     Unlocked: { on: { Push: { target: targets.root.Locked } } }
   }
 })
-
 const program = Effect.gen(function*() {
   const ref = yield* Machine.start(Turnstile)
   yield* ref.send(Events.Coin())

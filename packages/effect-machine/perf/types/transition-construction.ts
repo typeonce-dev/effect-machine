@@ -1,18 +1,18 @@
 import { Schema } from "effect"
 import { Machine } from "../../dist/index.js"
 import { Root, Saved, States } from "./transition-construction-control.js"
-
 const targets = Machine.targets(States)
 const machine = Machine.make({
   branches: { reset: { idle: { target: targets.root.Idle }, same: { none: true } } },
-
   root: States,
-  events: Machine.events({ Save: { text: Schema.String }, Retry: {}, Reset: {} }),
-  initial: (root) => root.from(() => ({ count: 0 }))
+  events: Machine.events({ Save: { text: Schema.String }, Retry: {}, Reset: {} })
 })
-
 const handled = machine.handle({
-  on: { Reset: { update: targets.root, guard: ({ root }) => root.count > 0, from: () => ({ count: 0 }) } },
+  initial: {
+    target: Machine.targets(States).root.Idle
+  },
+  root: () => ({ count: 0 }),
+  on: { Reset: { update: targets.root, guard: ({ root }) => root.count > 0, data: () => ({ count: 0 }) } },
   states: {
     Idle: {
       on: {
@@ -20,7 +20,7 @@ const handled = machine.handle({
           target: targets.root.Saved,
           update: targets.root,
           guard: ({ event }) => event.text.length > 0,
-          from: ({ root, event }) => ({ target: { text: event.text }, update: { count: root.count + 1 } })
+          data: ({ root, event }) => ({ target: { text: event.text }, update: { count: root.count + 1 } })
         }
       }
     },
@@ -30,12 +30,13 @@ const handled = machine.handle({
           target: targets.root.Saved,
           update: targets.root,
           reenter: true,
-          decoded: ({ root, event }) => ({
+          decoded: true,
+          data: ({ root, event }) => ({
             target: new Saved({ text: event.text }),
             update: new Root({ count: root.count + 1 })
           })
         },
-        Retry: { target: targets.root.Saved, reenter: true, from: ({ state }) => ({ text: state.text }) },
+        Retry: { target: targets.root.Saved, reenter: true, data: ({ state }) => ({ text: state.text }) },
         Reset: {
           branches: "reset",
           reenter: true,

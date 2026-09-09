@@ -11,18 +11,17 @@ import { Effect, Schema, Stream } from "effect"
 import { Machine } from "./src/index.js"
 import { AtomMachine } from "./src/unstable/reactivity/index.js"
 
-const rootCompletion = Machine.state({ /*root-properties*/ initial: "Idle", states: { Idle: {} } })
+const rootCompletion = Machine.state({ /*root-properties*/ states: { Idle: {} } })
 void rootCompletion
 
 class AtomIdle extends Schema.TaggedClass<AtomIdle>("AtomIdle")("AtomIdle", {}) {}
 class AtomReady extends Schema.TaggedClass<AtomReady>("AtomReady")("AtomReady", {}) {}
-const AtomStates = Machine.state({ initial: "AtomIdle", states: { AtomIdle, AtomReady } })
+const AtomStates = Machine.state({ states: { AtomIdle, AtomReady } })
 const atomDefinition = Machine.make({
   root: AtomStates,
   events: Machine.eventsFromSchemas(),
-  input: Schema.String,
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
-}).handle({ states: { AtomIdle: {}, AtomReady: {} } })
+  input: Schema.String
+}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } })
 
 AtomMachine.family(atomDefinition, {
   atoms: {
@@ -34,15 +33,13 @@ AtomMachine.family(atomDefinition, {
 
 const atomChildDefinition = Machine.make({
   root: AtomStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
-}).handle({ states: { AtomIdle: {}, AtomReady: {} } })
+  events: Machine.eventsFromSchemas()
+}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } })
 const AtomChild = Machine.childFamily(atomChildDefinition)
 const atomParent = AtomMachine.make(Machine.make({
   root: AtomStates,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from(to => to.AtomIdle.decoded(new AtomIdle({}))))
-}).handle({ states: { AtomIdle: {}, AtomReady: {} } }))
+  events: Machine.eventsFromSchemas()
+}).handle({ initial: { target: Machine.targets(AtomStates).root.AtomIdle }, states: { AtomIdle: {}, AtomReady: {} } }))
 AtomMachine.familyChild(atomParent, {
   child: (id: string) => AtomChild(id),
   atoms: {
@@ -60,47 +57,50 @@ AtomMachine.familyChild(atomParent, {
   }
 })
 
-const States = Machine.state({ initial: "Loading", states: { Loading: {}, Done: {}, Failed: {} } })
+const States = Machine.state({ fields: { count: Schema.Number }, states: { Loading: { fields: {} }, Done: { fields: {} }, Failed: { fields: {} } } })
 const targets = Machine.targets(States)
 Machine.make({ /*invoke-sources*/root: States, events: Machine.eventsFromSchemas() })
 const definition = Machine.make({
   effects: { load: (tag: symbol) => Effect.fail("offline").pipe(Effect.as(tag)) },
   streams: { updates: Stream.make(1) },
   branches: { complete: { ready: { target: targets./*branch-target-scopes*/root.Done }, unchanged: { none: true } } },
-  root: States, events: Machine.eventsFromSchemas(),
-  initialConfiguration: root => root./*initial-operations*/resolve(({ /*initial-context*/ ...context }) => context.target./*initial-exact-target*/from(to => to./*initial-selector*/Loading.from()))
+  root: States, events: Machine.eventsFromSchemas(), input: Schema.String
 })
-definition.handle({ states: { Loading: { invoke: {
+definition.handle({
+ root: ({ /*root-data-context*/ ...context }) => ({ count: context.input.length }),
+ initial: { /*initial-operations*/ target: targets.root./*initial-selector*/Loading, data: ({ /*initial-context*/ ...context }) => ({}) }
+})
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: {
   src: "load", input: ({ /*invoke-source-context*/ ...context }) => context.event._tag,
   onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready./*done-exact-target*/from() },
-  onFailure: { target: targets.root./*done-target*/Failed, from: ({ /*failure-context*/ ...context }) => undefined }
+  onFailure: { target: targets.root./*done-target*/Failed, data: ({ /*failure-context*/ ...context }) => ({}) }
 } } } })
-definition.handle({ states: { Loading: {
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: {
 // @ts-expect-error Incomplete invocation exposes required properties in completion.
 invoke: {
   src: "load", input: () => Machine.InitialEventTypeId, /*invoke-properties*/
 } } } })
-definition.handle({ states: { Loading: { invoke: {
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: {
   src: "updates", onElement: { none: true, resolve: ({ /*element-context*/ ...context }) => undefined }, onDone: { none: true }
 } } } })
 const requiredParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.parent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
-requiredParentDefinition.handle({ states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
+requiredParentDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: { src: "wait", input: ({ /*required-parent-context*/ ...context }) => undefined } } } })
 const optionalParentDefinition = Machine.make({ root: States, events: Machine.eventsFromSchemas(), parent: Machine.optionalParent(Machine.eventsFromSchemas()), effects: { wait: (_input: undefined) => Effect.never } })
-optionalParentDefinition.handle({ states: { Loading: { invoke: { src: "wait", input: ({ /*optional-parent-context*/ ...context }) => undefined } } } })
-definition.handle({ states: { Loading: {
+optionalParentDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: { src: "wait", input: ({ /*optional-parent-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: {
 // @ts-expect-error Incomplete transition exposes its operation fields in completion.
 always: { /*transition-selector*/ }
 } } })
-definition.handle({ states: { Loading: { on: {}, always: { target: targets.root.Done, /*selected-operations*/ } } } })
-definition.handle({ states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
-definition.handle({ states: { Loading: { always: { target: targets./*target-scopes*/root.Done, from: ({ /*transition-context*/ ...context }) => undefined } } } })
-definition.handle({ states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready./*transition-exact-target*/from() } } } })
-definition.handle({ states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
-definition.handle({ states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { on: {}, always: { target: targets.root.Done, /*selected-operations*/ } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { target: targets./*target-scopes*/root.Done, data: ({ /*transition-context*/ ...context }) => ({}) } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready./*transition-exact-target*/from() } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
 
 const eventDefinition = Machine.make({ root: States, events: Machine.events({ Retry: {} }) })
-eventDefinition.handle({ states: { Loading: { on: { /*event-handler-on*/ } } } })
-eventDefinition.handle({ /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
+eventDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { on: { /*event-handler-on*/ } } } })
+eventDefinition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, /*event-handler-root*/ states: { Loading: { /*event-handler-node*/ on: { Retry: { none: true } } } } })
 
 `
 
@@ -233,16 +233,16 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(initialSelector.has("none"), false)
 
   const initialOperations = completions("initial-operations")
-  assert.equal(initialOperations.has("resolve"), true)
+  assert.equal(initialOperations.has("decoded"), true)
+  assert.equal(initialOperations.has("resolve"), false)
   assert.equal(initialOperations.has("reenter"), false)
 
   const initialContext = completions("initial-context")
-  assert.equal(initialContext.has("input"), true)
-  assert.equal(initialContext.has("target"), true)
+  assert.equal(initialContext.has("input"), false)
+  assert.equal(initialContext.has("root"), true)
+  assert.equal(initialContext.has("state"), true)
+  assert.equal(completions("root-data-context").has("input"), true)
 
-  const initialTarget = completions("initial-exact-target")
-  assert.equal(initialTarget.has("from"), true)
-  assert.equal(initialTarget.has("Done"), false)
 
   const selector = completions("transition-selector")
   assert.equal(selector.has("none"), true)
@@ -289,7 +289,7 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(declinable.has("decline"), true)
 
   const selected = completions("selected-operations")
-  assert.equal(selected.has("from"), true)
+  assert.equal(selected.has("data"), true)
   assert.equal(selected.has("decoded"), true)
 
 })

@@ -9,6 +9,15 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
   // The legacy process constructor takes `(initial, transition)`. The static
   // definition constructor is deliberately unary and returns its config.
   const hasObjectTransitions = typeof Machine.targets === "function"
+  const hasHandlerInitial = hasObjectTransitions && typeof Machine.state === "function" && (() => {
+    try {
+      Machine.state({ states: { Probe: {} } })
+      return true
+    } catch {
+      return false
+    }
+  })()
+  const rootDefinitions = new WeakMap()
   const transitionDefinition = Symbol("benchmark transition")
   const invocationDefinition = Symbol("benchmark invocation")
   const hasRoot = typeof Machine.eventsFromSchemas === "function"
@@ -91,7 +100,7 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
         const target = selectInstruction(definition.target({ full: selectorsForRoot, branch: selectorsForRoot, local: siblings }))
         return {
           target,
-          ...(definition.from !== undefined ? { from: definition.from } : definition.resolve === undefined ? {} : { from: (context) => definition.resolve({ ...context, target: { from: (value) => value } }) }),
+          ...(definition.from !== undefined ? { [hasHandlerInitial ? "data" : "from"]: definition.from } : definition.resolve === undefined ? {} : { [hasHandlerInitial ? "data" : "from"]: (context) => definition.resolve({ ...context, target: { from: (value) => value } }) }),
           ...(definition.reenter === true ? { reenter: true } : {})
         }
       }
@@ -112,12 +121,43 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
       }))
       return { handle: (states) => {
         const handlers = walk(states, targets.root)
+        if (hasHandlerInitial) {
+          const declared = rootDefinitions.get(root)
+          if (declared === undefined) throw new Error("Missing benchmark root declaration")
+          const initialize = (node, handler, path, refs) => {
+            if (node.states === undefined) return handler
+            const result = { ...handler }
+            if (node.type === "parallel") {
+              result.initial = Object.fromEntries(Object.keys(node.states).filter(key => Object.hasOwn(definition.values ?? {}, path ? `${path}.${key}` : key)).map(key => [key, definition.values[path ? `${path}.${key}` : key]]))
+            } else {
+              const key = path === "" ? initialKey : node.initial
+              if (key === undefined) throw new Error("Missing benchmark initial child")
+              const childPath = path ? `${path}.${key}` : key
+              result.initial = { target: refs[key], ...(Object.hasOwn(definition.values ?? {}, childPath) ? { data: definition.values[childPath] } : {}) }
+            }
+            result.states = Object.fromEntries(Object.entries(node.states).map(([key, child]) => [key, initialize(child, handler?.states?.[key] ?? {}, path ? `${path}.${key}` : key, refs[key])]))
+            return result
+          }
+          return Machine.make({ ...rest, root, children }).handle(initialize(declared, { states: handlers }, "", targets.root))
+        }
         return Machine.make({ ...rest, root, initialConfiguration, children }).handle({ states: handlers })
       } }
 
     },
-    states: (definitions) =>
-      hasRoot ? { states: Machine.state({ initial: Object.keys(definitions)[0], states: definitions }) } : typeof Machine.states === "function" ? Machine.states(definitions) : Machine.defineStates(definitions),
+    states: (definitions) => {
+      if (hasHandlerInitial) {
+        const stripInitial = (node) => {
+          if (node.states === undefined) return node
+          const { initial, states, ...rest } = node
+          return { ...rest, states: Object.fromEntries(Object.entries(states).map(([key, child]) => [key, stripInitial(child)])) }
+        }
+        const node = { states: definitions }
+        const root = Machine.state(stripInitial(node))
+        rootDefinitions.set(root, node)
+        return { states: root }
+      }
+      return hasRoot ? { states: Machine.state({ initial: Object.keys(definitions)[0], states: definitions }) } : typeof Machine.states === "function" ? Machine.states(definitions) : Machine.defineStates(definitions)
+    },
     events: hasRoot ? (...schemas) => Machine.eventsFromSchemas(...schemas) : typeof Machine.event === "function"
       ? (...schemas) => schemas
       : (...schemas) => Machine.events(...schemas),

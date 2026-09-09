@@ -1,38 +1,31 @@
 import { Schema } from "effect"
 import { describe, expect, test } from "tstyche"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", { count: Schema.Number }) {}
 class Saved extends Schema.TaggedClass<Saved>("Saved")("Saved", { text: Schema.String }) {}
 const root1 = Machine.state({
   schema: Root,
-  initial: "Idle",
   states: {
     Idle: {},
     Saved: { schema: Saved },
     Nested: {
       fields: { label: Schema.String },
-      initial: "Child",
       states: { Child: { fields: { required: Schema.String } } }
     }
   }
 })
-
 const targets1 = Machine.targets(root1)
 const definition = Machine.make({
   branches: { saved: { ready: { target: targets1.root.Saved } } },
   root: root1,
-  events: Machine.events({ Save: { text: Schema.String } }),
-  initial: (root) => {
-    expect(root).type.not.toHaveProperty("guard")
-    expect(root).type.not.toHaveProperty("reenter")
-    return root.from(() => ({ count: 0 }))
-  }
+  events: Machine.events({ Save: { text: Schema.String } })
 })
-
 describe("transition construction", () => {
   test("infers both values and preserves explicit construction requirements", () => {
     definition.handle({
+      initial: {
+        target: Machine.targets(root1).root.Idle
+      },
       states: {
         Idle: {
           on: {
@@ -45,7 +38,36 @@ describe("transition construction", () => {
                 expect(event.text).type.toBe<string>()
                 return event.text.length > 0
               },
-              from: ({ root, event }) => ({ target: { text: event.text }, update: { count: root.count + 1 } })
+              data: ({ root, event }) => ({ target: { text: event.text }, update: { count: root.count + 1 } })
+            }
+          }
+        },
+        Saved: {},
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { Child: {} }
+        }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      }
+    })
+    expect(definition.handle).type.toBeCallableWith({
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle },
+      states: {
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
@@ -58,11 +80,23 @@ describe("transition construction", () => {
             Save: {
               target: targets1.root.Saved,
               update: targets1.root,
-              from: () => ({ target: {}, update: { count: 1 } })
+              data: () => ({ target: {}, update: { count: 1 } })
+            }
+          }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
-      }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
@@ -71,18 +105,42 @@ describe("transition construction", () => {
             Save: {
               target: targets1.root.Saved,
               update: targets1.root,
-              from: () => ({ target: { text: "" }, update: {} })
+              data: () => ({ target: { text: "" }, update: {} })
+            }
+          }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
-      }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
         Idle: {
-          on: { Save: { target: targets1.root.Saved, update: targets1.root, from: () => ({ target: { text: "" } }) } }
+          on: { Save: { target: targets1.root.Saved, update: targets1.root, data: () => ({ target: { text: "" } }) } }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
         }
-      }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
@@ -91,11 +149,24 @@ describe("transition construction", () => {
             Save: {
               target: targets1.root.Saved,
               update: targets1.root,
-              decoded: () => ({ target: { text: "" }, update: new Root({ count: 1 }) })
+              decoded: true,
+              data: () => ({ target: { text: "" }, update: new Root({ count: 1 }) })
+            }
+          }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
-      }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
     expect(definition.handle).type.not.toBeCallableWith({
       states: {
@@ -104,23 +175,53 @@ describe("transition construction", () => {
             Save: {
               target: targets1.root.Saved,
               update: targets1.root,
-              decoded: () => ({ target: new Saved({ text: "" }), update: { count: 1 } })
+              decoded: true,
+              data: () => ({ target: new Saved({ text: "" }), update: { count: 1 } })
+            }
+          }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
-      }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
     definition.handle({
+      initial: {
+        target: Machine.targets(root1).root.Idle
+      },
       states: {
         Idle: {
           on: {
             Save: {
               target: targets1.root.Saved,
               update: targets1.root,
-              decoded: () => ({ target: new Saved({ text: "" }), update: new Root({ count: 1 }) })
+              decoded: true,
+              data: () => ({ target: new Saved({ text: "" }), update: new Root({ count: 1 }) })
             }
           }
+        },
+        Saved: {},
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { Child: {} }
         }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
@@ -130,36 +231,115 @@ describe("transition construction", () => {
             Save: {
               target: targets1.root.Nested,
               update: targets1.root,
-              from: () => ({ target: { label: "" }, update: { count: 1 } })
+              data: () => ({ target: { label: "" }, update: { count: 1 } })
+            }
+          }
+        },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
+    })
+    expect(definition.handle).type.not.toBeCallableWith({
+      states: {
+        Idle: { on: { Save: { update: targets1.root.Idle, data: () => undefined } } },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
+    })
+  })
+  test("guards updates without allowing incomplete replacements or implicit reentry", () => {
+    definition.handle({
+      initial: {
+        target: Machine.targets(root1).root.Idle
+      },
+      on: {
+        Save: {
+          update: targets1.root,
+          guard: ({ root, event }) => root.count > event.text.length,
+          decoded: true,
+          data: ({ root }) => {
+            expect(root).type.toBe<Root>()
+            return root
+          }
+        }
+      },
+      states: {
+        Idle: {},
+        Saved: {},
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { Child: {} }
+        }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      }
+    })
+    expect(definition.handle).type.not.toBeCallableWith({
+      on: { Save: { update: targets1.root, data: () => ({}) } },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle },
+      states: {
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
             }
           }
         }
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      states: { Idle: { on: { Save: { update: targets1.root.Idle, from: () => undefined } } } }
-    })
-  })
-  test("guards updates without allowing incomplete replacements or implicit reentry", () => {
-    definition.handle({
-      on: {
-        Save: {
-          update: targets1.root,
-          guard: ({ root, event }) => root.count > event.text.length,
-          decoded: ({ root }) => {
-            expect(root).type.toBe<Root>()
-            return root
+      on: { Save: { update: targets1.root, reenter: true, data: () => ({ count: 1 }) } },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle },
+      states: {
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
           }
         }
       }
     })
-    expect(definition.handle).type.not.toBeCallableWith({ on: { Save: { update: targets1.root, from: () => ({}) } } })
-    expect(definition.handle).type.not.toBeCallableWith({
-      on: { Save: { update: targets1.root, reenter: true, from: () => ({ count: 1 }) } }
-    })
   })
   test("reentry composes with value construction and branch resolution", () => {
     definition.handle({
+      initial: {
+        target: Machine.targets(root1).root.Idle
+      },
       states: {
         Idle: {
           on: {
@@ -172,11 +352,38 @@ describe("transition construction", () => {
               }
             }
           }
+        },
+        Saved: {},
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          },
+          states: { Child: {} }
         }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
       }
     })
     expect(definition.handle).type.not.toBeCallableWith({
-      states: { Idle: { on: { Save: { target: targets1.root.Saved, resolve: () => undefined } } } }
+      states: {
+        Idle: { on: { Save: { target: targets1.root.Saved, resolve: () => undefined } } },
+        Nested: {
+          initial: {
+            target: Machine.targets(root1).root.Nested.Child,
+            data: () => {
+              throw new Error("type-only constructor")
+            }
+          }
+        }
+      },
+      root: () => {
+        throw new Error("type-only constructor")
+      },
+      initial: { target: Machine.targets(root1).root.Idle }
     })
   })
 })

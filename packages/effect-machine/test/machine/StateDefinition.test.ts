@@ -1,27 +1,18 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 class Root extends Schema.TaggedClass<Root>("Root")("Root", {}) {}
 class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
 class Done extends Schema.TaggedClass<Done>("Done")("Done", {}) {}
-
 interface OpaqueState {
   readonly _tag: "OpaqueState"
   readonly value: number
 }
-
 const OpaqueState = Schema.declare<OpaqueState>((input): input is OpaqueState =>
   typeof input === "object" && input !== null && "_tag" in input && input._tag === "OpaqueState" &&
   "value" in input && typeof input.value === "number"
 )
-
-const expectDefinitionError = (
-  run: () => unknown,
-  boundary: "Machine.state",
-  path: string,
-  detail: string
-): void => {
+const expectDefinitionError = (run: () => unknown, boundary: "Machine.state", path: string, detail: string): void => {
   let failure: unknown
   try {
     run()
@@ -32,40 +23,48 @@ const expectDefinitionError = (
   assert.include(failure.message, `${boundary} invalid state definition at "${path}"`)
   assert.include(failure.message, detail)
 }
-
 const unsafeState = Machine.state as (definition: unknown) => Machine.State<Machine.Machine.StateNodeConfig>
-
 const makeFromUnknownStates = (states: unknown): unknown =>
   Machine.make({
     root: unsafeState({
-      initial: typeof states === "object" && states !== null ? Object.keys(states)[0] ?? "Root" : "Root",
       states: states as Machine.Machine.StateSchemas
     }),
-    events: Machine.eventsFromSchemas(),
-    initialConfiguration: {} as any
+    events: Machine.eventsFromSchemas()
   })
-
 describe("exact state-definition runtime validation", () => {
   it("captures raw definitions before compiling topology and selectors", () => {
-    const raw = { Root: { initial: "Idle" as const, states: { Idle: {}, Done: {} } } }
+    const raw = { Root: { states: { Idle: {}, Done: {} } } }
+    const InitialRoot1 = Machine.state({ states: raw })
     const machine = Machine.make({
-      root: Machine.state({ initial: "Root", states: raw }),
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => target.from((to) => to.Root.from((child) => child.Idle.from())))
+      root: InitialRoot1,
+      events: Machine.eventsFromSchemas()
     })
     Object.assign(raw.Root, { initial: "Done" })
     Object.assign(raw.Root.states, { Added: {} })
     assert.notStrictEqual(machine.root.node.states, raw)
-    assert.strictEqual(machine.root.node.states.Root.initial, "Idle")
+    assert.isFalse("initial" in machine.root.node.states.Root)
     assert.deepStrictEqual(Object.keys(machine.root.node.states.Root.states), ["Idle", "Done"])
     assert.isTrue(Object.isFrozen(machine.root.node.states.Root.states))
-    assert.throws(() => machine.handle({ states: { Root: { states: { Added: {} } } } as never }), /unknown state/)
+    const compiled = machine.handle({
+      initial: {
+        target: Machine.targets(InitialRoot1).root.Root
+      },
+      states: {
+        Root: {
+          initial: {
+            target: Machine.targets(InitialRoot1).root.Root.Idle
+          },
+          states: {
+            Idle: {},
+            Done: {}
+          }
+        }
+      }
+    })
+    assert.strictEqual(Machine.initialDefinition(compiled).target, "")
   })
-
   it("captures reusable state definitions independently at each mount", () => {
     const TradingSlot = Machine.state({
-      initial: "Idle",
       states: {
         Idle: {},
         InSession: Idle,
@@ -73,7 +72,6 @@ describe("exact state-definition runtime validation", () => {
       }
     })
     const states = Machine.state({
-      initial: "trading",
       states: {
         trading: {
           type: "parallel",
@@ -84,7 +82,6 @@ describe("exact state-definition runtime validation", () => {
         }
       }
     })
-
     assert.notStrictEqual(states.node.states.trading.states.slot1, TradingSlot.node)
     assert.notStrictEqual(states.node.states.trading.states.slot1, states.node.states.trading.states.slot2)
     assert.deepStrictEqual(states.node.states.trading.states.slot1, TradingSlot.node)
@@ -93,7 +90,6 @@ describe("exact state-definition runtime validation", () => {
     assert.strictEqual(states.node.states.trading.states.slot1.states.InSession, Idle)
     assert.strictEqual(states.path("trading.slot2.InSession"), "trading.slot2.InSession")
   })
-
   it("reports reusable state errors at the Machine.state boundary", () => {
     expectDefinitionError(
       () =>
@@ -102,20 +98,17 @@ describe("exact state-definition runtime validation", () => {
           states: { Idle: {} }
         } as never),
       "Machine.state",
-      ".initial",
-      "does not exist"
+      "",
+      "cannot declare property \"initial\""
     )
   })
-
   it("accepts schema-less active states without confusing them with pseudo-states", () => {
     const states = Machine.state({
-      initial: "Idle",
       states: {
         Idle: {
           annotations: { title: "Idle", description: "No state-local data" }
         },
         Flow: {
-          initial: "Waiting",
           states: {
             Waiting: {},
             Done: { type: "final", output: Schema.String }
@@ -132,10 +125,30 @@ describe("exact state-definition runtime validation", () => {
     })
     const machine = Machine.make({
       root: states,
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.from()))
+      events: Machine.eventsFromSchemas()
+    }).handle({
+      initial: {
+        target: Machine.targets(states).root.Idle
+      },
+      states: {
+        Idle: {},
+        Flow: {
+          initial: {
+            target: Machine.targets(states).root.Flow.Waiting
+          },
+          states: {
+            Waiting: {},
+            Done: { output: () => "done" }
+          }
+        },
+        Regions: {
+          states: {
+            left: {},
+            right: {}
+          }
+        }
+      }
     })
-
     const nodes = Machine.stateNodes(machine)
     assert.strictEqual(nodes.find(({ path }) => path === "Idle")?.schema, undefined)
     assert.deepStrictEqual(nodes.find(({ path }) => path === "Idle")?.annotations, {
@@ -146,46 +159,53 @@ describe("exact state-definition runtime validation", () => {
     assert.strictEqual(nodes.find(({ path }) => path === "Flow.Done")?.type, "final")
     assert.strictEqual(nodes.find(({ path }) => path === "Regions")?.type, "parallel")
   })
-
   it("recognizes Effect schemas before inspecting config properties", () => {
     const AnnotatedIdle = Idle.annotate({
       title: "Idle",
       arbitrarySchemaAnnotation: { owner: "machine-team" }
     })
-    const states = Machine.state({ initial: "Idle", states: { Idle: AnnotatedIdle } })
+    const states = Machine.state({ states: { Idle: AnnotatedIdle } })
     const machine = Machine.make({
       root: states,
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+      events: Machine.eventsFromSchemas()
+    }).handle({
+      initial: {
+        target: Machine.targets(states).root.Idle,
+        decoded: true,
+        data: new Idle({})
+      },
+      states: {
+        Idle: {}
+      }
     })
-
     assert.strictEqual(Machine.stateNodes(machine)[1]?.path, "Idle")
-
-    const prototypeNamed = Machine.state({ initial: "constructor", states: { constructor: Idle, toString: Done } })
+    const prototypeNamed = Machine.state({ states: { constructor: Idle, toString: Done } })
     assert.strictEqual(prototypeNamed.node.states.constructor, Idle)
     assert.strictEqual(prototypeNamed.node.states.toString, Done)
   })
-
   it("accepts an opaque declaration whose Type satisfies TaggedSchema", () => {
-    const states = Machine.state({ initial: "Opaque", states: { Opaque: OpaqueState } })
+    const states = Machine.state({ states: { Opaque: OpaqueState } })
     const machine = Machine.make({
       root: states,
-      events: Machine.eventsFromSchemas(),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => target.from((to) => to.Opaque.decoded({ _tag: "OpaqueState", value: 1 })))
+      events: Machine.eventsFromSchemas()
+    }).handle({
+      initial: {
+        target: Machine.targets(states).root.Opaque,
+        decoded: true,
+        data: { _tag: "OpaqueState", value: 1 }
+      },
+      states: {
+        Opaque: {}
+      }
     })
-
     assert.strictEqual(Machine.stateNodes(machine)[1]?.path, "Opaque")
   })
-
   it("rejects schemas whose decoded type does not have a required PropertyKey _tag", () => {
     const UntaggedStruct = Schema.Struct({ value: Schema.String })
-
     for (const schema of [Schema.String, UntaggedStruct]) {
       for (const [node, path] of [[schema, "Invalid"], [{ schema }, "Invalid.schema"]] as const) {
         expectDefinitionError(
-          () =>
-            unsafeState({ initial: "Invalid", states: { Invalid: node } as unknown as Machine.Machine.StateSchemas }),
+          () => unsafeState({ states: { Invalid: node } as unknown as Machine.Machine.StateSchemas }),
           "Machine.state",
           path,
           "required PropertyKey _tag"
@@ -199,18 +219,22 @@ describe("exact state-definition runtime validation", () => {
       }
     }
   })
-
   it("rejects unknown properties for every state kind with the complete nested path", () => {
-    const invalidTrees: ReadonlyArray<readonly [unknown, string, string]> = [
+    const invalidTrees: ReadonlyArray<
+      readonly [
+        unknown,
+        string,
+        string
+      ]
+    > = [
       [{ Idle: { schema: Idle, unknown: true } }, "Idle", "atomic states"],
       [{ Done: { schema: Done, type: "final", unknown: true } }, "Done", "final states"],
-      [{ Root: { schema: Root, initial: "Idle", states: { Idle }, unknown: true } }, "Root", "compound states"],
+      [{ Root: { schema: Root, states: { Idle }, unknown: true } }, "Root", "compound states"],
       [{ Root: { schema: Root, type: "parallel", states: { Idle }, unknown: true } }, "Root", "parallel states"],
       [
         {
           Root: {
             schema: Root,
-            initial: "Idle",
             states: { Idle, History: { type: "history", unknown: true } }
           }
         },
@@ -221,7 +245,6 @@ describe("exact state-definition runtime validation", () => {
         {
           Root: {
             schema: Root,
-            initial: "Idle",
             states: { Idle, Choice: { type: "choice", unknown: true } }
           }
         },
@@ -229,12 +252,10 @@ describe("exact state-definition runtime validation", () => {
         "choice states"
       ]
     ]
-
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
         () =>
           unsafeState({
-            initial: typeof states === "object" && states !== null ? Object.keys(states)[0] ?? "Root" : "Root",
             states: states as Machine.Machine.StateSchemas
           }),
         "Machine.state",
@@ -242,13 +263,11 @@ describe("exact state-definition runtime validation", () => {
         detail
       )
     }
-
     expectDefinitionError(
       () =>
         makeFromUnknownStates({
           Root: {
             schema: Root,
-            initial: "Idle",
             states: { Idle: { schema: Idle, nestedUnknown: true } }
           }
         }),
@@ -257,17 +276,20 @@ describe("exact state-definition runtime validation", () => {
       "nestedUnknown"
     )
   })
-
   it("rejects invalid state keys recursively, including symbol and __proto__ keys", () => {
     const symbolKey = Symbol("state")
     const symbolTree = { Idle } as Record<PropertyKey, unknown>
     symbolTree[symbolKey] = Idle
-
     const protoTree = Object.create(null) as Record<PropertyKey, unknown>
     Object.defineProperty(protoTree, "__proto__", { enumerable: true, value: Idle })
     const implicitProtoTree = { __proto__: { injected: Idle }, Idle }
-
-    const invalidTrees: ReadonlyArray<readonly [unknown, string, string]> = [
+    const invalidTrees: ReadonlyArray<
+      readonly [
+        unknown,
+        string,
+        string
+      ]
+    > = [
       [{ "": Idle }, "<empty>", "cannot be empty"],
       [{ "bad.path": Idle }, "bad.path", "cannot contain"],
       [{ 0: Idle }, "0", "numeric forms"],
@@ -286,7 +308,6 @@ describe("exact state-definition runtime validation", () => {
         {
           Root: {
             schema: Root,
-            initial: "bad.path",
             states: { "bad.path": Idle }
           }
         },
@@ -294,12 +315,10 @@ describe("exact state-definition runtime validation", () => {
         "cannot contain"
       ]
     ]
-
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
         () =>
           unsafeState({
-            initial: typeof states === "object" && states !== null ? Object.keys(states)[0] ?? "Root" : "Root",
             states: states as Machine.Machine.StateSchemas
           }),
         "Machine.state",
@@ -307,23 +326,14 @@ describe("exact state-definition runtime validation", () => {
         detail
       )
     }
-
-    expectDefinitionError(
-      () => makeFromUnknownStates({ 12: Idle }),
-      "Machine.state",
-      "12",
-      "numeric forms"
-    )
+    expectDefinitionError(() => makeFromUnknownStates({ 12: Idle }), "Machine.state", "12", "numeric forms")
   })
-
   it("rejects child keys reserved by definition-time target selectors", () => {
     expectDefinitionError(
       () =>
         unsafeState({
-          initial: "Root",
           states: {
             Root: {
-              initial: "initial",
               states: { initial: Idle }
             }
           } as any
@@ -335,11 +345,9 @@ describe("exact state-definition runtime validation", () => {
     expectDefinitionError(
       () =>
         unsafeState({
-          initial: "Root",
           states: {
             Root: {
               schema: Root,
-              initial: "with",
               states: { with: Idle }
             }
           } as any
@@ -349,16 +357,13 @@ describe("exact state-definition runtime validation", () => {
       "reserved local target selector key"
     )
   })
-
   it("rejects unknown or non-string pseudo-state annotations", () => {
     expectDefinitionError(
       () =>
         Machine.state({
-          initial: "Root",
           states: {
             Root: {
               schema: Root,
-              initial: "Idle",
               states: {
                 Idle,
                 Choice: {
@@ -376,11 +381,9 @@ describe("exact state-definition runtime validation", () => {
     expectDefinitionError(
       () =>
         Machine.state({
-          initial: "Root",
           states: {
             Root: {
               schema: Root,
-              initial: "Idle",
               states: {
                 Idle,
                 History: {
@@ -396,11 +399,16 @@ describe("exact state-definition runtime validation", () => {
       "must be strings"
     )
   })
-
   it("rejects malformed schema-less active states at the runtime boundary", () => {
-    const invalidTrees: ReadonlyArray<readonly [unknown, string, string]> = [
+    const invalidTrees: ReadonlyArray<
+      readonly [
+        unknown,
+        string,
+        string
+      ]
+    > = [
       [{ Invalid: { schema: undefined } }, "Invalid.schema", "required PropertyKey _tag"],
-      [{ Invalid: { states: { Child: {} } } }, "Invalid.initial", "must declare an initial child"],
+      [{ Invalid: { states: null } }, "Invalid", "record"],
       [{ Invalid: { type: "parallel" } }, "Invalid.states", "must declare child regions"],
       [
         { Invalid: { annotations: { executable: "no" } } },
@@ -413,12 +421,10 @@ describe("exact state-definition runtime validation", () => {
         "must be strings"
       ]
     ]
-
     for (const [states, path, detail] of invalidTrees) {
       expectDefinitionError(
         () =>
           unsafeState({
-            initial: typeof states === "object" && states !== null ? Object.keys(states)[0] ?? "Root" : "Root",
             states: states as Machine.Machine.StateSchemas
           }),
         "Machine.state",

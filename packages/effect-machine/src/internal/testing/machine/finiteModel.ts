@@ -1203,7 +1203,6 @@ const makeStateTree = (
     } else if (node._tag === "Compound") {
       tree[node.key] = {
         schema,
-        initial: node.initial,
         states: makeStateTree(node.states, path)
       }
     } else {
@@ -1473,17 +1472,20 @@ const makeHandlers = (
           ...(Object.keys(history).length === 0 ? {} : { history }),
           ...(node._tag === "Compound"
             ? {
-              initialize: ({ builder }: any) => builder.decoded(stateValue(byPath.get(`${path}.${node.initial}`)!))
+              initial: {
+                target: `${path}.${node.initial}`.split(".").reduce((ref, key) => ref[key], references),
+                ...(byPath.get(`${path}.${node.initial}`)!.node._tag === "Choice" ? {} : {
+                  decoded: true,
+                  data: stateValue(byPath.get(`${path}.${node.initial}`)!)
+                })
+              }
             }
             : {
-              initialize: ({ builder }: any) =>
+              initial: Object.fromEntries(
                 node.states
                   .filter((child) => child._tag !== "History" && child._tag !== "Choice")
-                  .reduce(
-                    (current: any, child) =>
-                      current[child.key].decoded(stateValue(byPath.get(`${path}.${child.key}`)!)),
-                    builder
-                  )
+                  .map((child) => [child.key, { decoded: true, data: stateValue(byPath.get(`${path}.${child.key}`)!) }])
+              )
             }),
           states: makeHandlers(node.states, path, byPath, transitions, references, branches)
         }
@@ -1508,7 +1510,7 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   const flattened = validateModel(model)
   const byPath = new Map(flattened.map((state) => [state.path, state]))
   const stateTree = makeStateTree(model.roots, undefined)
-  const defined = Machine.state({ initial: model.initial, states: stateTree } as any)
+  const defined = Machine.state({ states: stateTree } as any)
   const eventSchemas = model.events.map((event) => Schema.TaggedStruct(event, {}))
   const initial = byPath.get(model.initial)!
   const transitions = new Map(model.transitions.map((transition) => [
@@ -1524,7 +1526,11 @@ export const compileModel = (model: FiniteModel): Machine.Machine.Any => {
   } as any)
   return machine.handle(
     {
-      initialize: ({ builder }: any) => builder.decoded(stateValue(initial)),
+      initial: {
+        target: (Machine.targets(defined).root as unknown as Record<string, unknown>)[model.initial],
+        decoded: true,
+        data: stateValue(initial)
+      },
       states: handlers
     } as any
   ) as Machine.Machine.Any

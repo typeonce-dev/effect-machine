@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Machine } from "../../src/index.js"
-
 describe("local compound target selection", () => {
   it.effect("captures and plans local.with from the compound scope", () =>
     Effect.gen(function*() {
@@ -15,11 +14,9 @@ describe("local compound target selection", () => {
         Reset: {}
       })
       const states = Machine.state({
-        initial: "search",
         states: {
           search: {
             schema: State.cases.Search,
-            initial: "Idle",
             states: {
               Idle: {},
               Updated: {}
@@ -30,16 +27,18 @@ describe("local compound target selection", () => {
       const targets1 = Machine.targets(states)
       const machine = Machine.make({
         branches: { transition1: { destination: { target: targets1.root.search } } },
-
         root: states,
-        events: Machine.eventsFromSchemas(Events),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) =>
-            target.from((to) => to.search.from({ query: "" }, (search) => search.Idle.from()))
-          )
+        events: Machine.eventsFromSchemas(Events)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.search,
+          data: { query: "" }
+        },
         states: {
           search: {
+            initial: {
+              target: Machine.targets(states).root.search.Idle
+            },
             on: {
               UpdateQuery: {
                 branches: "transition1",
@@ -59,7 +58,6 @@ describe("local compound target selection", () => {
           }
         }
       })
-
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "search",
         trigger: { type: "event", event: "UpdateQuery" },
@@ -85,10 +83,8 @@ describe("local compound target selection", () => {
           updates: []
         }]
       }])
-
       const initial = yield* Machine.planInitial(machine)
       const updated = yield* Machine.plan(machine, initial.state, Events.cases.UpdateQuery.make({ query: "next" }))
-
       assert.deepStrictEqual(updated.next.state, {
         path: "search",
         value: State.cases.Search.make({ query: "next" }),
@@ -97,7 +93,6 @@ describe("local compound target selection", () => {
           value: undefined
         }
       })
-
       const reset = yield* Machine.plan(machine, updated.next, Events.cases.Reset.make({}))
       assert.deepStrictEqual(reset.next.state, {
         path: "search",
@@ -108,7 +103,6 @@ describe("local compound target selection", () => {
         }
       })
     }))
-
   it.effect("resolves local.with from a descendant invoke source", () =>
     Effect.gen(function*() {
       const State = Schema.TaggedUnion({
@@ -117,11 +111,9 @@ describe("local compound target selection", () => {
         Updated: {}
       })
       const states = Machine.state({
-        initial: "search",
         states: {
           search: {
             schema: State.cases.Search,
-            initial: "Searching",
             states: {
               Searching: {},
               Updated: {}
@@ -133,16 +125,18 @@ describe("local compound target selection", () => {
       const machine = Machine.make({
         branches: { transition1: { destination: { target: targets2.root.search } } },
         effects: { source1: Effect.suspend(() => Effect.succeed("resolved")) },
-
         root: states,
-        events: Machine.eventsFromSchemas(),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) =>
-            target.from((to) => to.search.from({ query: "pending" }, (search) => search.Searching.from()))
-          )
+        events: Machine.eventsFromSchemas()
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.search,
+          data: { query: "pending" }
+        },
         states: {
           search: {
+            initial: {
+              target: Machine.targets(states).root.search.Searching
+            },
             states: {
               Searching: {
                 invoke: {
@@ -160,7 +154,6 @@ describe("local compound target selection", () => {
           }
         }
       })
-
       assert.deepStrictEqual(Machine.transitionDefinitions(machine), [{
         source: "search.Searching",
         trigger: { type: "invoke", id: "search", outcome: "done" },
@@ -175,10 +168,10 @@ describe("local compound target selection", () => {
           updates: []
         }]
       }])
-
       const ref = yield* Machine.start(machine)
-      for (let index = 0; index < 5; index += 1) yield* Effect.yieldNow
-
+      for (let index = 0; index < 5; index += 1) {
+        yield* Effect.yieldNow
+      }
       assert.deepStrictEqual((yield* ref.state).state, {
         path: "search",
         value: State.cases.Search.make({ query: "resolved" }),
@@ -188,14 +181,11 @@ describe("local compound target selection", () => {
         }
       })
     }))
-
   it("does not install local.with for a schema-less compound scope", () => {
     const Event = Schema.TaggedUnion({ Advance: {} })
     const states = Machine.state({
-      initial: "flow",
       states: {
         flow: {
-          initial: "Idle",
           states: {
             Idle: {},
             Updated: {}
@@ -203,17 +193,20 @@ describe("local compound target selection", () => {
         }
       }
     })
-
     const targets3 = Machine.targets(states)
     assert.notProperty(targets3.root.flow, "with")
     Machine.make({
       root: states,
-      events: Machine.eventsFromSchemas(Event),
-      initialConfiguration: (root) =>
-        root.resolve(({ target }) => target.from((to) => to.flow.from((flow) => flow.Idle.from())))
+      events: Machine.eventsFromSchemas(Event)
     }).handle({
+      initial: {
+        target: Machine.targets(states).root.flow
+      },
       states: {
         flow: {
+          initial: {
+            target: Machine.targets(states).root.flow.Idle
+          },
           states: {
             Idle: {
               on: {

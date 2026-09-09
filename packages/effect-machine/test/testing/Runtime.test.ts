@@ -3,67 +3,68 @@ import { Cause, Clock, Effect, Exit, Option, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
   count: Schema.Int
 }) {}
-
 class Add extends Schema.TaggedClass<Add>("Add")("Add", {
   amount: Schema.Int
 }) {}
-
 class InternalAdd extends Schema.TaggedClass<InternalAdd>("InternalAdd")("InternalAdd", {
   amount: Schema.Int
 }) {}
-
 class Noop extends Schema.TaggedClass<Noop>("RuntimeNoop")("Noop", {}) {}
 class Ignored extends Schema.TaggedClass<Ignored>("RuntimeIgnored")("Ignored", {}) {}
 class Burst extends Schema.TaggedClass<Burst>("RuntimeBurst")("Burst", {}) {}
-
-const CounterStates = Machine.state({ initial: "Counter", states: { Counter } })
-
+const CounterStates = Machine.state({ states: { Counter } })
 const makeCounterMachine = () => {
   const targets1 = Machine.targets(CounterStates)
   return Machine.make({
     root: CounterStates,
     events: Machine.eventsFromSchemas(Add),
-    internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
-    initialConfiguration: (root) =>
-      root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
+    internalEvents: Machine.internalEventsFromSchemas(InternalAdd)
   }).handle({
+    initial: {
+      target: Machine.targets(CounterStates).root.Counter,
+      decoded: true,
+      data: new Counter({ count: 0 })
+    },
     states: {
       Counter: {
         on: {
           Add: {
             target: targets1.root.Counter,
-            decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+            decoded: true,
+            data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
           },
           InternalAdd: {
             target: targets1.root.Counter,
-            decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+            decoded: true,
+            data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
           }
         }
       }
     }
   })
 }
-
 const targets2 = Machine.targets(CounterStates)
 const causalMachine = Machine.make({
   branches: { transition2: { destination: { target: targets2.root.Counter } } },
-
   root: CounterStates,
   events: Machine.eventsFromSchemas(Add, Noop, Ignored, Burst),
-  internalEvents: Machine.internalEventsFromSchemas(InternalAdd),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Counter.decoded(new Counter({ count: 0 }))))
+  internalEvents: Machine.internalEventsFromSchemas(InternalAdd)
 }).handle({
+  initial: {
+    target: Machine.targets(CounterStates).root.Counter,
+    decoded: true,
+    data: new Counter({ count: 0 })
+  },
   states: {
     Counter: {
       on: {
         Add: {
           target: targets2.root.Counter,
-          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+          decoded: true,
+          data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         },
         Noop: { none: true },
         Burst: {
@@ -75,33 +76,29 @@ const causalMachine = Machine.make({
         },
         InternalAdd: {
           target: targets2.root.Counter,
-          decoded: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
+          decoded: true,
+          data: ({ event, state }) => (new Counter({ count: state.count + event.amount }))
         }
       }
     }
   }
 })
-
 type CounterMachine = ReturnType<typeof makeCounterMachine>
 type CounterSnapshot = Machine.Machine.Snapshot<Machine.Machine.States<CounterMachine>>
 type CounterRuntimeSnapshot = Machine.RuntimeSnapshot<CounterSnapshot, any, any>
-
 const snapshotCount = (snapshot: CounterRuntimeSnapshot | undefined): number | undefined =>
   snapshot?.state.state.value.count
-
 const propertyMachine = makeCounterMachine()
 const generatedRuntimeCommands = MachineTest.runtimeCommands(propertyMachine, {
   minCommands: 0,
   maxCommands: 20,
   includeCheckpoint: true
 })
-
 describe("MachineTest runtime commands", () => {
   it("keeps deprecated ambiguous names as enqueue-oriented compatibility aliases", () => {
     assert.strictEqual(MachineTest.runRuntimeCommands, MachineTest.runEnqueuedCommands)
     assert.strictEqual(MachineTest.formatRuntimeTranscript, MachineTest.formatEnqueuedTranscript)
   })
-
   it("derives only public send commands and shrinkable clock/lifecycle commands", () => {
     const machine = makeCounterMachine()
     const generated = MachineTest.runtimeCommands(machine, {
@@ -111,7 +108,6 @@ describe("MachineTest runtime commands", () => {
       advanceArbitrary: FastCheck.constant(10)
     })
     const samples = FastCheck.sample(generated.arbitrary, 20)
-
     assert.strictEqual(generated.diagnostics.events, "override")
     assert.strictEqual(generated.diagnostics.includesAdvance, true)
     assert.strictEqual(generated.diagnostics.includesStop, true)
@@ -119,10 +115,11 @@ describe("MachineTest runtime commands", () => {
     assert.strictEqual(samples.every((commands) => commands.length === 4), true)
     for (const commands of samples) {
       for (const command of commands) {
-        if (command._tag === "Send") assert.instanceOf(command.event, Add)
+        if (command._tag === "Send") {
+          assert.instanceOf(command.event, Add)
+        }
       }
     }
-
     const onlySends = MachineTest.runtimeCommands(machine, {
       maxCommands: 10,
       eventArbitrary: FastCheck.constant(new Add({ amount: 1 })),
@@ -130,83 +127,79 @@ describe("MachineTest runtime commands", () => {
       includeStop: false,
       includeCheckpoint: false
     })
-    const shrunk = FastCheck.check(
-      FastCheck.property(onlySends.arbitrary, (commands) => commands.length === 0),
-      { numRuns: 20 }
-    )
+    const shrunk = FastCheck.check(FastCheck.property(onlySends.arbitrary, (commands) => commands.length === 0), {
+      numRuns: 20
+    })
     assert.strictEqual(shrunk.failed, true)
-    if (shrunk.failed) assert.strictEqual((shrunk.counterexample?.[0] as ReadonlyArray<unknown>).length, 1)
+    if (shrunk.failed) {
+      assert.strictEqual((shrunk.counterexample?.[0] as ReadonlyArray<unknown>).length, 1)
+    }
   })
-
-  it.effect.prop(
-    "checks schema-generated commands against a pure model after every shrink",
-    { commands: generatedRuntimeCommands.arbitrary },
-    ({ commands }) =>
-      Effect.gen(function*() {
-        const ref = yield* Machine.start(propertyMachine)
-        const transcript = yield* MachineTest.runEnqueuedCommands(ref, commands, {
-          initialModel: { count: 0, stopped: false },
-          transition: (model, command) => {
-            switch (command._tag) {
-              case "Send": {
-                const next = model.stopped ? model : { ...model, count: model.count + command.event.amount }
-                return Effect.succeed({
-                  model: next,
-                  expected: {
-                    result: model.stopped ? "SendRejected" : "SendAccepted" as string,
-                    count: next.count,
-                    status: model.stopped ? "stopped" as const : "active" as const
-                  },
-                  synchronize: model.stopped
-                    ? MachineTest.RuntimeSynchronization.none
-                    : MachineTest.RuntimeSynchronization.next
-                })
-              }
-              case "Stop":
-                return Effect.succeed({
-                  model: { ...model, stopped: true },
-                  expected: { result: "Stopped" as string, count: model.count, status: "stopped" as const },
-                  synchronize: model.stopped
-                    ? MachineTest.RuntimeSynchronization.current
-                    : MachineTest.RuntimeSynchronization.next
-                })
-              case "Advance":
-                return Effect.succeed({
-                  model,
-                  expected: {
-                    result: "ClockAdvanced" as string,
-                    count: model.count,
-                    status: model.stopped ? "stopped" as const : "active" as const
-                  },
-                  synchronize: MachineTest.RuntimeSynchronization.current
-                })
-              case "Checkpoint":
-                return Effect.succeed({
-                  model,
-                  expected: {
-                    result: "Checkpoint" as string,
-                    count: model.count,
-                    status: model.stopped ? "stopped" as const : "active" as const
-                  },
-                  synchronize: MachineTest.RuntimeSynchronization.current
-                })
+  it.effect.prop("checks schema-generated commands against a pure model after every shrink", {
+    commands: generatedRuntimeCommands.arbitrary
+  }, ({ commands }) =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(propertyMachine)
+      const transcript = yield* MachineTest.runEnqueuedCommands(ref, commands, {
+        initialModel: { count: 0, stopped: false },
+        transition: (model, command) => {
+          switch (command._tag) {
+            case "Send": {
+              const next = model.stopped ? model : { ...model, count: model.count + command.event.amount }
+              return Effect.succeed({
+                model: next,
+                expected: {
+                  result: model.stopped ? "SendRejected" : "SendAccepted" as string,
+                  count: next.count,
+                  status: model.stopped ? "stopped" as const : "active" as const
+                },
+                synchronize: model.stopped
+                  ? MachineTest.RuntimeSynchronization.none
+                  : MachineTest.RuntimeSynchronization.next
+              })
             }
-          },
-          assert: ({ actual, expected }) =>
-            Effect.sync(() => {
-              assert.strictEqual(actual.result._tag, expected.result)
-              if (actual.snapshot !== undefined) {
-                assert.strictEqual(actual.snapshot.status, expected.status)
-                assert.strictEqual(snapshotCount(actual.snapshot), expected.count)
-              }
-            })
-        })
-        assert.strictEqual(transcript.records.length, commands.length)
-        yield* ref.stop
-      }),
-    { fastCheck: { numRuns: 100, seed: 18_241 } }
-  )
-
+            case "Stop":
+              return Effect.succeed({
+                model: { ...model, stopped: true },
+                expected: { result: "Stopped" as string, count: model.count, status: "stopped" as const },
+                synchronize: model.stopped
+                  ? MachineTest.RuntimeSynchronization.current
+                  : MachineTest.RuntimeSynchronization.next
+              })
+            case "Advance":
+              return Effect.succeed({
+                model,
+                expected: {
+                  result: "ClockAdvanced" as string,
+                  count: model.count,
+                  status: model.stopped ? "stopped" as const : "active" as const
+                },
+                synchronize: MachineTest.RuntimeSynchronization.current
+              })
+            case "Checkpoint":
+              return Effect.succeed({
+                model,
+                expected: {
+                  result: "Checkpoint" as string,
+                  count: model.count,
+                  status: model.stopped ? "stopped" as const : "active" as const
+                },
+                synchronize: MachineTest.RuntimeSynchronization.current
+              })
+          }
+        },
+        assert: ({ actual, expected }) =>
+          Effect.sync(() => {
+            assert.strictEqual(actual.result._tag, expected.result)
+            if (actual.snapshot !== undefined) {
+              assert.strictEqual(actual.snapshot.status, expected.status)
+              assert.strictEqual(snapshotCount(actual.snapshot), expected.count)
+            }
+          })
+      })
+      assert.strictEqual(transcript.records.length, commands.length)
+      yield* ref.stop
+    }), { fastCheck: { numRuns: 100, seed: 18241 } })
   it.effect("buffers public changes so a checkpoint can verify multiple queued sends in order", () =>
     Effect.gen(function*() {
       const machine = makeCounterMachine()
@@ -231,48 +224,50 @@ describe("MachineTest runtime commands", () => {
           return Effect.succeed({
             model: next,
             expected: { count: next.count, result: "Checkpoint" as string },
-            synchronize: MachineTest.RuntimeSynchronization.until<CounterSnapshot, any>(
-              (snapshot) => snapshotCount(snapshot) === next.count
+            synchronize: MachineTest.RuntimeSynchronization.until<CounterSnapshot, any>((snapshot) =>
+              snapshotCount(snapshot) === next.count
             )
           })
         },
         assert: ({ actual, expected }) =>
           Effect.sync(() => {
             assert.strictEqual(actual.result._tag, expected.result)
-            if (actual.snapshot !== undefined) assert.strictEqual(snapshotCount(actual.snapshot), expected.count)
+            if (actual.snapshot !== undefined) {
+              assert.strictEqual(snapshotCount(actual.snapshot), expected.count)
+            }
           })
       })
-
-      assert.deepStrictEqual(
-        transcript.records[2]?.actual.published.map((snapshot) => snapshotCount(snapshot)),
-        [2, 7]
-      )
+      assert.deepStrictEqual(transcript.records[2]?.actual.published.map((snapshot) => snapshotCount(snapshot)), [2, 7])
       assert.strictEqual(snapshotCount(transcript.final), 7)
       yield* ref.stop
     }))
-
   it.effect("advances TestClock deterministically through an inline timer", () =>
     Effect.gen(function*() {
-      class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {}
-      class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {}
-      class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {}
-      const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
+      class Waiting extends Schema.TaggedClass<Waiting>("Waiting")("Waiting", {}) {
+      }
+      class TimedOut extends Schema.TaggedClass<TimedOut>("TimedOut")("TimedOut", {}) {
+      }
+      class Timeout extends Schema.TaggedClass<Timeout>("Timeout")("Timeout", {}) {
+      }
+      const states = Machine.state({ states: { Waiting, TimedOut } })
       const targets3 = Machine.targets(states)
       const machine = Machine.make({
         timers: { source1: "1 second" },
-
         root: states,
         events: Machine.eventsFromSchemas(),
-        internalEvents: Machine.internalEventsFromSchemas(Timeout),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Waiting.decoded(new Waiting({}))))
+        internalEvents: Machine.internalEventsFromSchemas(Timeout)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Waiting,
+          decoded: true,
+          data: new Waiting({})
+        },
         states: {
           Waiting: {
             invoke: {
               src: "source1",
               id: "timeout",
-              onDone: { target: targets3.root.TimedOut, decoded: () => (new TimedOut({})) }
+              onDone: { target: targets3.root.TimedOut, decoded: true, data: () => (new TimedOut({})) }
             }
           },
           TimedOut: {}
@@ -291,7 +286,7 @@ describe("MachineTest runtime commands", () => {
           if (command._tag === "Advance") {
             const elapsed = model.elapsed + Number(command.duration)
             return Effect.succeed({
-              model: { elapsed, path: elapsed >= 1_000 ? "TimedOut" as const : model.path },
+              model: { elapsed, path: elapsed >= 1000 ? "TimedOut" as const : model.path },
               expected: command._tag,
               synchronize: MachineTest.RuntimeSynchronization.none
             })
@@ -311,11 +306,9 @@ describe("MachineTest runtime commands", () => {
             }
           })
       })
-
       assert.strictEqual(transcript.records[3]?.actual.snapshot?.state.state.path, "TimedOut")
       yield* ref.stop
     }))
-
   it.effect("models idempotent stop and rejected sends after stop explicitly", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -344,7 +337,6 @@ describe("MachineTest runtime commands", () => {
             }
           })
       })
-
       assert.deepStrictEqual(transcript.records.map(({ actual }) => actual.result._tag), [
         "Stopped",
         "Stopped",
@@ -353,7 +345,6 @@ describe("MachineTest runtime commands", () => {
       ])
       assert.strictEqual(transcript.final.status, "stopped")
     }))
-
   it.effect("retains a replayable prefix and attempted command in typed failures", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -376,7 +367,6 @@ describe("MachineTest runtime commands", () => {
           return Effect.void
         }
       }).pipe(Effect.flip)
-
       assert.strictEqual(failure.phase, "assertion")
       assert.strictEqual(failure.index, 1)
       assert.strictEqual(failure.prefix.length, 1)
@@ -392,7 +382,6 @@ describe("MachineTest runtime commands", () => {
       assert.match(formatted, /expected count below three/)
       yield* ref.stop
     }))
-
   it.effect("fails with structured evidence when an expected publication never arrives", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -410,7 +399,6 @@ describe("MachineTest runtime commands", () => {
           }),
         assert: () => Effect.void
       }).pipe(Effect.flip)
-
       assert.strictEqual(failure.phase, "observation")
       assert.strictEqual(failure.index, 0)
       assert.strictEqual(failure.prefix.length, 0)
@@ -423,7 +411,6 @@ describe("MachineTest runtime commands", () => {
       assert.strictEqual(yield* Clock.currentTimeMillis, virtualTimeBefore)
       yield* ref.stop
     }))
-
   it.effect("keeps trailing enqueue-only work explicit instead of sampling a racy final state", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -442,12 +429,10 @@ describe("MachineTest runtime commands", () => {
           }),
         assert: ({ actual, expected }) => Effect.sync(() => assert.strictEqual(actual.result._tag, expected))
       })
-
       assert.strictEqual(transcript.synchronized, false)
       assert.strictEqual(snapshotCount(transcript.final), 0)
       yield* ref.stop
     }))
-
   it.effect("does not let one Next observation clear earlier unknown work", () =>
     Effect.gen(function*() {
       const initial = { status: "active" as const, state: 0 }
@@ -481,11 +466,9 @@ describe("MachineTest runtime commands", () => {
           }),
         assert: () => Effect.void
       })
-
       assert.strictEqual(transcript.records[1]?.actual.snapshot?.state, 1)
       assert.strictEqual(transcript.synchronized, false)
     }))
-
   it.effect("captures command execution defects without losing replay evidence", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -500,7 +483,6 @@ describe("MachineTest runtime commands", () => {
           }),
         assert: () => Effect.void
       }).pipe(Effect.flip)
-
       assert.strictEqual(failure.phase, "execution")
       assert.strictEqual(failure.index, 0)
       assert.deepStrictEqual(failure.command, invalid)
@@ -508,7 +490,6 @@ describe("MachineTest runtime commands", () => {
       assert.strictEqual(Cause.hasDies(failure.cause), true)
       yield* ref.stop
     }))
-
   it.effect("captures synchronous throws while constructing model and inspection effects", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -522,7 +503,6 @@ describe("MachineTest runtime commands", () => {
       }).pipe(Effect.flip)
       assert.strictEqual(modelFailure.phase, "model")
       assert.match(String(Cause.squash(modelFailure.cause)), /model callback threw/)
-
       const inspectionFailure = yield* MachineTest.runEnqueuedCommands(ref, [command], {
         initialModel: undefined,
         transition: (model) =>
@@ -542,7 +522,6 @@ describe("MachineTest runtime commands", () => {
       assert.match(String(Cause.squash(inspectionFailure.cause)), /inspection callback threw/)
       yield* ref.stop
     }))
-
   it.effect("propagates pure interruption instead of reporting a counterexample", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(makeCounterMachine())
@@ -550,21 +529,19 @@ describe("MachineTest runtime commands", () => {
       const exit = yield* MachineTest.runEnqueuedCommands(ref, [command], {
         initialModel: undefined,
         transition: (model) =>
-          Effect.interrupt.pipe(
-            Effect.andThen(Effect.succeed({
-              model,
-              expected: undefined,
-              synchronize: MachineTest.RuntimeSynchronization.current
-            }))
-          ),
+          Effect.interrupt.pipe(Effect.andThen(Effect.succeed({
+            model,
+            expected: undefined,
+            synchronize: MachineTest.RuntimeSynchronization.current
+          }))),
         assert: () => Effect.void
       }).pipe(Effect.exit)
-
       assert.strictEqual(Exit.isFailure(exit), true)
-      if (Exit.isFailure(exit)) assert.strictEqual(Cause.hasInterruptsOnly(exit.cause), true)
+      if (Exit.isFailure(exit)) {
+        assert.strictEqual(Cause.hasInterruptsOnly(exit.cause), true)
+      }
       yield* ref.stop
     }))
-
   it.effect("marks unobserved stop and one-of-possibly-many send publications as outstanding", () =>
     Effect.gen(function*() {
       const stoppedRef = yield* Machine.start(makeCounterMachine())
@@ -580,7 +557,6 @@ describe("MachineTest runtime commands", () => {
       })
       assert.strictEqual(stopped.final.status, "active")
       assert.strictEqual(stopped.synchronized, false)
-
       const sentRef = yield* Machine.start(makeCounterMachine())
       const sent = yield* MachineTest.runEnqueuedCommands(sentRef, [
         MachineTest.sendCommand(new Add({ amount: 1 }))
@@ -599,20 +575,15 @@ describe("MachineTest runtime commands", () => {
       yield* sentRef.stop
     }))
 })
-
 describe("MachineTest causal runtime commands", () => {
   it("validates runtime invariant names and non-vacuity requirements", () => {
     const invariant = MachineTest.runtimeInvariants(causalMachine)
-    assert.throws(
-      () => invariant.snapshot(" ", () => true),
-      /name to be a non-empty string/
-    )
+    assert.throws(() => invariant.snapshot(" ", () => true), /name to be a non-empty string/)
     assert.throws(
       () => invariant.command("invalid minimum", () => true, { require: { minObservations: -1 } }),
       /minObservations to be a non-negative safe integer/
     )
   })
-
   it.effect("attributes ignored, targetless, raised, and changing macrosteps to their exact sends", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -643,7 +614,6 @@ describe("MachineTest causal runtime commands", () => {
             }
           })
       })
-
       const [ignored, targetless, changed, burst] = transcript.records
       assert.strictEqual(ignored?.actual.result._tag, "SendProcessed")
       if (ignored?.actual.result._tag === "SendProcessed") {
@@ -662,58 +632,51 @@ describe("MachineTest causal runtime commands", () => {
       }
       assert.strictEqual(burst?.actual.result._tag, "SendProcessed")
       if (burst?.actual.result._tag === "SendProcessed") {
-        assert.deepStrictEqual(
-          burst.actual.result.step.plan.microsteps.map(({ event }) => event._tag),
-          ["Burst", "InternalAdd"]
-        )
+        assert.deepStrictEqual(burst.actual.result.step.plan.microsteps.map(({ event }) => event._tag), [
+          "Burst",
+          "InternalAdd"
+        ])
         assert.strictEqual(burst.actual.result.step.before.state.value.count, 2)
         assert.strictEqual(burst.actual.result.step.after.state.value.count, 13)
       }
       assert.strictEqual(transcript.final.state.state.value.count, 13)
       yield* ref.stop
     }))
-
-  it.effect.prop(
-    "checks and shrinks generated command sequences at causal boundaries",
-    {
-      commands: MachineTest.runtimeCommands(causalMachine, {
-        maxCommands: 20,
-        eventArbitrary: FastCheck.oneof(
-          FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
-          FastCheck.constant(new Ignored({})),
-          FastCheck.constant(new Noop({}))
-        ),
-        includeAdvance: false,
-        includeStop: false,
-        includeCheckpoint: false
-      }).arbitrary
-    },
-    ({ commands }) =>
-      Effect.gen(function*() {
-        const ref = yield* Machine.start(causalMachine)
-        const probe = yield* MachineTest.probe(causalMachine, ref)
-        const transcript = yield* MachineTest.runCausalCommands(probe, commands, {
-          initialModel: 0,
-          transition: (count, command) => {
-            const next = command._tag === "Send" && command.event._tag === "Add"
-              ? count + command.event.amount
-              : count
-            return Effect.succeed({ model: next, expected: next })
-          },
-          assert: ({ actual, expected }) =>
-            Effect.sync(() => {
-              assert.strictEqual(actual.snapshot.state.state.value.count, expected)
-              if (actual.result._tag === "SendProcessed") {
-                assert.strictEqual(actual.result.step.after.state.value.count, expected)
-              }
-            })
-        })
-        assert.strictEqual(transcript.finalModel, transcript.final.state.state.value.count)
-        yield* ref.stop
-      }),
-    { fastCheck: { numRuns: 100, seed: 31_590 } }
-  )
-
+  it.effect.prop("checks and shrinks generated command sequences at causal boundaries", {
+    commands: MachineTest.runtimeCommands(causalMachine, {
+      maxCommands: 20,
+      eventArbitrary: FastCheck.oneof(
+        FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
+        FastCheck.constant(new Ignored({})),
+        FastCheck.constant(new Noop({}))
+      ),
+      includeAdvance: false,
+      includeStop: false,
+      includeCheckpoint: false
+    }).arbitrary
+  }, ({ commands }) =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const transcript = yield* MachineTest.runCausalCommands(probe, commands, {
+        initialModel: 0,
+        transition: (count, command) => {
+          const next = command._tag === "Send" && command.event._tag === "Add"
+            ? count + command.event.amount
+            : count
+          return Effect.succeed({ model: next, expected: next })
+        },
+        assert: ({ actual, expected }) =>
+          Effect.sync(() => {
+            assert.strictEqual(actual.snapshot.state.state.value.count, expected)
+            if (actual.result._tag === "SendProcessed") {
+              assert.strictEqual(actual.result.step.after.state.value.count, expected)
+            }
+          })
+      })
+      assert.strictEqual(transcript.finalModel, transcript.final.state.state.value.count)
+      yield* ref.stop
+    }), { fastCheck: { numRuns: 100, seed: 31590 } })
   it.effect("represents stopped sends without turning an expected rejection into a failed property", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -730,36 +693,39 @@ describe("MachineTest causal runtime commands", () => {
           }),
         assert: ({ actual, expected }) => Effect.sync(() => assert.strictEqual(actual.result._tag, expected))
       })
-
       assert.strictEqual(transcript.records[1]?.actual.result._tag, "SendRejected")
       if (transcript.records[1]?.actual.result._tag === "SendRejected") {
         assert.instanceOf(transcript.records[1].actual.result.error, Machine.StoppedError)
       }
       assert.strictEqual(transcript.final.status, "stopped")
     }))
-
   it.effect("uses RuntimeAwait only for asynchronous work after the causal command boundary", () =>
     Effect.gen(function*() {
-      class Waiting extends Schema.TaggedClass<Waiting>("CausalWaiting")("Waiting", {}) {}
-      class TimedOut extends Schema.TaggedClass<TimedOut>("CausalTimedOut")("TimedOut", {}) {}
-      class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {}
-      const states = Machine.state({ initial: "Waiting", states: { Waiting, TimedOut } })
+      class Waiting extends Schema.TaggedClass<Waiting>("CausalWaiting")("Waiting", {}) {
+      }
+      class TimedOut extends Schema.TaggedClass<TimedOut>("CausalTimedOut")("TimedOut", {}) {
+      }
+      class Timeout extends Schema.TaggedClass<Timeout>("CausalTimeout")("Timeout", {}) {
+      }
+      const states = Machine.state({ states: { Waiting, TimedOut } })
       const targets4 = Machine.targets(states)
       const timerMachine = Machine.make({
         timers: { source1: "1 second" },
-
         root: states,
         events: Machine.eventsFromSchemas(),
-        internalEvents: Machine.internalEventsFromSchemas(Timeout),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Waiting.decoded(new Waiting({}))))
+        internalEvents: Machine.internalEventsFromSchemas(Timeout)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Waiting,
+          decoded: true,
+          data: new Waiting({})
+        },
         states: {
           Waiting: {
             invoke: {
               src: "source1",
               id: "timeout",
-              onDone: { target: targets4.root.TimedOut, decoded: () => (new TimedOut({})) }
+              onDone: { target: targets4.root.TimedOut, decoded: true, data: () => (new TimedOut({})) }
             }
           },
           TimedOut: {}
@@ -767,7 +733,7 @@ describe("MachineTest causal runtime commands", () => {
       })
       const ref = yield* Machine.start(timerMachine)
       const probe = yield* MachineTest.probe(timerMachine, ref)
-      const transcript = yield* MachineTest.runCausalCommands(probe, [MachineTest.advanceCommand(1_000)], {
+      const transcript = yield* MachineTest.runCausalCommands(probe, [MachineTest.advanceCommand(1000)], {
         initialModel: "Waiting" as "Waiting" | "TimedOut",
         transition: () =>
           Effect.succeed({
@@ -781,35 +747,28 @@ describe("MachineTest causal runtime commands", () => {
             assert.isAtLeast(actual.awaited.length, 1)
           })
       })
-
       assert.strictEqual(transcript.final.state.state.path, "TimedOut")
       yield* ref.stop
-
       const verifiedRef = yield* Machine.start(timerMachine)
       const verifiedProbe = yield* MachineTest.probe(timerMachine, verifiedRef)
       const invariant = MachineTest.runtimeInvariants(timerMachine)
-      const verified = yield* MachineTest.verifyCausalCommands(
-        verifiedProbe,
-        [MachineTest.advanceCommand(1_000)],
-        {
-          await: () => verifiedProbe.await.until((snapshot) => snapshot.state.state.path === "TimedOut"),
-          invariants: [
-            invariant.snapshot(
-              "awaited timer observations remain active",
-              ({ snapshot }) => snapshot.status === "active",
-              { observe: "awaited", require: { minObservations: 1 } }
-            ),
-            invariant.transcript(
-              "the awaited timer reaches TimedOut",
-              ({ transcript }) => transcript.final.state.state.path === "TimedOut"
-            )
-          ]
-        }
-      )
+      const verified = yield* MachineTest.verifyCausalCommands(verifiedProbe, [MachineTest.advanceCommand(1000)], {
+        await: () => verifiedProbe.await.until((snapshot) => snapshot.state.state.path === "TimedOut"),
+        invariants: [
+          invariant.snapshot(
+            "awaited timer observations remain active",
+            ({ snapshot }) => snapshot.status === "active",
+            { observe: "awaited", require: { minObservations: 1 } }
+          ),
+          invariant.transcript(
+            "the awaited timer reaches TimedOut",
+            ({ transcript }) => transcript.final.state.state.path === "TimedOut"
+          )
+        ]
+      })
       assert.isAtLeast(verified.records[0]?.actual.awaited.length ?? 0, 1)
       yield* verifiedRef.stop
     }))
-
   it.effect("attributes processing failures to the exact causal command and prefix", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -830,7 +789,6 @@ describe("MachineTest causal runtime commands", () => {
           }),
         assert: () => Effect.void
       }).pipe(Effect.flip)
-
       assert.strictEqual(failure.phase, "execution")
       assert.strictEqual(failure.index, 1)
       assert.strictEqual(failure.prefix.length, 1)
@@ -845,7 +803,6 @@ describe("MachineTest causal runtime commands", () => {
       const snapshot = yield* ref.snapshot
       assert.strictEqual(snapshot.status, "error")
     }))
-
   it.effect("does not confuse a processing StoppedError with mailbox rejection", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -868,12 +825,10 @@ describe("MachineTest causal runtime commands", () => {
         transition: (model) => Effect.succeed({ model, expected: undefined }),
         assert: () => Effect.void
       }).pipe(Effect.flip)
-
       assert.strictEqual(failure.phase, "execution")
       assert.instanceOf(Cause.squash(failure.cause), Machine.StoppedError)
       yield* ref.stop
     }))
-
   it.effect("checks reusable snapshot, command, and transcript laws over causal evidence", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -888,10 +843,7 @@ describe("MachineTest causal runtime commands", () => {
       })
       const invariant = MachineTest.runtimeInvariants(causalMachine)
       const report = yield* MachineTest.checkRuntimeInvariants(causalMachine, transcript, [
-        invariant.snapshot(
-          "count is non-negative",
-          ({ snapshot }) => snapshot.state.state.value.count >= 0
-        ),
+        invariant.snapshot("count is non-negative", ({ snapshot }) => snapshot.state.state.value.count >= 0),
         invariant.command(
           "add is processed",
           ({ command, result }) =>
@@ -909,18 +861,13 @@ describe("MachineTest causal runtime commands", () => {
               result._tag === "SendProcessed" && result.step.handled && !result.step.configurationChanged
             )
         ),
-        invariant.snapshot(
-          "an optional await law remains explicitly untested",
-          () => true,
-          { observe: "awaited" }
-        ),
+        invariant.snapshot("an optional await law remains explicitly untested", () => true, { observe: "awaited" }),
         invariant.snapshot(
           "the final retained snapshot is available",
           ({ snapshot }) => snapshot.state.state.value.count === 2,
           { observe: "final" }
         )
       ])
-
       assert.deepStrictEqual(
         report.checks.map(({ observations, scope, status }) => ({
           observations,
@@ -937,7 +884,6 @@ describe("MachineTest causal runtime commands", () => {
       )
       yield* ref.stop
     }))
-
   it.effect("retains every runtime law violation and detects vacuous conditional laws", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -949,21 +895,14 @@ describe("MachineTest causal runtime commands", () => {
       })
       const invariant = MachineTest.runtimeInvariants(causalMachine)
       const failure = yield* MachineTest.assertRuntimeInvariants(causalMachine, transcript, [
-        invariant.snapshot(
-          "count stays non-negative",
-          ({ snapshot }) =>
-            snapshot.state.state.value.count >= 0 || `negative count: ${snapshot.state.state.value.count}`
-        ),
-        invariant.command(
-          "burst is exercised",
-          () => true,
-          {
-            when: ({ command }) => command._tag === "Send" && command.event._tag === "Burst",
-            require: { minObservations: 1 }
-          }
-        )
+        invariant.snapshot("count stays non-negative", ({ snapshot }) =>
+          snapshot.state.state.value.count >= 0 || `negative count: ${snapshot.state.state.value.count}`),
+        invariant.command("burst is exercised", () =>
+          true, {
+          when: ({ command }) => command._tag === "Send" && command.event._tag === "Burst",
+          require: { minObservations: 1 }
+        })
       ]).pipe(Effect.flip)
-
       assert.deepStrictEqual(failure.report.checks.map(({ status }) => status), ["failed", "insufficient"])
       assert.strictEqual(failure.violations.length, 2)
       assert.deepStrictEqual(failure.violations[0], {
@@ -980,7 +919,6 @@ describe("MachineTest causal runtime commands", () => {
       assert.strictEqual(failure.transcript.records.length, 1)
       yield* ref.stop
     }))
-
   it.effect("verifies causal laws without requiring dummy model callbacks", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -997,51 +935,45 @@ describe("MachineTest causal runtime commands", () => {
             command._tag !== "Send" || result._tag === "SendProcessed")
         ]
       })
-
       assert.strictEqual(transcript.records.length, 3)
       assert.strictEqual(transcript.final.state.state.value.count, 14)
       assert.strictEqual("finalModel" in transcript, false)
       yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
       yield* ref.stop
     }))
-
-  it.effect.prop(
-    "checks generated causal commands with reusable runtime laws and planner agreement",
-    {
-      commands: MachineTest.runtimeCommands(causalMachine, {
-        maxCommands: 20,
-        eventArbitrary: FastCheck.oneof(
-          FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
-          FastCheck.constant(new Ignored({})),
-          FastCheck.constant(new Noop({}))
-        ),
-        includeAdvance: false,
-        includeStop: false,
-        includeCheckpoint: false
-      }).arbitrary
-    },
-    ({ commands }) =>
-      Effect.gen(function*() {
-        const ref = yield* Machine.start(causalMachine)
-        const probe = yield* MachineTest.probe(causalMachine, ref)
-        const invariant = MachineTest.runtimeInvariants(causalMachine)
-        const transcript = yield* MachineTest.verifyCausalCommands(probe, commands, {
-          invariants: [
-            invariant.command("add applies exactly once", ({ command, result }) => {
-              if (
-                command._tag !== "Send" || command.event._tag !== "Add" ||
-                result._tag !== "SendProcessed"
-              ) return true
-              return result.step.after.state.value.count === result.step.before.state.value.count + command.event.amount
-            })
-          ]
-        })
-        yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
-        yield* ref.stop
-      }),
-    { fastCheck: { numRuns: 100, seed: 81_440 } }
-  )
-
+  it.effect.prop("checks generated causal commands with reusable runtime laws and planner agreement", {
+    commands: MachineTest.runtimeCommands(causalMachine, {
+      maxCommands: 20,
+      eventArbitrary: FastCheck.oneof(
+        FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
+        FastCheck.constant(new Ignored({})),
+        FastCheck.constant(new Noop({}))
+      ),
+      includeAdvance: false,
+      includeStop: false,
+      includeCheckpoint: false
+    }).arbitrary
+  }, ({ commands }) =>
+    Effect.gen(function*() {
+      const ref = yield* Machine.start(causalMachine)
+      const probe = yield* MachineTest.probe(causalMachine, ref)
+      const invariant = MachineTest.runtimeInvariants(causalMachine)
+      const transcript = yield* MachineTest.verifyCausalCommands(probe, commands, {
+        invariants: [
+          invariant.command("add applies exactly once", ({ command, result }) => {
+            if (
+              command._tag !== "Send" || command.event._tag !== "Add" ||
+              result._tag !== "SendProcessed"
+            ) {
+              return true
+            }
+            return result.step.after.state.value.count === result.step.before.state.value.count + command.event.amount
+          })
+        ]
+      })
+      yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
+      yield* ref.stop
+    }), { fastCheck: { numRuns: 100, seed: 81440 } })
   it.effect("reports the exact field when causal evidence disagrees with fresh planning", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -1051,7 +983,9 @@ describe("MachineTest causal runtime commands", () => {
       ], { invariants: [] })
       const record = transcript.records[0]!
       assert.strictEqual(record.actual.result._tag, "SendProcessed")
-      if (record.actual.result._tag !== "SendProcessed") return
+      if (record.actual.result._tag !== "SendProcessed") {
+        return
+      }
       const corrupted = {
         ...transcript,
         records: [{
@@ -1066,7 +1000,6 @@ describe("MachineTest causal runtime commands", () => {
         }]
       }
       const failure = yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, corrupted).pipe(Effect.flip)
-
       assert.deepStrictEqual(failure.violations.map(({ commandIndex, field }) => ({ commandIndex, field })), [
         { commandIndex: 0, field: "handled" }
       ])

@@ -1,92 +1,105 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
-
 class Workspace extends Schema.TaggedClass<Workspace>("TransitionWorkspace")("Workspace", {
   revision: Schema.Number,
   preferredRoute: Schema.Literals(["draft", "review"])
-}) {}
+}) {
+}
 class Draft extends Schema.TaggedClass<Draft>("TransitionDraft")("Draft", {
   text: Schema.String,
   autosaves: Schema.Number
-}) {}
-class AutoSaving extends Schema.TaggedClass<AutoSaving>("TransitionAutoSaving")("AutoSaving", {}) {}
+}) {
+}
+class AutoSaving extends Schema.TaggedClass<AutoSaving>("TransitionAutoSaving")("AutoSaving", {}) {
+}
 class Review extends Schema.TaggedClass<Review>("TransitionReview")("Review", {
   requestedBy: Schema.String
-}) {}
+}) {
+}
 class Checking extends Schema.TaggedClass<Checking>("TransitionChecking")("Checking", {
   checks: Schema.Array(Schema.String)
-}) {}
-class ChangesRequested extends Schema.TaggedClass<ChangesRequested>("TransitionChangesRequested")(
-  "ChangesRequested",
-  { reason: Schema.String }
-) {}
+}) {
+}
+class ChangesRequested extends Schema.TaggedClass<ChangesRequested>("TransitionChangesRequested")("ChangesRequested", {
+  reason: Schema.String
+}) {
+}
 class Approved extends Schema.TaggedClass<Approved>("TransitionApproved")("Approved", {
   reviewer: Schema.String
-}) {}
-class WorkspaceFinished extends Schema.TaggedClass<WorkspaceFinished>("TransitionWorkspaceFinished")(
-  "Finished",
-  { result: Schema.String }
-) {}
+}) {
+}
+class WorkspaceFinished
+  extends Schema.TaggedClass<WorkspaceFinished>("TransitionWorkspaceFinished")("Finished", { result: Schema.String })
+{
+}
 class Paused extends Schema.TaggedClass<Paused>("TransitionPaused")("Paused", {
   reason: Schema.String
-}) {}
+}) {
+}
 class Published extends Schema.TaggedClass<Published>("TransitionPublished")("Published", {
   result: Schema.String
-}) {}
+}) {
+}
 class Disabled extends Schema.TaggedClass<Disabled>("TransitionDisabled")("Disabled", {
   reason: Schema.String
-}) {}
-
+}) {
+}
 class Create extends Schema.TaggedClass<Create>("TransitionCreate")("Create", {
   text: Schema.String,
   route: Schema.Literals(["draft", "review"])
-}) {}
-class Edit extends Schema.TaggedClass<Edit>("TransitionEdit")("Edit", { text: Schema.String }) {}
-class Save extends Schema.TaggedClass<Save>("TransitionSave")("Save", {}) {}
+}) {
+}
+class Edit extends Schema.TaggedClass<Edit>("TransitionEdit")("Edit", { text: Schema.String }) {
+}
+class Save extends Schema.TaggedClass<Save>("TransitionSave")("Save", {}) {
+}
 class Submit extends Schema.TaggedClass<Submit>("TransitionSubmit")("Submit", {
   mode: Schema.Literals(["review", "publish"]),
   requestedBy: Schema.String
-}) {}
+}) {
+}
 class Approve extends Schema.TaggedClass<Approve>("TransitionApprove")("Approve", {
   reviewer: Schema.String
-}) {}
+}) {
+}
 class Reject extends Schema.TaggedClass<Reject>("TransitionReject")("Reject", {
   reason: Schema.String
-}) {}
-class Revise extends Schema.TaggedClass<Revise>("TransitionRevise")("Revise", {}) {}
-class Pause extends Schema.TaggedClass<Pause>("TransitionPause")("Pause", { reason: Schema.String }) {}
-class ResumeShallow extends Schema.TaggedClass<ResumeShallow>("TransitionResumeShallow")(
-  "ResumeShallow",
-  {}
-) {}
-class ResumeDeep extends Schema.TaggedClass<ResumeDeep>("TransitionResumeDeep")("ResumeDeep", {}) {}
-class Restart extends Schema.TaggedClass<Restart>("TransitionRestart")("Restart", {}) {}
-class Refresh extends Schema.TaggedClass<Refresh>("TransitionRefresh")("Refresh", {}) {}
-class Ignore extends Schema.TaggedClass<Ignore>("TransitionIgnore")("Ignore", {}) {}
+}) {
+}
+class Revise extends Schema.TaggedClass<Revise>("TransitionRevise")("Revise", {}) {
+}
+class Pause extends Schema.TaggedClass<Pause>("TransitionPause")("Pause", { reason: Schema.String }) {
+}
+class ResumeShallow extends Schema.TaggedClass<ResumeShallow>("TransitionResumeShallow")("ResumeShallow", {}) {
+}
+class ResumeDeep extends Schema.TaggedClass<ResumeDeep>("TransitionResumeDeep")("ResumeDeep", {}) {
+}
+class Restart extends Schema.TaggedClass<Restart>("TransitionRestart")("Restart", {}) {
+}
+class Refresh extends Schema.TaggedClass<Refresh>("TransitionRefresh")("Refresh", {}) {
+}
+class Ignore extends Schema.TaggedClass<Ignore>("TransitionIgnore")("Ignore", {}) {
+}
 class MaybeHandle extends Schema.TaggedClass<MaybeHandle>("TransitionMaybeHandle")("MaybeHandle", {
   accept: Schema.Boolean
-}) {}
-class BumpWorkspace extends Schema.TaggedClass<BumpWorkspace>("TransitionBumpWorkspace")(
-  "BumpWorkspace",
-  {}
-) {}
+}) {
+}
+class BumpWorkspace extends Schema.TaggedClass<BumpWorkspace>("TransitionBumpWorkspace")("BumpWorkspace", {}) {
+}
 class Archive extends Schema.TaggedClass<Archive>("TransitionArchive")("Archive", {
   reason: Schema.String
-}) {}
-
+}) {
+}
 const TransitionStates = Machine.state({
-  initial: "Paused",
   states: {
     Workspace: {
       schema: Workspace,
-      initial: "Routing",
       states: {
         Routing: { type: "choice" },
         Draft,
         AutoSaving,
         Review: {
           schema: Review,
-          initial: "Checking",
           states: {
             Checking,
             ChangesRequested,
@@ -103,7 +116,6 @@ const TransitionStates = Machine.state({
     Published: { schema: Published, type: "final", output: Schema.String }
   }
 })
-
 const defaultWorkspaceSnapshot = () => ({
   path: "" as const,
   value: undefined,
@@ -116,7 +128,6 @@ const defaultWorkspaceSnapshot = () => ({
     }
   }
 })
-
 const targets1 = Machine.targets(TransitionStates)
 export const transitionSemanticsMachine = Machine.make({
   branches: {
@@ -131,7 +142,6 @@ export const transitionSemanticsMachine = Machine.make({
     transition14: { destination: { history: targets1.root.Workspace.recent } },
     transition15: { destination: { history: targets1.root.Workspace.exact } }
   },
-
   id: "transition-semantics",
   root: TransitionStates,
   events: Machine.eventsFromSchemas(
@@ -151,27 +161,42 @@ export const transitionSemanticsMachine = Machine.make({
     MaybeHandle,
     BumpWorkspace,
     Archive
-  ),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Paused.decoded(new Paused({ reason: "not started" }))))
+  )
 }).handle({
+  initial: {
+    target: Machine.targets(TransitionStates).root.Paused,
+    decoded: true,
+    data: new Paused({ reason: "not started" })
+  },
   states: {
     Workspace: {
+      initial: {
+        target: Machine.targets(TransitionStates).root.Workspace.Routing
+      },
       history: {
         recent: { default: defaultWorkspaceSnapshot },
         exact: { default: defaultWorkspaceSnapshot }
       },
       on: {
-        Pause: { target: targets1.root.Paused, decoded: ({ event }) => (new Paused({ reason: event.reason })) },
+        Pause: {
+          target: targets1.root.Paused,
+          decoded: true,
+          data: ({ event }) => (new Paused({ reason: event.reason }))
+        },
         BumpWorkspace: {
           update: targets1.root.Workspace,
-          decoded: ({ state: current }) => (new Workspace({
+          decoded: true,
+          data: ({ state: current }) => (new Workspace({
             revision: current.revision + 1,
             preferredRoute: current.preferredRoute
           }))
         }
       },
-      onDone: { target: targets1.root.Published, decoded: () => (new Published({ result: "workspace published" })) },
+      onDone: {
+        target: targets1.root.Published,
+        decoded: true,
+        data: () => (new Published({ result: "workspace published" }))
+      },
       states: {
         Routing: {
           choice: {
@@ -186,9 +211,10 @@ export const transitionSemanticsMachine = Machine.make({
           on: {
             Edit: {
               target: targets1.root.Workspace.Draft,
-              decoded: ({ event, state }) => (new Draft({ text: event.text, autosaves: state.autosaves }))
+              decoded: true,
+              data: ({ event, state }) => (new Draft({ text: event.text, autosaves: state.autosaves }))
             },
-            Save: { target: targets1.root.Workspace.AutoSaving, decoded: () => (new AutoSaving({})) },
+            Save: { target: targets1.root.Workspace.AutoSaving, decoded: true, data: () => (new AutoSaving({})) },
             Submit: {
               branches: "transition7",
               resolve: ({ event, select }) =>
@@ -208,25 +234,33 @@ export const transitionSemanticsMachine = Machine.make({
         AutoSaving: {
           always: {
             target: targets1.root.Workspace.Draft,
-            decoded: () => (new Draft({ text: "Autosaved draft", autosaves: 1 }))
+            decoded: true,
+            data: () => (new Draft({ text: "Autosaved draft", autosaves: 1 }))
           }
         },
         Review: {
-          initialize: ({ builder }) => builder.decoded(new Checking({ checks: ["types", "tests"] })),
+          initial: {
+            target: Machine.targets(TransitionStates).root.Workspace.Review.Checking,
+            decoded: true,
+            data: ({}) => new Checking({ checks: ["types", "tests"] })
+          },
           onDone: {
             target: targets1.root.Workspace.Finished,
-            decoded: () => (new WorkspaceFinished({ result: "approved review" }))
+            decoded: true,
+            data: () => (new WorkspaceFinished({ result: "approved review" }))
           },
           states: {
             Checking: {
               on: {
                 Approve: {
                   target: targets1.root.Workspace.Review.Approved,
-                  decoded: ({ event }) => (new Approved({ reviewer: event.reviewer }))
+                  decoded: true,
+                  data: ({ event }) => (new Approved({ reviewer: event.reviewer }))
                 },
                 Reject: {
                   target: targets1.root.Workspace.Review.ChangesRequested,
-                  decoded: ({ event }) => (new ChangesRequested({ reason: event.reason }))
+                  decoded: true,
+                  data: ({ event }) => (new ChangesRequested({ reason: event.reason }))
                 }
               }
             },
@@ -234,25 +268,30 @@ export const transitionSemanticsMachine = Machine.make({
               on: {
                 Revise: {
                   target: targets1.root.Workspace.Draft,
-                  decoded: () => (new Draft({ text: "Revised draft", autosaves: 0 }))
+                  decoded: true,
+                  data: () => (new Draft({ text: "Revised draft", autosaves: 0 }))
                 }
               }
-            }
+            },
+            Approved: {}
           }
-        }
+        },
+        Finished: {}
       }
     },
     Paused: {
       on: {
         Create: {
           initial: targets1.root.Workspace,
-          decoded: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
+          decoded: true,
+          data: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
         },
         ResumeShallow: { branches: "transition14", resolve: ({ select: { destination: target } }) => target() },
         ResumeDeep: { branches: "transition15", resolve: ({ select: { destination: target } }) => target() },
         Restart: {
           initial: targets1.root.Workspace,
-          decoded: () => (new Workspace({ revision: 0, preferredRoute: "draft" }))
+          decoded: true,
+          data: () => (new Workspace({ revision: 0, preferredRoute: "draft" }))
         }
       }
     },

@@ -35,11 +35,11 @@ import {
   normalizeTargetConfigurationSync,
   pathDepth,
   snapshotFromConfiguration,
-  snapshotFromConfigurationAtPath,
-  validateInitialConfiguration
+  snapshotFromConfigurationAtPath
 } from "./configuration.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
+import { isDataInitializer } from "./initialDeclaration.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
 import * as InvocationEvent from "./invocationEvent.js"
@@ -300,11 +300,13 @@ const completeHistoryConfiguration = (
           )
           let next = current
           for (const routed of [choice.target, ...choice.additionalTargets]) {
-            if (routed === undefined || isHistoryTarget(routed)) {
+            if (routed === undefined) {
               throw new Error(`Machine initial choice "${child.path}" must resolve to an active state target`)
             }
             const resolved = isInitialTarget(routed)
               ? resolveInitialTarget(machine, next, routed, event)
+              : isHistoryTarget(routed)
+              ? resolveHistoryTarget(machine, next, routed, event)
               : undefined
             next = normalizeTargetConfigurationSync(
               machine,
@@ -343,7 +345,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
-            builder: makeStateInitializeBuilder(machine, path)
+            ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = getStateInitializeValues(path, initialized.value)
           values.set(child.path, decodeStateValueSync(machine, child, initializedValues[child.key]))
@@ -371,7 +373,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
-            builder: makeStateInitializeBuilder(machine, path)
+            ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = initialized === undefined
             ? undefined
@@ -387,6 +389,10 @@ const completeHistoryConfiguration = (
               if (
                 initializedValues === undefined || !Object.prototype.hasOwnProperty.call(initializedValues, child.key)
               ) {
+                if (initializer !== undefined && isDataInitializer(initializer)) {
+                  values.set(child.path, decodeStateValueSync(machine, child, makeStateInput({})))
+                  continue
+                }
                 throw new Error(`Machine parallel state initializer for "${path}" must return region "${child.key}"`)
               }
               values.set(
@@ -419,14 +425,24 @@ const completeHistoryConfiguration = (
   }
 }
 
-export function resolveInitialTarget(
+/** Resolves initial data into owned configuration without a snapshot round trip. */
+export function resolveInitialConfiguration(
   machine: Machine.Any,
   configuration: ActiveConfiguration,
   target: InitialTargetInstruction,
   event: unknown
 ) {
   const partial = configurationFromInitialTargetSync(machine, configuration, target)
-  const completed = completeHistoryConfiguration(machine, partial, event)
+  return completeHistoryConfiguration(machine, partial, event)
+}
+
+export function resolveInitialTarget(
+  machine: Machine.Any,
+  configuration: ActiveConfiguration,
+  target: InitialTargetInstruction,
+  event: unknown
+) {
+  const completed = resolveInitialConfiguration(machine, configuration, target, event)
   const snapshot = snapshotFromConfigurationAtPath(machine, completed.configuration, target.path)
   return {
     target: makeTarget(target.path as any, snapshot.value as any, {
@@ -1720,77 +1736,13 @@ export const planInitialSync = <
     outputs: new Map(),
     history: new Map()
   }
-  const rootResolution = isInitialTarget(initial)
-    ? resolveInitialTarget(machine, emptyConfiguration, initial, InitialEvent)
-    : undefined
-  const state = rootResolution?.target ?? initial
-  const initialChoice = choiceFromTarget(state)
-  const choiceResolution = initialChoice === undefined
-    ? undefined
-    : resolveChoiceTarget(
-      machine,
-      emptyConfiguration,
-      state,
-      InitialEvent
-    )
-  const initialHistoryActions: Array<RuntimeCommand> = []
-  const initialHistoryRaisedEvents: Array<unknown> = []
-  const initialHistoryEmittedEvents: Array<unknown> = []
-  const initialHistoryChoiceTransitions: Array<ResolvedChoiceTransition> = []
-  const resolvedInitialTargets: Array<unknown> = []
-  for (
-    const target of choiceResolution !== undefined
-      ? [choiceResolution.target, ...choiceResolution.additionalTargets]
-      : rootResolution === undefined
-      ? []
-      : [rootResolution.target]
-  ) {
-    if (!isHistoryTarget(target)) {
-      resolvedInitialTargets.push(target)
-      continue
-    }
-    const history = resolveHistoryTarget(machine, emptyConfiguration, target, InitialEvent)
-    resolvedInitialTargets.push(history.target)
-    initialHistoryActions.push(...history.commands)
-    initialHistoryRaisedEvents.push(...history.raisedEvents)
-    initialHistoryEmittedEvents.push(...history.emittedEvents)
-    initialHistoryChoiceTransitions.push(...history.transitions)
-  }
-  let resolvedConfiguration = resolvedInitialTargets.length === 0
-    ? normalizeConfigurationSync<States>(machine, state as Machine.Snapshot<States>)
-    : normalizeTargetConfigurationSync<States>(
-      machine,
-      emptyConfiguration,
-      resolvedInitialTargets[0] as
-        | Machine.Snapshot<States>
-        | Machine.Target<States, Machine.StateIdentifier<States>>
-    )
-  for (const additionalTarget of resolvedInitialTargets.slice(1)) {
-    resolvedConfiguration = normalizeTargetConfigurationSync<States>(
-      machine,
-      resolvedConfiguration,
-      additionalTarget as Machine.Snapshot<States> | Machine.Target<States, Machine.StateIdentifier<States>>
-    )
-  }
-  const configuration: ActiveConfiguration = resolvedConfiguration
-  if (machine.initialDefinition.selection.kind === "initial") validateInitialConfiguration(machine, configuration)
+  const rootResolution = resolveInitialTarget(machine, emptyConfiguration, initial, InitialEvent)
+  const configuration = normalizeTargetConfigurationSync(machine, emptyConfiguration, rootResolution.target)
   const startingState = snapshotFromConfiguration<States>(machine, configuration)
   const initialEntryPaths = getInitialEntryPaths(machine, configuration)
-  const commands = [
-    ...(rootResolution?.commands ?? []),
-    ...(choiceResolution?.commands ?? []),
-    ...initialHistoryActions
-  ]
-  const raisedEvents = [
-    ...(rootResolution?.raisedEvents ?? []),
-    ...(choiceResolution?.raisedEvents ?? []),
-    ...initialHistoryRaisedEvents
-  ]
-  const emittedEvents = [
-    ...(rootResolution?.emittedEvents ?? []),
-    ...(choiceResolution?.emittedEvents ?? []),
-    ...initialHistoryEmittedEvents
-  ]
+  const commands = rootResolution.commands
+  const raisedEvents = rootResolution.raisedEvents
+  const emittedEvents = rootResolution.emittedEvents
   const entry = collectStateActions<States, Events, Emits, E, R>(
     machine,
     configuration,
@@ -1805,17 +1757,12 @@ export const planInitialSync = <
     [...entry.commands],
     [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
     [...emittedEvents, ...entry.emittedEvents],
-    choiceResolution === undefined && (rootResolution?.transitions.length ?? 0) === 0 &&
-      initialHistoryChoiceTransitions.length === 0 ?
+    rootResolution.transitions.length === 0 ?
       [] :
       [{
         next: configuration,
         event: InitialEvent,
-        transitions: [
-          ...(rootResolution?.transitions ?? []),
-          ...(choiceResolution?.transitions ?? []),
-          ...initialHistoryChoiceTransitions
-        ],
+        transitions: rootResolution.transitions,
         commands,
         raisedEvents: [
           ...raisedEvents

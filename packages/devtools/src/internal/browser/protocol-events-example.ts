@@ -1,53 +1,55 @@
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
-
 class ChildProgress extends Schema.TaggedClass<ChildProgress>("ProtocolChildProgress")("ChildProgress", {
   percent: Schema.Number
-}) {}
+}) {
+}
 class ChildFinished extends Schema.TaggedClass<ChildFinished>("ProtocolChildFinished")("ChildFinished", {
   result: Schema.String
-}) {}
+}) {
+}
 class ChildProblem extends Schema.TaggedClass<ChildProblem>("ProtocolChildProblem")("ChildProblem", {
   message: Schema.String
-}) {}
-
+}) {
+}
 const ParentEvents = Machine.eventsFromSchemas(ChildProgress, ChildFinished, ChildProblem)
-
-class ChildIdle extends Schema.TaggedClass<ChildIdle>("ProtocolChildIdle")("Idle", {}) {}
+class ChildIdle extends Schema.TaggedClass<ChildIdle>("ProtocolChildIdle")("Idle", {}) {
+}
 class ChildWorking extends Schema.TaggedClass<ChildWorking>("ProtocolChildWorking")("Working", {
   job: Schema.String,
   progress: Schema.Number
-}) {}
+}) {
+}
 class ChildDone extends Schema.TaggedClass<ChildDone>("ProtocolChildDone")("Done", {
   result: Schema.String
-}) {}
+}) {
+}
 class ChildCancelled extends Schema.TaggedClass<ChildCancelled>("ProtocolChildCancelled")("Cancelled", {
   reason: Schema.String
-}) {}
-
+}) {
+}
 class BeginChildWork extends Schema.TaggedClass<BeginChildWork>("ProtocolBeginChildWork")("BeginChildWork", {
   job: Schema.String
-}) {}
-class CancelChildWork extends Schema.TaggedClass<CancelChildWork>("ProtocolCancelChildWork")(
-  "CancelChildWork",
-  { reason: Schema.String }
-) {}
+}) {
+}
+class CancelChildWork
+  extends Schema.TaggedClass<CancelChildWork>("ProtocolCancelChildWork")("CancelChildWork", { reason: Schema.String })
+{
+}
 class Heartbeat extends Schema.TaggedClass<Heartbeat>("ProtocolHeartbeat")("Heartbeat", {
   percent: Schema.Number
-}) {}
-class CommitChildWork extends Schema.TaggedClass<CommitChildWork>("ProtocolCommitChildWork")(
-  "CommitChildWork",
-  {}
-) {}
+}) {
+}
+class CommitChildWork extends Schema.TaggedClass<CommitChildWork>("ProtocolCommitChildWork")("CommitChildWork", {}) {
+}
 class ChildTrace extends Schema.TaggedClass<ChildTrace>("ProtocolChildTrace")("ChildTrace", {
   message: Schema.String
-}) {}
-
+}) {
+}
 const ChildEvents = Machine.eventsFromSchemas(BeginChildWork, CancelChildWork)
 const ChildInternalEvents = Machine.internalEventsFromSchemas(Heartbeat, CommitChildWork)
 const ChildEmissions = Machine.emittedEventsFromSchemas(ChildTrace)
 const ChildStates = Machine.state({
-  initial: "Idle",
   states: {
     Idle: ChildIdle,
     Working: ChildWorking,
@@ -55,7 +57,6 @@ const ChildStates = Machine.state({
     Cancelled: { schema: ChildCancelled, type: "final", output: Schema.String }
   }
 })
-
 const targets1 = Machine.targets(ChildStates)
 export const requiredParentChildMachine = Machine.make({
   branches: {
@@ -63,22 +64,23 @@ export const requiredParentChildMachine = Machine.make({
     transition3: { destination: { target: targets1.root.Working } }
   },
   effects: {
-    source1: (
-      { parent, state }: {
-        readonly parent: Machine.MachineTarget<Machine.Machine.EventInput<ChildProgress | ChildFinished | ChildProblem>>
-        readonly state: ChildWorking
-      }
-    ) => parent.send(ParentEvents.ChildProgress({ percent: state.progress }))
+    source1: ({ parent, state }: {
+      readonly parent: Machine.MachineTarget<Machine.Machine.EventInput<ChildProgress | ChildFinished | ChildProblem>>
+      readonly state: ChildWorking
+    }) => parent.send(ParentEvents.ChildProgress({ percent: state.progress }))
   },
-
   id: "required-parent-child",
   root: ChildStates,
   events: ChildEvents,
   internalEvents: ChildInternalEvents,
   emittedEvents: ChildEmissions,
-  parent: Machine.parent(ParentEvents),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new ChildIdle({}))))
+  parent: Machine.parent(ParentEvents)
 }).handle({
+  initial: {
+    target: Machine.targets(ChildStates).root.Idle,
+    decoded: true,
+    data: new ChildIdle({})
+  },
   states: {
     Idle: {
       on: {
@@ -100,7 +102,8 @@ export const requiredParentChildMachine = Machine.make({
         onDone: { none: true },
         onFailure: {
           target: targets1.root.Cancelled,
-          decoded: ({ error }) => (new ChildCancelled({ reason: String(error) }))
+          decoded: true,
+          data: ({ error }) => (new ChildCancelled({ reason: String(error) }))
         }
       },
       on: {
@@ -113,11 +116,13 @@ export const requiredParentChildMachine = Machine.make({
         },
         CommitChildWork: {
           target: targets1.root.Done,
-          decoded: ({ state }) => (new ChildDone({ result: `${state.job}:complete` }))
+          decoded: true,
+          data: ({ state }) => (new ChildDone({ result: `${state.job}:complete` }))
         },
         CancelChildWork: {
           target: targets1.root.Cancelled,
-          decoded: ({ event }) => (new ChildCancelled({ reason: event.reason }))
+          decoded: true,
+          data: ({ event }) => (new ChildCancelled({ reason: event.reason }))
         }
       }
     },
@@ -129,24 +134,26 @@ export const requiredParentChildMachine = Machine.make({
     }
   }
 })
-
 const ProtocolChild = Machine.child("protocol-child", requiredParentChildMachine)
-
-class ParentIdle extends Schema.TaggedClass<ParentIdle>("ProtocolParentIdle")("Idle", {}) {}
+class ParentIdle extends Schema.TaggedClass<ParentIdle>("ProtocolParentIdle")("Idle", {}) {
+}
 class Supervising extends Schema.TaggedClass<Supervising>("ProtocolSupervising")("Supervising", {
   latestProgress: Schema.Number
-}) {}
+}) {
+}
 class ParentComplete extends Schema.TaggedClass<ParentComplete>("ProtocolParentComplete")("Complete", {
   result: Schema.String
-}) {}
+}) {
+}
 class ParentFailed extends Schema.TaggedClass<ParentFailed>("ProtocolParentFailed")("Failed", {
   message: Schema.String
-}) {}
-class LaunchChild extends Schema.TaggedClass<LaunchChild>("ProtocolLaunchChild")("LaunchChild", {}) {}
-class ResetParent extends Schema.TaggedClass<ResetParent>("ProtocolResetParent")("ResetParent", {}) {}
-
+}) {
+}
+class LaunchChild extends Schema.TaggedClass<LaunchChild>("ProtocolLaunchChild")("LaunchChild", {}) {
+}
+class ResetParent extends Schema.TaggedClass<ResetParent>("ProtocolResetParent")("ResetParent", {}) {
+}
 const ParentStates = Machine.state({
-  initial: "Idle",
   states: {
     Idle: ParentIdle,
     Supervising,
@@ -154,7 +161,6 @@ const ParentStates = Machine.state({
     Failed: ParentFailed
   }
 })
-
 const targets2 = Machine.targets(ParentStates)
 export const parentProtocolMachine = Machine.make({
   branches: {
@@ -162,41 +168,56 @@ export const parentProtocolMachine = Machine.make({
     transition3: { destination: { target: targets2.root.Complete } }
   },
   children: { source1: ProtocolChild },
-
   id: "parent-child-protocol",
   root: ParentStates,
-  events: Machine.eventsFromSchemas(LaunchChild, ResetParent, ParentEvents),
-  initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new ParentIdle({}))))
+  events: Machine.eventsFromSchemas(LaunchChild, ResetParent, ParentEvents)
 }).handle({
+  initial: {
+    target: Machine.targets(ParentStates).root.Idle,
+    decoded: true,
+    data: new ParentIdle({})
+  },
   states: {
     Idle: {
       on: {
-        LaunchChild: { target: targets2.root.Supervising, decoded: () => (new Supervising({ latestProgress: 0 })) }
+        LaunchChild: {
+          target: targets2.root.Supervising,
+          decoded: true,
+          data: () => (new Supervising({ latestProgress: 0 }))
+        }
       }
     },
     Supervising: {
       invoke: {
         src: "source1",
-        onDone: { target: targets2.root.Complete, decoded: ({ output }) => (new ParentComplete({ result: output })) },
+        onDone: {
+          target: targets2.root.Complete,
+          decoded: true,
+          data: ({ output }) => (new ParentComplete({ result: output }))
+        },
         onFailure: {
           target: targets2.root.Failed,
-          decoded: ({ error }) => (new ParentFailed({ message: String(error) }))
+          decoded: true,
+          data: ({ error }) => (new ParentFailed({ message: String(error) }))
         }
       },
       on: {
         ChildProgress: {
           target: targets2.root.Supervising,
-          decoded: ({ event }) => (new Supervising({ latestProgress: event.percent }))
+          decoded: true,
+          data: ({ event }) => (new Supervising({ latestProgress: event.percent }))
         },
         ChildFinished: {
           target: targets2.root.Complete,
-          decoded: ({ event }) => (new ParentComplete({ result: event.result }))
+          decoded: true,
+          data: ({ event }) => (new ParentComplete({ result: event.result }))
         },
         ChildProblem: {
           target: targets2.root.Failed,
-          decoded: ({ event }) => (new ParentFailed({ message: event.message }))
+          decoded: true,
+          data: ({ event }) => (new ParentFailed({ message: event.message }))
         },
-        ResetParent: { target: targets2.root.Idle, decoded: () => (new ParentIdle({})) }
+        ResetParent: { target: targets2.root.Idle, decoded: true, data: () => (new ParentIdle({})) }
       }
     },
     Complete: {
@@ -204,34 +225,35 @@ export const parentProtocolMachine = Machine.make({
     },
     Failed: {
       on: {
-        ResetParent: { target: targets2.root.Idle, decoded: () => (new ParentIdle({})) }
+        ResetParent: { target: targets2.root.Idle, decoded: true, data: () => (new ParentIdle({})) }
       }
     }
   }
 })
-
-class Detached extends Schema.TaggedClass<Detached>("OptionalParentDetached")("Detached", {}) {}
+class Detached extends Schema.TaggedClass<Detached>("OptionalParentDetached")("Detached", {}) {
+}
 class Published extends Schema.TaggedClass<Published>("OptionalParentPublished")("Published", {
   deliveredToParent: Schema.Boolean
-}) {}
-class PublishOutside extends Schema.TaggedClass<PublishOutside>("OptionalParentPublishOutside")(
-  "PublishOutside",
-  { result: Schema.String }
-) {}
-
-const OptionalParentStates = Machine.state({ initial: "Detached", states: { Detached, Published } })
-
+}) {
+}
+class PublishOutside extends Schema.TaggedClass<PublishOutside>("OptionalParentPublishOutside")("PublishOutside", {
+  result: Schema.String
+}) {
+}
+const OptionalParentStates = Machine.state({ states: { Detached, Published } })
 const targets3 = Machine.targets(OptionalParentStates)
 export const optionalParentMachine = Machine.make({
   branches: { transition1: { destination: { target: targets3.root.Published } } },
-
   id: "optional-parent-protocol",
   root: OptionalParentStates,
   events: Machine.eventsFromSchemas(PublishOutside),
-  parent: Machine.optionalParent(ParentEvents),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) => target.from((to) => to.Detached.decoded(new Detached({}))))
+  parent: Machine.optionalParent(ParentEvents)
 }).handle({
+  initial: {
+    target: Machine.targets(OptionalParentStates).root.Detached,
+    decoded: true,
+    data: new Detached({})
+  },
   states: {
     Detached: {
       on: {

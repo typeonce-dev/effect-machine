@@ -232,26 +232,29 @@ export interface Scenarios<M extends AnyMachine> {
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * class Reset extends Schema.TaggedClass<Reset>("Reset")("Reset", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(Reset),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: {
- *   Idle: {
- *     on: {
- *       Reset: (to) =>
- *         to.branch.Idle().resolve(({ target }) => target.from())
+ *   events: Machine.eventsFromSchemas(Reset)
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {
+ *       on: {
+ *         Reset: (to) => to.branch.Idle().resolve(({ target }) => target.from())
+ *       }
  *     }
  *   }
- * } })
- *
+ * })
  * const generated = MachineTest.scenarios(machine, { maxEvents: 5 })
  * ```
  *
@@ -491,18 +494,23 @@ export { ProbeUnavailableError } from "../internal/testing/machine/probe.js"
  * **Example**
  *
  * ```ts
- * import { Effect, Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Effect, Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const program = Effect.gen(function*() {
  *   const ref = yield* Machine.start(machine)
  *   return yield* MachineTest.probe(machine, ref)
@@ -1100,20 +1108,27 @@ export const Invariant: {
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
+ * import { Schema } from "effect"
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
- * }) {}
- * const States = Machine.state({ initial: "Count", states: { Count } })
+ * }) {
+ * }
+ * const States = Machine.state({ states: { Count } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
- * }).handle({ states: { Count: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Count,
+ *     decoded: true,
+ *     data: new Count({ value: 0 })
+ *   },
+ *   states: {
+ *     Count: {}
+ *   }
+ * })
  * const nonNegative = MachineTest.invariants(machine).state(
  *   "count is non-negative",
  *   ({ snapshot }) => snapshot.value.value >= 0
@@ -1431,29 +1446,34 @@ export type ExploreOptions<M extends AnyMachine, Key extends ExplorationKey = Ex
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
+ * import { Schema } from "effect"
  * class Count extends Schema.TaggedClass<Count>("Count")("Count", {
  *   value: Schema.Number
- * }) {}
- * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {}
- * const States = Machine.state({ initial: "Count", states: { Count } })
+ * }) {
+ * }
+ * class Increment extends Schema.TaggedClass<Increment>("Increment")("Increment", {}) {
+ * }
+ * const States = Machine.state({ states: { Count } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(Increment),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Count.decoded(new Count({ value: 0 }))))
- * }).handle({ states: {
- *   Count: {
- *     on: {
- *       Increment: (to) =>
- *         to.branch.Count().resolve(({ state, target }) =>
- *           target.decoded(new Count({ value: state.value + 1 })))
+ *   events: Machine.eventsFromSchemas(Increment)
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Count,
+ *     decoded: true,
+ *     data: new Count({ value: 0 })
+ *   },
+ *   states: {
+ *     Count: {
+ *       on: {
+ *         Increment: (to) =>
+ *           to.branch.Count().resolve(({ state, target }) => target.decoded(new Count({ value: state.value + 1 })))
+ *       }
  *     }
  *   }
- * } })
- *
+ * })
  * const explored = MachineTest.explore(machine, {
  *   events: ({ snapshot }) => snapshot.value.value < 2 ? [new Increment({})] : [],
  *   stateKey: ({ snapshot }) => snapshot.value.value
@@ -1623,18 +1643,23 @@ export type RunServices<M extends AnyMachine> = IsAny<
  * **Example**
  *
  * ```ts
- * import { Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const trace = MachineTest.run(machine, { events: [] })
  * ```
  *
@@ -1889,22 +1914,24 @@ export interface Coverage<M extends AnyMachine> {
  * **Example**
  *
  * ```ts
- * import { Effect, Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Effect, Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
- * const report = Effect.map(
- *   MachineTest.run(machine, { events: [] }),
- *   (trace) => MachineTest.coverage(machine, trace)
- * )
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
+ * const report = Effect.map(MachineTest.run(machine, { events: [] }), (trace) => MachineTest.coverage(machine, trace))
  * ```
  *
  * @category verification
@@ -2115,18 +2142,23 @@ export interface VerifyOptions {
  * **Example**
  *
  * ```ts
- * import { Effect, Schema } from "effect"
  * import { Machine } from "@typeonce/effect-machine"
  * import { MachineTest } from "@typeonce/effect-machine/testing"
- *
- * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
- * const States = Machine.state({ initial: "Idle", states: { Idle } })
+ * import { Effect, Schema } from "effect"
+ * class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+ * }
+ * const States = Machine.state({ states: { Idle } })
  * const machine = Machine.make({
  *   root: States,
- *   events: Machine.eventsFromSchemas(),
- *   initialConfiguration: root => root.resolve(({ target }) => target.from(tree => tree.Idle.from()))
- * }).handle({ states: { Idle: {} } })
- *
+ *   events: Machine.eventsFromSchemas()
+ * }).handle({
+ *   initial: {
+ *     target: Machine.targets(States).root.Idle
+ *   },
+ *   states: {
+ *     Idle: {}
+ *   }
+ * })
  * const checked = Effect.gen(function*() {
  *   const trace = yield* MachineTest.run(machine, { events: [] })
  *   yield* MachineTest.verify(machine, trace)

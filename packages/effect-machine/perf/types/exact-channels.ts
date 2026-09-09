@@ -1,27 +1,23 @@
 import { Effect } from "effect"
 import { Machine } from "../../dist/index.js"
 import { Done, Idle, Input, Loaded, Notice, Start, States } from "./exact-channels-control.js"
-
-type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2) ?
-  true :
-  false
+type Equal<Left, Right> = (<Type>() => Type extends Left ? 1 : 2) extends (<Type>() => Type extends Right ? 1 : 2)
+  ? true
+  : false
 type Expect<Value extends true> = Value
 type IsAny<Value> = 0 extends 1 & Value ? true : false
-
 const targets = Machine.targets(States)
 const machine = Machine.make({
   branches: { finish: { done: { target: targets.root.Done } } },
-
   root: States,
   events: Machine.eventsFromSchemas(Start),
   internalEvents: Machine.internalEventsFromSchemas(Loaded),
   emittedEvents: Machine.emittedEventsFromSchemas(Notice),
-  input: Input,
-  initialConfiguration: (root) =>
-    root.resolve(({ input, target }) => target.from((to) => to.Idle.from(Idle.make({ value: input.seed }))))
+  input: Input
 })
-
 const complete = machine.handle({
+  root: ({ input }) => ({ input }),
+  initial: { target: targets.root.Idle, data: ({ root }) => ({ value: root.input.seed }) },
   states: {
     Idle: {
       entry: () => {},
@@ -33,7 +29,7 @@ const complete = machine.handle({
             return select.done.from(Done.make({ value: event.value }))
           }
         },
-        Loaded: { target: targets.root.Done, from: ({ event }) => ({ value: event.value }) }
+        Loaded: { target: targets.root.Done, data: ({ event }) => ({ value: event.value }) }
       }
     },
     Done: {
@@ -41,11 +37,16 @@ const complete = machine.handle({
     }
   }
 })
-
 type InputSchemaIsExact = Expect<
-  Equal<Machine.Machine.InputSchema<typeof complete>["Type"], { readonly seed: number }>
+  Equal<Machine.Machine.InputSchema<typeof complete>["Type"], {
+    readonly seed: number
+  }>
 >
-type InputIsExact = Expect<Equal<Machine.Machine.Input<typeof complete>, { readonly seed: number }>>
+type InputIsExact = Expect<
+  Equal<Machine.Machine.Input<typeof complete>, {
+    readonly seed: number
+  }>
+>
 type InputEventIsExact = Expect<Equal<Machine.Machine.InputEvent<typeof complete>, typeof Start.Type>>
 type EventIsExact = Expect<Equal<Machine.Machine.Event<typeof complete>, typeof Start.Type | typeof Loaded.Type>>
 type EmitIsExact = Expect<Equal<Machine.Machine.EmittedEvent<typeof complete>, typeof Notice.Type>>
@@ -58,7 +59,6 @@ type OutputStatesAreExact = Expect<Equal<Machine.Machine.OutputStates<typeof com
 type ErrorIsNotAny = Expect<Equal<IsAny<Machine.Machine.Error<typeof complete>>, false>>
 type ServicesAreNotAny = Expect<Equal<IsAny<Machine.Machine.Services<typeof complete>>, false>>
 type OutputIsNotAny = Expect<Equal<IsAny<Machine.Machine.Output<typeof complete>>, false>>
-
 void States
 void Machine.planInitial(complete, { seed: 1 })
 void Machine.start(complete, { seed: 1 })

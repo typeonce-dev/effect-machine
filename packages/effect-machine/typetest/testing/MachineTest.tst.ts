@@ -3,24 +3,29 @@ import { FastCheck } from "effect/testing"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
-
 describe("MachineTest", () => {
-  class Input extends Schema.Class<Input>("Input")({ id: Schema.String }) {}
-  class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {}
+  class Input extends Schema.Class<Input>("Input")({ id: Schema.String }) {
+  }
+  class Idle extends Schema.TaggedClass<Idle>("Idle")("Idle", {}) {
+  }
   class PublicEvent extends Schema.TaggedClass<PublicEvent>("PublicEvent")("PublicEvent", {
     value: Schema.Number
-  }) {}
-  class InternalEvent extends Schema.TaggedClass<InternalEvent>("InternalEvent")("InternalEvent", {}) {}
-
-  const States = Machine.state({ initial: "idle", states: { idle: Idle } })
-
+  }) {
+  }
+  class InternalEvent extends Schema.TaggedClass<InternalEvent>("InternalEvent")("InternalEvent", {}) {
+  }
+  const States = Machine.state({ states: { idle: Idle } })
   const machine = Machine.make({
     root: States,
     events: Machine.eventsFromSchemas(PublicEvent),
     internalEvents: Machine.internalEventsFromSchemas(InternalEvent),
-    input: Input,
-    initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
+    input: Input
   }).handle({
+    initial: {
+      target: Machine.targets(States).root.idle,
+      decoded: true,
+      data: new Idle({})
+    },
     states: {
       idle: {
         on: {
@@ -30,17 +35,14 @@ describe("MachineTest", () => {
       }
     }
   })
-
   it("preserves input and public event types in generated scenarios", () => {
     const generated = MachineTest.scenarios(machine)
     expect(generated.arbitrary).type.toBe<FastCheck.Arbitrary<MachineTest.Scenario<typeof machine>>>()
-
     type Scenario = MachineTest.Scenario<typeof machine>
     expect<Scenario["input"]>().type.toBe<Input>()
     expect<Scenario["events"][number]>().type.toBe<Machine.Machine.EventInput<PublicEvent>>()
     expect<InternalEvent>().type.not.toBeAssignableTo<Scenario["events"][number]>()
   })
-
   it("types whole-value arbitrary overrides", () => {
     const options: MachineTest.ScenarioOptions<typeof machine> = {
       inputArbitrary: FastCheck.constant(new Input({ id: "test" })),
@@ -49,35 +51,35 @@ describe("MachineTest", () => {
     expect(options.inputArbitrary).type.toBe<FastCheck.Arbitrary<Input> | undefined>()
     expect(options.eventsArbitrary).type.toBe<FastCheck.Arbitrary<ReadonlyArray<PublicEvent>> | undefined>()
   })
-
   it("omits input for machines without an input schema", () => {
     const noInput = Machine.make({
       root: States,
-      events: Machine.eventsFromSchemas(PublicEvent),
-      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
-    }).handle({ states: { idle: {} } })
+      events: Machine.eventsFromSchemas(PublicEvent)
+    }).handle({
+      initial: {
+        target: Machine.targets(States).root.idle,
+        decoded: true,
+        data: new Idle({})
+      },
+      states: { idle: {} }
+    })
     type Scenario = MachineTest.Scenario<typeof noInput>
     type Options = MachineTest.ScenarioOptions<typeof noInput>
-
     expect<keyof Scenario>().type.toBe<"events">()
     expect<Options["inputArbitrary"]>().type.toBe<undefined>()
   })
-
   it("retains typed trace plans and transition metadata", () => {
     const scenario: MachineTest.Scenario<typeof machine> = {
       input: new Input({ id: "test" }),
       events: [new PublicEvent({ value: 1 })]
     }
     const executed = MachineTest.run(machine, scenario)
-
     expect<Effect.Success<typeof executed>>().type.toBe<MachineTest.Trace<typeof machine>>()
     expect<Effect.Error<typeof executed>>().type.toBe<
       MachineTest.RunFailure<MachineTest.RunError<typeof machine>, typeof machine>
     >()
-
     expect<Effect.Success<typeof executed>["initial"]["startingConfiguration"][number]>().type.toBe<"" | "idle">()
     expect<Effect.Success<typeof executed>["initial"]["initialEntryPaths"][number]>().type.toBe<"" | "idle">()
-
     type InitialMicrostep = MachineTest.Trace<typeof machine>["initial"]["plan"]["microsteps"][number]
     type EventMicrostep = MachineTest.Trace<typeof machine>["steps"][number]["plan"]["microsteps"][number]
     expect<InitialMicrostep["transitions"][number]["source"]>().type.toBe<"" | "idle">()
@@ -86,7 +88,6 @@ describe("MachineTest", () => {
     >()
     expect<EventMicrostep["transitions"][number]["target"]>().type.toBe<"" | "idle" | undefined>()
     expect<EventMicrostep["transitions"][number]["resolvedTarget"]>().type.toBe<"" | "idle" | undefined>()
-
     const startup = Machine.planInitial(machine, new Input({ id: "test" }))
     type StartupMicrostep = Effect.Success<typeof startup>["microsteps"][number]
     expect<StartupMicrostep["transitions"][number]["source"]>().type.toBe<"" | "idle">()
@@ -94,10 +95,9 @@ describe("MachineTest", () => {
       Machine.Machine.TransitionTrigger<"PublicEvent" | "InternalEvent">
     >()
   })
-
   it("does not require invoke services while planning scenarios", () => {
-    class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {}
-
+    class InvokeRequirement extends Context.Service<InvokeRequirement, string>()("InvokeRequirement") {
+    }
     const invokedMachine = Machine.make({
       effects: {
         source1: Effect.suspend(() =>
@@ -106,32 +106,24 @@ describe("MachineTest", () => {
           })
         )
       },
-
       root: States,
-      events: Machine.eventsFromSchemas(PublicEvent),
-      initialConfiguration: (root) => root.resolve(({ target }) => (target.from((to) => to.idle.decoded(new Idle({})))))
+      events: Machine.eventsFromSchemas(PublicEvent)
     }).handle({
-      states: {
-        idle: {
-          invoke: { src: "source1", id: "service-backed-invoke", onDone: { none: true } }
-        }
-      }
+      initial: {
+        target: Machine.targets(States).root.idle,
+        decoded: true,
+        data: new Idle({})
+      },
+      states: { idle: { invoke: { src: "source1", id: "service-backed-invoke", onDone: { none: true } } } }
     })
-
     const executed = MachineTest.run(invokedMachine, { events: [] })
-
     expect<Effect.Services<typeof executed>>().type.toBe<never>()
     expect<MachineTest.RunServices<typeof invokedMachine>>().type.toBe<never>()
   })
-
   it("keeps runtime commands on the public event protocol", () => {
     const generated = MachineTest.runtimeCommands(machine)
-    expect(generated.arbitrary).type.toBe<
-      FastCheck.Arbitrary<ReadonlyArray<MachineTest.RuntimeCommand<PublicEvent>>>
-    >()
-    expect(MachineTest.sendCommand(new PublicEvent({ value: 1 }))).type.toBe<
-      MachineTest.RuntimeCommand<PublicEvent>
-    >()
+    expect(generated.arbitrary).type.toBe<FastCheck.Arbitrary<ReadonlyArray<MachineTest.RuntimeCommand<PublicEvent>>>>()
+    expect(MachineTest.sendCommand(new PublicEvent({ value: 1 }))).type.toBe<MachineTest.RuntimeCommand<PublicEvent>>()
     expect(MachineTest.sendCommand(new InternalEvent({}))).type.not.toBeAssignableTo<
       MachineTest.RuntimeCommand<PublicEvent>
     >()
@@ -141,14 +133,19 @@ describe("MachineTest", () => {
       MachineTest.RuntimeCommand<PublicEvent>
     >()
   })
-
   it("preserves model and assertion errors and services in runtime command checks", () => {
-    class ModelFailure extends Data.TaggedError("ModelFailure")<{}> {}
-    class InspectionFailure extends Data.TaggedError("InspectionFailure")<{}> {}
-    class AssertionFailure extends Data.TaggedError("AssertionFailure")<{}> {}
-    class ModelRequirement extends Context.Service<ModelRequirement, string>()("ModelRequirement") {}
-    class InspectionRequirement extends Context.Service<InspectionRequirement, string>()("InspectionRequirement") {}
-    class AssertionRequirement extends Context.Service<AssertionRequirement, string>()("AssertionRequirement") {}
+    class ModelFailure extends Data.TaggedError("ModelFailure")<{}> {
+    }
+    class InspectionFailure extends Data.TaggedError("InspectionFailure")<{}> {
+    }
+    class AssertionFailure extends Data.TaggedError("AssertionFailure")<{}> {
+    }
+    class ModelRequirement extends Context.Service<ModelRequirement, string>()("ModelRequirement") {
+    }
+    class InspectionRequirement extends Context.Service<InspectionRequirement, string>()("InspectionRequirement") {
+    }
+    class AssertionRequirement extends Context.Service<AssertionRequirement, string>()("AssertionRequirement") {
+    }
     const started = Machine.start(machine, new Input({ id: "test" }))
     type Ref = Effect.Success<typeof started>
     const ref = null as unknown as Ref
@@ -159,7 +156,9 @@ describe("MachineTest", () => {
       transition: (model) =>
         Effect.gen(function*() {
           yield* ModelRequirement
-          if (model < 0) return yield* Effect.fail(new ModelFailure())
+          if (model < 0) {
+            return yield* Effect.fail(new ModelFailure())
+          }
           return {
             model: model + 1,
             expected: model + 1,
@@ -169,7 +168,9 @@ describe("MachineTest", () => {
       inspect: () =>
         Effect.gen(function*() {
           const inspected = yield* InspectionRequirement
-          if (inspected.length === 0) return yield* Effect.fail(new InspectionFailure())
+          if (inspected.length === 0) {
+            return yield* Effect.fail(new InspectionFailure())
+          }
           return inspected
         }),
       assert: () =>
@@ -178,11 +179,8 @@ describe("MachineTest", () => {
           return yield* Effect.fail(new AssertionFailure())
         })
     })
-
     expect<Effect.Success<typeof executed>["finalModel"]>().type.toBe<number>()
-    expect<Effect.Success<typeof executed>["records"][number]["actual"]["inspected"]>().type.toBe<
-      string | undefined
-    >()
+    expect<Effect.Success<typeof executed>["records"][number]["actual"]["inspected"]>().type.toBe<string | undefined>()
     expect<Effect.Services<typeof executed>>().type.toBe<
       ModelRequirement | InspectionRequirement | AssertionRequirement
     >()

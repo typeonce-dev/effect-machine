@@ -1,6 +1,5 @@
 import { Schema } from "effect"
 import { Machine } from "../../dist/index.js"
-
 export const App = Schema.TaggedStruct("App", {})
 export const Workspace = Schema.TaggedStruct("Workspace", {})
 export const Editor = Schema.TaggedStruct("Editor", {})
@@ -9,18 +8,14 @@ export const EditorDone = Schema.TaggedStruct("EditorDone", { value: Schema.Stri
 export const Sync = Schema.TaggedStruct("Sync", {})
 export const SyncIdle = Schema.TaggedStruct("SyncIdle", {})
 export const SyncDone = Schema.TaggedStruct("SyncDone", { value: Schema.Number })
-
 export const WorkspaceOutput = Schema.Struct({
   Editor: Schema.String,
   Sync: Schema.Number
 })
-
 export const States = Machine.state({
-  initial: "App",
   states: {
     App: {
       schema: App,
-      initial: "Workspace",
       states: {
         Workspace: {
           schema: Workspace,
@@ -29,7 +24,6 @@ export const States = Machine.state({
           states: {
             Editor: {
               schema: Editor,
-              initial: "Editing",
               states: {
                 Editing,
                 Done: {
@@ -41,7 +35,6 @@ export const States = Machine.state({
             },
             Sync: {
               schema: Sync,
-              initial: "Idle",
               states: {
                 Idle: SyncIdle,
                 Done: {
@@ -64,21 +57,7 @@ export const States = Machine.state({
     }
   }
 })
-
 export const machine = Machine.make({
   root: States,
-  events: Machine.eventsFromSchemas(),
-  initialConfiguration: (root) =>
-    root.resolve(({ target }) =>
-      target.from((to) =>
-        to.App.from(App.make({}), (app) =>
-          app.Workspace.from(
-            Workspace.make({}),
-            (workspace) =>
-              workspace
-                .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
-                .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))
-          ))
-      )
-    )
+  events: Machine.eventsFromSchemas()
 })

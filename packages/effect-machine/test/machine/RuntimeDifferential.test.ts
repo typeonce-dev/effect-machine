@@ -5,22 +5,25 @@ import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import type { DifferentialStep } from "./support/runtimeDifferential.js"
 import { traceBoundary, traceSteps, verifyManagedExecution } from "./support/runtimeDifferential.js"
-
-const event = (_tag: string): { readonly _tag: string } => ({ _tag })
-
+const event = (_tag: string): {
+  readonly _tag: string
+} => ({ _tag })
 const parallelPaths = (model: MachineTest.FiniteModel): ReadonlyArray<string> => {
   const paths: Array<string> = []
   const visit = (states: ReadonlyArray<MachineTest.FiniteState>, parent?: string): void => {
     for (const state of states) {
       const path = parent === undefined ? state.key : `${parent}.${state.key}`
-      if (state._tag === "Parallel") paths.push(path)
-      if (state._tag === "Compound" || state._tag === "Parallel") visit(state.states, path)
+      if (state._tag === "Parallel") {
+        paths.push(path)
+      }
+      if (state._tag === "Compound" || state._tag === "Parallel") {
+        visit(state.states, path)
+      }
     }
   }
   visit(model.roots)
   return paths
 }
-
 const generated = MachineTest.finiteModels({
   maxRoots: 2,
   maxDepth: 3,
@@ -31,23 +34,26 @@ const generated = MachineTest.finiteModels({
   maxHistoryStates: 1,
   maxChoiceStates: 1
 })
-
 describe("pure planning and managed runtime differential", () => {
   it.effect("matches the compiled flat-state executor across raised and terminal transitions", () =>
     Effect.gen(function*() {
       class Count extends Schema.TaggedClass<Count>("FlatDifferentialCount")("Count", {
         value: Schema.Number
-      }) {}
+      }) {
+      }
       class Done extends Schema.TaggedClass<Done>("FlatDifferentialDone")("Done", {
         value: Schema.Number
-      }) {}
-      class Cascade extends Schema.TaggedClass<Cascade>("FlatDifferentialCascade")("Cascade", {}) {}
-      class Increment extends Schema.TaggedClass<Increment>("FlatDifferentialIncrement")("Increment", {}) {}
-      class Ignore extends Schema.TaggedClass<Ignore>("FlatDifferentialIgnore")("Ignore", {}) {}
-      class Finish extends Schema.TaggedClass<Finish>("FlatDifferentialFinish")("Finish", {}) {}
-
+      }) {
+      }
+      class Cascade extends Schema.TaggedClass<Cascade>("FlatDifferentialCascade")("Cascade", {}) {
+      }
+      class Increment extends Schema.TaggedClass<Increment>("FlatDifferentialIncrement")("Increment", {}) {
+      }
+      class Ignore extends Schema.TaggedClass<Ignore>("FlatDifferentialIgnore")("Ignore", {}) {
+      }
+      class Finish extends Schema.TaggedClass<Finish>("FlatDifferentialFinish")("Finish", {}) {
+      }
       const states = Machine.state({
-        initial: "Count",
         states: {
           Count,
           Done: { schema: Done, type: "final", output: Schema.Number }
@@ -57,10 +63,13 @@ describe("pure planning and managed runtime differential", () => {
       const machine = Machine.make({
         root: states,
         events: Machine.eventsFromSchemas(Cascade, Ignore, Finish),
-        internalEvents: Machine.internalEventsFromSchemas(Increment),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) => target.from((to) => to.Count.decoded(new Count({ value: 0 }))))
+        internalEvents: Machine.internalEventsFromSchemas(Increment)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Count,
+          decoded: true,
+          data: new Count({ value: 0 })
+        },
         states: {
           Count: {
             on: {
@@ -73,15 +82,19 @@ describe("pure planning and managed runtime differential", () => {
               },
               Increment: {
                 target: targets1.root.Count,
-                decoded: ({ state }) => (new Count({ value: state.value + 1 }))
+                decoded: true,
+                data: ({ state }) => (new Count({ value: state.value + 1 }))
               },
-              Finish: { target: targets1.root.Done, decoded: ({ state }) => (new Done({ value: state.value })) }
+              Finish: {
+                target: targets1.root.Done,
+                decoded: true,
+                data: ({ state }) => (new Done({ value: state.value }))
+              }
             }
           },
           Done: { output: ({ state }) => state.value }
         }
       })
-
       const initial = yield* Machine.planInitial(machine) as Effect.Effect<any, unknown, never>
       const requested = [new Ignore({}), new Cascade({}), new Cascade({}), new Finish({})]
       const steps: Array<DifferentialStep> = []
@@ -91,7 +104,6 @@ describe("pure planning and managed runtime differential", () => {
         steps.push({ event: nextEvent, plan })
         state = plan.next
       }
-
       assert.deepStrictEqual(steps.map(({ plan }) => plan.microsteps.length), [0, 2, 2, 1])
       assert.strictEqual(steps.at(-1)?.plan.output, 2)
       yield* verifyManagedExecution({
@@ -101,7 +113,6 @@ describe("pure planning and managed runtime differential", () => {
         steps,
         label: "compiled flat state"
       })
-
       const resumed = steps[1]!.plan
       const resumedState = resumed.next as typeof initial.state
       yield* verifyManagedExecution({
@@ -116,26 +127,31 @@ describe("pure planning and managed runtime differential", () => {
         label: "resumed compiled flat state"
       })
     }) as Effect.Effect<void, unknown, any>)
-
   it.effect("matches the compiled hierarchical executor across parallel and raised transitions", () =>
     Effect.gen(function*() {
-      class Running extends Schema.TaggedClass<Running>("HierarchicalDifferentialRunning")("Running", {}) {}
+      class Running extends Schema.TaggedClass<Running>("HierarchicalDifferentialRunning")("Running", {}) {
+      }
       class Left extends Schema.TaggedClass<Left>("HierarchicalDifferentialLeft")("Left", {
         value: Schema.Number
-      }) {}
+      }) {
+      }
       class Right extends Schema.TaggedClass<Right>("HierarchicalDifferentialRight")("Right", {
         value: Schema.Number
-      }) {}
+      }) {
+      }
       class Done extends Schema.TaggedClass<Done>("HierarchicalDifferentialDone")("Done", {
         value: Schema.Number
-      }) {}
-      class Advance extends Schema.TaggedClass<Advance>("HierarchicalDifferentialAdvance")("Advance", {}) {}
-      class Inspect extends Schema.TaggedClass<Inspect>("HierarchicalDifferentialInspect")("Inspect", {}) {}
-      class Finish extends Schema.TaggedClass<Finish>("HierarchicalDifferentialFinish")("Finish", {}) {}
-      class Bump extends Schema.TaggedClass<Bump>("HierarchicalDifferentialBump")("Bump", {}) {}
-
+      }) {
+      }
+      class Advance extends Schema.TaggedClass<Advance>("HierarchicalDifferentialAdvance")("Advance", {}) {
+      }
+      class Inspect extends Schema.TaggedClass<Inspect>("HierarchicalDifferentialInspect")("Inspect", {}) {
+      }
+      class Finish extends Schema.TaggedClass<Finish>("HierarchicalDifferentialFinish")("Finish", {}) {
+      }
+      class Bump extends Schema.TaggedClass<Bump>("HierarchicalDifferentialBump")("Bump", {}) {
+      }
       const states = Machine.state({
-        initial: "Running",
         states: {
           Running: {
             schema: Running,
@@ -158,27 +174,28 @@ describe("pure planning and managed runtime differential", () => {
           transition1: { destination: { target: targets2.root.Done } },
           transition2: { destination: { target: targets2.root.Running.Left } }
         },
-
         root: states,
         events: Machine.eventsFromSchemas(Advance, Inspect, Finish),
-        internalEvents: Machine.internalEventsFromSchemas(Bump),
-        initialConfiguration: (root) =>
-          root.resolve(({ target }) =>
-            target.from((to) =>
-              to.Running.decoded(
-                new Running({}),
-                (running) => running.Left.decoded(new Left({ value: 0 })).Right.decoded(new Right({ value: 0 }))
-              )
-            )
-          )
+        internalEvents: Machine.internalEventsFromSchemas(Bump)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Running,
+          decoded: true,
+          data: new Running({})
+        },
         states: {
           Running: {
+            initial: {
+              Left: { decoded: true, data: new Left({ value: 0 }) },
+              Right: { decoded: true, data: new Right({ value: 0 }) }
+            },
             on: {
               Finish: {
                 branches: "transition1",
                 resolve: ({ snapshot, select: { destination: target } }) => {
-                  if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
+                  if (snapshot.state.path !== "Running") {
+                    throw new Error("expected Running snapshot")
+                  }
                   return target.decoded(
                     new Done({
                       value: snapshot.state.states.Left.value.value + snapshot.state.states.Right.value.value
@@ -203,17 +220,21 @@ describe("pure planning and managed runtime differential", () => {
                 on: {
                   Advance: {
                     target: targets2.root.Running.Right,
-                    decoded: ({ state }) => (new Right({ value: state.value + 10 }))
+                    decoded: true,
+                    data: ({ state }) => (new Right({ value: state.value + 10 }))
                   },
                   Bump: {
                     target: targets2.root.Running.Right,
-                    decoded: ({ state }) => (new Right({ value: state.value + 100 }))
+                    decoded: true,
+                    data: ({ state }) => (new Right({ value: state.value + 100 }))
                   },
                   Inspect: {
                     none: true,
                     resolve: (context) => {
                       const { state, containingState, ancestors, snapshot } = context
-                      if (snapshot.state.path !== "Running") throw new Error("expected Running snapshot")
+                      if (snapshot.state.path !== "Running") {
+                        throw new Error("expected Running snapshot")
+                      }
                       const expectedKeys = [
                         "self",
                         "state",
@@ -250,7 +271,6 @@ describe("pure planning and managed runtime differential", () => {
           Done: { output: ({ state }) => state.value }
         }
       })
-
       const initial = yield* Machine.planInitial(machine)
       const requested = [new Advance({}), new Inspect({}), new Finish({})]
       const steps: Array<DifferentialStep> = []
@@ -260,7 +280,6 @@ describe("pure planning and managed runtime differential", () => {
         steps.push({ event: nextEvent, plan })
         state = plan.next
       }
-
       assert.deepStrictEqual(steps.map(({ plan }) => plan.microsteps.length), [2, 1, 1])
       assert.strictEqual(steps.at(-1)?.plan.output, 111)
       assert.deepStrictEqual(observations, [{
@@ -271,7 +290,6 @@ describe("pure planning and managed runtime differential", () => {
         right: 110
       }])
       observations.length = 0
-
       yield* verifyManagedExecution({
         machine,
         open: Machine.start(machine),
@@ -286,7 +304,6 @@ describe("pure planning and managed runtime differential", () => {
         left: 1,
         right: 110
       }])
-
       observations.length = 0
       const resumed = steps[0]!.plan
       const resumedState = resumed.next as typeof initial.state
@@ -305,14 +322,12 @@ describe("pure planning and managed runtime differential", () => {
         right: 110
       }])
     }) as Effect.Effect<void, unknown, any>)
-
   it.effect("matches deterministic generated start and resumed executions", () =>
     Effect.gen(function*() {
-      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 36, seed: 93_701 })
+      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 36, seed: 93701 })
       let activeParallel = 0
       let eventful = 0
       let resumedContinuation = 0
-
       for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex++) {
         const sampled = samples[sampleIndex]!
         // Keep generated runtime inputs on deterministic, state-changing
@@ -349,21 +364,23 @@ describe("pure planning and managed runtime differential", () => {
         const machine = MachineTest.compileModel(model)
         const trace = yield* MachineTest.run(machine, { events: events.map(event) })
         yield* MachineTest.verifyModel(model, trace)
-
         if (
           expected.steps.some(({ microsteps }) =>
             microsteps.some(({ transitions }) =>
               transitions.some(({ trigger }) => trigger.type === "event")
             )
           )
-        ) eventful += 1
+        ) {
+          eventful += 1
+        }
         const parallel = new Set(parallelPaths(model))
         if (
           [expected.initial.state, ...expected.steps.map(({ after }) => after)].some(({ activePaths }) =>
             activePaths.some((path) => parallel.has(path))
           )
-        ) activeParallel += 1
-
+        ) {
+          activeParallel += 1
+        }
         yield* verifyManagedExecution({
           machine,
           open: Machine.start(machine as any),
@@ -371,7 +388,6 @@ describe("pure planning and managed runtime differential", () => {
           steps: traceSteps(trace),
           label: `generated start ${sampleIndex}`
         })
-
         const boundary = trace.steps.length < 2 ? 0 : Math.max(1, Math.floor(trace.steps.length / 2))
         const boundaryState = traceBoundary(trace, boundary)
         const encoded = yield* Machine.encodeSnapshot(machine as any, boundaryState.state as any)
@@ -383,17 +399,17 @@ describe("pure planning and managed runtime differential", () => {
           steps: traceSteps(trace, boundary),
           label: `generated resume ${sampleIndex}:${boundary}`
         })
-        if (boundary > 0 && boundary < trace.steps.length) resumedContinuation += 1
+        if (boundary > 0 && boundary < trace.steps.length) {
+          resumedContinuation += 1
+        }
       }
-
       assert.ok(eventful > 0, "generated differential must execute public-event transitions")
       assert.ok(activeParallel > 0, "generated differential must execute an active parallel configuration")
       assert.ok(
         resumedContinuation > 0,
         "generated differential must resume after a noninitial boundary with a non-empty suffix"
       )
-    }), 30_000)
-
+    }), 30000)
   it.effect("resumes a nonterminal boundary reached through always and completion stabilization", () =>
     Effect.gen(function*() {
       const model: MachineTest.FiniteModel = {
@@ -437,7 +453,6 @@ describe("pure planning and managed runtime differential", () => {
       assert.strictEqual((trace.initial.plan.state as any).state.state.path, "flow.ready")
       assert.strictEqual(trace.steps[0]?.plan.done, true)
       assert.strictEqual(trace.steps[0]?.plan.output, "machine:done")
-
       yield* verifyManagedExecution({
         machine,
         open: Machine.start(machine as any),
@@ -455,23 +470,27 @@ describe("pure planning and managed runtime differential", () => {
         label: "automatic resume"
       })
     }))
-
   it.effect("preserves raised-event, lifecycle, and planned emission order", () =>
     Effect.gen(function*() {
-      class Idle extends Schema.TaggedClass<Idle>("DifferentialIdle")("Idle", {}) {}
-      class Working extends Schema.TaggedClass<Working>("DifferentialWorking")("Working", {}) {}
-      class Finished extends Schema.TaggedClass<Finished>("DifferentialFinished")("Finished", {}) {}
-      class Begin extends Schema.TaggedClass<Begin>("DifferentialBegin")("Begin", {}) {}
-      class RaisedOne extends Schema.TaggedClass<RaisedOne>("DifferentialRaisedOne")("RaisedOne", {}) {}
-      class RaisedTwo extends Schema.TaggedClass<RaisedTwo>("DifferentialRaisedTwo")("RaisedTwo", {}) {}
-      class Notice extends Schema.TaggedClass<Notice>("DifferentialNotice")("Notice", { label: Schema.String }) {}
-
+      class Idle extends Schema.TaggedClass<Idle>("DifferentialIdle")("Idle", {}) {
+      }
+      class Working extends Schema.TaggedClass<Working>("DifferentialWorking")("Working", {}) {
+      }
+      class Finished extends Schema.TaggedClass<Finished>("DifferentialFinished")("Finished", {}) {
+      }
+      class Begin extends Schema.TaggedClass<Begin>("DifferentialBegin")("Begin", {}) {
+      }
+      class RaisedOne extends Schema.TaggedClass<RaisedOne>("DifferentialRaisedOne")("RaisedOne", {}) {
+      }
+      class RaisedTwo extends Schema.TaggedClass<RaisedTwo>("DifferentialRaisedTwo")("RaisedTwo", {}) {
+      }
+      class Notice extends Schema.TaggedClass<Notice>("DifferentialNotice")("Notice", { label: Schema.String }) {
+      }
       const actions: Array<string> = []
       const record = (label: string) => {
         actions.push(label)
       }
       const states = Machine.state({
-        initial: "Idle",
         states: {
           Idle,
           Working,
@@ -484,13 +503,16 @@ describe("pure planning and managed runtime differential", () => {
           transition1: { destination: { target: targets3.root.Working } },
           transition2: { destination: { target: targets3.root.Finished } }
         },
-
         root: states,
         events: Machine.eventsFromSchemas(Begin),
         internalEvents: Machine.internalEventsFromSchemas(RaisedOne, RaisedTwo),
-        emittedEvents: Machine.emittedEventsFromSchemas(Notice),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+        emittedEvents: Machine.emittedEventsFromSchemas(Notice)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Idle,
+          decoded: true,
+          data: new Idle({})
+        },
         states: {
           Idle: {
             entry: (_, enqueue) => {
@@ -543,15 +565,11 @@ describe("pure planning and managed runtime differential", () => {
           }
         }
       })
-
       const initial = yield* Machine.planInitial(machine)
       assert.deepStrictEqual(initial.emittedEvents.map(({ label }) => label), ["initial"])
       assert.deepStrictEqual(actions, ["entry:idle"])
       const planned = yield* Machine.plan(machine, initial.state, new Begin({}))
-      assert.deepStrictEqual(
-        planned.microsteps.map(({ event }) => event._tag),
-        ["Begin", "RaisedOne", "RaisedTwo"]
-      )
+      assert.deepStrictEqual(planned.microsteps.map(({ event }) => event._tag), ["Begin", "RaisedOne", "RaisedTwo"])
       assert.deepStrictEqual(planned.emittedEvents.map(({ label }) => label), [
         "transition",
         "entry",
@@ -568,7 +586,6 @@ describe("pure planning and managed runtime differential", () => {
         "entry:finished"
       ])
       actions.length = 0
-
       const actor = yield* Machine.start(machine)
       assert.deepStrictEqual(actions, ["entry:idle"])
       yield* actor.send(new Begin({}))
@@ -585,7 +602,6 @@ describe("pure planning and managed runtime differential", () => {
         yield* Machine.encodeSnapshot(machine, (yield* actor.snapshot).state),
         yield* Machine.encodeSnapshot(machine, planned.next)
       )
-
       actions.length = 0
       const resumed = yield* Machine.resume(machine, initial.state)
       assert.deepStrictEqual(actions, [], "resume must not replay initial entry actions")
@@ -599,24 +615,31 @@ describe("pure planning and managed runtime differential", () => {
         "entry:finished"
       ])
     }))
-
   it.effect("does not publish for an unhandled event before the next handled event", () =>
     Effect.gen(function*() {
-      class Idle extends Schema.TaggedClass<Idle>("DifferentialNoopIdle")("Idle", {}) {}
-      class Active extends Schema.TaggedClass<Active>("DifferentialNoopActive")("Active", {}) {}
-      class Ignore extends Schema.TaggedClass<Ignore>("DifferentialIgnore")("Ignore", {}) {}
-      class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {}
-      const states = Machine.state({ initial: "Idle", states: { Idle, Active } })
+      class Idle extends Schema.TaggedClass<Idle>("DifferentialNoopIdle")("Idle", {}) {
+      }
+      class Active extends Schema.TaggedClass<Active>("DifferentialNoopActive")("Active", {}) {
+      }
+      class Ignore extends Schema.TaggedClass<Ignore>("DifferentialIgnore")("Ignore", {}) {
+      }
+      class Go extends Schema.TaggedClass<Go>("DifferentialGo")("Go", {}) {
+      }
+      const states = Machine.state({ states: { Idle, Active } })
       const targets4 = Machine.targets(states)
       const machine = Machine.make({
         root: states,
-        events: Machine.eventsFromSchemas(Ignore, Go),
-        initialConfiguration: (root) => root.resolve(({ target }) => target.from((to) => to.Idle.decoded(new Idle({}))))
+        events: Machine.eventsFromSchemas(Ignore, Go)
       }).handle({
+        initial: {
+          target: Machine.targets(states).root.Idle,
+          decoded: true,
+          data: new Idle({})
+        },
         states: {
           Idle: {
             on: {
-              Go: { target: targets4.root.Active, decoded: () => (new Active({})) }
+              Go: { target: targets4.root.Active, decoded: true, data: () => (new Active({})) }
             }
           },
           Active: {}
@@ -626,12 +649,8 @@ describe("pure planning and managed runtime differential", () => {
       const ignored = yield* Machine.plan(machine, initial.state, new Ignore({}))
       const handled = yield* Machine.plan(machine, ignored.next, new Go({}))
       assert.deepStrictEqual(ignored.microsteps, [])
-
       const actor = yield* Machine.start(machine)
-      const publications = yield* actor.changes.pipe(
-        Stream.runCollect,
-        Effect.forkChild({ startImmediately: true })
-      )
+      const publications = yield* actor.changes.pipe(Stream.runCollect, Effect.forkChild({ startImmediately: true }))
       const active = yield* actor.changes.pipe(
         Stream.filter((snapshot) => snapshot.status === "active" && snapshot.state.state.path === "Active"),
         Stream.take(1),
@@ -642,7 +661,6 @@ describe("pure planning and managed runtime differential", () => {
       yield* actor.send(new Go({}))
       yield* Fiber.join(active)
       yield* actor.stop
-
       const observed = Array.from(yield* Fiber.join(publications))
       assert.deepStrictEqual(observed.map(({ status }) => status), ["active", "active", "stopped"])
       assert.deepStrictEqual(observed[0]!.state, initial.state)
