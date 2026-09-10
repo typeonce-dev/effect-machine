@@ -599,7 +599,12 @@ const collectIndexedEvaluatedTransition = (
   const initialResolution = unresolvedTarget !== undefined && isInitialTarget(unresolvedTarget)
     ? resolveInitialTarget(
       machine,
-      activeConfigurationFromIndexedState(descriptor, state),
+      (() => {
+        const current = activeConfigurationFromIndexedState(descriptor, state)
+        return update === undefined
+          ? current
+          : { ...current, values: new Map(current.values).set(update.path, update.value) }
+      })(),
       unresolvedTarget,
       (selection.context as any).event
     )

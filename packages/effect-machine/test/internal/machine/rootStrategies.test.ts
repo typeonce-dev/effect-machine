@@ -282,7 +282,7 @@ it.effect("preserves owner updates while resolving compound initial descendants"
     fields: { count: Schema.Number },
     states: {
       Idle: {},
-      Work: { fields: { title: Schema.String }, states: { Ready: {} } }
+      Work: { fields: { title: Schema.String }, states: { Ready: { fields: { count: Schema.Number } } } }
     }
   })
   const targets = Machine.targets(root)
@@ -299,7 +299,7 @@ it.effect("preserves owner updates while resolving compound initial descendants"
           }
         }
       },
-      Work: { initial: { target: targets.root.Work.Ready } }
+      Work: { initial: { target: targets.root.Work.Ready, data: ({ root }) => ({ count: root.count }) } }
     }
   })
   return verifyPlannerStrategies({

@@ -1464,17 +1464,23 @@ const collectEvaluatedTransition = <
       }
     })()
     : undefined
+  // Initial constructors and choices observe the owner value being committed
+  // with this target, while the source configuration remains untouched.
+  const constructionState =
+    update !== undefined && (isInitialTarget(unresolvedTarget) || isChoiceTarget(unresolvedTarget))
+      ? { ...state, values: new Map(state.values).set(update.path, update.value) }
+      : state
   const choiceResolution = unresolvedTarget === undefined
     ? undefined
     : resolveChoiceTarget(
       machine,
-      state,
+      constructionState,
       unresolvedTarget,
       (selection.context as any).event
     )
   const choiceResolvedTarget = choiceResolution?.target ?? unresolvedTarget
   const initialResolution = choiceResolvedTarget !== undefined && isInitialTarget(choiceResolvedTarget)
-    ? resolveInitialTarget(machine, state, choiceResolvedTarget, (selection.context as any).event)
+    ? resolveInitialTarget(machine, constructionState, choiceResolvedTarget, (selection.context as any).event)
     : undefined
   const routedTarget = initialResolution?.target ?? choiceResolvedTarget
   let historyResolution: {

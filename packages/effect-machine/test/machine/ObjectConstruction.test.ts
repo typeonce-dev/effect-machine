@@ -80,7 +80,10 @@ it.effect("enters a compound's default child with a retained-owner replacement",
       fields: { revision: Schema.Number },
       states: {
         Idle: {},
-        Flow: { fields: { title: Schema.String }, states: { Editing: { fields: { title: Schema.String } } } }
+        Flow: {
+          fields: { title: Schema.String },
+          states: { Editing: { fields: { title: Schema.String, revision: Schema.Number } } }
+        }
       }
     })
     const targets = Machine.targets(root)
@@ -97,11 +100,20 @@ it.effect("enters a compound's default child with a retained-owner replacement",
             }
           }
         },
-        Flow: { initial: { target: targets.root.Flow.Editing, data: ({ state }) => ({ title: state.title }) } }
+        Flow: {
+          initial: {
+            target: targets.root.Flow.Editing,
+            data: ({ state, root }) => ({ title: state.title, revision: root.revision })
+          }
+        }
       }
     })
     const initial = yield* Machine.planInitial(machine)
     const next = yield* Machine.plan(machine, initial.state, { _tag: "Open" })
     assert.isTrue(root.matches(next.next, "Flow.Editing"))
     assert.deepStrictEqual(next.next.value, { _tag: "", revision: 1 })
+    assert.deepStrictEqual(
+      root.get(next.next, "Flow.Editing").pipe((value) => value._tag === "Some" ? value.value.revision : undefined),
+      1
+    )
   }))
