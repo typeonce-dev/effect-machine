@@ -72,7 +72,7 @@ definition.handle({
 })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { invoke: {
   src: "load", input: ({ /*invoke-source-context*/ ...context }) => context.event._tag,
-  onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready./*done-exact-target*/from() },
+  onDone: { branches: "complete", resolve: ({ /*done-context*/ ...context }) => context.select.ready({ /*done-exact-target*/ }) },
   onFailure: { target: targets.root./*done-target*/Failed, data: ({ /*failure-context*/ ...context }) => ({}) }
 } } } })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: {
@@ -94,7 +94,7 @@ always: { /*transition-selector*/ }
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { on: {}, always: { target: targets.root.Done, /*selected-operations*/ } } } })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*targetless-context*/ ...context }) => undefined } } } })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { target: targets./*target-scopes*/root.Done, data: ({ /*transition-context*/ ...context }) => ({}) } } } })
-definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready./*transition-exact-target*/from() } } } })
+definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { branches: "complete", resolve: ({ /*branch-resolve-context*/ ...context }) => context.select./*branch-select-keys*/ready({ /*transition-exact-target*/ }) } } } })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, resolve: ({ /*required-context*/ ...context }) => undefined } } } })
 definition.handle({ root: { count: 0 }, initial: { target: targets.root.Loading }, states: { Loading: { always: { none: true, declinable: true, resolve: ({ /*declinable-context*/ ...context }) => context.decline() } } } })
 
@@ -204,7 +204,7 @@ test("contextually completes Effect invocation factories while authoring", () =>
   assert.equal(doneTarget.has("Failed"), true)
 
   const exactTarget = completions("done-exact-target")
-  assert.equal(exactTarget.has("from"), true)
+  assert.equal(exactTarget.has("data"), true)
   assert.equal(exactTarget.has("full"), false)
   assert.equal(exactTarget.has("Done"), false)
 
@@ -238,7 +238,7 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(initialOperations.has("reenter"), false)
 
   const initialContext = completions("initial-context")
-  assert.equal(initialContext.has("input"), false)
+  assert.equal(initialContext.has("input"), true)
   assert.equal(initialContext.has("root"), true)
   assert.equal(initialContext.has("state"), true)
   assert.equal(completions("root-data-context").has("input"), true)
@@ -260,7 +260,7 @@ test("contextually completes transition definitions while authoring", () => {
   assert.equal(context.has("root"), true)
 
   const exactTarget = completions("transition-exact-target")
-  assert.equal(exactTarget.has("from"), true)
+  assert.equal(exactTarget.has("data"), true)
   assert.equal(exactTarget.has("full"), false)
   assert.equal(exactTarget.has("Done"), false)
 

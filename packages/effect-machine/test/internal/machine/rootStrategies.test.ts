@@ -248,3 +248,63 @@ it.effect("reuses only immutable startup builders and keeps input values indepen
       })
     }
   }))
+
+it.effect("compares fresh root input and parallel initial constructors across planners", () => {
+  const root = Machine.state({
+    type: "parallel",
+    states: {
+      Left: { fields: { count: Schema.Number } },
+      Right: { fields: { label: Schema.String } }
+    }
+  })
+  const targets = Machine.targets(root)
+  const machine = Machine.make({
+    root,
+    input: Schema.Number,
+    events: Machine.events({ Reset: { count: Schema.Number }, Restart: { count: Schema.Number } })
+  }).handle({
+    initial: { Left: ({ input }) => ({ count: input }), Right: ({ input }) => ({ label: String(input) }) },
+    on: {
+      Reset: { target: targets.root, input: ({ event }) => event.count },
+      Restart: { target: targets.root, input: ({ event }) => event.count, reenter: true }
+    }
+  })
+  return verifyPlannerStrategies({
+    machine,
+    initialArgs: [1],
+    label: "fresh parallel root input",
+    events: [{ _tag: "Reset", count: 2 }, { _tag: "Restart", count: 3 }]
+  })
+})
+
+it.effect("preserves owner updates while resolving compound initial descendants", () => {
+  const root = Machine.state({
+    fields: { count: Schema.Number },
+    states: {
+      Idle: {},
+      Work: { fields: { title: Schema.String }, states: { Ready: {} } }
+    }
+  })
+  const targets = Machine.targets(root)
+  const machine = Machine.make({ root, events: Machine.events({ Open: {} }) }).handle({
+    root: { count: 0 },
+    initial: { target: targets.root.Idle },
+    states: {
+      Idle: {
+        on: {
+          Open: {
+            target: targets.root.Work,
+            update: targets.root,
+            data: { target: { title: "new" }, update: { count: 1 } }
+          }
+        }
+      },
+      Work: { initial: { target: targets.root.Work.Ready } }
+    }
+  })
+  return verifyPlannerStrategies({
+    machine,
+    label: "compound initial with retained owner update",
+    events: [{ _tag: "Open" }]
+  })
+})

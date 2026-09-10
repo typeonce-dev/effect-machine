@@ -130,7 +130,7 @@ export const parallelCompletionMachine = Machine.make({
     Cart: {
       on: {
         Checkout: {
-          initial: targets1.root.Order,
+          target: targets1.root.Order,
           decoded: true,
           data: ({ event }) => (new Order({ orderId: event.orderId, total: event.total }))
         }
@@ -242,7 +242,7 @@ export const parallelCompletionMachine = Machine.make({
     Cancelled: {
       on: {
         RetryOrder: {
-          initial: targets1.root.Order,
+          target: targets1.root.Order,
           decoded: true,
           data: () => (new Order({ orderId: "retry", total: 0 }))
         }

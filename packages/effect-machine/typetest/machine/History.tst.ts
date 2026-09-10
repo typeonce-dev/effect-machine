@@ -93,29 +93,43 @@ const completeNestedFallback = (
     readonly "": typeof NestedStates.node
   }, "App.Workspace">
 ) =>
-  target.from((tree) =>
-    tree.App.decoded(new App({ session: "fallback" }), (app) => {
-      expect(app).type.not.toHaveProperty("Settings")
-      return app.Workspace.decoded(new Workspace({}), (workspace) =>
-        workspace
-          .Editor.decoded(new Editor({}), (editor) => editor.Editing.decoded(new Editing({})))
-          .Sidebar.decoded(new Sidebar({})))
-    })
-  )
+  target({
+    states: {
+      App: {
+        decoded: true,
+        data: new App({ session: "fallback" }),
+        states: {
+          Workspace: {
+            decoded: true,
+            data: new Workspace({}),
+            states: {
+              Editor: {
+                decoded: true,
+                data: new Editor({}),
+                states: { Editing: { decoded: true, data: new Editing({}) } }
+              },
+              Sidebar: { decoded: true, data: new Sidebar({}) }
+            }
+          }
+        }
+      }
+    }
+  })
+
 const constructedNestedFallback = (
   target: Machine.Machine.HistoryDefaultTargetBuilder<{
     readonly "": typeof NestedStates.node
   }, "App.Workspace">,
   session: string
 ) =>
-  target.from((tree) =>
-    tree.App.from({ session }, (app) =>
-      app.Workspace.from((workspace) =>
-        workspace
-          .Editor.from((editor) => editor.Editing.from())
-          .Sidebar.from()
-      ))
-  )
+  target({
+    states: {
+      App: {
+        data: { session },
+        states: { Workspace: { states: { Editor: { states: { Editing: {} } }, Sidebar: {} } } }
+      }
+    }
+  })
 describe("Machine history states", () => {
   it("separates active and history identifiers", () => {
     expect<
@@ -315,22 +329,28 @@ describe("Machine history states", () => {
                     readonly "": typeof States.node
                   }, "checkout">
                 >()
-                return target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                return target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
               }
             },
             exact: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             }
           },
           states: {
@@ -374,22 +394,28 @@ describe("Machine history states", () => {
             recent: {
               default: ({ target }) => {
                 expect(target).type.not.toHaveProperty("support")
-                return target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                return target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
               }
             },
             exact: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             }
           },
           states: {
@@ -942,21 +968,27 @@ describe("Machine history states", () => {
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             },
             exact: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             }
           },
           states: {
@@ -993,21 +1025,27 @@ describe("Machine history states", () => {
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             },
             exact: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.checkout.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (checkout) => checkout.shipping.decoded(new Shipping({ address: "" }))
-                  )
-                )
+                target({
+                  states: {
+                    checkout: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: { shipping: { data: new Shipping({ address: "" }), decoded: true } }
+                    }
+                  }
+                })
             }
           },
           states: {
@@ -1158,16 +1196,24 @@ describe("Machine history states", () => {
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.outer.decoded(
-                    new Checkout({ orderId: "fallback" }),
-                    (outer) =>
-                      outer.all.decoded(new Payment({ attempt: 1 }), (all) =>
-                        all
-                          .shipping.decoded(new Shipping({ address: "" }))
-                          .card.decoded(new CardEntry({ cardNumber: "" })))
-                  )
-                )
+                target({
+                  states: {
+                    outer: {
+                      data: new Checkout({ orderId: "fallback" }),
+                      decoded: true,
+                      states: {
+                        all: {
+                          data: new Payment({ attempt: 1 }),
+                          decoded: true,
+                          states: {
+                            shipping: { data: new Shipping({ address: "" }), decoded: true },
+                            card: { data: new CardEntry({ cardNumber: "" }), decoded: true }
+                          }
+                        }
+                      }
+                    }
+                  }
+                })
             }
           },
           states: {

@@ -67,7 +67,7 @@ describe("declarative transitions", () => {
           Loading: {
             invoke: {
               src: "load",
-              onDone: { branches: "finish", resolve: ({ output, select }) => select.done.from({ value: output }) }
+              onDone: { branches: "finish", resolve: ({ output, select }) => select.done({ data: { value: output } }) }
             }
           },
           Done: { output: ({ state }) => state.value }
@@ -163,10 +163,10 @@ describe("declarative transitions", () => {
                 branches: "checkout",
                 resolve: ({ event, select }) => {
                   calls++
-                  return select.review.from(
-                    { orderId: "order-1" },
-                    (child) => child.Review.from({ total: event.count })
-                  )
+                  return select.review({
+                    data: { orderId: "order-1" },
+                    states: { Review: { data: { total: event.count } } }
+                  })
                 }
               }
             }

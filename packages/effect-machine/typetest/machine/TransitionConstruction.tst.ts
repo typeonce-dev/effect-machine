@@ -224,7 +224,7 @@ describe("transition construction", () => {
         throw new Error("type-only constructor")
       }
     })
-    expect(definition.handle).type.not.toBeCallableWith({
+    expect(definition.handle).type.toBeCallableWith({
       states: {
         Idle: {
           on: {
@@ -348,7 +348,7 @@ describe("transition construction", () => {
               reenter: true,
               resolve: ({ event, select }) => {
                 expect(event.text).type.toBe<string>()
-                return select.ready.from({ text: event.text })
+                return select.ready({ data: { text: event.text } })
               }
             }
           }

@@ -173,8 +173,8 @@ export const plannerMachine = Machine.make({
             }
             const working = new Working({ owner: state.owner, job: event.job })
             return event.priority === "urgent"
-              ? select.urgent.decoded(working)
-              : select.normal.decoded(working)
+              ? select.urgent({ data: working, decoded: true })
+              : select.normal({ data: working, decoded: true })
           }
         }
       }

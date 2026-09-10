@@ -991,7 +991,7 @@ const configurationFromTargetPathSync = (
 
   for (const ancestor of paths) {
     const ancestorNode = getNode(machine, ancestor)
-    if (ancestorNode.type !== "parallel") continue
+    if (ancestorNode.type !== "parallel" || ancestor === node.path) continue
     for (const child of ancestorNode.children) {
       if (pathSet.has(child) || !current.active.has(child)) continue
       for (const activePath of current.active) {
@@ -1016,15 +1016,18 @@ export const configurationFromInitialTargetSync = (
   machine: Machine.Any,
   current: ActiveConfiguration,
   target: InitialTargetInstruction
-): ActiveConfiguration =>
-  configurationFromTargetPathSync(
-    machine,
-    current,
-    target.path,
-    target.value,
-    target.values as Readonly<Record<string, unknown>> | undefined,
-    true
-  )
+): ActiveConfiguration => {
+  const partial = configurationFromTargetPathSync(machine, current, target.path, target.value, target.values, true)
+  if (target.children === undefined) return partial
+  const active = new Set(partial.active)
+  const values = new Map(partial.values)
+  for (const [path, value] of target.children) {
+    const node = getNode(machine, path)
+    active.add(path)
+    if (node.schema !== undefined) values.set(path, decodeStateValueSync(machine, node, value))
+  }
+  return { ...partial, active, values }
+}
 
 const configurationFromTargetSnapshotSync = (
   machine: Machine.Any,

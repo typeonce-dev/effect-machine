@@ -148,7 +148,7 @@ describe("machine planner and runtime strategies", () => {
               resolve: ({ event, state, select: { destination: target }, decline }) =>
                 event.value < 0
                   ? decline()
-                  : target.decoded(new Count({ value: state.value + event.value })),
+                  : target({ data: new Count({ value: state.value + event.value }), decoded: true }),
               declinable: true
             }
           }
@@ -376,9 +376,11 @@ describe("machine planner and runtime strategies", () => {
                 Save: {
                   branches: "transition1",
                   resolve: ({ ancestors: { Ready: current }, event, select: { destination: target } }) =>
-                    target.decoded(new Saving({ request: event.request })).update.decoded(
-                      new Ready({ revision: current.revision + 1 })
-                    )
+                    target({
+                      data: new Saving({ request: event.request }),
+                      decoded: true,
+                      update: { data: new Ready({ revision: current.revision + 1 }), decoded: true }
+                    })
                 }
               }
             },
@@ -511,7 +513,7 @@ describe("machine planner and runtime strategies", () => {
         states: {
           Outside: {
             on: {
-              Enter: { initial: targets7.root.Opened, decoded: true, data: () => (new Opened({})) }
+              Enter: { target: targets7.root.Opened, decoded: true, data: () => (new Opened({})) }
             }
           },
           Opened: {
@@ -1129,7 +1131,7 @@ describe("machine planner and runtime strategies", () => {
                   choice: {
                     branches: "transition1",
                     resolve: ({ containingState, select }) =>
-                      containingState.authenticated ? select.authenticated.from() : select.anonymous.from()
+                      containingState.authenticated ? select.authenticated({}) : select.anonymous({})
                   }
                 },
                 Checking: {
@@ -1375,7 +1377,9 @@ describe("machine planner and runtime strategies", () => {
                 onSnapshot: {
                   branches: "transition1",
                   resolve: ({ snapshot, select }) =>
-                    snapshot.state === "stale" ? select.stale.decoded(new Failed({})) : select.unchanged()
+                    snapshot.state === "stale"
+                      ? select.stale({ data: new Failed({}), decoded: true })
+                      : select.unchanged()
                 }
               },
               on: {

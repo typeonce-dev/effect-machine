@@ -38,7 +38,10 @@ const machine = Machine.make({
   states: {
     Idle: {
       on: {
-        Start: { branches: "start", resolve: ({ select }) => select.cached.decoded(State.cases.Loading.make({})) }
+        Start: {
+          branches: "start",
+          resolve: ({ select }) => select.cached({ data: State.cases.Loading.make({}), decoded: true })
+        }
       }
     },
     Loading: {

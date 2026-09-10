@@ -175,7 +175,7 @@ describe("declarative inference", () => {
       },
       initial: { target: Machine.targets(root).root.Idle }
     })
-    expect(definition.handle).type.not.toBeCallableWith({
+    expect(definition.handle).type.toBeCallableWith({
       on: { Reset: { target: targets.root } },
       root: () => {
         throw new Error("type-only constructor")
@@ -239,17 +239,18 @@ describe("declarative inference", () => {
             Load: {
               branches: "complete",
               resolve: ({ event, select }) => {
-                expect(select.ready.from).type.toBeCallableWith({ count: 1 })
-                expect(select.ready.from).type.not.toBeCallableWith({ message: "wrong branch" })
-                expect(select.failed.from).type.toBeCallableWith({ message: "failed" })
+                expect(select.ready).type.toBeCallableWith({ data: { count: 1 } })
+                expect(select.ready).type.not.toBeCallableWith({ data: { message: "wrong branch" } })
+                expect(select.failed).type.toBeCallableWith({ data: { message: "failed" } })
                 return event.count > 0
-                  ? select.ready.from({ count: event.count })
-                  : select.failed.from({ message: "zero" })
+                  ? select.ready({ data: { count: event.count } })
+                  : select.failed({ data: { message: "zero" } })
               }
             },
             Reset: {
               branches: "nested",
-              resolve: ({ select }) => select.child.from({ name: "nested" }, (child) => child.Child.from({ count: 1 }))
+              resolve: ({ select }) =>
+                select.child({ data: { name: "nested" }, states: { Child: { data: { count: 1 } } } })
             }
           }
         },

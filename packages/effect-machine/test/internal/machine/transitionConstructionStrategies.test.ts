@@ -101,7 +101,7 @@ it.effect("compares atomic construction and verifies guards retain generic plann
               Branch: {
                 branches: "transition1",
                 reenter: true,
-                resolve: ({ state, select }) => select.saved.decoded(state)
+                resolve: ({ state, select }) => select.saved({ data: state, decoded: true })
               },
               Finish: { target: targets2.root.Done }
             }

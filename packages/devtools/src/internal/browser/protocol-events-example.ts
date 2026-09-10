@@ -89,7 +89,7 @@ export const requiredParentChildMachine = Machine.make({
           resolve: ({ event, select: { destination: target } }, enqueue) => {
             enqueue.raise(ChildInternalEvents.Heartbeat({ percent: 25 }))
             enqueue.emit(ChildEmissions.ChildTrace({ message: `started ${event.job}` }))
-            return target.decoded(new ChildWorking({ job: event.job, progress: 0 }))
+            return target({ data: new ChildWorking({ job: event.job, progress: 0 }), decoded: true })
           }
         }
       }
@@ -111,7 +111,7 @@ export const requiredParentChildMachine = Machine.make({
           branches: "transition3",
           resolve: ({ event, state, select: { destination: target } }, enqueue) => {
             enqueue.raise(ChildInternalEvents.CommitChildWork())
-            return target.decoded(new ChildWorking({ job: state.job, progress: event.percent }))
+            return target({ data: new ChildWorking({ job: state.job, progress: event.percent }), decoded: true })
           }
         },
         CommitChildWork: {
@@ -263,7 +263,7 @@ export const optionalParentMachine = Machine.make({
             if (parent !== undefined) {
               enqueue.sendTo(parent, ParentEvents.ChildFinished({ result: event.result }))
             }
-            return target.decoded(new Published({ deliveredToParent: parent !== undefined }))
+            return target({ data: new Published({ deliveredToParent: parent !== undefined }), decoded: true })
           }
         }
       }

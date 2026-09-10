@@ -128,23 +128,81 @@ const deepHistoryFallback = (
     readonly "": typeof DeepStates.node
   }, "Root.L1.L2.L3.L4.L5.L6.L7.L8.L9.L10.Hub">
 ) =>
-  target.from((tree) =>
-    tree.Root.decoded(
-      new Root({}),
-      (root) =>
-        root.L1.decoded(new Branch({}), (l1) =>
-          l1.L2.decoded(new Branch({}), (l2) =>
-            l2.L3.decoded(new Branch({}), (l3) =>
-              l3.L4.decoded(new Branch({}), (l4) =>
-                l4.L5.decoded(new Branch({}), (l5) =>
-                  l5.L6.decoded(new Branch({}), (l6) =>
-                    l6.L7.decoded(new Branch({}), (l7) =>
-                      l7.L8.decoded(new Branch({}), (l8) =>
-                        l8.L9.decoded(new Branch({}), (l9) =>
-                          l9.L10.decoded(new Branch({}), (l10) =>
-                            l10.Hub.decoded(new Hub({}), (hub) => hub.Idle.decoded(new Idle({})))))))))))))
-    )
-  )
+  target({
+    states: {
+      Root: {
+        data: new Root({}),
+        decoded: true,
+        states: {
+          L1: {
+            data: new Branch({}),
+            decoded: true,
+            states: {
+              L2: {
+                data: new Branch({}),
+                decoded: true,
+                states: {
+                  L3: {
+                    data: new Branch({}),
+                    decoded: true,
+                    states: {
+                      L4: {
+                        data: new Branch({}),
+                        decoded: true,
+                        states: {
+                          L5: {
+                            data: new Branch({}),
+                            decoded: true,
+                            states: {
+                              L6: {
+                                data: new Branch({}),
+                                decoded: true,
+                                states: {
+                                  L7: {
+                                    data: new Branch({}),
+                                    decoded: true,
+                                    states: {
+                                      L8: {
+                                        data: new Branch({}),
+                                        decoded: true,
+                                        states: {
+                                          L9: {
+                                            data: new Branch({}),
+                                            decoded: true,
+                                            states: {
+                                              L10: {
+                                                data: new Branch({}),
+                                                decoded: true,
+                                                states: {
+                                                  Hub: {
+                                                    data: new Hub({}),
+                                                    decoded: true,
+                                                    states: { Idle: { data: new Idle({}), decoded: true } }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
 const makeDeepMachine = () =>
   Machine.make({
     root: DeepStates,

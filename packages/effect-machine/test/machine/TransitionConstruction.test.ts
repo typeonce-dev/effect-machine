@@ -181,7 +181,7 @@ describe("transition construction", () => {
                     resolve: ({ select }, enqueue) => {
                       constructed++
                       enqueue.raise(events.Reset())
-                      return select.updated.from({ count: 1 })
+                      return select.updated({ data: { count: 1 } })
                     }
                   }
               }

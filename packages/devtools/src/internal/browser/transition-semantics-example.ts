@@ -133,10 +133,10 @@ export const transitionSemanticsMachine = Machine.make({
   branches: {
     transition4: {
       draft: { target: targets1.root.Workspace.Draft, title: "Preferred route is draft" },
-      review: { initial: targets1.root.Workspace.Review, title: "Preferred route is review" }
+      review: { target: targets1.root.Workspace.Review, title: "Preferred route is review" }
     },
     transition7: {
-      review: { initial: targets1.root.Workspace.Review, title: "Enter the review flow" },
+      review: { target: targets1.root.Workspace.Review, title: "Enter the review flow" },
       publish: { target: targets1.root.Workspace.Finished, title: "Publish without review" }
     },
     transition14: { destination: { history: targets1.root.Workspace.recent } },
@@ -203,8 +203,8 @@ export const transitionSemanticsMachine = Machine.make({
             branches: "transition4",
             resolve: ({ containingState, select }) =>
               containingState.preferredRoute === "review"
-                ? select.review.decoded(new Review({ requestedBy: "initial route" }))
-                : select.draft.decoded(new Draft({ text: "", autosaves: 0 }))
+                ? select.review({ data: new Review({ requestedBy: "initial route" }), decoded: true })
+                : select.draft({ data: new Draft({ text: "", autosaves: 0 }), decoded: true })
           }
         },
         Draft: {
@@ -219,8 +219,8 @@ export const transitionSemanticsMachine = Machine.make({
               branches: "transition7",
               resolve: ({ event, select }) =>
                 event.mode === "publish"
-                  ? select.publish.decoded(new WorkspaceFinished({ result: "published directly" }))
-                  : select.review.decoded(new Review({ requestedBy: event.requestedBy }))
+                  ? select.publish({ data: new WorkspaceFinished({ result: "published directly" }), decoded: true })
+                  : select.review({ data: new Review({ requestedBy: event.requestedBy }), decoded: true })
             },
             Refresh: { none: true, reenter: true },
             Ignore: { none: true },
@@ -282,14 +282,14 @@ export const transitionSemanticsMachine = Machine.make({
     Paused: {
       on: {
         Create: {
-          initial: targets1.root.Workspace,
+          target: targets1.root.Workspace,
           decoded: true,
           data: ({ event }) => (new Workspace({ revision: 0, preferredRoute: event.route }))
         },
         ResumeShallow: { branches: "transition14", resolve: ({ select: { destination: target } }) => target() },
         ResumeDeep: { branches: "transition15", resolve: ({ select: { destination: target } }) => target() },
         Restart: {
-          initial: targets1.root.Workspace,
+          target: targets1.root.Workspace,
           decoded: true,
           data: () => (new Workspace({ revision: 0, preferredRoute: "draft" }))
         }

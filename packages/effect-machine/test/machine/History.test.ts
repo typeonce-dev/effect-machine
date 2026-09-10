@@ -181,10 +181,11 @@ const makeCheckoutMachine = (
               EnterVerifying: {
                 branches: "transition4",
                 resolve: ({ select: { destination: target } }) =>
-                  target.decoded(
-                    new Payment({ attempt: 2 }),
-                    (payment) => payment.verifying.decoded(new Verifying({ challengeId: "challenge-7" }))
-                  )
+                  target({
+                    data: new Payment({ attempt: 2 }),
+                    decoded: true,
+                    states: { verifying: { data: new Verifying({ challengeId: "challenge-7" }), decoded: true } }
+                  })
               }
             }
           },
@@ -343,33 +344,49 @@ const makeWorkspaceMachine = (initialized: Array<string>) => {
         history: {
           recent: {
             default: ({ target }) =>
-              target.from((to) =>
-                to.workspace.decoded(new Workspace({ id: "fallback" }), (workspace) =>
-                  workspace
-                    .editor.decoded(
-                      new Editor({ documentId: "fallback" }),
-                      (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-                    )
-                    .sidebar.decoded(
-                      new Sidebar({ width: 200 }),
-                      (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
-                    ))
-              )
+              target({
+                states: {
+                  workspace: {
+                    data: new Workspace({ id: "fallback" }),
+                    decoded: true,
+                    states: {
+                      editor: {
+                        data: new Editor({ documentId: "fallback" }),
+                        decoded: true,
+                        states: { writing: { data: new Writing({ draft: "" }), decoded: true } }
+                      },
+                      sidebar: {
+                        data: new Sidebar({ width: 200 }),
+                        decoded: true,
+                        states: { files: { data: new Files({ directory: "/" }), decoded: true } }
+                      }
+                    }
+                  }
+                }
+              })
           },
           exact: {
             default: ({ target }) =>
-              target.from((to) =>
-                to.workspace.decoded(new Workspace({ id: "fallback" }), (workspace) =>
-                  workspace
-                    .editor.decoded(
-                      new Editor({ documentId: "fallback" }),
-                      (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-                    )
-                    .sidebar.decoded(
-                      new Sidebar({ width: 200 }),
-                      (sidebar) => sidebar.files.decoded(new Files({ directory: "/" }))
-                    ))
-              )
+              target({
+                states: {
+                  workspace: {
+                    data: new Workspace({ id: "fallback" }),
+                    decoded: true,
+                    states: {
+                      editor: {
+                        data: new Editor({ documentId: "fallback" }),
+                        decoded: true,
+                        states: { writing: { data: new Writing({ draft: "" }), decoded: true } }
+                      },
+                      sidebar: {
+                        data: new Sidebar({ width: 200 }),
+                        decoded: true,
+                        states: { files: { data: new Files({ directory: "/" }), decoded: true } }
+                      }
+                    }
+                  }
+                }
+              })
           }
         },
         on: {
@@ -485,15 +502,22 @@ const nestedHistoryMachine = Machine.make({
           history: {
             exact: {
               default: ({ target }) =>
-                target.from((to) =>
-                  to.workspace.decoded(new Workspace({ id: "fallback-workspace" }), (workspace) =>
-                    workspace
-                      .editor.decoded(
-                        new Editor({ documentId: "fallback" }),
-                        (editor) => editor.writing.decoded(new Writing({ draft: "" }))
-                      )
-                      .sidebar.decoded(new Search({ query: "fallback" })))
-                )
+                target({
+                  states: {
+                    workspace: {
+                      data: new Workspace({ id: "fallback-workspace" }),
+                      decoded: true,
+                      states: {
+                        editor: {
+                          data: new Editor({ documentId: "fallback" }),
+                          decoded: true,
+                          states: { writing: { data: new Writing({ draft: "" }), decoded: true } }
+                        },
+                        sidebar: { data: new Search({ query: "fallback" }), decoded: true }
+                      }
+                    }
+                  }
+                })
             }
           },
           states: {

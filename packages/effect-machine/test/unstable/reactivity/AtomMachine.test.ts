@@ -725,7 +725,7 @@ describe("AtomMachine", () => {
                 branches: "transition1",
                 resolve: ({ select: { destination: target } }) => {
                   requiredResolverCalls++
-                  return target.decoded(new CanDone({}))
+                  return target({ data: new CanDone({}), decoded: true })
                 }
               }
             }

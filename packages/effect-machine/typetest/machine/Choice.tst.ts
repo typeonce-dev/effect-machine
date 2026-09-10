@@ -64,7 +64,7 @@ describe("Machine choice pseudo-states", () => {
                   expect(context.containingState).type.toBe<Flow>()
                   expect(context.ancestors.Flow).type.toBe<Flow>()
                   expect(context.event).type.toBe<Machine.Machine.LifecycleEvent<readonly []>>()
-                  return context.select.destination.decoded(new Approved({}))
+                  return context.select.destination({ data: new Approved({}), decoded: true })
                 }
               }
             },
@@ -99,7 +99,8 @@ describe("Machine choice pseudo-states", () => {
               choice: {
                 branches: "transition1",
                 // @ts-expect-error!
-                resolve: ({ select: { destination: target } }) => Effect.succeed(target.decoded(new Approved({})))
+                resolve: ({ select: { destination: target } }) =>
+                  Effect.succeed(target({ data: new Approved({}), decoded: true }))
               }
             },
             Approved: {},
@@ -208,8 +209,8 @@ describe("Machine choice pseudo-states", () => {
               choice: {
                 branches: "transition1",
                 resolve: ({ select: { destination: selectedTarget } }) => {
-                  expect(selectedTarget.decoded).type.not.toBeCallableWith(new Approved({}))
-                  return selectedTarget.decoded(new Rejected({}))
+                  expect(selectedTarget).type.not.toBeCallableWith({ data: new Approved({}), decoded: true })
+                  return selectedTarget({ data: new Rejected({}), decoded: true })
                 }
               }
             },

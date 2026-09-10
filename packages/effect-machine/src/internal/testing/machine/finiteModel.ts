@@ -1217,101 +1217,52 @@ const makeStateTree = (
   return tree
 }
 
-const selectSnapshot = (
-  builder: Record<string, any>,
+const construction = (
   path: string,
   byPath: ReadonlyMap<string, FlatFiniteState>,
   requestedParts: ReadonlyArray<string> | undefined,
   index: number,
   sourcePath?: string,
   requestedValue?: number
-): unknown => {
+): Readonly<Record<string, unknown>> => {
   const state = byPath.get(path)!
-  if (state.node._tag === "History") {
-    throw new Error(`MachineTest.compileModel cannot construct active history state "${path}"`)
-  }
-  if (state.node._tag === "Choice") {
-    return (builder[state.node.key] as () => unknown)()
-  }
-  const method = builder[state.node.key].decoded as (
-    value: unknown,
-    selector?: (builder: any) => unknown
-  ) => unknown
-  const value = stateValue(state, path === requestedParts?.join(".") ? requestedValue : undefined)
-  if (state.node._tag === "Atomic" || state.node._tag === "Final") return method(value)
-
+  if (state.node._tag === "History") throw new Error(`MachineTest cannot construct history state "${path}"`)
+  if (state.node._tag === "Choice") return {}
+  const data = stateValue(state, path === requestedParts?.join(".") ? requestedValue : undefined)
+  if (state.node._tag === "Atomic" || state.node._tag === "Final") return { data, decoded: true }
   const requestedChild = requestedParts?.[index + 1]
+  let keys: ReadonlyArray<string>
   if (state.node._tag === "Parallel") {
-    const parallel = state.node
-    const sourceInside = sourcePath === path || sourcePath?.startsWith(`${path}.`) === true
-    if (sourceInside) {
-      const childKey = requestedChild ?? (sourcePath === path
-        ? parallel.states.find((child) => child._tag !== "History" && child._tag !== "Choice")!.key
-        : sourcePath!.slice(path.length + 1).split(".")[0]!)
-      return method(
-        value,
-        (children: Record<string, any>) =>
-          selectSnapshot(
-            children,
-            `${path}.${childKey}`,
-            byPath,
-            requestedChild === undefined ? undefined : requestedParts,
-            index + 1,
-            sourcePath,
-            requestedValue
-          )
+    const inside = sourcePath === path || sourcePath?.startsWith(`${path}.`) === true
+    keys = inside ?
+      [
+        requestedChild ?? (sourcePath === path
+          ? state.node.states.find((child) => child._tag !== "History" && child._tag !== "Choice")!.key
+          : sourcePath!.slice(path.length + 1).split(".")[0]!)
+      ]
+      : state.node.states.filter((child) => child._tag !== "History" && child._tag !== "Choice").map((child) =>
+        child.key
       )
-    }
-    return method(value, (children: Record<string, any>) => {
-      let selected: unknown = children
-      for (const child of parallel.states.filter((child) => child._tag !== "History" && child._tag !== "Choice")) {
-        const isRequestedRegion = requestedChild === child.key
-        selected = selectSnapshot(
-          selected as Record<string, any>,
-          `${path}.${child.key}`,
+  } else keys = [requestedChild ?? state.node.initial]
+  return {
+    data,
+    decoded: true,
+    states: Object.fromEntries(
+      keys.map((
+        key
+      ) => [
+        key,
+        construction(
+          `${path}.${key}`,
           byPath,
-          isRequestedRegion ? requestedParts : undefined,
+          key === requestedChild ? requestedParts : undefined,
           index + 1,
           sourcePath,
           requestedValue
         )
-      }
-      return selected
-    })
+      ])
+    )
   }
-
-  const childKey = requestedChild ?? state.node.initial
-  const childPath = `${path}.${childKey}`
-  return method(
-    value,
-    (children: Record<string, any>) =>
-      selectSnapshot(
-        children,
-        childPath,
-        byPath,
-        requestedChild === undefined ? undefined : requestedParts,
-        index + 1,
-        sourcePath,
-        requestedValue
-      )
-  )
-}
-
-const findSnapshot = (snapshot: unknown, path: string): unknown => {
-  if (typeof snapshot !== "object" || snapshot === null) return undefined
-  const current = snapshot as Record<string, unknown>
-  if (current.path === path) return snapshot
-  if (current.state !== undefined) {
-    const found = findSnapshot(current.state, path)
-    if (found !== undefined) return found
-  }
-  if (typeof current.states === "object" && current.states !== null) {
-    for (const child of Object.values(current.states)) {
-      const found = findSnapshot(child, path)
-      if (found !== undefined) return found
-    }
-  }
-  return undefined
 }
 
 const selectableDefinitionTarget = (
@@ -1349,47 +1300,19 @@ const selectDefinitionTarget = (
 }
 
 const resolveDefinitionTarget = (
-  builder: any,
+  build: (config?: unknown) => unknown,
   source: string,
   target: string,
   byPath: ReadonlyMap<string, FlatFiniteState>,
   value?: number
 ): unknown => {
   const selected = byPath.get(target)!
-  if (selected.node._tag === "History") return builder()
-  if (selected.root !== byPath.get(source)!.root) {
-    const parts = target.split(".")
-    return selectSnapshot({ [parts[0]!]: builder }, parts[0]!, byPath, parts, 0, source, value)
-  }
-  const selectable = selectableDefinitionTarget(source, target, byPath)
-  if (selectable !== target) {
-    const bound = byPath.get(selectable)!
-    const parts = target.split(".")
-    return selectSnapshot(
-      { [bound.node.key]: builder },
-      selectable,
-      byPath,
-      parts,
-      selectable.split(".").length - 1,
-      source,
-      value
-    )
-  }
-  if (selected.node._tag === "Choice") return builder()
-  const input = { value: value ?? selected.node.value }
-  if (selected.node._tag === "Compound" || selected.node._tag === "Parallel") {
-    const parts = target.split(".")
-    return selectSnapshot(
-      { [selected.node.key]: builder },
-      target,
-      byPath,
-      parts,
-      parts.length - 1,
-      source,
-      value
-    )
-  }
-  return builder.from(input)
+  if (selected.node._tag === "History") return build()
+  const parts = target.split(".")
+  const path = selected.root !== byPath.get(source)!.root
+    ? parts[0]!
+    : selectableDefinitionTarget(source, target, byPath)
+  return build(construction(path, byPath, parts, path.split(".").length - 1, source, value))
 }
 
 const makeHandlers = (
@@ -1448,16 +1371,15 @@ const makeHandlers = (
         if (child._tag !== "History") return []
         return [[child.key, {
           default: ({ target: root }: { readonly target: any }) =>
-            root.from((target: Record<string, any>) => {
-              const fallback = byPath.get(child.fallback)!
-              const parts = child.fallback.split(".")
-              const completeRoot = selectSnapshot(target, fallback.root, byPath, parts, 0)
-              if (findSnapshot(completeRoot, path) === undefined) {
-                throw new Error(
-                  `MachineTest.compileModel could not construct history fallback for "${path}.${child.key}"`
+            root({
+              states: {
+                [byPath.get(child.fallback)!.root]: construction(
+                  byPath.get(child.fallback)!.root,
+                  byPath,
+                  child.fallback.split("."),
+                  0
                 )
               }
-              return completeRoot
             })
         }]]
       }))

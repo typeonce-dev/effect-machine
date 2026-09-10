@@ -294,7 +294,7 @@ describe("Machine", () => {
                 branches: "refresh",
                 reenter: true,
                 resolve: ({ event, select }) =>
-                  event.route ? select.refresh.decoded(new Stable({})) : select.unchanged()
+                  event.route ? select.refresh({ data: new Stable({}), decoded: true }) : select.unchanged()
               }
             }
           }
@@ -625,7 +625,7 @@ describe("Machine", () => {
                 branches: "transition1",
                 resolve: ({ state, select: { destination: target } }) => {
                   const { _tag: _, ...fields } = state
-                  return target.from(fields)
+                  return target({ data: fields })
                 }
               }
             }
@@ -1300,13 +1300,12 @@ describe("Machine", () => {
                     LocalWith: { target: targets14.root.Flow.Running },
                     Branch: {
                       branches: "transition3",
-                      resolve: ({ select: { destination: target } }) =>
-                        target.from((nested) => nested.NestedIdle.from())
+                      resolve: ({ select: { destination: target } }) => target({ states: { NestedIdle: {} } })
                     },
                     Full: {
                       branches: "transition4",
                       resolve: ({ select: { destination: target } }) =>
-                        target.from((flow) => flow.Nested.from((nested) => nested.NestedIdle.from()))
+                        target({ states: { Nested: { states: { NestedIdle: {} } } } })
                     },
                     Finish: { target: targets14.root.Flow.Done }
                   }
@@ -1523,16 +1522,19 @@ describe("Machine", () => {
                 Submit: {
                   branches: "transition1",
                   resolve: ({ event, select: { destination: target } }) =>
-                    target.from({ id: event.value }, (fulfillment) =>
-                      fulfillment
-                        .inventory.from(
-                          { warehouse: "warehouse-1" },
-                          (inventory) => inventory.reserved.from({ reservationId: event.value })
-                        )
-                        .shipping.from(
-                          { address: "Main Street" },
-                          (shipping) => shipping.quoted.from({ quoteId: event.value })
-                        ))
+                    target({
+                      data: { id: event.value },
+                      states: {
+                        inventory: {
+                          data: { warehouse: "warehouse-1" },
+                          states: { reserved: { data: { reservationId: event.value } } }
+                        },
+                        shipping: {
+                          data: { address: "Main Street" },
+                          states: { quoted: { data: { quoteId: event.value } } }
+                        }
+                      }
+                    })
                 }
               }
             },
@@ -1619,7 +1621,7 @@ describe("Machine", () => {
                     Submit: {
                       branches: "transition1",
                       resolve: ({ event, select: { destination: target } }) =>
-                        target.from({ id: "payment-2" }, (payment) => payment.authorized.from({ code: event.value }))
+                        target({ data: { id: "payment-2" }, states: { authorized: { data: { code: event.value } } } })
                     }
                   }
                 },
@@ -1675,9 +1677,15 @@ describe("Machine", () => {
                     Submit: {
                       branches: "transition1",
                       resolve: ({ event, select: { destination: target } }) =>
-                        target.from({ id: "workflow-2" }, (workflow) =>
-                          workflow.checkout.from({ id: "checkout-1" }, (checkout) =>
-                            checkout.quoted.from({ quoteId: event.value })))
+                        target({
+                          data: { id: "workflow-2" },
+                          states: {
+                            checkout: {
+                              data: { id: "checkout-1" },
+                              states: { quoted: { data: { quoteId: event.value } } }
+                            }
+                          }
+                        })
                     }
                   }
                 },
@@ -2616,7 +2624,7 @@ describe("Machine", () => {
                     resolve: ({ event, containingState, ancestors, select: { destination: target } }) => {
                       assert.deepStrictEqual(containingState, payment)
                       assert.deepStrictEqual(ancestors, { payment })
-                      return target.decoded(new AuthorizedPayment({ code: event.code }))
+                      return target({ data: new AuthorizedPayment({ code: event.code }), decoded: true })
                     }
                   }
                 }
@@ -2703,7 +2711,7 @@ describe("Machine", () => {
                 branches: "transition1",
                 resolve: ({ select: { destination: target } }) => {
                   requiredResolverCalls++
-                  return target.decoded(new Done({}))
+                  return target({ data: new Done({}), decoded: true })
                 }
               },
               Raised: {
@@ -2794,7 +2802,7 @@ describe("Machine", () => {
                     branches: "transition2",
                     resolve: ({ event, select, decline }, enqueue) => {
                       if (event.code === "child") {
-                        return select.authorize.decoded(new AuthorizedPayment({ code: event.code }))
+                        return select.authorize({ data: new AuthorizedPayment({ code: event.code }), decoded: true })
                       }
                       if (event.code === "consume") {
                         return select.consume()
@@ -3016,7 +3024,7 @@ describe("Machine", () => {
                 branches: "transition1",
                 resolve: ({ select: { destination: target } }) => {
                   parentCalls++
-                  return target.decoded(new Finished({}))
+                  return target({ data: new Finished({}), decoded: true })
                 }
               }
             },
@@ -3226,16 +3234,24 @@ describe("Machine", () => {
               Submit: {
                 branches: "transition1",
                 resolve: ({ event, select: { destination: target } }) =>
-                  target.decoded(new Fulfillment({ id: event.value }), (fulfillment) =>
-                    fulfillment
-                      .inventory.decoded(
-                        new Inventory({ warehouse: "warehouse-1" }),
-                        (inventory) => inventory.reserved.decoded(new InventoryReserved({ reservationId: event.value }))
-                      )
-                      .shipping.decoded(
-                        new Shipping({ address: "Main Street" }),
-                        (shipping) => shipping.quoted.decoded(new ShippingQuoted({ quoteId: event.value }))
-                      ))
+                  target({
+                    data: new Fulfillment({ id: event.value }),
+                    decoded: true,
+                    states: {
+                      inventory: {
+                        data: new Inventory({ warehouse: "warehouse-1" }),
+                        decoded: true,
+                        states: {
+                          reserved: { data: new InventoryReserved({ reservationId: event.value }), decoded: true }
+                        }
+                      },
+                      shipping: {
+                        data: new Shipping({ address: "Main Street" }),
+                        decoded: true,
+                        states: { quoted: { data: new ShippingQuoted({ quoteId: event.value }), decoded: true } }
+                      }
+                    }
+                  })
               }
             }
           },
@@ -3354,17 +3370,24 @@ describe("Machine", () => {
                   Submit: {
                     branches: "transition1",
                     resolve: ({ event, select: { destination: target } }) =>
-                      target.decoded(new Fulfillment({ id: event.value }), (fulfillment) =>
-                        fulfillment
-                          .inventory.decoded(
-                            new Inventory({ warehouse: "warehouse-1" }),
-                            (inventory) =>
-                              inventory.reserved.decoded(new InventoryReserved({ reservationId: event.value }))
-                          )
-                          .shipping.decoded(
-                            new Shipping({ address: "Main Street" }),
-                            (shipping) => shipping.quoted.decoded(new ShippingQuoted({ quoteId: event.value }))
-                          ))
+                      target({
+                        data: new Fulfillment({ id: event.value }),
+                        decoded: true,
+                        states: {
+                          inventory: {
+                            data: new Inventory({ warehouse: "warehouse-1" }),
+                            decoded: true,
+                            states: {
+                              reserved: { data: new InventoryReserved({ reservationId: event.value }), decoded: true }
+                            }
+                          },
+                          shipping: {
+                            data: new Shipping({ address: "Main Street" }),
+                            decoded: true,
+                            states: { quoted: { data: new ShippingQuoted({ quoteId: event.value }), decoded: true } }
+                          }
+                        }
+                      })
                   }
                 }
               },
@@ -3509,10 +3532,14 @@ describe("Machine", () => {
                       Submit: {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }) =>
-                          target.decoded(new Fulfillment({ id: event.value }), (fulfillment) =>
-                            fulfillment
-                              .inventory.decoded(new Inventory({ warehouse: "warehouse-1" }))
-                              .shipping.decoded(new Shipping({ address: "Main Street" })))
+                          target({
+                            data: new Fulfillment({ id: event.value }),
+                            decoded: true,
+                            states: {
+                              inventory: { data: new Inventory({ warehouse: "warehouse-1" }), decoded: true },
+                              shipping: { data: new Shipping({ address: "Main Street" }), decoded: true }
+                            }
+                          })
                       }
                     }
                   },
@@ -3715,11 +3742,16 @@ describe("Machine", () => {
                       ReserveInventory: {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }) =>
-                          target.decoded(
-                            nextInventory,
-                            (inventory) =>
-                              inventory.reserved.decoded(new InventoryReserved({ reservationId: event.reservationId }))
-                          )
+                          target({
+                            data: nextInventory,
+                            decoded: true,
+                            states: {
+                              reserved: {
+                                data: new InventoryReserved({ reservationId: event.reservationId }),
+                                decoded: true
+                              }
+                            }
+                          })
                       }
                     }
                   },
@@ -3820,11 +3852,16 @@ describe("Machine", () => {
                       ReserveInventory: {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }) =>
-                          target.decoded(
-                            nextInventory,
-                            (inventory) =>
-                              inventory.reserved.decoded(new InventoryReserved({ reservationId: event.reservationId }))
-                          )
+                          target({
+                            data: nextInventory,
+                            decoded: true,
+                            states: {
+                              reserved: {
+                                data: new InventoryReserved({ reservationId: event.reservationId }),
+                                decoded: true
+                              }
+                            }
+                          })
                       }
                     }
                   },
@@ -3926,11 +3963,22 @@ describe("Machine", () => {
                       ReserveInventory: {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }) =>
-                          target.decoded(nextFulfillment, (fulfillment) =>
-                            fulfillment.inventory.decoded(nextInventory, (inventory) =>
-                              inventory.reserved.decoded(
-                                new InventoryReserved({ reservationId: event.reservationId })
-                              )))
+                          target({
+                            data: nextFulfillment,
+                            decoded: true,
+                            states: {
+                              inventory: {
+                                data: nextInventory,
+                                decoded: true,
+                                states: {
+                                  reserved: {
+                                    data: new InventoryReserved({ reservationId: event.reservationId }),
+                                    decoded: true
+                                  }
+                                }
+                              }
+                            }
+                          })
                       }
                     }
                   },
@@ -4032,8 +4080,13 @@ describe("Machine", () => {
                       ReserveInventory: {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }) =>
-                          target.decoded(shipping, (shipping) =>
-                            shipping.quoted.decoded(new ShippingQuoted({ quoteId: event.reservationId })))
+                          target({
+                            data: shipping,
+                            decoded: true,
+                            states: {
+                              quoted: { data: new ShippingQuoted({ quoteId: event.reservationId }), decoded: true }
+                            }
+                          })
                       }
                     }
                   },
@@ -4899,11 +4952,12 @@ describe("Machine", () => {
                         branches: "transition1",
                         resolve: ({ event, select: { destination: target } }, enqueue) => {
                           enqueue.raise(new Resolve({}))
-                          return target.decoded(
-                            new InventoryReserved({
+                          return target({
+                            data: new InventoryReserved({
                               reservationId: event.reservationId
-                            })
-                          )
+                            }),
+                            decoded: true
+                          })
                         }
                       }
                     }
@@ -6703,7 +6757,7 @@ describe("Machine", () => {
                 branches: "snapshots",
                 resolve: ({ snapshot, select }) =>
                   snapshot.state === "ready"
-                    ? select.ready.decoded(new Success({ requestId: snapshot.state }))
+                    ? select.ready({ data: new Success({ requestId: snapshot.state }), decoded: true })
                     : select.unchanged()
               }
             }
@@ -7262,8 +7316,11 @@ describe("Machine", () => {
               Submit: {
                 branches: "transition1",
                 resolve: ({ select: { destination: target } }) =>
-                  target.decoded(new Loading({ requestId: "request-1" }), (flow) =>
-                    flow.done.decoded(new Success({ requestId: "request-1" })))
+                  target({
+                    data: new Loading({ requestId: "request-1" }),
+                    decoded: true,
+                    states: { done: { data: new Success({ requestId: "request-1" }), decoded: true } }
+                  })
               }
             }
           },
@@ -7275,8 +7332,11 @@ describe("Machine", () => {
             onDone: {
               branches: "transition2",
               resolve: ({ state, select: { destination: target } }) =>
-                target.decoded(state, (flow) =>
-                  flow.done.decoded(new Success({ requestId: state.requestId })))
+                target({
+                  data: state,
+                  decoded: true,
+                  states: { done: { data: new Success({ requestId: state.requestId }), decoded: true } }
+                })
             },
             states: {
               done: {}

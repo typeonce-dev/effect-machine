@@ -8,7 +8,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
 import type { Enqueue, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
-import { getTargetBuilder, makeCollector, type RuntimeCommand } from "./command.js"
+import { makeCollector, type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
   captureHistory,
@@ -37,6 +37,7 @@ import {
   snapshotFromConfiguration,
   snapshotFromConfigurationAtPath
 } from "./configuration.js"
+import * as Construction from "./construction.js"
 import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import { isDataInitializer } from "./initialDeclaration.js"
@@ -265,7 +266,8 @@ const collectStateInitializer = (
 const completeHistoryConfiguration = (
   machine: Machine.Any,
   configuration: ActiveConfiguration,
-  event: unknown
+  event: unknown,
+  input?: { readonly value: unknown }
 ) => {
   const active = new Set(configuration.active)
   const values = new Map(configuration.values)
@@ -345,6 +347,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
+            ...(path === "" && input !== undefined ? { input: input.value } : {}),
             ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = getStateInitializeValues(path, initialized.value)
@@ -373,6 +376,7 @@ const completeHistoryConfiguration = (
             containingState: getParentValue(machine, current, path),
             ancestors: getParentValues(machine, current, path),
             event,
+            ...(path === "" && input !== undefined ? { input: input.value } : {}),
             ...(isDataInitializer(initializer) ? {} : { builder: makeStateInitializeBuilder(machine, path) })
           })
           const initializedValues = initialized === undefined
@@ -432,8 +436,53 @@ export function resolveInitialConfiguration(
   target: InitialTargetInstruction,
   event: unknown
 ) {
-  const partial = configurationFromInitialTargetSync(machine, configuration, target)
-  return completeHistoryConfiguration(machine, partial, event)
+  let partial = configurationFromInitialTargetSync(machine, configuration, target)
+  if (
+    target.children === undefined ||
+    ![...target.children.keys()].some((path) => getNode(machine, path).type === "choice")
+  ) {
+    return completeHistoryConfiguration(machine, partial, event, target.input)
+  }
+  const commands: Array<RuntimeCommand> = []
+  const raisedEvents: Array<unknown> = []
+  const emittedEvents: Array<unknown> = []
+  const transitions: Array<ResolvedChoiceTransition> = []
+  for (const path of target.children?.keys() ?? []) {
+    const node = getNode(machine, path)
+    if (node.type !== "choice") continue
+    const choice = resolveChoiceTarget(machine, partial, makeChoiceTarget(path, node.parent!), event)
+    for (const routed of [choice.target, ...choice.additionalTargets]) {
+      const resolved = isInitialTarget(routed) ?
+        resolveInitialTarget(machine, partial, routed, event)
+        : isHistoryTarget(routed)
+        ? resolveHistoryTarget(machine, partial, routed, event)
+        : undefined
+      partial = normalizeTargetConfigurationSync(
+        machine,
+        partial,
+        (resolved?.target ?? routed) as Machine.Target<any, any>
+      )
+      if (resolved !== undefined) {
+        commands.push(...resolved.commands)
+        raisedEvents.push(...resolved.raisedEvents)
+        emittedEvents.push(...resolved.emittedEvents)
+        transitions.push(...resolved.transitions)
+      }
+    }
+    commands.push(...choice.commands)
+    raisedEvents.push(...choice.raisedEvents)
+    emittedEvents.push(...choice.emittedEvents)
+    transitions.push(...choice.transitions)
+  }
+  const completed = completeHistoryConfiguration(machine, partial, event, target.input)
+  if (transitions.length === 0) return completed
+  return {
+    ...completed,
+    commands: [...commands, ...completed.commands],
+    raisedEvents: [...raisedEvents, ...completed.raisedEvents],
+    emittedEvents: [...emittedEvents, ...completed.emittedEvents],
+    transitions: [...transitions, ...completed.transitions]
+  }
 }
 
 export function resolveInitialTarget(
@@ -447,7 +496,7 @@ export function resolveInitialTarget(
   return {
     target: makeTarget(target.path as any, snapshot.value as any, {
       snapshot: snapshot as any,
-      values: Object.fromEntries(completed.configuration.values) as any
+      values: target.values as any
     }),
     commands: completed.commands,
     raisedEvents: completed.raisedEvents,
@@ -495,7 +544,7 @@ function resolveHistoryTarget(
   }
   const collected = collectTransition(machine, fallback, {
     event,
-    target: getTargetBuilder(machine, target.parent).full[""],
+    target: (config: unknown) => Construction.snapshot(machine.stateNodes, config),
     owner: target.parent
   })
   if (collected.state === undefined || isHistoryTarget(collected.state) || !isSnapshot(collected.state)) {
@@ -732,8 +781,7 @@ const makeTransitionContext = <
   containingState: getParentValue(machine, configuration, path) as Machine.ParentStateValue<States, StateId>,
   ancestors: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
-  snapshot,
-  target: getTargetBuilder(machine, path)
+  snapshot
 })
 
 const makeDoneContext = <
@@ -755,8 +803,7 @@ const makeDoneContext = <
   ancestors: getParentValues(machine, configuration, path) as Machine.ParentStateValues<States, StateId>,
   event,
   output: output as Machine.CompletionOutputByIdentifier<States, StateId>,
-  snapshot,
-  target: getTargetBuilder(machine, path)
+  snapshot
 })
 
 const collectStateActions = <
@@ -859,8 +906,7 @@ const selectAlwaysTransitions = <
                 Machine.StateIdentifier<States>
               >,
               event,
-              snapshot: capturedSnapshot(),
-              target: getTargetBuilder(machine, path)
+              snapshot: capturedSnapshot()
             }
           })
           evaluatedSources.set(path, candidate)
@@ -1068,7 +1114,6 @@ const selectInvocationTransition = <
     containingState: getParentValue(machine, configuration, event.path),
     ancestors: getParentValues(machine, configuration, event.path),
     snapshot,
-    target: getTargetBuilder(machine, event.path),
     id: event.id,
     ...(event.type === "element"
       ? { element: event.element }
@@ -1244,6 +1289,7 @@ const withChoiceValues = (target: unknown, values: Readonly<Record<string, unkno
   if (isChoiceTarget(target)) {
     return makeChoiceTarget(target.path, target.parent, { ...values, ...(target.values ?? {}) })
   }
+  if (isInitialTarget(target)) return { ...target, values: { ...values, ...target.values } }
   if (!isTarget(target) || Object.keys(values).length === 0) return target
   const snapshot = target[TargetSnapshotTypeId]
   return makeTarget(target.path, target.value, {
@@ -1324,8 +1370,7 @@ function resolveChoiceTarget(
           ...resolveMachineReferences(machine, provisional),
           containingState: getParentValue(machine, provisional, node.path),
           ancestors: getParentValues(machine, provisional, node.path),
-          event,
-          target: getTargetBuilder(machine, node.path)
+          event
         },
         choice.evaluate
       )
@@ -2321,4 +2366,4 @@ export const planInitial = (
 
 // Captured constructors are private planner inputs. Public callbacks receive root data
 // and the constructors bound to their declared branches during normalization.
-type ConstructionContext<C> = Omit<C, "root"> & { readonly target: unknown }
+type ConstructionContext<C> = Omit<C, "root">

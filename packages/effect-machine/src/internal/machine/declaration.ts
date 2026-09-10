@@ -12,6 +12,7 @@ interface Source {
   readonly value: unknown
 }
 export interface Declaration {
+  readonly initialize?: (input: unknown) => unknown
   readonly root: State<Machine.StateNodeConfig>
   readonly sources: ReadonlyMap<string, Source>
   readonly branches: ReadonlyMap<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>
@@ -50,7 +51,7 @@ export const capture = (
           const spec = { ...record(value, `Machine branch "${name}.${key}" must be a declaration`) }
           for (const field of Reflect.ownKeys(spec)) {
             if (
-              typeof field !== "string" || !["target", "update", "initial", "history", "none", "title"].includes(field)
+              typeof field !== "string" || !["target", "update", "history", "none", "title"].includes(field)
             ) {
               throw new Error(`Machine branch "${name}.${key}" contains an unknown declaration field`)
             }
@@ -76,7 +77,7 @@ export const selection = (
   declaration: Declaration,
   config: Readonly<Record<string, unknown>>
 ): Topology.TargetSelection => {
-  const keys = ["target", "initial", "history", "none"].filter((key) => config[key] !== undefined)
+  const keys = ["target", "history", "none"].filter((key) => config[key] !== undefined)
   if (keys.length === 0 && config.update !== undefined) {
     const owner = reference(config.update, declaration.root)
     if (owner.kind !== "state") throw new Error("Machine update requires an active state reference")
@@ -91,17 +92,13 @@ export const selection = (
     return Topology.noneTargetSelection
   }
   const ref = reference(config[key], declaration.root)
-  if (ref.path === "") throw new Error("Machine root data changes use update; transitions select a descendant")
   if ((key === "history") !== (ref.kind === "history")) {
     throw new Error("Machine history references require a history transition")
-  }
-  if (key === "initial" && ref.kind !== "state") {
-    throw new Error("Machine initial entry requires an active state reference")
   }
   const update = config.update === undefined ? undefined : reference(config.update, declaration.root).path
   if (update !== undefined && key !== "target") throw new Error("Machine owner updates require an ordinary destination")
   return Topology.makeTargetSelection(
-    key === "initial" ? "initial" : ref.kind,
+    ref.kind,
     ref.path,
     key === "history" ? "full" : "branch",
     update

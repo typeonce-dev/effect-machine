@@ -71,7 +71,7 @@ const causalMachine = Machine.make({
           branches: "transition2",
           resolve: ({ state, select: { destination: target } }, enqueue) => {
             enqueue.raise(new InternalAdd({ amount: 10 }))
-            return target.decoded(new Counter({ count: state.count + 1 }))
+            return target({ data: new Counter({ count: state.count + 1 }), decoded: true })
           }
         },
         InternalAdd: {

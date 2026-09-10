@@ -47,7 +47,7 @@ const machine = Machine.make({
           branches: "transition3",
           resolve: ({ state, select: { destination: target } }, enqueue) => {
             enqueue.raise(new RaisedIncrement({}))
-            return target.decoded(new Counter({ count: state.count + 1 }))
+            return target({ data: new Counter({ count: state.count + 1 }), decoded: true })
           }
         },
         RaisedIncrement: {

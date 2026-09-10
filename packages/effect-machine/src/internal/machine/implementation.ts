@@ -28,13 +28,12 @@ export interface CapturedStateConfig {
 /**
  * Captured machine implementation consumed by semantic layers.
  *
- * The public erased view retains its existing fields for compatibility. Internal
- * code enters through this view so handler lookup cannot silently produce `any`.
+ * Internal code enters through this view so handler lookup cannot silently
+ * produce `any`.
  * Construction captures these containers before handing the machine to a planner.
  */
 export interface MachineInternal extends Machine.Any {
   readonly handlers: Readonly<Record<string, CapturedStateConfig | undefined>>
-  readonly makeTargetBuilder: (source: string) => Machine.TargetBuilder<any, any>
 }
 
 /** The single conversion from an erased public machine to its captured implementation. */

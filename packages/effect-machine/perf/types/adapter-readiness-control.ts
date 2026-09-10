@@ -44,7 +44,7 @@ export const machine = Machine.make({
       history: {
         recent: {
           default: ({ target }) =>
-            target.from((tree) => tree.Flow.from(Flow.make({}), (flow) => flow.Idle.from(Idle.make({}))))
+            target({ states: { Flow: { data: Flow.make({}), states: { Idle: { data: Idle.make({}) } } } } })
         }
       },
       states: {
