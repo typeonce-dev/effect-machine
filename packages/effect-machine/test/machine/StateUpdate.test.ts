@@ -50,14 +50,15 @@ describe("state value updates", () => {
                   CreatePlan: {
                     branches: "transition1",
                     resolve: ({ ancestors: { Ready: current }, event, select: { destination: target } }) =>
-                      target.from({ request: event.input }).update.decoded(
-                        State.cases.Ready.make({ ...current, notice: null })
-                      )
+                      target({
+                        data: { request: event.input },
+                        update: { data: State.cases.Ready.make({ ...current, notice: null }), decoded: true }
+                      })
                   },
                   InvalidPlan: {
                     branches: "transition2",
                     resolve: ({ select: { destination: target } }) =>
-                      target.from({ request: "invalid" }).update.from({ notice: 1 } as any)
+                      target({ data: { request: "invalid" }, update: { data: { notice: 1 } as any } })
                   }
                 }
               },
@@ -150,7 +151,12 @@ describe("state value updates", () => {
                   onDone: {
                     branches: "transition1",
                     resolve: ({ ancestors: { Ready: current }, output, select: { destination: target } }) =>
-                      target.from().update.decoded(State.cases.Ready.make({ ...current, day: output, notice: "Saved" }))
+                      target({
+                        update: {
+                          data: State.cases.Ready.make({ ...current, day: output, notice: "Saved" }),
+                          decoded: true
+                        }
+                      })
                   }
                 }
               }
@@ -306,7 +312,7 @@ describe("state value updates", () => {
                   Set: {
                     branches: "transition1",
                     resolve: ({ event, select }) =>
-                      event.changed ? select.changed.from({ count: 1 }) : select.unchanged()
+                      event.changed ? select.changed({ data: { count: 1 } }) : select.unchanged()
                   }
                 }
               }
@@ -441,7 +447,7 @@ describe("state value updates", () => {
                   branches: "transition1",
                   resolve: ({ ancestors: { scope: current }, decline, select: { destination: owner } }) =>
                     current.count < 2
-                      ? owner.from({ count: current.count + 1 })
+                      ? owner({ data: { count: current.count + 1 } })
                       : decline(),
                   declinable: true
                 }
@@ -745,7 +751,7 @@ describe("state value updates", () => {
                       enqueue.raise(Events.Raised())
                       enqueue.emit(Emissions.Changed({ count: 1 }))
                       enqueue.sendTo(self, Events.Raised())
-                      return owner.from({ count: 1 })
+                      return owner({ data: { count: 1 } })
                     }
                   },
                   Raised: { none: true }

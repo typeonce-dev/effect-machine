@@ -76,9 +76,12 @@ describe("Machine state-value updates", () => {
                           resolve: ({ ancestors, select, state }) => {
                             expect(state).type.toBe<SignedOut>()
                             expect(ancestors["root.work.auth"]).type.toBe<Auth>()
-                            expect(select.owner.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
-                            expect(select.owner.from).type.toBeCallableWith({ user: "next" })
-                            return select.owner.decoded(new Auth({ user: "next" }))
+                            expect(select.owner).type.toBeCallableWith({
+                              data: new Auth({ user: "next" }),
+                              decoded: true
+                            })
+                            expect(select.owner).type.toBeCallableWith({ data: { user: "next" } })
+                            return select.owner({ data: new Auth({ user: "next" }), decoded: true })
                           }
                         }
                       }
@@ -158,12 +161,20 @@ describe("Machine state-value updates", () => {
                           branches: "signIn",
                           resolve: ({ ancestors, select }) => {
                             expect(ancestors["root.work.auth"]).type.toBe<Auth>()
-                            expect(select.signedIn.from).type.toBeCallableWith({})
-                            expect(select.signedIn.decoded).type.toBeCallableWith(new SignedIn({}))
-                            const selected = select.signedIn.decoded(new SignedIn({}))
-                            expect(selected.update.from).type.toBeCallableWith({ user: "next" })
-                            expect(selected.update.decoded).type.toBeCallableWith(new Auth({ user: "next" }))
-                            return selected.update.decoded(new Auth({ user: "next" }))
+                            expect(select.signedIn).type.not.toBeCallableWith({ data: {} })
+                            expect(select.signedIn).type.toBeCallableWith({
+                              data: {},
+                              update: { data: { user: "next" } }
+                            })
+                            expect(select.signedIn).type.not.toBeCallableWith({
+                              data: {},
+                              update: { data: { user: 1 } }
+                            })
+                            return select.signedIn({
+                              data: new SignedIn({}),
+                              decoded: true,
+                              update: { data: new Auth({ user: "next" }), decoded: true }
+                            })
                           }
                         }
                       }
@@ -231,7 +242,7 @@ describe("Machine state-value updates", () => {
                         Tick: {
                           branches: "signIn",
                           // @ts-expect-error! The declared retained owner must be constructed before returning a branch.
-                          resolve: ({ select }) => select.signedIn.decoded(new SignedIn({}))
+                          resolve: ({ select }) => select.signedIn({ data: new SignedIn({}), decoded: true })
                         }
                       }
                     },
@@ -421,7 +432,7 @@ describe("Machine state-value updates", () => {
                           branches: "change",
                           declinable: true,
                           resolve: ({ select, decline, ancestors }) =>
-                            ancestors.root.revision === 0 ? select.changed.from({ revision: 1 }) : decline()
+                            ancestors.root.revision === 0 ? select.changed({ data: { revision: 1 } }) : decline()
                         }
                       }
                     },

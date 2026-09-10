@@ -44,7 +44,7 @@ const navigationMachine = Machine.make({
         Go: {
           branches: "transition1",
           resolve: ({ select: { destination: target } }) =>
-            target.decoded(new App({}), (app) => app.two.decoded(new Two({})))
+            target({ data: new App({}), decoded: true, states: { two: { data: new Two({}), decoded: true } } })
         }
       }
     },
@@ -78,13 +78,13 @@ const raisedNavigationMachine = Machine.make({
       always: {
         branches: "transition1",
         resolve: ({ select: { destination: target } }) =>
-          target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+          target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
       },
       on: {
         Go: {
           branches: "transition2",
           resolve: ({ select: { destination: target } }) =>
-            target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+            target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
         }
       }
     },
@@ -146,7 +146,7 @@ const conditionalMachine = Machine.make({
             event.value < 0
               ? select.negative()
               : event.value === 0
-              ? select.zero.decoded(new Counter({ count: 0 }))
+              ? select.zero({ data: new Counter({ count: 0 }), decoded: true })
               : select.positive()
         }
       }
@@ -296,7 +296,7 @@ const reentryMachine = Machine.make({
           branches: "transition1",
           reenter: true,
           resolve: ({ select: { destination: target } }) =>
-            target.decoded(new App({}), (app) => app.one.decoded(new One({})))
+            target({ data: new App({}), decoded: true, states: { one: { data: new One({}), decoded: true } } })
         }
       },
       states: {
@@ -395,25 +395,39 @@ const historyMachine = Machine.make({
       history: {
         recent: {
           default: ({ target }) =>
-            target.from((to) =>
-              to.workspace.decoded(
-                new Workspace({}),
-                (workspace) =>
-                  workspace.editor.decoded(new Editor({}), (editor) =>
-                    editor.editing.decoded(new Editing({ revision: 0 })))
-              )
-            )
+            target({
+              states: {
+                workspace: {
+                  data: new Workspace({}),
+                  decoded: true,
+                  states: {
+                    editor: {
+                      data: new Editor({}),
+                      decoded: true,
+                      states: { editing: { data: new Editing({ revision: 0 }), decoded: true } }
+                    }
+                  }
+                }
+              }
+            })
         },
         exact: {
           default: ({ target }) =>
-            target.from((to) =>
-              to.workspace.decoded(
-                new Workspace({}),
-                (workspace) =>
-                  workspace.editor.decoded(new Editor({}), (editor) =>
-                    editor.editing.decoded(new Editing({ revision: 0 })))
-              )
-            )
+            target({
+              states: {
+                workspace: {
+                  data: new Workspace({}),
+                  decoded: true,
+                  states: {
+                    editor: {
+                      data: new Editor({}),
+                      decoded: true,
+                      states: { editing: { data: new Editing({ revision: 0 }), decoded: true } }
+                    }
+                  }
+                }
+              }
+            })
         }
       },
       on: {

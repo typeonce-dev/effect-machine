@@ -725,7 +725,7 @@ describe("Machine", () => {
                 expect(enqueue.sendTo).type.not.toBeCallableWith(worker, new Down({}))
                 expect(enqueue.stop).type.toBeCallableWith(worker)
                 expect(enqueue.stop).type.not.toBeCallableWith("worker")
-                return target.decoded(new Down({}))
+                return target({ data: new Down({}), decoded: true })
               }
             }
           }
@@ -2267,10 +2267,10 @@ describe("Machine", () => {
               branches: "transition1",
               resolve: ({ state, select: { destination: target } }) => {
                 const { _tag: _, ...fields } = state
-                expect(target.from).type.toBeCallableWith({ ...fields, attempt: 1 })
-                expect(target.from).type.not.toBeCallableWith(fields)
-                expect(target.from).type.not.toBeCallableWith({ ...fields, attempt: "invalid" })
-                return target.from({ ...fields, attempt: 1 })
+                expect(target).type.toBeCallableWith({ data: { ...fields, attempt: 1 } })
+                expect(target).type.not.toBeCallableWith({ data: fields })
+                expect(target).type.not.toBeCallableWith({ data: { ...fields, attempt: "invalid" } })
+                return target({ data: { ...fields, attempt: 1 } })
               }
             }
           }
@@ -2956,17 +2956,17 @@ describe("Machine", () => {
               resolve: ({ event, select, state }) => {
                 expect(event).type.toBe<SignIn>()
                 expect(state).type.toBe<Down>()
-                expect(select.recognized.decoded).type.toBeCallableWith(new Down({}))
+                expect(select.recognized).type.toBeCallableWith({ data: new Down({}), decoded: true })
                 expect(select.measured).type.toBeCallableWith()
                 switch (event.userId.length) {
                   case 0:
                     return select.measured()
                   case 1:
-                    return select.named.decoded(new Down({}))
+                    return select.named({ data: new Down({}), decoded: true })
                   case 2:
                     return select.active()
                   default:
-                    return select.recognized.decoded(new Down({}))
+                    return select.recognized({ data: new Down({}), decoded: true })
                 }
               }
             }
@@ -3114,7 +3114,7 @@ describe("Machine", () => {
                 if (context.event.userId === "consume") {
                   return context.select.consumed()
                 }
-                return context.select.accepted.decoded(new Down({}))
+                return context.select.accepted({ data: new Down({}), decoded: true })
               },
               declinable: true
             }
@@ -3360,7 +3360,7 @@ describe("Machine", () => {
                       resolve: ({ event, state, select: { destination: target } }) => {
                         expect(event).type.toBe<SignIn>()
                         expect(state).type.toBe<SignedOut>()
-                        return target.decoded(new SignedIn({ userId: event.userId }))
+                        return target({ data: new SignedIn({ userId: event.userId }), decoded: true })
                       }
                     }
                   }
@@ -3502,7 +3502,7 @@ describe("Machine", () => {
                   expect(event).type.toBe<SignIn | Machine.InitialEvent>()
                   expect(output).type.toBe<undefined>()
                   expect(state).type.toBe<Auth>()
-                  return target.decoded(new Down({}))
+                  return target({ data: new Down({}), decoded: true })
                 }
               },
               states: { signedOut: {}, signedIn: {} }
@@ -3944,7 +3944,7 @@ describe("Machine", () => {
             branches: "transition1",
             resolve: ({ output, select: { destination: target } }) => {
               expect(output).type.toBe<string>()
-              return target.decoded(new Down({}))
+              return target({ data: new Down({}), decoded: true })
             }
           },
           states: { signedOut: {}, signedIn: { output: ({ state }) => state.userId } }

@@ -141,8 +141,12 @@ export const machine = Machine.make({
                 Start: {
                   branches: "transition1",
                   resolve: ({ select: { destination: target } }) =>
-                    target.decoded(new Running({}), (running) => running.editing.decoded(new Editing({}))).update
-                      .decoded(new Workflow({ document: "Machine.ts", unsavedChanges: 3 }))
+                    target({
+                      data: new Running({}),
+                      decoded: true,
+                      states: { editing: { data: new Editing({}), decoded: true } },
+                      update: { data: new Workflow({ document: "Machine.ts", unsavedChanges: 3 }), decoded: true }
+                    })
                 },
                 Refresh: {
                   update: targets1.root.application.workflow,

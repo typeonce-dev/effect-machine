@@ -34,7 +34,7 @@ describe("machine scheduling", () => {
                 branches: "transition1",
                 resolve: ({ state, select: { destination: target } }, enqueue) => {
                   enqueue.raise(new Burst({}))
-                  return target.decoded(state)
+                  return target({ data: state, decoded: true })
                 }
               },
               Burst: {
@@ -44,7 +44,7 @@ describe("machine scheduling", () => {
                   if (count < burstSize) {
                     enqueue.raise(new Burst({}))
                   }
-                  return target.decoded(new SchedulingActive({ count }))
+                  return target({ data: new SchedulingActive({ count }), decoded: true })
                 }
               }
             }

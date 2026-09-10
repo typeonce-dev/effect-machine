@@ -125,15 +125,19 @@ const makeMachine = (unsafeStart = false) =>
                       branches: "unsafe",
                       resolve: ({ select }) =>
                         ({
-                          ...select.disabled.decoded(new Disabled({})),
+                          ...select.disabled({ data: new Disabled({}), decoded: true }),
                           result: { path: "application.workflow.idle", value: new Disabled({}) }
                         }) as any
                     } :
                     {
                       branches: "start",
                       resolve: ({ select }) =>
-                        select.running.decoded(new Running({}), (running) => running.editing.decoded(new Editing({})))
-                          .update.decoded(new Workflow({}))
+                        select.running({
+                          data: new Running({}),
+                          decoded: true,
+                          states: { editing: { data: new Editing({}), decoded: true } },
+                          update: { data: new Workflow({}), decoded: true }
+                        })
                     },
                   Refresh: { update: targets1.root.application.workflow, decoded: true, data: () => (new Workflow({})) }
                 }
@@ -215,7 +219,11 @@ const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined)
         always: {
           branches: "transition1",
           resolve: ({ select: { destination: target } }) => {
-            const selected = target.decoded(new Workflow({}), (workflow) => workflow.complete.decoded(new Complete({})))
+            const selected = target({
+              data: new Workflow({}),
+              decoded: true,
+              states: { complete: { data: new Complete({}), decoded: true } }
+            })
             return unsafe === "always"
               ? ({ ...selected, result: { path: "idle", value: new Running({}) } } as unknown as typeof selected)
               : selected
@@ -229,7 +237,7 @@ const makeLifecycleMachine = (unsafe: "always" | "done" | undefined = undefined)
         onDone: {
           branches: "transition2",
           resolve: ({ select: { destination: target } }) => {
-            const selected = target.decoded(new Disabled({}))
+            const selected = target({ data: new Disabled({}), decoded: true })
             return unsafe === "done"
               ? ({ ...selected, result: { path: "workflow", value: new Disabled({}) } } as unknown as typeof selected)
               : selected

@@ -22,7 +22,7 @@ const CounterState = Schema.TaggedUnion({
   Running: { count: Schema.Number }
 })
 
-export const CounterStates = Machine.state({ initial: "Idle", states: {
+export const CounterStates = Machine.state({ states: {
   Idle: {},
   Running: CounterState.cases.Running
 } })
@@ -41,16 +41,15 @@ export const CounterMachine = Machine.make({
   id: "Counter",
   root: CounterStates,
   events: CounterEvents,
-  initialConfiguration: root => root.resolve(({ target }) => target.from(to => to.Idle.from()))
-}).handle({ states: {
+}).handle({ initial: { target: targets.root.Idle }, states: {
   Idle: {
     on: {
-      Start: { target: targets.root.Running, from: () => ({ count: 0 }) }
+      Start: { target: targets.root.Running, data: () => ({ count: 0 }) }
     }
   },
   Running: {
     on: {
-      Increment: { update: targets.root.Running, from: ({ state }) => ({ count: state.count + 1 }) },
+      Increment: { update: targets.root.Running, data: ({ state }) => ({ count: state.count + 1 }) },
       Stop: { target: targets.root.Idle }
     }
   }
@@ -62,19 +61,18 @@ Each step has one job:
 - `Machine.state` declares the root, its child topology, and state-owned data.
 - `Machine.events` declares the public messages the machine accepts and returns
   typed event constructors.
-- `Machine.make` joins the state tree, event protocol, input, and initial state.
-- `.handle` implements the behavior of every active state and returns the
+- `Machine.make` joins the state tree, event protocol, input, and reusable sources.
+- `.handle` declares initial children and implements the behavior of every active state and returns the
   machine to export.
 
 Chain `.handle` from `Machine.make`. Do not store the intermediate definition
 when the module exports one machine implementation.
 
-State builders construct the next snapshot. Use `.from(...)` for schema make
-input; defaults, transformations, and refinements run while the machine plans
-the transition. Use `.decoded(...)` only for an existing `Schema.Type`. It is
-validated against the type side without rerunning encoded transformations.
-Valued state builders are not callable, so the construction mode is always
-visible. Schema-less state construction uses `.from()`.
+Use `data` for schema make input. Constructor defaults and validation run while
+planning. Use `{ decoded: true, data }` for an existing schema Type; validation
+still applies. Named selectors take the same object format, with nested children
+under `states`. Structural states omit data. See [Root API](./root-api.md) for
+startup input, root targets, subtree construction, and history fallbacks.
 
 The examples below show one modeling decision at a time. They omit unchanged
 state and event declarations already shown above.
@@ -108,7 +106,7 @@ const RequestState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const RequestStates = Machine.state({ initial: "Idle", states: {
+const RequestStates = Machine.state({ states: {
   Idle: {},
   Loading: {},
   Ready: RequestState.cases.Ready,
@@ -141,12 +139,11 @@ const DocumentState = Schema.TaggedUnion({
   }
 })
 
-const DocumentStates = Machine.state({ initial: "Closed", states: {
+const DocumentStates = Machine.state({ states: {
   Closed: {},
   Open: {
     // Editing, Saving, and SaveFailed all need the document and draft.
     schema: DocumentState.cases.Open,
-    initial: "Editing",
     states: {
       Editing: {},
       Saving: {},
@@ -177,9 +174,10 @@ const documentTargets = Machine.targets(DocumentStates)
 const DocumentMachine = Machine.make({
   root: DocumentStates,
   events: DocumentEvents
-}).handle({ states: {
+}).handle({ initial: { target: documentTargets.root.Closed }, states: {
   Closed: {},
   Open: {
+    initial: { target: documentTargets.root.Open.Editing },
     on: {
       // All Open children close the document in the same way.
       Close: { target: documentTargets.root.Closed }
@@ -245,19 +243,17 @@ child in every region. A parallel model therefore accepts the full product of
 those regions.
 
 ```ts
-const ScreenStates = Machine.state({ initial: "Screen", states: {
+const ScreenStates = Machine.state({ states: {
   Screen: {
     type: "parallel",
     states: {
       connection: {
-        initial: "Online",
         states: {
           Online: {},
           Offline: {}
         }
       },
       panel: {
-        initial: "Closed",
         states: {
           Closed: {},
           Open: {}
@@ -266,6 +262,15 @@ const ScreenStates = Machine.state({ initial: "Screen", states: {
     }
   }
 } })
+const screenTargets = Machine.targets(ScreenStates)
+const ScreenMachine = Machine.make({ root: ScreenStates, events: Machine.events({}) }).handle({
+  initial: { target: screenTargets.root.Screen },
+  states: { Screen: { states: {
+    connection: { initial: { target: screenTargets.root.Screen.connection.Online } },
+    panel: { initial: { target: screenTargets.root.Screen.panel.Closed } }
+  } } }
+})
+
 ```
 
 This model permits all four combinations: online with a closed panel, online
@@ -288,7 +293,7 @@ const LoadState = Schema.TaggedUnion({
   Failed: { message: Schema.String }
 })
 
-const LoadStates = Machine.state({ initial: "Idle", states: {
+const LoadStates = Machine.state({ states: {
   Idle: {},
   Loading: LoadState.cases.Loading,
   Ready: LoadState.cases.Ready,
@@ -300,15 +305,14 @@ const LoadMachine = Machine.make({
   root: LoadStates,
   effects: { loadDocument },
   events: Machine.eventsFromSchemas(),
-  initialConfiguration: root => root.resolve(({ target }) => target.from(to => to.Idle.from()))
-}).handle({ states: {
+}).handle({ initial: { target: loadTargets.root.Idle }, states: {
   Idle: {},
   Loading: {
     invoke: {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
-      onDone: { target: loadTargets.root.Ready, from: ({ output }) => ({ content: output }) },
-      onFailure: { target: loadTargets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+      onDone: { target: loadTargets.root.Ready, data: ({ output }) => ({ content: output }) },
+      onFailure: { target: loadTargets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
     }
   },
   Ready: {},
@@ -334,8 +338,8 @@ Loading: {
     {
       src: "loadDocument",
       input: ({ state }) => state.documentId,
-      onDone: { target: loadTargets.root.Ready, from: ({ output }) => ({ content: output }) },
-      onFailure: { target: loadTargets.root.Failed, from: ({ error }) => ({ message: String(error) }) }
+      onDone: { target: loadTargets.root.Ready, data: ({ output }) => ({ content: output }) },
+      onFailure: { target: loadTargets.root.Failed, data: ({ error }) => ({ message: String(error) }) }
     },
     { src: "loadTimeout", onDone: { target: loadTargets.root.Idle } }
   ]
@@ -387,14 +391,14 @@ const ReviewMachine = Machine.make({
       rejected: { target: reviewTargets.root.Rejected }
     }
   }
-}).handle({ states: {
+}).handle({ initial: { target: reviewTargets.root.Pending }, states: {
   Pending: {
     on: {
       Evaluate: {
         branches: "evaluate",
         resolve: ({ event, select }) => event.score >= 80
-          ? select.accepted.from()
-          : select.rejected.from()
+          ? select.accepted()
+          : select.rejected()
       }
     }
   },
@@ -414,7 +418,7 @@ descendants and running work:
 ```ts
 Changed: {
   update: targets.root.Document,
-  from: ({ ancestors }) => ({
+  data: ({ ancestors }) => ({
     ...ancestors.Document,
     revision: ancestors.Document.revision + 1
   })
@@ -423,12 +427,11 @@ Changed: {
 
 Choose a valued source or retained ancestor explicitly. To change a parallel
 sibling, send an event handled by that sibling. Combine a destination and one
-retained owner update with `{ target, update, from }`; the callback returns
+retained owner update with `{ target, update, data }`; the callback returns
 `{ target: destinationInput, update: completeOwnerInput }`. Both values are
 validated atomically, and destination entry sees the new owner value. A named
 branch can declare the same pair when a resolver needs commands or nested
-construction. Its constructor requires `.update.from(...)` or
-`.update.decoded(...)` before the selection can be returned.
+construction. Its selector requires `update: { data: ownerValue }` in the construction object.
 
 ## Test paths and invariants
 

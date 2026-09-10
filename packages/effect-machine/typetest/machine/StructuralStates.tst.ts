@@ -79,34 +79,46 @@ describe("structural active state types", () => {
       { readonly "": typeof States.node },
       ""
     >
-    expect(target.from).type.not.toBeCallableWith({}, () => undefined)
-    expect<typeof target extends (...args: ReadonlyArray<any>) => any ? true : false>().type.toBe<false>()
-    type RootBuilder = Parameters<typeof target.from>[0] extends (builder: infer Builder) => unknown ? Builder
-      : never
-    const tree = null as unknown as RootBuilder
-    type PlayerBuilder = Parameters<typeof tree.player.from>[0] extends (builder: infer Builder) => unknown ? Builder
-      : never
-    const player = null as unknown as PlayerBuilder
-    expect(player.transport.from).type.not.toBeCallableWith((transport: unknown) => transport)
-    type TransportBuilder = Parameters<typeof player.transport.from>[0] extends (builder: infer Builder) => unknown ?
-      Builder :
-      never
-    const transport = null as unknown as TransportBuilder
-    expect(transport.Empty.from).type.toBeCallableWith()
-    expect(transport.Empty.from).type.not.toBeCallableWith({})
-    type SettingsBuilder = Parameters<typeof player.settings.from>[0] extends (builder: infer Builder) => unknown
-      ? Builder
-      : never
-    const settings = null as unknown as SettingsBuilder
-    expect(settings.Audible.from).type.toBeCallableWith({ volume: 1 })
-    expect(settings.Audible.from).type.not.toBeCallableWith()
-    target.from((to) =>
-      to.player.from((player) =>
-        player
-          .transport.from((transport) => transport.Empty.from())
-          .settings.from((settings) => settings.Audible.from({ volume: 1 }))
-      )
-    )
+    expect(target).type.not.toBeCallableWith({})
+    expect(target).type.not.toBeCallableWith({ data: {}, states: { player: {} } })
+    type Tree = Parameters<typeof target>[0]
+    const valid = {
+      states: {
+        player: {
+          states: {
+            transport: { states: { Empty: {} } },
+            settings: { states: { Audible: { data: { volume: 1 } } } }
+          }
+        }
+      }
+    } satisfies Tree
+    expect(target).type.toBeCallableWith(valid)
+    expect(target).type.not.toBeCallableWith({
+      states: {
+        player: {
+          states: {
+            transport: { states: { Empty: {} } }
+          }
+        }
+      }
+    })
+    expect(target).type.not.toBeCallableWith({
+      states: {
+        player: {
+          states: {
+            transport: { states: { Empty: { data: {} } } },
+            settings: { states: { Audible: {} } }
+          }
+        }
+      }
+    })
+    target({
+      states: {
+        player: {
+          states: { transport: { states: { Empty: {} } }, settings: { states: { Audible: { data: { volume: 1 } } } } }
+        }
+      }
+    })
   })
   it("restricts value access while retaining structural snapshot queries", () => {
     type Snapshot = Machine.Snapshot<typeof States>
@@ -168,7 +180,7 @@ describe("structural active state types", () => {
                     Loaded: {
                       branches: "transition1",
                       resolve: ({ event, select: { destination: target } }) =>
-                        target.from({ duration: event.duration }, (ready) => ready.Paused.from())
+                        target({ data: { duration: event.duration }, states: { Paused: {} } })
                     }
                   }
                 },
@@ -188,10 +200,10 @@ describe("structural active state types", () => {
                             expect(ancestors).type.toBe<{
                               readonly "player.transport.Ready": Ready
                             }>()
-                            return target.from(
-                              { duration: containingState.duration },
-                              (ready) => ready.Playing.from({ position: 0 })
-                            )
+                            return target({
+                              data: { duration: containingState.duration },
+                              states: { Playing: { data: { position: 0 } } }
+                            })
                           }
                         }
                       }

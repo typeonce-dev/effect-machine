@@ -6,7 +6,7 @@
 
 import * as Effect from "effect/Effect"
 import type { Machine, MachineTarget } from "../../Machine.js"
-import { getTargetBuilder, type RuntimeCommand } from "./command.js"
+import { type RuntimeCommand } from "./command.js"
 import {
   type ActiveConfiguration,
   compareDocumentOrder,
@@ -391,7 +391,6 @@ const makeIndexedTransitionContext = (
   event: any,
   machineReferences?: PlanningMachineReferences
 ): any => {
-  const source = descriptor.nodes[sourceIndex]!
   const parentIndex = descriptor.parentIndices[sourceIndex]!
   const ancestors: Record<string, unknown> = {}
   for (const ancestorIndex of descriptor.ancestorIndices[sourceIndex]!) {
@@ -405,8 +404,7 @@ const makeIndexedTransitionContext = (
     containingState: parentIndex < 0 ? undefined : configuration.values[parentIndex],
     ancestors,
     event,
-    snapshot: snapshotFromIndexedState(descriptor, configuration),
-    target: getTargetBuilder(machine, source.path)
+    snapshot: snapshotFromIndexedState(descriptor, configuration)
   }
 }
 
@@ -601,7 +599,12 @@ const collectIndexedEvaluatedTransition = (
   const initialResolution = unresolvedTarget !== undefined && isInitialTarget(unresolvedTarget)
     ? resolveInitialTarget(
       machine,
-      activeConfigurationFromIndexedState(descriptor, state),
+      (() => {
+        const current = activeConfigurationFromIndexedState(descriptor, state)
+        return update === undefined
+          ? current
+          : { ...current, values: new Map(current.values).set(update.path, update.value) }
+      })(),
       unresolvedTarget,
       (selection.context as any).event
     )
@@ -830,8 +833,7 @@ const planIndexedFlatState = (
           containingState: undefined,
           ancestors: {},
           event,
-          snapshot: snapshotFromIndexedState(descriptor, current),
-          target: getTargetBuilder(machine, sourcePath)
+          snapshot: snapshotFromIndexedState(descriptor, current)
         },
         transition.evaluate
       )

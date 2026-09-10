@@ -33,13 +33,22 @@ const handled = machine.handle({
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) =>
-                  tree.App.from(App.make({}), (app) =>
-                    app.Workspace.from(Workspace.make({}), (workspace) =>
-                      workspace
-                        .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
-                        .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))))
-                )
+                target({
+                  states: {
+                    App: {
+                      data: App.make({}),
+                      states: {
+                        Workspace: {
+                          data: Workspace.make({}),
+                          states: {
+                            Editor: { data: Editor.make({}), states: { Editing: { data: Editing.make({}) } } },
+                            Sync: { data: Sync.make({}), states: { Idle: { data: SyncIdle.make({}) } } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                })
             }
           },
           output: ({ outputs }) => ({
@@ -79,11 +88,18 @@ const handled = machine.handle({
           choice: {
             branches: "enter",
             resolve: ({ select }) =>
-              select.app.from(App.make({}), (app) =>
-                app.Workspace.from(Workspace.make({}), (workspace) =>
-                  workspace
-                    .Editor.from(Editor.make({}), (editor) => editor.Editing.from(Editing.make({})))
-                    .Sync.from(Sync.make({}), (sync) => sync.Idle.from(SyncIdle.make({})))))
+              select.app({
+                data: App.make({}),
+                states: {
+                  Workspace: {
+                    data: Workspace.make({}),
+                    states: {
+                      Editor: { data: Editor.make({}), states: { Editing: { data: Editing.make({}) } } },
+                      Sync: { data: Sync.make({}), states: { Idle: { data: SyncIdle.make({}) } } }
+                    }
+                  }
+                }
+              })
           }
         }
       }

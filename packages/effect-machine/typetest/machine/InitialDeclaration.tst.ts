@@ -105,7 +105,7 @@ describe("handler-owned initial declarations", () => {
       ...baseline,
       initial: { target: targets.root.Idle, resolve: () => ({}) }
     })
-    expect(definition.handle).type.not.toBeCallableWith({ initial: baseline.initial })
+    expect(definition.handle).type.not.toBeCallableWith({ target: baseline.initial })
     expect(definition.handle).type.not.toBeCallableWith({ ...baseline, states: { Session: {} } })
     expect(definition.handle).type.not.toBeCallableWith({
       ...baseline,

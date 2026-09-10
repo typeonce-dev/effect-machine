@@ -196,11 +196,12 @@ describe("pure planning and managed runtime differential", () => {
                   if (snapshot.state.path !== "Running") {
                     throw new Error("expected Running snapshot")
                   }
-                  return target.decoded(
-                    new Done({
+                  return target({
+                    data: new Done({
                       value: snapshot.state.states.Left.value.value + snapshot.state.states.Right.value.value
-                    })
-                  )
+                    }),
+                    decoded: true
+                  })
                 }
               }
             },
@@ -211,7 +212,7 @@ describe("pure planning and managed runtime differential", () => {
                     branches: "transition2",
                     resolve: ({ state, select: { destination: target } }, enqueue) => {
                       enqueue.raise(new Bump({}))
-                      return target.decoded(new Left({ value: state.value + 1 }))
+                      return target({ data: new Left({ value: state.value + 1 }), decoded: true })
                     }
                   }
                 }
@@ -526,7 +527,7 @@ describe("pure planning and managed runtime differential", () => {
                   record("transition:begin")
                   enqueue.emit(new Notice({ label: "transition" }))
                   enqueue.raise(new RaisedOne({}))
-                  return target.decoded(new Working({}))
+                  return target({ data: new Working({}), decoded: true })
                 }
               }
             }
@@ -551,7 +552,7 @@ describe("pure planning and managed runtime differential", () => {
                 resolve: ({ select: { destination: target } }, enqueue) => {
                   record("raised:two")
                   enqueue.emit(new Notice({ label: "raised-two" }))
-                  return target.decoded(new Finished({}))
+                  return target({ data: new Finished({}), decoded: true })
                 }
               }
             }

@@ -95,7 +95,7 @@ describe("Machine transition snapshot context", () => {
                         resolve: ({ snapshot, select }) => {
                           captured = snapshot
                           return States.matches(snapshot, "System.Network.Online")
-                            ? select.online.decoded(new Playing({}))
+                            ? select.online({ data: new Playing({}), decoded: true })
                             : select.unchanged()
                         }
                       }
@@ -168,7 +168,7 @@ describe("Machine transition snapshot context", () => {
                         branches: "transition1",
                         resolve: ({ snapshot, select: { destination: target } }) => {
                           captured.push(snapshot)
-                          return target.decoded(new Playing({}))
+                          return target({ data: new Playing({}), decoded: true })
                         }
                       }
                     }
@@ -189,7 +189,7 @@ describe("Machine transition snapshot context", () => {
                         branches: "transition2",
                         resolve: ({ snapshot, select: { destination: target } }) => {
                           captured.push(snapshot)
-                          return target.decoded(new Offline({}))
+                          return target({ data: new Offline({}), decoded: true })
                         }
                       }
                     }
@@ -255,7 +255,7 @@ describe("Machine transition snapshot context", () => {
                       resolve: ({ snapshot, select }) => {
                         captured = snapshot
                         return States.matches(snapshot, "System.Network.Online")
-                          ? select.online.decoded(new Playing({}))
+                          ? select.online({ data: new Playing({}), decoded: true })
                           : select.unchanged()
                       }
                     }
@@ -342,7 +342,7 @@ describe("Machine transition snapshot context", () => {
                   branches: "transition1",
                   resolve: ({ snapshot, select: { destination: target } }) => {
                     captured = snapshot
-                    return target.decoded(new Restarted({}))
+                    return target({ data: new Restarted({}), decoded: true })
                   }
                 },
                 states: {

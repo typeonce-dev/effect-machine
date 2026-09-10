@@ -229,7 +229,11 @@ describe("executable machine readiness", () => {
           history: {
             recent: {
               default: ({ target }) =>
-                target.from((tree) => tree.Flow.decoded(new Flow({}), (flow) => flow.Idle.decoded(new Idle({}))))
+                target({
+                  states: {
+                    Flow: { data: new Flow({}), decoded: true, states: { Idle: { data: new Idle({}), decoded: true } } }
+                  }
+                })
             }
           },
           states: {

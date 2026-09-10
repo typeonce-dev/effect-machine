@@ -48,8 +48,8 @@ const makeMachine = () => {
     states: {
       closed: {
         on: {
-          Open: { initial: targets1.root.opened, data: () => ({ id: "team-1" }) },
-          OpenInvalid: { initial: targets1.root.opened, data: () => ({ id: "" }) }
+          Open: { target: targets1.root.opened, data: () => ({ id: "team-1" }) },
+          OpenInvalid: { target: targets1.root.opened, data: () => ({ id: "" }) }
         }
       },
       opened: {
@@ -95,7 +95,7 @@ const makeParallelMachine = () => {
     states: {
       outside: {
         on: {
-          EnterDashboard: { initial: targets2.root.dashboard, decoded: true, data: () => (new Dashboard({})) }
+          EnterDashboard: { target: targets2.root.dashboard, decoded: true, data: () => (new Dashboard({})) }
         }
       },
       dashboard: {
@@ -142,7 +142,7 @@ const makeChoiceMachine = () => {
     states: {
       outside: {
         on: {
-          EnterFlow: { initial: targets3.root.flow, decoded: true, data: () => (new Flow({})) }
+          EnterFlow: { target: targets3.root.flow, decoded: true, data: () => (new Flow({})) }
         }
       },
       flow: {
@@ -181,7 +181,7 @@ const makeStructuralMachine = () => {
     states: {
       outside: {
         on: {
-          EnterFlow: { initial: targets4.root.group }
+          EnterFlow: { target: targets4.root.group }
         }
       },
       group: {
@@ -227,8 +227,8 @@ const makeNestedMachine = () => {
         states: {
           closed: {
             on: {
-              OpenLocal: { initial: targets5.root.root.opened, data: () => ({ id: "local" }) },
-              OpenBranch: { initial: targets5.root.root.opened, data: () => ({ id: "branch" }) }
+              OpenLocal: { target: targets5.root.root.opened, data: () => ({ id: "local" }) },
+              OpenBranch: { target: targets5.root.root.opened, data: () => ({ id: "branch" }) }
             }
           },
           opened: {

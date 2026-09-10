@@ -91,14 +91,14 @@ const makeCounter = (state: {
               state.inFlight -= 1
               const value = current.value + event.by
               enqueue.emit(new Changed({ value }))
-              return target.decoded(new Count({ value }))
+              return target({ data: new Count({ value }), decoded: true })
             }
           },
           Fail: {
             branches: "transition2",
             resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.emit(new Changed({ value: 999 }))
-              return target.decoded(current)
+              return target({ data: current, decoded: true })
             }
           },
           Finish: {
@@ -110,14 +110,14 @@ const makeCounter = (state: {
             branches: "transition4",
             resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.raise(new Increment({ by: 1, block: false }))
-              return target.decoded(current)
+              return target({ data: current, decoded: true })
             }
           },
           SpawnFromAction: {
             branches: "transition5",
             resolve: ({ state: current, select: { destination: target } }, enqueue) => {
               enqueue.stop(UnsupportedChild)
-              return target.decoded(current)
+              return target({ data: current, decoded: true })
             }
           }
         }

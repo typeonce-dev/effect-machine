@@ -129,7 +129,7 @@ it("declines guarded child transitions and tries the root handler", async () => 
             guard: ({ event }) => event.allowed,
             resolve: ({ select: { destination: target } }) => {
               constructed++
-              return target.from()
+              return target({})
             }
           }
         }
@@ -270,7 +270,7 @@ it("retains current root fields when restoring descendant history", async () => 
         on: { Leave: { target: targets5.root.Away } },
         history: {
           recent: {
-            default: ({ target }) => target.from({ count: 999 }, (to) => to.Editing.from((editing) => editing.A.from()))
+            default: ({ target }) => target({ data: { count: 999 }, states: { Editing: { states: { A: {} } } } })
           }
         },
         states: {

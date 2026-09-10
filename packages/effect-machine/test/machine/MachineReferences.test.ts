@@ -261,7 +261,7 @@ describe("machine reference event channels", () => {
                   if (parent !== undefined) {
                     enqueue.sendTo(parent, ParentEvents.ChildReported({ value: 1 }))
                   }
-                  return target.decoded(new Reported({}))
+                  return target({ data: new Reported({}), decoded: true })
                 }
               }
             }

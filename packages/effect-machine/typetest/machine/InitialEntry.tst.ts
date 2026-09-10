@@ -39,7 +39,7 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: { initial: targets1.root.opened, decoded: true, data: () => (new Opened({ id: "team-1" })) }
+            Open: { target: targets1.root.opened, decoded: true, data: () => (new Opened({ id: "team-1" })) }
           }
         },
         opened: {
@@ -63,7 +63,7 @@ describe("declared initial entry types", () => {
       states: {
         closed: {
           on: {
-            Open: { initial: targets1.root.opened, data: () => ({ id: "team-1" }) }
+            Open: { target: targets1.root.opened, data: () => ({ id: "team-1" }) }
           }
         },
         opened: {
@@ -90,7 +90,11 @@ describe("declared initial entry types", () => {
             Open: {
               branches: "transition3",
               resolve: ({ select: { destination: target } }) =>
-                target.decoded(new Opened({ id: "team-1" }), (opened) => opened.loading.decoded(new Loading({})))
+                target({
+                  data: new Opened({ id: "team-1" }),
+                  decoded: true,
+                  states: { loading: { data: new Loading({}), decoded: true } }
+                })
             }
           }
         },
@@ -120,12 +124,16 @@ describe("declared initial entry types", () => {
             Open: {
               branches: "transition4",
               resolve: ({ select: { destination: target } }) => {
-                expect(target.initial).type.not.toBeAssignableTo<() => unknown>()
-                expect(target).type.toHaveProperty("initial")
-                expect(target.initial.decoded).type.not.toBeCallableWith()
-                expect(target.initial.decoded).type.toBeCallableWith(new Opened({ id: "team-1" }))
-                expect(target.initial.from).type.toBeCallableWith({ id: "team-1" })
-                return target.decoded(new Opened({ id: "team-1" }), (opened) => opened.loading.decoded(new Loading({})))
+                expect(target).type.not.toBeCallableWith()
+                expect(target).type.not.toHaveProperty("initial")
+                expect(target).type.not.toBeCallableWith({ decoded: true })
+                expect(target).type.toBeCallableWith({ data: new Opened({ id: "team-1" }), decoded: true })
+                expect(target).type.toBeCallableWith({ data: { id: "team-1" } })
+                return target({
+                  data: new Opened({ id: "team-1" }),
+                  decoded: true,
+                  states: { loading: { data: new Loading({}), decoded: true } }
+                })
               }
             }
           }

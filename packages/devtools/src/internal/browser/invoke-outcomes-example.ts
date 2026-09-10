@@ -260,7 +260,7 @@ export const invokeOutcomesMachine = Machine.make({
               branches: "transition13",
               resolve: ({ select, snapshot }) =>
                 snapshot.state === "ready"
-                  ? select.ready.decoded(new Completed({ source: "process", result: "ready" }))
+                  ? select.ready({ data: new Completed({ source: "process", result: "ready" }), decoded: true })
                   : select.waiting()
             }
           }
@@ -279,12 +279,12 @@ export const invokeOutcomesMachine = Machine.make({
     },
     Completed: {
       on: {
-        Reset: { initial: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
+        Reset: { target: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
       }
     },
     Failed: {
       on: {
-        Reset: { initial: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
+        Reset: { target: targets2.root.Gallery, decoded: true, data: () => (new Gallery({ selectedDemo: null })) }
       }
     }
   }

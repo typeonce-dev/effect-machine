@@ -40,7 +40,7 @@ const handled = machine.handle({
         Reset: {
           branches: "reset",
           reenter: true,
-          resolve: ({ state, select }) => state.text.length === 0 ? select.idle.from() : select.same()
+          resolve: ({ state, select }) => state.text.length === 0 ? select.idle({}) : select.same()
         }
       }
     }

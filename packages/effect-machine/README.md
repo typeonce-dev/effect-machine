@@ -209,8 +209,8 @@ const machine = Machine.make({
           branches: "search",
           resolve: ({ event, select }) =>
             event.query.length > 0
-              ? select.loading.from({ query: event.query })
-              : select.idle.from()
+              ? select.loading({ data: { query: event.query } })
+              : select.idle()
         }
       }
     }
@@ -221,9 +221,9 @@ const machine = Machine.make({
 Each selector is bound to its declared destination. Its constructor rejects a
 payload belonging to another branch. A single-target group works the same way;
 there is no second path declaration in the resolver. For a compound target,
-`select.checkout.from(parentValues, child => child.Review.from(childValues))`
+`select.checkout({ data: parentValues, states: { Review: { data: childValues } } })`
 constructs the explicitly selected subtree. Parallel constructors require every
-entered region. Every compound has an initial edge, including inactive branches. Final outputs,
+entered region; source-local construction can retain active sibling regions. Every compound has an initial edge, including inactive branches. Final outputs,
 history defaults, and choices remain part of machine readiness checking.
 
 Use `guard: context => boolean` to decline before construction or commands.
@@ -239,9 +239,10 @@ All references come from the same root descriptor supplied to `make`:
 | Declaration                                           | Meaning                                                                   |
 | ----------------------------------------------------- | ------------------------------------------------------------------------- |
 | `{ target: targets.root.Checkout.Review, data: ... }` | Enter a declared destination with its value.                              |
-| `{ initial: targets.root.Checkout, data: ... }`       | Enter the declared initial configuration of a compound or parallel state. |
+| `{ target: targets.root.Checkout, data: ... }`        | Enter the declared initial configuration of a compound or parallel state. |
 | `{ history: targets.root.Checkout.recent }`           | Restore a declared history state.                                         |
 | `{ update: targets.root.Checkout, data: ... }`        | Replace a retained active owner's value.                                  |
+| `{ target: targets.root, input: ... }`                | Reconstruct root and its initial children using fresh machine input.      |
 | `{ update: targets.root, data: ... }`                 | Replace root data and retain active descendants.                          |
 | `{ none: true }`                                      | Accept an event without changing the configuration.                       |
 
@@ -260,12 +261,12 @@ Save: {
 
 The complete replacement values are validated before either change is applied.
 Advanced construction declares both references in a branch and uses
-`select.saved.from(destinationValues).update.from(ownerValues)`.
+`select.saved({ data: destinationValues, update: { data: ownerValues } })`.
 A retained owner must be active for that source and remain active through the
 transition. A sibling region's value cannot be updated through this operation.
 
 The runtime transition API does not replace arbitrary complete root
-configurations. Startup follows the initial declarations in `.handle`; history
+configurations. Root targets accept fresh input and follow the initial declarations in `.handle`; history
 defaults retain complete subtree construction for restoration.
 
 ### Protocols and ownership

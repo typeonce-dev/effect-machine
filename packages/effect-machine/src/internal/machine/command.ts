@@ -16,22 +16,6 @@ export interface Collected<Event> {
   readonly emittedEvents: Array<unknown>
 }
 
-const targetBuilderCache = new WeakMap<object, Map<string, unknown>>()
-
-export const getTargetBuilder = (machine: Machine.Any, path: string): any => {
-  let byPath = targetBuilderCache.get(machine)
-  if (byPath === undefined) {
-    byPath = new Map()
-    targetBuilderCache.set(machine, byPath)
-  }
-  if (byPath.has(path)) {
-    return byPath.get(path)
-  }
-  const builder = machine.makeTargetBuilder(path as any)
-  byPath.set(path, builder)
-  return builder
-}
-
 export const makeCollector = <Event>(machine: Machine.Any): Collected<Event> => {
   const commands: Array<RuntimeCommand> = []
   const raisedEvents: Array<Event> = []

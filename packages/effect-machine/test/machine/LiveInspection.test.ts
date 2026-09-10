@@ -31,7 +31,7 @@ const machine = Machine.make({
           branches: "transition1",
           resolve: ({ event, select: { destination: target } }, enqueue) => {
             enqueue.emit(Emissions.Notice({ value: event.by }))
-            return target.decoded(new Idle({}))
+            return target({ data: new Idle({}), decoded: true })
           }
         }
       }

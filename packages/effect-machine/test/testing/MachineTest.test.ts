@@ -44,7 +44,7 @@ const makeTraceMachine = (onAction: () => void) => {
             branches: "transition1",
             resolve: ({ select: { destination: target } }) => {
               onAction()
-              return target.decoded(new Ready({ count: 0 }))
+              return target({ data: new Ready({ count: 0 }), decoded: true })
             }
           }
         }
@@ -55,7 +55,7 @@ const makeTraceMachine = (onAction: () => void) => {
             branches: "transition2",
             resolve: ({ event, state, select: { destination: target } }) => {
               onAction()
-              return target.decoded(new Ready({ count: state.count + event.amount }))
+              return target({ data: new Ready({ count: state.count + event.amount }), decoded: true })
             }
           }
         }

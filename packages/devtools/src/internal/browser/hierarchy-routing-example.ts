@@ -60,8 +60,8 @@ export const hierarchyRoutingMachine = Machine.make({
               branches: "transition1",
               resolve: ({ event, select }) =>
                 event.route === "save"
-                  ? select.save.from()
-                  : select.invalid.from({ message: "Add a title before continuing." })
+                  ? select.save({})
+                  : select.invalid({ data: { message: "Add a title before continuing." } })
             }
           },
           states: {

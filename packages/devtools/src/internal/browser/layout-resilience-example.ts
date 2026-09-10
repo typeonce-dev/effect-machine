@@ -117,12 +117,12 @@ export const layoutResilienceMachine = Machine.make({
               branches: "transition4",
               resolve: ({ event, select }) => {
                 if (event.route === "login") {
-                  return select.login.from()
+                  return select.login({})
                 }
                 if (event.route === "verification") {
-                  return select.requestVerification.from()
+                  return select.requestVerification({})
                 }
-                return select.invalid.from({ message: "Enter valid authentication details." })
+                return select.invalid({ data: { message: "Enter valid authentication details." } })
               }
             }
           },
@@ -149,7 +149,7 @@ export const layoutResilienceMachine = Machine.make({
             id: "request-verification",
             input: (context) => context,
             onDone: {
-              initial: targets1.root.Verification,
+              target: targets1.root.Verification,
               data: ({ containingState }) => ({
                 mode: containingState.mode,
                 email: containingState.email,

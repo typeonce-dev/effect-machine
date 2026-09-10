@@ -26,7 +26,7 @@ const complete = machine.handle({
           branches: "finish",
           resolve: ({ event, select }, enqueue) => {
             enqueue.emit(Notice.make({ value: event.value }))
-            return select.done.from(Done.make({ value: event.value }))
+            return select.done({ data: Done.make({ value: event.value }) })
           }
         },
         Loaded: { target: targets.root.Done, data: ({ event }) => ({ value: event.value }) }

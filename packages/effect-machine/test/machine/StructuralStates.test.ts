@@ -92,7 +92,7 @@ const makeMachine = () => {
                     branches: "transition1",
                     resolve: ({ event, state, select: { destination: target } }) => {
                       assert.strictEqual(state, undefined)
-                      return target.from({ url: event.url })
+                      return target({ data: { url: event.url } })
                     }
                   }
                 }
@@ -103,7 +103,7 @@ const makeMachine = () => {
                     branches: "transition2",
                     resolve: ({ event, state, select: { destination: target } }) => {
                       assert.strictEqual(state._tag, "Loading")
-                      return target.from({ duration: event.duration }, (ready) => ready.Paused.from())
+                      return target({ data: { duration: event.duration }, states: { Paused: {} } })
                     }
                   }
                 }
@@ -119,7 +119,7 @@ const makeMachine = () => {
                         branches: "transition3",
                         resolve: ({ containingState, state, select: { destination: target } }) => {
                           assert.strictEqual(state, undefined)
-                          return target.from({ position: Math.min(0, containingState.duration) })
+                          return target({ data: { position: Math.min(0, containingState.duration) } })
                         }
                       }
                     }

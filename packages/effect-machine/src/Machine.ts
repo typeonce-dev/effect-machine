@@ -243,11 +243,6 @@ export interface Machine<
   readonly stateNodes: Machine.StateNodes
 
   /** @internal */
-  readonly makeTargetBuilder: <Source extends Machine.StateNodeIdentifier<States>>(
-    source: Source
-  ) => Machine.TargetBuilder<States, Source>
-
-  /** @internal */
   readonly handlers: Readonly<Record<string, unknown>>
 
   /** @internal */
@@ -300,7 +295,7 @@ export interface Definition<
       InputEvents,
       ParentEvents
     >,
-    TypeId | "stateNodes" | "makeTargetBuilder" | "handlers" | "initial" | "initialDefinition"
+    TypeId | "stateNodes" | "handlers" | "initial" | "initialDefinition"
   >
 {
   /**
@@ -355,10 +350,7 @@ export declare namespace Definition {
    * @category models
    * @since 0.15.0
    */
-  export interface Any
-    extends
-      Omit<Machine.Any, TypeId | "stateNodes" | "makeTargetBuilder" | "handlers" | "initial" | "initialDefinition">
-  {
+  export interface Any extends Omit<Machine.Any, TypeId | "stateNodes" | "handlers" | "initial" | "initialDefinition"> {
     readonly handle: any
   }
 }
@@ -2621,7 +2613,6 @@ export declare namespace Machine {
     /** @internal */
     readonly stateNodes: StateNodes
     /** @internal */
-    readonly makeTargetBuilder: any
     /** @internal */
     readonly handlers: any
     /** @internal */
@@ -4534,12 +4525,9 @@ export declare namespace Machine {
   export type HistoryDefaultTargetBuilder<
     States extends StateSchemas,
     Owner extends StateIdentifier<States>
-  > = HistorySnapshotMethod<
-    { readonly "": Extract<Omit<States[""], "~effect/Machine/ExplicitInitial">, StateNodeConfig> },
-    "" & ActiveStateKey<{ readonly "": Extract<Omit<States[""], "~effect/Machine/ExplicitInitial">, StateNodeConfig> }>,
-    "",
-    Owner
-  >
+  > = (
+    construction: HistoryConstruction<States[""], Owner>
+  ) => StateConstruction<CompleteSnapshotContaining<States, Owner>>
 
   /**
    * Builder for source-local transition targets.
@@ -5708,6 +5696,32 @@ export declare namespace Machine {
       readonly output?: never
     }
 
+  type HistoryConstruction<Node, Owner extends string> =
+    & ConstructionData<Node>
+    & (Node extends {
+      readonly states: infer Children extends StateSchemas
+    } ? {
+        readonly states: Node extends { readonly type: "parallel" } ? {
+            readonly [K in (ActiveStateKey<Children> | ChoiceStateKey<Children>)]: HistoryConstruction<
+              Children[K],
+              Owner extends `${K}.${infer Rest}` ? Rest : ""
+            >
+          }
+          : {
+            readonly [K in (ActiveStateKey<Children> | ChoiceStateKey<Children>)]: Owner extends
+              "" | K | `${K}.${string}` ?
+                & {
+                  readonly [P in K]: HistoryConstruction<
+                    Children[P],
+                    Owner extends `${K}.${infer Rest}` ? Rest : ""
+                  >
+                }
+                & { readonly [P in Exclude<(ActiveStateKey<Children> | ChoiceStateKey<Children>), K>]?: never } :
+              never
+          }[(ActiveStateKey<Children> | ChoiceStateKey<Children>)]
+      }
+      : { readonly states?: never })
+
   /** Context used only when a history node has no previously captured record. */
   export interface HistoryDefaultContext<
     in out States extends StateSchemas,
@@ -6393,7 +6407,7 @@ export declare namespace Machine {
     & (
       | {
         /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-        readonly target: ReferenceUnion<S, DestinationPath<S>>
+        readonly target: ReferenceUnion<S, DestinationPath<S>> | TargetReference<Root, "", "state">
         /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
         readonly update?: ReferenceUnion<S, ValuedStateIdentifier<S>>
         /** Enters a compound or parallel subtree through its declared initialization. */
@@ -6410,18 +6424,6 @@ export declare namespace Machine {
         readonly target?: never
         /** Enters a compound or parallel subtree through its declared initialization. */
         readonly initial?: never
-        /** Restores the declared history reference, using its fallback on first entry. */
-        readonly history?: never
-        /** Accepts the event without selecting a new destination. */
-        readonly none?: never
-      }
-      | {
-        /** Enters a compound or parallel subtree through its declared initialization. */
-        readonly initial: ReferenceUnion<S, Exclude<ObjectCompoundPath<S>, "">>
-        /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-        readonly target?: never
-        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-        readonly update?: never
         /** Restores the declared history reference, using its fallback on first entry. */
         readonly history?: never
         /** Accepts the event without selecting a new destination. */
@@ -6470,56 +6472,111 @@ export declare namespace Machine {
     /** Named groups of inspectable destinations used by transition resolvers. */
     readonly branches?: Readonly<Record<string, Readonly<Record<string, unknown>>>>
   }
+  type RegisteredInput<R> = R extends { readonly "~input": infer I extends Schema.Top } ? I : typeof Schema.Void
   type Registered<R, Kind extends PropertyKey> = Kind extends keyof R ? NonNullable<R[Kind]> : {}
-  type AtBuilder<T, P extends string> = P extends "" ? T
-    : P extends `${infer H}.${infer Rest}` ? H extends keyof T ? AtBuilder<T[H], Rest> : never
-    : P extends keyof T ? T[P]
-    : never
-  type BranchBuilderAt<S extends StateSchemas, Src extends StateNodeIdentifier<S>, P extends string> = AtBuilder<
-    RootBuilder<BranchTargetBuilder<S, Src>>,
-    P
-  >
   type RefPath<R> = R extends TargetReference<any, infer P, any> ? P : never
-  type SelectionOf<S extends StateSchemas, Src extends StateNodeIdentifier<S>, D> = D extends {
-    /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-    readonly target: infer Ref
-  } ? RefPath<Ref> extends infer P extends StateNodeIdentifier<S> ? D extends {
-        /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-        readonly update: infer Update
-      } ?
-        RefPath<Update> extends
-          infer Owner extends Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>
-          ? TargetSelection<UpdatingTargetBuilder<BranchBuilderAt<S, Src, P>, S, Owner>, P, "state", "branch"> :
-        never
-      : TargetSelection<BranchBuilderAt<S, Src, P>, P, P extends ChoiceIdentifier<S> ? "choice" : "state", "branch">
+  type ConstructionData<Node> = [NodeSchema<Node>] extends [never] ? { readonly data?: never; readonly decoded?: never }
+    :
+      | (
+        & { readonly decoded?: false }
+        & ({} extends NodeMakeInput<Node> ? { readonly data?: NodeMakeInput<Node> } :
+          { readonly data: NodeMakeInput<Node> })
+      )
+      | { readonly decoded: true; readonly data: NodeValue<Node> }
+  type ConstructionChildren<Children extends StateSchemas, Parallel extends boolean, Source extends string = never> =
+    Parallel extends true ? {
+        readonly [K in ActiveStateKey<Children>]: ConstructionObject<
+          Children[K],
+          Source extends `${K}.${infer Rest}` ? Rest : Source extends K ? "" : never
+        >
+      }
+      : {
+        readonly [K in ActiveStateKey<Children> | ChoiceStateKey<Children>]:
+          & {
+            readonly [P in K]: ConstructionObject<
+              Children[P],
+              Source extends `${P}.${infer Rest}` ? Rest : Source extends P ? "" : never
+            >
+          }
+          & { readonly [P in Exclude<ActiveStateKey<Children> | ChoiceStateKey<Children>, K>]?: never }
+      }[ActiveStateKey<Children> | ChoiceStateKey<Children>]
+  /** Values for one state and, optionally, its explicitly selected descendants. */
+  export type ConstructionObject<Node, Source extends string = never> =
+    & { readonly input?: never }
+    & ConstructionData<Node>
+    & (Node extends {
+      readonly states: infer Children extends StateSchemas
+    } ? {
+        readonly states?: ConstructionChildren<
+          Children,
+          Node extends { readonly type: "parallel" } ? [Source] extends [never] ? true : false
+            : false,
+          Source
+        >
+      }
+      : { readonly states?: never })
+  type ConstructionCall<A, Result> = {} extends A ? (construction?: A) => Result : (construction: A) => Result
+  type RootInput<R> =
+    & { readonly data?: never; readonly decoded?: never; readonly states?: never; readonly update?: never }
+    & (RegisteredInput<R> extends typeof Schema.Void ? { readonly input?: never }
+      : {
+        /** Fresh machine input used by root construction and root initial callbacks. */ readonly input:
+          RegisteredInput<R>["Type"]
+      })
+  type ObjectSelection<
+    S extends StateSchemas,
+    Src extends StateNodeIdentifier<S>,
+    P extends StateNodeIdentifier<S>,
+    R
+  > = P extends "" ? ConstructionCall<RootInput<R>, InitialTarget<P>>
+    : P extends ChoiceIdentifier<S> ? () => ChoiceTarget<S, P>
+    : P extends StateIdentifier<S> ? ConstructionCall<
+        ConstructionObject<
+          NodeByIdentifier<S, P>,
+          Src extends `${P}.${infer Rest}` ? Rest : Src extends P ? "" : never
+        > & { readonly update?: never },
+        Target<S, P>
+      >
     : never
-    : D extends {
-      /** Enters a compound or parallel subtree through its declared initialization. */
-      readonly initial: infer Ref
-    } ? RefPath<Ref> extends infer P extends string ? BranchBuilderAt<S, Src, P> extends {
-          /** Enters a compound or parallel subtree through its declared initialization. */
-          readonly initial: infer B
-        } ? TargetSelection<B, P, "initial", "branch">
-        : never :
+  type SelectionOf<S extends StateSchemas, Src extends StateNodeIdentifier<S>, D, R = {}> = D extends {
+    readonly target: infer Ref
+  } ?
+    RefPath<Ref> extends infer P extends StateNodeIdentifier<S> ?
+      D extends { readonly update: infer Update }
+        ? RefPath<Update> extends
+          infer Owner extends Extract<ParentStateIdentifier<Src>, ParentStateIdentifier<P> & ValuedStateIdentifier<S>>
+          ? P extends StateIdentifier<S> ? TargetSelection<
+              ConstructionCall<
+                ConstructionObject<
+                  NodeByIdentifier<S, P>,
+                  Src extends `${P}.${infer Rest}` ? Rest : Src extends P ? "" : never
+                > & {
+                  readonly update: ConstructionData<NodeByIdentifier<S, Owner>>
+                },
+                CombinedTarget<Target<S, P>, S, Owner>
+              >,
+              P,
+              "state",
+              "branch"
+            > :
+          never
+        : never
+      : TargetSelection<ObjectSelection<S, Src, P, R>, P, P extends ChoiceIdentifier<S> ? "choice" : "state", "branch">
+    : never
+    : D extends { readonly history: infer Ref }
+      ? RefPath<Ref> extends infer P extends HistoryIdentifier<S>
+        ? TargetSelection<() => HistoryTarget<S, P>, P, "history", "full"> :
       never
-    : D extends {
-      /** Restores the declared history reference, using its fallback on first entry. */
-      readonly history: infer Ref
-    } ?
-      RefPath<Ref> extends infer P extends string
-        ? TargetSelection<AtBuilder<RootBuilder<HistoryTargetBuilder<S>>, P>, P, "history", "full"> :
+    : D extends { readonly update: infer Ref }
+      ? RefPath<Ref> extends infer P extends Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>
+        ? TargetSelection<
+          ConstructionCall<ConstructionData<NodeByIdentifier<S, P>>, StateUpdate<S, P>>,
+          P,
+          "update",
+          "branch"
+        > :
       never
-    : D extends {
-      /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-      readonly update: infer Ref
-    } ?
-      RefPath<Ref> extends infer P extends Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>
-        ? TargetSelection<StateUpdateBuilder<S, P>, P, "update", "branch"> :
-      never
-    : D extends {
-      /** Accepts the event without selecting a new destination. */
-      readonly none: true
-    } ? TargetSelection<() => NoTarget, never, "none", "local">
+    : D extends { readonly none: true } ? TargetSelection<() => NoTarget, never, "none", "local">
     : never
   type BuilderArgs<B, K extends PropertyKey> = K extends keyof B
     ? B[K] extends (...args: infer A) => unknown ? A : never
@@ -6530,15 +6587,6 @@ export declare namespace Machine {
         & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
       : never
   }[Extract<keyof B, "from" | "decoded">]
-  type ObjectDefault<B> = B extends {
-    /** Constructs schema make input from the typed source context. */
-    readonly from: () => unknown
-  } | (() => unknown) ? {
-      /** Constructs schema make input from the typed source context. */
-      readonly from?: never /** Supplies an already decoded schema value from the typed source context. */
-      readonly decoded?: never
-    }
-    : never
   type ObjectPolicy<C, Reenter extends boolean, Acceptance extends TransitionAcceptance> = {
     /** Set to true to exit and reenter the handler source. */
     readonly reenter?: Reenter extends true ? boolean : never
@@ -6560,13 +6608,24 @@ export declare namespace Machine {
     P extends DestinationPath<S>,
     C
   > = P extends ChoiceIdentifier<S> ? { readonly from?: never; readonly decoded?: never }
-    : P extends StateIdentifier<S> ?
-      NodeByIdentifier<S, P> extends { readonly states: StateSchemas }
-        ? [NodeSchema<NodeByIdentifier<S, P>>] extends [never]
-          ? ObjectConstruction<C, BranchBuilderAt<S, Src, P>> | ObjectDefault<BranchBuilderAt<S, Src, P>>
-        : never
-      : InlineNodeConstruction<C, NodeByIdentifier<S, P>>
+    : P extends StateIdentifier<S> ? InlineNodeConstruction<C, NodeByIdentifier<S, P>>
     : never
+  type InlineRoot<S extends StateSchemas, C, R> =
+    & {
+      readonly target: ReferenceAt<S, Extract<"", StateNodeIdentifier<S>>>
+      readonly update?: never
+      readonly branches?: never
+      readonly resolve?: never
+      readonly history?: never
+      readonly none?: never
+    }
+    & (RegisteredInput<R> extends typeof Schema.Void ? { readonly input?: never }
+      : {
+        /** Fresh machine input used to reconstruct root and its initial children. */ readonly input: DataValue<
+          C,
+          RegisteredInput<R>["Type"]
+        >
+      })
   type InlineDestination<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> = {
     readonly [P in DestinationPath<S>]:
       & {
@@ -6595,24 +6654,7 @@ export declare namespace Machine {
     P extends string,
     Owner extends ValuedStateIdentifier<S>,
     C
-  > = P extends StateIdentifier<S> ? NodeByIdentifier<S, P> extends { readonly states: StateSchemas } ? {
-        readonly [
-          M in Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">
-        ]: BuilderArgs<BranchBuilderAt<S, Src, P>, M> extends readonly [unknown?] ?
-            & {
-              readonly [K in M]: (
-                context: C
-              ) => {
-                /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-                readonly target: BuilderArgs<BranchBuilderAt<S, Src, P>, M>[0]
-                /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-                readonly update: BuilderArgs<StateUpdateBuilder<S, Owner>, M>[0]
-              }
-            }
-            & { readonly [K in Exclude<"from" | "decoded", M>]?: never }
-          : never
-      }[Extract<keyof BranchBuilderAt<S, Src, P> & keyof StateUpdateBuilder<S, Owner>, "from" | "decoded">]
-    :
+  > = P extends StateIdentifier<S> ?
       | {
         readonly from: (
           context: C
@@ -6684,35 +6726,10 @@ export declare namespace Machine {
         }
         & ObjectConstruction<C, StateUpdateBuilder<S, P>>
     }[Extract<Src | ParentStateIdentifier<Src>, ValuedStateIdentifier<S>>]
-  type InlineInitial<S extends StateSchemas, Src extends StateNodeIdentifier<S>, C> =
-    [Exclude<ObjectCompoundPath<S>, "">] extends [never] ? never : {
-      readonly [P in Exclude<ObjectCompoundPath<S>, "">]: InitialTargetFactory<NodeByIdentifier<S, P>, P> extends
-        infer B ?
-          & {
-            /** Enters a compound or parallel subtree through its declared initialization. */
-            readonly initial: ReferenceAt<S, P>
-            /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-            readonly target?: never
-            /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
-            readonly update?: never
-            /** Restores the declared history reference, using its fallback on first entry. */
-            readonly history?: never
-            /** Accepts the event without selecting a new destination. */
-            readonly none?: never
-            /** Named groups of inspectable destinations used by transition resolvers. */
-            readonly branches?: never
-            /** Selects one declared branch and may enqueue synchronous commands. */
-            readonly resolve?: never
-            /** Set to true when the resolver can explicitly return decline(). */
-            readonly declinable?: never
-          }
-          & (ObjectConstruction<C, B> | ObjectDefault<B>) :
-        never
-    }[Exclude<ObjectCompoundPath<S>, "">]
-  type BranchSelections<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
+  type BranchSelections<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group, R> = {
     readonly [K in Extract<keyof Group, string>]: {
       /** Selects a declared descendant; its transition or bound branch constructor supplies required values. */
-      readonly target: SelectionOf<S, Src, Group[K]>
+      readonly target: SelectionOf<S, Src, Group[K], R>
     }
   }
   type ObjectBranchResolver<
@@ -6725,7 +6742,7 @@ export declare namespace Machine {
     context: C & { readonly select: BranchSelectors<B> } & DeclineCapability,
     enqueue: Enqueue<EventOf<Ev>, EmittedEventOf<Em>>
   ) => BranchSelectionResult<B> | (Declinable extends true ? Declined : never)
-  type InvalidBranchSelection<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group> = {
+  type InvalidBranchSelection<S extends StateSchemas, Src extends StateNodeIdentifier<S>, Group, R> = {
     readonly [K in keyof Group]: Src extends ChoiceIdentifier<S> ? Group[K] extends {
         /** Accepts the event without selecting a new destination. */
         readonly none: true
@@ -6733,9 +6750,9 @@ export declare namespace Machine {
         /** Replaces the complete value of a retained source or ancestor without replacing its active children. */
         readonly update: unknown
       } ? K
-      : [SelectionBuilder<SelectionOf<S, Src, Group[K]>>] extends [never] ? K
+      : [SelectionBuilder<SelectionOf<S, Src, Group[K], R>>] extends [never] ? K
       : never
-      : [SelectionBuilder<SelectionOf<S, Src, Group[K]>>] extends [never] ? K
+      : [SelectionBuilder<SelectionOf<S, Src, Group[K], R>>] extends [never] ? K
       : never
   }[keyof Group]
   type ObjectBranches<
@@ -6748,7 +6765,7 @@ export declare namespace Machine {
     Acceptance extends TransitionAcceptance
   > = {
     readonly [K in Extract<keyof Registered<R, "branches">, string>]:
-      & ([InvalidBranchSelection<S, Src, Registered<R, "branches">[K]>] extends [never] ? unknown : never)
+      & ([InvalidBranchSelection<S, Src, Registered<R, "branches">[K], R>] extends [never] ? unknown : never)
       & {
         /** Named groups of inspectable destinations used by transition resolvers. */
         readonly branches: K
@@ -6771,7 +6788,13 @@ export declare namespace Machine {
         /** Set to true when the resolver can explicitly return decline(). */
         readonly declinable?: "declinable" extends Acceptance ? boolean : false
         /** Selects one declared branch and may enqueue synchronous commands. */
-        readonly resolve: ObjectBranchResolver<Ev, Em, C, BranchSelections<S, Src, Registered<R, "branches">[K]>, true>
+        readonly resolve: ObjectBranchResolver<
+          Ev,
+          Em,
+          C,
+          BranchSelections<S, Src, Registered<R, "branches">[K], R>,
+          true
+        >
       }
   }[Extract<keyof Registered<R, "branches">, string>]
   type DataValue<C, A> = A | ((context: C) => A)
@@ -6803,7 +6826,7 @@ export declare namespace Machine {
         | InlineDestination<S, Src, C>
         | InlineUpdate<S, Src, C>
         | InlineCombined<S, Src, C>
-        | InlineInitial<S, Src, C>
+        | InlineRoot<S, C, R>
         | {
           /** Restores the declared history reference, using its fallback on first entry. */
           readonly history: ReferenceUnion<S, HistoryIdentifier<S>>
@@ -7135,13 +7158,13 @@ export declare namespace Machine {
   type RootConstruction<Node, Input> = [NodeSchema<Node>] extends [never] ?
     { /** Root-owned data is available only when the root declares a schema. */ readonly root?: never }
     : {} extends NodeMakeInput<Node> ? {
-        /** Constructs root-owned data once from startup input. */ readonly root?: ShortConstruction<
+        /** Constructs root-owned data from startup or fresh root-target input. */ readonly root?: ShortConstruction<
           { readonly input: Input },
           Node
         >
       }
     : {
-      /** Constructs root-owned data once from startup input. */ readonly root: ShortConstruction<
+      /** Constructs root-owned data from startup or fresh root-target input. */ readonly root: ShortConstruction<
         { readonly input: Input },
         Node
       >
@@ -7215,10 +7238,16 @@ export declare namespace Machine {
       S,
       Node,
       Src,
-      StateActionContext<S, Ev, Em, Extract<Src, StateIdentifier<S>>, In, Pa> & {
+      & StateActionContext<S, Ev, Em, Extract<Src, StateIdentifier<S>>, In, Pa>
+      & {
         /** Root-owned data constructed before initial descendant values. */
         readonly root: StateByIdentifier<S, Extract<"", StateIdentifier<S>>>
       }
+      & (Src extends "" ? {
+          /** Fresh machine input used by root construction and root initial callbacks. */ readonly input:
+            RegisteredInput<R>["Type"]
+        }
+        : {})
     >
     & (Src extends ChoiceIdentifier<S> ? {
         /** Required total transition for a transient choice state. */
@@ -7314,13 +7343,16 @@ export declare namespace Machine {
             }) :
       never)
   type ValidateObjectTransition<T> =
+    & ("input" extends keyof T
+      ? T extends { readonly target: TargetReference<any, "", "state"> } ? unknown : { readonly input: never }
+      : unknown)
     & {
       readonly [
         K in Exclude<
           keyof T,
           | "target"
           | "update"
-          | "initial"
+          | "input"
           | "history"
           | "none"
           | "branches"
@@ -7436,7 +7468,7 @@ export declare namespace Machine {
         & (C extends (...args: never[]) => unknown ? never : unknown)
         & HandlerShape<
           C,
-          & StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R>
+          & StateHandler<S, S[""], Ev, Em, Extract<"", StateNodeIdentifier<S>>, In, Pa, R & { readonly "~input": I }>
           & RootConstruction<S[""], I["Type"]>
         >
         & RootConstruction<S[""], I["Type"]>

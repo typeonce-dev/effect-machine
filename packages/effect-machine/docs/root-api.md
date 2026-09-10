@@ -1,259 +1,212 @@
 # Root machine API
 
-A machine is one explicit root state. The root can own data, child topology,
-both, or neither. There is no separate global context store.
+A machine has one root state. It can own data, child topology, both, or neither.
+`Machine.state` declares that structure; `Machine.make` declares protocols and
+reusable sources; `.handle` supplies initialization and behavior.
 
-## Events and transitions only
+## Startup input and state data
 
 ```ts
 import { Machine } from "@typeonce/effect-machine"
 import { Schema } from "effect"
 
-const Events = Machine.events({ Open: {}, Close: {} })
 const Root = Machine.state({
-  initial: "Closed",
-  states: { Closed: {}, Open: {} }
-})
-const targets = Machine.targets(Root)
-const Door = Machine.make({ root: Root, events: Events }).handle({
+  fields: { locale: Schema.String },
   states: {
-    Closed: { on: { Open: { target: targets.root.Open } } },
-    Open: { on: { Close: { target: targets.root.Closed } } }
+    Loading: { fields: { documentId: Schema.String } },
+    Ready: {}
   }
 })
-```
-
-The root declares the default child once. No startup target, empty schema, or
-resolver is needed. Structural nodes have `value: undefined` in snapshots.
-
-## Root data and child data
-
-```ts
-const Root = Machine.state({
-  fields: { title: Schema.String },
-  initial: "Editing",
-  states: {
-    Editing: { fields: { draft: Schema.String } },
-    Saving: {}
-  }
-})
-const Events = Machine.events({ Rename: { title: Schema.String }, Save: {} })
 const targets = Machine.targets(Root)
-const Editor = Machine.make({
+const Events = Machine.events({
+  Loaded: {},
+  Reload: { locale: Schema.String, documentId: Schema.String }
+})
+const Document = Machine.make({
   root: Root,
   events: Events,
-  initial: (root) => root.from(() => ({ title: "Untitled" }))
+  input: Schema.Struct({ locale: Schema.String, documentId: Schema.String })
 }).handle({
-  initialize: ({ builder, state }) => builder.from({ draft: state.title }),
+  root: ({ input }) => ({ locale: input.locale }),
+  initial: {
+    target: targets.root.Loading,
+    data: ({ input }) => ({ documentId: input.documentId })
+  },
   on: {
-    Rename: { update: targets.root, from: ({ event }) => ({ title: event.title }) }
+    Reload: {
+      target: targets.root,
+      input: ({ event }) => ({ locale: event.locale, documentId: event.documentId }),
+      reenter: true
+    }
   },
   states: {
-    Editing: { on: { Save: { target: targets.root.Saving } } }
+    Loading: { on: { Loaded: { target: targets.root.Ready } } }
   }
 })
 ```
 
-`initialize` constructs the declared child configuration. Required values must
-be supplied before the machine becomes executable. Values whose schema make
-input is optional can use their schema defaults. A parallel owner's initializer
-constructs every required region through the typed builder.
+Start with `Machine.start(Document, { locale: "en", documentId: "intro" })`.
+Root construction runs before its initial child construction. Both receive the
+same validated input. `documentId` belongs only to Loading; it need not be stored
+in root data. Input is not retained as a reset value on the machine or snapshot.
 
-The complete snapshot always includes the root:
+Only the root's initial callbacks receive machine input. Nested initial callbacks
+receive their owning state, ancestors, root, and lifecycle event. Pass any needed
+values through the nested state's data. Input is not an entry/exit capability.
+
+For a parallel root, every required region constructor receives input:
 
 ```ts
-// While Editing is active:
-{
-  path: "",
-  value: { _tag: "", title: "Untitled" },
-  state: {
-    path: "Editing",
-    value: { _tag: "Editing", draft: "Untitled" }
-  }
+initial: {
+  Documents: ({ input }) => ({ folder: input.folder }),
+  Connection: ({ input }) => ({ endpoint: input.endpoint })
 }
 ```
 
-Root handlers remain active across child transitions. Child handlers receive
-their own state, typed ancestors, `root`, and the complete snapshot.
-`update: targets.root` addresses root data from a child. An explicit descendant
-reference addresses a valued handler owner or retained ancestor.
-Both replace the entire value; omitted fields are not silently retained.
-Updates preserve the active topology and do not restart scoped work.
+Structural regions require no data. Schema constructor defaults can supply
+optional region data. Compound handlers declare one direct initial child with
+`initial: { target, data }`; each compound has its own initial declaration.
+There is no `initialConfiguration` or initializer in `make`.
 
-Simultaneous transitions retain conflict checking. Two parallel handlers cannot
-silently overwrite the same owner. Use `{ target, update }` to combine a selected destination and a retained
-owner's value in one atomic transition.
+## Root targets and updates
 
-## Schemas and reusable descriptors
+`{ target: targets.root, input: ... }` reconstructs root data and follows its
+initial declarations using fresh input. Input is required exactly when it is
+required by `Machine.start`. Machines without input omit it. Root targets reject
+`data`, `decoded`, and explicit child construction.
 
-Use `fields` for local data or `schema` for an existing tagged schema. They are
-mutually exclusive. A schema preserves class identity, refinements, defaults,
-and transformations; its tag is independent of its mount path.
+Targeting root retains its lifecycle unless it is reentered. Put a machine-wide
+reset handler at root and use `reenter: true` to exit and enter root as well as
+its descendants. Reentry restarts work owned by the exited states. Without
+reentry, retained root work continues; it does not automatically acquire new
+construction values. Ordinary transition conflict and lifecycle rules still apply.
+This does not create a new machine reference or discard history records.
 
-```ts
-class Ready extends Schema.TaggedClass<Ready>("Ready")("Ready", {
-  name: Schema.String
-}) {}
+`{ update: targets.root, data: ... }` instead replaces root's complete value,
+retaining its active children and running work. It takes no input and does not
+run initial constructors. Other source/ancestor updates follow the same rules.
 
-const Form = Machine.state({
-  initial: "Idle",
-  states: { Idle: {}, Ready: { schema: Ready } }
-})
-const Root = Machine.state({
-  type: "parallel",
-  states: { First: Form, Second: Form }
-})
-```
+## Inline and named construction
 
-Each mount has its own path and lifecycle. Descriptors capture their definition
-without retaining caller-owned mutable topology containers. `Machine.make`
-accepts the complete descriptor as `root`; callers do not extract its internals.
-
-`Machine.events({ Save: { title: Schema.String } })` creates a deferred
-`Events.Save({ title })` constructor. The machine validates it when processing
-the event. To reuse tagged classes or a tagged union, use
-`Machine.eventsFromSchemas(...)`. Internal and emitted protocols have distinct
-constructors with the same fields/import distinction. Public sends cannot send
-internal events, and emissions do not become machine input events implicitly.
-
-## Default initialization and explicit configuration
-
-`initial` supplies root values while following the topology's declared child
-defaults. It does not override those defaults. A structural root usually needs
-no initializer.
-
-Use the separately named `initialConfiguration` to select a complete startup
-configuration, for example to start the door open:
+Ordinary transitions stay inline:
 
 ```ts
-const DoorOpen = Machine.make({
-  root: Root,
-  events: Events,
-  initialConfiguration: (root) => root.resolve(({ target }) =>
-    target.from((states) => states.Open.from())
-  )
-}).handle({})
-```
-
-This example uses the door root and events from the first section. Every active
-value and region in an explicit configuration must be provided. `initial` and
-`initialConfiguration` cannot be combined. Use `Machine.resume` when restoring
-a validated snapshot, including its completion and history metadata.
-
-## Construction, guards, and branches
-
-Ordinary transitions declare their destination inline. `from` constructs schema
-make input; `decoded` returns an already decoded value. Omit construction only
-when the selected state can be constructed without arguments.
-
-```ts
-Save: {
-  target: targets.root.Saving,
-  guard: ({ state }) => state.draft.length > 0,
-  from: ({ state }) => ({ requestId: state.draft })
+Load: {
+  target: targets.root.Loading,
+  data: ({ event }) => ({ documentId: event.documentId })
 }
 ```
 
-A false guard declines the handler and allows ancestor fallback. `{ none: true }`
-accepts an event without changing topology. Initial entry and total choices
-cannot decline. `reenter: true` explicitly restarts the handler source; a value
-update alone retains its lifecycle and cannot request reentry.
+Targeting a compound or parallel state follows its initial declarations. Event
+transitions use `target`, never `initial`. `initial` names only handler startup
+edges. `history` restores a declared history reference; `none: true` accepts an
+event without changing its target configuration.
 
-Use a branch group in `make` for conditional selection, commands, or explicit
-nested construction. The resolver receives constructors derived from that
-exact declaration, so its result cannot introduce another destination.
+Declare branch topology in `make` when a resolver chooses an outcome, builds an
+explicit subtree, or enqueues commands:
 
 ```ts
-// In make:
 branches: {
-  choose: {
-    saving: { target: targets.root.Saving, title: "Save changes" },
-    idle: { target: targets.root.Idle }
+  open: {
+    checkout: { target: targets.root.Checkout },
+    unchanged: { none: true }
   }
-}
-
-// In handle:
-Choose: {
-  branches: "choose",
-  resolve: ({ event, select }) => event.save
-    ? select.saving.from({ requestId: event.requestId })
-    : select.idle.from()
 }
 ```
 
-Declare `declinable: true` if a resolver may return `decline()`. Guards and
-resolvers must remain synchronous and deterministic.
+The resolver calls a constructor bound to that declaration:
 
-An owner update replaces its entire value. A combined transition constructs
-both values atomically:
+```ts
+Open: {
+  branches: "open",
+  resolve: ({ event, select }) => event.open
+    ? select.checkout({
+      data: { cartId: event.cartId },
+      states: { Review: { data: { total: event.total } } }
+    })
+    : select.unchanged()
+}
+```
+
+Objects contain computed values, not nested constructor callbacks. `data` is
+schema make input; `{ decoded: true, data: value }` supplies the decoded type.
+Both paths validate and report typed schema failures before committing changes.
+The decoded flag applies only to its own node. Structural nodes reject data.
+
+Omitting `states` follows declared initial children. Explicit compound
+construction selects exactly one child. Entering an inactive parallel subtree
+requires every region. Source-local parallel construction can select a single
+region while retaining its active siblings, preserving the existing scope rules.
+Names under `states` cannot collide with construction metadata.
+
+Declared branch targets remain inspectable without executing a resolver.
+Dynamically selected descendants are visible after resolution; this API does not
+add static analysis of resolver bodies.
+
+## Retained-owner updates
+
+An inline combined transition keeps `target` and `update` references separate:
 
 ```ts
 Save: {
-  target: targets.root.Saving,
-  update: targets.root,
-  from: ({ root, event }) => ({
+  target: targets.root.Checkout.Saving,
+  update: targets.root.Checkout,
+  data: ({ event }) => ({
     target: { requestId: event.requestId },
-    update: { ...root, attempts: root.attempts + 1 }
+    update: { cartId: event.cartId }
   })
 }
 ```
 
-Destination entry sees the updated owner. Use a named branch with the same
-`{ target, update }` declaration for nested construction or mixed methods:
-`select.saved.from(payload).update.decoded(ownerValue)`.
+For the same pair declared as a named branch, construct both in one call:
 
-All destination references are paths derived by `Machine.targets(Root)`.
-`target` selects a descendant; `initial` enters a compound or parallel subtree
-using its declared initialization; `history` restores a history reference.
-`update: targets.root` changes root data while preserving active children.
-There is no transition operation that replaces an arbitrary full root
-configuration. Use explicit branches to keep every possible destination visible.
+```ts
+select.saved({
+  data: { requestId: event.requestId },
+  update: { data: { cartId: event.cartId } }
+})
+```
 
-## Completion and history
+`update` is required only for a branch declaring an owner update. It is not an
+arbitrary nested-state operation. The owner must be active and retained across
+the transition. Both complete values validate before either is committed.
 
-A compound root returns its completed direct workflow's output when that child
-has no `onDone` handler. A child with `onDone` first handles its completion.
-Nested compound states retain statechart completion rules: an arbitrary
-completed descendant does not make every ancestor final. Parallel roots
-complete when all required regions complete.
+## History and lifecycle
 
-Restoring history beneath the root preserves current root data. Restoring the
-root's own history can restore root-owned data. History fallback builders must
-construct a complete configuration containing the history owner.
+History fallback uses a bound function with the same node object format:
 
-## Observation and testing
+```ts
+history: {
+  recent: {
+    default: ({ target }) => target({
+      states: {
+        Checkout: {
+          data: { cartId: "new" },
+          states: { Review: { data: { total: 0 } } }
+        }
+      }
+    })
+  }
+}
+```
 
-- `MachineRef.state` reads the complete logical root snapshot.
-- `MachineRef.snapshot` includes runtime status and completion information.
-- `MachineAtom.result` retains asynchronous startup, failure, and the successful
-  logical snapshot. `MachineAtom.snapshot` exposes the runtime snapshot.
-- `AtomMachine.select` selects an optional value; `selectSnapshot` selects an
-  optional subtree. Child inactivity remains `Option.none()`.
-- `MachineState` renders a typed path in React. `createMachineContext(factory)`
-  owns a separate machine per Provider without subscribing the Provider to it.
+A fallback must explicitly construct a complete tree containing its owner,
+including required ancestors and parallel siblings. Its root data is state data,
+not startup input. `Machine.resume` restores a validated snapshot without rerunning
+startup constructors.
 
-The Atom bridge and child bridge no longer expose `.state`; use `.result` or a
-path selector. The core `MachineRef.state` contract remains available.
-
-`MachineTest.run` and `MachineTest.probe` accept the same public event inputs as
-production sends, including deferred constructors. Traces and acknowledgements
-record the decoded event that was processed, including ignored events.
+`guard` declines before construction. A resolver may return `decline()` only with
+`declinable: true`. Effect, Stream, timer, logic, child invocation, completion,
+entry/exit, and required outcome channels retain their existing contracts.
 
 ## Migration
 
-Replace `Machine.states(tree)` and `Machine.make({ states: States.states })`
-with one `Machine.state({ initial, states: tree })` descriptor and
-`Machine.make({ root })`. Move the old root-level handler map under
-`handle({ states: ... })`; place machine-wide behavior directly in `handle`.
-Use root `fields` to replace a wrapper state introduced only to carry shared data.
-Use `Machine.Snapshot<typeof root>` for the complete logical snapshot. `Machine.StateAccessors` replaces the former `Machine.DefinedStates`
-helper interface; it exposes paths and projections without a public state map.
-
-Replace schema arguments to `Machine.events`, `internalEvents`, and
-`emittedEvents` with field records, or use their explicit `FromSchemas`
-constructors. Replace old Atom `.state` reads with `.result`. Use
-`EmittedEvent`, `EmittedEvents`, `EmittedEventOf`, and `SchemaLessStateAnnotations` in place
-of the removed deprecated type aliases.
-
-Encoded snapshots now use version 2 and include the root at path `""`.
-Version 1 payloads must be explicitly migrated; the decoder rejects them.
+- Root initial constructors can read `input`; remove root fields used only to
+  forward that input to the initial child.
+- Replace event `{ initial: reference, data }` with `{ target: reference, data }`.
+- Replace `select.branch.from(value)` with `select.branch({ data: value })`.
+- Replace `.decoded(value)` with `({ decoded: true, data: value })`.
+- Replace child callbacks with `states: { Child: { data, states } }`.
+- Replace `.update.from(value)` chaining with `update: { data: value }` inside
+  the same selector call.
+- Replace history fallback chains with `target({ states: ... })`.

@@ -32,7 +32,7 @@ const counterMachine = Machine.make({
           branches: "transition1",
           reenter: true,
           resolve: ({ event, state, select: { destination: target } }) =>
-            target.decoded(new Count({ value: state.value + event.amount })),
+            target({ data: new Count({ value: state.value + event.amount }), decoded: true }),
           declinable: true
         },
         Finish: { target: targets1.root.done, decoded: true, data: () => (new Done({})) }
@@ -85,7 +85,7 @@ const startupMachine = Machine.make({
         branches: "transition1",
         resolve: ({ state, select }) =>
           state.value === 0
-            ? select.zero.decoded(new Count({ value: 1 }))
+            ? select.zero({ data: new Count({ value: 1 }), decoded: true })
             : select.unchanged()
       },
       on: {

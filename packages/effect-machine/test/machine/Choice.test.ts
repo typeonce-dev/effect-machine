@@ -35,7 +35,7 @@ const machine = Machine.make({
       passing: { title: "Score is at least 70", target: targets1.root.Flow.Approved },
       failing: { target: targets1.root.Flow.Rejected }
     },
-    transition1: { destination: { initial: targets1.root.Flow } }
+    transition1: { destination: { target: targets1.root.Flow } }
   },
   root: States,
   events: Machine.eventsFromSchemas(Recheck)
@@ -57,21 +57,21 @@ const machine = Machine.make({
             resolve: ({ containingState, select }) => {
               const score = containingState.score
               return score === 100
-                ? select.perfect.decoded(new Approved({}))
+                ? select.perfect({ data: new Approved({}), decoded: true })
                 : score < 0
-                ? select.negative.decoded(new Rejected({}))
+                ? select.negative({ data: new Rejected({}), decoded: true })
                 : score === 0
-                ? select.zero.decoded(new Rejected({}))
+                ? select.zero({ data: new Rejected({}), decoded: true })
                 : score >= 70
-                ? select.passing.decoded(new Approved({}))
-                : select.failing.decoded(new Rejected({}))
+                ? select.passing({ data: new Approved({}), decoded: true })
+                : select.failing({ data: new Rejected({}), decoded: true })
             }
           }
         },
         Approved: {
           on: {
             Recheck: {
-              initial: targets1.root.Flow,
+              target: targets1.root.Flow,
               decoded: true,
               data: ({ event }) => (new Flow({ score: event.score }))
             }
@@ -221,8 +221,8 @@ describe("Machine choice pseudo-states", () => {
                           score: containingState.score
                         }
                         return ancestors.Root.enabled && containingState.score >= 70
-                          ? select.approved.decoded(new Approved({}))
-                          : select.rejected.decoded(new Rejected({}))
+                          ? select.approved({ data: new Approved({}), decoded: true })
+                          : select.rejected({ data: new Rejected({}), decoded: true })
                       }
                     }
                   },
@@ -456,7 +456,8 @@ describe("Machine choice pseudo-states", () => {
             },
             onDone: {
               branches: "transition1",
-              resolve: ({ state, select: { destination: target } }) => target.decoded(state, (flow) => flow.Routing())
+              resolve: ({ state, select: { destination: target } }) =>
+                target({ data: state, decoded: true, states: { Routing: {} } })
             },
             states: {
               Done: {},
@@ -611,9 +612,15 @@ describe("Machine choice pseudo-states", () => {
             history: {
               Recent: {
                 default: ({ target }) =>
-                  target.from((to) =>
-                    to.Flow.decoded(new Flow({ score: 0 }), (flow) => flow.Active.decoded(new Active({})))
-                  )
+                  target({
+                    states: {
+                      Flow: {
+                        data: new Flow({ score: 0 }),
+                        decoded: true,
+                        states: { Active: { data: new Active({}), decoded: true } }
+                      }
+                    }
+                  })
               }
             },
             states: {
@@ -632,7 +639,7 @@ describe("Machine choice pseudo-states", () => {
               Resume: {
                 branches: "transition3",
                 resolve: ({ select: { destination: target } }) =>
-                  target.decoded(new Flow({ score: 2 }), (flow) => flow.Routing())
+                  target({ data: new Flow({ score: 2 }), decoded: true, states: { Routing: {} } })
               }
             }
           }
@@ -748,7 +755,7 @@ describe("Machine choice pseudo-states", () => {
             history: {
               Recent: {
                 default: ({ target }) =>
-                  target.from((to) => to.Flow.decoded(new Flow({ score: 1 }), (flow) => flow.Routing()))
+                  target({ states: { Flow: { data: new Flow({ score: 1 }), decoded: true, states: { Routing: {} } } } })
               }
             },
             states: {
@@ -847,7 +854,7 @@ describe("Machine choice pseudo-states", () => {
     )
     assert.deepStrictEqual(recheck?.branches[0]?.selection, {
       path: "Flow",
-      kind: "initial",
+      kind: "state",
       scope: "branch"
     })
   })

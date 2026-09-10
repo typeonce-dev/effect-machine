@@ -118,12 +118,17 @@ const machine = definition.handle({
         Begin: {
           branches: "ready",
           resolve: ({ select: { ready: target } }) =>
-            target.decoded(
-              State.cases.Ready.make({}),
-              (ready) =>
-                ready.Editor.decoded(State.cases.Editor.make({}), (editor) =>
-                  editor.Editing.decoded(State.cases.Editing.make({ value: "ready" })))
-            )
+            target({
+              data: State.cases.Ready.make({}),
+              decoded: true,
+              states: {
+                Editor: {
+                  data: State.cases.Editor.make({}),
+                  decoded: true,
+                  states: { Editing: { data: State.cases.Editing.make({ value: "ready" }), decoded: true } }
+                }
+              }
+            })
         }
       }
     },
@@ -155,7 +160,7 @@ const machine = definition.handle({
                   branches: "notice",
                   resolve: ({ event, select }, enqueue) => {
                     enqueue.emit(Emissions.Notice({ value: event.value }))
-                    return select.saved.decoded(State.cases.Saving.make({ value: event.value }))
+                    return select.saved({ data: State.cases.Saving.make({ value: event.value }), decoded: true })
                   }
                 },
                 ChildCompleted: {

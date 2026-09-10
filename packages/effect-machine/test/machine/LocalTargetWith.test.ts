@@ -44,7 +44,7 @@ describe("local compound target selection", () => {
                 branches: "transition1",
                 reenter: true,
                 resolve: ({ event, select: { destination: target } }) =>
-                  target.from({ query: event.query }, (search) => search.Updated.from())
+                  target({ data: { query: event.query }, states: { Updated: {} } })
               }
             },
             states: {
@@ -145,7 +145,7 @@ describe("local compound target selection", () => {
                   onDone: {
                     branches: "transition1",
                     resolve: ({ output, select: { destination: target } }) =>
-                      target.from({ query: output }, (search) => search.Updated.from())
+                      target({ data: { query: output }, states: { Updated: {} } })
                   }
                 }
               },

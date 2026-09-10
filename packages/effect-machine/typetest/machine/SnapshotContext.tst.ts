@@ -62,7 +62,7 @@ describe("Machine transition snapshot context", () => {
                   expect(States.matches).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                   expect(States.get).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
                   expect(States.getSnapshot).type.toBeCallableWith(snapshot, "Root.Right.RightIdle")
-                  return target.decoded(new LeftIdle({}))
+                  return target({ data: new LeftIdle({}), decoded: true })
                 }
               },
               states: {
@@ -80,7 +80,7 @@ describe("Machine transition snapshot context", () => {
                       resolve: ({ snapshot, select: { destination: target } }) => {
                         expect(snapshot).type.toBe<Machine.Snapshot<typeof States>>()
                         expect(States.matches(snapshot, "Root.Right.RightIdle")).type.toBe<boolean>()
-                        return target.decoded(new LeftDone({}))
+                        return target({ data: new LeftDone({}), decoded: true })
                       }
                     }
                   }
@@ -142,7 +142,7 @@ describe("Machine transition snapshot context", () => {
                 branches: "transition1",
                 resolve: (context) => {
                   expect(context).type.not.toHaveProperty("snapshot")
-                  return context.select.destination.decoded(new Active({}))
+                  return context.select.destination({ data: new Active({}), decoded: true })
                 }
               }
             },

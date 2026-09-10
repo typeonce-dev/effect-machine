@@ -55,6 +55,10 @@ export interface HistoryTarget {
 export interface InitialTarget {
   readonly [InitialTargetTypeId]: typeof InitialTargetTypeId
   readonly _tag: "InitialTarget"
+  /** Transient startup input, never retained in a configuration. */
+  readonly input?: { readonly value: unknown }
+  /** Explicitly selected descendants and their construction values. */
+  readonly children?: ReadonlyMap<string, unknown>
   readonly path: string
   readonly value: unknown
   readonly values?: Readonly<Record<string, unknown>>
