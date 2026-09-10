@@ -9187,6 +9187,53 @@ export const watch: <State, Event, Error = never, Output = never>(
 ) => Stream.Stream<RuntimeOutcome<State, Error, Output>> = internal.watch
 
 /**
+ * Waits for the first current or subsequent published snapshot matching a predicate.
+ *
+ * Use for external Effect coordination and tests. Prefer atom selectors for UI
+ * reads, invocation outcomes for workflow behavior, and `ref.join` for output.
+ * This observes state; it does not acknowledge or correlate a sent event.
+ *
+ * The predicate runs before terminal classification, so explicitly matching a
+ * done, error, or stopped snapshot succeeds. Otherwise an error preserves its
+ * Cause, stopping fails with `StoppedError`, and completion without a match
+ * fails with `Cause.NoSuchElementError`. Predicate exceptions are defects.
+ *
+ * Evaluation subscribes lazily. Interruption releases only the subscription,
+ * never the machine. There is no default timeout; compose `Effect.timeout`.
+ * Type predicates narrow the returned snapshot. Intermediate microsteps and
+ * historical snapshots are not observed.
+ *
+ * @example
+ * ```ts
+ * const snapshot = yield* Machine.waitFor(ref, isReady).pipe(Effect.timeout("5 seconds"))
+ * ```
+ * @category combinators
+ * @since 0.37.0
+ */
+export const waitFor: {
+  <State, Error, Output, Narrowed extends RuntimeSnapshot<State, Error, Output>>(
+    predicate: (snapshot: RuntimeSnapshot<State, Error, Output>) => snapshot is Narrowed
+  ): <Event, Emitted>(ref: MachineRef<State, Event, Error, Output, Emitted>) => Effect.Effect<
+    Narrowed,
+    Error | StoppedError | Cause.NoSuchElementError
+  >
+  <State, Error, Output>(
+    predicate: (snapshot: RuntimeSnapshot<State, Error, Output>) => boolean
+  ): <Event, Emitted>(ref: MachineRef<State, Event, Error, Output, Emitted>) => Effect.Effect<
+    RuntimeSnapshot<State, Error, Output>,
+    Error | StoppedError | Cause.NoSuchElementError
+  >
+  <State, Event, Error, Output, Emitted, Narrowed extends RuntimeSnapshot<State, Error, Output>>(
+    ref: MachineRef<State, Event, Error, Output, Emitted>,
+    predicate: (snapshot: RuntimeSnapshot<State, Error, Output>) => snapshot is Narrowed
+  ): Effect.Effect<Narrowed, Error | StoppedError | Cause.NoSuchElementError>
+  <State, Event, Error, Output, Emitted>(
+    ref: MachineRef<State, Event, Error, Output, Emitted>,
+    predicate: (snapshot: RuntimeSnapshot<State, Error, Output>) => boolean
+  ): Effect.Effect<RuntimeSnapshot<State, Error, Output>, Error | StoppedError | Cause.NoSuchElementError>
+} = internal.waitFor
+
+/**
  * Prepares a fresh machine without initializing it.
  *
  * Use this constructor when observation must be composed before initial-entry

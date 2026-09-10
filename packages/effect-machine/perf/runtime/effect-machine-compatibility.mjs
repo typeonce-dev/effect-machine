@@ -65,6 +65,17 @@ export const makeEffectMachineBenchmarkApi = (Machine) => {
 
   return {
     snapshot,
+    effectLifecycle: hasHandlerInitial ? (work, output) => {
+      const root = Machine.state({ states: { Working: {}, Complete: { type: "final", output } } })
+      const targets = Machine.targets(root)
+      return Machine.make({ root, events: Machine.events({}), effects: { work } }).handle({
+        initial: { target: targets.root.Working },
+        states: {
+          Working: { invoke: { src: "work", onDone: { target: targets.root.Complete } } },
+          Complete: { output: () => undefined }
+        }
+      })
+    } : undefined,
     make: (config) => {
       if (!hasRoot) return Machine.make(config)
       const { states: root, initial, ...rest } = config

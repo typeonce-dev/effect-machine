@@ -131,6 +131,7 @@ export const invocation = (
   const field = { effects: "effect", streams: "stream", timers: "after", logic: "logic" }[source.kind]
   return {
     ...rest,
+    sourceName: src,
     id: rest.id ?? src,
     [field]: !parameterized && (source.kind === "timers" || source.kind === "logic") ? source.value : resolve
   }

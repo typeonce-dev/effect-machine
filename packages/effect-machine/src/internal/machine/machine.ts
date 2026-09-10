@@ -34,6 +34,7 @@ import type { ChildAlreadyExistsError, InfiniteTransitionError, StartupError } f
 import type { CapturedStateConfig } from "./implementation.js"
 import * as InitialDeclaration from "./initialDeclaration.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
+import * as Observation from "./observation.js"
 import * as internalPlanner from "./planner.js"
 import * as internalProcess from "./process.js"
 import * as Protocol from "./protocol.js"
@@ -1410,6 +1411,8 @@ export const stopChild: {
 export const watch = <State, Event, Error = never, Output = never>(
   ref: MachineRef<State, Event, Error, Output>
 ): Stream.Stream<RuntimeOutcome<State, Error, Output>> => internalRuntime.watch(ref)
+
+export const waitFor = Observation.waitFor
 
 export const prepare = internalProcess.prepare
 

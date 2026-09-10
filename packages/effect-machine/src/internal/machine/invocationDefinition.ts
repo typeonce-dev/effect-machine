@@ -16,6 +16,7 @@ interface Outcomes {
 
 export type InvocationDefinition =
   & Outcomes
+  & { readonly sourceName?: string }
   & (
     | { readonly id: string; readonly effect: (context: Context) => Effect.Effect<unknown, unknown, unknown> }
     | { readonly id: string; readonly stream: (context: Context) => Stream.Stream<unknown, unknown, unknown> }

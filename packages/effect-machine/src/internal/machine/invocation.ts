@@ -19,6 +19,7 @@ import { ChildMachineLogicTypeId } from "./symbols.js"
 /** @internal */
 export interface AnyConfig {
   readonly id: string
+  readonly sourceName?: string | undefined
   readonly address?: string
   readonly descriptor?: ChildMachine.Any
   readonly src: () => Runtime.ProcessLogic<any, any, any, any, any, any>
@@ -82,6 +83,7 @@ const resolveOne = (
   if ("effect" in raw) {
     return {
       id: String(raw.id),
+      sourceName: raw.sourceName,
       src: () =>
         oneShot(raw.effect(context) as Effect.Effect<any, any, any>) as unknown as Runtime.ProcessLogic<
           any,
@@ -100,6 +102,7 @@ const resolveOne = (
   if ("after" in raw) {
     return {
       id: String(raw.id),
+      sourceName: raw.sourceName,
       src: () =>
         oneShot(Effect.sleep(resolveValue(raw.after, context) as any)) as unknown as Runtime.ProcessLogic<
           any,
@@ -117,6 +120,7 @@ const resolveOne = (
     const id = String(raw.id)
     return {
       id,
+      sourceName: raw.sourceName,
       src: () =>
         streamLogic(raw.stream(context), path, id) as unknown as Runtime.ProcessLogic<any, any, any, any, any, any>,
       onDone: raw.onDone,
@@ -192,11 +196,37 @@ const startResolved = (
   onDone: unknown,
   onFailure: unknown,
   onSnapshot: unknown,
-  activityKind?: Inspection.Activity["kind"]
+  activityKind?: Inspection.Activity["kind"],
+  sourceName?: string
 ): Effect.Effect<void, any, any> =>
   Effect.suspend(() => {
     const key = makeKey(path, invokeId)
-    return ownedChildren.spawn(src, {
+    // Source construction keeps its startup failure boundary. Only the hosted
+    // program is wrapped; child statecharts retain their execution descriptors.
+    const tracedSource = activityKind === undefined ? src : () => {
+      const logic = src()
+      return {
+        ...logic,
+        run: (context: Runtime.ProcessContext<any, any>) =>
+          Effect.withSpan(
+            Effect.suspend(() => logic.run(context)),
+            "Machine.invoke",
+            {
+              attributes: {
+                "machine.id": scope.self.id,
+                "machine.sessionId": scope.self.sessionId,
+                "machine.state.path": path,
+                "machine.invoke.id": invokeId,
+                "machine.invoke.source": sourceName ?? invokeId,
+                "machine.invoke.kind": activityKind,
+                "machine.invoke.sessionId": context.self.sessionId
+              },
+              captureStackTrace: false
+            }
+          )
+      }
+    }
+    return ownedChildren.spawn(tracedSource, {
       key,
       path,
       id: childId,
@@ -260,7 +290,8 @@ const start = (
     config.onDone,
     config.onFailure,
     config.onSnapshot,
-    config.activityKind
+    config.activityKind,
+    config.sourceName
   )
 }
 
