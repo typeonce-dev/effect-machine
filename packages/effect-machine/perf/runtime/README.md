@@ -14,6 +14,7 @@ The command reports:
 - repeated child lookup and delivery to one running child;
 - machine start-and-stop throughput;
 - parent-with-child start-and-stop throughput;
+- complete Effect invocation throughput with standard tracing enabled and disabled;
 - generic and compiled raw-process lifecycle throughput;
 - heap and resident-memory growth at 100, 500, and 1,000 live units, including
   a raw generic process, a raw compiled process, an idle statechart, two

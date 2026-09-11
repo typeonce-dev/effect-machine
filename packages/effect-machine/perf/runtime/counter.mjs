@@ -26,6 +26,22 @@ if (machineRuntimePath === undefined) {
 const machineRuntime = await import(pathToFileURL(machineRuntimePath).href)
 const { Effect, Fiber, Option, Schema, Stream } = effect
 
+const invocationLifecycleMachine = benchmarkApi.effectLifecycle?.(Effect.void, Schema.Void)
+const invocationLifecycleBenchmarks = invocationLifecycleMachine === undefined ? [] : [true, false].map((enabled) => ({
+  id: `effect-invocation-tracing-${enabled ? "enabled" : "disabled"}`,
+  label: `Complete an Effect invocation with tracing ${enabled ? "enabled" : "disabled"}`,
+  unit: "invocations/s",
+  operations: () => 1,
+  expected: () => 1,
+  start: () => undefined,
+  run: () => Effect.runPromise(Effect.gen(function*() {
+    const ref = yield* Machine.start(invocationLifecycleMachine)
+    yield* ref.join
+    return 1
+  }).pipe(Effect.withTracerEnabled(enabled))),
+  stop: () => undefined
+}))
+
 const CounterState = Schema.TaggedUnion({
   Count: {
     value: Schema.Number
@@ -616,6 +632,7 @@ export const effectMachineAdapter = {
   stopObservedCounter,
   stopCounters,
   additionalMachineBenchmarks: [
+    ...invocationLifecycleBenchmarks,
     {
       id: "hierarchical-plan-counter",
       label: "Plan transitions through a compound state",

@@ -537,7 +537,8 @@ const normalizeIndexedTargetStateSync = (
   const targetIndex = isTarget(target) ? descriptor.indexByPath.get(String(target.path)) : undefined
   if (
     targetIndex === activeLeafIndex && current.active[activeLeafIndex] === 1 && isTarget(target) &&
-    target[TargetSnapshotTypeId] === undefined && target.values === undefined && current.completedOrder.length === 0
+    target[TargetSnapshotTypeId] === undefined && target.values === undefined && current.completedOrder.length === 0 &&
+    descriptor.valued[activeLeafIndex]
   ) {
     const values = current.values.slice()
     values[activeLeafIndex] = decodeStateValueSync(
@@ -863,7 +864,8 @@ const planIndexedFlatState = (
           ? target[TargetSnapshotTypeId] === undefined && target.values === undefined
           : !("state" in target) && !("states" in target) && !("completed" in target) && !("history" in target)
         if (
-          targetIndex === sourceIndex && isSimpleTarget && current.completedOrder.length === 0
+          targetIndex === sourceIndex && isSimpleTarget && current.completedOrder.length === 0 &&
+          descriptor.valued[sourceIndex]
         ) {
           updateOwnedIndexedValue(
             current,

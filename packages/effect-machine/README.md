@@ -397,6 +397,43 @@ address it from Effects; resolvers use `enqueue.sendTo` and `enqueue.stop`.
 Duplicate active IDs fail with `ChildAlreadyExistsError` and preserve the
 existing child. Parent-protocol compatibility is checked at each spawn.
 
+## External observation and tracing
+
+Use `Machine.waitFor(ref, predicate)` when an external Effect needs a particular
+current or subsequent published snapshot. Type predicates narrow the result.
+It does not send an event or prove that a particular event caused the snapshot.
+Prefer `ref.join` for final output, invocation `onDone` / `onFailure` for workflow
+behavior, atom selectors for UI reads, and `ref.changes` for continuous observation.
+
+```ts
+const ready = yield * Machine.waitFor(ref, isReady).pipe(Effect.timeout("5 seconds"))
+```
+
+The predicate runs first, including for terminal snapshots. An unmatched failure
+preserves its `Cause`; an unmatched stop fails with `StoppedError`; completion
+without a match fails with `Cause.NoSuchElementError`. A predicate exception is
+a defect. Observation is lazy, has no default timeout, and releases its
+subscription on completion or interruption without stopping the machine. It does
+not replay historical snapshots or expose intermediate macrostep configurations.
+
+Effect, Stream, and timer invocations run inside an Effect span named
+`Machine.invoke`. Application spans inside that work inherit the invocation span.
+Configure the application's ordinary Effect tracer and exporter; no Machine-specific
+exporter or inspection subscription is required. Standard Effect tracing and
+sampling controls apply, including `Effect.withTracerEnabled(false)`.
+
+Spans identify `machine.id`, `machine.sessionId`, `machine.state.path`,
+`machine.invoke.id`, `machine.invoke.source`, `machine.invoke.kind`, and
+`machine.invoke.sessionId`. Source is the registered name; invocation IDs can be
+overridden independently. Payloads are not recorded automatically. Execution spans
+end when the Effect, Stream consumption, or timer settles, including cancellation;
+they do not change the lifetime of resources held in an enclosing Scope. Source
+construction keeps its existing startup failure boundary. This does not add
+machine-lifetime spans or propagate the trace context of each sender through the
+mailbox. Tracing can add diagnostic Cause annotations without changing failure
+values or interruption semantics. Even without an exporter, tracing has runtime
+cost.
+
 ## Reactivity
 
 `AtomMachine` runs one lazy machine instance per `AtomRegistry`:

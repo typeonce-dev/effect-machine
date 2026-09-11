@@ -474,3 +474,23 @@ const testProgram = Effect.gen(function*() {
 Use pure planner traces for state and transition rules. Start a live machine
 and use `MachineTest.probe` when a test depends on timers, invoked work, raised
 events, or runtime scheduling.
+
+## Choose observation deliberately
+
+Use atom selectors to render state, invocation outcomes to express workflow
+behavior, `ref.join` to await final output, and `ref.changes` for ongoing
+observation. Reach for `Machine.waitFor(ref, predicate)` only when an external
+Effect or test must wait for a specific current or subsequent snapshot, such as
+a long-lived connection becoming ready. Compose `Effect.timeout` when needed.
+
+Do not use `send` followed by `waitFor` as an acknowledgement protocol. The current
+snapshot might already match, and a match does not identify which event caused
+it. Keep workflow steps in the machine. A matching terminal snapshot succeeds;
+an unmatched error preserves its Cause, stopping fails with `StoppedError`, and
+completion without a match fails with `Cause.NoSuchElementError`.
+
+Invoked Effects, Streams, and timers already receive a `Machine.invoke` Effect
+span with machine, state, source, and invocation identity. Use ordinary Effect
+tracing configuration and application spans such as `Effect.fn("Payments.charge")`.
+Do not add manual spans around every transition or introduce a second exporter.
+Sender trace context is not automatically carried through machine mailboxes.
