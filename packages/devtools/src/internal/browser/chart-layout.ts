@@ -896,35 +896,52 @@ const shortenTransitionRoute = (
   return candidate
 }
 
-const normalizeTerminalDirection = (
-  edge: ChartEdge,
+// Both repairs use a route oriented away from the endpoint being repaired.
+// An attached opposite endpoint is a constraint, including on two-point routes
+// where replacing the connection would otherwise replace both endpoint steps.
+const normalizeEndpointDirection = (
   points: ReadonlyArray<ChartPoint>,
-  nodes: ReadonlyMap<string, LaidOutChartNode>,
-  allNodes: ReadonlyArray<LaidOutChartNode>
+  node: LaidOutChartNode,
+  opposite: LaidOutChartNode | undefined,
+  obstacles: ReadonlyArray<ChartRect>
 ): ReadonlyArray<ChartPoint> => {
-  if (edge.target === null || isSelfTransition(edge) || points.length < 2) return points
-  const target = nodes.get(edge.target)
-  if (target === undefined) return points
-  const rawEnd = points.at(-1)!
-  const side = endpointSide(rawEnd, target)
-  const end = pointOnNodeBoundary(rawEnd, target, side)
-  const prefix = points.slice(0, -1)
-  const previous = prefix.at(-1)!
-  const attached = compactPoints([...prefix, end])
-  if (isOutwardStep(end, previous, side)) return attached
+  const rawStart = points[0]!
+  const side = endpointStepSide(rawStart, points[1]!, node)
+  const start = pointOnNodeBoundary(rawStart, node, side)
+  const end = points.at(-1)!
+  const previous = points.at(-2)!
+  const oppositeSide = opposite === undefined ? undefined : endpointStepSide(end, previous, opposite)
+  const preserveOpposite = opposite !== undefined && oppositeSide !== undefined &&
+    nodeBoundaryDistance(end, opposite) <= 0.5 && isOutwardStep(end, previous, oppositeSide)
+  const validEndpoints = (route: ReadonlyArray<ChartPoint>): boolean =>
+    isOutwardStep(route[0]!, route[1]!, side) && chartRouteLength(route.slice(0, 2)) >= 9 &&
+    (!preserveOpposite ||
+      isOutwardStep(route.at(-1)!, route.at(-2)!, oppositeSide!) && chartRouteLength(route.slice(-2)) >= 9)
 
-  const targetStub = outwardPoint(end, side, 18)
-  const obstacles = [...routeObstacles(edge, allNodes), routeNodeRect(target)]
-  return endpointConnections(previous, targetStub, routeNodeRect(target), side)
-    .filter((connection) =>
-      !connection.slice(0, -1).some((point) => point.x === end.x && point.y === end.y) &&
-      routeIsClear([...connection, end], obstacles)
+  const tail = points.slice(1)
+  const attached = compactPoints([start, ...tail])
+  if (attached.length >= 2 && validEndpoints(attached)) return attached
+
+  if (tail.length === 1 && preserveOpposite) {
+    tail.unshift(outwardPoint(end, oppositeSide!, 18))
+  }
+  const stub = outwardPoint(start, side, 18)
+  const endpointObstacles = [
+    ...obstacles,
+    routeNodeRect(node),
+    ...(preserveOpposite ? [routeNodeRect(opposite!)] : [])
+  ]
+  return endpointConnections(stub, tail[0]!, routeNodeRect(node), side)
+    .map((connection) => compactPoints([start, ...connection, ...tail.slice(1)]))
+    .filter((route) =>
+      route.length >= 2 && validEndpoints(route) &&
+      !route.slice(1).some((point) => point.x === start.x && point.y === start.y) &&
+      routeIsClear(route, endpointObstacles)
     )
-    .map((connection) => compactPoints([...prefix, ...connection.slice(1), end]))
     .sort((left, right) => chartRouteLength(left) - chartRouteLength(right))[0] ?? attached
 }
 
-const normalizeSourceDirection = (
+const normalizeTransitionEndpoints = (
   edge: ChartEdge,
   points: ReadonlyArray<ChartPoint>,
   nodes: ReadonlyMap<string, LaidOutChartNode>,
@@ -932,21 +949,14 @@ const normalizeSourceDirection = (
 ): ReadonlyArray<ChartPoint> => {
   if (isSelfTransition(edge) || points.length < 2) return points
   const source = nodes.get(edge.source)
-  if (source === undefined || source.node.children.length > 0) return points
-  const rawStart = points[0]!
-  const side = endpointSide(rawStart, source)
-  const start = pointOnNodeBoundary(rawStart, source, side)
-  const tail = points.slice(1)
-  const next = tail[0]!
-  const attached = compactPoints([start, ...tail])
-  if (isOutwardStep(start, next, side)) return attached
-
-  const sourceStub = outwardPoint(start, side, 18)
-  const obstacles = [...routeObstacles(edge, allNodes), routeNodeRect(source)]
-  return endpointConnections(sourceStub, next, routeNodeRect(source), side)
-    .filter((connection) => routeIsClear([start, ...connection, ...tail.slice(1)], obstacles))
-    .map((connection) => compactPoints([start, ...connection, ...tail.slice(1)]))
-    .sort((left, right) => chartRouteLength(left) - chartRouteLength(right))[0] ?? attached
+  const target = edge.target === null ? undefined : nodes.get(edge.target)
+  const obstacles = routeObstacles(edge, allNodes)
+  const fromSource = source === undefined || source.node.children.length > 0
+    ? points
+    : normalizeEndpointDirection(points, source, target, obstacles)
+  return target === undefined
+    ? fromSource
+    : [...normalizeEndpointDirection([...fromSource].reverse(), target, source, obstacles)].reverse()
 }
 
 const headerDetour = (
@@ -1207,24 +1217,19 @@ const collectLayout = (
       if (elkPoints === undefined) return []
       const chartEdge = chartEdges.get(edge.id)
       if (chartEdge === undefined) return []
-      const points = normalizeTerminalDirection(
+      const points = normalizeTransitionEndpoints(
         chartEdge,
-        normalizeSourceDirection(
+        avoidCompoundHeaders(
           chartEdge,
-          avoidCompoundHeaders(
+          (shortenRoutes ? shortenTransitionRoute : (_edge: ChartEdge, route: ReadonlyArray<ChartPoint>) => route)(
             chartEdge,
-            (shortenRoutes ? shortenTransitionRoute : (_edge: ChartEdge, route: ReadonlyArray<ChartPoint>) => route)(
-              chartEdge,
-              normalizeHierarchyRoute(chartEdge, elkPoints, nodesByPath, nodes, hierarchyLanes),
-              nodesByPath,
-              nodes,
-              directLanes
-            ),
+            normalizeHierarchyRoute(chartEdge, elkPoints, nodesByPath, nodes, hierarchyLanes),
+            nodesByPath,
             nodes,
-            hierarchyLanes
+            directLanes
           ),
-          nodesByPath,
-          nodes
+          nodes,
+          hierarchyLanes
         ),
         nodesByPath,
         nodes
@@ -1700,7 +1705,7 @@ export const layoutChartWith = (
           new ChartLayoutError({
             cause: { failures, invalid },
             message:
-              `ELK did not produce a safe layout for ${model.machineId} after ${layoutProfiles.length} deterministic attempts: ${detail}`
+              `Chart routing did not produce a safe layout for ${model.machineId} after ${layoutProfiles.length} deterministic attempts: ${detail}`
           })
         )
       }
