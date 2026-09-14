@@ -1,5 +1,16 @@
 # @typeonce/effect-machine-devtools
 
+## 0.37.0
+
+### Patch Changes
+
+- 25998c0: Fix devtools charts failing to render retry transitions into compound states. Route repairs preserve the direction and clearance at both ends of each transition, including straight routes that need a detour to reach a state header.
+
+  Keep the devtools platform dependencies on the supported Effect prerelease so fresh installations can start the CLI without missing-module errors.
+
+- Updated dependencies [794a12a]
+  - @typeonce/effect-machine@0.37.0
+
 ## 0.36.0
 
 ### Patch Changes
