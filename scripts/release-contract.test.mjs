@@ -32,3 +32,14 @@ test("all Effect Machine packages release with the same version", async () => {
     "all Effect Machine packages must remain in the same Changesets fixed group"
   )
 })
+
+test("devtools pins its platform packages to the supported Effect prerelease", async () => {
+  const devtools = await readJson("packages/devtools/package.json")
+  for (const name of ["@effect/platform-browser", "@effect/platform-node", "@effect/platform-node-shared"]) {
+    assert.equal(
+      devtools.dependencies[name],
+      devtools.peerDependencies.effect,
+      `${name} must match the supported Effect version`
+    )
+  }
+})
