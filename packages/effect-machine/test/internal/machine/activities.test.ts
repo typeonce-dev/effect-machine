@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Schema, Stream } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../../src/index.js"
 import { activityDefinitions } from "../../../src/internal/machine/activities.js"
 import { makeMermaidRenderer } from "../../machine/visualization/mermaid.js"
@@ -166,8 +166,8 @@ describe("machine activity metadata", () => {
     assert(Machine.activityDefinitions(activityMachine).every(({ source }) => paths.has(source)))
   })
   it.effect.prop("keeps generated timer ids, durations, events, and owners aligned with helper declarations", {
-    durationMillis: FastCheck.integer({ min: 0, max: 604800000 }),
-    idSuffix: FastCheck.nat({ max: 1000000 })
+    durationMillis: Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 604800000 }))),
+    idSuffix: Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1000000 })))
   }, ({ durationMillis, idSuffix }) =>
     Effect.sync(() => {
       const id = `generated-timer-${idSuffix}`
@@ -196,7 +196,7 @@ describe("machine activity metadata", () => {
         duration: Duration.format(Duration.fromInputUnsafe(durationMillis))
       })
       assert(Machine.stateNodes(generated).some(({ path }) => path === definition?.source))
-    }), { fastCheck: { numRuns: 100, seed: 68241 } })
+    }), { arbitrary: { runs: 100, seed: 68241 } })
   it("collects static descriptors in topology and declaration order", () => {
     assert.deepStrictEqual(activityDefinitions(machine), [
       {

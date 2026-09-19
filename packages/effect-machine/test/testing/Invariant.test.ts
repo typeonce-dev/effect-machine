@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class Account extends Schema.TaggedClass<Account>("Account")("Account", {
@@ -171,16 +171,20 @@ describe("MachineTest invariants", () => {
     ({ snapshot }) => snapshot.state.value.balance >= 0
   )
   const safeScenarios = MachineTest.scenarios(safeMachine, {
-    eventsArbitrary: FastCheck.array(FastCheck.integer({ min: 0, max: 5 }).map((amount) => new Deposit({ amount })))
+    eventsArbitrary: Arbitrary.array(
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5 }))).pipe(
+        Arbitrary.map((amount) => new Deposit({ amount }))
+      )
+    )
   })
   it.effect.prop(
-    "rechecks invariants after every FastCheck shrink",
+    "rechecks invariants after every Arbitrary shrink",
     { scenario: safeScenarios.arbitrary },
     ({ scenario }) =>
       MachineTest.run(safeMachine, scenario).pipe(
         Effect.flatMap((trace) => MachineTest.assertInvariants(safeMachine, trace, [safe]))
       ),
-    { fastCheck: { numRuns: 25 } }
+    { arbitrary: { runs: 25 } }
   )
   it("validates invariant metadata eagerly", () => {
     const define = MachineTest.invariants(safeMachine)

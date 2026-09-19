@@ -11,12 +11,14 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Queue from "effect/Queue"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { FastCheck, TestClock } from "effect/testing"
+import { TestClock } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
 import type { CausalRuntimeEvidence, Probe, ProbeStep, RuntimeInvariant } from "../../../testing/MachineTest.js"
 import * as Protocol from "../../machine/protocol.js"
-import { type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
+import { chooseArbitrary, type SchemaArbitraryReport, toArbitraryWithReport } from "./arbitrary.js"
 import { assertRuntimeInvariants, type RuntimeInvariantError } from "./runtimeInvariant.js"
 
 type AnyMachine = Machine.Machine.Any
@@ -1188,7 +1190,7 @@ export const runRuntimeCommands: typeof runEnqueuedCommands = runEnqueuedCommand
  * inspection, assertion, and the next command. Use `probe.await.until` only
  * for later asynchronous work such as timer, invoke, or child delivery.
  * Processing failures are attributed to the exact submitted command and retain
- * the successfully checked prefix for FastCheck shrinking and replay.
+ * the successfully checked prefix for Arbitrary shrinking and replay.
  *
  * Use `runEnqueuedCommands` instead when the behavior under test intentionally
  * depends on burst enqueueing or outstanding mailbox work.
@@ -1460,12 +1462,12 @@ export const verifyCausalCommands = <M extends AnyMachine, Error, Output>(
 export interface RuntimeCommandsOptions<M extends AnyMachine> {
   readonly minCommands?: number
   readonly maxCommands?: number
-  readonly eventArbitrary?: FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>
-  readonly advanceArbitrary?: FastCheck.Arbitrary<Duration.Input>
+  readonly eventArbitrary?: Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>
+  readonly advanceArbitrary?: Arbitrary.Arbitrary<Duration.Input>
   readonly includeAdvance?: boolean
   readonly includeStop?: boolean
   readonly includeCheckpoint?: boolean
-  readonly additionalCommands?: ReadonlyArray<FastCheck.Arbitrary<RuntimeCommand<Machine.Machine.InputEvent<M>>>>
+  readonly additionalCommands?: ReadonlyArray<Arbitrary.Arbitrary<RuntimeCommand<Machine.Machine.InputEvent<M>>>>
 }
 
 /**
@@ -1489,7 +1491,7 @@ export interface RuntimeCommandsDiagnostics {
  * @since 0.4.0
  */
 export interface RuntimeCommands<M extends AnyMachine> {
-  readonly arbitrary: FastCheck.Arbitrary<ReadonlyArray<RuntimeCommand<Machine.Machine.InputEvent<M>>>>
+  readonly arbitrary: Arbitrary.Arbitrary<ReadonlyArray<RuntimeCommand<Machine.Machine.InputEvent<M>>>>
   readonly diagnostics: RuntimeCommandsDiagnostics
 }
 
@@ -1503,9 +1505,8 @@ const validateCommandLength = (name: "minCommands" | "maxCommands", value: numbe
  * Derives a shrinkable command sequence from public event schemas and explicit
  * clock/stop/checkpoint command choices.
  *
- * This deliberately returns ordinary Effect FastCheck arbitraries instead of
- * adapting the runner through `asyncModelRun`: the latter requires Promise
- * callbacks and would erase Effect error and service channels.
+ * Returns native Arbitrary values for use with `Arbitrary.checkEffect` or
+ * Effect property tests, preserving typed errors and required services.
  *
  * @category constructors
  * @since 0.4.0
@@ -1527,33 +1528,34 @@ export const runtimeCommands = <M extends AnyMachine>(
     ? Protocol.inputEventSchemas(machine).map((schema) => {
       const derived = toArbitraryWithReport(schema)
       reports.push(derived.report)
-      return derived.value as FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>
+      return derived.value as Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>
     })
     : []
   const eventArbitrary = options.eventArbitrary ?? (eventArbitraries.length === 0
     ? undefined
-    : FastCheck.oneof(
+    : chooseArbitrary(
       ...eventArbitraries as [
-        FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>,
-        ...Array<FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>>
+        Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>,
+        ...Array<Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>>
       ]
     ))
-  const commandArbitraries: Array<FastCheck.Arbitrary<RuntimeCommand<Machine.Machine.InputEvent<M>>>> = []
-  if (eventArbitrary !== undefined) commandArbitraries.push(eventArbitrary.map(sendCommand))
+  const commandArbitraries: Array<Arbitrary.Arbitrary<RuntimeCommand<Machine.Machine.InputEvent<M>>>> = []
+  if (eventArbitrary !== undefined) commandArbitraries.push(eventArbitrary.pipe(Arbitrary.map(sendCommand)))
 
   if (options.includeAdvance !== false) {
-    const advanceArbitrary = options.advanceArbitrary ?? FastCheck.nat({ max: 60_000 })
-    commandArbitraries.push(advanceArbitrary.map(advanceCommand))
+    const advanceArbitrary = options.advanceArbitrary ??
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 60_000 })))
+    commandArbitraries.push(advanceArbitrary.pipe(Arbitrary.map(advanceCommand)))
   }
-  if (options.includeStop !== false) commandArbitraries.push(FastCheck.constant(stopCommand()))
-  if (options.includeCheckpoint !== false) commandArbitraries.push(FastCheck.constant(checkpointCommand()))
+  if (options.includeStop !== false) commandArbitraries.push(Arbitrary.Constant(stopCommand()))
+  if (options.includeCheckpoint !== false) commandArbitraries.push(Arbitrary.Constant(checkpointCommand()))
   commandArbitraries.push(...options.additionalCommands ?? [])
   if (commandArbitraries.length === 0) {
     if (minCommands > 0) {
       throw new Error("MachineTest.runtimeCommands cannot generate a non-empty command sequence without commands")
     }
     return {
-      arbitrary: FastCheck.constant([]),
+      arbitrary: Arbitrary.Constant([]),
       diagnostics: {
         events: options.eventArbitrary !== undefined ? "override" : eventArbitraries.length === 0 ? "none" : "schema",
         schemaReports: reports,
@@ -1565,7 +1567,7 @@ export const runtimeCommands = <M extends AnyMachine>(
   }
 
   return {
-    arbitrary: FastCheck.array(FastCheck.oneof(...commandArbitraries), {
+    arbitrary: Arbitrary.array(chooseArbitrary(commandArbitraries[0]!, ...commandArbitraries.slice(1)), {
       minLength: minCommands,
       maxLength: maxCommands
     }),

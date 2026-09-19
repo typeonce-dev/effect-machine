@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 
@@ -173,7 +173,7 @@ describe("MachineTest finite models", () => {
       eventlessTransitions: true,
       acyclicAutomaticTransitions: true
     })
-    const samples = FastCheck.sample(generated.arbitrary, { numRuns: 250, seed: 10_241 })
+    const samples = Effect.runSync(Arbitrary.sampleEffect(generated.arbitrary, { count: 250, seed: 10_241 }))
     for (const model of samples) {
       assertValid(model, generated.diagnostics.limits)
       assert.ok(
@@ -203,7 +203,7 @@ describe("MachineTest finite models", () => {
 
   it.effect("generates firing event-to-always and event-to-completion chains", () =>
     Effect.gen(function*() {
-      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 2_000, seed: 12_773 })
+      const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, { count: 2_000, seed: 12_773 })
       const witnesses = new Map<"always" | "done", {
         readonly event: string
         readonly model: MachineTest.FiniteModel
@@ -241,7 +241,7 @@ describe("MachineTest finite models", () => {
 
   it.effect("replays exact generated root and nested value-mutation/capture/restore scenarios", () =>
     Effect.gen(function*() {
-      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 1_000, seed: 15_361 })
+      const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, { count: 1_000, seed: 15_361 })
       const candidates = samples.flatMap((model) =>
         (model.historyScenarios ?? []).map((scenario) => ({ model, scenario }))
       )
@@ -268,7 +268,7 @@ describe("MachineTest finite models", () => {
     }))
 
   it("compiles state nodes and transition definitions through the public Machine API", () => {
-    for (const model of FastCheck.sample(generated.arbitrary, { numRuns: 100, seed: 20_482 })) {
+    for (const model of Effect.runSync(Arbitrary.sampleEffect(generated.arbitrary, { count: 100, seed: 20_482 }))) {
       const machine = MachineTest.compileModel(model)
       const expectedStates = flatten(model)
       const actualStates = Machine.stateNodes(machine)
@@ -336,14 +336,14 @@ describe("MachineTest finite models", () => {
     }
   })
 
-  const executable = generated.arbitrary.chain((model) => {
+  const executable = generated.arbitrary.pipe(Arbitrary.flatMap((model) => {
     const machine = MachineTest.compileModel(model)
-    return MachineTest.scenarios(machine, { minEvents: 0, maxEvents: 20 }).arbitrary.map((scenario) => ({
+    return MachineTest.scenarios(machine, { minEvents: 0, maxEvents: 20 }).arbitrary.pipe(Arbitrary.map((scenario) => ({
       model,
       machine,
       scenario
-    }))
-  })
+    })))
+  }))
 
   it.effect.prop(
     "runs and independently verifies schema-valid scenarios for generated machines",
@@ -352,7 +352,7 @@ describe("MachineTest finite models", () => {
       MachineTest.run(generated.machine, generated.scenario).pipe(
         Effect.flatMap((trace) => MachineTest.verify(generated.machine, trace))
       ),
-    { fastCheck: { numRuns: 250, seed: 30_723 } }
+    { arbitrary: { runs: 250, seed: 30_723 } }
   )
 
   it.effect("keeps the natural cross-root lifecycle boundary for reentering transitions", () =>
@@ -411,27 +411,23 @@ describe("MachineTest finite models", () => {
 
   it("keeps every visited shrink valid and replays the minimal counterexample", () => {
     const visited: Array<MachineTest.FiniteModel> = []
-    const property = FastCheck.property(generated.arbitrary, (model) => {
+    const property = (model: MachineTest.FiniteModel) => {
       assertValid(model, generated.diagnostics.limits)
       MachineTest.compileModel(model)
       visited.push(model)
       return false
-    })
-    const result = FastCheck.check(property, { numRuns: 20, seed: 40_964 })
+    }
+    const result = Effect.runSync(Arbitrary.checkEffect(generated.arbitrary, property, { runs: 20, seed: 40_964 }))
 
-    assert.strictEqual(result.failed, true)
+    assert.strictEqual(result._tag, "Falsified")
+    if (result._tag !== "Falsified") return
     assert.ok(visited.length > 1, "the failing input should have been shrunk")
-    assert.ok(result.counterexample !== null)
-    const smallest = result.counterexample![0]
+    const smallest = result.shrunkInput
     assertValid(smallest, generated.diagnostics.limits)
 
-    const replay = FastCheck.check(property, {
-      numRuns: 1,
-      seed: result.seed,
-      path: result.counterexamplePath
-    })
-    assert.strictEqual(replay.failed, true)
-    assert.deepStrictEqual(replay.counterexample?.[0], smallest)
+    const replay = Effect.runSync(Arbitrary.checkEffect(generated.arbitrary, property, { replay: result.replay }))
+    assert.strictEqual(replay._tag, "Falsified")
+    if (replay._tag === "Falsified") assert.deepStrictEqual(replay.shrunkInput, smallest)
   })
 
   it("rejects hand-authored dangling and duplicate transition registrations", () => {

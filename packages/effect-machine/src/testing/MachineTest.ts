@@ -7,7 +7,7 @@
 import type * as Effect from "effect/Effect"
 import type * as Graph from "effect/Graph"
 import type * as Schema from "effect/Schema"
-import type { FastCheck } from "effect/testing"
+import type * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import type { EnsureExecutable } from "../internal/machine/readiness.js"
 import type { SchemaArbitraryReport } from "../internal/testing/machine/arbitrary.js"
 import * as ExplorationImpl from "../internal/testing/machine/exploration.js"
@@ -179,13 +179,13 @@ export type ScenarioOptions<M extends AnyMachine> =
   & {
     readonly minEvents?: number
     readonly maxEvents?: number
-    readonly eventsArbitrary?: FastCheck.Arbitrary<ReadonlyArray<Machine.Machine.InputEvent<M>>>
+    readonly eventsArbitrary?: Arbitrary.Arbitrary<ReadonlyArray<Machine.Machine.InputEvent<M>>>
   }
   & (Machine.Machine.InputSchema<M> extends typeof Schema.Void ? {
       readonly inputArbitrary?: never
     }
     : {
-      readonly inputArbitrary?: FastCheck.Arbitrary<InputValue<M>>
+      readonly inputArbitrary?: Arbitrary.Arbitrary<InputValue<M>>
     })
 
 /**
@@ -219,14 +219,14 @@ export interface ScenarioDiagnostics {
  * @since 0.4.0
  */
 export interface Scenarios<M extends AnyMachine> {
-  readonly arbitrary: FastCheck.Arbitrary<Scenario<M>>
+  readonly arbitrary: Arbitrary.Arbitrary<Scenario<M>>
   readonly diagnostics: ScenarioDiagnostics
 }
 
 /**
  * Derives valid machine inputs and public events from their schemas.
  *
- * Unsupported schema derivations fail immediately through `Schema.toArbitrary`.
+ * Unsupported schema derivations fail immediately through `Arbitrary.schema`.
  * Non-fatal derivation warnings are returned instead of being hidden.
  *
  * **Example**
@@ -1216,7 +1216,7 @@ export { InvariantError } from "../internal/testing/machine/invariant.js"
  *
  * Every invariant and matching observation is evaluated so one failure
  * contains all relevant evidence. Combine this with `scenarios` and `run` in
- * an Effect property test to retain FastCheck shrinking.
+ * an Effect property test to retain Arbitrary shrinking.
  *
  * @category verification
  * @since 0.4.0

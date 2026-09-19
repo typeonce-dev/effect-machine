@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class TestInput extends Schema.Class<TestInput>("TestInput")({
@@ -67,7 +67,7 @@ describe("MachineTest", () => {
   it("derives complete scenarios from machine schemas and reports diagnostics", () => {
     const machine = makeTraceMachine(() => undefined)
     const generated = MachineTest.scenarios(machine, { minEvents: 2, maxEvents: 2 })
-    const samples = FastCheck.sample(generated.arbitrary, 10)
+    const samples = Effect.runSync(Arbitrary.sampleEffect(generated.arbitrary, { count: 10 }))
     assert.strictEqual(generated.diagnostics.input, "schema")
     assert.strictEqual(generated.diagnostics.events, "schema")
     assert.strictEqual(generated.diagnostics.schemas.length, 3)
@@ -91,10 +91,13 @@ describe("MachineTest", () => {
     const generated = MachineTest.scenarios(machine, {
       minEvents: 10,
       maxEvents: 10,
-      inputArbitrary: FastCheck.constant(input),
-      eventsArbitrary: FastCheck.constant(events)
+      inputArbitrary: Arbitrary.Constant(input),
+      eventsArbitrary: Arbitrary.Constant(events)
     })
-    assert.deepStrictEqual(FastCheck.sample(generated.arbitrary, 1), [{ input, events }])
+    assert.deepStrictEqual(Effect.runSync(Arbitrary.sampleEffect(generated.arbitrary, { count: 1 })), [{
+      input,
+      events
+    }])
     assert.strictEqual(generated.diagnostics.input, "override")
     assert.strictEqual(generated.diagnostics.events, "override")
   })

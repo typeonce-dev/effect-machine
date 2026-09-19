@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Clock, Effect, Exit, Option, Schema, Stream } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 class Counter extends Schema.TaggedClass<Counter>("Counter")("Counter", {
@@ -104,10 +104,10 @@ describe("MachineTest runtime commands", () => {
     const generated = MachineTest.runtimeCommands(machine, {
       minCommands: 4,
       maxCommands: 4,
-      eventArbitrary: FastCheck.constant(new Add({ amount: 1 })),
-      advanceArbitrary: FastCheck.constant(10)
+      eventArbitrary: Arbitrary.Constant(new Add({ amount: 1 })),
+      advanceArbitrary: Arbitrary.Constant(10)
     })
-    const samples = FastCheck.sample(generated.arbitrary, 20)
+    const samples = Effect.runSync(Arbitrary.sampleEffect(generated.arbitrary, { count: 20 }))
     assert.strictEqual(generated.diagnostics.events, "override")
     assert.strictEqual(generated.diagnostics.includesAdvance, true)
     assert.strictEqual(generated.diagnostics.includesStop, true)
@@ -122,18 +122,52 @@ describe("MachineTest runtime commands", () => {
     }
     const onlySends = MachineTest.runtimeCommands(machine, {
       maxCommands: 10,
-      eventArbitrary: FastCheck.constant(new Add({ amount: 1 })),
+      eventArbitrary: Arbitrary.Constant(new Add({ amount: 1 })),
       includeAdvance: false,
       includeStop: false,
       includeCheckpoint: false
     })
-    const shrunk = FastCheck.check(FastCheck.property(onlySends.arbitrary, (commands) => commands.length === 0), {
-      numRuns: 20
-    })
-    assert.strictEqual(shrunk.failed, true)
-    if (shrunk.failed) {
-      assert.strictEqual((shrunk.counterexample?.[0] as ReadonlyArray<unknown>).length, 1)
+    const shrunk = Effect.runSync(
+      Arbitrary.checkEffect(onlySends.arbitrary, (commands) => commands.length === 0, { runs: 20, seed: 42 })
+    )
+    assert.strictEqual(shrunk._tag, "Falsified")
+    if (shrunk._tag === "Falsified") {
+      assert.strictEqual(shrunk.shrunkInput.length, 1)
     }
+  })
+  it("shrinks custom command arrays by removing unrelated commands and replays the result", () => {
+    const generated = MachineTest.runtimeCommands(propertyMachine, {
+      maxCommands: 6,
+      eventArbitrary: Arbitrary.schema(Schema.Literals([1, 2, 3])).pipe(
+        Arbitrary.map((amount) => new Add({ amount }))
+      ),
+      includeAdvance: false,
+      includeStop: false,
+      includeCheckpoint: false
+    })
+    const property = (commands: ReadonlyArray<MachineTest.RuntimeCommand<Add>>) => {
+      let seenTwo = false
+      for (const command of commands) {
+        if (command._tag !== "Send") continue
+        if (command.event.amount === 3 && seenTwo) return false
+        if (command.event.amount === 2) seenTwo = true
+      }
+      return true
+    }
+    const result = Effect.runSync(Arbitrary.checkEffect(generated.arbitrary, property, {
+      runs: 100,
+      seed: 0,
+      size: 6
+    }))
+    assert.strictEqual(result._tag, "Falsified")
+    if (result._tag !== "Falsified") return
+    assert.deepStrictEqual(
+      result.shrunkInput.map((command) => command._tag === "Send" ? command.event.amount : undefined),
+      [2, 3]
+    )
+    const replay = Effect.runSync(Arbitrary.checkEffect(generated.arbitrary, property, { replay: result.replay }))
+    assert.strictEqual(replay._tag, "Falsified")
+    if (replay._tag === "Falsified") assert.deepStrictEqual(replay.shrunkInput, result.shrunkInput)
   })
   it.effect.prop("checks schema-generated commands against a pure model after every shrink", {
     commands: generatedRuntimeCommands.arbitrary
@@ -199,7 +233,7 @@ describe("MachineTest runtime commands", () => {
       })
       assert.strictEqual(transcript.records.length, commands.length)
       yield* ref.stop
-    }), { fastCheck: { numRuns: 100, seed: 18241 } })
+    }), { arbitrary: { runs: 100, seed: 18241 } })
   it.effect("buffers public changes so a checkpoint can verify multiple queued sends in order", () =>
     Effect.gen(function*() {
       const machine = makeCounterMachine()
@@ -645,10 +679,14 @@ describe("MachineTest causal runtime commands", () => {
   it.effect.prop("checks and shrinks generated command sequences at causal boundaries", {
     commands: MachineTest.runtimeCommands(causalMachine, {
       maxCommands: 20,
-      eventArbitrary: FastCheck.oneof(
-        FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
-        FastCheck.constant(new Ignored({})),
-        FastCheck.constant(new Noop({}))
+      eventArbitrary: Arbitrary.schema(Schema.Literals(["Add", "Ignored", "Noop"])).pipe(
+        Arbitrary.flatMap((tag): Arbitrary.Arbitrary<Add | Ignored | Noop> =>
+          tag === "Add"
+            ? Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: -10, maximum: 10 }))).pipe(
+              Arbitrary.map((amount) => new Add({ amount }))
+            )
+            : Arbitrary.Constant(tag === "Ignored" ? new Ignored({}) : new Noop({}))
+        )
       ),
       includeAdvance: false,
       includeStop: false,
@@ -676,7 +714,7 @@ describe("MachineTest causal runtime commands", () => {
       })
       assert.strictEqual(transcript.finalModel, transcript.final.state.state.value.count)
       yield* ref.stop
-    }), { fastCheck: { numRuns: 100, seed: 31590 } })
+    }), { arbitrary: { runs: 100, seed: 31590 } })
   it.effect("represents stopped sends without turning an expected rejection into a failed property", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)
@@ -944,10 +982,14 @@ describe("MachineTest causal runtime commands", () => {
   it.effect.prop("checks generated causal commands with reusable runtime laws and planner agreement", {
     commands: MachineTest.runtimeCommands(causalMachine, {
       maxCommands: 20,
-      eventArbitrary: FastCheck.oneof(
-        FastCheck.integer({ min: -10, max: 10 }).map((amount) => new Add({ amount })),
-        FastCheck.constant(new Ignored({})),
-        FastCheck.constant(new Noop({}))
+      eventArbitrary: Arbitrary.schema(Schema.Literals(["Add", "Ignored", "Noop"])).pipe(
+        Arbitrary.flatMap((tag): Arbitrary.Arbitrary<Add | Ignored | Noop> =>
+          tag === "Add"
+            ? Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: -10, maximum: 10 }))).pipe(
+              Arbitrary.map((amount) => new Add({ amount }))
+            )
+            : Arbitrary.Constant(tag === "Ignored" ? new Ignored({}) : new Noop({}))
+        )
       ),
       includeAdvance: false,
       includeStop: false,
@@ -973,7 +1015,7 @@ describe("MachineTest causal runtime commands", () => {
       })
       yield* MachineTest.assertPlannerRuntimeAgreement(causalMachine, transcript)
       yield* ref.stop
-    }), { fastCheck: { numRuns: 100, seed: 81440 } })
+    }), { arbitrary: { runs: 100, seed: 81440 } })
   it.effect("reports the exact field when causal evidence disagrees with fresh planning", () =>
     Effect.gen(function*() {
       const ref = yield* Machine.start(causalMachine)

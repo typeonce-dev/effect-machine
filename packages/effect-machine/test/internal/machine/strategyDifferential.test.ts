@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../../src/index.js"
 import * as Configuration from "../../../src/internal/machine/configuration.js"
 import * as ExecutionPlan from "../../../src/internal/machine/executionPlan.js"
@@ -1519,7 +1519,7 @@ describe("machine planner and runtime strategies", () => {
         maxHistoryStates: 0,
         maxChoiceStates: 0
       })
-      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 120, seed: 81109 })
+      const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, { count: 120, seed: 81109 })
       let compared = 0
       for (let index = 0; index < samples.length && compared < 24; index++) {
         const model = samples[index]!

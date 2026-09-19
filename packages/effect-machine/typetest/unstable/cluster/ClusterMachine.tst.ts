@@ -1,4 +1,4 @@
-import { Context, Effect, type Layer, Option, Schema, SchemaGetter } from "effect"
+import { Context, Effect, type Layer, Schema, SchemaGetter } from "effect"
 import { type MessageStorage, type Sharding } from "effect/unstable/cluster"
 import type { Rpc, RpcGroup } from "effect/unstable/rpc"
 import { describe, expect, it } from "tstyche"
@@ -285,12 +285,12 @@ describe("ClusterMachine", () => {
   it("retains snapshot codec service requirements", () => {
     const ContextualNumber = Schema.Number.pipe(
       Schema.decode({
-        decode: SchemaGetter.onSome((value) => Effect.as(SnapshotDecoding, Option.some(value))),
+        decode: SchemaGetter.transformEffect((value) => Effect.as(SnapshotDecoding, value)),
         encode: SchemaGetter.passthrough()
       }),
       Schema.encode({
         decode: SchemaGetter.passthrough(),
-        encode: SchemaGetter.onSome((value) => Effect.as(SnapshotEncoding, Option.some(value)))
+        encode: SchemaGetter.transformEffect((value) => Effect.as(SnapshotEncoding, value))
       })
     )
     class ContextualCount extends Schema.TaggedClass<ContextualCount>("ContextualCount")("ContextualCount", {

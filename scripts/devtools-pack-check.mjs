@@ -109,7 +109,7 @@ try {
   }, null, 2))
   await writeFile(
     join(consumer, "pnpm-workspace.yaml"),
-    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\n`
+    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\nminimumReleaseAgeExclude:\n  - "effect"\n  - "@effect/platform-browser"\n  - "@effect/platform-node"\n  - "@effect/platform-node-shared"\n`
   )
   await writeFile(machineFile, readyMachine)
 

@@ -1,5 +1,6 @@
 import { Cause, Data, Deferred, Effect, Exit, Queue, Ref } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Schema from "effect/Schema"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../../src/index.js"
 
 export type ActivityOutcome = "succeeded" | "cancelled" | "failed"
@@ -124,12 +125,14 @@ export const lifecycleCommandSamples = (options?: {
   readonly seed?: number
   readonly maxCommands?: number
 }): ReadonlyArray<ReadonlyArray<LifecycleCommand>> =>
-  FastCheck.sample(
-    FastCheck.array(
-      FastCheck.constantFrom<LifecycleCommand>("enter", "leave", "restart"),
-      { minLength: 1, maxLength: options?.maxCommands ?? 24 }
-    ),
-    { numRuns: options?.numRuns ?? 40, seed: options?.seed ?? 82_419 }
+  Effect.runSync(
+    Arbitrary.sampleEffect(
+      Arbitrary.array(Arbitrary.schema(Schema.Literals(["enter", "leave", "restart"])), {
+        minLength: 1,
+        maxLength: options?.maxCommands ?? 24
+      }),
+      { count: options?.numRuns ?? 40, seed: options?.seed ?? 82_419 }
+    )
   )
 
 export const expectedLifecycle = (commands: ReadonlyArray<LifecycleCommand>): LifecycleExpectation => {

@@ -12,37 +12,37 @@ import * as StaticSite from "./internal/staticSite.js"
 import * as MachineRegistry from "./MachineRegistry.js"
 import * as ProjectInspector from "./ProjectInspector.js"
 
-const root = Flag.directory("root", { mustExist: true }).pipe(
+const root = Flag.Directory("root", { mustExist: true }).pipe(
   Flag.withDescription("Project root to inspect"),
   Flag.withDefault(process.cwd())
 )
 
-const include = Flag.string("include").pipe(
+const include = Flag.String("include").pipe(
   Flag.withDescription("Machine source glob relative to the project root"),
   Flag.withDefault("**/src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}")
 )
 
-const host = Flag.string("host").pipe(
+const host = Flag.String("host").pipe(
   Flag.withDescription("Host for the local visualizer"),
   Flag.withDefault("127.0.0.1")
 )
 
-const port = Flag.integer("port").pipe(
+const port = Flag.Int("port").pipe(
   Flag.withDescription("Port for the local visualizer"),
   Flag.withDefault(5173)
 )
 
-const open = Flag.boolean("open").pipe(
+const open = Flag.Boolean("open").pipe(
   Flag.withDescription("Open the visualizer in the default browser"),
   Flag.withDefault(false)
 )
 
-const watchPolling = Flag.boolean("watch-polling").pipe(
+const watchPolling = Flag.Boolean("watch-polling").pipe(
   Flag.withDescription("Use polling instead of native file-system events"),
   Flag.withDefault(false)
 )
 
-const outputDirectory = Flag.directory("out-dir").pipe(
+const outputDirectory = Flag.Directory("out-dir").pipe(
   Flag.withAlias("o"),
   Flag.withDescription("Directory to write the static website"),
   Flag.withDefault(".effect-machine/site")
