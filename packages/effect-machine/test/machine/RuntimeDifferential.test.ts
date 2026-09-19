@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Fiber, Schema, Stream } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 import type { DifferentialStep } from "./support/runtimeDifferential.js"
@@ -325,7 +325,7 @@ describe("pure planning and managed runtime differential", () => {
     }) as Effect.Effect<void, unknown, any>)
   it.effect("matches deterministic generated start and resumed executions", () =>
     Effect.gen(function*() {
-      const samples = FastCheck.sample(generated.arbitrary, { numRuns: 36, seed: 93701 })
+      const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, { count: 36, seed: 93701 })
       let activeParallel = 0
       let eventful = 0
       let resumedContinuation = 0

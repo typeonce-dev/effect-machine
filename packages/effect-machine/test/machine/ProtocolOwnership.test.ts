@@ -71,10 +71,16 @@ describe("protocol ownership", () => {
       Effect.gen(function*() {
         const Value = boundary === "encode"
           ? Schema.Number.pipe(
-            Schema.encode({ decode: SchemaGetter.passthrough(), encode: SchemaGetter.onSome(() => Effect.interrupt) })
+            Schema.encode({
+              decode: SchemaGetter.passthrough(),
+              encode: SchemaGetter.transformEffect(() => Effect.interrupt)
+            })
           )
           : Schema.Number.pipe(
-            Schema.decode({ decode: SchemaGetter.onSome(() => Effect.interrupt), encode: SchemaGetter.passthrough() })
+            Schema.decode({
+              decode: SchemaGetter.transformEffect(() => Effect.interrupt),
+              encode: SchemaGetter.passthrough()
+            })
           )
         const State = Schema.TaggedStruct("State", { value: Value })
         const InitialRoot1 = Machine.state({ states: { State } })

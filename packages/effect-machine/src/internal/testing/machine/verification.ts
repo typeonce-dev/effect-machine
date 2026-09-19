@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Graph from "effect/Graph"
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
 import type {
   Coverage,
@@ -32,7 +32,7 @@ import type {
   VerifyOptions
 } from "../../../testing/MachineTest.js"
 import * as Protocol from "../../machine/protocol.js"
-import { toArbitraryWithReport } from "./arbitrary.js"
+import { chooseArbitrary, toArbitraryWithReport } from "./arbitrary.js"
 import type { FiniteModel } from "./finiteModel.js"
 import * as ReferenceModel from "./referenceModel.js"
 import { rawConfigurationPaths } from "./trace.js"
@@ -82,17 +82,17 @@ export const scenarios = <M extends AnyMachine>(
         index,
         report: derived.report
       })
-      return derived.value as FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>
+      return derived.value as Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>
     })
     : []
 
   const eventsArbitrary = options.eventsArbitrary ?? (eventArbitraries.length === 0
-    ? FastCheck.constant<ReadonlyArray<Machine.Machine.InputEvent<M>>>([])
-    : FastCheck.array(
-      FastCheck.oneof(
+    ? Arbitrary.Constant<ReadonlyArray<Machine.Machine.InputEvent<M>>>([])
+    : Arbitrary.array(
+      chooseArbitrary(
         ...eventArbitraries as [
-          FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>,
-          ...Array<FastCheck.Arbitrary<Machine.Machine.InputEvent<M>>>
+          Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>,
+          ...Array<Arbitrary.Arbitrary<Machine.Machine.InputEvent<M>>>
         ]
       ),
       { minLength: minEvents, maxLength: maxEvents }
@@ -103,7 +103,7 @@ export const scenarios = <M extends AnyMachine>(
       throw new Error("MachineTest.scenarios cannot override input for a machine without an input schema")
     }
     return {
-      arbitrary: eventsArbitrary.map((events) => ({ events }) as Scenario<M>),
+      arbitrary: eventsArbitrary.pipe(Arbitrary.map((events) => ({ events }) as Scenario<M>)),
       diagnostics: {
         input: "none",
         events: options.eventsArbitrary !== undefined ? "override" : eventArbitraries.length === 0 ? "empty" : "schema",
@@ -112,7 +112,7 @@ export const scenarios = <M extends AnyMachine>(
     }
   }
 
-  let inputArbitrary: FastCheck.Arbitrary<InputValue<M>>
+  let inputArbitrary: Arbitrary.Arbitrary<InputValue<M>>
   if (options.inputArbitrary !== undefined) {
     inputArbitrary = options.inputArbitrary
   } else {
@@ -122,16 +122,16 @@ export const scenarios = <M extends AnyMachine>(
       index: undefined,
       report: derived.report
     })
-    inputArbitrary = derived.value as FastCheck.Arbitrary<InputValue<M>>
+    inputArbitrary = derived.value as Arbitrary.Arbitrary<InputValue<M>>
   }
 
   return {
-    arbitrary: FastCheck.tuple(inputArbitrary, eventsArbitrary).map(([input, events]) =>
+    arbitrary: Arbitrary.all([inputArbitrary, eventsArbitrary]).pipe(Arbitrary.map(([input, events]) =>
       ({
         input,
         events
       }) as Scenario<M>
-    ),
+    )),
     diagnostics: {
       input: options.inputArbitrary !== undefined ? "override" : "schema",
       events: options.eventsArbitrary !== undefined ? "override" : eventArbitraries.length === 0 ? "empty" : "schema",

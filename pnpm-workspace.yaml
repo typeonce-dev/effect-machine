@@ -2,11 +2,15 @@ packages:
   - "packages/*"
 
 overrides:
-  effect: 4.0.0-rc.112
-  "@effect/vitest": 4.0.0-rc.112
+  effect: 4.0.0-rc.116
+  "@effect/vitest": 4.0.0-rc.116
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   - effect
   - "@effect/vitest"
+  - "@effect/atom-react"
+  - "@effect/platform-browser"
+  - "@effect/platform-node"
+  - "@effect/platform-node-shared"
   - xstate-v6

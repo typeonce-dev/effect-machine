@@ -1323,6 +1323,6 @@ describe("MachineTest.verify", () => {
       MachineTest.run(navigationMachine, scenario).pipe(
         Effect.flatMap((trace) => MachineTest.verify(navigationMachine, trace))
       ),
-    { fastCheck: { numRuns: 50 } }
+    { arbitrary: { runs: 50 } }
   )
 })

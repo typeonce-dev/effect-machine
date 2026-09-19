@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Option, Schema } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 class Root extends Schema.TaggedClass<Root>("CodecRoot")("CodecRoot", {
   id: Schema.NonEmptyString
@@ -311,7 +311,7 @@ const expectDecodeFailure = Effect.fnUntraced(
 )
 describe("snapshot codec adversarial boundaries", () => {
   it.effect.prop("turns arbitrary JSON-shaped boundary input into values or typed failures, never defects", {
-    input: FastCheck.jsonValue()
+    input: Arbitrary.schema(Schema.Json)
   }, ({ input }) =>
     Effect.gen(function*() {
       const encodeExit = yield* Effect.exit(Machine.encodeSnapshot(topologyMachine, input as any))
@@ -329,7 +329,7 @@ describe("snapshot codec adversarial boundaries", () => {
             error.value instanceof Machine.MachineSchemaDecodeError
         )
       }
-    }), { fastCheck: { numRuns: 100, seed: 83117 } })
+    }), { arbitrary: { runs: 100, seed: 83117 } })
   it.effect("round-trips active parallel and completed final configurations through JSON", () =>
     Effect.gen(function*() {
       for (const snapshot of [topologyActive(), topologyFinal()]) {

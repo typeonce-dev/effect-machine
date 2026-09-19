@@ -1,4 +1,4 @@
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
@@ -34,7 +34,7 @@ describe("MachineTest finite models", () => {
   })
 
   it("exposes the model arbitrary and resolved diagnostics", () => {
-    expect(generated.arbitrary).type.toBe<FastCheck.Arbitrary<MachineTest.FiniteModel>>()
+    expect(generated.arbitrary).type.toBe<Arbitrary.Arbitrary<MachineTest.FiniteModel>>()
     expect(generated.diagnostics.limits.maxRoots).type.toBe<1 | 2 | 3>()
     expect(generated.diagnostics.limits.maxParallelRegions).type.toBe<2 | 3>()
     expect(generated.diagnostics.limits.maxHistoryStates).type.toBe<number>()
@@ -79,7 +79,7 @@ describe("MachineTest finite models", () => {
     const machine = MachineTest.compileModel(model)
     expect(machine).type.toBe<Machine.Machine.Any>()
     expect(MachineTest.scenarios(machine).arbitrary).type.toBe<
-      FastCheck.Arbitrary<MachineTest.Scenario<Machine.Machine.Any>>
+      Arbitrary.Arbitrary<MachineTest.Scenario<Machine.Machine.Any>>
     >()
   })
 

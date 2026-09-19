@@ -1,5 +1,5 @@
 import { Cause, Context, Data, Effect, Schema } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { describe, expect, it } from "tstyche"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
@@ -37,7 +37,7 @@ describe("MachineTest", () => {
   })
   it("preserves input and public event types in generated scenarios", () => {
     const generated = MachineTest.scenarios(machine)
-    expect(generated.arbitrary).type.toBe<FastCheck.Arbitrary<MachineTest.Scenario<typeof machine>>>()
+    expect(generated.arbitrary).type.toBe<Arbitrary.Arbitrary<MachineTest.Scenario<typeof machine>>>()
     type Scenario = MachineTest.Scenario<typeof machine>
     expect<Scenario["input"]>().type.toBe<Input>()
     expect<Scenario["events"][number]>().type.toBe<Machine.Machine.EventInput<PublicEvent>>()
@@ -45,11 +45,11 @@ describe("MachineTest", () => {
   })
   it("types whole-value arbitrary overrides", () => {
     const options: MachineTest.ScenarioOptions<typeof machine> = {
-      inputArbitrary: FastCheck.constant(new Input({ id: "test" })),
-      eventsArbitrary: FastCheck.constant([new PublicEvent({ value: 1 })])
+      inputArbitrary: Arbitrary.Constant(new Input({ id: "test" })),
+      eventsArbitrary: Arbitrary.Constant([new PublicEvent({ value: 1 })])
     }
-    expect(options.inputArbitrary).type.toBe<FastCheck.Arbitrary<Input> | undefined>()
-    expect(options.eventsArbitrary).type.toBe<FastCheck.Arbitrary<ReadonlyArray<PublicEvent>> | undefined>()
+    expect(options.inputArbitrary).type.toBe<Arbitrary.Arbitrary<Input> | undefined>()
+    expect(options.eventsArbitrary).type.toBe<Arbitrary.Arbitrary<ReadonlyArray<PublicEvent>> | undefined>()
   })
   it("omits input for machines without an input schema", () => {
     const noInput = Machine.make({
@@ -122,7 +122,7 @@ describe("MachineTest", () => {
   })
   it("keeps runtime commands on the public event protocol", () => {
     const generated = MachineTest.runtimeCommands(machine)
-    expect(generated.arbitrary).type.toBe<FastCheck.Arbitrary<ReadonlyArray<MachineTest.RuntimeCommand<PublicEvent>>>>()
+    expect(generated.arbitrary).type.toBe<Arbitrary.Arbitrary<ReadonlyArray<MachineTest.RuntimeCommand<PublicEvent>>>>()
     expect(MachineTest.sendCommand(new PublicEvent({ value: 1 }))).type.toBe<MachineTest.RuntimeCommand<PublicEvent>>()
     expect(MachineTest.sendCommand(new InternalEvent({}))).type.not.toBeAssignableTo<
       MachineTest.RuntimeCommand<PublicEvent>

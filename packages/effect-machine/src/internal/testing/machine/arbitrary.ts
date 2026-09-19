@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema"
 import * as SchemaAST from "effect/SchemaAST"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 
 /**
  * Warning emitted when schema arbitrary generation must enforce an opaque
@@ -39,8 +39,7 @@ const reportChecks = (
   path: ReadonlyArray<PropertyKey>
 ): void => {
   const visit = (check: SchemaAST.Check<unknown>, covered: boolean): void => {
-    const arbitrary = check.annotations?.arbitrary
-    const nextCovered = covered || arbitrary?.constraint !== undefined || arbitrary?.candidate !== undefined
+    const nextCovered = covered || check.annotations?.arbitraryConstraint !== undefined
     if (check._tag !== "Filter") {
       for (const child of check.checks) visit(child, nextCovered)
     } else if (!nextCovered) {
@@ -97,6 +96,14 @@ const reportFor = (ast: SchemaAST.AST): SchemaArbitraryReport => {
 
 /** @internal */
 export const toArbitraryWithReport = <S extends Schema.Constraint>(schema: S) => ({
-  value: Schema.toArbitrary(schema)(FastCheck),
+  value: Arbitrary.schema(schema),
   report: reportFor(schema.ast)
 })
+
+/** Selects one of the supplied generators without replacing its shrink tree. @internal */
+export const chooseArbitrary = <A>(
+  ...choices: readonly [Arbitrary.Arbitrary<A>, ...Array<Arbitrary.Arbitrary<A>>]
+): Arbitrary.Arbitrary<A> =>
+  Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: choices.length - 1 }))).pipe(
+    Arbitrary.flatMap((index) => choices[index]!)
+  )

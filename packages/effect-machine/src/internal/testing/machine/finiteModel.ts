@@ -10,8 +10,9 @@
  */
 
 import * as Schema from "effect/Schema"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import * as Machine from "../../../Machine.js"
+import { chooseArbitrary } from "./arbitrary.js"
 
 /**
  * An atomic state in a finite generated model.
@@ -307,7 +308,7 @@ export interface FiniteModelDiagnostics {
  * @since 0.4.0
  */
 export interface FiniteModels {
-  readonly arbitrary: FastCheck.Arbitrary<FiniteModel>
+  readonly arbitrary: Arbitrary.Arbitrary<FiniteModel>
   readonly diagnostics: FiniteModelDiagnostics
 }
 
@@ -397,26 +398,32 @@ const resolveOptions = (options: FiniteModelOptions): FiniteModelDiagnostics["li
 const rawStateArbitrary = (
   depth: number,
   limits: FiniteModelDiagnostics["limits"]
-): FastCheck.Arbitrary<RawState> => {
-  const leaf = FastCheck.boolean().map((final): RawState => final ? { _tag: "Final" } : { _tag: "Atomic" })
+): Arbitrary.Arbitrary<RawState> => {
+  const leaf = Arbitrary.schema(Schema.Boolean).pipe(
+    Arbitrary.map((final): RawState => final ? { _tag: "Final" } : { _tag: "Atomic" })
+  )
   if (depth >= limits.maxDepth) return leaf
 
   const nested = rawStateArbitrary(depth + 1, limits)
-  const compound = FastCheck.array(nested, {
+  const compound = Arbitrary.array(nested, {
     minLength: 1,
     maxLength: limits.maxChildren
-  }).chain((states) =>
-    FastCheck.integer({ min: 0, max: states.length - 1 }).map((initialIndex): RawCompoundState => ({
-      _tag: "Compound",
-      initialIndex,
-      states
-    }))
+  }).pipe(
+    Arbitrary.flatMap((states) =>
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: states.length - 1 }))).pipe(
+        Arbitrary.map((initialIndex): RawCompoundState => ({
+          _tag: "Compound",
+          initialIndex,
+          states
+        }))
+      )
+    )
   )
-  const parallel = FastCheck.array(nested, {
+  const parallel = Arbitrary.array(nested, {
     minLength: 2,
     maxLength: limits.maxParallelRegions
-  }).map((states): RawParallelState => ({ _tag: "Parallel", states }))
-  return FastCheck.oneof(leaf, compound, parallel)
+  }).pipe(Arbitrary.map((states): RawParallelState => ({ _tag: "Parallel", states })))
+  return chooseArbitrary(leaf, compound, parallel)
 }
 
 const normalizeStates = (raw: ReadonlyArray<RawState>): ReadonlyArray<FiniteState> => {
@@ -659,7 +666,7 @@ const makeTransitionArbitrary = (
   events: ReadonlyArray<string>,
   maxTransitions: number,
   historyScenarios: ReadonlyArray<FiniteHistoryScenario> = []
-): FastCheck.Arbitrary<ReadonlyArray<FiniteTransition>> => {
+): Arbitrary.Arbitrary<ReadonlyArray<FiniteTransition>> => {
   const states = flattenStates(roots)
   const sourceOrder = new Map(states.map((state, index) => [state.path, index]))
   const stateByPath = new Map(states.map((state) => [state.path, state]))
@@ -773,46 +780,63 @@ const makeTransitionArbitrary = (
   const materialize = (
     selected: ReadonlyArray<TransitionCandidate>,
     allowTargetlessEvents = true
-  ): FastCheck.Arbitrary<ReadonlyArray<FiniteTransition>> => {
-    if (selected.length === 0) return FastCheck.constant([])
+  ): Arbitrary.Arbitrary<ReadonlyArray<FiniteTransition>> => {
+    if (selected.length === 0) return Arbitrary.Constant([])
     const decisions = selected.map((candidate) =>
-      FastCheck.record({
+      Arbitrary.all({
         // Targetless event transitions remain useful witnesses. Generated
         // automatic transitions always exit their source so stabilization is
         // acyclic by construction; targetless automatic semantics are covered
         // by focused examples rather than mixed into the finite-model oracle.
-        targetIndex: FastCheck.integer({
-          min: candidate.trigger.type === "event" && allowTargetlessEvents ? 0 : 1,
-          max: candidate.targets.length
-        }),
-        targetValueOffset: FastCheck.integer({ min: 0, max: 2 }),
-        reenter: FastCheck.boolean()
+        targetIndex: Arbitrary.schema(
+          Schema.Int.check(
+            Schema.isBetween({
+              minimum: candidate.trigger.type === "event" && allowTargetlessEvents ? 0 : 1,
+              maximum: candidate.targets.length
+            })
+          )
+        ),
+        targetValueOffset: Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))),
+        reenter: Arbitrary.schema(Schema.Boolean)
       })
     )
-    return FastCheck.tuple(...decisions).map((values) =>
-      selected.map((candidate, index): FiniteTransition => {
-        const decision = values[index]!
-        const target = decision.targetIndex === 0 ? undefined : candidate.targets[decision.targetIndex - 1]
-        const targetState = target === undefined ? undefined : states.find(({ path }) => path === target)
-        const targetValue = targetState?.node._tag === "Atomic" &&
-            decision.targetValueOffset !== 0
-          ? targetState.node.value + decision.targetValueOffset
-          : undefined
-        const targetFields = target === undefined
-          ? {}
-          : { target, ...(targetValue === undefined ? {} : { targetValue }) }
-        const trigger = candidate.trigger
-        return trigger.type === "event"
-          ? { source: candidate.source, trigger, reenter: decision.reenter, ...targetFields }
-          : { source: candidate.source, trigger, ...targetFields }
-      })
+    return Arbitrary.all([...decisions]).pipe(
+      Arbitrary.map((values) =>
+        selected.map((candidate, index): FiniteTransition => {
+          const decision = values[index]!
+          const target = decision.targetIndex === 0 ? undefined : candidate.targets[decision.targetIndex - 1]
+          const targetState = target === undefined ? undefined : states.find(({ path }) => path === target)
+          const targetValue = targetState?.node._tag === "Atomic" &&
+              decision.targetValueOffset !== 0
+            ? targetState.node.value + decision.targetValueOffset
+            : undefined
+          const targetFields = target === undefined
+            ? {}
+            : { target, ...(targetValue === undefined ? {} : { targetValue }) }
+          const trigger = candidate.trigger
+          return trigger.type === "event"
+            ? { source: candidate.source, trigger, reenter: decision.reenter, ...targetFields }
+            : { source: candidate.source, trigger, ...targetFields }
+        })
+      )
     )
   }
   const optionalBudget = maxTransitions - mandatory.length
-  const general = FastCheck.subarray([...eventCandidates, ...automaticCandidates], {
-    minLength: 0,
-    maxLength: Math.min(optionalBudget, eventCandidates.length + automaticCandidates.length)
-  }).chain((selected) => materialize(selected).map((transitions) => orderTransitions([...mandatory, ...transitions])))
+  const candidates = [...eventCandidates, ...automaticCandidates]
+  const selectedCandidates = candidates.length === 0
+    ? Arbitrary.Constant<ReadonlyArray<TransitionCandidate>>([])
+    : Arbitrary.schema(
+      Schema.Array(
+        Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: candidates.length - 1 }))
+      ).check(Schema.isUnique(), Schema.isMaxLength(Math.min(optionalBudget, candidates.length)))
+    ).pipe(
+      Arbitrary.map((indices) => [...indices].sort((a, b) => a - b).map((index) => candidates[index]!))
+    )
+  const general = selectedCandidates.pipe(
+    Arbitrary.flatMap((selected) =>
+      materialize(selected).pipe(Arbitrary.map((transitions) => orderTransitions([...mandatory, ...transitions])))
+    )
+  )
 
   if (mandatory.length > 0 || optionalBudget < 2 || automaticCandidates.length === 0) return general
 
@@ -836,10 +860,14 @@ const makeTransitionArbitrary = (
   })
   if (chainCandidates.length === 0) return general
 
-  const chain = FastCheck.constantFrom(...chainCandidates).chain(({ automatic, event }) =>
-    materialize([event, automatic], false).map((transitions) => orderTransitions(transitions))
+  const chain = Arbitrary.schema(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: chainCandidates.length - 1 }))
+  ).pipe(Arbitrary.map((index) => chainCandidates[index]!)).pipe(
+    Arbitrary.flatMap(({ automatic, event }) =>
+      materialize([event, automatic], false).pipe(Arbitrary.map((transitions) => orderTransitions(transitions)))
+    )
   )
-  return FastCheck.oneof(general, chain)
+  return chooseArbitrary(general, chain)
 }
 
 /**
@@ -858,20 +886,20 @@ const makeTransitionArbitrary = (
  */
 export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => {
   const limits = resolveOptions(options)
-  const rawRoots = FastCheck.array(rawStateArbitrary(1, limits), {
+  const rawRoots = Arbitrary.array(rawStateArbitrary(1, limits), {
     minLength: 1,
     maxLength: limits.maxRoots
   })
-  const arbitrary = rawRoots.chain((raw) => {
+  const arbitrary = rawRoots.pipe(Arbitrary.flatMap((raw) => {
     const activeRoots = normalizeStates(raw)
-    return FastCheck.tuple(
-      FastCheck.integer({ min: 0, max: activeRoots.length - 1 }),
-      FastCheck.integer({ min: 1, max: limits.maxEvents }),
-      FastCheck.array(FastCheck.constantFrom("shallow" as const, "deep" as const), {
+    return Arbitrary.all([
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: activeRoots.length - 1 }))),
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: limits.maxEvents }))),
+      Arbitrary.array(Arbitrary.schema(Schema.Literals(["shallow" as const, "deep" as const])), {
         minLength: 0,
         maxLength: limits.maxHistoryStates
       })
-    ).chain(([initialIndex, eventCount, historyDecisions]) => {
+    ]).pipe(Arbitrary.flatMap(([initialIndex, eventCount, historyDecisions]) => {
       const events = Array.from({ length: eventCount }, (_, index) => `Event${index}`)
       const initial = activeRoots[initialIndex]!.key
       const generated = addGeneratedHistory(
@@ -885,11 +913,11 @@ export const finiteModels = (options: FiniteModelOptions = {}): FiniteModels => 
       const roots = generated.scenarios.length === 0
         ? addGeneratedChoices(generated.roots, limits.maxChoiceStates)
         : generated.roots
-      return makeTransitionArbitrary(roots, initial, events, limits.maxTransitions, generated.scenarios).map(
-        (transitions) => freezeModel(roots, initial, events, transitions, generated.scenarios)
+      return makeTransitionArbitrary(roots, initial, events, limits.maxTransitions, generated.scenarios).pipe(
+        Arbitrary.map((transitions) => freezeModel(roots, initial, events, transitions, generated.scenarios))
       )
-    })
-  })
+    }))
+  }))
 
   return {
     arbitrary,

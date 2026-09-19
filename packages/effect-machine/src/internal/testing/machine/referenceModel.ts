@@ -970,12 +970,13 @@ const evaluateTransition = (
   if (!changed) {
     return { ...selection, next, targetPath, changed, exitPaths: [], entryPaths: [] }
   }
-  const naturalBoundary = targetPath === undefined
-    ? getState(index, transition.source).parent
-    : leastCommonAncestor(index, selection.leaf, targetPath)
   const choiceEntry = transition.target === undefined ? undefined : entryChoicePath(index, transition.target)
-  const choiceResolvesToActiveAncestor = choiceEntry !== undefined &&
-    isPathInSubtree(transition.source, resolveChoicePath(index, choiceEntry))
+  const lifecycleTarget = choiceEntry === undefined ? targetPath : choiceChainResolvedTargetPath(index, choiceEntry)
+  const naturalBoundary = lifecycleTarget === undefined
+    ? getState(index, transition.source).parent
+    : leastCommonAncestor(index, selection.leaf, lifecycleTarget)
+  const choiceResolvesToActiveAncestor = choiceEntry !== undefined && lifecycleTarget !== undefined &&
+    isPathInSubtree(transition.source, lifecycleTarget)
   const boundary = reenters(transition)
     ? !choiceResolvesToActiveAncestor
       ? broadenBoundary(index, naturalBoundary, getState(index, transition.source).parent)

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
 const event = (_tag: string): {
@@ -1886,33 +1886,35 @@ describe("MachineTest finite-model reference interpreter", () => {
     maxChildren: 3,
     maxEvents: 4,
     maxTransitions: 20
-  }).arbitrary.chain((model) => {
-    const randomEvents = FastCheck.array(FastCheck.constantFrom(...model.events), { maxLength: 20 })
+  }).arbitrary.pipe(Arbitrary.flatMap((model) => {
+    const randomEvents = Arbitrary.array(Arbitrary.schema(Schema.Literals([...model.events])), { maxLength: 20 })
     const historyScenarios = model.historyScenarios ?? []
     // Execute the generator-authored witness itself. This prevents an
     // unrelated value-bearing transition under the same owner from silently
     // standing in for the mutation that must be captured and restored.
-    return FastCheck.oneof(
-      ...(historyScenarios.length === 0
-        ? [FastCheck.constant({ events: [] as ReadonlyArray<string>, scenario: undefined, firstUse: false })]
-        : historyScenarios.map((scenario) =>
-          FastCheck.constant({ events: scenario.events, scenario, firstUse: false })
-        )),
-      ...(historyScenarios.length === 0
-        ? []
-        : historyScenarios.map((scenario) =>
-          FastCheck.constant({ events: [scenario.resume.event], scenario, firstUse: true })
-        )),
-      randomEvents.map((events) => ({ events, scenario: undefined, firstUse: false }))
-    ).map(({ events, firstUse, scenario }) => ({
+    const scenarios = historyScenarios.flatMap((scenario) => [
+      { events: scenario.events, scenario, firstUse: false },
+      { events: [scenario.resume.event], scenario, firstUse: true }
+    ])
+    return Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: scenarios.length }))).pipe(
+      Arbitrary.flatMap((index): Arbitrary.Arbitrary<{
+        events: ReadonlyArray<string>
+        scenario: MachineTest.FiniteHistoryScenario | undefined
+        firstUse: boolean
+      }> =>
+        index === scenarios.length
+          ? randomEvents.pipe(Arbitrary.map((events) => ({ events, scenario: undefined, firstUse: false })))
+          : Arbitrary.Constant(scenarios[index]!)
+      )
+    ).pipe(Arbitrary.map(({ events, firstUse, scenario }) => ({
       model: firstUse && scenario !== undefined
         ? { ...model, initial: scenario.resume.source.split(".")[0]!, historyScenarios: [] }
         : model,
       events,
       scenario,
       firstUse
-    }))
-  })
+    })))
+  }))
   it.effect.prop("stress-checks planner traces across shrinkable generated parallel/history models and scenarios", {
     generated
   }, ({ generated }) => {
@@ -1940,5 +1942,79 @@ describe("MachineTest finite-model reference interpreter", () => {
       }),
       Effect.flatMap((trace) => MachineTest.verifyModel(generated.model, trace))
     )
-  }, { timeout: 30000, fastCheck: { numRuns: 1500, seed: 51205 } })
+  }, { timeout: 30000, arbitrary: { runs: 1500, seed: 51205 } })
 })
+
+for (const reenter of [false, true]) {
+  it.effect(`retains the active compound when an ancestor initial choice resolves inside it (reenter: ${reenter})`, () =>
+    Effect.gen(function*() {
+      const model: MachineTest.FiniteModel = {
+        roots: [{
+          _tag: "Compound",
+          key: "workspace",
+          value: 0,
+          initial: "route",
+          states: [
+            {
+              _tag: "Compound",
+              key: "editor",
+              value: 1,
+              initial: "first",
+              states: [
+                {
+                  _tag: "Parallel",
+                  key: "first",
+                  value: 2,
+                  output: "first",
+                  states: [
+                    { _tag: "Atomic", key: "a", value: 3 },
+                    { _tag: "Atomic", key: "b", value: 4 }
+                  ]
+                },
+                {
+                  _tag: "Parallel",
+                  key: "second",
+                  value: 5,
+                  output: "second",
+                  states: [
+                    { _tag: "Atomic", key: "a", value: 6 },
+                    { _tag: "Atomic", key: "b", value: 7 }
+                  ]
+                }
+              ]
+            },
+            { _tag: "Choice", key: "route", targets: ["workspace.editor"], selected: "workspace.editor" }
+          ]
+        }],
+        initial: "workspace",
+        events: ["Next", "Reset"],
+        transitions: [
+          {
+            source: "workspace",
+            trigger: { type: "event", event: "Next" },
+            target: "workspace.editor.second",
+            reenter: false
+          },
+          {
+            source: "workspace.editor.second.b",
+            trigger: { type: "event", event: "Reset" },
+            target: "workspace",
+            reenter
+          }
+        ]
+      }
+      const machine = MachineTest.compileModel(model)
+      const trace = yield* MachineTest.run(machine, { events: [{ _tag: "Next" }, { _tag: "Reset" }] })
+      yield* MachineTest.verifyModel(model, trace)
+      assert.deepStrictEqual(trace.steps[1]!.plan.microsteps[0]!.exitPaths, [
+        "workspace.editor.second.b",
+        "workspace.editor.second.a",
+        "workspace.editor.second"
+      ])
+      assert.deepStrictEqual(trace.steps[1]!.plan.microsteps[0]!.entryPaths, [
+        "workspace.editor.first",
+        "workspace.editor.first.a",
+        "workspace.editor.first.b"
+      ])
+    }))
+}

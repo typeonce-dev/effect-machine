@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Fiber, Schema, Stream } from "effect"
-import { FastCheck } from "effect/testing"
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
 import { isDeepStrictEqual } from "node:util"
 import { Machine } from "../../src/index.js"
 import { MachineTest } from "../../src/testing/index.js"
@@ -14,17 +14,19 @@ const generatedModels = MachineTest.finiteModels({
   maxHistoryStates: 2,
   maxChoiceStates: 2
 })
-const generatedCases = generatedModels.arbitrary.chain((model) =>
-  FastCheck.tuple(
-    FastCheck.array(FastCheck.constantFrom(...model.events), { minLength: 0, maxLength: 12 }),
-    FastCheck.nat({ max: 12 })
-  ).map(([events, boundary]) => ({
-    model,
-    events,
-    boundary: Math.min(boundary, events.length)
-  }))
+const generatedCases = generatedModels.arbitrary.pipe(
+  Arbitrary.flatMap((model) =>
+    Arbitrary.all([
+      Arbitrary.array(Arbitrary.schema(Schema.Literals([...model.events])), { minLength: 0, maxLength: 12 }),
+      Arbitrary.schema(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 12 })))
+    ]).pipe(Arbitrary.map(([events, boundary]) => ({
+      model,
+      events,
+      boundary: Math.min(boundary, events.length)
+    })))
+  )
 )
-const generatedResumeCases = generatedCases.map((generated) => {
+const generatedResumeCases = generatedCases.pipe(Arbitrary.map((generated) => {
   // Automatic-transition restoration has focused witnesses in the finite
   // reference-model suite. Keep this broad continuation property on
   // deterministic state-changing event targets (plus complete generated
@@ -53,7 +55,7 @@ const generatedResumeCases = generatedCases.map((generated) => {
     events,
     boundary: Math.min(generated.boundary, events.length)
   }
-})
+}))
 const assertNoUnexpectedDefect: <A, E>(operation: string, exit: Exit.Exit<A, E>) => asserts exit is Exit.Success<A, E> =
   (operation, exit) => {
     if (Exit.isFailure(exit) && Cause.hasDies(exit.cause)) {
@@ -176,7 +178,7 @@ describe("machine operation totality", () => {
         const decoded = yield* decodeWithoutDefect(machine, transported, `decodeSnapshot ${index}`)
         yield* assertLogicalSnapshotEquivalent(machine, snapshot, decoded, `snapshot ${index}`)
       }
-    }), { fastCheck: { numRuns: 150, seed: 61607 } })
+    }), { arbitrary: { runs: 150, seed: 61607 } })
   it.effect.prop("resumes a round-tripped stable boundary and preserves continuation semantics", {
     generated: generatedResumeCases
   }, ({ generated }) =>
@@ -216,7 +218,7 @@ describe("machine operation totality", () => {
       }
       yield* assertLogicalSnapshotEquivalent(machine, fullTrace.final, finalRuntime.state, "resumed continuation")
       yield* ref.stop
-    }), { fastCheck: { numRuns: 75, seed: 72719 } })
+    }), { arbitrary: { runs: 75, seed: 72719 } })
   it.effect("round-trips transformed state values and completion output", () =>
     Effect.gen(function*() {
       const Value = Schema.TaggedStruct("Value", { amount: Schema.NumberFromString })

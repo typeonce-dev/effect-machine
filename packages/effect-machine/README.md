@@ -596,6 +596,26 @@ pass complete decoded objects when defining scenarios manually. Pure planner
 tests do not execute invokes or time. Use a started machine and a probe when
 those semantics matter.
 
+Generated scenarios, finite models, and runtime commands use
+`effect/unstable/arbitrary/Arbitrary`. Custom generator options accept native
+`Arbitrary` values. For example:
+
+```ts
+import * as Arbitrary from "effect/unstable/arbitrary/Arbitrary"
+
+const generated = MachineTest.scenarios(Counter, { maxEvents: 20 })
+const samples = yield* Arbitrary.sampleEffect(generated.arbitrary, {
+  count: 10,
+  seed: 42
+})
+```
+
+Use `Arbitrary.schema(schema)` to derive a generator and `Arbitrary.array(item,
+{ maxLength })` for custom sequences. `Arbitrary.checkEffect` checks properties
+and returns a replay token for a failing case. With `@effect/vitest`, configure
+property runs using `{ arbitrary: { runs: 100, seed: 42 } }`. FastCheck replay
+paths and seeds do not preserve the same generated cases after migration.
+
 ## Entrypoints
 
 ```ts
