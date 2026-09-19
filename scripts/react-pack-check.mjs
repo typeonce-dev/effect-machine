@@ -68,7 +68,7 @@ try {
   }, null, 2))
   await writeFile(
     join(consumer, "pnpm-workspace.yaml"),
-    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\n`
+    `packages:\n  - .\noverrides:\n  "@typeonce/effect-machine": "file:${coreArchive}"\nminimumReleaseAgeExclude:\n  - "effect"\n  - "@effect/atom-react"\n`
   )
 
   run("pnpm", ["install", "--prefer-offline", "--ignore-scripts"], { cwd: consumer })
