@@ -32,9 +32,9 @@
     "dev": "tsx src/bin.ts"
   },
   "dependencies": {
-    "@effect/platform-browser": "4.0.0-rc.116",
-    "@effect/platform-node": "4.0.0-rc.116",
-    "@effect/platform-node-shared": "4.0.0-rc.116",
+    "@effect/platform-browser": "4.0.0-rc.117",
+    "@effect/platform-node": "4.0.0-rc.117",
+    "@effect/platform-node-shared": "4.0.0-rc.117",
     "@typeonce/effect-machine": "workspace:^",
     "chokidar": "4.0.3",
     "elkjs": "0.12.0",
@@ -42,11 +42,11 @@
     "vite": "8.1.5"
   },
   "peerDependencies": {
-    "effect": "4.0.0-rc.116"
+    "effect": "4.0.0-rc.117"
   },
   "devDependencies": {
     "@types/node": "25.7.0",
-    "effect": "4.0.0-rc.116",
+    "effect": "4.0.0-rc.117",
     "tsx": "4.21.0"
   },
   "files": [

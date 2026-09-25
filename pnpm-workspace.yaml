@@ -2,8 +2,8 @@ packages:
   - "packages/*"
 
 overrides:
-  effect: 4.0.0-rc.116
-  "@effect/vitest": 4.0.0-rc.116
+  effect: 4.0.0-rc.117
+  "@effect/vitest": 4.0.0-rc.117
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
