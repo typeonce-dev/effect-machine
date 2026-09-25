@@ -1,5 +1,13 @@
 # @typeonce/effect-machine-devtools
 
+## 0.38.1
+
+### Patch Changes
+
+- a3f54ab: Upgrade Effect and companion packages to `4.0.0-rc.117`. Install matching Effect packages when upgrading.
+- Updated dependencies [a3f54ab]
+  - @typeonce/effect-machine@0.38.1
+
 ## 0.38.0
 
 ### Minor Changes
