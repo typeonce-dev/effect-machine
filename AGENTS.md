@@ -66,3 +66,16 @@ Use the pull request performance workflows to compare against the base branch; d
 
 - Add or update a changeset for changes under `packages/effect-machine/src/` or changes to a publishable package manifest, following the changelog-writing guide in `.changeset/README.md`.
 - Fill in the pull request template, including the validation performed and the changeset decision.
+
+## Project skills
+
+These workflows apply only to this repository and run only when explicitly requested:
+
+- [effect-machine-pr](.agents/skills/effect-machine-pr/SKILL.md): implement, validate, open a pull request, follow CI and performance checks, and merge.
+- [effect-machine-release](.agents/skills/effect-machine-release/SKILL.md): complete the PR workflow, merge the Changesets release pull request, and verify publication.
+
+Keep one definition of each workflow in `.agents/skills`. Tool-specific discovery folders, such as `.claude/skills`, use relative symlinks to those shared definitions. Keep all discovery paths inside the repository; do not install these skills globally.
+
+Request a workflow by name or through the host's supported skill selection or command syntax. An agent without skill discovery can read the linked file when the user requests the named workflow. Mentioning, reviewing, or editing a skill is not authorization to run it.
+
+Keep workflow instructions and branch names independent of the agent, editor, or provider. Preserve explicit invocation in each host's supported metadata, including `disable-model-invocation` frontmatter and `agents/openai.yaml`. For a release, invoke only `effect-machine-release`; it reads and follows the PR workflow itself.
