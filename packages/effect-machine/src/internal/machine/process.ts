@@ -4,32 +4,28 @@
  * @since 0.4.0
  */
 
-import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import type * as Schema from "effect/Schema"
-import type { ActionError, ExecutionServices, Machine, Runtime } from "../../Machine.js"
+import type { Machine, Runtime } from "../../Machine.js"
 import * as CommandRuntime from "./commandRuntime.js"
 import * as Configuration from "./configuration.js"
-import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError } from "./errors.js"
-import type { StoppedError } from "./errors.js"
+import { failPlanning, toStartupFailure } from "./errors.js"
 import * as ExecutionPlan from "./executionPlan.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import * as Invocation from "./invocation.js"
 import * as internalPlanner from "./planner.js"
-import type { ExcludeCompatibleRuntime } from "./requirements.js"
 import * as internalRuntime from "./runtime.js"
 import * as internalRuntimeProtocol from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 
-type ProcessEntry<States extends Machine.StateSchemas, Input extends Schema.Top> =
+type ProcessEntry =
   | {
     readonly _tag: "Initial"
-    readonly args: [...Machine.InputArgs<Input>]
+    readonly args: ReadonlyArray<unknown>
   }
   | {
     readonly _tag: "Resume"
-    readonly snapshot: Machine.Snapshot<States>
+    readonly snapshot: Machine.Snapshot<any>
   }
 
 const runSequentialDiscard = <E, R>(
@@ -129,9 +125,7 @@ const makeChildlessCompiledDrain = (
           context.scope
         )
       } catch (error) {
-        return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-          ? Effect.fail(error)
-          : Effect.die(error)
+        return failPlanning(error)
       }
       configuration = planned.next
       context.executionState = configuration
@@ -254,9 +248,7 @@ const makeInvokingCompiledDrain = (
           scope
         )
       } catch (error) {
-        return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-          ? Effect.fail(error)
-          : Effect.die(error)
+        return failPlanning(error)
       }
       configuration = planned.next
       if (planned.microsteps.length === 0) {
@@ -370,69 +362,31 @@ const makeInvokingCompiledDrain = (
   }
 }
 
-const makeProcessLogic: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  entry: ProcessEntry<States, Input>
-) => internalRuntimeProtocol.ProcessLogic<
-  Machine.Snapshot<States>,
-  Machine.EventOf<Events>,
-  E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-  ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >,
-  Output,
-  | InitialE
-  | E
-  | ActionError<InitialR | R>
-  | InfiniteTransitionError
-  | MachineSchemaDecodeError
-  | StartupError
-  | StoppedError
-> = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  entry: ProcessEntry<States, Input>
-) => {
+// Planned initial states only carry an output once the machine is done.
+const initialResult = (
+  planned: { readonly state: Machine.Snapshot<any>; readonly done: boolean; readonly output: unknown }
+): internalRuntimeProtocol.CompiledProcessInitial<Machine.Snapshot<any>, unknown> =>
+  planned.done
+    ? { state: planned.state, done: true, output: planned.output }
+    : { state: planned.state, done: false, output: undefined }
+
+// Process logic executes erased machine definitions. The public `Machine`
+// module owns the typed contract that specializes this boundary.
+const makeProcessLogic = (
+  machine: Machine.Any,
+  entry: ProcessEntry
+): internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any> => {
   const hasInvokes = hasInvokeCapability(machine)
   const executionPlan = ExecutionPlan.compileExecutionPlan(machine)
   const initialArgs = entry._tag === "Initial" ? entry.args : []
   const compiledInitial = entry._tag === "Initial" ? executionPlan.initial : undefined
   const makeCompiledInitial = compiledInitial === undefined ? undefined : (
-    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<Events>>
+    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<any>>
   ) => {
     try {
       const planned = compiledInitial(initialArgs, scope)
       scope.inspectInitial(planned.initialEntryPaths)
-      const result = {
-        state: planned.state as Machine.Snapshot<States>,
-        done: planned.done,
-        output: planned.output as Output | undefined
-      }
+      const result = initialResult(planned)
       return hasInvokes
         ? {
           ...result,
@@ -444,13 +398,11 @@ const makeProcessLogic: <
         }
         : result
     } catch (error) {
-      throw error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-        ? error
-        : new StartupError({ cause: Cause.die(error) })
+      throw toStartupFailure(error)
     }
   }
   const makeInitial = (
-    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<Events>>
+    scope: internalRuntimeProtocol.ProcessScope<Machine.EventOf<any>>
   ) =>
     compiledInitial === undefined
       ? internalRuntimeProtocol.provideMachineRuntime(
@@ -464,13 +416,9 @@ const makeProcessLogic: <
               ? undefined
               : CommandRuntime.runEmittedEvents(
                 planned.emittedEvents,
-                CommandRuntime.makeLiveRuntime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>>(machine, scope)
+                CommandRuntime.makeLiveRuntime(machine, scope)
               )
-            const result = Effect.succeed({
-              state: planned.state,
-              done: planned.done,
-              output: planned.output
-            })
+            const result = Effect.succeed(initialResult(planned))
             return commands === undefined
               ? emitted === undefined ? result : emitted.pipe(Effect.andThen(result))
               : emitted === undefined
@@ -480,14 +428,14 @@ const makeProcessLogic: <
         ),
         scope
       )
-      : Effect.try({ try: () => makeCompiledInitial!(scope), catch: (error) => error as any })
+      : Effect.try({ try: () => makeCompiledInitial!(scope), catch: toStartupFailure })
   return ({
     inspection: { kind: "Machine", definition: machine },
     execution: {
       _tag: "Compiled",
       childless: !hasInvokes,
-      initial: entry._tag === "Initial" ? makeInitial : undefined,
-      initialSync: makeCompiledInitial,
+      ...(entry._tag === "Initial" ? { initial: makeInitial } : {}),
+      ...(makeCompiledInitial === undefined ? {} : { initialSync: makeCompiledInitial }),
       drain: {
         _tag: "Owned",
         run: hasInvokes
@@ -509,11 +457,11 @@ const makeProcessLogic: <
           if (completeMessage === undefined || pollMessage === undefined || receiveMessage === undefined) {
             return yield* Effect.die(new Error("Machine statechart started without acknowledged mailbox access"))
           }
-          let terminal: { readonly output: Output } | undefined
+          let terminal: { readonly output: any } | undefined
 
           let current = yield* state
           if (internalPlanner.isFinalState(machine, current)) {
-            return yield* internalPlanner.getFinalOutputEffect<States, Events, Output>(
+            return yield* internalPlanner.getFinalOutputEffect(
               machine,
               current,
               internalPlanner.InitialEvent
@@ -528,9 +476,9 @@ const makeProcessLogic: <
             // per iteration; every iteration still crosses Effect boundaries,
             // so the Effect scheduler remains responsible for cooperative yield.
             let configuration: Configuration.ActiveConfiguration | undefined
-            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<Events>>> = Option
+            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<any>>> = Option
               .none()
-            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
+            let liveRuntime: Runtime<Machine.EventOf<any>, Machine.EmittedEventOf<any>> | undefined
             while (terminal === undefined) {
               const message = Option.isSome(pendingMessage) ? pendingMessage.value : yield* receiveMessage
               pendingMessage = Option.none()
@@ -548,21 +496,18 @@ const makeProcessLogic: <
                   event
                 )
               } catch (error) {
-                if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
-                  return yield* error
-                }
-                throw error
+                return yield* failPlanning(error)
               }
               configuration = planned.next
 
               if (planned.microsteps.length > 0) {
-                const next = Configuration.snapshotFromConfiguration<States>(machine, planned.next)
+                const next = Configuration.snapshotFromConfiguration(machine, planned.next)
                 yield* CommandRuntime.runCommands(planned.commands, context)
                 yield* setState(next)
                 current = next
                 if (planned.emittedEvents.length > 0) {
                   yield* CommandRuntime.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
+                    planned.emittedEvents,
                     liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
@@ -610,16 +555,15 @@ const makeProcessLogic: <
           const startInvokes: (
             configuration: Configuration.ActiveConfiguration,
             paths: ReadonlyArray<string>,
-            event: Machine.LifecycleEvent<Events>
-          ) => Effect.Effect<void, E | MachineSchemaDecodeError, R> = (configuration, paths, event) =>
-            (Invocation.startAll(
-              machine,
-              context,
-              ownedChildren,
-              configuration,
-              paths,
-              event
-            ) ?? Effect.void) as Effect.Effect<void, E | MachineSchemaDecodeError, R>
+            event: Machine.LifecycleEvent<any>
+          ) => Effect.Effect<void, any, any> = (configuration, paths, event) => (Invocation.startAll(
+            machine,
+            context,
+            ownedChildren,
+            configuration,
+            paths,
+            event
+          ) ?? Effect.void)
           const stopInvokes = (paths: ReadonlyArray<string>): Effect.Effect<void> =>
             ownedChildren.stopPaths(paths) ?? Effect.void
 
@@ -637,9 +581,9 @@ const makeProcessLogic: <
             // As above, keep the normalized configuration only while this
             // worker can continue draining an already queued batch.
             configuration = undefined
-            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<Events>>> = Option
+            let pendingMessage: Option.Option<internalRuntimeProtocol.ProcessMessage<Machine.EventOf<any>>> = Option
               .none()
-            let liveRuntime: Runtime<Machine.EventOf<Events>, Machine.EmittedEventOf<Emits>> | undefined
+            let liveRuntime: Runtime<Machine.EventOf<any>, Machine.EmittedEventOf<any>> | undefined
 
             // Match the compact non-invoke loop while retaining state-scoped
             // child lifecycle work at the same ordered Effect boundaries.
@@ -660,25 +604,22 @@ const makeProcessLogic: <
                   event
                 )
               } catch (error) {
-                if (error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError) {
-                  return yield* error
-                }
-                throw error
+                return yield* failPlanning(error)
               }
               configuration = planned.next
               if (planned.microsteps.length > 0) {
                 const changed = planned.microsteps.some((step) => step.changed)
                 const exitPaths = planned.microsteps.flatMap((step) => step.exitPaths)
-                const entryEvents = new Map<string, Machine.LifecycleEvent<Events>>()
+                const entryEvents = new Map<string, Machine.LifecycleEvent<any>>()
                 for (const step of planned.microsteps) {
                   if (step.changed) {
                     for (const path of step.entryPaths) {
-                      entryEvents.set(path, step.event as Machine.LifecycleEvent<Events>)
+                      entryEvents.set(path, step.event)
                     }
                   }
                 }
 
-                const next = Configuration.snapshotFromConfiguration<States>(machine, planned.next)
+                const next = Configuration.snapshotFromConfiguration(machine, planned.next)
                 yield* CommandRuntime.runCommands(planned.commands, context)
                 if (changed) {
                   yield* stopInvokes(exitPaths)
@@ -687,7 +628,7 @@ const makeProcessLogic: <
                 current = next
                 if (planned.emittedEvents.length > 0) {
                   yield* CommandRuntime.runEmittedEvents(
-                    planned.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
+                    planned.emittedEvents,
                     liveRuntime ??= CommandRuntime.makeLiveRuntime(machine, context)
                   )
                 }
@@ -734,24 +675,7 @@ const makeProcessLogic: <
         }),
         context
       )
-  }) as internalRuntimeProtocol.ProcessLogic<
-    Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
-    E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-    ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
-      Machine.EventOf<Events>,
-      Machine.EmittedEventOf<Emits>
-    >,
-    Output,
-    | InitialE
-    | E
-    | ActionError<InitialR | R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StartupError
-    | StoppedError
-  >
+  })
 }
 
 const initialProcessLogicCache = new WeakMap<
@@ -759,39 +683,10 @@ const initialProcessLogicCache = new WeakMap<
   internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any>
 >()
 
-export const toProcessLogic: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
-) => internalRuntimeProtocol.ProcessLogic<
-  Machine.Snapshot<States>,
-  Machine.EventOf<Events>,
-  E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-  ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >,
-  Output,
-  | InitialE
-  | E
-  | ActionError<InitialR | R>
-  | InfiniteTransitionError
-  | MachineSchemaDecodeError
-  | StartupError
-  | StoppedError
-> = (machine, ...args) => {
+export const toProcessLogic = (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<unknown>
+): internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any> => {
   if (args.length > 0) {
     return makeProcessLogic(machine, { _tag: "Initial", args })
   }
@@ -813,7 +708,7 @@ const toResumedProcessLogic = (
   machine: Machine.Any,
   snapshot: Machine.Snapshot<any>
 ): internalRuntimeProtocol.ProcessLogic<any, any, any, any, any, any> =>
-  (makeProcessLogic as any)(machine, { _tag: "Resume", snapshot })
+  makeProcessLogic(machine, { _tag: "Resume", snapshot })
 
 /** @internal Test-only runtime strategy selection for a fresh machine. */
 export const startWithRuntimeStrategyForTesting = (
@@ -822,7 +717,7 @@ export const startWithRuntimeStrategyForTesting = (
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any>, any, any> =>
   internalRuntime.startProcessWithStrategyForTesting(
-    (toProcessLogic as any)(machine, ...args),
+    toProcessLogic(machine, ...args),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
   )
@@ -834,7 +729,7 @@ export const prepareWithRuntimeStrategyForTesting = (
   ...args: ReadonlyArray<unknown>
 ): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>, any, any> =>
   internalRuntime.prepareProcessWithStrategyForTesting(
-    (toProcessLogic as any)(machine, ...args),
+    toProcessLogic(machine, ...args),
     strategy,
     machine.id === undefined ? undefined : { id: machine.id }
   )
@@ -851,125 +746,31 @@ export const resumeWithRuntimeStrategyForTesting = (
     machine.id === undefined ? undefined : { id: machine.id }
   )
 
-export const start: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  internalRuntimeProtocol.MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
-    | E
-    | ActionError<R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output
-  >,
-  | InitialE
-  | E
-  | ActionError<InitialR | R>
-  | InfiniteTransitionError
-  | MachineSchemaDecodeError
-  | StartupError
-  | StoppedError,
-  ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
-> = (machine, ...args) =>
+// The public `Machine` module owns the typed start, prepare, and resume
+// signatures. These implementations are the erased boundary they specialize.
+export const start = (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<unknown>
+): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any, any>, any, any> =>
   internalRuntime.startProcess(
     toProcessLogic(machine, ...args),
     machine.id === undefined ? undefined : { id: machine.id }
-  ) as any
+  )
 
-export const prepare: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  internalRuntimeProtocol.PreparedProcess<
-    Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
-    | E
-    | ActionError<R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>,
-    | InitialE
-    | E
-    | ActionError<InitialR | R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StartupError
-    | StoppedError,
-    ExcludeCompatibleRuntime<
-      Exclude<ExecutionServices<InitialR | R>, internalRuntimeProtocol.MachineRuntime>,
-      Machine.EventOf<Events>,
-      Machine.EmittedEventOf<Emits>
-    >
-  >
-> = (machine, ...args) =>
+export const prepare = (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<unknown>
+): Effect.Effect<internalRuntimeProtocol.PreparedProcess<any, any, any, any, any, any, any>> =>
   internalRuntime.prepareProcess(
     toProcessLogic(machine, ...args),
     machine.id === undefined ? undefined : { id: machine.id }
-  ) as any
+  )
 
-export const resume: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  snapshot: Machine.Snapshot<States>
-) => Effect.Effect<
-  internalRuntimeProtocol.MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventOf<Events>,
-    E | ActionError<R> | InfiniteTransitionError | MachineSchemaDecodeError | StoppedError,
-    Output
-  >,
-  MachineSchemaDecodeError,
-  ExcludeCompatibleRuntime<
-    Exclude<ExecutionServices<R>, internalRuntimeProtocol.MachineRuntime>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
-> = (machine, snapshot) =>
+export const resume = (
+  machine: Machine.Any,
+  snapshot: Machine.Snapshot<any>
+): Effect.Effect<internalRuntimeProtocol.MachineRef<any, any, any, any, any>, any, any> =>
   internalRuntime.startProcess(
     toResumedProcessLogic(machine, snapshot),
     machine.id === undefined ? undefined : { id: machine.id }
-  ) as any
+  )

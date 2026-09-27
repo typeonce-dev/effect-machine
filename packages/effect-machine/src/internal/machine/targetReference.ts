@@ -1,19 +1,19 @@
 import * as Schema from "effect/Schema"
-import type { Machine, State } from "../../Machine.js"
+import type { Machine } from "../../Machine.js"
 
 /** Reference metadata is separate from child names, including names such as `path`. */
 export const TypeId: unique symbol = Symbol.for("effect/Machine/TargetReference")
 
 export interface Reference {
   readonly [TypeId]: {
-    readonly root: State<Machine.StateNodeConfig>
+    readonly root: Machine.Any["root"]
     readonly path: string
     readonly kind: "state" | "choice" | "history"
   }
 }
 
 /** Captures an immutable reference tree without allocating or executing a machine. */
-export const make = (root: State<Machine.StateNodeConfig>): { readonly root: Reference } => {
+export const make = (root: Machine.Any["root"]): { readonly root: Reference } => {
   const nodes: Array<{ path: string; key: string; parent: string | undefined; type: string }> = []
   const visit = (
     node: Machine.StateNodeConfig | Machine.TaggedSchema,

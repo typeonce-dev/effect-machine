@@ -4,9 +4,7 @@
  * @since 0.4.0
  */
 
-import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import type * as Schema from "effect/Schema"
 import type { Enqueue, InitialEvent as MachineInitialEvent, Machine, MachineTarget } from "../../Machine.js"
 import { makeCollector, type RuntimeCommand } from "./command.js"
 import {
@@ -38,7 +36,9 @@ import {
   snapshotFromConfigurationAtPath
 } from "./configuration.js"
 import * as Construction from "./construction.js"
-import { InfiniteTransitionError, MachineSchemaDecodeError, StartupError, StoppedError } from "./errors.js"
+import { failPlanning, InfiniteTransitionError, MachineSchemaDecodeError, toStartupFailure } from "./errors.js"
+import { StoppedError } from "./errors.js"
+import type { PlanningError, StartupError } from "./errors.js"
 import { type CapturedStateConfig, toImpl } from "./implementation.js"
 import { isDataInitializer } from "./initialDeclaration.js"
 import { getStateInitializeValues, makeStateInitializeBuilder } from "./initialization.js"
@@ -770,7 +770,7 @@ const makeTransitionContext = <
   StateId extends Machine.StateIdentifier<States>,
   EventTag extends Machine.TagOf<Events[number]>
 >(
-  machine: Machine<States, Events, any, any, any, any, any, any, any, any, Emits>,
+  machine: Machine.Any,
   configuration: ActiveConfiguration,
   path: string,
   event: Machine.EventByTag<Events, EventTag>,
@@ -1728,58 +1728,20 @@ export const getFinalOutputEffect = <
     })
   )
 
-export const isFinal = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates
-  >,
-  state: Machine.Snapshot<States>
-): state is Machine.SnapshotContainingFinal<States, FinalStates> => isFinalState(machine, state)
+export const isFinal = (
+  machine: Machine.Any,
+  state: Machine.Snapshot<any>
+): state is Machine.SnapshotContainingFinal<any, any> => isFinalState(machine, state)
 
-export const planInitialSync = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  ...args: [...Machine.InputArgs<Input>]
+export const planInitialSync = (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<unknown>
 ) => {
   const inputArgs = machine.input === undefined
     ? args
     : args.length === 0
     ? (decodeInputSync(machine, machine.input, undefined), args)
-    : [decodeInputSync(machine, machine.input, args[0])] as [...Machine.InputArgs<Input>]
+    : [decodeInputSync(machine, machine.input, args[0])]
   const initial = machine.initial(...inputArgs)
   const emptyConfiguration: ActiveConfiguration = {
     active: new Set(),
@@ -1789,12 +1751,12 @@ export const planInitialSync = <
   }
   const rootResolution = resolveInitialTarget(machine, emptyConfiguration, initial, InitialEvent)
   const configuration = normalizeTargetConfigurationSync(machine, emptyConfiguration, rootResolution.target)
-  const startingState = snapshotFromConfiguration<States>(machine, configuration)
+  const startingState = snapshotFromConfiguration(machine, configuration)
   const initialEntryPaths = getInitialEntryPaths(machine, configuration)
   const commands = rootResolution.commands
   const raisedEvents = rootResolution.raisedEvents
   const emittedEvents = rootResolution.emittedEvents
-  const entry = collectStateActions<States, Events, Emits, E, R>(
+  const entry = collectStateActions(
     machine,
     configuration,
     initialEntryPaths,
@@ -1806,7 +1768,7 @@ export const planInitialSync = <
     configuration,
     InitialEvent,
     [...entry.commands],
-    [...raisedEvents, ...entry.raisedEvents] as Array<Machine.EventOf<Events>>,
+    [...raisedEvents, ...entry.raisedEvents],
     [...emittedEvents, ...entry.emittedEvents],
     rootResolution.transitions.length === 0 ?
       [] :
@@ -1817,7 +1779,7 @@ export const planInitialSync = <
         commands,
         raisedEvents: [
           ...raisedEvents
-        ] as ReadonlyArray<Machine.EventOf<Events>>,
+        ],
         emittedEvents,
         exitPaths: [],
         entryPaths: [],
@@ -1829,14 +1791,14 @@ export const planInitialSync = <
   const planned = {
     startingState,
     initialEntryPaths,
-    state: snapshotFromConfiguration<States>(machine, settled.next),
+    state: snapshotFromConfiguration(machine, settled.next),
     commands: [
       ...commands,
       ...settled.commands
     ],
-    emittedEvents: settled.emittedEvents as ReadonlyArray<Machine.EmittedEventOf<Emits>>,
+    emittedEvents: settled.emittedEvents,
     microsteps: settled.microsteps.map((step) => ({
-      next: snapshotFromConfiguration<States>(machine, step.next),
+      next: snapshotFromConfiguration(machine, step.next),
       event: step.event,
       transitions: step.transitions,
       commands: step.commands,
@@ -1852,47 +1814,21 @@ export const planInitialSync = <
     : { ...planned, done: false as const, output: undefined }
 }
 
-export const enabled = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates
-  >,
-  state: Machine.Snapshot<States>
-): ReadonlyArray<Machine.TagOf<Events[number]>> => {
+export const enabled = (
+  machine: Machine.Any,
+  state: Machine.Snapshot<any>
+): ReadonlyArray<Machine.TagOf<any>> => {
   if (isFinalState(machine, state)) {
     return []
   }
   const configuration = normalizeConfiguration(machine, state)
-  const tags: Array<Machine.TagOf<Events[number]>> = []
+  const tags: Array<Machine.TagOf<any>> = []
   const seen = new Set<PropertyKey>()
   for (const path of getCandidatePaths(machine, configuration)) {
     for (const tag of Reflect.ownKeys(toImpl(machine).handlers[path]?.on ?? {})) {
       if (!seen.has(tag)) {
         seen.add(tag)
-        tags.push(tag as Machine.TagOf<Events[number]>)
+        tags.push(tag)
       }
     }
   }
@@ -1910,24 +1846,11 @@ const canSync = (
   return selectEventTransitions(machine, configuration, decodedEvent as any).length > 0
 }
 
-const microstep = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  Context = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+const microstep = (
+  machine: Machine.Any,
   state: ActiveConfiguration,
-  event: Machine.LifecycleEvent<Events>,
-  selections: ReadonlyArray<SelectedTransition<States, E, R, Context>>
+  event: Machine.LifecycleEvent<any>,
+  selections: ReadonlyArray<SelectedTransition<any, any, any, any>>
 ) => {
   if (selections.length === 0) {
     return {
@@ -1945,10 +1868,10 @@ const microstep = <
   }
 
   const activeSelections = removePreemptedAncestorSelections(selections)
-  const evaluatedTransitions: Array<EvaluatedTransition<States, Machine.EventOf<Events>, E, R, Context>> = []
+  const evaluatedTransitions: Array<EvaluatedTransition<any, Machine.EventOf<any>, any, any, any>> = []
   for (const selection of activeSelections) {
     evaluatedTransitions.push(
-      collectEvaluatedTransition<States, Machine.EventOf<Events>, E, R, Context>(
+      collectEvaluatedTransition(
         machine,
         state,
         selection
@@ -1994,7 +1917,7 @@ const microstep = <
   ]
   for (const transition of targetApplicationOrder) {
     if (transition.target !== undefined) {
-      stateAfterTransition = normalizeTargetConfigurationSync<States>(
+      stateAfterTransition = normalizeTargetConfigurationSync(
         machine,
         stateAfterTransition,
         transition.target
@@ -2029,14 +1952,14 @@ const microstep = <
   const exitPaths = sortExitPaths(machine, sortedTransitions.flatMap((transition) => transition.exitPaths))
   const entryPaths = sortEntryPaths(machine, sortedTransitions.flatMap((transition) => transition.entryPaths))
   stateAfterTransition = captureHistory(machine, state, stateAfterTransition, exitPaths)
-  const exit = collectStateActions<States, Events, Emits, E, R>(
+  const exit = collectStateActions(
     machine,
     state,
     exitPaths,
     event,
     "exit"
   )
-  const entry = collectStateActions<States, Events, Emits, E, R>(
+  const entry = collectStateActions(
     machine,
     stateAfterTransition,
     entryPaths,
@@ -2050,7 +1973,7 @@ const microstep = <
     transitions: retainedTransitions,
     commands: [...exit.commands, ...transitionActions, ...entry.commands],
     raisedEvents: [...exit.raisedEvents, ...transitionRaisedEvents, ...entry.raisedEvents] as ReadonlyArray<
-      Machine.EventOf<Events>
+      Machine.EventOf<any>
     >,
     emittedEvents: [...exit.emittedEvents, ...transitionEmittedEvents, ...entry.emittedEvents],
     exitPaths,
@@ -2060,26 +1983,14 @@ const microstep = <
   }
 }
 
-const settle = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+const settle = (
+  machine: Machine.Any,
   state: ActiveConfiguration,
-  event: Machine.LifecycleEvent<Events>,
+  event: Machine.LifecycleEvent<any>,
   commands: Array<RuntimeCommand>,
-  raisedEvents: Array<Machine.EventOf<Events>>,
+  raisedEvents: Array<Machine.EventOf<any>>,
   emittedEvents: Array<unknown>,
-  microsteps: Array<SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R>>
+  microsteps: Array<SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any>>
 ) => {
   let currentState = state
   let currentEvent = event
@@ -2087,7 +1998,7 @@ const settle = <
   let iterations = 0
   let raisedEventIndex = 0
   let completedTerminal = false
-  let finalOutput: Output | undefined = undefined
+  let finalOutput: any | undefined = undefined
   const pendingCompletions: Array<{ readonly path: string; readonly output: unknown }> = []
 
   while (true) {
@@ -2108,14 +2019,14 @@ const settle = <
     while (pendingCompletions.length > 0 && !currentState.active.has(pendingCompletions[0]!.path)) {
       pendingCompletions.shift()
     }
-    const done = selectDoneTransitions<States, Events, Emits, E, R>(
+    const done = selectDoneTransitions(
       machine,
       currentState,
       currentEvent,
       pendingCompletions.length === 0 ? [] : [pendingCompletions.shift()!]
     )
     if (done.length > 0) {
-      const doneStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
+      const doneStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2135,15 +2046,15 @@ const settle = <
         throw new Error("Machine reached a terminal configuration without a completed root output")
       }
       completedTerminal = true
-      finalOutput = currentState.outputs.get(root) as Output
+      finalOutput = currentState.outputs.get(root) as any
       break
     }
 
     const always = shouldRunAlways
-      ? selectAlwaysTransitions<States, Events, Emits, E, R>(machine, currentState, currentEvent)
+      ? selectAlwaysTransitions(machine, currentState, currentEvent)
       : []
     if (always.length > 0) {
-      const alwaysStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<Events>, E, R> = microstep(
+      const alwaysStep: SettlingMicrostep<ActiveConfiguration, Machine.EventOf<any>, any, any> = microstep(
         machine,
         currentState,
         currentEvent,
@@ -2168,10 +2079,10 @@ const settle = <
     // internal queue, so decoding it again here only repeats schema work.
     const raisedEvent = raisedEventValue
     currentEvent = raisedEvent
-    const raisedSelections = selectEventTransitions<States, Events, Emits, E, R>(
+    const raisedSelections = selectEventTransitions(
       machine,
       currentState,
-      raisedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
+      raisedEvent
     )
     if (raisedSelections.length === 0) {
       shouldRunAlways = true
@@ -2198,28 +2109,16 @@ const settle = <
     microsteps
   }
   return completedTerminal
-    ? { ...result, done: true as const, output: finalOutput as Output }
+    ? { ...result, done: true as const, output: finalOutput as any }
     : { ...result, done: false as const, output: undefined }
 }
 
-const macrostepConfiguration = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
+const macrostepConfiguration = (
+  machine: Machine.Any,
   configuration: ActiveConfiguration,
-  event: Machine.EventOf<Events> | InvocationEvent.InvocationEvent
+  event: Machine.EventOf<any> | InvocationEvent.InvocationEvent
 ) => {
-  const decodedEvent = InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync<Events>(machine, event)
+  const decodedEvent = InvocationEvent.isInvocationEvent(event) ? event : decodeEventSync(machine, event)
   if (isActiveFinalConfiguration(machine, configuration)) {
     const completed = completeConfigurationSync(machine, configuration, decodedEvent as any)
     const root = getRootPath(machine, completed.configuration)
@@ -2233,16 +2132,16 @@ const macrostepConfiguration = <
       emittedEvents: [],
       microsteps: [],
       done: true as const,
-      output: completed.configuration.outputs.get(root) as Output
+      output: completed.configuration.outputs.get(root) as any
     }
   }
 
   const selections = InvocationEvent.isInvocationEvent(decodedEvent)
-    ? selectInvocationTransition<States, Events, Emits, E, R>(machine, configuration, decodedEvent)
-    : selectEventTransitions<States, Events, Emits, E, R>(
+    ? selectInvocationTransition(machine, configuration, decodedEvent)
+    : selectEventTransitions(
       machine,
       configuration,
-      decodedEvent as Machine.EventByTag<Events, Machine.TagOf<Events[number]>>
+      decodedEvent
     )
   if (selections.length === 0) {
     return {
@@ -2303,40 +2202,26 @@ const snapshotMacrostep = <
     : { ...planned, done: false, output: undefined }
 }
 
-const macrostep = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never
->(
-  machine: Machine<States, Events, Input, UnhandledStates, E, R, InitialE, InitialR, FinalStates, Output, Emits>,
-  state: Machine.Snapshot<States>,
-  event: Machine.EventOf<Events>
+const macrostep = (
+  machine: Machine.Any,
+  state: Machine.Snapshot<any>,
+  event: Machine.EventOf<any>
 ) => {
-  const configuration = normalizeConfigurationSync<States>(machine, state)
+  const configuration = normalizeConfigurationSync(machine, state)
   const settled = macrostepConfiguration(machine, configuration, event)
-  return snapshotMacrostep<States, Machine.EventOf<Events>, E, R, Output>(machine, settled)
+  return snapshotMacrostep(machine, settled)
 }
 
 export const planSync = macrostep
 
 export const planConfiguration = macrostepConfiguration
 
-const planningEffect = <A>(thunk: () => A): Effect.Effect<A, InfiniteTransitionError | MachineSchemaDecodeError> =>
+const planningEffect = <A>(thunk: () => A): Effect.Effect<A, PlanningError> =>
   Effect.suspend(() => {
     try {
       return Effect.succeed(thunk())
     } catch (error) {
-      return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-        ? Effect.fail(error)
-        : Effect.die(error)
+      return failPlanning(error)
     }
   })
 
@@ -2349,25 +2234,34 @@ const schemaEffect = <A>(thunk: () => A): Effect.Effect<A, MachineSchemaDecodeEr
     }
   })
 
-export const can = (...args: readonly [Machine.Any] | readonly [Machine.Any, Machine.Snapshot<any>, unknown]) => {
+export function can(
+  machine: Machine.Any
+): (state: Machine.Snapshot<any>, event: unknown) => Effect.Effect<boolean, MachineSchemaDecodeError>
+export function can(
+  machine: Machine.Any,
+  state: Machine.Snapshot<any>,
+  event: unknown
+): Effect.Effect<boolean, MachineSchemaDecodeError>
+export function can(
+  ...args: readonly [Machine.Any] | readonly [Machine.Any, Machine.Snapshot<any>, unknown]
+):
+  | ((state: Machine.Snapshot<any>, event: unknown) => Effect.Effect<boolean, MachineSchemaDecodeError>)
+  | Effect.Effect<boolean, MachineSchemaDecodeError>
+{
   const query = (state: Machine.Snapshot<any>, event: unknown) => schemaEffect(() => canSync(args[0], state, event))
   return args.length === 1 ? query : query(args[1], args[2])
 }
 
 export const plan = (machine: Machine.Any, state: Machine.Snapshot<any>, event: unknown) =>
-  planningEffect(() => planSync(machine as any, state, event as any))
+  planningEffect(() => planSync(machine, state, event))
 
 export const planInitial = (
   machine: Machine.Any,
   ...args: ReadonlyArray<unknown>
-): Effect.Effect<any, InfiniteTransitionError | MachineSchemaDecodeError | StartupError> =>
+): Effect.Effect<ReturnType<typeof planInitialSync>, PlanningError | StartupError> =>
   Effect.try({
-    try: () => (planInitialSync as any)(machine, ...args),
-    catch: (error) => {
-      return error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
-        ? error
-        : new StartupError({ cause: Cause.die(error) })
-    }
+    try: () => planInitialSync(machine, ...args),
+    catch: toStartupFailure
   })
 
 // Captured constructors are private planner inputs. Public callbacks receive root data

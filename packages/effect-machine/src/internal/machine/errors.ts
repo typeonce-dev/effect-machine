@@ -1,5 +1,6 @@
-import type * as Cause from "effect/Cause"
+import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
 import type * as Schema from "effect/Schema"
 
 /**
@@ -85,3 +86,23 @@ export class ProcessLocalError extends Data.TaggedError("ProcessLocalError")<{
  * @since 0.4.0
  */
 export class StoppedError extends Data.TaggedError("StoppedError") {}
+
+/**
+ * Failures that synchronous planning reports through the typed error channel.
+ * Every other planning throw is a defect.
+ */
+export type PlanningError = InfiniteTransitionError | MachineSchemaDecodeError
+
+export const isPlanningError = (error: unknown): error is PlanningError =>
+  error instanceof InfiniteTransitionError || error instanceof MachineSchemaDecodeError
+
+/** Converts a synchronous planning throw into a typed failure or a defect. */
+export const failPlanning = (error: unknown): Effect.Effect<never, PlanningError> =>
+  isPlanningError(error) ? Effect.fail(error) : Effect.die(error)
+
+/**
+ * Classifies a synchronous initial-planning throw. Planning failures stay
+ * typed; any other throw is preserved as the defect cause of a `StartupError`.
+ */
+export const toStartupFailure = (error: unknown): PlanningError | StartupError =>
+  isPlanningError(error) || error instanceof StartupError ? error : new StartupError({ cause: Cause.die(error) })

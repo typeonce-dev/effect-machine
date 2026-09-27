@@ -140,7 +140,7 @@ const resumeMachineAtomEffect = (
   get: Atom.AtomContext,
   machine: Machine.Machine.Any,
   snapshot: Machine.Machine.Snapshot<any>
-) => runMachineAtomEffect(get, internalMachine.resume(machine as any, snapshot as any))
+) => runMachineAtomEffect(get, internalMachine.resume(machine, snapshot))
 
 type RefState<Ref> = Ref extends Machine.MachineRef<infer State, any, any, any, any> ? State : never
 type RefError<Ref> = Ref extends Machine.MachineRef<any, any, infer Error, any, any> ? Error : never
@@ -723,10 +723,7 @@ export const can = (event: unknown) => {
       event: unknown
     ) => Effect.Effect<boolean, Machine.MachineSchemaDecodeError> = machine === undefined
       ? () => Effect.die(new Error("AtomMachine.can requires a machine atom created by AtomMachine"))
-      : internalMachine.can(machine) as (
-        state: Machine.Machine.Snapshot<any>,
-        event: unknown
-      ) => Effect.Effect<boolean, Machine.MachineSchemaDecodeError>
+      : internalMachine.can(machine)
 
     const result = Atom.readable((get): AsyncResult.AsyncResult<boolean, any> => {
       const current = get(self.snapshot)
@@ -840,7 +837,7 @@ export const make: {
     Machine.Machine.EmittedEventOf<Emits>
   >
 } = ((machine: Machine.Machine.Any, ...args: ReadonlyArray<unknown>) => {
-  const prepared = Atom.make(() => internalMachine.prepare(machine as any, ...(args as [])))
+  const prepared = Atom.make(() => internalMachine.prepare(machine, ...args))
   const ref = Atom.make((get) => startPreparedMachineAtomEffect(get, prepared as any))
   const result = makeFromRefAtom(ref as any, machine)
   preparedByMachineAtom.set(result, prepared as any)
@@ -869,7 +866,7 @@ const makeWithRuntime = (
   machine: Machine.Machine.Any,
   args: ReadonlyArray<unknown>
 ): MachineAtom<any, any, any, any, any, any> => {
-  const prepared = runtime.atom(() => internalMachine.prepare(machine as any, ...(args as [])))
+  const prepared = runtime.atom(() => internalMachine.prepare(machine, ...args))
   const ref = runtime.atom((get) => startPreparedMachineAtomEffect(get, prepared as any))
   const result = makeFromRefAtom(ref as any, machine)
   preparedByMachineAtom.set(result, prepared as any)
