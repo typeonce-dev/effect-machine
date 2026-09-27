@@ -7,13 +7,9 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 import type {
-  ActionError,
   ChildAddress,
   ChildMachine,
-  Command,
   Definition,
-  ExecutionServices,
-  InitialEvent as InitialEventModel,
   Logic,
   Machine,
   MachineRef,
@@ -30,7 +26,7 @@ import * as Activities from "./activities.js"
 import * as Configuration from "./configuration.js"
 import * as Construction from "./construction.js"
 import * as Declaration from "./declaration.js"
-import type { ChildAlreadyExistsError, InfiniteTransitionError, StartupError } from "./errors.js"
+import type { ChildAlreadyExistsError, PlanningError, StartupError } from "./errors.js"
 import type { CapturedStateConfig } from "./implementation.js"
 import * as InitialDeclaration from "./initialDeclaration.js"
 import * as InvocationDefinition from "./invocationDefinition.js"
@@ -38,8 +34,6 @@ import * as Observation from "./observation.js"
 import * as internalPlanner from "./planner.js"
 import * as internalProcess from "./process.js"
 import * as Protocol from "./protocol.js"
-import type { EnsureExecutable } from "./readiness.js"
-import type { ExcludeCompatibleRuntime } from "./requirements.js"
 import * as internalRuntime from "./runtimeProtocol.js"
 import * as Serialization from "./serialization.js"
 import * as StateDefinition from "./stateDefinition.js"
@@ -60,8 +54,7 @@ export { ChildMachineLogicTypeId, InitialEventTypeId, SnapshotBuilderStateTypeId
 
 /** Internal seam for the public target-reference factory and its opaque brand. */
 export const TargetReferenceTypeId: typeof TargetReference.TypeId = TargetReference.TypeId
-export const targets: (root: State<Machine.StateNodeConfig>) => { readonly root: TargetReference.Reference } =
-  TargetReference.make
+export const targets: (root: Machine.Any["root"]) => any = TargetReference.make
 
 const TypeId = "~effect/Machine"
 const ParentTypeId = "~effect/Machine/Parent"
@@ -742,38 +735,11 @@ export const isMachine = (
   u: unknown
 ): u is Machine.Any => hasProperty(u, TypeId) && u[TypeId] === TypeId
 
-export const isFinal = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >,
-  state: Machine.Snapshot<States>
-): state is Machine.SnapshotContainingFinal<States, FinalStates> => internalPlanner.isFinal(machine as any, state)
+// Erased machine operations. `any` marks the positions whose types the public
+// `Machine` module computes from the machine's generic parameters; the public
+// module specializes each operation without a cast.
+
+export const isFinal: (machine: Machine.Any, state: any) => state is any = internalPlanner.isFinal
 
 export const state = (node: unknown): State<Machine.StateNodeConfig> => {
   const captured = StateDefinition.captureRoot(node) as Machine.StateNodeConfig
@@ -806,54 +772,23 @@ const makeStateHelpers = (): Machine.StateAccessors<{ readonly "": Machine.State
   }
 }
 
-type MakeResult<
-  States extends Machine.StateSchemas,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  Input extends Schema.Top,
-  InitialE,
-  InitialR,
-  InternalEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  ParentDeclaration extends Parent.Any | undefined
-> = Definition<
-  States,
-  readonly [...InputEvents, ...InternalEvents],
-  Input,
-  InitialE,
-  InitialR,
-  Machine.FinalStateFromDefinition<States>,
-  Machine.TerminalOutput<States>,
-  Emits,
-  InputEvents,
-  Machine.ParentEventsOf<ParentDeclaration>
->
-
-export const make = <
-  const States extends Machine.StateSchemas,
-  const InputEvents extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  InitialE = never,
-  InitialR = never,
-  const InternalEvents extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const ParentDeclaration extends Parent.Any | undefined = undefined
->(
+export const make = (
   config: {
     readonly id?: string
-    readonly root: State<Machine.StateNodeConfig>
+    readonly root: Machine.Any["root"]
     readonly effects?: unknown
     readonly streams?: unknown
     readonly timers?: unknown
     readonly logic?: unknown
     readonly children?: unknown
     readonly branches?: unknown
-    readonly events: Machine.EventProtocol<"public", InputEvents>
-    readonly internalEvents?: Machine.EventProtocol<"internal", InternalEvents>
-    readonly emittedEvents?: Machine.EventProtocol<"emitted", Emits>
-    readonly parent?: ParentDeclaration
-    readonly input?: Input
+    readonly events: Machine.EventProtocol<"public", any>
+    readonly internalEvents?: Machine.EventProtocol<"internal", any>
+    readonly emittedEvents?: Machine.EventProtocol<"emitted", any>
+    readonly parent?: Parent.Any | undefined
+    readonly input?: Schema.Top
   }
-): MakeResult<States, InputEvents, Emits, Input, InitialE, InitialR, InternalEvents, ParentDeclaration> => {
+): any => {
   if (Object.hasOwn(config, "initial") || Object.hasOwn(config, "initialConfiguration")) {
     throw new Error("Machine initial edges and root data belong in handle")
   }
@@ -900,12 +835,15 @@ const eventFieldSchemas = (
   return Object.keys(cases).length === 0 ? [] : [Schema.TaggedUnion(cases)]
 }
 
-export const eventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
-  Protocol.makeEventProtocol("public", eventFieldSchemas(cases))
-export const internalEventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
-  Protocol.makeEventProtocol("internal", eventFieldSchemas(cases))
-export const emittedEventsFromFields = (cases: Readonly<Record<string, Schema.Struct.Fields>>) =>
-  Protocol.makeEventProtocol("emitted", eventFieldSchemas(cases))
+export const eventsFromFields = (
+  cases: Readonly<Record<string, Schema.Struct.Fields>>
+): Machine.EventProtocol<"public", any> => Protocol.makeEventProtocol("public", eventFieldSchemas(cases))
+export const internalEventsFromFields = (
+  cases: Readonly<Record<string, Schema.Struct.Fields>>
+): Machine.EventProtocol<"internal", any> => Protocol.makeEventProtocol("internal", eventFieldSchemas(cases))
+export const emittedEventsFromFields = (
+  cases: Readonly<Record<string, Schema.Struct.Fields>>
+): Machine.EventProtocol<"emitted", any> => Protocol.makeEventProtocol("emitted", eventFieldSchemas(cases))
 
 const makeParent = <
   const Mode extends ParentMode,
@@ -944,151 +882,20 @@ export const emittedEvents = <const Inputs extends ReadonlyArray<Machine.EventPr
     flattenEventProtocolInputs("emitted", inputs)
   ) as Machine.EventProtocol<"emitted", Machine.EventProtocolInputSchemasOf<"emitted", Inputs>>
 
-export const encodeSnapshot: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >,
-  snapshot: Machine.Snapshot<States>
-) => Effect.Effect<
-  Machine.EncodedSnapshot,
-  MachineSchemaEncodeError,
-  Machine.SnapshotEncodingServices<States>
-> = Serialization.encodeSnapshot as any
+export const encodeSnapshot: (
+  machine: Machine.Any,
+  snapshot: any
+) => Effect.Effect<Machine.EncodedSnapshot, MachineSchemaEncodeError, any> = Serialization.encodeSnapshot
 
-export const decodeSnapshot: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >,
+export const decodeSnapshot: (
+  machine: Machine.Any,
   encoded: unknown
-) => Effect.Effect<
-  Machine.Snapshot<States>,
-  MachineSchemaDecodeError,
-  Machine.SnapshotDecodingServices<States>
-> = Serialization.decodeSnapshot as any
+) => Effect.Effect<any, MachineSchemaDecodeError, any> = Serialization.decodeSnapshot
 
-export const planInitial: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  & {
-    readonly startingState: Machine.Snapshot<States>
-    readonly initialEntryPaths: ReadonlyArray<Machine.StateIdentifier<States>>
-    readonly state: Machine.Snapshot<States>
-    readonly commands: ReadonlyArray<Command>
-    readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
-    readonly microsteps: ReadonlyArray<{
-      readonly next: Machine.Snapshot<States>
-      readonly event: Machine.EventOf<Events> | InitialEventModel
-      readonly transitions: ReadonlyArray<
-        Machine.RetainedTransition<
-          Machine.StateNodeIdentifier<States>,
-          Machine.TagOf<Events[number]>,
-          Machine.StateNodeIdentifier<States>
-        >
-      >
-      readonly commands: ReadonlyArray<Command>
-      readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
-      readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
-      readonly exitPaths: ReadonlyArray<string>
-      readonly entryPaths: ReadonlyArray<string>
-      readonly changed: boolean
-    }>
-  }
-  & (
-    | {
-      readonly done: true
-      readonly output: Output
-    }
-    | {
-      readonly done: false
-      readonly output: undefined
-    }
-  ),
-  InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
-  never
-> = internalPlanner.planInitial as any
+export const planInitial: (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<any>
+) => Effect.Effect<any, PlanningError | StartupError> = internalPlanner.planInitial
 
 export const stateNodes = <M extends Machine.Any>(
   machine: M
@@ -1162,111 +969,18 @@ export const configuration = <M extends Machine.Any>(
   )
 }
 
-export const enabled = <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema>,
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine: Machine<
-    States,
-    Events,
-    Input,
-    UnhandledStates,
-    E,
-    R,
-    InitialE,
-    InitialR,
-    FinalStates,
-    Output,
-    Emits,
-    OutputStates,
-    InputEvents
-  >,
-  state: Machine.Snapshot<States>
-): ReadonlyArray<Machine.TagOf<Events[number]>> => internalPlanner.enabled(machine as any, state)
+export const enabled: (machine: Machine.Any, state: any) => ReadonlyArray<any> = internalPlanner.enabled
 
-export const can = internalPlanner.can
+export const can: {
+  (machine: Machine.Any): (state: any, event: any) => Effect.Effect<boolean, MachineSchemaDecodeError>
+  (machine: Machine.Any, state: any, event: any): Effect.Effect<boolean, MachineSchemaDecodeError>
+} = internalPlanner.can
 
-export const plan: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
-  state: Machine.Snapshot<States>,
-  event: Machine.EventInputOf<InputEvents>
-) => Effect.Effect<
-  & {
-    readonly next: Machine.Snapshot<States>
-    readonly commands: ReadonlyArray<Command>
-    readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
-    readonly microsteps: ReadonlyArray<{
-      readonly next: Machine.Snapshot<States>
-      readonly event: Machine.EventOf<Events> | InitialEventModel
-      readonly transitions: ReadonlyArray<
-        Machine.RetainedTransition<
-          Machine.StateNodeIdentifier<States>,
-          Machine.TagOf<Events[number]>,
-          Machine.StateNodeIdentifier<States>
-        >
-      >
-      readonly commands: ReadonlyArray<Command>
-      readonly raisedEvents: ReadonlyArray<Machine.EventOf<Events>>
-      readonly emittedEvents: ReadonlyArray<Machine.EmittedEventOf<Emits>>
-      readonly exitPaths: ReadonlyArray<string>
-      readonly entryPaths: ReadonlyArray<string>
-      readonly changed: boolean
-    }>
-  }
-  & (
-    | {
-      readonly done: true
-      readonly output: Output
-    }
-    | {
-      readonly done: false
-      readonly output: undefined
-    }
-  ),
-  E | InfiniteTransitionError | MachineSchemaDecodeError,
-  never
-> = internalPlanner.plan as any
+export const plan: (
+  machine: Machine.Any,
+  state: any,
+  event: any
+) => Effect.Effect<any, PlanningError> = internalPlanner.plan
 
 export const logic = <
   State,
@@ -1316,8 +1030,8 @@ export const child = <const Id extends string, M extends Machine.Any>(
 ): ChildMachine<Id, M> =>
   makeChild(id, machine, (input) =>
     machine.input === undefined
-      ? (internalProcess.toProcessLogic as any)(machine)
-      : (internalProcess.toProcessLogic as any)(machine, input))
+      ? internalProcess.toProcessLogic(machine)
+      : internalProcess.toProcessLogic(machine, input))
 
 const makeChild = <const Id extends string, M extends Machine.Any>(
   id: Id,
@@ -1333,8 +1047,8 @@ const makeChild = <const Id extends string, M extends Machine.Any>(
 export const childFamily = <M extends Machine.Any>(machine: M): ChildMachine.Family<M> => {
   const makeLogic = (input?: unknown): Logic<any, any, any, any, any, any> =>
     machine.input === undefined
-      ? (internalProcess.toProcessLogic as any)(machine)
-      : (internalProcess.toProcessLogic as any)(machine, input)
+      ? internalProcess.toProcessLogic(machine)
+      : internalProcess.toProcessLogic(machine, input)
   return (id) => makeChild(id, machine, makeLogic)
 }
 
@@ -1414,116 +1128,17 @@ export const watch = <State, Event, Error = never, Output = never>(
 
 export const waitFor = Observation.waitFor
 
-export const prepare = internalProcess.prepare
+export const prepare: (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<any>
+) => Effect.Effect<internalRuntime.PreparedProcess<any, any, any, any, any, any, any>> = internalProcess.prepare
 
-export const start: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
-  ...args: [...Machine.InputArgs<Input>]
-) => Effect.Effect<
-  MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    | E
-    | ActionError<R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>
-  >,
-  | InitialE
-  | E
-  | ActionError<InitialR | R>
-  | InfiniteTransitionError
-  | MachineSchemaDecodeError
-  | StartupError
-  | StoppedError,
-  ExcludeCompatibleRuntime<
-    ExecutionServices<InitialR | R>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
-> = internalProcess.start as any
+export const start: (
+  machine: Machine.Any,
+  ...args: ReadonlyArray<any>
+) => Effect.Effect<MachineRef<any, any, any, any, any>, any, any> = internalProcess.start
 
-export const resume: <
-  const States extends Machine.StateSchemas,
-  const Events extends ReadonlyArray<Machine.TaggedSchema>,
-  const Emits extends ReadonlyArray<Machine.TaggedSchema> = readonly [],
-  const Input extends Schema.Top = typeof Schema.Void,
-  UnhandledStates extends Machine.StateIdentifier<States> = Machine.StateIdentifier<States>,
-  E = never,
-  R = never,
-  InitialE = never,
-  InitialR = never,
-  FinalStates extends Machine.StateIdentifier<States> = never,
-  Output = never,
-  OutputStates extends Machine.StateIdentifier<States> = never,
-  InputEvents extends ReadonlyArray<Machine.TaggedSchema> = Events
->(
-  machine:
-    & Machine<
-      States,
-      Events,
-      Input,
-      UnhandledStates,
-      E,
-      R,
-      InitialE,
-      InitialR,
-      FinalStates,
-      Output,
-      Emits,
-      OutputStates,
-      InputEvents
-    >
-    & EnsureExecutable<States, UnhandledStates, OutputStates>,
-  snapshot: Machine.Snapshot<States>
-) => Effect.Effect<
-  MachineRef<
-    Machine.Snapshot<States>,
-    Machine.EventInputOf<InputEvents>,
-    | E
-    | ActionError<R>
-    | InfiniteTransitionError
-    | MachineSchemaDecodeError
-    | StoppedError,
-    Output,
-    Machine.EmittedEventOf<Emits>
-  >,
-  MachineSchemaDecodeError,
-  ExcludeCompatibleRuntime<
-    ExecutionServices<R>,
-    Machine.EventOf<Events>,
-    Machine.EmittedEventOf<Emits>
-  >
-> = internalProcess.resume as any
+export const resume: (
+  machine: Machine.Any,
+  snapshot: any
+) => Effect.Effect<MachineRef<any, any, any, any, any>, MachineSchemaDecodeError, any> = internalProcess.resume

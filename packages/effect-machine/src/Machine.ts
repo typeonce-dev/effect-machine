@@ -2613,7 +2613,6 @@ export declare namespace Machine {
     /** @internal */
     readonly stateNodes: StateNodes
     /** @internal */
-    /** @internal */
     readonly handlers: any
     /** @internal */
     readonly initial: any
@@ -7737,7 +7736,7 @@ export const isFinal: <
     ParentEvents
   >,
   state: Machine.Snapshot<States>
-) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal as any
+) => state is Machine.SnapshotContainingFinal<States, FinalStates> = internal.isFinal
 
 /**
  * Defines root or nested state schemas while preserving the exact child topology.
@@ -7835,10 +7834,8 @@ export interface Targets<Root extends Machine.StateNodeConfig> {
  * @category constructors
  * @since 0.34.0
  */
-export const targets: <const Root extends Machine.StateNodeConfig>(root: State<Root>) => Targets<Root> = internal
-  .targets as unknown as <const Root extends Machine.StateNodeConfig>(
-    root: State<Root>
-  ) => Targets<Root>
+export const targets: <const Root extends Machine.StateNodeConfig>(root: State<Root>) => Targets<Root> =
+  internal.targets
 
 type UniqueSourceNames<F, S, T, L, C> = [
   | Extract<keyof F, keyof S | keyof T | keyof L | keyof C>
@@ -8066,7 +8063,7 @@ interface Make {
  * @category constructors
  * @since 0.4.0
  */
-export const make: Make = internal.make as unknown as Make
+export const make: Make = internal.make
 
 /**
  * Extracts the decoded event union carried by an event protocol descriptor.
@@ -8131,7 +8128,7 @@ type ValidateEventFields<Cases> = {
  */
 export const events: <const Cases extends Readonly<Record<string, Schema.Struct.Fields>>>(
   cases: Cases & ValidateEventFields<NoInfer<Cases>> & ValidateEventProtocolBuilder<"public", EventFieldsSchemas<Cases>>
-) => Machine.EventProtocol<"public", EventFieldsSchemas<Cases>> = internal.eventsFromFields as any
+) => Machine.EventProtocol<"public", EventFieldsSchemas<Cases>> = internal.eventsFromFields
 
 /** Imports existing schemas and protocols without rebuilding their contracts.
  * @category constructors
@@ -8141,7 +8138,7 @@ export const eventsFromSchemas: {
   <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"public">>>(
     ...inputs: Inputs & ValidateEventProtocolBuilder<"public", Inputs>
   ): Machine.EventProtocol<"public", Machine.EventProtocolInputSchemasOf<"public", Inputs>>
-} = internal.events as any
+} = internal.events
 
 /**
  * Requires the machine to run as an owned child whose parent accepts the
@@ -8201,7 +8198,7 @@ export const internalEvents: <const Cases extends Readonly<Record<string, Schema
     & Cases
     & ValidateEventFields<NoInfer<Cases>>
     & ValidateEventProtocolBuilder<"internal", EventFieldsSchemas<Cases>>
-) => Machine.EventProtocol<"internal", EventFieldsSchemas<Cases>> = internal.internalEventsFromFields as any
+) => Machine.EventProtocol<"internal", EventFieldsSchemas<Cases>> = internal.internalEventsFromFields
 
 /** Imports existing schemas and protocols without rebuilding their contracts.
  * @category constructors
@@ -8211,7 +8208,7 @@ export const internalEventsFromSchemas: {
   <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"internal">>>(
     ...inputs: Inputs & ValidateEventProtocolBuilder<"internal", Inputs>
   ): Machine.EventProtocol<"internal", Machine.EventProtocolInputSchemasOf<"internal", Inputs>>
-} = internal.internalEvents as any
+} = internal.internalEvents
 
 /**
  * Defines the ephemeral notifications a machine may publish to external
@@ -8238,7 +8235,7 @@ export const emittedEvents: <const Cases extends Readonly<Record<string, Schema.
     & Cases
     & ValidateEventFields<NoInfer<Cases>>
     & ValidateEventProtocolBuilder<"emitted", EventFieldsSchemas<Cases>>
-) => Machine.EventProtocol<"emitted", EventFieldsSchemas<Cases>> = internal.emittedEventsFromFields as any
+) => Machine.EventProtocol<"emitted", EventFieldsSchemas<Cases>> = internal.emittedEventsFromFields
 
 /** Imports existing schemas and protocols without rebuilding their contracts.
  * @category constructors
@@ -8248,7 +8245,7 @@ export const emittedEventsFromSchemas: {
   <const Inputs extends ReadonlyArray<Machine.EventProtocolInput<"emitted">>>(
     ...inputs: Inputs & ValidateEventProtocolBuilder<"emitted", Inputs>
   ): Machine.EventProtocol<"emitted", Machine.EventProtocolInputSchemasOf<"emitted", Inputs>>
-} = internal.emittedEvents as any
+} = internal.emittedEvents
 
 /**
  * Encodes a decoded machine snapshot into a normalized data representation.
@@ -8342,7 +8339,7 @@ export const encodeSnapshot: <
   Machine.EncodedSnapshot,
   MachineSchemaEncodeError,
   Machine.SnapshotEncodingServices<States>
-> = internal.encodeSnapshot as any
+> = internal.encodeSnapshot
 
 /**
  * Decodes a normalized data representation into a validated machine snapshot.
@@ -8430,7 +8427,7 @@ export const decodeSnapshot: <
   Machine.Snapshot<States>,
   MachineSchemaDecodeError,
   Machine.SnapshotDecodingServices<States>
-> = internal.decodeSnapshot as any
+> = internal.decodeSnapshot
 
 type TransitionBranchRecordError<Message extends string, Key extends PropertyKey = never> = {
   readonly "~effect/Machine/TransitionBranchRecordError": Message
@@ -8578,7 +8575,7 @@ export const planInitial: <
   ),
   InitialE | E | InfiniteTransitionError | MachineSchemaDecodeError | StartupError,
   never
-> = internal.planInitial as any
+> = internal.planInitial
 
 /**
  * Returns every compiled state node in definition order.
@@ -8738,7 +8735,7 @@ export const enabled: <
     ParentEvents
   >,
   state: Machine.Snapshot<States>
-) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled as any
+) => ReadonlyArray<Machine.TagOf<Events[number]>> = internal.enabled
 
 /**
  * Tests whether a concrete event would select at least one transition from a
@@ -8870,7 +8867,7 @@ export const can: {
     state: Machine.Snapshot<States>,
     event: Machine.EventInputOf<Events>
   ): Effect.Effect<boolean, MachineSchemaDecodeError>
-} = internal.can as any
+} = internal.can
 
 /**
  * Returns an Effect that plans the next state snapshot without running command effects.
@@ -9004,7 +9001,7 @@ export const plan: <
   ),
   E | InfiniteTransitionError | MachineSchemaDecodeError,
   never
-> = internal.plan as any
+> = internal.plan
 
 /**
  * Creates advanced stateful process logic from explicit initialization and
@@ -9315,7 +9312,7 @@ export const prepare: <
       Machine.EmittedEventOf<Emits>
     >
   >
-> = internal.prepare as any
+> = internal.prepare
 
 /**
  * Starts a machine.
@@ -9429,7 +9426,7 @@ export const start: <
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >
-> = internal.start as any
+> = internal.start
 
 /**
  * Starts a fresh managed runtime from a decoded logical snapshot.
@@ -9541,4 +9538,4 @@ export const resume: <
     Machine.EventOf<Events>,
     Machine.EmittedEventOf<Emits>
   >
-> = internal.resume as any
+> = internal.resume

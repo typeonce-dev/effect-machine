@@ -2,7 +2,7 @@
 import * as Effect from "effect/Effect"
 import { hasProperty } from "effect/Predicate"
 import * as Stream from "effect/Stream"
-import type { Machine, State } from "../../Machine.js"
+import type { Machine } from "../../Machine.js"
 import * as Reference from "./targetReference.js"
 import * as Topology from "./topology.js"
 
@@ -13,7 +13,7 @@ interface Source {
 }
 export interface Declaration {
   readonly initialize?: (input: unknown) => unknown
-  readonly root: State<Machine.StateNodeConfig>
+  readonly root: Machine.Any["root"]
   readonly sources: ReadonlyMap<string, Source>
   readonly branches: ReadonlyMap<string, Readonly<Record<string, Readonly<Record<string, unknown>>>>>
 }
@@ -22,7 +22,7 @@ const record = (value: unknown, message: string): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 export const capture = (
-  root: State<Machine.StateNodeConfig>,
+  root: Machine.Any["root"],
   config: Readonly<Record<string, unknown>>
 ): Declaration => {
   const sources = new Map<string, Source>()

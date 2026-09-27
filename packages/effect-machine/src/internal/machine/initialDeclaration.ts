@@ -1,7 +1,7 @@
 /** Captures handler-owned initial edges before compiling executable topology. */
 import { hasProperty } from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type { Machine, State } from "../../Machine.js"
+import type { Machine } from "../../Machine.js"
 import { SnapshotBuilderStateTypeId } from "./symbols.js"
 import * as Reference from "./targetReference.js"
 import * as Topology from "./topology.js"
@@ -52,7 +52,7 @@ interface Captured {
   readonly handlers: Record<string, unknown>
 }
 export const capture = (
-  root: State<Machine.StateNodeConfig>,
+  root: Machine.Any["root"],
   handler: Readonly<Record<string, unknown>>
 ): Captured => {
   const visit = (
