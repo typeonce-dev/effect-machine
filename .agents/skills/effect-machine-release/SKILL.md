@@ -1,9 +1,12 @@
 ---
 name: effect-machine-release
-description: Run the complete Effect Machine implementation and release workflow. Use only when the user explicitly invokes `$effect-machine-release` and wants a change implemented, validated, merged, included in the Changesets version pull request, and published by the release workflow. Do not use when the requested endpoint is only a feature pull request or merge to main.
+description: Run the complete Effect Machine implementation and release workflow in this repository. Use only when the user explicitly requests the effect-machine-release workflow and wants a change implemented, validated, merged, included in the Changesets version pull request, and published. Do not use when the requested endpoint is only a feature pull request or merge to main.
+disable-model-invocation: true
 ---
 
 # Effect Machine Release
+
+This skill applies only to the Effect Machine repository. Accept an explicit request to use `effect-machine-release` by name or through the host's supported skill selection or command syntax. Discussing or editing this skill does not invoke its shipping workflow.
 
 Ship the requested change through its feature pull request, the bot-owned Changesets version pull request, and the resulting publish workflow. Treat invocation as authorization to merge both validated pull requests; it does not authorize bypassing protections or merging unrelated, unverified work.
 

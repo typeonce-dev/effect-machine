@@ -1,9 +1,12 @@
 ---
 name: effect-machine-pr
-description: Run the complete Effect Machine implementation-to-merge workflow. Use only when the user explicitly invokes `$effect-machine-pr` and wants a repository change implemented from the latest base branch through local validation, a pull request, CI and performance checks, and merge. Do not use for design, review, diagnosis, or implementation that should stop before publication.
+description: Run the complete Effect Machine implementation-to-merge workflow in this repository. Use only when the user explicitly requests the effect-machine-pr workflow and wants a change implemented, validated, published as a pull request, checked in CI, and merged. Do not use for design, review, diagnosis, or implementation that should stop before publication.
+disable-model-invocation: true
 ---
 
 # Effect Machine PR
+
+This skill applies only to the Effect Machine repository. Accept an explicit request to use `effect-machine-pr` by name or through the host's supported skill selection or command syntax. Discussing or editing this skill does not invoke its shipping workflow.
 
 Ship the requested change through a green, merged pull request. Treat invocation as authorization for the in-scope branch, commits, push, pull request, CI fixes, and final merge; it does not authorize unrelated changes, bypassing protections, or destructive recovery.
 
@@ -13,7 +16,7 @@ Ship the requested change through a green, merged pull request. Treat invocation
 2. Inspect the worktree and preserve all user-owned changes. Never discard or overwrite unrelated work.
 3. Use the base branch named by the user, or `main` by default.
 4. Fetch the latest remote base. In its primary worktree, switch to the base and run a fast-forward-only pull. If the base is checked out in another worktree, branch directly from the freshly fetched `origin/<base>` commit instead.
-5. Create a focused `codex/` branch unless the user specifies another name.
+5. Create a focused branch named after the change, using lowercase words separated by hyphens, unless the user specifies another name. Keep branch names independent of the agent, editor, or provider.
 
 ## Implement the complete change
 
