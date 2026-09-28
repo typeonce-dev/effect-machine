@@ -1,5 +1,14 @@
 # @typeonce/effect-machine-devtools
 
+## 0.39.0
+
+### Patch Changes
+
+- e20e054: Show transition declarations with declared state paths such as `{ target: "Checkout.Review" }` and `{ initialize: … }` in the devtools. `no-async-planning-callback` also checks `initialize` input mappers.
+- Updated dependencies [e20e054]
+- Updated dependencies [86968b6]
+  - @typeonce/effect-machine@0.39.0
+
 ## 0.38.1
 
 ### Patch Changes
